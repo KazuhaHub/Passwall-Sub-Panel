@@ -71,6 +71,9 @@ type Service struct {
 	// feature existed. It is late-bound (SetPolicies) because the compiler needs
 	// the GeoIP and list services, which are built after this one.
 	policies DestPolicyCompiler
+	// allowlistResync runs when a panel's ability to enforce a group allowlist
+	// changed (SetAllowlistResyncer).
+	allowlistResync func(ctx context.Context, panelID int64)
 	// audit takes the node's hit batches for storage. NIL MEANS THIS BUILD DOES
 	// NOT RECORD HITS: a batch a node reports is then simply not kept. It is
 	// late-bound (SetAudit) like the policy compiler.
@@ -118,6 +121,32 @@ func (s *Service) PruneAgents(live map[string]bool) {
 
 // SetAudit binds the hit sink. Left unbound, hit batches are dropped.
 func (s *Service) SetAudit(a AuditSink) { s.audit = a }
+
+// SetAllowlistResyncer binds what runs when a native panel starts or stops
+// being able to enforce a group allowlist: it drops that panel's cached
+// eligibility and then resyncs the members of every allowlist group
+// (group.Service.ResyncAllowlistGroups). The destination-policy service shares
+// it for the fallback reasons that matter. Left unbound nothing is triggered
+// and the heal sweep converges the members.
+func (s *Service) SetAllowlistResyncer(resync func(ctx context.Context, panelID int64)) {
+	s.allowlistResync = resync
+}
+
+// allowlistCapabilities are the capabilities a panel's eligibility for an
+// allowlist rests on. Task capabilities change from report to report, so the
+// whole set must not be compared.
+var allowlistCapabilities = []string{nodeprotocol.CapabilityDestinationPolicy, nodeprotocol.CapabilityDestinationGroups}
+
+// allowlistCapabilitiesChanged reports whether either capability appeared or
+// disappeared between two reports.
+func allowlistCapabilitiesChanged(before, after []string) bool {
+	for _, c := range allowlistCapabilities {
+		if slices.Contains(before, c) != slices.Contains(after, c) {
+			return true
+		}
+	}
+	return false
+}
 
 // SetPolicies binds the destination-policy compiler. Left unbound, nodes are
 // never sent a policy.
@@ -645,6 +674,12 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	// upgrade helper immediately revokes future task admission.
 	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
 		return fmt.Errorf("nodesync: record protocol observation: %w", err)
+	}
+	if s.allowlistResync != nil && allowlistCapabilitiesChanged(agent.ObservedCapabilities, report.Capabilities) {
+		// A node that newly declares the capabilities (a fresh install, an
+		// upgrade) must get its allowlist members' clients, and one that lost
+		// them must lose them: nothing else would notice.
+		s.allowlistResync(ctx, agent.PanelID)
 	}
 	results := make([]domain.NodeAgentTaskResult, len(report.TaskResults))
 	for i := range report.TaskResults {

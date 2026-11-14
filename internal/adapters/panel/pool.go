@@ -60,7 +60,7 @@ func (p *Pool) Get(panelID int64) (ports.PanelClient, error) {
 	defer p.mu.RUnlock()
 	client, ok := p.clients[panelID]
 	if !ok {
-		return nil, fmt.Errorf("panel id %d not registered", panelID)
+		return nil, fmt.Errorf("panel id %d not registered: %w", panelID, ports.ErrPanelNotRegistered)
 	}
 	return client, nil
 }

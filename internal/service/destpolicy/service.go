@@ -1,6 +1,7 @@
 package destpolicy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -21,8 +22,11 @@ type Service struct {
 	countries CountryExpander
 	settings  SettingsReader
 	members   GroupMemberCounter
-	metrics   Metrics
-	now       func() time.Time
+	// fallbackChanged is told when an agent enters or leaves a fallback that
+	// stops it enforcing a group allowlist (Deps.FallbackChanged).
+	fallbackChanged func(ctx context.Context, agentID string)
+	metrics         Metrics
+	now             func() time.Time
 
 	// pubMu makes publication single-flight: every sync of every node asks
 	// whether a publish is due, and only one of them should do the work.
@@ -77,11 +81,17 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		defs: d.Definitions, state: d.State, agents: d.Agents, lists: d.Lists, countries: d.Countries,
-		settings: d.Settings, members: d.GroupMembers, metrics: d.Metrics, now: now,
+		settings: d.Settings, members: d.GroupMembers, fallbackChanged: d.FallbackChanged, metrics: d.Metrics, now: now,
 		agentMeta: map[string]*domain.DestAgentPolicy{}, compiled: map[string]*compiledEntry{},
 		digests: map[string]digestInfo{},
 	}, nil
 }
+
+// GroupMembersWired reports whether the per-node limit counts the members a
+// panel's tags select (Deps.GroupMembers). It exists for the application's
+// wiring test: left out, the limit counts the roster, which shrinks when
+// members are made ineligible and lets the policy flap in and out of the limit.
+func (s *Service) GroupMembersWired() bool { return s.members != nil }
 
 func (s *Service) countCompile(result string) {
 	if s.metrics.Compile != nil {

@@ -168,13 +168,17 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		// The per-node limit counts the members the panel's tags select, not the
 		// roster (which shrinks when members are made ineligible): see
 		// groupSubjectSlack.
+		// Every allowlist group, with or without a member on the roster: when
+		// the limit itself makes the panel ineligible all the members leave the
+		// roster, and a count that needed one would then see the limit satisfied
+		// and let them back in, on every sync.
 		for _, g := range cb.base.groups {
-			if !slices.ContainsFunc(view.users, func(u int64) bool { return view.groupOf[u] == g.id }) {
-				continue
-			}
 			n, err := s.members.TagMatchedMembers(ctx, in.PanelID, g.id)
 			if err != nil {
 				return Result{}, fmt.Errorf("destpolicy: count the members of group %d: %w", g.id, err)
+			}
+			if n == 0 {
+				continue // the panel's tags select none of its members
 			}
 			if view.tagMatched == nil {
 				view.tagMatched = map[int64]int{}
@@ -309,7 +313,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		desiredShed = shedSniffing
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)}}
 	}
-	slack := groupSubjectSlack(desired, view.tagMatched)
+	slack := groupSubjectSlack(desired, cb.base.groups, view.tagMatched)
 	if shed, why, ok := shedObserve(desired, slack); ok {
 		desired, desiredShed = shed, why
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)}}
@@ -319,6 +323,13 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// node at as_is. It is a downgrade, not a restriction: no rule is dropped or
 	// scoped, and the node is flagged.
 	desiredResolveHeld := settleResolve(desired, nodes, engine)
+	if desired == nil && slack > 0 && (Usage{Subjects: slack}).over() != nil {
+		// Nothing is on the roster to carry rules, but the members its tags
+		// select would carry more than the limit allows. Answering "no policy"
+		// here would clear the over-limit that made the panel ineligible, and
+		// the members would come back and push it over again, every sync.
+		desired = &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}}
+	}
 	desiredDigest := protocol.PolicyDigest(desired)
 	precheckJSON := ""
 	if len(findings) > 0 {
@@ -673,27 +684,38 @@ func sheddable(r protocol.DestinationRule) bool {
 
 // groupSubjectSlack is what the per-node limit adds for allowlist groups on top
 // of the subjects the policy carries: each group's members that its tags select
-// but the roster does not hold, once per rule of the group. Counting the
+// but the roster does not hold, once per rule the group has (with no member on
+// the roster the group has no rule in the policy, so its rules are counted from
+// its lists). Counting the
 // roster alone would let a node flip over and under the limit as members leave
 // its roster for being ineligible and come back.
-func groupSubjectSlack(p *protocol.DestinationPolicy, tagMatched map[int64]int) int {
-	if p == nil || len(tagMatched) == 0 {
+func groupSubjectSlack(p *protocol.DestinationPolicy, groups []baseGroup, tagMatched map[int64]int) int {
+	if len(tagMatched) == 0 {
 		return 0
 	}
-	rules, held := map[int64]int{}, map[int64]int{}
-	for _, r := range p.Rules {
-		if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' {
-			rules[n]++
-			if r.CatchAll {
+	held := map[int64]int{}
+	if p != nil {
+		for _, r := range p.Rules {
+			if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' && r.CatchAll {
 				held[n] = len(r.Subjects)
 			}
 		}
 	}
 	slack := 0
-	for gid, count := range rules {
-		if tm, ok := tagMatched[gid]; ok && tm > held[gid] {
-			slack += (tm - held[gid]) * count
+	for _, g := range groups {
+		tm, ok := tagMatched[g.id]
+		if !ok || tm <= held[g.id] {
+			continue
 		}
+		// The rules the group has, which depend on its lists and not on who is
+		// on the roster: a group with no member on it has none in the policy.
+		rules := 1
+		for _, a := range []groupAllow{g.x1, g.x2} {
+			if !a.empty() {
+				rules++
+			}
+		}
+		slack += (tm - held[g.id]) * rules
 	}
 	return slack
 }
@@ -1038,12 +1060,12 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 		return fmt.Errorf("destpolicy: write agent state: %w", err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cur := s.agentMeta[agentID]
 	next := domain.DestAgentPolicy{AgentID: agentID}
 	if cur != nil {
 		next = *cur
 	}
+	before := next.FallbackReason
 	if p.DesiredSHA256 != nil {
 		next.DesiredSHA256 = *p.DesiredSHA256
 	}
@@ -1126,7 +1148,21 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 		next.RejectedCtx = *p.RejectedCtx
 	}
 	s.agentMeta[agentID] = &next
+	after := next.FallbackReason
+	s.mu.Unlock()
+	if s.fallbackChanged != nil && blocksAllowlist(before) != blocksAllowlist(after) {
+		s.fallbackChanged(ctx, agentID)
+	}
 	return nil
+}
+
+// blocksAllowlist says whether a fallback reason makes a node unable to
+// enforce a group allowlist: a policy the node refused or one over a limit
+// means its groups' rules are not running. The sniffing fallback is not one:
+// it depends on the roster, which the allowlist shrinks, and eligibility
+// judges the inbounds' sniffing directly instead (group.Service.Eligible).
+func blocksAllowlist(r domain.DestFallbackReason) bool {
+	return r == domain.DestFallbackRejected || r == domain.DestFallbackOverLimit
 }
 
 // baseFor returns the expanded snapshot of generation gen, building it on a

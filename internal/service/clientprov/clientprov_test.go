@@ -415,3 +415,59 @@ func assertClientBaselines(t *testing.T, got, want *domain.PSPClient) {
 		t.Fatalf("counter baselines changed:\n got  %+v\n want %+v", got, want)
 	}
 }
+
+// A client retired because the user lost every node on its panel is a
+// different thing from one replaced by another client on the same panel: the
+// first only ever tightens access, the second must wait for its replacement to
+// be live. SyncUserRetirements tells the two apart; SyncUser still reports both.
+func TestSyncUserRetirements_PanelRemovedVersusRegrouped(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+
+	both := []*domain.Node{
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless", Flow: "xtls-rprx-vision"}, // its own flow client
+		{ID: 2, PanelID: 10, DesiredProtocol: "vless"},
+		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
+	}
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, both); err != nil {
+		t.Fatal(err)
+	}
+	visionBefore, _ := repo.ListByUser(ctx, 42)
+	if len(visionBefore) != 3 {
+		t.Fatalf("setup: want 3 clients (2 on panel 10, 1 on panel 11), got %d", len(visionBefore))
+	}
+
+	// Panel 11 is gone entirely; on panel 10 the flow client is merged away.
+	got, err := svc.SyncUserRetirements(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 2, PanelID: 10, DesiredProtocol: "vless"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PanelRemoved[11]) != 1 || len(got.PanelRemoved[10]) != 0 {
+		t.Fatalf("PanelRemoved = %v, want exactly panel 11's client", got.PanelRemoved)
+	}
+	if len(got.Regrouped[10]) != 1 || len(got.Regrouped[11]) != 0 {
+		t.Fatalf("Regrouped = %v, want exactly panel 10's replaced client", got.Regrouped)
+	}
+}
+
+func TestSyncUser_StillReportsBothKindsInOneMap(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+	both := []*domain.Node{
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless", Flow: "xtls-rprx-vision"},
+		{ID: 2, PanelID: 10, DesiredProtocol: "vless"},
+		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
+	}
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, both); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 2, PanelID: 10, DesiredProtocol: "vless"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retired[10]) != 1 || len(retired[11]) != 1 {
+		t.Fatalf("SyncUser retired = %v, want one email on each panel", retired)
+	}
+}
