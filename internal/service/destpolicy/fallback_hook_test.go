@@ -93,11 +93,14 @@ func TestFallbackChanged_OverLimitEnteredAndLeft(t *testing.T) {
 	}
 }
 
-// The sniffing fallback depends on the roster, which the allowlist itself
-// shrinks: it is judged on the inbounds directly (group.Service.Eligible), so
-// it must not be what triggers a resync, or entering and leaving it would
-// loop.
-func TestFallbackChanged_SniffingIsNotATrigger(t *testing.T) {
+// An inbound that cannot sniff limits what the node is sent (the rules that
+// need the sniffer, only on the inbounds that can supply it) and is recorded in
+// the precheck listeners, not as a fallback. Eligibility judges the inbounds'
+// sniffing directly (group.Service.Eligible), so entering or leaving that state
+// must not be what triggers a resync, or the roster-dependent judgement would
+// loop: ineligible, members removed, rules gone, precheck passes, eligible,
+// members added, precheck fails.
+func TestFallbackChanged_InsufficientSniffingIsNotATrigger(t *testing.T) {
 	h := newHarness(t)
 	log := &fallbackLog{}
 	h.svc.fallbackChanged = log.hook
@@ -106,12 +109,15 @@ func TestFallbackChanged_SniffingIsNotATrigger(t *testing.T) {
 	h.publishNow()
 	bad := fleet{panelID: 9, nodes: []*domain.Node{node(1, `{"enabled":true,"destOverride":["http"]}`)}, users: []int64{10}}
 	h.compile(bad)
-	if m := h.meta(); m.FallbackReason != domain.DestFallbackSniffing {
-		t.Fatalf("setup: not in the sniffing fallback: %+v", m)
+	if m := h.meta(); m.PrecheckListeners == "" {
+		t.Fatalf("setup: the insufficient inbound was not recorded: %+v", m)
 	}
 	good := fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing)}, users: []int64{10}}
 	h.compile(good)
+	if m := h.meta(); m.PrecheckListeners != "" {
+		t.Fatalf("setup: the sniffing finding was not cleared: %+v", m)
+	}
 	if log.count() != 0 {
-		t.Fatalf("the sniffing fallback told %d times, want 0", log.count())
+		t.Fatalf("an inbound's sniffing told %d times, want 0", log.count())
 	}
 }
