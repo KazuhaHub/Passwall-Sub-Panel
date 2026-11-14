@@ -30,3 +30,12 @@ export function validPort(raw: string): boolean {
   if (raw.trim() === '') return true
   return /^\d{1,5}$/.test(raw.trim()) && Number(raw) >= 1 && Number(raw) <= 65535
 }
+
+/** The most addresses a test may be given as the resolution of the host name. */
+export const MAX_RESOLVED_IPS = 16
+
+/** IP literals typed with commas or spaces between them: the list, and whether it is usable (each a valid IP, at most 16). */
+export function parseResolvedIps(raw: string): { ips: string[]; bad: boolean } {
+  const ips = raw.split(/[\s,]+/).filter(Boolean)
+  return { ips, bad: ips.length > MAX_RESOLVED_IPS || !ips.every(validIp) }
+}

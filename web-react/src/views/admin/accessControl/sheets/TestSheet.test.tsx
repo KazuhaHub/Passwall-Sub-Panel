@@ -164,4 +164,43 @@ describe('TestSheet', () => {
     fireEvent.click(await screen.findByRole('button', { name: '加入' }))
     await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'site' }))
   })
+  it('sends resolved_ips only when filled, split on commas and spaces', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked())
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
+    run()
+    await waitFor(() => expect(api.testDestination).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.testDestination).mock.calls[0][0]).not.toHaveProperty('resolved_ips')
+    fireEvent.change(screen.getByRole('textbox', { name: /解析出的 IP/ }), { target: { value: '10.0.0.1, 2001:db8::1' } })
+    run()
+    await waitFor(() => expect(api.testDestination).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.testDestination).mock.calls[1][0]).toMatchObject({ resolved_ips: ['10.0.0.1', '2001:db8::1'] })
+  })
+
+  it('validates the resolved IPs before asking', async () => {
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /解析出的 IP/ }), { target: { value: '10.0.0.1 nope' } })
+    run()
+    expect(screen.getByText('最多 16 个，每个都要是有效的 IP 地址')).toBeTruthy()
+    expect(api.testDestination).not.toHaveBeenCalled()
+  })
+
+  it('says the result is conditional when the host name was not resolved', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked({ verdict: 'default', terminating_step: '', steps: [], notes: ['hostname_needs_resolution'] }))
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
+    run()
+    expect(await screen.findByText(/节点会解析这个主机名，而这里没有解析/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/hostname_needs_resolution|admin:access_control/)
+  })
+
+  it('says an empty resolution is engine-dependent', async () => {
+    vi.mocked(api.testDestination).mockResolvedValue(blocked({ verdict: 'default', terminating_step: '', steps: [], notes: ['resolution_failed_engine_dependent'] }))
+    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
+    run()
+    expect(await screen.findByText(/Xray 放行，sing-box 拒绝连接/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/resolution_failed_engine_dependent|admin:access_control/)
+  })
 })

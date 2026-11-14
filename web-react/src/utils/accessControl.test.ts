@@ -6,7 +6,7 @@ import {
   ACCESS_TONE_KINDS, accessTone, enforcingNodeCount, limitKindKey, accessVerdict, applyMinutes, budgetLevel, clampDays, destStatusActive,
   needsFirstPublishConfirm, nodeStateKey, NODE_STATE_FILTER, NODE_STATE_TONE, PENDING_STUCK_MS, pipelineSteps,
   visibleBudget, type NodeStateKey,
-  collectingNodeCount, enabledPolicies, reportNotDeployedCount, nodeRecording, policyHitsView, policyStateOptions, policyStateTone, reorderWithin,
+  collectingNodeCount, enabledPolicies, reportNotDeployedCount, nodeRecording, nodeResolve, policyHitsView, policyStateOptions, policyStateTone, reorderWithin,
   splitBlockByState,
 } from './accessControl'
 
@@ -345,5 +345,20 @@ describe('recording', () => {
   it('a node that was told to record but is not recording yet is "hits" with a null 24h, not 0', () => {
     expect(nodeRecording(node({ supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: false, hits_24h: null })))
       .toEqual({ mode: 'hits', hits24h: null })
+  })
+})
+
+describe('nodeResolve: the hostname-matching mode of a native node', () => {
+  it('null for a node that is not native', () => {
+    expect(nodeResolve(node({ kind: 'x-ui', state: 'unsupported_kind' }))).toBeNull()
+  })
+  it('an older answer without the fields is as-is', () => {
+    expect(nodeResolve(node())).toEqual({ mode: 'as_is', effective: 'as_is', unavailable: null })
+  })
+  it('the effective mode is what the node was sent; empty is as-is', () => {
+    expect(nodeResolve(node({ resolve: 'on_demand', resolve_effective: 'on_demand', resolve_unavailable: null })))
+      .toEqual({ mode: 'on_demand', effective: 'on_demand', unavailable: null })
+    expect(nodeResolve(node({ resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'version' })))
+      .toEqual({ mode: 'on_demand', effective: 'as_is', unavailable: 'version' })
   })
 })

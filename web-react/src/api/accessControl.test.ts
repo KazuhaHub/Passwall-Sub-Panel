@@ -61,3 +61,19 @@ describe('null arrays become []', () => {
     expect((await api.getDestUser(1)).user_id).toBe(1)
   })
 })
+
+describe('the hostname-matching setting', () => {
+  it('PUT /servers/:id carries only dest_resolve, and the recording mode only audit_collect', async () => {
+    http.put.mockResolvedValue(ok({}))
+    await api.setDestResolve(5, 'on_demand')
+    expect(http.put).toHaveBeenLastCalledWith('/admin/servers/5', { dest_resolve: 'on_demand' }, expect.anything())
+    await api.setAuditCollect(5, 'off')
+    expect(http.put).toHaveBeenLastCalledWith('/admin/servers/5', { audit_collect: 'off' }, expect.anything())
+  })
+  it('the test request carries resolved_ips as given', async () => {
+    http.post.mockResolvedValue(ok({ steps: [], notes: ['hostname_needs_resolution'], nodes: [] }))
+    const r = await api.testDestination({ target: 'a.example', resolved_ips: ['10.0.0.1'] })
+    expect(http.post).toHaveBeenLastCalledWith('/admin/dest/test', { target: 'a.example', resolved_ips: ['10.0.0.1'] }, expect.anything())
+    expect(r.notes).toEqual(['hostname_needs_resolution'])
+  })
+})

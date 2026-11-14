@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { DestNodeStatus } from '@/api/accessControl'
 import AuditCollectDialog from '@/components/AuditCollectDialog'
+import DestResolveDialog from '@/components/DestResolveDialog'
 import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import NodePolicyStatusRow from '@/components/NodePolicyStatusRow'
 import { useDestSettings, useDestStatus, useRetryDestAgent } from '@/query/accessControl'
@@ -30,8 +31,9 @@ const C = 'admin:access_control.coverage.'
 /**
  * S14: the whole fleet, one row per node, with where it stands, what to do next
  * and what it records. The rows are NodePolicyStatusRow, the one node-state
- * component; the recording mode is set in AuditCollectDialog (shared with the
- * servers page) from a row's menu.
+ * component; the recording mode is set in AuditCollectDialog and how IP rules
+ * treat host names in DestResolveDialog (both shared with the servers page)
+ * from a row's menu.
  */
 export default function CoverageSheet({ open, onClose, filter, onFilterChange, onOpenSettings }: CoverageSheetProps) {
   const { t } = useTranslation(['admin'])
@@ -44,6 +46,7 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
   const retry = useRetryDestAgent(scope)
   const [menu, setMenu] = useState<{ el: HTMLElement; node: DestNodeStatus } | null>(null)
   const [recordingFor, setRecordingFor] = useState<DestNodeStatus | null>(null)
+  const [resolveFor, setResolveFor] = useState<DestNodeStatus | null>(null)
   const readAt = status.dataUpdatedAt
   const now = useMemo(() => Date.now(), [readAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -137,12 +140,16 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
         {menu && isNativeKind(menu.node.kind) && menu.node.state !== 'unsupported_kind' && (
           <MenuItem onClick={() => { const n = menu.node; setMenu(null); setRecordingFor(n) }}>{t(`${C}set_recording`)}</MenuItem>
         )}
+        {menu && isNativeKind(menu.node.kind) && menu.node.state !== 'unsupported_kind' && (
+          <MenuItem onClick={() => { const n = menu.node; setMenu(null); setResolveFor(n) }}>{t(`${C}set_resolve`)}</MenuItem>
+        )}
         <MenuItem disabled={menu?.node.kind !== 'psp'} onClick={() => { const n = menu!.node; setMenu(null); toServer(n) }}>{t('admin:access_control.node_action.open_server')}</MenuItem>
         <MenuItem onClick={() => { const n = menu!.node; setMenu(null); void navigate(`/admin/node-issues?agent=${encodeURIComponent(n.agent_id)}`) }}>
           {t('admin:access_control.node_action.node_issues')}
         </MenuItem>
       </Menu>
       <AuditCollectDialog node={recordingFor} onClose={() => setRecordingFor(null)} />
+      <DestResolveDialog node={resolveFor} onClose={() => setResolveFor(null)} />
     </SheetDrawer>
   )
 }

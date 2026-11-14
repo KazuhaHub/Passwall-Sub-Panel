@@ -7,7 +7,7 @@ import type { DestNodeStatus } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import ToneBadge from '@/components/ToneBadge'
 import {
-  accessTone, limitKindKey, nodeRecording, nodeStateKey, NODE_STATE_TONE, type NodeStateKey,
+  accessTone, limitKindKey, nodeRecording, nodeResolve, nodeStateKey, NODE_STATE_TONE, type NodeStateKey,
 } from '@/utils/accessControl'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 
@@ -68,6 +68,25 @@ export function nodeRecordingText(t: T, node: DestNodeStatus, now: number): stri
   return parts.join(t(`${S}node_recording.separator`))
 }
 
+/**
+ * The hostname-matching line of a row: shown only where it says something, a
+ * node asked for on_demand. As-is is the default and needs no line. The mode
+ * named is the one the node was sent; asked-for but not yet delivered says so.
+ */
+export function nodeResolveText(t: T, node: DestNodeStatus): string | null {
+  const v = nodeResolve(node)
+  if (!v || (v.mode !== 'on_demand' && !v.unavailable)) return null
+  const pending = v.mode === 'on_demand' && v.effective === 'as_is' && !v.unavailable
+  return t(`${S}node_resolve.line`, { mode: t(pending ? `${S}node_resolve.pending` : `${S}node_resolve.mode.${v.effective}`) })
+}
+
+/** Why a node set to on_demand runs as as_is: a quiet-amber badge with its words. */
+export function ResolveUnavailableBadge({ reason }: { reason: 'version' | 'route_only' }) {
+  const { t } = useTranslation(['admin'])
+  const theme = useTheme()
+  return <ToneBadge tone={accessTone(theme, 'attention')} label={t(`${S}node_resolve.unavailable.${reason}`)} testId="node-resolve-unavailable" data={reason} />
+}
+
 export interface NodePolicyStatusRowProps {
   node: DestNodeStatus
   variant: 'row' | 'block'
@@ -93,6 +112,8 @@ export default function NodePolicyStatusRow({
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
   const recording = nodeRecordingText(t, node, now)
+  const resolveText = nodeResolveText(t, node)
+  const resolveView = nodeResolve(node)
 
   const actions: ReactNode[] = []
   const link = (id: string, text: string, onClick: () => void) => (
@@ -150,6 +171,12 @@ export default function NodePolicyStatusRow({
       {allowLine}
       {reportLine}
       {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
+      {resolveText && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="body2" data-testid="node-resolve" sx={{ color: md.onSurfaceVariant }}>{resolveText}</Typography>
+          {resolveView?.unavailable && <ResolveUnavailableBadge reason={resolveView.unavailable} />}
+        </Box>
+      )}
       {extra}
       {actions.length > 0 && <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{actions}</Box>}
     </Box>

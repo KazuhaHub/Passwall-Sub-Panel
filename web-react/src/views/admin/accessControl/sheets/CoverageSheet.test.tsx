@@ -129,6 +129,41 @@ describe('recording (2c)', () => {
     await waitFor(() => expect(api.setAuditCollect).toHaveBeenCalledWith(1, 'off'))
   })
 
+  it('every native row has "set the hostname matching" in its menu, opening that dialog and saving', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec(), node({ panel_id: 3, agent_id: 'a3', panel_name: 'US A', kind: 'x-ui', state: 'unsupported_kind' })]))
+    vi.mocked(api.setDestResolve).mockResolvedValue()
+    sheet()
+    fireEvent.click(await screen.findByRole('button', { name: 'US A 的更多操作' }))
+    expect(screen.queryByRole('menuitem', { name: '设置主机名匹配方式…' })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Tokyo 01 的更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '设置主机名匹配方式…' }))
+    const dialog = (await screen.findAllByRole('dialog')).find(d => d.textContent?.includes('IP 规则对主机名的匹配方式'))!
+    fireEvent.click(within(dialog).getByRole('radio', { name: /按需解析：/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.setDestResolve).toHaveBeenCalledWith(1, 'on_demand'))
+  })
+
+  it('a row on demand says so, and a node that stayed as-is says why', async () => {
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([
+      rec({ resolve: 'on_demand', resolve_effective: 'on_demand', resolve_unavailable: null }),
+      rec({ panel_id: 2, agent_id: 'a2', panel_name: 'Osaka', resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'version' }),
+      rec({ panel_id: 3, agent_id: 'a3', panel_name: 'Seoul', resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'route_only' }),
+      rec({ panel_id: 4, agent_id: 'a4', panel_name: 'Lima', resolve: 'as_is', resolve_effective: '', resolve_unavailable: null }),
+    ]))
+    sheet()
+    await screen.findByText('Seoul')
+    const lines = screen.getAllByTestId('node-resolve').map(e => e.textContent)
+    expect(lines).toEqual([
+      'IP 规则对主机名：按需解析',
+      'IP 规则对主机名：按原样',
+      'IP 规则对主机名：按原样',
+    ])
+    expect(screen.getByText('节点版本不支持，按原样执行')).toBeTruthy()
+    expect(screen.getByText('入站 routeOnly 开启，按原样执行')).toBeTruthy()
+  })
+
   it('the dialog opens above the drawer: it is a modal, the drawer is not raised', async () => {
     vi.mocked(api.getDestStatus).mockResolvedValue(status([rec()]))
     sheet()

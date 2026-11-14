@@ -213,6 +213,7 @@ describe.each([
 // node row and recording dialog, and the servers page's single-node dialog.
 describe.each([
   { file: '../components/AuditCollectDialog.tsx' },
+  { file: '../components/DestResolveDialog.tsx' },
   { file: '../components/NodePolicyStatusRow.tsx' },
   { file: '../views/admin/ServerAccessDialog.tsx' },
 ])('$file reads every word from the bundles', ({ file }) => {

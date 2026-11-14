@@ -46,6 +46,22 @@ describe('the single-node dialog: recording and the last 24 hours (S15, 2c)', ()
     expect(await screen.findByText('东京 01 记录什么？')).toBeTruthy()
   })
 
+  it('shows the hostname matching mode and Change opens its dialog', async () => {
+    show(node({ resolve: 'on_demand', resolve_effective: 'on_demand' }))
+    const box = await screen.findByTestId('server-resolve')
+    expect(box.textContent).toContain('主机名匹配')
+    expect(box.textContent).toContain('按需解析')
+    fireEvent.click(within(box).getByRole('button', { name: '修改' }))
+    expect(await screen.findByText('IP 规则对主机名的匹配方式')).toBeTruthy()
+  })
+
+  it('a node held at as-is shows why next to the mode', async () => {
+    show(node({ resolve: 'on_demand', resolve_effective: '', resolve_unavailable: 'route_only' }))
+    const box = await screen.findByTestId('server-resolve')
+    expect(box.textContent).toContain('按原样')
+    expect(box.textContent).toContain('入站 routeOnly 开启，按原样执行')
+  })
+
   it('a node that does not record has no hit block and says it does not record', async () => {
     show(node({ collect: 'off', collect_effective: 'off', collecting: false, hits_24h: 0 }))
     const recording = await screen.findByTestId('server-recording')

@@ -9,7 +9,7 @@ import {
   useEditDestListEntries, useInstantiateDestTemplate, usePauseDest, usePublishDest, usePutSourceRule,
   useReorderDestPolicies, useRetryDestAgent, useRollbackGeosite, useSaveDestExemption, useSaveDestList,
   useSaveDestSettings, useUpdateDestPolicy, useUpdateGeosite, useTestDestination, useAddDestException,
-  useDestHits, useDestPolicies, useDestUser, useSetAuditCollect,
+  useDestHits, useDestPolicies, useDestUser, useSetAuditCollect, useSetDestResolve,
 } from './accessControl'
 import { accessControlKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { policies } from './policies'
@@ -134,6 +134,13 @@ describe('write → invalidate', () => {
     const s = spy()
     await run(() => useSetAuditCollect(scope), s.client, { serverId: 5, collect: 'off' })
     s.expectKeys([ac.status(scope), serverKeys.lists(scope), ac.policies(scope), ac.hitsAll(scope), ac.usersAll(scope)])
+  })
+
+  it('a hostname-matching mode: the status, the servers list that carries dest_resolve, and the policies', async () => {
+    vi.mocked(api.setDestResolve).mockResolvedValue()
+    const s = spy()
+    await run(() => useSetDestResolve(scope), s.client, { serverId: 5, resolve: 'on_demand' })
+    s.expectKeys([ac.status(scope), serverKeys.lists(scope), ac.policies(scope)])
   })
 
   it('pause, publish-now and a retry: status and policies', async () => {

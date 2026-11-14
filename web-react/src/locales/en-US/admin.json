@@ -3339,7 +3339,8 @@
       "change": "Change",
       "hits_24h": "Hits, 24 hours",
       "view_records": "View records",
-      "hits_none_note": "This node has not started reporting hits yet; numbers appear once a policy is applied. The dash does not mean zero."
+      "hits_none_note": "This node has not started reporting hits yet; numbers appear once a policy is applied. The dash does not mean zero.",
+      "resolve": "Host name matching"
     }
   },
   "diagnostics": {
@@ -5039,7 +5040,8 @@
       "recording_note_one": "{{count}} node records rule matches only (kept {{days}} days) · the raw access log never leaves the node",
       "recording_note_other": "{{count}} nodes record rule matches only (kept {{days}} days) · the raw access log never leaves the node",
       "recording_none": "No node is recording hits · the raw access log never leaves the node",
-      "set_recording": "Set the recording…"
+      "set_recording": "Set the recording…",
+      "set_resolve": "Set host name matching…"
     },
     "policies": {
       "read_failed": "Could not read the policies",
@@ -5346,7 +5348,12 @@
         "host": "This host only",
         "cancel": "Cancel",
         "save": "Add"
-      }
+      },
+      "resolved_ips": "Resolved IPs (optional; PSP does no DNS)",
+      "resolved_ips_hint": "The addresses the node would resolve the host name to, separated by commas or spaces",
+      "resolved_ips_bad": "At most 16, each a valid IP address",
+      "note_hostname_needs_resolution": "The node resolves this host name and this test did not, so the result of IP range and private-address rules depends on the addresses it gets and is only conditional. Enter the addresses the node would see in \"Resolved IPs\" and test again.",
+      "note_resolution_failed": "With an empty (or failed) resolution, IP range and private-address rules do not match. The real outcome depends on the engine: Xray lets the connection through, sing-box fails it."
     },
     "tab_records": "Records",
     "convert": {
@@ -5506,6 +5513,38 @@
       "hits_24h": "{{n}} in 24 hours",
       "reported": "reported {{ago}}",
       "separator": " · "
+    },
+    "dest_resolve": {
+      "title": "How IP rules treat host names",
+      "label": "Matching",
+      "option": {
+        "as_is": "As is (default): no DNS. IP range and private-address rules apply only to connections made to an IP; a connection with a false SNI/Host is redirected to the address the SNI names, which the IP rules never see.",
+        "on_demand": "Resolve on demand: the host name is resolved once, when routing reaches the first IP rule, and a connection is blocked if any resolved address falls in a blocked range. Cost: one extra DNS lookup and round trip per connection (Xray also resolves again when it dials).",
+        "if_non_match": "Resolve if nothing matches (IPIfNonMatch): not offered, because it would let report-only and trial groups change the verdict."
+      },
+      "caveat": {
+        "fail_open_closed": "A failed lookup differs by engine: Xray lets the connection through (IP rules do not match), sing-box fails the connection.",
+        "dial_again": "Xray resolves again when it dials, so the address that matched may not be the address dialed; sing-box dials the address it matched.",
+        "route_only": "If an inbound sniffs with routeOnly:true and would substitute the name, the node stays as is and the reason is shown on its status."
+      },
+      "restart": "Switching to resolve on demand restarts this node's proxy once.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
+      "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
+      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes"
+    },
+    "node_resolve": {
+      "line": "IP rules and host names: {{mode}}",
+      "mode": {
+        "as_is": "as is",
+        "on_demand": "resolve on demand"
+      },
+      "pending": "as is (resolve on demand not delivered yet)",
+      "unavailable": {
+        "version": "Node version too old: running as is",
+        "route_only": "Inbound routeOnly is on: running as is"
+      }
     }
   }
 }

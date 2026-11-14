@@ -306,6 +306,8 @@ export interface DestTestInput {
   panel_id?: number
   inbound_node_id?: number
   source_ip?: string
+  /** The addresses the node would resolve the host name to (PSP does no DNS); at most 16 IP literals. */
+  resolved_ips?: string[]
 }
 
 export type DestTestStepKind = 'source' | 'allow' | 'block' | 'exempt' | 'builtin'
@@ -332,7 +334,7 @@ export interface DestTestResult {
   /** The rule id that ended it, "exempt", a builtin's name, or "". */
   terminating_step: string
   steps: DestTestStep[]
-  /** Currently only hostname_skips_ip_rules. */
+  /** hostname_skips_ip_rules, hostname_needs_resolution, resolution_failed_engine_dependent. */
   notes: string[]
   builtin?: string
   conditional: boolean
@@ -455,6 +457,12 @@ export interface DestNodeStatus {
   collect_effective: string
   /** Whether it records now (derived; a quiet node sends nothing). */
   collecting: boolean
+  /** How the panel is set to treat host names under IP rules. Absent from an older panel (read as as_is). */
+  resolve?: DestResolve
+  /** What the node was actually sent; '' is as_is. */
+  resolve_effective?: '' | 'on_demand'
+  /** Why a node set to on_demand runs as_is: its version cannot, or an inbound sniffs with routeOnly. */
+  resolve_unavailable?: 'version' | 'route_only' | null
   /** Why the node was sent the policy without its report-only rules (enforced ones untouched); null when it got them all. */
   report_only_not_deployed?: 'sniffing' | 'limit' | null
   state: DestNodeState
@@ -782,6 +790,17 @@ export type AuditCollect = 'off' | 'hits' | 'hits_and_usage'
 /** The recording mode of one native server: PUT /servers/:id with this one key (the others are kept). */
 export async function setAuditCollect(serverId: number, collect: AuditCollect): Promise<void> {
   await client.put(`/admin/servers/${serverId}`, { audit_collect: collect }, quiet)
+}
+
+/**
+ * How a Passwall Node server's IP-range and private-address rules meet a host name.
+ * if_non_match is shown but never offered: the API refuses it.
+ */
+export type DestResolve = 'as_is' | 'on_demand'
+
+/** The hostname-matching mode of one native server: PUT /servers/:id with this one key (the others are kept). */
+export async function setDestResolve(serverId: number, resolve: DestResolve): Promise<void> {
+  await client.put(`/admin/servers/${serverId}`, { dest_resolve: resolve }, quiet)
 }
 
 // ---- errors ----
