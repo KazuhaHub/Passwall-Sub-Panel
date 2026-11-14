@@ -88,3 +88,25 @@ func TestProxiedDNSHostsDoesNotReturnPartialOrInventUnresolvedHosts(t *testing.T
 		t.Fatal("empty DNS suggestions must remain an explicit empty list")
 	}
 }
+
+// A sing-box server may be spelled the legacy way (an address URL), and a direct
+// outbound may carry any tag: neither is a host resolved through the proxy
+// unless it is one.
+func TestProxiedDNSHostsReadsLegacyAddressServersAndDirectOutboundsOfAnyTag(t *testing.T) {
+	template := domain.Template{ClientType: domain.ClientSingBox, Content: `{
+"dns": {
+  "servers": [
+    {"tag":"old", "address":"https://old.example.test/dns-query", "detour":"Proxy"},
+    {"tag":"old-direct", "address":"https://olddirect.example.test/dns-query", "detour":"out-direct"},
+    {"tag":"old-udp", "address":"udp://1.1.1.1"},
+    {"tag":"new-direct", "type":"https", "server":"newdirect.example.test", "detour":"out-direct"}
+  ],
+  "rules": [ {"server":"old"}, {"server":"old-direct"}, {"server":"old-udp"}, {"server":"new-direct"} ]
+},
+"outbounds": [{{ outbounds }}, {"type":"direct","tag":"out-direct"}]
+}`}
+	got, err := ProxiedDNSHosts(template)
+	if err != nil || !reflect.DeepEqual(got, []string{"old.example.test"}) {
+		t.Fatalf("hosts = %v, %v", got, err)
+	}
+}

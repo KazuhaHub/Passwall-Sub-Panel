@@ -39,12 +39,17 @@ type fakeEligibility struct {
 	panels  []int64
 	reasons map[int64]string
 	err     error
+	reads   map[int64]int
 }
 
 func (f *fakeEligibility) PanelsFor(context.Context, *domain.Group) ([]int64, error) {
 	return f.panels, f.err
 }
 func (f *fakeEligibility) PanelEnforceReason(_ context.Context, id int64) (string, error) {
+	if f.reads == nil {
+		f.reads = map[int64]int{}
+	}
+	f.reads[id]++
 	return f.reasons[id], f.err
 }
 func (f *fakeEligibility) InvalidateEligibility(id int64) { f.ev.add("invalidate:" + itoa(id)) }

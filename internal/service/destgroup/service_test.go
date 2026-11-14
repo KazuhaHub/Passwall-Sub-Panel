@@ -168,6 +168,9 @@ func TestPut_OffToOnDirectlyAndTheMembersAreToldInOrder(t *testing.T) {
 	if err != nil || base.OwnerGroupID != g.ID || string(base.Entries) != "full:doh.example" {
 		t.Fatalf("base list = %+v, %v: an exact host, owned by the group", base, err)
 	}
+	if base.Name != "Guests · 基础放行" {
+		t.Fatalf("base list name = %q", base.Name)
+	}
 	extra, _ := h.dest.Lists.GetByID(h.ctx, al.ExtraListID)
 	if extra.OwnerGroupID != g.ID || extra.EntryCount != 0 {
 		t.Fatalf("extra list = %+v", extra)
@@ -622,5 +625,24 @@ func TestReport_DaysAreClampedToTheRetentionAndDefaultToAWeek(t *testing.T) {
 		if err != nil || r.EffectiveDays != c.want {
 			t.Fatalf("days %d -> %d, %v, want %d", c.asked, r.EffectiveDays, err, c.want)
 		}
+	}
+}
+
+// The overview asks about each panel once, however many groups select it.
+func TestList_ReadsEachPanelOncePerRequest(t *testing.T) {
+	h := newHarness(t)
+	for _, n := range []string{"A", "B", "C", "D"} {
+		h.group(n, 1)
+	}
+	if _, err := h.svc.List(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	for id, n := range h.elig.reads {
+		if n != 1 {
+			t.Fatalf("panel %d was read %d times for 4 groups", id, n)
+		}
+	}
+	if len(h.elig.reads) != 3 {
+		t.Fatalf("reads = %v", h.elig.reads)
 	}
 }

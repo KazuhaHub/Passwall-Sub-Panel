@@ -144,7 +144,7 @@ func (s *Service) Put(ctx context.Context, gid int64, in PutInput) (*View, error
 	if !in.State.Valid() {
 		return nil, badInput("state", "state must be off, report or on", string(in.State))
 	}
-	_, cur, err := s.groupAndAllowlist(ctx, gid)
+	grp, cur, err := s.groupAndAllowlist(ctx, gid)
 	if err != nil {
 		return nil, err
 	}
@@ -191,10 +191,10 @@ func (s *Service) Put(ctx context.Context, gid int64, in PutInput) (*View, error
 		}
 		hostCount = len(hosts)
 		now := s.Now()
-		if base, err = ownedList(fmt.Sprintf("group %d base allowance", gid), hosts, now); err != nil {
+		if base, err = ownedList(ownedName(grp.Name, "基础放行"), hosts, now); err != nil {
 			return nil, err
 		}
-		if extra, err = ownedList(fmt.Sprintf("group %d extra allowances", gid), nil, now); err != nil {
+		if extra, err = ownedList(ownedName(grp.Name, "补充"), nil, now); err != nil {
 			return nil, err
 		}
 	}
@@ -292,7 +292,7 @@ func (s *Service) Preview(ctx context.Context, gid int64, in PreviewInput) (*Pre
 	if err != nil {
 		return nil, err
 	}
-	infos, err := s.panelInfos(ctx, g)
+	infos, err := s.panelInfos(ctx, g, panelCache{})
 	if err != nil {
 		return nil, err
 	}
@@ -374,4 +374,16 @@ func (s *Service) AddException(ctx context.Context, gid int64, target, match str
 		return nil, err
 	}
 	return &ExceptionResult{Entry: line, GroupID: gid, ListID: a.ExtraListID}, nil
+}
+
+// ownedName is the name of one of a group's own lists, "<group> · <role>" as the
+// plan words it (the exceptions list and the catalog are named in English; these
+// are the plan's own Chinese). The group's name is cut to fit the name limit.
+func ownedName(group, role string) string {
+	suffix := " · " + role
+	room := domain.DestNameMax - len(suffix)
+	if len(group) > room {
+		group = strings.ToValidUTF8(group[:room], "")
+	}
+	return group + suffix
 }

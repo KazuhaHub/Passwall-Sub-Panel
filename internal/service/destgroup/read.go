@@ -69,46 +69,76 @@ type panelInfo struct {
 	applied bool
 }
 
+// panelFacts is what is read about one panel, whatever the group: the reads
+// are made once per request.
+type panelFacts struct {
+	name      string
+	missing   bool
+	reason    string
+	canRecord bool
+	applied   []int64
+}
+
+// panelCache memoises panelFacts within one request (GET /dest/groups asks about
+// the same panels for every group).
+type panelCache map[int64]*panelFacts
+
+func (s *Service) factsOf(ctx context.Context, id int64, cache panelCache) (*panelFacts, error) {
+	if f, ok := cache[id]; ok {
+		return f, nil
+	}
+	panel, err := s.Panels.GetByID(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		cache[id] = &panelFacts{missing: true}
+		return cache[id], nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	f := &panelFacts{name: panel.Name}
+	if f.reason, err = s.Eligibility.PanelEnforceReason(ctx, id); err != nil {
+		return nil, err
+	}
+	agent, err := s.Agents.GetByPanelID(ctx, id)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+	case err != nil:
+		return nil, err
+	default:
+		f.canRecord = domain.NormalizeAuditCollect(panel.AuditCollect) != domain.AuditCollectOff &&
+			domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine) == domain.NodeCoreXray &&
+			slices.Contains(agent.ObservedCapabilities, protocol.CapabilityAuditHits)
+		meta, err := s.Policies.GetMeta(ctx, agent.AgentID)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+		case err != nil:
+			return nil, err
+		default:
+			f.applied = meta.AppliedGroups
+		}
+	}
+	cache[id] = f
+	return f, nil
+}
+
 // panelInfos reads the panels a group's tags select. A read that fails is an
 // error: a partial list would say "all nodes can enforce" for the ones it
 // could not read.
-func (s *Service) panelInfos(ctx context.Context, g *domain.Group) ([]panelInfo, error) {
+func (s *Service) panelInfos(ctx context.Context, g *domain.Group, cache panelCache) ([]panelInfo, error) {
 	ids, err := s.Eligibility.PanelsFor(ctx, g)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]panelInfo, 0, len(ids))
 	for _, id := range ids {
-		panel, err := s.Panels.GetByID(ctx, id)
-		if errors.Is(err, domain.ErrNotFound) {
-			continue
-		}
+		f, err := s.factsOf(ctx, id, cache)
 		if err != nil {
 			return nil, err
 		}
-		info := panelInfo{id: id, name: panel.Name}
-		if info.reason, err = s.Eligibility.PanelEnforceReason(ctx, id); err != nil {
-			return nil, err
+		if f.missing {
+			continue
 		}
-		agent, err := s.Agents.GetByPanelID(ctx, id)
-		switch {
-		case errors.Is(err, domain.ErrNotFound):
-		case err != nil:
-			return nil, err
-		default:
-			info.canRecord = domain.NormalizeAuditCollect(panel.AuditCollect) != domain.AuditCollectOff &&
-				domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine) == domain.NodeCoreXray &&
-				slices.Contains(agent.ObservedCapabilities, protocol.CapabilityAuditHits)
-			meta, err := s.Policies.GetMeta(ctx, agent.AgentID)
-			switch {
-			case errors.Is(err, domain.ErrNotFound):
-			case err != nil:
-				return nil, err
-			default:
-				info.applied = slices.Contains(meta.AppliedGroups, g.ID)
-			}
-		}
-		out = append(out, info)
+		out = append(out, panelInfo{id: id, name: f.name, reason: f.reason, canRecord: f.canRecord, applied: slices.Contains(f.applied, g.ID)})
 	}
 	return out, nil
 }
@@ -325,12 +355,13 @@ func (s *Service) List(ctx context.Context) ([]*View, error) {
 		return nil, err
 	}
 	out := make([]*View, 0, len(groups))
+	cache := panelCache{}
 	for _, g := range groups {
 		a := rows[g.ID]
 		if a == nil {
 			a = &domain.DestAllowlist{}
 		}
-		infos, err := s.panelInfos(ctx, g)
+		infos, err := s.panelInfos(ctx, g, cache)
 		if err != nil {
 			return nil, err
 		}
@@ -367,7 +398,7 @@ func (s *Service) viewOf(ctx context.Context, gid int64) (*View, *domain.DestAll
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	infos, err := s.panelInfos(ctx, g)
+	infos, err := s.panelInfos(ctx, g, panelCache{})
 	if err != nil {
 		return nil, nil, nil, err
 	}

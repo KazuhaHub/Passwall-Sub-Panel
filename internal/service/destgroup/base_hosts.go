@@ -28,7 +28,9 @@ type baseDNSConfig struct {
 		Tag    string `yaml:"tag"`
 		Type   string `yaml:"type"`
 		Server string `yaml:"server"`
-		Detour string `yaml:"detour"`
+		// Address is the legacy spelling of a server (sing-box before 1.12): a URL.
+		Address string `yaml:"address"`
+		Detour  string `yaml:"detour"`
 	} `yaml:"servers"`
 	Rules []baseDNSRule `yaml:"rules"`
 }
@@ -99,16 +101,42 @@ func ProxiedDNSHosts(templates ...domain.Template) ([]string, error) {
 				}
 			}
 			walk(root.DNS.Rules)
+			// A server whose detour is a direct outbound (whatever its tag) is not
+			// resolved through the proxy.
+			direct := map[string]bool{"direct": true}
+			// Read loosely and apart: a placeholder stands in the list where the
+			// nodes go, and an outbound section that does not read only means the
+			// default tag is all that is known.
+			var outs struct {
+				Outbounds []any `yaml:"outbounds"`
+			}
+			_ = yaml.Unmarshal([]byte(body), &outs)
+			for _, o := range outs.Outbounds {
+				if m, ok := o.(map[string]any); ok && m["type"] == "direct" {
+					if tag, ok := m["tag"].(string); ok {
+						direct[tag] = true
+					}
+				}
+			}
 			seen := map[string]bool{}
 			for _, server := range root.DNS.Servers {
 				if seen[server.Tag] {
 					return nil, invalid("template.dns")
 				}
 				seen[server.Tag] = true
-				if !referenced[server.Tag] || server.Type != "https" || server.Detour == "direct" {
+				legacy := server.Type == "" && strings.HasPrefix(server.Address, "https://")
+				if !referenced[server.Tag] || (server.Type != "https" && !legacy) || direct[server.Detour] {
 					continue
 				}
-				host, err := baseDNSHostname(server.Server)
+				name := server.Server
+				if legacy {
+					u, err := url.Parse(server.Address)
+					if err != nil || u.User != nil {
+						return nil, invalid("template.dns")
+					}
+					name = u.Hostname()
+				}
+				host, err := baseDNSHostname(name)
 				if err != nil {
 					return nil, err
 				}
