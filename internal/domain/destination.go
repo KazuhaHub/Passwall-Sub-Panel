@@ -259,6 +259,47 @@ type DestAllowlist struct {
 	UpdatedAt      *time.Time
 }
 
+// DestGroupAllowlistEntry is a group that has an allowlist row, with its name:
+// what the admin overview and the lists' "used by" are made of.
+type DestGroupAllowlistEntry struct {
+	GroupID   int64
+	GroupName string
+	Allowlist DestAllowlist
+}
+
+// DestListUse is who holds a list: the policies and the allowlist groups that
+// reference it (a group in any state, off included: it keeps its lists).
+type DestListUse struct {
+	PolicyIDs []int64
+	GroupIDs  []int64
+}
+
+// Any reports whether anything holds the list.
+func (u DestListUse) Any() bool { return len(u.PolicyIDs)+len(u.GroupIDs) > 0 }
+
+// DestTrialSite is one destination of an allowlist group's report-only rows,
+// folded over hours, panels and users.
+type DestTrialSite struct {
+	Site   string
+	Count  int64
+	LastMS int64
+}
+
+// ErrDestListNotReady refuses saving an allowlist that is on with a list that is
+// not ready (HTTP 409 dest_list_not_ready), or changing a list an on allowlist
+// holds into one that is not: an allowlist built on a list that never arrived
+// would deny everything.
+var ErrDestListNotReady = fmt.Errorf("%w: dest list would not be ready", ErrConflict)
+
+// DestListNotReadyError names the lists that are not ready, and the groups that
+// hold them (when the change was to a list).
+type DestListNotReadyError struct{ ListIDs, GroupIDs []int64 }
+
+func (e *DestListNotReadyError) Error() string {
+	return fmt.Sprintf("%v: lists %v, groups %v", ErrDestListNotReady, e.ListIDs, e.GroupIDs)
+}
+func (e *DestListNotReadyError) Unwrap() error { return ErrDestListNotReady }
+
 // DestGroupMode is one group's allowlist as the compiler reads it with the
 // other definitions.
 type DestGroupMode struct {
@@ -348,7 +389,11 @@ type DestAgentPolicy struct {
 	// report_only_not_deployed). Set by each compile, so it follows the node's
 	// current inbounds and the current budget instead of staying as an issue row.
 	ReportOnlyShed string
-	AppliedSHA256  string
+	// SniffingGroupsDropped is the JSON list of allowlist group ids this node
+	// was not sent because an enabled inbound cannot supply the sniffing their
+	// domain rules need, "" when none was left out.
+	SniffingGroupsDropped string
+	AppliedSHA256         string
 	// AppliedBody is the canonical policy that last applied (the LKG).
 	AppliedBody      []byte
 	AppliedAt        *time.Time
@@ -408,25 +453,27 @@ type DestAgentPolicyPatch struct {
 	OverLimit          *string
 	PrecheckListeners  *string
 	ReportOnlyShed     *string
-	AppliedSHA256      *string
-	AppliedBody        *[]byte
-	AppliedAt          *time.Time
-	AppliedRuleCount   *int
-	AppliedGroups      *[]int64
-	AppliedCollect     *string
-	CollectEffective   *string
-	ResolveEffective   *string
-	ResolveUnavailable *string
-	ReportedSHA256     *string
-	ReportedState      *string
-	ReportedIssue      *string
-	ReportedListeners  *string
-	ReportedAt         *time.Time
-	RejectedCaps       *string
-	RejectedSHA256     *string
-	MintedGeneration   *int64
-	MintedCtx          *string
-	RejectedCtx        *string
+	// SniffingGroupsDropped: see DestAgentPolicy.
+	SniffingGroupsDropped *string
+	AppliedSHA256         *string
+	AppliedBody           *[]byte
+	AppliedAt             *time.Time
+	AppliedRuleCount      *int
+	AppliedGroups         *[]int64
+	AppliedCollect        *string
+	CollectEffective      *string
+	ResolveEffective      *string
+	ResolveUnavailable    *string
+	ReportedSHA256        *string
+	ReportedState         *string
+	ReportedIssue         *string
+	ReportedListeners     *string
+	ReportedAt            *time.Time
+	RejectedCaps          *string
+	RejectedSHA256        *string
+	MintedGeneration      *int64
+	MintedCtx             *string
+	RejectedCtx           *string
 }
 
 // Valid reports whether r is one of the four stored reasons.

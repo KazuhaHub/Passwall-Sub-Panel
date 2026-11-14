@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -582,4 +583,55 @@ func (r *DestHitRepo) PruneOrphans(ctx context.Context) (int64, error) {
 		total += res.RowsAffected
 	}
 	return total, nil
+}
+
+// TrialSites folds an allowlist group's report-only rows (the rows of source
+// that are observe and carry no account) from sinceMS on by destination, most
+// seen first and then by name. The destination is what the node recorded: the
+// main domain, or "(ip)".
+func (r *DestHitRepo) TrialSites(ctx context.Context, source string, sinceMS int64) ([]domain.DestTrialSite, error) {
+	var rows []struct {
+		Dest string
+		N    int64
+		Last int64
+	}
+	if err := r.db.WithContext(ctx).Model(&destHitRow{}).
+		Where("source = ? AND action = ? AND user_id = 0 AND hour_ms >= ?", source, domain.DestHitObserve, sinceMS).
+		Select("dest, SUM(count) AS n, MAX(last_ms) AS last").Group("dest").Order("n DESC, dest ASC").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("fold dest trial rows: %w", err)
+	}
+	out := make([]domain.DestTrialSite, len(rows))
+	for i, row := range rows {
+		out[i] = domain.DestTrialSite{Site: row.Dest, Count: row.N, LastMS: row.Last}
+	}
+	// Ties are ordered here, by bytes: the dialects' collations disagree on
+	// punctuation ("(ip)" sorts first in SQLite and after letters in PostgreSQL).
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Site < out[j].Site
+	})
+	return out, nil
+}
+
+// TrialDropped is how many allowlist trial rows the nodes dropped (their
+// aggregator was full) in [sinceMS, untilMS); zero bounds are open. It is the
+// overflow DroppedInRange leaves out: a report is missing these.
+func (r *DestHitRepo) TrialDropped(ctx context.Context, sinceMS, untilMS int64) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind = ?", domain.DestDropNodeTrial)
+	if sinceMS > 0 {
+		q = q.Where("hour_ms >= ?", sinceMS)
+	}
+	if untilMS > 0 {
+		q = q.Where("hour_ms < ?", untilMS)
+	}
+	var total *int64
+	if err := q.Select("SUM(count)").Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("sum dest trial drops: %w", err)
+	}
+	if total == nil {
+		return 0, nil
+	}
+	return *total, nil
 }

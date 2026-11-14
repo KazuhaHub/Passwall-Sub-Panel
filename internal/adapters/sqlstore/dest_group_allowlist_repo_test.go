@@ -101,7 +101,8 @@ func TestGroupRepo_RoundTripsTheAllowlistThroughEveryRead(t *testing.T) {
 func TestGroupRepo_UpdateNeverWritesTheAllowlist(t *testing.T) {
 	repos, gr, ctx := newGroupAllowlistRepos(t)
 	g := mkGroup(t, gr, "g")
-	if err := repos.GroupAllowlists.Save(ctx, g.ID, allowlist(domain.DestStateOn, 4), nil); err != nil {
+	ls := makeLists(t, repos, 1)
+	if err := repos.GroupAllowlists.Save(ctx, g.ID, allowlist(domain.DestStateOn, ls[0]), nil); err != nil {
 		t.Fatal(err)
 	}
 	stale := *g // read before the allowlist was set
@@ -122,7 +123,8 @@ func TestGroupAllowlistRepo_SaveAdvancesTheGenerationAndWritesOnlyItsColumns(t *
 	if err := gr.Update(ctx, g); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.GroupAllowlists.Save(ctx, g.ID, allowlist(domain.DestStateReport, 2, 1, 1), nil); err != nil {
+	ls := makeLists(t, repos, 2)
+	if err := repos.GroupAllowlists.Save(ctx, g.ID, allowlist(domain.DestStateReport, ls[1], ls[0], ls[0]), nil); err != nil {
 		t.Fatal(err)
 	}
 	if gen := destGeneration(t, repos, ctx); gen != 1 {
@@ -210,12 +212,13 @@ func TestGroupAllowlistRepo_StateChangedAtMovesOnlyWithTheState(t *testing.T) {
 		got, _ := repos.GroupAllowlists.Get(ctx, g.ID)
 		return got
 	}
-	a := save(allowlist(domain.DestStateReport, 1))
-	b := save(allowlist(domain.DestStateReport, 2))
+	ls := makeLists(t, repos, 2)
+	a := save(allowlist(domain.DestStateReport, ls[0]))
+	b := save(allowlist(domain.DestStateReport, ls[1]))
 	if !b.StateChangedAt.Equal(*a.StateChangedAt) || !b.UpdatedAt.After(*a.UpdatedAt) {
 		t.Fatalf("state_changed_at %v -> %v, updated_at %v -> %v", a.StateChangedAt, b.StateChangedAt, a.UpdatedAt, b.UpdatedAt)
 	}
-	c := save(allowlist(domain.DestStateOn, 2))
+	c := save(allowlist(domain.DestStateOn, ls[1]))
 	if !c.StateChangedAt.After(*b.StateChangedAt) {
 		t.Fatalf("state_changed_at did not move with the state: %v -> %v", b.StateChangedAt, c.StateChangedAt)
 	}
@@ -233,7 +236,7 @@ func TestGroupAllowlistRepo_CreateWithOwnedListsIsOneTransaction(t *testing.T) {
 	repos, gr, ctx := newGroupAllowlistRepos(t)
 	g := mkGroup(t, gr, "g")
 	base, extra := ownedList("g base", "domain:doh.example"), ownedList("g extra", "domain:more.example")
-	a := allowlist(domain.DestStateReport, 5)
+	a := allowlist(domain.DestStateReport, makeLists(t, repos, 1)[0])
 	if err := repos.GroupAllowlists.CreateWithOwnedLists(ctx, g.ID, a, base, extra); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +261,7 @@ func TestGroupAllowlistRepo_CreateWithOwnedListsIsOneTransaction(t *testing.T) {
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("second create = %v, want ErrAlreadyExists", err)
 	}
-	if lists, _ := repos.Lists.List(ctx, false); len(lists) != 2 {
+	if lists, _ := repos.Lists.List(ctx, false); len(lists) != 3 { // the one it names and its two own
 		t.Fatalf("lists = %d: the refused create left some", len(lists))
 	}
 }
@@ -289,10 +292,11 @@ func TestGroupAllowlistRepo_CreateWithOwnedListsLeavesNothingOnFailure(t *testin
 func TestDestReadDefinitions_CarriesTheGroupAllowlists(t *testing.T) {
 	repos, gr, ctx := newGroupAllowlistRepos(t)
 	g1, g2, g3 := mkGroup(t, gr, "a"), mkGroup(t, gr, "b"), mkGroup(t, gr, "c")
+	ls := makeLists(t, repos, 2)
 	for _, c := range []struct {
 		g *domain.Group
 		a *domain.DestAllowlist
-	}{{g2, allowlist(domain.DestStateOn, 9)}, {g1, allowlist(domain.DestStateOff, 1)}} {
+	}{{g2, allowlist(domain.DestStateOn, ls[1])}, {g1, allowlist(domain.DestStateOff, ls[0])}} {
 		if err := repos.GroupAllowlists.Save(ctx, c.g.ID, c.a, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +307,7 @@ func TestDestReadDefinitions_CarriesTheGroupAllowlists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(defs.GroupModes) != 2 || defs.GroupModes[0].GroupID != g1.ID || defs.GroupModes[0].State != domain.DestStateOff ||
-		defs.GroupModes[1].GroupID != g2.ID || defs.GroupModes[1].State != domain.DestStateOn || defs.GroupModes[1].ListIDs[0] != 9 {
+		defs.GroupModes[1].GroupID != g2.ID || defs.GroupModes[1].State != domain.DestStateOn || defs.GroupModes[1].ListIDs[0] != ls[1] {
 		t.Fatalf("group modes = %+v", defs.GroupModes)
 	}
 	if defs.Generation != destGeneration(t, repos, ctx) {

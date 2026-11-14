@@ -13,6 +13,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
@@ -43,17 +44,20 @@ type DestSourceRuleStore interface {
 // makes the routes that need it answer 503: "this build cannot" stays apart
 // from "nothing there" (TestBuildWiresTheAccessControlAPI guards Build).
 type DestWiring struct {
-	Lists       *destlist.Service
-	Catalog     *destcatalog.Service
-	Policy      *destpolicy.Service
-	Admin       *destpolicy.Admin
-	Policies    destpolicy.PolicyStore
-	Exemptions  DestExemptionStore
-	SourceRules DestSourceRuleStore
-	Users       ports.UserRepo
-	Groups      ports.GroupRepo
-	Nodes       ports.NodeRepo
-	Panels      ports.XUIPanelRepo
+	// AllowlistGroups is the allowlist groups' admin side. Nil: the group routes
+	// answer 503 and the policy list names no group.
+	AllowlistGroups *destgroup.Service
+	Lists           *destlist.Service
+	Catalog         *destcatalog.Service
+	Policy          *destpolicy.Service
+	Admin           *destpolicy.Admin
+	Policies        destpolicy.PolicyStore
+	Exemptions      DestExemptionStore
+	SourceRules     DestSourceRuleStore
+	Users           ports.UserRepo
+	Groups          ports.GroupRepo
+	Nodes           ports.NodeRepo
+	Panels          ports.XUIPanelRepo
 	// Hits is the hit-record read side. Nil: the hit routes answer 503 and the
 	// hit fields of the policy list and the account view stay null.
 	Hits DestHitStore
@@ -115,7 +119,9 @@ type errCodes struct{ stale, exists string }
 //	400 dest_list_insecure_url
 //	400 dest_policy_invalid / _no_match / _over_limit {kind,used,limit} / dest_policy_state_unavailable (a report-only ALLOW policy)
 //	400 dest_hits_invalid / dest_hits_range (GET /hits)
-//	409 dest_list_in_use {used_by}            deleting a list a policy uses
+//	409 dest_list_in_use {used_by}            deleting a list a policy or an allowlist group holds
+//	409 dest_list_not_ready {not_ready_lists} "on" with a list that is not ready; editing one an "on" group holds into one
+//	409 dest_group_stale                      an allowlist saved since it was read
 //	409 <stale>                               the precondition failed
 //	409 dest_template_exists                  a built-in rule group added twice
 //	409 <exists>                              a duplicate (name, exemption)
@@ -125,13 +131,14 @@ type errCodes struct{ stale, exists string }
 //	503 dest_geoip_unavailable / dest_geosite_unavailable
 func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) {
 	var (
-		verr   *destpolicy.ValidationError
-		parse  *destlist.ParseError
-		large  *destlist.TooLargeError
-		broad  *destlist.BroadEntryError
-		inUse  *destlist.ListInUseError
-		reject *destlist.UpdateRejectedError
-		pub    *destpolicy.PublishRefusedError
+		verr     *destpolicy.ValidationError
+		parse    *destlist.ParseError
+		large    *destlist.TooLargeError
+		broad    *destlist.BroadEntryError
+		inUse    *destlist.ListInUseError
+		notReady *destlist.ListNotReadyError
+		reject   *destlist.UpdateRejectedError
+		pub      *destpolicy.PublishRefusedError
 	)
 	body := func(status int, code, msg string, extra gin.H) {
 		out := gin.H{"error": msg, "code": code}
@@ -165,8 +172,17 @@ func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) 
 		body(http.StatusBadRequest, "dest_list_too_broad", broad.Error(), gin.H{"entry": broad.Entry, "reason": broad.Reason})
 	case errors.Is(err, destlist.ErrInsecureURL):
 		body(http.StatusBadRequest, "dest_list_insecure_url", "a list URL must be https", nil)
+	case errors.As(err, &notReady):
+		body(http.StatusConflict, codeListNotReady, "a list is not ready: an allowlist that is on cannot use it", h.listNotReadyBody(c, notReady.ListIDs))
 	case errors.As(err, &inUse):
-		body(http.StatusConflict, "dest_list_in_use", "a policy uses this list", gin.H{"used_by": h.policyRefs(c.Request.Context(), inUse.PolicyIDs)})
+		used := make([]any, 0, len(inUse.PolicyIDs)+len(inUse.GroupIDs))
+		for _, r := range h.policyRefs(c.Request.Context(), inUse.PolicyIDs) {
+			used = append(used, r)
+		}
+		for _, r := range h.groupRefs(c, inUse.GroupIDs) {
+			used = append(used, r)
+		}
+		body(http.StatusConflict, "dest_list_in_use", "a policy or an allowlist group uses this list", gin.H{"used_by": used})
 	case errors.As(err, &reject):
 		body(http.StatusConflict, "dest_geosite_update_rejected", "the update would break a policy in force", gin.H{"rejection": reject.UpdateRejection})
 	case errors.Is(err, destlist.ErrGeositeBusy):

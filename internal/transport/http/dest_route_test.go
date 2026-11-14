@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,8 +25,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 )
@@ -35,15 +39,55 @@ import (
 // route landed in.
 
 type destFixture struct {
-	t             *testing.T
-	do            func(method, target, token, body string) *httptest.ResponseRecorder
-	adminToken    string
-	operatorToken string
-	repos         ports.Repos
-	dest          *sqlstore.DestRepos
-	nativeNode    int64
-	foreignNode   int64
+	t              *testing.T
+	do             func(method, target, token, body string) *httptest.ResponseRecorder
+	adminToken     string
+	operatorToken  string
+	repos          ports.Repos
+	dest           *sqlstore.DestRepos
+	nativeNode     int64
+	foreignNode    int64
+	nativePanelID  int64
+	foreignPanelID int64
+	users          routerReleaseUsers
+	// resyncs are the groups the allowlist writes told the member sync about.
+	resyncs *resyncLog
 }
+
+// resyncLog records which groups the member sync was told to re-derive.
+type resyncLog struct {
+	mu  sync.Mutex
+	ids []int64
+}
+
+func (r *resyncLog) ResyncGroupMembersInBackground(gid int64) {
+	r.mu.Lock()
+	r.ids = append(r.ids, gid)
+	r.mu.Unlock()
+}
+
+func (r *resyncLog) got() []int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.ids)
+}
+
+// routeEligibility stands for group.Service in the route tests: the native
+// panel can enforce an allowlist, the 3X-UI one cannot.
+type routeEligibility struct{ native, foreign int64 }
+
+func (e routeEligibility) PanelsFor(context.Context, *domain.Group) ([]int64, error) {
+	return []int64{e.native, e.foreign}, nil
+}
+
+func (e routeEligibility) PanelEnforceReason(_ context.Context, id int64) (string, error) {
+	if id == e.foreign {
+		return "xui", nil
+	}
+	return "", nil
+}
+
+func (routeEligibility) InvalidateEligibility(int64) {}
 
 func newDestFixture(t *testing.T, wired bool) *destFixture {
 	t.Helper()
@@ -64,11 +108,12 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 	}
 	repos := sqlstore.NewRepos(db)
 	dest := sqlstore.NewDestRepos(db)
-	f := &destFixture{t: t, repos: repos, dest: dest}
+	f := &destFixture{t: t, repos: repos, dest: dest, resyncs: &resyncLog{}}
 
 	admin := &domain.User{ID: 1, UPN: "admin@example.test", Enabled: true, Role: domain.RoleAdmin}
 	operator := &domain.User{ID: 2, UPN: "operator@example.test", Enabled: true, Role: domain.RoleOperator}
 	users := routerReleaseUsers{users: map[int64]*domain.User{1: admin, 2: operator}}
+	f.users = users
 	repos.User = users
 	issuer := jwtutil.NewIssuer(strings.Repeat("test-only-key", 3), func() jwtutil.Params {
 		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: "dest-route-test"}
@@ -89,6 +134,7 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 			t.Fatal(err)
 		}
 	}
+	f.nativePanelID, f.foreignPanelID = native.ID, foreign.ID
 	for _, c := range []struct {
 		panel *domain.XUIPanel
 		into  *int64
@@ -104,11 +150,12 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 		Cfg:   &config.Config{ConfigDir: t.TempDir()},
 		Repos: repos,
 		Auth:  authSvc, User: user.New(users, nil, nil, nil, nil, nil, nil, nil),
+		Group: group.New(repos.Group, repos.Node, repos.ScopeSettings),
 		Audit: audit.New(repos.Audit),
 	}
 	if wired {
 		lists := destlist.New(destlist.Deps{
-			Lists: dest.Lists, Policies: dest.Policies, SourceRules: dest.SourceRules, State: dest.State,
+			Lists: dest.Lists, Policies: dest.Policies, SourceRules: dest.SourceRules, State: dest.State, Groups: dest.GroupAllowlists,
 			Settings: repos.Settings, DataDir: t.TempDir(),
 		})
 		catalog, err := destcatalog.New(lists, dest, dest.Policies)
@@ -129,8 +176,18 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
+		allowlistGroups, err := destgroup.New(destgroup.Deps{
+			Allowlists: dest.GroupAllowlists, Groups: repos.Group, Lists: dest.Lists, Editor: lists, Budget: adminSvc,
+			Eligibility: routeEligibility{native: f.nativePanelID, foreign: f.foreignPanelID}, Resync: f.resyncs,
+			Panels: repos.XUIPanel, Agents: repos.NodeAgent, Policies: dest.Agents, Hits: dest.Hits, Settings: repos.Settings,
+			BaseHosts: func(context.Context) ([]string, error) { return []string{"dns.alidns.com"}, nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		deps.Dest = handler.DestWiring{
-			Lists: lists, Catalog: catalog, Policy: policy, Admin: adminSvc, Policies: dest.Policies, Exemptions: dest.Exemptions,
+			AllowlistGroups: allowlistGroups,
+			Lists:           lists, Catalog: catalog, Policy: policy, Admin: adminSvc, Policies: dest.Policies, Exemptions: dest.Exemptions,
 			SourceRules: dest.SourceRules, Users: users, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel,
 			Hits: dest.Hits,
 		}
@@ -190,6 +247,12 @@ var destRoutes = []destRoute{
 	{"GET", "/api/admin/dest/source-rules/1", ""},
 	{"PUT", "/api/admin/dest/source-rules/1", `{"countries":["CN"],"state":"on"}`},
 	{"POST", "/api/admin/dest/exceptions", `{"target":"example.com","match":"site","scope":"global"}`},
+	{"POST", "/api/admin/dest/exceptions", `{"target":"example.com","match":"site","scope":"group","group_id":1}`},
+	{"GET", "/api/admin/dest/groups", ""},
+	{"GET", "/api/admin/dest/groups/1", ""},
+	{"PUT", "/api/admin/dest/groups/1", `{"state":"report","list_ids":[],"base_hosts":["dns.example.com"]}`},
+	{"GET", "/api/admin/dest/groups/1/preview?state=on", ""},
+	{"GET", "/api/admin/dest/groups/1/report", ""},
 	{"POST", "/api/admin/dest/test", `{"target":"example.com"}`},
 	{"GET", "/api/admin/dest/users/2", ""},
 	{"GET", "/api/admin/dest/hits", ""},
@@ -526,7 +589,9 @@ func TestDestGeositeAPIWithoutData(t *testing.T) {
 
 func TestDestExceptionsTestStatusAndControl(t *testing.T) {
 	f := newDestFixture(t, true)
-	f.expect("POST", "/exceptions", `{"target":"example.com","match":"site","scope":"group","group_id":3}`, 400, "dest_exception_invalid")
+	// The group scope is the allowlist groups' (TestDestGroupExceptionsAndTheirRefusals); a scope nobody has is refused.
+	f.expect("POST", "/exceptions", `{"target":"example.com","match":"site","scope":"panel","group_id":3}`, 400, "dest_exception_invalid")
+	f.expect("POST", "/exceptions", `{"target":"example.com","match":"site","scope":"group","group_id":3}`, 404, "dest_group_not_found")
 	f.expect("POST", "/exceptions", `{"target":"","match":"site"}`, 400, "dest_exception_invalid")
 	first := f.expect("POST", "/exceptions", `{"target":"ok.example.com","match":"site","scope":"global"}`, 200, "")
 	created := first["created"].(map[string]any)
@@ -585,6 +650,10 @@ func TestDestExceptionsTestStatusAndControl(t *testing.T) {
 	}
 	if v, present := native["report_only_not_deployed"]; !present || v != nil {
 		t.Fatalf("report_only_not_deployed = %v (present %v): the field is always there, null when nothing was left out", v, present)
+	}
+
+	if v, ok := native["sniffing_groups_dropped"].([]any); !ok || len(v) != 0 {
+		t.Fatalf("sniffing_groups_dropped = %v: always a list, empty when no group was left out", native["sniffing_groups_dropped"])
 	}
 
 	f.expect("PUT", "/pause", `{}`, 400, "dest_bad_request")

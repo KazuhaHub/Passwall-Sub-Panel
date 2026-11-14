@@ -139,7 +139,7 @@ func (h *AdminDestHandler) ListPolicies(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"allow": allow, "block": block, "observe": []destPolicyView{}, "exemptions": gin.H{"count": exemptions},
-		"allowlist_groups": []any{}, "hit_window_days": hitDays, "budget": budget,
+		"allowlist_groups": h.groupStateSummaries(c), "hit_window_days": hitDays, "budget": budget,
 	})
 }
 

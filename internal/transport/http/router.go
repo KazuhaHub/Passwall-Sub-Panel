@@ -1062,6 +1062,13 @@ func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
 	g.GET("/dest/source-rules/:node_id", h.GetSourceRule)
 	g.PUT("/dest/source-rules/:node_id", h.PutSourceRule)
 	g.POST("/dest/exceptions", h.AddException)
+
+	// The allowlist groups. The preview and the report only read.
+	g.GET("/dest/groups", h.ListGroups)
+	g.GET("/dest/groups/:group_id", h.GetGroup)
+	g.PUT("/dest/groups/:group_id", h.PutGroup)
+	g.GET("/dest/groups/:group_id/preview", h.PreviewGroup)
+	g.GET("/dest/groups/:group_id/report", h.GroupReport)
 	// Tools and one account.
 	g.POST("/dest/test", h.Test)
 	g.GET("/dest/users/:id", h.User)

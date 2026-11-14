@@ -41,6 +41,14 @@ func describeRules(cb *cachedBase) map[string]TestStep {
 			out["s"+strconv.FormatInt(n, 10)] = TestStep{Kind: "source", ReportOnly: g.report, NodeID: n}
 		}
 	}
+	// An allowlist group's three rules (the group's name is read when a trace is
+	// made: the snapshot does not carry it).
+	for _, g := range cb.base.groups {
+		id := "g" + strconv.FormatInt(g.id, 10)
+		for _, rule := range []string{id, id + "x1", id + "x2"} {
+			out[rule] = TestStep{Kind: "group", ReportOnly: g.report, GroupID: g.id}
+		}
+	}
 	return out
 }
 
@@ -100,7 +108,11 @@ type NodeState struct {
 	// not be expanded for want of a GeoIP database and is not enforced.
 	GeoIPUnavailable bool                `json:"geoip_unavailable"`
 	AllowlistGroups  []AllowlistGroupRef `json:"allowlist_groups"`
-	Hits24h          *int64              `json:"hits_24h"`
+	// SniffingGroupsDropped are the allowlist groups this node was not sent
+	// because an enabled inbound cannot supply the sniffing their domain rules
+	// need: the group does not apply on ANY inbound of this node.
+	SniffingGroupsDropped []AllowlistGroupRef `json:"sniffing_groups_dropped"`
+	Hits24h               *int64              `json:"hits_24h"`
 	// ReportOnlyNotDeployed says why this node was sent the policy without its
 	// report-only rules: "sniffing" (an inbound's sniffing cannot supply what
 	// they need) or "limit" (they overrun the node's budget). Null when all
@@ -252,7 +264,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 	for _, panel := range panels {
 		ns := NodeState{
 			PanelID: panel.ID, PanelName: panel.Name, Kind: string(domain.NormalizePanelKind(panel.Kind)),
-			Sniffing: []SniffView{}, AllowlistGroups: []AllowlistGroupRef{},
+			Sniffing: []SniffView{}, AllowlistGroups: []AllowlistGroupRef{}, SniffingGroupsDropped: []AllowlistGroupRef{},
 		}
 		agent := agentByPanel[panel.ID]
 		switch {
@@ -311,6 +323,14 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		ns.MintedAt, ns.AppliedAt, ns.AppliedRules = ms(row.MintedAt), ms(row.AppliedAt), row.AppliedRuleCount
 		for _, gid := range row.AppliedGroups {
 			ns.AllowlistGroups = append(ns.AllowlistGroups, AllowlistGroupRef{ID: gid, Name: groupName(gid)})
+		}
+		if row.SniffingGroupsDropped != "" {
+			var ids []int64
+			if json.Unmarshal([]byte(row.SniffingGroupsDropped), &ids) == nil {
+				for _, gid := range ids {
+					ns.SniffingGroupsDropped = append(ns.SniffingGroupsDropped, AllowlistGroupRef{ID: gid, Name: groupName(gid)})
+				}
+			}
 		}
 		if row.OverLimit != "" {
 			var o domain.DestPublishError

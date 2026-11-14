@@ -1310,7 +1310,7 @@ func TestDestListRepo_DeleteUnusedChecksAndDeletesTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	using, err := repos.Lists.DeleteUnused(ctx, l.ID)
-	if err != nil || !reflect.DeepEqual(using, []int64{p.ID}) {
+	if err != nil || !reflect.DeepEqual(using.PolicyIDs, []int64{p.ID}) {
 		t.Fatalf("DeleteUnused of a used list = %v, %v", using, err)
 	}
 	if _, err := repos.Lists.GetByID(ctx, l.ID); err != nil {
@@ -1319,7 +1319,7 @@ func TestDestListRepo_DeleteUnusedChecksAndDeletesTogether(t *testing.T) {
 	if err := repos.Policies.Delete(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if using, err := repos.Lists.DeleteUnused(ctx, l.ID); err != nil || len(using) != 0 {
+	if using, err := repos.Lists.DeleteUnused(ctx, l.ID); err != nil || using.Any() {
 		t.Fatalf("DeleteUnused = %v, %v", using, err)
 	}
 	if _, err := repos.Lists.DeleteUnused(ctx, l.ID); !errors.Is(err, domain.ErrNotFound) {

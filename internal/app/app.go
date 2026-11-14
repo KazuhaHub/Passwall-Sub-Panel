@@ -40,6 +40,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
@@ -181,6 +182,8 @@ type App struct {
 	destLists   *destlist.Service
 	destCatalog *destcatalog.Service
 	destPolicy  *destpolicy.Service
+	// destGroups is the allowlist groups' admin side (TestBuildWiresTheAllowlistGroupAPI).
+	destGroups *destgroup.Service
 	// destAudit is the hit-ingest queue and its worker (the dest-audit-ingest
 	// loop). Without the worker nothing drains the queue and a node's hits are
 	// dropped with the batch: TestBuildStoresAReportedHitBatch.
@@ -729,9 +732,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Policies:    destRepos.Policies,
 		SourceRules: destRepos.SourceRules,
 		State:       destRepos.State,
-		Settings:    repos.Settings,
-		Locator:     geoSvc,
-		DataDir:     cfg.DataDir,
+		// The allowlist groups hold lists: a list one holds is in use, and an
+		// "on" group's list is not edited into one that is not ready.
+		Groups:   destRepos.GroupAllowlists,
+		Settings: repos.Settings,
+		Locator:  geoSvc,
+		DataDir:  cfg.DataDir,
 		ObserveRefresh: func(result string) {
 			metrics.DestListRefreshTotal.With(result).Inc()
 		},
@@ -775,6 +781,23 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("destination policy admin: %w", err)
+	}
+	// The allowlist groups' admin side. A save is measured against the limits by
+	// the policy admin, the members are re-derived by the user service after
+	// eligibility is dropped, and the rendered subscriptions (cached by the
+	// answer eligibility gave) are dropped with it. Each left out is silent,
+	// which TestBuildWiresTheAllowlistGroupAPI guards.
+	destGroups, err := destgroup.New(destgroup.Deps{
+		Allowlists: destRepos.GroupAllowlists, Groups: repos.Group, Lists: destRepos.Lists, Editor: destLists, Budget: destAdmin,
+		Eligibility: groupSvc, Resync: userSvc, Panels: repos.XUIPanel, Agents: repos.NodeAgent, Policies: destRepos.Agents,
+		Hits: destRepos.Hits, Settings: repos.Settings,
+		BaseHosts: func(ctx context.Context) ([]string, error) {
+			return defaultTemplateDNSHosts(ctx, repos.Template)
+		},
+		Changed: func(context.Context) { renderSvc.InvalidateAll() },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination allowlist groups: %w", err)
 	}
 	nativeSync.SetPolicies(destPolicy)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
@@ -854,7 +877,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
 		Dest: handler.DestWiring{
-			Lists: destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
+			AllowlistGroups: destGroups,
+			Lists:           destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
 			Policies: destRepos.Policies, Exemptions: destRepos.Exemptions, SourceRules: destRepos.SourceRules,
 			Users: repos.User, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel, Async: dispatcher,
 			Hits: destRepos.Hits,
@@ -908,6 +932,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists = destLists
 	a.destCatalog = destCatalog
 	a.destPolicy = destPolicy
+	a.destGroups = destGroups
 	a.destAudit = destAudit
 	a.nativeSync = nativeSync
 	// The observe-only risk signals. The worker is handed read-only views and
@@ -2561,4 +2586,26 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 		"user_id", u.ID,
 		"group", g.Slug)
 	return nil
+}
+
+// defaultTemplateDNSHosts are the hosts a new allowlist group's base allowance is
+// suggested from: the encrypted-DNS servers the default subscription templates
+// resolve through the proxy. They are read from the templates as they are now
+// (an admin's edits included), never from a built-in list.
+func defaultTemplateDNSHosts(ctx context.Context, repo ports.TemplateRepo) ([]string, error) {
+	var templates []domain.Template
+	for _, client := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+		t, err := repo.GetDefault(ctx, client)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		templates = append(templates, *t)
+	}
+	if len(templates) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return destgroup.ProxiedDNSHosts(templates...)
 }
