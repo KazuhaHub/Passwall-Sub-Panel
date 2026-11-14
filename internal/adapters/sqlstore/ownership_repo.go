@@ -38,7 +38,9 @@ func (l retiredTableLogger) LogMode(level logger.LogLevel) logger.Interface {
 }
 
 func (l retiredTableLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
-	if isMissingTableErr(err) {
+	// Only the retired table's absence: every dialect names the table in the
+	// message, and a missing column or a connection error must still be logged.
+	if isMissingTableErr(err) && strings.Contains(strings.ToLower(err.Error()), "user_xui_clients") {
 		err = nil
 	}
 	l.Interface.Trace(ctx, begin, fc, err)
