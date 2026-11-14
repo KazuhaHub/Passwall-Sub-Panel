@@ -466,7 +466,7 @@ export interface DestNodeStatus {
   /** Why a node set to on_demand runs as_is. `no_ip_rules` is not a fault: the policy has nothing to resolve for. */
   resolve_unavailable?: ResolveUnavailable | null
   /** Why the node was sent the policy without its report-only rules (enforced ones untouched); null when it got them all. */
-  report_only_not_deployed?: 'sniffing' | 'limit' | null
+  report_only_not_deployed?: 'sniffing' | 'limit' | 'resolve' | null
   state: DestNodeState
   fallback_reason: string
   over_limit: DestPublishError | null

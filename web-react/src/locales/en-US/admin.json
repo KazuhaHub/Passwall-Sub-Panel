@@ -950,6 +950,7 @@
       "directive_unknown_client": "Policy references a missing client",
       "report_missing_object": "Node report is incomplete",
       "destination_policy_report_only_not_deployed": "Report-only rules not deployed",
+      "destination_policy_resolve_not_deployed": "On-demand resolution not applied",
       "task_identity_conflict": "Task identity conflict",
       "task_replay_fenced": "Task replay was prevented",
       "legacy_task_result_quarantined": "Legacy task result isolated"
@@ -966,6 +967,7 @@
       "directive_unknown_client": "The policy references a client missing from the client list.",
       "report_missing_object": "A required object was absent from a full node report.",
       "destination_policy_report_only_not_deployed": "This node did not receive all the report-only rules (the rule budget is exceeded, or they were restricted away from inbounds whose sniffing cannot support them); blocking is unaffected.",
+      "destination_policy_resolve_not_deployed": "This node stays as-is (hostnames are not resolved): an inbound whose sniffing is routeOnly:true or unreadable would substitute the name that is resolved. Everything else in the policy runs as usual.",
       "task_identity_conflict": "One task ID was used with different operation inputs.",
       "task_replay_fenced": "The node could not prove a safe fresh task start.",
       "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity."
@@ -4644,6 +4646,7 @@
       "none": "This node has no policy to enforce",
       "report_not_deployed_sniffing": "Some inbounds' sniffing cannot support report-only rules, so they are not run on those inbounds",
       "report_not_deployed_limit": "Over the rule budget: the report-only rules were not sent",
+      "report_not_deployed_resolve": "Some inbounds have routeOnly sniffing that would substitute the resolved name, so report-only IP rules are not run on those inbounds",
       "paused": "Access control is paused; it resumes as it was.",
       "not_enrolled": "This native node has not enrolled: no agent has reported."
     },

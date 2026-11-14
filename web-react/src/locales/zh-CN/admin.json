@@ -948,6 +948,7 @@
       "directive_unknown_client": "策略引用的客户端不存在",
       "report_missing_object": "节点报告不完整",
       "destination_policy_report_only_not_deployed": "仅报告规则未下发",
+      "destination_policy_resolve_not_deployed": "按需解析未生效",
       "task_identity_conflict": "任务身份冲突",
       "task_replay_fenced": "任务重放已阻止",
       "legacy_task_result_quarantined": "旧任务结果已隔离"
@@ -964,6 +965,7 @@
       "directive_unknown_client": "策略引用的客户端不在列表中。",
       "report_missing_object": "完整节点报告缺少应有的对象。",
       "destination_policy_report_only_not_deployed": "这台节点没有收到全部仅报告规则（超出规则预算；或在嗅探不足的入站上被限定/去掉）；拦截规则不受影响。",
+      "destination_policy_resolve_not_deployed": "这台节点保持按原样（不解析主机名）：某个入站的嗅探开了 routeOnly:true 或无法解析，会替换被解析的名字；其余策略照常执行。",
       "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
       "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
       "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。"
@@ -4625,6 +4627,7 @@
       "none": "这台节点没有要执行的策略",
       "report_not_deployed_sniffing": "部分入站的嗅探无法支持仅报告规则，这些入站上未执行仅报告规则",
       "report_not_deployed_limit": "超出规则预算，仅报告规则未下发",
+      "report_not_deployed_resolve": "部分入站的 routeOnly 会替换被解析的名字，这些入站上的仅报告 IP 规则未执行",
       "paused": "访问控制已暂停，恢复后照原样执行。",
       "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。"
     },
