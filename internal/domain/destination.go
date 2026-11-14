@@ -310,7 +310,12 @@ type DestAgentPolicy struct {
 	// PrecheckListeners is the JSON list of listeners whose sniffing is
 	// insufficient, "" when none.
 	PrecheckListeners string
-	AppliedSHA256     string
+	// ReportOnlyShed says why report-only rules were left out of what this node
+	// was sent: "sniffing" or "limit", "" when none was (the status page's
+	// report_only_not_deployed). Set by each compile, so it follows the node's
+	// current inbounds and the current budget instead of staying as an issue row.
+	ReportOnlyShed string
+	AppliedSHA256  string
 	// AppliedBody is the canonical policy that last applied (the LKG).
 	AppliedBody      []byte
 	AppliedAt        *time.Time
@@ -361,6 +366,7 @@ type DestAgentPolicyPatch struct {
 	RejectedGeneration *int64
 	OverLimit          *string
 	PrecheckListeners  *string
+	ReportOnlyShed     *string
 	AppliedSHA256      *string
 	AppliedBody        *[]byte
 	AppliedAt          *time.Time

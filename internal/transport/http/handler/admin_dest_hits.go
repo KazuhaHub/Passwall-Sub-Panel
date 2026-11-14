@@ -116,8 +116,10 @@ func badHits(c *gin.Context, code, field, msg string) {
 // (block|observe), since and until (UTC ms, at most 31 days apart; default the
 // policy window up to now), include_trial, q (destination keyword),
 // group_by (none|site|user|policy), page, page_size. The response adds
-// summary {block, deny, observe, users} (the whole time/user/panel selection,
-// whatever the action and source filters), sources (every source with rows in
+// summary {block, deny, observe, users} (the time/user/panel selection, narrowed
+// to the exact source when one is given, whatever the action and source_kind
+// filters: the convert dialog reads the accounts a policy hit from summary.users
+// of a source-scoped request), sources (every source with rows in
 // the range, name null when it no longer exists) and dropped_in_range (rows
 // that were reported and are not here). A row never carries a client address:
 // there is none.

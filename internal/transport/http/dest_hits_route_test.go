@@ -223,3 +223,33 @@ func TestDestUserCarriesRecentHits(t *testing.T) {
 		t.Fatalf("second = %v", items[1])
 	}
 }
+
+// summary honours the exact source and still ignores action and source_kind:
+// the convert dialog reads the accounts one policy hit from summary.users.
+func TestDestHitsSummaryHonoursTheSourceFilter(t *testing.T) {
+	f := newDestFixture(t, true)
+	a := f.policyID("alpha", "block", "report")
+	b := f.policyID("bravo", "block", "on")
+	pa, pb := "p"+itoa(a), "p"+itoa(b)
+	f.seedHits(
+		hitOf(time.Hour, 1, 11, pa, "observe", "x.example", 5),
+		hitOf(time.Hour, 1, 12, pa, "observe", "y.example", 3),
+		hitOf(time.Hour, 1, 13, pb, "block", "z.example", 40),
+	)
+	sum := func(q string) map[string]any {
+		return f.expect("GET", "/hits?"+q, "", 200, "")["summary"].(map[string]any)
+	}
+	if s := sum(""); num(s["users"]) != 3 || num(s["observe"]) != 8 || num(s["block"]) != 40 {
+		t.Fatalf("whole selection = %v", s)
+	}
+	if s := sum("source=" + pa + "&group_by=site"); num(s["users"]) != 2 || num(s["observe"]) != 8 || num(s["block"]) != 0 {
+		t.Fatalf("summary for %s = %v, want its 2 accounts and 8 would-blocks", pa, s)
+	}
+	if s := sum("source=" + pb); num(s["users"]) != 1 || num(s["block"]) != 40 {
+		t.Fatalf("summary for %s = %v", pb, s)
+	}
+	// Action and source_kind still do not narrow it.
+	if s := sum("action=block&source_kind=policy"); num(s["users"]) != 3 || num(s["observe"]) != 8 {
+		t.Fatalf("summary with action/source_kind = %v, want the whole selection", s)
+	}
+}

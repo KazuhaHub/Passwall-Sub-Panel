@@ -115,7 +115,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	var cb *cachedBase
 	for attempt := 0; ; attempt++ {
 		if st.Paused || st.PublishedGeneration == 0 {
-			return s.noPolicy(ctx, in, meta, now)
+			return s.noPolicy(ctx, in, meta, "", now)
 		}
 		if cb, err = s.baseFor(ctx, st.PublishedGeneration); errors.Is(err, domain.ErrNotFound) && attempt == 0 {
 			// The generation this compile read was superseded and its snapshot
@@ -132,7 +132,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return Result{}, err
 	}
 	if cb.doc.empty() {
-		return s.noPolicy(ctx, in, meta, now)
+		return s.noPolicy(ctx, in, meta, "", now)
 	}
 
 	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil}
@@ -203,8 +203,10 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 // noPolicy is the nil answer for a node that is paused or has nothing in
 // force. It clears a fallback (there is nothing left to fall back from) and
 // records that nothing is minted, but it never touches the last-known-good:
-// pausing must not rewrite the record of what the node last applied.
-func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, now time.Time) (Result, error) {
+// pausing must not rewrite the record of what the node last applied. shed is
+// why report-only rules were left out when that is what emptied the policy
+// ("" for a pause or for nothing in force).
+func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed string, now time.Time) (Result, error) {
 	var patch domain.DestAgentPolicyPatch
 	empty := ""
 	if meta.DesiredSHA256 != "" || meta.MintedSHA256 != "" {
@@ -213,6 +215,11 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	if meta.CollectEffective != "" {
 		// Nothing is minted, so nothing is being recorded.
 		patch.CollectEffective = &empty
+	}
+	if meta.ReportOnlyShed != shed {
+		// Nothing is sent; what was left out of it is still worth showing when
+		// leaving it out is why nothing is sent.
+		patch.ReportOnlyShed = &shed
 	}
 	if meta.FallbackReason != domain.DestFallbackNone || meta.OverLimit != "" || meta.PrecheckListeners != "" {
 		none := domain.DestFallbackNone
@@ -241,13 +248,17 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// are what overruns the budget) are left out, and the enforced rules go on
 	// exactly as they would without them.
 	var shedNote []domain.NodeAgentIssue
+	// desiredShed is why the DESIRED policy lost its report-only rules; what the
+	// node is actually sent may be a fallback, so the status field is computed
+	// from the output below, never from this.
+	desiredShed := ""
 	if shed, why, ok := shedObserve(desired, nodes, engine); ok {
-		desired = shed
+		desired, desiredShed = shed, why
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)}}
 	}
 	desiredDigest := protocol.PolicyDigest(desired)
 	if desired == nil {
-		res, err := s.noPolicy(ctx, in, meta, now)
+		res, err := s.noPolicy(ctx, in, meta, desiredShed, now)
 		res.Issues = append(res.Issues, shedNote...)
 		return res, &compiledEntry{res: res}, err
 	}
@@ -342,7 +353,11 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			output = desired
 		}
 	}
+	fallbackShed := ""
 	if reason != domain.DestFallbackNone {
+		// The desired policy is not what goes out, so its shedding note is not
+		// true of this node; only what the fallback itself sheds is.
+		shedNote = nil
 		var ferr error
 		if s.bodyReadBackedOff(bodyKey(in.AgentID, meta.AppliedSHA256), now) {
 			output, unreadable = nil, true
@@ -369,12 +384,14 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 				// Report-only rules in the fallback that are all that needs the
 				// sniffing are shed, not the whole fallback.
 				if shed, why, ok := shedObserve(output, nodes, engine); ok && why == shedSniffing {
-					output = shed
+					output, fallbackShed = shed, why
 					shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)})
 					ff = nil
 				}
 			}
-			if ff := sniffingFindings(output, nodes); len(ff) > 0 {
+			if output == nil {
+				// Shedding emptied the fallback: nothing left to check.
+			} else if ff := sniffingFindings(output, nodes); len(ff) > 0 {
 				output = nil
 				res0 := s.issuesFor(domain.DestFallbackSniffing, meta, desiredDigest, nil, ff)
 				fallbackIssues = append(fallbackIssues, res0...)
@@ -411,6 +428,9 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			lkgDropped = true
 		}
 		output, outDigest = nil, ""
+		// Nothing is sent because of the refusal, not because report-only rules
+		// were left out of it.
+		fallbackShed, desiredShed, shedNote = "", "", nil
 		if result != ResultInvalid {
 			result = ResultFallbackNil
 		}
@@ -426,6 +446,18 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	}
 	if outCollect != meta.CollectEffective {
 		patch.CollectEffective = &outCollect
+	}
+	// Why report-only rules were left out of what this node is sent, as the
+	// status page shows it (cleared when nothing was).
+	sentShed := ""
+	switch {
+	case reason == domain.DestFallbackNone:
+		sentShed = desiredShed
+	default:
+		sentShed = fallbackShed
+	}
+	if sentShed != meta.ReportOnlyShed {
+		patch.ReportOnlyShed = &sentShed
 	}
 	if desiredDigest != meta.DesiredSHA256 {
 		patch.DesiredSHA256 = &desiredDigest
@@ -874,6 +906,9 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 	}
 	if p.PrecheckListeners != nil {
 		next.PrecheckListeners = *p.PrecheckListeners
+	}
+	if p.ReportOnlyShed != nil {
+		next.ReportOnlyShed = *p.ReportOnlyShed
 	}
 	if p.AppliedSHA256 != nil {
 		next.AppliedSHA256 = *p.AppliedSHA256

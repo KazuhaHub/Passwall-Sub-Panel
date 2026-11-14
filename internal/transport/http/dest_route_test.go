@@ -582,6 +582,9 @@ func TestDestExceptionsTestStatusAndControl(t *testing.T) {
 	if native == nil || native["state"] != "unsupported_version" {
 		t.Fatalf("native node status = %v (no agent has reported)", native)
 	}
+	if v, present := native["report_only_not_deployed"]; !present || v != nil {
+		t.Fatalf("report_only_not_deployed = %v (present %v): the field is always there, null when nothing was left out", v, present)
+	}
 
 	f.expect("PUT", "/pause", `{}`, 400, "dest_bad_request")
 	if p := f.expect("PUT", "/pause", `{"paused":true}`, 200, ""); p["paused"] != true {
@@ -689,3 +692,85 @@ func TestDestAPIAuditRowsAreAdminOnly(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// counts_as_risk is written and read back on every policy route; an allow
+// policy cannot carry it; a PUT that omits it keeps it.
+func TestDestPolicyCountsAsRiskRoundTrip(t *testing.T) {
+	f := newDestFixture(t, true)
+	policy := func(out map[string]any) map[string]any { return out["policy"].(map[string]any) }
+
+	made := policy(f.expect("POST", "/policies", `{"name":"mail","action":"block","state":"on","counts_as_risk":true,"inline":{"ports":"25"}}`, 201, ""))
+	if made["counts_as_risk"] != true {
+		t.Fatalf("POST = %v", made)
+	}
+	plain := policy(f.expect("POST", "/policies", `{"name":"plain","action":"block","state":"on","inline":{"ports":"26"}}`, 201, ""))
+	if plain["counts_as_risk"] != false {
+		t.Fatalf("omitted on POST = %v, want false", plain["counts_as_risk"])
+	}
+	flags := map[string]any{}
+	for _, p := range f.expect("GET", "/policies", "", 200, "")["block"].([]any) {
+		flags[p.(map[string]any)["name"].(string)] = p.(map[string]any)["counts_as_risk"]
+	}
+	if flags["mail"] != true || flags["plain"] != false {
+		t.Fatalf("GET = %v", flags)
+	}
+
+	id := itoa(num(made["id"]))
+	at := num(made["updated_at"])
+	kept := policy(f.expect("PUT", "/policies/"+id, `{"name":"mail","action":"block","state":"report","inline":{"ports":"25"},"updated_at":`+itoa(at)+`}`, 200, ""))
+	if kept["counts_as_risk"] != true || kept["state"] != "report" {
+		t.Fatalf("a PUT that omits the flag = %v: it keeps the stored value (a report-only block may store it)", kept)
+	}
+	cleared := policy(f.expect("PUT", "/policies/"+id, `{"name":"mail","action":"block","state":"on","counts_as_risk":false,"inline":{"ports":"25"},"updated_at":`+itoa(num(kept["updated_at"]))+`}`, 200, ""))
+	if cleared["counts_as_risk"] != false {
+		t.Fatalf("explicit false = %v", cleared)
+	}
+
+	// An allow policy cannot count.
+	bad := f.expect("POST", "/policies", `{"name":"allow-me","action":"allow","state":"on","counts_as_risk":true,"inline":{"ports":"27"}}`, 400, "dest_policy_invalid")
+	if bad["field"] != "counts_as_risk" {
+		t.Fatalf("400 body = %v, want field counts_as_risk", bad)
+	}
+	// A block that becomes an allow in the same request drops the flag silently;
+	// an allow that stays an allow with it is refused.
+	cur := f.expect("GET", "/policies", "", 200, "")["block"].([]any)
+	var curAt int64
+	for _, p := range cur {
+		if m := p.(map[string]any); m["name"] == "mail" {
+			curAt = num(m["updated_at"])
+		}
+	}
+	toAllow := policy(f.expect("PUT", "/policies/"+id, `{"name":"mail","action":"allow","state":"on","counts_as_risk":true,"inline":{"ports":"25"},"updated_at":`+itoa(curAt)+`}`, 200, ""))
+	if toAllow["action"] != "allow" || toAllow["counts_as_risk"] != false {
+		t.Fatalf("block -> allow echoing true = %v", toAllow)
+	}
+	f.expect("PUT", "/policies/"+id, `{"name":"mail","action":"allow","state":"on","counts_as_risk":true,"inline":{"ports":"25"},"updated_at":`+itoa(num(toAllow["updated_at"]))+`}`, 400, "dest_policy_invalid")
+
+	// The preview judges it like the save and echoes it back.
+	pv := f.expect("POST", "/policies/preview", `{"name":"pv","action":"block","state":"report","counts_as_risk":true,"inline":{"ports":"28"}}`, 200, "")
+	if policy(pv)["counts_as_risk"] != true || pv["budget"] == nil {
+		t.Fatalf("preview = %v", pv)
+	}
+	f.expect("POST", "/policies/preview", `{"name":"pv","action":"allow","state":"on","counts_as_risk":true,"inline":{"ports":"28"}}`, 400, "dest_policy_invalid")
+	if all, _ := f.dest.Policies.List(context.Background()); len(all) != 2 {
+		t.Fatalf("%d policies stored, want 2: a preview or a refusal wrote one", len(all))
+	}
+}
+
+// The catalog offers the default, and a template added from it carries it.
+func TestDestCatalogTemplateCarriesCountsAsRisk(t *testing.T) {
+	f := newDestFixture(t, true)
+	cat := f.expect("GET", "/catalog", "", 200, "")
+	got := map[string]any{}
+	for _, tpl := range cat["templates"].([]any) {
+		m := tpl.(map[string]any)
+		got[m["key"].(string)] = m["counts_as_risk"]
+	}
+	if got["smtp"] != true || got["bittorrent"] != true || got["porn"] == true || got["private"] == true {
+		t.Fatalf("template defaults = %v", got)
+	}
+	made := f.expect("POST", "/catalog/smtp/instantiate", `{"state":"report"}`, 201, "")
+	if made["policy"].(map[string]any)["counts_as_risk"] != true {
+		t.Fatalf("instantiate = %v", made)
+	}
+}

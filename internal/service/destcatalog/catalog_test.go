@@ -329,3 +329,26 @@ func TestInstantiate_HoldsTheGeositeLockAcrossDerivationAndStorage(t *testing.T)
 		t.Fatalf("the lock was not released after a failure: %v", events)
 	}
 }
+
+// A hit on BitTorrent or an outgoing mail port is evidence about the account, so
+// those two templates create a policy that counts as a risk signal; a category
+// list or the private-address match (which a node blocks anyway) does not.
+func TestInstantiate_OnlyBitTorrentAndMailPortsCountAsRiskByDefault(t *testing.T) {
+	svc, _, store := newService(t)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tpl := range c.Templates {
+		want := tpl.Key == "bittorrent" || tpl.Key == "smtp"
+		if tpl.CountsAsRisk != want {
+			t.Errorf("template %s counts_as_risk = %v, want %v", tpl.Key, tpl.CountsAsRisk, want)
+		}
+		if _, err := svc.Instantiate(context.Background(), tpl.Key, "en-US", domain.DestStateReport); err != nil {
+			t.Fatal(err)
+		}
+		if store.pol.CountsAsRisk != want {
+			t.Errorf("the policy made from %s has counts_as_risk = %v, want %v", tpl.Key, store.pol.CountsAsRisk, want)
+		}
+	}
+}

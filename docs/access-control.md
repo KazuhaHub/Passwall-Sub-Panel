@@ -129,7 +129,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 | 表 | 作用 |
 |---|---|
 | `dest_lists` | 列表。`entries`（BLOB/BYTEA/LONGBLOB）是规范条目，每行一条、排序去重；`source_text` 是管理员粘贴的原文；`content_sha256` 是条目摘要（摘要不变不推进 generation） |
-| `dest_policies` | 策略：`action`、`state`（`off`/`report`/`on`）、`list_ids`、`inline`（内置匹配 JSON）、`scope`、`group_ids`、`panel_ids`、`priority`、`template_key` |
+| `dest_policies` | 策略：`action`、`state`（`off`/`report`/`on`）、`list_ids`、`inline`（内置匹配 JSON）、`scope`、`group_ids`、`panel_ids`、`priority`、`template_key`、`counts_as_risk`（默认 false） |
 | `dest_exemptions` | 豁免：`user_id` 主键、`reason`、`created_by`、`expires_at` |
 | `dest_source_rules` | 每入站一行：`node_id` 主键、`countries`、`cidrs`、`state`（`off`/`report`/`on`） |
 | `dest_hits` | 命中的小时聚合。主键 `(hour_ms, panel_id, user_id, source, action, dest, port)`，`count`、`first_ms`、`last_ms`（毫秒，bigint：MySQL 的 datetime 没有毫秒，SQLite 把时间存成文本，MIN/MAX 会成字符串比较）。`source` 是 `p<策略号>`、`s<入站号>` 或 `g<分组号>`（`x<k>` 后缀已去掉）；`action` 是 `block` 或 `observe`（本应拦截）。白名单试运行行 `user_id = 0`、`port = 0`。索引 `(user_id, hour_ms)`、`(source, hour_ms)`、`(panel_id, hour_ms)`。**不存来源 IP** |
@@ -162,17 +162,17 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | GET | `/geosite/status` `/geosite/categories` | 规则数据版本面板；无数据时分类 503 `dest_geosite_unavailable` |
 | POST | `/geosite/update[?dry_run=1]` `/geosite/rollback[?dry_run=1]` | dry-run 返回每分类差异与判定；被拒 409 `dest_geosite_update_rejected`；忙 409 `dest_geosite_busy` |
 | GET / POST | `/catalog`、`/catalog/:key/instantiate` | 目录；实例化 `{state:"off"|"on", locale?}`；不可用的组 400 `dest_template_unavailable`；已添加 409 `dest_template_exists`，名称与现有策略重复 409 `dest_name_taken` |
-| GET / POST / PUT / DELETE | `/policies[/:id]`、`/policies/preview`、`/policies/order` | 额度形状 `budget:{rules,domains,regexps,cidrs,source_cidrs,subjects,bytes}`，各为 `{used,limit}`。`order` 的 `ids` 必须恰好等于该动作当前的全部策略，否则 409 `dest_policy_order_stale`。预览**不写库、不写审计** |
+| GET / POST / PUT / DELETE | `/policies[/:id]`、`/policies/preview`、`/policies/order` | 额度形状 `budget:{rules,domains,regexps,cidrs,source_cidrs,subjects,bytes}`，各为 `{used,limit}`。`order` 的 `ids` 必须恰好等于该动作当前的全部策略，否则 409 `dest_policy_order_stale`。预览**不写库、不写审计**，并返回 `{budget, policy}`（`policy` 是按保存同样的规则校验、规范化后的假设结果）。**`counts_as_risk`**（策略 DTO 与 POST / PUT / 预览请求都带，布尔）：这条策略**被执行的拦截**计入风险信号 `dest_block`。只有 `block` 策略能设为 true，新建 `allow` 策略、或保持为 `allow` 的策略带 `true` 是 400 `dest_policy_invalid`，`field:"counts_as_risk"`；`block` 在同一请求里改成 `allow`（客户端把整个 DTO 原样传回）则静默清为 false，不报错；仅报告（`report`）的 `block` 策略可以存着它，但仅报告的行（`observe`）永远不计，它在转为 `on` 之后才开始计数。请求里省略它：POST 为 false，PUT 保持原值（所以不认识这个字段的老客户端不会无意清掉它）；只改 `counts_as_risk` 的 PUT 不推进 generation（编译器不读它，不会触发重新发布）。目录模板的默认值：`bittorrent` 与 `smtp` 为 true（命中就是这个账号在做这件事），其余（分类列表、`private` 内网匹配，节点本来就会拦这类地址）为 false；模板对象带 `counts_as_risk`，实例化出的策略取该默认值，之后可改 |
 | GET / POST / PUT / DELETE | `/exemptions[/:user_id]` | 重复添加 409 `dest_exemption_exists`；响应带 `created_by_upn`、`expired` |
 | GET | `/source-rules`、`/source-rules/:node_id` | 全部 / 单个（无规则返回 `state:"off"`）；带 `geoip_available` |
 | PUT | `/source-rules/:node_id` | `{countries, cidrs, state, updated_at?}`；非原生节点 409 `dest_source_rule_not_native`；冲突 409 `dest_source_rule_stale` |
 | POST | `/exceptions` | 全局例外：`{target, match:"site"|"host", scope:"global"}`；第一次使用时在同一事务里建「放行例外」列表和排在放行第一位的 allow 策略 |
-| POST | `/test` | `{target, port?, network?, user_id?, panel_id?, inbound_node_id?, source_ip?}`。**写审计**（谁替谁测试过什么）。永不做 DNS |
+| POST | `/test` | `{target, port?, network?, user_id?, panel_id?, inbound_node_id?, source_ip?}`。**写审计**（谁替谁测试过什么）。永不做 DNS。`steps[].kind` 取 `source`、`allow`、`block`、`exempt`、`builtin`；每个 step 另带 `report_only: bool`：**规则处于 `report`（仅报告）状态时为 true，策略规则与来源规则都一样**，此时 `kind` 仍是规则本身的种类（`block` 或 `source`），并带 `policy_id` / `node_id` 与 `name`。命中 `report_only` 的 step 不拦截：它**会**终止求值，`verdict` 为 `observe`，`terminating_step` 是该规则的 id（界面应显示「仅记录，本应拦截」，不要显示「被拦截」）。取舍：用独立的布尔而不是新的 `kind`，是因为界面既要知道这是哪一种规则，也要知道它只是报告|
 | GET | `/users/:id` | 账号的分组与豁免，加 `hits_available`（该账号有 client 的节点中至少一台在记录）与 `recent_hits:{days, items:[{source, source_name, action, count, top_dests(≤3), panels, last_at}]}`；用量部分仍为 null |
-| GET | `/hits` | 命中记录，分页。筛选 `user_id`、`panel_id`、`source`、`source_kind`（`policy`/`source`/`group`）、`action`（`block`/`observe`）、`since`、`until`（UTC 毫秒，间隔最长 31 天，超出 400 `dest_hits_range`）、`include_trial`、`q`（目的地关键词）、`group_by`（`none`/`site`/`user`/`policy`）、`page`、`page_size`。响应另带 `summary:{block, deny, observe, users}`（整个时间/账号/节点选择，不受 action、source 筛选影响）、`sources:[{source, name|null}]`（`null` = 已删除）与 `dropped_in_range` |
+| GET | `/hits` | 命中记录，分页。筛选 `user_id`、`panel_id`、`source`、`source_kind`（`policy`/`source`/`group`）、`action`（`block`/`observe`）、`since`、`until`（UTC 毫秒，间隔最长 31 天，超出 400 `dest_hits_range`）、`include_trial`、`q`（目的地关键词）、`group_by`（`none`/`site`/`user`/`policy`）、`page`、`page_size`。响应另带 `summary:{block, deny, observe, users}`（时间/账号/节点选择，**带 `source` 时再收窄到这个来源**，不受 `action`、`source_kind` 筛选影响。取舍：计划 P7 只把 `action` 与 `source_kind` 列为不影响摘要的筛选，而「转为拦截」对话框（S4）要的是「这条策略涉及多少账号」，读的就是 `source=p<id>` 请求的 `summary.users`，所以按来源收窄比另设 `summary_for_source` 更贴合计划，前端也不用多发一个请求；不带 `source` 时仍是整个选择，指标卡不随 `action` 变化）、`sources:[{source, name|null}]`（`null` = 已删除）与 `dropped_in_range` |
 | GET | `/policies` | 策略带 `hits_recent`（窗口内 `block` 命中数）、`last_hit_at`，**状态为 `report` 的另带 `would_block_recent`**（窗口内 `observe` 命中数，即本应拦截的次数）；`hit_window_days = min(7, 命中保留天数)`。没有任何节点在记录时 `hits_recent` / `would_block_recent` 为 null；放行策略不记录任何东西，三个字段恒为 null。`last_hit_at` 只在保留窗口内、只为列出的非放行策略读取（走 `(source, hour_ms)` 索引）。风险信号 `dest_block` 判断「节点是否在记录」用的是不随每次发布抖动的 `CollectingForRisk`（已应用过带记录级别的策略、且面板仍要求记录即算），`/status.collecting` 仍是「此刻确实在记录」的诚实答案（「0 次」对一条没人监视的策略是没有依据的说法）。仅报告的策略在 `block` 数组里，`observe` 数组恒为空 |
 | GET / PUT | `/servers`、`/servers/:id`（已有） | 原生服务器的 DTO 与更新多了 `audit_collect`（省略保持原值；对非原生服务器 400；非法值 400） |
-| GET | `/status` | 全局 `{generation, published_generation, last_write_at, next_publish_at, apply_eta_ms, paused, publish_error, geosite_release, geoip_unavailable, totals, nodes:[…]}`；每节点含 `state`、`fallback_reason`、`over_limit`、`sniffing_insufficient`、`rules_data_version`、`geoip_unavailable`、`collect`（面板档位）、`collect_effective`（下发给节点的档位）、`collecting`（推导的「在记录」，§4.0）、`hits_24h`（近 24 小时命中数，节点无记录能力时为 null） |
+| GET | `/status` | 全局 `{generation, published_generation, last_write_at, next_publish_at, apply_eta_ms, paused, publish_error, geosite_release, geoip_unavailable, totals, nodes:[…]}`；每节点含 `state`、`fallback_reason`、`over_limit`、`sniffing_insufficient`、`rules_data_version`、`geoip_unavailable`、`collect`（面板档位）、`collect_effective`（下发给节点的档位）、`collecting`（推导的「在记录」，§4.0）、`hits_24h`（近 24 小时命中数，节点无记录能力时为 null）、`report_only_not_deployed`（`"sniffing"`、`"limit"` 或 null：这个节点收到的策略里被去掉了仅报告规则的原因，null 表示都已下发；开启的规则不受影响；每次编译重新写入，所以嗅探修好、额度够了就变回 null，与节点 issue `destination_policy_report_only_not_deployed` 同源，但 issue 行不会自己消失，这个字段会） |
 | POST / PUT | `/publish`、`/pause` | 立即发布（被校验拒绝 409 `dest_policy_over_limit` 带 `publish_error`）；紧急开关 `{paused}` |
 | POST | `/agents/:agent_id/retry` | 清除 `rejected`，下一轮重试新版 |
 
@@ -269,3 +269,10 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | `dest_rules_update_mode` | `manual` | `manual` / `auto` | `auto`：检查到新 geosite 版本就下载、校验并应用；`manual`：只提示，管理员点更新。两种模式下，只有**正在使用的分类**内容变化时才让 generation +1。让已启用的策略超额或出现过宽条目的更新会失败并保留旧数据 |
 
 后台循环 `dest-list-refresh` 见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3。
+
+## 12. 相对规划书的偏离
+
+两处与 `node-audit-plan.md` 不同，都是有意的：
+
+- **`counts_as_risk` 在 PUT 里省略时保持原值**（规划书 R18 说 PUT 带全字段）。原因：这个字段是后来加进 DTO 的，不认识它的客户端（旧前端、脚本）整份回写策略时，若按「省略 = false」就会悄悄关掉 BT、发信模板的风险计数，而且没有任何提示。显式写 `true` / `false` 照常生效；POST 省略为 false。
+- **`GET /dest/hits` 的 `summary` 带 `source` 时收窄到该来源**（S12 的指标卡原本按整个选择计）。原因：「转为拦截」对话框（S4）要的「涉及账号」就是 `source=p<id>` 请求的 `summary.users`；另设一个 `summary_for_source` 要多一块响应和一套前端分支。不带 `source` 时仍是整个选择，`action`、`source_kind` 仍不影响它。

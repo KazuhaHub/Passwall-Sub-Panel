@@ -70,6 +70,12 @@ type Template struct {
 	Ports     string   `json:"ports,omitempty"`
 	Network   string   `json:"network,omitempty"`
 	Private   bool     `json:"private,omitempty"`
+	// CountsAsRisk is the default of the policy the template creates: its
+	// enforced blocks feed the dest_block risk signal. True only where a hit is
+	// evidence of misuse by the account (BitTorrent, outbound mail ports); false
+	// where it is not (category lists, the private-address match, which a node
+	// blocks anyway).
+	CountsAsRisk bool `json:"counts_as_risk,omitempty"`
 }
 
 // Unavailable is a group the admin may look for and cannot have, with why.
@@ -309,7 +315,7 @@ func (s *Service) Instantiate(ctx context.Context, key, locale string, state dom
 	}
 	p := &domain.DestPolicy{
 		Name: t.Name.pick(locale), Description: t.Description.pick(locale), Action: domain.DestActionBlock,
-		State: state, Scope: domain.DestScopeAll, TemplateKey: t.Key,
+		State: state, Scope: domain.DestScopeAll, TemplateKey: t.Key, CountsAsRisk: t.CountsAsRisk,
 		Inline: domain.DestPolicyInline{Ports: t.Ports, Network: t.Network, Protocols: slices.Clone(t.Protocols), Private: t.Private},
 	}
 	return s.store.InstantiateTemplate(ctx, specs, p)

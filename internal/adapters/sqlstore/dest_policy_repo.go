@@ -277,7 +277,7 @@ func (r *DestPolicyRepo) Update(ctx context.Context, p *domain.DestPolicy, ifUpd
 			Updates(&row).Error; err != nil {
 			return mapPolicyWriteError(err)
 		}
-		// The name and description are not compiled: an edit of only those
+		// The name, the description and counts_as_risk are not compiled: an edit of only those
 		// must not republish (and so must not restart a core).
 		if compiledPolicyEqual(cur, row) {
 			return nil
@@ -294,10 +294,10 @@ func (r *DestPolicyRepo) Update(ctx context.Context, p *domain.DestPolicy, ifUpd
 }
 
 // compiledPolicyEqual reports whether two rows differ in nothing the compiler
-// reads. Priority is compared too: it orders the rules.
+// reads. Priority is compared too: it orders the rules. CountsAsRisk is not:
+// only the risk signal reads it, so an edit of it alone is not a new policy.
 func compiledPolicyEqual(a, b destPolicyRow) bool {
 	return a.Action == b.Action && a.State == b.State && a.Scope == b.Scope && a.Priority == b.Priority &&
-		a.CountsAsRisk == b.CountsAsRisk &&
 		slices.Equal([]int64(a.ListIDs), []int64(b.ListIDs)) &&
 		slices.Equal([]int64(a.GroupIDs), []int64(b.GroupIDs)) &&
 		slices.Equal([]int64(a.PanelIDs), []int64(b.PanelIDs)) &&

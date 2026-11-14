@@ -283,11 +283,25 @@ func (r *DestHitRepo) List(ctx context.Context, f domain.DestHitFilter) ([]domai
 	return out, total, nil
 }
 
-// Summary counts a selection by what happened, ignoring the filter's action and
-// source (the cards above a listing count the whole selection, as the risk
-// center's metric cards count the whole queue). Allowlist trial rows are
-// separate from both counts: a group's observe row is a would-deny of a whole
-// group, not an account's would-block.
+// destHitSummaryScope is the selection a summary counts: time, account, node
+// and the exact source, but not action or source kind.
+func destHitSummaryScope(q *gorm.DB, f domain.DestHitFilter) *gorm.DB {
+	q = destHitScope(q, f, false)
+	if f.Source != "" {
+		q = q.Where("source = ?", f.Source)
+	}
+	return q
+}
+
+// Summary counts a selection by what happened. It ignores the filter's action
+// and source kind (the cards above a listing count the whole selection, as the
+// risk center's metric cards count the whole queue) but HONOURS its exact
+// source: P7 lists only action and source_kind among what it ignores, and the
+// convert-to-block dialog (S4) reads "accounts involved" from summary.users of a
+// request made with source=p<id>, so a source-scoped request must give a
+// source-scoped summary. Allowlist trial rows are separate from both counts: a
+// group's observe row is a would-deny of a whole group, not an account's
+// would-block.
 func (r *DestHitRepo) Summary(ctx context.Context, f domain.DestHitFilter) (domain.DestHitSummary, error) {
 	type agg struct {
 		Block   *int64
@@ -295,7 +309,7 @@ func (r *DestHitRepo) Summary(ctx context.Context, f domain.DestHitFilter) (doma
 		Observe *int64
 	}
 	var a agg
-	q := destHitScope(r.db.WithContext(ctx).Model(&destHitRow{}), f, false)
+	q := destHitSummaryScope(r.db.WithContext(ctx).Model(&destHitRow{}), f)
 	if err := q.Select(
 		"SUM(CASE WHEN action = 'block' AND source NOT LIKE 'g%' THEN count ELSE 0 END) AS block, " +
 			"SUM(CASE WHEN action = 'block' AND source LIKE 'g%' THEN count ELSE 0 END) AS deny, " +
@@ -303,7 +317,7 @@ func (r *DestHitRepo) Summary(ctx context.Context, f domain.DestHitFilter) (doma
 		return domain.DestHitSummary{}, fmt.Errorf("summarise dest hits: %w", err)
 	}
 	var users int64
-	if err := destHitScope(r.db.WithContext(ctx).Model(&destHitRow{}), f, false).
+	if err := destHitSummaryScope(r.db.WithContext(ctx).Model(&destHitRow{}), f).
 		Where("user_id > 0").Distinct("user_id").Count(&users).Error; err != nil {
 		return domain.DestHitSummary{}, fmt.Errorf("count dest hit users: %w", err)
 	}

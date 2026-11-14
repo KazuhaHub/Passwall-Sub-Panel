@@ -25,18 +25,20 @@ func describeRules(cb *cachedBase) map[string]TestStep {
 		names[p.ID] = p.Name
 	}
 	out := map[string]TestStep{}
-	for _, group := range [][]baseRule{cb.base.allow, cb.base.block} {
+	for _, group := range [][]baseRule{cb.base.allow, cb.base.block, cb.base.watch} {
 		for _, r := range group {
 			kind := "block"
 			if r.action == protocol.RuleAllow {
 				kind = "allow"
 			}
-			out[r.id] = TestStep{Kind: kind, PolicyID: r.policyID, Name: names[r.policyID]}
+			// A report-only rule is named like an enforced one; report_only is
+			// what says a hit on it does not block.
+			out[r.id] = TestStep{Kind: kind, ReportOnly: r.report, PolicyID: r.policyID, Name: names[r.policyID]}
 		}
 	}
 	for _, g := range cb.base.sources {
 		for _, n := range g.nodes {
-			out["s"+strconv.FormatInt(n, 10)] = TestStep{Kind: "source", NodeID: n}
+			out["s"+strconv.FormatInt(n, 10)] = TestStep{Kind: "source", ReportOnly: g.report, NodeID: n}
 		}
 	}
 	return out
@@ -82,6 +84,12 @@ type NodeState struct {
 	GeoIPUnavailable bool    `json:"geoip_unavailable"`
 	AllowlistGroups  []int64 `json:"allowlist_groups"`
 	Hits24h          *int64  `json:"hits_24h"`
+	// ReportOnlyNotDeployed says why this node was sent the policy without its
+	// report-only rules: "sniffing" (an inbound's sniffing cannot supply what
+	// they need) or "limit" (they overrun the node's budget). Null when all
+	// deployed. Enforced rules are unaffected either way. It is the status-page
+	// face of the node issue destination_policy_report_only_not_deployed.
+	ReportOnlyNotDeployed *string `json:"report_only_not_deployed"`
 }
 
 // SniffView names an inbound whose sniffing cannot supply the policy's needs.
@@ -240,6 +248,10 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		if panelHits != nil && ns.Supports.Hits {
 			n := panelHits[panel.ID]
 			ns.Hits24h = &n
+		}
+		if row.ReportOnlyShed != "" {
+			shed := row.ReportOnlyShed
+			ns.ReportOnlyNotDeployed = &shed
 		}
 		ns.FallbackReason = string(row.FallbackReason)
 		ns.MintedAt, ns.AppliedAt, ns.AppliedRules = ms(row.MintedAt), ms(row.AppliedAt), row.AppliedRuleCount

@@ -145,6 +145,12 @@ type PolicyInput struct {
 	GroupIDs    []int64
 	PanelIDs    []int64
 	TemplateKey string
+	// CountsAsRisk says the policy's enforced blocks feed the dest_block risk
+	// signal. Only a block policy may set it (a report-only block may store it:
+	// its report rows never count, it counts once enforced). Nil on a create is
+	// false; nil on an edit keeps the stored value, so a client that does not
+	// know the field cannot clear it by omission.
+	CountsAsRisk *bool
 }
 
 // PreparePolicy validates and normalises an admin's policy and returns the row
@@ -175,13 +181,30 @@ func (a *Admin) PreparePolicy(ctx context.Context, in PolicyInput, existing *dom
 	if in.Action == domain.DestActionAllow && len(inline.Protocols) > 0 {
 		return nil, bad("inline.protocols", "an allow policy cannot match a protocol")
 	}
+	// Only a request that creates an allow policy, or keeps one an allow, may
+	// not carry the flag. A block that becomes an allow in the same request is a
+	// client echoing the whole DTO back: the flag is dropped below, not refused.
+	if in.CountsAsRisk != nil && *in.CountsAsRisk && in.Action != domain.DestActionBlock &&
+		(existing == nil || existing.Action == in.Action) {
+		return nil, bad("counts_as_risk", "only a block policy can count as a risk signal", "true")
+	}
 	p := &domain.DestPolicy{
 		Name: in.Name, Description: in.Description, Action: in.Action, State: in.State, Inline: inline, Scope: in.Scope,
 		ListIDs: uniqueSorted(in.ListIDs),
 	}
 	if existing != nil {
-		p.ID, p.Priority, p.CreatedAt, p.UpdatedAt, p.TemplateKey, p.CountsAsRisk = existing.ID, existing.Priority, existing.CreatedAt, existing.UpdatedAt, existing.TemplateKey, existing.CountsAsRisk
-	} else if len(in.TemplateKey) > 0 {
+		p.ID, p.Priority, p.CreatedAt, p.UpdatedAt, p.TemplateKey = existing.ID, existing.Priority, existing.CreatedAt, existing.UpdatedAt, existing.TemplateKey
+		p.CountsAsRisk = existing.CountsAsRisk
+	}
+	if in.CountsAsRisk != nil {
+		p.CountsAsRisk = *in.CountsAsRisk
+	}
+	if p.Action != domain.DestActionBlock {
+		// An allow records nothing, so there is nothing to count: a block turned
+		// into an allow without saying so does not keep a flag it cannot use.
+		p.CountsAsRisk = false
+	}
+	if existing == nil && len(in.TemplateKey) > 0 {
 		return nil, bad("template_key", "a policy is added from a template through the catalog, not created with a key")
 	}
 	for _, id := range p.ListIDs {
@@ -466,10 +489,14 @@ type TestStep struct {
 	Step   int    `json:"step"`
 	RuleID string `json:"rule_id,omitempty"`
 	// Kind is "source", "allow", "block", "exempt" or "builtin".
-	Kind     string `json:"kind"`
-	PolicyID int64  `json:"policy_id,omitempty"`
-	NodeID   int64  `json:"node_id,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Kind string `json:"kind"`
+	// ReportOnly is true on a step whose rule is report-only (a policy or a
+	// source rule in the report state): the step records, and a hit on it does
+	// not block. Kind stays what the rule is (block, allow, source).
+	ReportOnly bool   `json:"report_only"`
+	PolicyID   int64  `json:"policy_id,omitempty"`
+	NodeID     int64  `json:"node_id,omitempty"`
+	Name       string `json:"name,omitempty"`
 	// Result is "hit", "miss", "untestable", "shadowed" or "skipped".
 	Result  string `json:"result"`
 	Entry   string `json:"entry,omitempty"`
@@ -613,7 +640,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 			step.Kind = "builtin"
 		default:
 			info := names[s.RuleID]
-			step.Kind, step.PolicyID, step.NodeID, step.Name = info.Kind, info.PolicyID, info.NodeID, info.Name
+			step.Kind, step.ReportOnly, step.PolicyID, step.NodeID, step.Name = info.Kind, info.ReportOnly, info.PolicyID, info.NodeID, info.Name
 		}
 		res.Steps = append(res.Steps, step)
 	}

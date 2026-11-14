@@ -27,8 +27,10 @@ type destPolicyView struct {
 	PanelIDs    []int64                 `json:"panel_ids"`
 	Priority    int                     `json:"priority"`
 	TemplateKey string                  `json:"template_key"`
-	CreatedAt   int64                   `json:"created_at"`
-	UpdatedAt   int64                   `json:"updated_at"`
+	// CountsAsRisk: the policy's enforced blocks feed the dest_block risk signal.
+	CountsAsRisk bool  `json:"counts_as_risk"`
+	CreatedAt    int64 `json:"created_at"`
+	UpdatedAt    int64 `json:"updated_at"`
 	// ListStates says what each list the policy uses is right now: ready,
 	// not_ready or empty. How the compile treated the policy is Note.
 	ListStates []destListState        `json:"list_states"`
@@ -60,7 +62,7 @@ func (h *AdminDestHandler) policyView(ctx context.Context, p *domain.DestPolicy,
 	v := destPolicyView{
 		ID: p.ID, Name: p.Name, Description: p.Description, Action: p.Action, State: p.State, ListIDs: nonNil(p.ListIDs),
 		Inline: p.Inline, Scope: p.Scope, GroupIDs: nonNil(p.GroupIDs), PanelIDs: nonNil(p.PanelIDs), Priority: p.Priority,
-		TemplateKey: p.TemplateKey, CreatedAt: msOf(p.CreatedAt), UpdatedAt: msOf(p.UpdatedAt),
+		TemplateKey: p.TemplateKey, CountsAsRisk: p.CountsAsRisk, CreatedAt: msOf(p.CreatedAt), UpdatedAt: msOf(p.UpdatedAt),
 		ListStates: []destListState{}, Note: notes[p.ID],
 	}
 	for _, id := range p.ListIDs {
@@ -152,6 +154,9 @@ type destPolicyRequest struct {
 	GroupIDs    []int64                 `json:"group_ids"`
 	PanelIDs    []int64                 `json:"panel_ids"`
 	TemplateKey string                  `json:"template_key"`
+	// CountsAsRisk is a pointer so that omitting it on a PUT keeps the stored
+	// value (see destpolicy.PolicyInput).
+	CountsAsRisk *bool `json:"counts_as_risk"`
 	// ID and UpdatedAt are for a preview of an edit and for PUT.
 	ID        int64  `json:"id"`
 	UpdatedAt *int64 `json:"updated_at"`
@@ -165,6 +170,7 @@ func (r destPolicyRequest) input() destpolicy.PolicyInput {
 	return destpolicy.PolicyInput{
 		Name: r.Name, Description: r.Description, Action: r.Action, State: r.State, ListIDs: r.ListIDs, Inline: r.Inline,
 		Scope: scope, GroupIDs: r.GroupIDs, PanelIDs: r.PanelIDs, TemplateKey: r.TemplateKey,
+		CountsAsRisk: r.CountsAsRisk,
 	}
 }
 
@@ -206,7 +212,7 @@ func (h *AdminDestHandler) PreviewPolicy(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"budget": budget})
+	c.JSON(http.StatusOK, gin.H{"budget": budget, "policy": h.policyView(ctx, p, nil)})
 }
 
 // CreatePolicy answers POST /api/admin/dest/policies. The priority is the

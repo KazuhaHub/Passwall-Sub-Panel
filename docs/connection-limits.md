@@ -1171,7 +1171,7 @@ max(floor(倍数 × 中位数 × 机队系数), 每日下限)
 | `flagged` | `over` | 次数 ≥ 阈值 |
 
 - **永不 `exempt`**：「信任此账号」只免去地点类来源（`LOCATION_SOURCES`），不隐藏 `dest_block`——信任一个人在哪里登录，不等于信任他去哪里；「忽略」照常可用。`domain.AllRiskCodes()[dest_block]` 恰好是这六个代码。
-- **计数口径**：窗口固定 24 小时（当前小时加前 23 个小时桶）；只统计 `dest_hits` 中 `action = block`、且来源是 `counts_as_risk = true` 的 `p*` 策略的行。**仅报告（`observe`）的命中不计入**——那是被放行的连接；白名单兜底（`g*`）永不计入；已删除策略的命中不计。
+- **计数口径**：窗口固定 24 小时（当前小时加前 23 个小时桶）；只统计 `dest_hits` 中 `action = block`、且来源是 `counts_as_risk = true` 的 `p*` 策略的行。**仅报告（`observe`）的命中不计入**——那是被放行的连接；白名单兜底（`g*`）永不计入；已删除策略的命中不计。`counts_as_risk` 由管理员在策略上设置（`POST`/`PUT /api/admin/dest/policies`，见 `access-control.md`），只有 `block` 策略可以设；目录模板里 `bittorrent` 与 `smtp` 默认计入，其余默认不计。没有任何策略计入时，这个信号永远不会 `flagged`。
 - **阈值**：`risk.dest_block_threshold`，0 = 默认 20，夹到 1–10000，可按分组覆盖；开关 `risk.dest_block_off` 同样。两者属于风控中心策略（`ports.RiskCenterPolicy`，48 → 50 个键），不在系统设置页；不在 `RuntimeEffective` 里。
 - **证据**：`{"v":1,"window_hours":24,"threshold":20,"total":37,"by_source":[{"source":"p12","count":30},…],"nodes":2}`，最多 5 个来源。**不含目的地、端口、IP**（§14.14 的规矩，而且证据会被复制进 `flag_records`，保留期比命中更长）。`TestRefresh_DestBlockEvidenceHasNoAddress` 与领域层的同名断言要求证据里任何字符串都不能解析为地址或网段。
 - **读取是窄的只读接口**：`risk.Deps.Dest` 只有 `DestBlockInputs`，一轮一次，返回每个账号的「在记录节点数」与计入的拦截数；`TestRiskServiceCannotWriteServiceState` 钉住方法集。读不到时这个信号保留上一轮的行，这一轮计 `partial`。

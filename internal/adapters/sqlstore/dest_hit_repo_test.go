@@ -368,9 +368,30 @@ func TestSummary_CountsTheWholeSelectionAndKeepsTrialSeparate(t *testing.T) {
 		t.Fatalf("summary = %+v", s)
 	}
 	// An action filter does not narrow the cards.
-	s2, _ := r.Summary(context.Background(), domain.DestHitFilter{SinceMS: h, UntilMS: h + 2*hourMS, Action: "block", Source: "p12"})
+	s2, _ := r.Summary(context.Background(), domain.DestHitFilter{SinceMS: h, UntilMS: h + 2*hourMS, Action: "block", SourceKind: "policy"})
 	if s2 != s {
-		t.Fatalf("summary with action/source filters = %+v, want the unfiltered %+v", s2, s)
+		t.Fatalf("summary with action/source_kind filters = %+v, want the unfiltered %+v", s2, s)
+	}
+}
+
+// A source filter DOES narrow the summary to that source: the convert-to-block
+// dialog asks "which accounts did THIS policy hit", and answers from it.
+func TestSummary_ASourceFilterNarrowsItToThatSource(t *testing.T) {
+	r, _ := newHitRepo(t)
+	h := seedHits(t, r)
+	win := domain.DestHitFilter{SinceMS: h, UntilMS: h + 2*hourMS}
+	p12, p13 := win, win
+	p12.Source, p12.Action = "p12", "block"
+	p13.Source = "p13"
+	if got, err := r.Summary(context.Background(), p12); err != nil || got != (domain.DestHitSummary{Block: 38, Users: 2}) {
+		t.Fatalf("summary for p12 = %+v, %v: its blocks and its two accounts, none of p13's would-blocks", got, err)
+	}
+	if got, _ := r.Summary(context.Background(), p13); got != (domain.DestHitSummary{Observe: 5, Users: 1}) {
+		t.Fatalf("summary for p13 = %+v, want 5 would-blocks and its one account", got)
+	}
+	none, _ := r.Summary(context.Background(), domain.DestHitFilter{SinceMS: h, UntilMS: h + 2*hourMS, Source: "p9999"})
+	if none != (domain.DestHitSummary{}) {
+		t.Fatalf("summary of a source with no rows = %+v", none)
 	}
 }
 
