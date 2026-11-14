@@ -196,6 +196,39 @@
         "managed-docker"
       ],
       "tag": "v4.2.0-beta.2"
+    },
+    {
+      "version": "4.2.0-beta.3",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.2.0-beta.3"
+    },
+    {
+      "version": "4.2.0-beta.4",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.2.0-beta.4"
+    },
+    {
+      "version": "4.2.0-beta.5",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.2.0-beta.5"
     }
   ]
 }

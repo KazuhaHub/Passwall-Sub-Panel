@@ -326,6 +326,9 @@ P1 的具体 schema 与 P2 反方向验证的旧 PSP 清单应在实现 PR 中�
   - 矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.2`（提交 `feaa6adb`）；`4.2.0-beta.1` 位于两端之间，只作为评审记录，使 compat-watch 能核对每个已发布版本，不单独运行。
   - `contract_source` 移到 `v4.2.0-beta.2`。已发布的预发布版本可以作为契约来源：它只需能被命名、固定提交并被拉取，规划器与来源检查都接受 `-beta.N`／`-rc.N`。选它是因为它是第一个声明 `policy.destination.v1` 并上报 `PolicyStatus` 的 PN 版本。
   - 新增 `TestLive_RealNodePolicyContract`（目的地策略往返：下发、上报摘要、撤回），由固定来源契约任务运行，按 `deploy/compat/profiles-node-contract.json` 的 `node-policy-v1` 判定。它不属于 `node-wire-v1`：该 profile 会在下限 `4.1.0` 上运行，而 `4.1.0` 早于该能力。
+- 2026-11-14：PN `4.2.0-beta.3`（`6a6f7a4e`）、`4.2.0-beta.4`（`e7ed6687`）与 `4.2.0-beta.5`（`124e42cb`）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`，没有任何版本变为未测试。
+  - 矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.5`；`4.2.0-beta.1` 至 `4.2.0-beta.4` 位于两端之间，只作为评审记录。
+  - `contract_source` 移到 `v4.2.0-beta.5`（提交 `124e42cb`）。该版本的契约代理在 `policy.destination.v1` 之外还声明 `policy.destination.groups.v1` 与 `policy.destination.resolve.v1`，`TestLive_RealNodePolicyContract` 现在对三者都做断言。
 
 原反方向实测日期记录为 2026-09-19，组合为 PN `v0.0.1-beta11` 与 PSP `v4.0.0-beta.19`；
 原始过程见 [观测进展记录](psp-node-rootless-observability-progress.md)。本文未重新执行该测试。
