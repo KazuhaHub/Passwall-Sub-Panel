@@ -54,7 +54,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 - `observe` 行在记录里表示「**本应拦截**」：连接被放行了。它不计入风险信号 `dest_block`（只数真正的 `block`）。
 - 仅报告的策略与开启的策略一样，带域名或协议时需要入站嗅探，在嗅探不足的入站上同样按第 4.2 节第 7 条限定入站；回退到 LKG 时，状态改变了的规则（开启 ↔ 仅报告）视为不同的规则，被修剪掉（只放宽、不收紧）。
 
-### 3.2 白名单分组（编译，数据模型与编译已就绪，接口与界面在后续批次）
+### 3.2 白名单分组（编译，数据模型、编译与成员同步已就绪，接口与界面在后续批次）
 
 - 状态存在分组自己的行上（`groups_` 表的可空列，见 §5），`off` / `report` / `on`，NULL 等于 `off`；没有任何分组设置时，快照字节、下发给节点的策略字节与升级前逐字节相同（`TestCompile_NoGroupsIsByteIdentical`）。
 - 每个面板上，状态不是 `off` 且本面板 roster 里有组员 M 的分组，按分组号升序输出三条规则，Subjects 都是 M：`g<gid>x1`（allow：`list_ids` 里已就绪列表的域名与 CIDR）、`g<gid>x2`（allow：基础放行列表加补充列表）、`g<gid>`（catch-all：`on` 为 block，`report` 为 observe）。x1 或 x2 没有内容就不输出；M 为空整组不输出。未就绪的列表不贡献内容。
@@ -64,6 +64,19 @@ config ETag 不变，core 不会因为升级面板而重启。
 - 上界（发布前校验）用每组一个合成 subject 把所有分组的规则与列表算进去；超额则发布被拒（`publish_error`）。
 - 仅报告的剪枝（`shedObserve` / `enforcedOnly`）把分组的规则当执行类，**永不剪掉**：只剪掉 catch-all 会留下没有 catch-all 的 member 规则，整份无效。试运行组需要的嗅探某入站不足时，该组在本节点按组整体去掉（见 §4.2 第 7 条），不再走回退。
 - 记录 LKG 时 `applied_groups` 写入 body 里出现 catch-all 的分组号；状态页 `allowlist_groups` 是 `[{id,name}]`。
+
+### 3.3 白名单分组的成员同步（R5：不能执行的节点上不给组员开账号）
+
+白名单只在「组员认证所在的那台原生节点、且策略已生效」时成立。3X-UI / S-UI、旧版节点、超额度、被拒或嗅探不足的节点都做不到，所以**只在订阅里隐藏不够**：组员在那些面板上的 client 还在，旧订阅照样能连。成员同步这一层必须排除它们。
+
+- **一个判断，全仓共用**：`group.Service.Eligible(ctx, node, group)`。状态 `off`（含 NULL）等同今天的 `Matches(node, tag_filter)`，行为与升级前完全相同。状态 `report` 或 `on`（两个都适用）还要同时满足：面板是原生（`psp`）；agent 本次上报的能力同时含 `policy.destination.v1` 与 `policy.destination.groups.v1`；`dest_agent_policy.fallback_reason` 不是 `rejected` 或 `over_limit`；引擎是 Xray 时，本面板**已启用的入站**的嗅探能满足域名规则（`protocol.CheckXraySniffing`，需求恒为域名）。能执行但不记录的节点（sing-box）算合格。
+- **嗅探直接在入站上判，不看 `fallback_reason=sniffing`**：后者依赖 roster，而把组员移出 roster 会让它消失，于是「不合格 → 移出 → 规则没了 → 预检通过 → 合格 → 加回 → 预检失败」会无限振荡。`rejected` 只在 generation 变化时重试，不会振荡，但每次重新发布可能有一轮「加回 → 被拒 → 删除」。
+- **失败语义**：任何一次读失败都返回 error，绝不当作 true 或 false。`NodesFor` 原样返回（`/sub` 失败，客户端保留上次订阅）；三处「添加」方向的调用点（`node.go` 的新节点入组与重建入站、`reconcile.go` 的缺失 client 修复）出错就**跳过该分组**，只打一条带 `group_id` 的 Warn，下一轮或 heal 会补上。
+- **缓存**：按面板的合格性缓存，TTL 30 秒；`NodesFor` 对 `TagFilter.All` 的捷径之后也过滤。`/sub` 热路径不额外查库。
+- **触发重新同步**（先失效缓存，再对每个状态不为 `off` 的分组调 `ResyncGroupMembersInBackground`，顺序不能反）：agent 上报的两个能力出现或消失（只看这两个，任务能力会逐次变化）；`fallback_reason` 进入或离开 `rejected` / `over_limit`；psp 面板的入站嗅探或启用状态变化；分组保存。没有接线时只失效缓存，由 heal 兜底。
+- **整面板移出时的删除不依赖其他面板**：`clientprov` 把退役的 client 分成「用户在该面板上已没有任何节点」与「同面板内被另一个 client 取代」。前者只收紧权限，`ResyncMembership` 不看 provision 与生命周期是否成功都删；后者仍要等替代者上线，否则用户会断网。删除失败（面板离线、拒绝）并入返回的错误，由 `user_resync` 任务和 heal 重试；面板已经没有这个 client（「not found」）算完成。
+- 每节点超额按 `TagMatchedMembers`（该面板 tags 选中的组员数，不论是否合格）计，由 `group.Service` 实现，见 §3.2。
+- **守卫**：`TestNoGroupMatchesOutsideGroupPackage` 扫描 `internal/service`、`internal/transport`、`internal/app`，`group` 包以外不得调用 `group.Matches`。
 
 ## 4. 发布、编译与回退
 
