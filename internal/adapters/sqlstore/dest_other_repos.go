@@ -15,27 +15,29 @@ import (
 // DestRepos is the destination-policy store family, built once from the
 // database handle and handed to each consumer as the narrow view it declares.
 type DestRepos struct {
-	db          *gorm.DB
-	Lists       *DestListRepo
-	Policies    *DestPolicyRepo
-	Exemptions  *DestExemptionRepo
-	SourceRules *DestSourceRuleRepo
-	State       *DestStateRepo
-	Agents      *DestAgentPolicyRepo
-	Hits        *DestHitRepo
+	db              *gorm.DB
+	Lists           *DestListRepo
+	Policies        *DestPolicyRepo
+	Exemptions      *DestExemptionRepo
+	SourceRules     *DestSourceRuleRepo
+	GroupAllowlists *DestGroupAllowlistRepo
+	State           *DestStateRepo
+	Agents          *DestAgentPolicyRepo
+	Hits            *DestHitRepo
 }
 
 // NewDestRepos builds the family over db.
 func NewDestRepos(db *gorm.DB) *DestRepos {
 	return &DestRepos{
-		db:          db,
-		Lists:       &DestListRepo{db: db},
-		Policies:    &DestPolicyRepo{db: db},
-		Exemptions:  &DestExemptionRepo{db: db},
-		SourceRules: &DestSourceRuleRepo{db: db},
-		State:       &DestStateRepo{db: db},
-		Agents:      &DestAgentPolicyRepo{db: db},
-		Hits:        &DestHitRepo{db: db},
+		db:              db,
+		Lists:           &DestListRepo{db: db},
+		Policies:        &DestPolicyRepo{db: db},
+		Exemptions:      &DestExemptionRepo{db: db},
+		SourceRules:     &DestSourceRuleRepo{db: db},
+		GroupAllowlists: &DestGroupAllowlistRepo{db: db},
+		State:           &DestStateRepo{db: db},
+		Agents:          &DestAgentPolicyRepo{db: db},
+		Hits:            &DestHitRepo{db: db},
 	}
 }
 

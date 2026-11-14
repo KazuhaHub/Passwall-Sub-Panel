@@ -135,7 +135,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return s.noPolicy(ctx, in, meta, "", now)
 	}
 
-	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil}
+	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups)}
 	var nodes []*domain.Node
 	if in.Snapshot != nil {
 		for _, n := range in.Snapshot.Nodes {
@@ -153,9 +153,27 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		}
 	}
 	slices.Sort(view.users)
-	if cb.base.needsGroups() {
+	if cb.base.needsGroups(view.groupCap) {
 		if view.groupOf, err = s.defs.GroupIDsByUserIDs(ctx, view.users); err != nil {
 			return Result{}, fmt.Errorf("destpolicy: read the roster's groups: %w", err)
+		}
+	}
+	if view.groupCap && s.members != nil {
+		// The per-node limit counts the members the panel's tags select, not the
+		// roster (which shrinks when members are made ineligible): see
+		// groupSubjectSlack.
+		for _, g := range cb.base.groups {
+			if !slices.ContainsFunc(view.users, func(u int64) bool { return view.groupOf[u] == g.id }) {
+				continue
+			}
+			n, err := s.members.TagMatchedMembers(ctx, in.PanelID, g.id)
+			if err != nil {
+				return Result{}, fmt.Errorf("destpolicy: count the members of group %d: %w", g.id, err)
+			}
+			if view.tagMatched == nil {
+				view.tagMatched = map[int64]int{}
+			}
+			view.tagMatched[g.id] = n
 		}
 	}
 	engine := strings.ToLower(strings.TrimSpace(in.Config.Core.Engine))
@@ -252,7 +270,8 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// node is actually sent may be a fallback, so the status field is computed
 	// from the output below, never from this.
 	desiredShed := ""
-	if shed, why, ok := shedObserve(desired, nodes, engine); ok {
+	slack := groupSubjectSlack(desired, view.tagMatched)
+	if shed, why, ok := shedObserve(desired, nodes, engine, slack); ok {
 		desired, desiredShed = shed, why
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)}}
 	}
@@ -265,6 +284,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	s.rememberDigest(desiredDigest, cb)
 
 	usage := usageOf(desired)
+	usage.Subjects += slack
 	var overLimit *domain.DestPublishError
 	if o := usage.over(); o != nil {
 		overLimit = o
@@ -383,7 +403,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			if ff := sniffingFindings(output, nodes); len(ff) > 0 {
 				// Report-only rules in the fallback that are all that needs the
 				// sniffing are shed, not the whole fallback.
-				if shed, why, ok := shedObserve(output, nodes, engine); ok && why == shedSniffing {
+				if shed, why, ok := shedObserve(output, nodes, engine, 0); ok && why == shedSniffing {
 					output, fallbackShed = shed, why
 					shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)})
 					ff = nil
@@ -548,13 +568,53 @@ func reportOnlyNote(why string) string {
 	return "report-only rules not deployed on this node: " + why
 }
 
+// sheddable is a rule report-only shedding may take out: an observe rule that is
+// not a group's. A group's rules are enforcement even when its catch-all only
+// records: leaving the allows without their catch-all is not a valid policy, and
+// a report group that cannot be deployed is the node's fallback, not a rule to
+// drop.
+func sheddable(r protocol.DestinationRule) bool {
+	if r.Action != protocol.RuleObserve {
+		return false
+	}
+	kind, _, ok := ruleOrigin(r.ID)
+	return !ok || kind != 'g'
+}
+
+// groupSubjectSlack is what the per-node limit adds for allowlist groups on top
+// of the subjects the policy carries: each group's members that its tags select
+// but the roster does not hold, once per rule of the group. Counting the
+// roster alone would let a node flip over and under the limit as members leave
+// its roster for being ineligible and come back.
+func groupSubjectSlack(p *protocol.DestinationPolicy, tagMatched map[int64]int) int {
+	if p == nil || len(tagMatched) == 0 {
+		return 0
+	}
+	rules, held := map[int64]int{}, map[int64]int{}
+	for _, r := range p.Rules {
+		if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' {
+			rules[n]++
+			if r.CatchAll {
+				held[n] = len(r.Subjects)
+			}
+		}
+	}
+	slack := 0
+	for gid, count := range rules {
+		if tm, ok := tagMatched[gid]; ok && tm > held[gid] {
+			slack += (tm - held[gid]) * count
+		}
+	}
+	return slack
+}
+
 // enforcedOnly is p without its observe rules (nil when nothing else is left,
 // as assemble has it), recording level re-derived because an observe rule is
 // one of the things that records.
 func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
 	out := &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}, Exempt: slices.Clone(p.Exempt)}
 	for _, r := range p.Rules {
-		if r.Action != protocol.RuleObserve {
+		if !sheddable(r) {
 			out.Rules = append(out.Rules, r)
 		}
 	}
@@ -570,14 +630,19 @@ func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
 // them, or sniffing the inbounds cannot supply only for them. It reports
 // ok=false (and p unchanged) when there is nothing to shed or when the enforced
 // rules alone would still not deploy, which is today's fallback.
-func shedObserve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string) (*protocol.DestinationPolicy, string, bool) {
-	if p == nil || !slices.ContainsFunc(p.Rules, func(r protocol.DestinationRule) bool { return r.Action == protocol.RuleObserve }) {
+func shedObserve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string, extraSubjects int) (*protocol.DestinationPolicy, string, bool) {
+	if p == nil || !slices.ContainsFunc(p.Rules, sheddable) {
 		return p, "", false
 	}
 	sniffs := func(q *protocol.DestinationPolicy) bool {
 		return q != nil && engine == xrayEngine && len(sniffingFindings(q, nodes)) > 0
 	}
-	over := usageOf(p).over() != nil
+	usageOver := func(q *protocol.DestinationPolicy) bool {
+		u := usageOf(q)
+		u.Subjects += extraSubjects
+		return u.over() != nil
+	}
+	over := usageOver(p)
 	// Sniffing is prechecked only inside the limits, as for any policy.
 	why := ""
 	switch {
@@ -589,7 +654,7 @@ func shedObserve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine str
 		return p, "", false
 	}
 	enf := enforcedOnly(p)
-	if enf != nil && (usageOf(enf).over() != nil || sniffs(enf)) {
+	if enf != nil && (usageOver(enf) || sniffs(enf)) {
 		return p, "", false
 	}
 	return enf, why, true
@@ -672,6 +737,14 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 	for _, u := range v.users {
 		fmt.Fprintf(h, "u%d:%d;", u, v.groupOf[u])
 	}
+	tm := make([]int64, 0, len(v.tagMatched))
+	for gid := range v.tagMatched {
+		tm = append(tm, gid)
+	}
+	slices.Sort(tm)
+	for _, gid := range tm {
+		fmt.Fprintf(h, "tm%d:%d;", gid, v.tagMatched[gid])
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -688,7 +761,8 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 //     the rule keeps only the inbounds that do);
 //   - subjects that are no longer on this node's roster go, and a rule whose
 //     subjects were all removed goes with them;
-//   - group rules go (a later stage's; none can be in force);
+//   - a group's rules stay only for a node that runs group rules, while the
+//     group is in force in the same state, and only for its current members;
 //   - the exempt list is the union of the old one and the current one, both
 //     limited to the roster.
 //
@@ -727,6 +801,21 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 	for _, u := range v.users {
 		roster[protocol.NewSubjectKey(u)] = true
 	}
+	// Allowlist groups in force now and the action each one's catch-all has on
+	// the wire, against what the LKG ran.
+	groupsNow := map[int64]protocol.RuleAction{}
+	for _, g := range cb.doc.Groups {
+		groupsNow[g.ID] = protocol.RuleBlock
+		if g.State == string(domain.DestStateReport) {
+			groupsNow[g.ID] = protocol.RuleObserve
+		}
+	}
+	lkgCatchAll := map[int64]protocol.RuleAction{}
+	for _, r := range lkg.Rules {
+		if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' && r.CatchAll {
+			lkgCatchAll[n] = r.Action
+		}
+	}
 
 	out := &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}}
 	for _, r := range lkg.Rules {
@@ -764,6 +853,25 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 				}
 				sortKeys(r.Subjects)
 			}
+		case 'g':
+			// A group stays only for a node that runs group rules, while it is
+			// still in force in the same state; its subjects are the LKG's that
+			// are still its members on the roster. Every rule of a group has the
+			// same subjects, so the group is kept or dropped whole.
+			now, in := groupsNow[n]
+			if !v.groupCap || !in || lkgCatchAll[n] != now {
+				continue
+			}
+			var keep []protocol.SubjectKey
+			for _, k := range r.Subjects {
+				if id, err := k.RowID(); err == nil && v.groupOf[id] == n {
+					keep = append(keep, k)
+				}
+			}
+			if len(keep) == 0 {
+				continue
+			}
+			r.Subjects = keep
 		case 's':
 			var keep []protocol.ListenerKey
 			for _, k := range r.Inbounds {

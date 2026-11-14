@@ -298,8 +298,12 @@ type Group struct {
 	// above, and the sparse setting overrides in OverridableScopeKeys). The
 	// older claim that groups only carry node selection and layout was never
 	// quite true and is no longer true at all.
-	Limits    GroupLimits
-	CreatedAt time.Time
+	Limits GroupLimits
+	// DestAllowlist is the group's destination allowlist: off (the zero value,
+	// and what a group that never had one reads as), report or on. See
+	// DestAllowlist.
+	DestAllowlist DestAllowlist
+	CreatedAt     time.Time
 }
 
 // TagFilter expresses a node selection rule.

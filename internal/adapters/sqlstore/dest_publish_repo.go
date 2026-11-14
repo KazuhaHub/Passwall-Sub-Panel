@@ -68,6 +68,18 @@ func (r *DestRepos) ReadDefinitions(ctx context.Context) (*domain.DestDefinition
 		if err := tx.Order("node_id").Find(&rules).Error; err != nil {
 			return err
 		}
+		var groups []groupRow
+		if err := tx.Select("id", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+			Where("dest_allowlist_state IS NOT NULL").Order("id").Find(&groups).Error; err != nil {
+			return err
+		}
+		defs.GroupModes = make([]*domain.DestGroupMode, 0, len(groups))
+		for _, g := range groups {
+			a := g.destAllowlist()
+			defs.GroupModes = append(defs.GroupModes, &domain.DestGroupMode{
+				GroupID: g.ID, State: a.State, ListIDs: a.ListIDs, BaseListID: a.BaseListID, ExtraListID: a.ExtraListID,
+			})
+		}
 		defs.Lists = make([]*domain.DestList, 0, len(lists))
 		for _, row := range lists {
 			defs.Lists = append(defs.Lists, row.toDomain())

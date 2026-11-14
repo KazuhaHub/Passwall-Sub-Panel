@@ -27,6 +27,18 @@ type snapshotDoc struct {
 	Policy  []snapPolicy `json:"policies"`
 	Exempt  []int64      `json:"exempt"`
 	Sources []snapSource `json:"sources"`
+	// Groups are the allowlist groups in force (report or on). Absent when there
+	// are none, so a snapshot without any is byte-identical to what it was.
+	Groups []snapGroup `json:"groups,omitempty"`
+}
+
+// snapGroup is one allowlist group in force. State is "report" or "on".
+type snapGroup struct {
+	ID    int64   `json:"id"`
+	State string  `json:"state"`
+	Lists []int64 `json:"lists,omitempty"`
+	Base  int64   `json:"base,omitempty"`
+	Extra int64   `json:"extra,omitempty"`
 }
 
 type snapList struct {
@@ -127,6 +139,21 @@ func newSnapshotDoc(defs *domain.DestDefinitions, state *domain.DestPolicyState,
 		}
 		doc.Sources = append(doc.Sources, src)
 	}
+	for _, m := range defs.GroupModes {
+		if m.State != domain.DestStateOn && m.State != domain.DestStateReport {
+			continue
+		}
+		g := snapGroup{ID: m.GroupID, State: string(m.State), Lists: slices.Clone(m.ListIDs), Base: m.BaseListID, Extra: m.ExtraListID}
+		slices.Sort(g.Lists)
+		g.Lists = slices.Compact(g.Lists)
+		for _, id := range append([]int64{g.Base, g.Extra}, g.Lists...) {
+			if id > 0 {
+				used[id] = true
+			}
+		}
+		doc.Groups = append(doc.Groups, g)
+	}
+	slices.SortFunc(doc.Groups, func(a, b snapGroup) int { return int(a.ID - b.ID) })
 	for _, l := range defs.Lists {
 		if !used[l.ID] {
 			continue
@@ -144,7 +171,9 @@ func newSnapshotDoc(defs *domain.DestDefinitions, state *domain.DestPolicyState,
 }
 
 // empty reports whether nothing in the document reaches a node.
-func (d *snapshotDoc) empty() bool { return len(d.Policy) == 0 && len(d.Sources) == 0 }
+func (d *snapshotDoc) empty() bool {
+	return len(d.Policy) == 0 && len(d.Sources) == 0 && len(d.Groups) == 0
+}
 
 func (d *snapshotDoc) marshal() ([]byte, error) { return json.Marshal(d) }
 

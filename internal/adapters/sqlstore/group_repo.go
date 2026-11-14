@@ -36,7 +36,9 @@ func (r *groupRepo) Create(ctx context.Context, g *domain.Group) error {
 }
 
 func (r *groupRepo) Update(ctx context.Context, g *domain.Group) error {
-	if err := r.db.WithContext(ctx).Save(groupFromDomain(g)).Error; err != nil {
+	// The allowlist columns are the destination side's to write: a group edit
+	// carries a group read earlier, and must not put an older allowlist back.
+	if err := r.db.WithContext(ctx).Omit(groupAllowlistColumns...).Save(groupFromDomain(g)).Error; err != nil {
 		return err
 	}
 	r.invalidateLimits()
@@ -44,7 +46,7 @@ func (r *groupRepo) Update(ctx context.Context, g *domain.Group) error {
 }
 
 func (r *groupRepo) Delete(ctx context.Context, id int64) error {
-	if err := r.db.WithContext(ctx).Delete(&groupRow{}, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return deleteGroupTx(tx, id) }); err != nil {
 		return err
 	}
 	r.invalidateLimits()

@@ -79,6 +79,9 @@ type countedDefs struct {
 	// afterRead runs once, right after ReadDefinitions returned (the window
 	// between the read and the compare-and-set of the publish).
 	afterRead func()
+	// modes are the allowlist groups the definitions read carries. Where they
+	// are stored is not this package's concern, so the tests supply them here.
+	modes []*domain.DestGroupMode
 }
 
 func (d *countedDefs) ReadDefinitions(ctx context.Context) (*domain.DestDefinitions, error) {
@@ -86,6 +89,9 @@ func (d *countedDefs) ReadDefinitions(ctx context.Context) (*domain.DestDefiniti
 	d.c.defsReads++
 	d.c.Unlock()
 	defs, err := d.Definitions.ReadDefinitions(ctx)
+	if err == nil && d.modes != nil {
+		defs.GroupModes = slices.Clone(d.modes)
+	}
 	if d.afterRead != nil {
 		f := d.afterRead
 		d.afterRead = nil

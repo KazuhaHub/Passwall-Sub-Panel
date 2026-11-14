@@ -176,6 +176,21 @@ func inForcePoliciesTx(tx *gorm.DB) ([]*domain.DestPolicy, map[int64]bool, error
 			inUse[id] = true
 		}
 	}
+	// The lists an allowlist group that is not off uses are in use too, though
+	// the group is not among the policies returned.
+	var groups []groupRow
+	if err := tx.Select("id", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+		Where("dest_allowlist_state IS NOT NULL AND dest_allowlist_state <> ?", string(domain.DestStateOff)).Find(&groups).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, g := range groups {
+		a := g.destAllowlist()
+		for _, id := range append([]int64{a.BaseListID, a.ExtraListID}, a.ListIDs...) {
+			if id > 0 {
+				inUse[id] = true
+			}
+		}
+	}
 	return out, inUse, nil
 }
 

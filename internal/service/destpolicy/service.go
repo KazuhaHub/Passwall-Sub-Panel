@@ -20,6 +20,7 @@ type Service struct {
 	lists     ListExpander
 	countries CountryExpander
 	settings  SettingsReader
+	members   GroupMemberCounter
 	metrics   Metrics
 	now       func() time.Time
 
@@ -76,7 +77,7 @@ func New(d Deps) (*Service, error) {
 	}
 	return &Service{
 		defs: d.Definitions, state: d.State, agents: d.Agents, lists: d.Lists, countries: d.Countries,
-		settings: d.Settings, metrics: d.Metrics, now: now,
+		settings: d.Settings, members: d.GroupMembers, metrics: d.Metrics, now: now,
 		agentMeta: map[string]*domain.DestAgentPolicy{}, compiled: map[string]*compiledEntry{},
 		digests: map[string]digestInfo{},
 	}, nil
@@ -120,8 +121,19 @@ func capsToken(caps []string) string {
 			tok = append(tok, 'u')
 		}
 	}
+	for _, c := range caps {
+		if c == capabilityDestinationGroups {
+			tok = append(tok, 'g')
+		}
+	}
 	return string(tok)
 }
+
+// capabilityDestinationGroups is the capability a node declares when it runs
+// group rules (g*) as the wire specification says (on sing-box, with the
+// protocol blocks ahead of a group's allows). Group rules are sent only to a
+// node that declares it.
+const capabilityDestinationGroups = protocol.CapabilityDestinationGroups
 
 const (
 	capabilityAuditHits  = protocol.CapabilityAuditHits

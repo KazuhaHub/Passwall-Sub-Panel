@@ -56,6 +56,12 @@ type AgentStore interface {
 	List(ctx context.Context) ([]*domain.DestAgentPolicy, error)
 }
 
+// GroupMemberCounter counts the accounts of a group that a panel's tags select,
+// whether or not they have a client on the panel right now.
+type GroupMemberCounter interface {
+	TagMatchedMembers(ctx context.Context, panelID, groupID int64) (int, error)
+}
+
 // ListExpander turns a list into the entries a rule carries (destlist.Service).
 type ListExpander interface {
 	Expand(ctx context.Context, l *domain.DestList) (*destlist.Expanded, error)
@@ -96,7 +102,11 @@ type Deps struct {
 	Lists       ListExpander
 	Countries   CountryExpander
 	Settings    SettingsReader
-	Metrics     Metrics
+	// GroupMembers counts the members of an allowlist group that a panel's tags
+	// select, for the per-node limit. Nil: the roster's members, which is the
+	// same until members can be made ineligible for a panel.
+	GroupMembers GroupMemberCounter
+	Metrics      Metrics
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
