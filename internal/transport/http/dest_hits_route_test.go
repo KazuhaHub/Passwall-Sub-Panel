@@ -113,6 +113,7 @@ func TestDestHitsAPI(t *testing.T) {
 	f.expect("GET", "/hits?group_by=dest", "", 400, "dest_hits_invalid")
 	f.expect("GET", "/hits?action=allow", "", 400, "dest_hits_invalid")
 	f.expect("GET", "/hits?since=abc", "", 400, "dest_hits_invalid")
+	f.expect("GET", "/hits?page=9223372036854775807", "", 400, "dest_hits_invalid")
 	long := fmt.Sprintf("/hits?since=%d&until=%d", time.Now().Add(-40*24*time.Hour).UnixMilli(), time.Now().UnixMilli())
 	f.expect("GET", long, "", 400, "dest_hits_range")
 }

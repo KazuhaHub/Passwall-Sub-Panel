@@ -202,6 +202,13 @@ func (h *AdminDestHandler) Hits(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Bounded before the conversion: the repository clamps the page size,
+	// but an int on a 32-bit build cannot hold every int64 the query parsed.
+	const maxPageParam = 1 << 30
+	if page > maxPageParam || size > maxPageParam {
+		badHits(c, codeHitsInvalid, "page", "page and page_size are at most 1073741824")
+		return
+	}
 	f.Page, f.PageSize = int(page), int(size)
 
 	rows, total, err := h.w.Hits.List(ctx, f)

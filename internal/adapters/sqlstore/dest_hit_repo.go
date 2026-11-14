@@ -119,7 +119,17 @@ func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, r
 			for i, h := range chunk {
 				batch[i] = destHitRowOf(h)
 			}
-			return tx.Clauses(destHitConflict(dialect)).CreateInBatches(batch, destHitStmtRows).Error
+			// One statement per destHitStmtRows rows, written as plain Creates in
+			// this transaction: CreateInBatches would wrap them in savepoints,
+			// which buy nothing here (the transaction is the unit of failure)
+			// and which a wrapped dialector may not provide.
+			for i := 0; i < len(batch); i += destHitStmtRows {
+				j := min(i+destHitStmtRows, len(batch))
+				if err := tx.Clauses(destHitConflict(dialect)).Create(batch[i:j]).Error; err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 		if err != nil {
 			return res, fmt.Errorf("store dest hits: %w", err)
