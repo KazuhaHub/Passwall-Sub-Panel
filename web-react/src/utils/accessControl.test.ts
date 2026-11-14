@@ -54,6 +54,7 @@ describe('accessVerdict: the worst finding wins', () => {
     { name: 'a refused publish', st: status([node()], { publish_error: { kind: 'domains', used: 57312, limit: 50000 } }), policies: on, kind: 'publish_refused', tone: 'failing' },
     { name: 'a node refused the policy', st: status([node({ state: 'rejected' })]), policies: on, kind: 'rejected', tone: 'failing' },
     { name: 'a node with no sniffing', st: status([node({ state: 'sniffing', sniffing_insufficient: [{ listener: 'l1', label: 'vless-443', node_id: 4 }] })]), policies: on, kind: 'sniffing', tone: 'failing' },
+    { name: 'a node in effect with inbounds that cannot sniff is attention, not a failure', st: status([node({ sniffing_insufficient: [{ listener: 'l1', label: 'vless-443', node_id: 4 }] })]), policies: on, kind: 'sniffing_partial', tone: 'attention' },
     { name: 'a node over its limit', st: status([node({ state: 'over_limit', over_limit: { kind: 'subjects', used: 9, limit: 5 } })]), policies: on, kind: 'over_limit', tone: 'failing' },
     { name: 'enabled policies and no node can run them', st: status([node({ state: 'unsupported_kind', kind: 'x-ui' })]), policies: on, kind: 'no_coverage', tone: 'failing' },
     { name: 'a native node too old', st: status([node(), node({ panel_id: 2, state: 'unsupported_version' })]), policies: on, kind: 'upgrade', tone: 'attention' },
@@ -118,6 +119,8 @@ describe('node states: one table', () => {
   const states: { node: Partial<DestNodeStatus>; key: NodeStateKey }[] = [
     { node: { state: 'applied' }, key: 'applied' },
     { node: { state: 'applied', engine: 'sing-box' }, key: 'applied_exec_only' },
+    { node: { state: 'applied', sniffing_insufficient: [{ listener: 'l1', label: 'v', node_id: 4 }] }, key: 'applied_sniffing' },
+    { node: { state: 'pending', sniffing_insufficient: [{ listener: 'l1', label: 'v', node_id: 4 }], pending_since: NOW - 5000 }, key: 'pending' },
     { node: { state: 'pending', pending_since: NOW - 5000 }, key: 'pending' },
     { node: { state: 'pending', pending_since: NOW - PENDING_STUCK_MS - 5 }, key: 'pending_long' },
     { node: { state: 'rejected' }, key: 'rejected' },

@@ -325,22 +325,22 @@ func TestCompile_SniffingPrecheck(t *testing.T) {
 		t.Fatalf("sniffing off must be accepted (the node injects it): %+v", res)
 	}
 
-	// routeOnly with domains rules is insufficient; the node is held at no
-	// policy (there is no last-known-good) and the operator is told which
-	// inbound.
+	// routeOnly with domain rules is insufficient on that inbound: the node is
+	// still sent the policy, with the domain rule restricted to the inbound that
+	// can supply it, and the operator is told which inbound.
 	bad := fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing), node(2, `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`)}, users: []int64{10}}
 	res := h.compile(bad)
-	if res.Policy != nil {
-		t.Fatalf("a policy was sent to a node whose inbound cannot sniff domains: %+v", res.Policy)
+	if res.Policy == nil || len(res.Policy.Rules) != 1 || !slices.Equal(res.Policy.Rules[0].Inbounds, []protocol.ListenerKey{"lst_1"}) {
+		t.Fatalf("the domain rule must run on lst_1 only: %+v", res.Policy)
 	}
 	if len(res.Issues) != 1 || res.Issues[0].Code != IssueSniffInsufficient || res.Issues[0].Key != "lst_2" || res.Issues[0].Detail != "route_only" {
 		t.Fatalf("issues = %+v", res.Issues)
 	}
-	if h.rec.count(ResultFallbackNil) != 1 {
+	if h.rec.count(ResultCompiled) != 2 {
 		t.Fatalf("results = %v", h.rec.compile)
 	}
 	meta, _ := h.repos.Agents.Get(h.ctx, "agt_9")
-	if meta.FallbackReason != domain.DestFallbackSniffing || !strings.Contains(meta.PrecheckListeners, `"lst_2"`) {
+	if meta.FallbackReason != domain.DestFallbackNone || !strings.Contains(meta.PrecheckListeners, `"lst_2"`) {
 		t.Fatalf("delivery state = %+v", meta)
 	}
 
@@ -353,9 +353,9 @@ func TestCompile_SniffingPrecheck(t *testing.T) {
 		t.Fatalf("the fallback must clear: %+v", meta)
 	}
 
-	// sing-box takes its sniff rule from the route: no precheck.
-	if res := h.compileEngine(bad, "sing-box"); res.Policy == nil {
-		t.Fatal("sing-box is not prechecked")
+	// sing-box takes its sniff rule from the route: no precheck, no restriction.
+	if res := h.compileEngine(bad, "sing-box"); res.Policy == nil || len(res.Policy.Rules[0].Inbounds) != 0 || len(res.Issues) != 0 {
+		t.Fatalf("sing-box is not prechecked: %+v", res)
 	}
 	// A policy with no domain or protocol rules needs no sniffing at all.
 	h2 := newHarness(t)
@@ -364,7 +364,8 @@ func TestCompile_SniffingPrecheck(t *testing.T) {
 	if res := h2.compile(bad); res.Policy == nil {
 		t.Fatal("a ports-only policy needs no sniffing")
 	}
-	// Malformed sniffing is the operator's problem, reported as one.
+	// Malformed sniffing is the operator's problem, reported as one: no inbound
+	// can run the domain rule, so it is dropped and nothing is left to send.
 	h3 := newHarness(t)
 	l3 := h3.list("l", "DOMAIN-SUFFIX,x.example.com")
 	h3.policy("p", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l3.ID} })

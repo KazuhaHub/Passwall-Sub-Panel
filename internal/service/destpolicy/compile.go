@@ -93,12 +93,14 @@ type sniffFinding struct {
 //
 // The order of precedence: no capability, then paused, then "nothing in force",
 // each answering nil. Only then are the node's own circumstances weighed:
-// inbounds whose sniffing cannot supply what the policy needs, a policy too
-// large for this node, a policy the node refused. In each of those the node
-// keeps running the last policy that applied, trimmed to what is still
-// relaxing (see fallbackPolicy), or no policy when there is none; a policy is
-// never truncated to fit, because a truncated block list is a silent
-// allow.
+// a policy too large for this node, a policy the node refused. In each of
+// those the node keeps running the last policy that applied, trimmed to what is
+// still relaxing (see fallbackPolicy), or no policy when there is none; a policy
+// is never truncated to fit, because a truncated block list is a silent allow.
+//
+// Inbounds whose sniffing cannot supply the domain and protocol rules are not
+// one of those: the node is sent the policy with those rules restricted to the
+// inbounds that can (see restrictForSniffing), and the inbounds are reported.
 func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) {
 	if !policyHasCapability(in.Capabilities) {
 		return Result{}, nil
@@ -115,7 +117,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	var cb *cachedBase
 	for attempt := 0; ; attempt++ {
 		if st.Paused || st.PublishedGeneration == 0 {
-			return s.noPolicy(ctx, in, meta, "", now)
+			return s.noPolicy(ctx, in, meta, "", "", now)
 		}
 		if cb, err = s.baseFor(ctx, st.PublishedGeneration); errors.Is(err, domain.ErrNotFound) && attempt == 0 {
 			// The generation this compile read was superseded and its snapshot
@@ -132,7 +134,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return Result{}, err
 	}
 	if cb.doc.empty() {
-		return s.noPolicy(ctx, in, meta, "", now)
+		return s.noPolicy(ctx, in, meta, "", "", now)
 	}
 
 	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups)}
@@ -223,8 +225,11 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 // records that nothing is minted, but it never touches the last-known-good:
 // pausing must not rewrite the record of what the node last applied. shed is
 // why report-only rules were left out when that is what emptied the policy
-// ("" for a pause or for nothing in force).
-func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed string, now time.Time) (Result, error) {
+// ("" for a pause or for nothing in force). precheck is the JSON list of
+// inbounds whose sniffing could not supply a rule that was dropped for it ("" for
+// none): with every rule dropped the node gets nothing, and the status still says
+// which inbounds to fix.
+func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed, precheck string, now time.Time) (Result, error) {
 	var patch domain.DestAgentPolicyPatch
 	empty := ""
 	if meta.DesiredSHA256 != "" || meta.MintedSHA256 != "" {
@@ -239,9 +244,12 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 		// leaving it out is why nothing is sent.
 		patch.ReportOnlyShed = &shed
 	}
-	if meta.FallbackReason != domain.DestFallbackNone || meta.OverLimit != "" || meta.PrecheckListeners != "" {
+	if meta.FallbackReason != domain.DestFallbackNone || meta.OverLimit != "" {
 		none := domain.DestFallbackNone
-		patch.FallbackReason, patch.OverLimit, patch.PrecheckListeners = &none, &empty, &empty
+		patch.FallbackReason, patch.OverLimit = &none, &empty
+	}
+	if meta.PrecheckListeners != precheck {
+		patch.PrecheckListeners = &precheck
 	}
 	if err := s.patchMeta(ctx, in.AgentID, patch); err != nil {
 		return Result{}, err
@@ -270,14 +278,34 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// node is actually sent may be a fallback, so the status field is computed
 	// from the output below, never from this.
 	desiredShed := ""
+	// INBOUNDS THAT CANNOT SNIFF: the findings name the inbounds that cannot run
+	// the ENFORCED domain and protocol rules (report-only ones are told apart by
+	// report_only_not_deployed); the policy is then restricted, not held back.
+	var findings []sniffFinding
+	if engine == xrayEngine {
+		if enf := enforcedOnly(desired); enf != nil {
+			findings = sniffingFindings(enf, nodes)
+		}
+	}
+	desired, restricted := restrictForSniffing(desired, nodes, engine)
+	if restricted.observe {
+		desiredShed = shedSniffing
+		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)}}
+	}
 	slack := groupSubjectSlack(desired, view.tagMatched)
-	if shed, why, ok := shedObserve(desired, nodes, engine, slack); ok {
+	if shed, why, ok := shedObserve(desired, slack); ok {
 		desired, desiredShed = shed, why
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)}}
 	}
 	desiredDigest := protocol.PolicyDigest(desired)
+	precheckJSON := ""
+	if len(findings) > 0 {
+		b, _ := json.Marshal(findings)
+		precheckJSON = string(b)
+	}
 	if desired == nil {
-		res, err := s.noPolicy(ctx, in, meta, desiredShed, now)
+		res, err := s.noPolicy(ctx, in, meta, desiredShed, precheckJSON, now)
+		res.Issues = append(res.Issues, sniffIssues(findings)...)
 		res.Issues = append(res.Issues, shedNote...)
 		return res, &compiledEntry{res: res}, err
 	}
@@ -288,10 +316,6 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	var overLimit *domain.DestPublishError
 	if o := usage.over(); o != nil {
 		overLimit = o
-	}
-	var findings []sniffFinding
-	if engine == xrayEngine && overLimit == nil {
-		findings = sniffingFindings(desired, nodes)
 	}
 
 	capsNow := capsToken(in.Capabilities)
@@ -317,22 +341,16 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	switch {
 	case overLimit != nil:
 		reason = domain.DestFallbackOverLimit
-	case len(findings) > 0:
-		reason = domain.DestFallbackSniffing
 	case rejectedHeld && !retryDue:
 		reason = domain.DestFallbackRejected
 	}
 
 	var patch domain.DestAgentPolicyPatch
 	setReason := func(r domain.DestFallbackReason) { patch.FallbackReason = &r }
-	overJSON, precheckJSON := "", ""
+	overJSON := ""
 	if overLimit != nil {
 		b, _ := json.Marshal(overLimit)
 		overJSON = string(b)
-	}
-	if len(findings) > 0 {
-		b, _ := json.Marshal(findings)
-		precheckJSON = string(b)
 	}
 	if reason != meta.FallbackReason {
 		setReason(reason)
@@ -357,7 +375,13 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	var fallbackIssues []domain.NodeAgentIssue
 	var output *protocol.DestinationPolicy
 	if reason == domain.DestFallbackNone {
-		if err := protocol.ValidateDestinationPolicy(desired); err != nil {
+		err := protocol.ValidateDestinationPolicy(desired)
+		if err == nil && engine == xrayEngine && len(perListenerSniffFindings(desired, nodes)) > 0 {
+			// The node checks sniffing per listener on the rules that apply to it;
+			// a restricted policy that fails the same check is a compiler bug too.
+			err = errors.New("a restricted policy still needs sniffing an inbound cannot supply")
+		}
+		if err != nil {
 			// A node's policy that does not validate here is a bug in the
 			// compiler, not an admin error: the pre-publish validation judged
 			// the upper bound, and what is left is only a subset of it.
@@ -395,34 +419,27 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		} else if !unreadable {
 			s.bodyReadOK(bodyKey(in.AgentID, meta.AppliedSHA256))
 		}
-		// The fallback needs the same sniffing the desired policy does if it has
-		// domain or protocol rules. If it cannot apply, send nothing: that is not
-		// a refusal by the node, so the LKG record stays for when the inbounds
-		// are fixed.
+		// The fallback is restricted the same way as the desired policy would be:
+		// the inbounds' sniffing may have changed since it applied. Report-only
+		// rules that lost an inbound for it are the one thing said about it; if
+		// even then it does not pass the node's check, send nothing (not a
+		// refusal by the node, so the LKG record stays).
 		if output != nil && engine == xrayEngine {
-			if ff := sniffingFindings(output, nodes); len(ff) > 0 {
-				// Report-only rules in the fallback that are all that needs the
-				// sniffing are shed, not the whole fallback.
-				if shed, why, ok := shedObserve(output, nodes, engine, 0); ok && why == shedSniffing {
-					output, fallbackShed = shed, why
-					shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)})
-					ff = nil
-				}
+			var info sniffRestriction
+			output, info = restrictForSniffing(output, nodes, engine)
+			if info.observe {
+				fallbackShed = shedSniffing
+				shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)})
 			}
-			if output == nil {
-				// Shedding emptied the fallback: nothing left to check.
-			} else if ff := sniffingFindings(output, nodes); len(ff) > 0 {
-				output = nil
-				res0 := s.issuesFor(domain.DestFallbackSniffing, meta, desiredDigest, nil, ff)
-				fallbackIssues = append(fallbackIssues, res0...)
+			if len(perListenerSniffFindings(output, nodes)) > 0 {
+				log.Error("destpolicy: a restricted fallback still needs sniffing an inbound cannot supply; sending none", "agent_id", in.AgentID)
+				output, fallbackShed = nil, ""
 			}
 		}
 		if result != ResultInvalid {
 			switch reason {
 			case domain.DestFallbackRejected:
 				result = ResultFallbackReject
-			case domain.DestFallbackSniffing:
-				result = ResultFallbackSniff
 			default:
 				result = ResultFallbackLimit
 			}
@@ -498,7 +515,8 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	}
 
 	res := Result{Policy: output, Digest: outDigest}
-	res.Issues = s.issuesFor(reason, meta, desiredDigest, overLimit, findings)
+	res.Issues = s.issuesFor(reason, meta, desiredDigest, overLimit)
+	res.Issues = append(res.Issues, sniffIssues(findings)...)
 	res.Issues = append(res.Issues, fallbackIssues...)
 	res.Issues = append(res.Issues, shedNote...)
 	if lkgDropped {
@@ -525,7 +543,7 @@ func (s *Service) rememberDigest(digest string, cb *cachedBase) {
 // last-seen time), so they stay open exactly as long as the condition does.
 // Nothing in them names a user or a destination.
 func (s *Service) issuesFor(reason domain.DestFallbackReason, meta *domain.DestAgentPolicy, desiredDigest string,
-	over *domain.DestPublishError, findings []sniffFinding) []domain.NodeAgentIssue {
+	over *domain.DestPublishError) []domain.NodeAgentIssue {
 	short := desiredDigest
 	if len(short) > 12 {
 		short = short[:12]
@@ -536,12 +554,6 @@ func (s *Service) issuesFor(reason domain.DestFallbackReason, meta *domain.DestA
 		// number that moves with every roster change would open a new issue each
 		// time. The figures are in the status.
 		return []domain.NodeAgentIssue{{Code: IssueOverLimit, Detail: over.Kind + " over limit"}}
-	case domain.DestFallbackSniffing:
-		out := make([]domain.NodeAgentIssue, 0, len(findings))
-		for _, f := range findings {
-			out = append(out, domain.NodeAgentIssue{Code: IssueSniffInsufficient, Key: f.Listener, Detail: f.Reason})
-		}
-		return out
 	case domain.DestFallbackRejected:
 		if meta.ReportedIssue == IssueSniffInsufficient && meta.ReportedListeners != "" {
 			var keys []string
@@ -556,6 +568,17 @@ func (s *Service) issuesFor(reason domain.DestFallbackReason, meta *domain.DestA
 		return []domain.NodeAgentIssue{{Code: IssueRejected, Detail: "digest " + short}}
 	}
 	return nil
+}
+
+// sniffIssues are the inbounds that cannot run the policy's domain and protocol
+// rules, one issue each. The node still runs everything else; the issue is what
+// the status page flags.
+func sniffIssues(findings []sniffFinding) []domain.NodeAgentIssue {
+	out := make([]domain.NodeAgentIssue, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, domain.NodeAgentIssue{Code: IssueSniffInsufficient, Key: f.Listener, Detail: f.Reason})
+	}
+	return out
 }
 
 // Why report-only rules were shed.
@@ -612,6 +635,9 @@ func groupSubjectSlack(p *protocol.DestinationPolicy, tagMatched map[int64]int) 
 // as assemble has it), recording level re-derived because an observe rule is
 // one of the things that records.
 func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
+	if p == nil {
+		return nil
+	}
 	out := &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}, Exempt: slices.Clone(p.Exempt)}
 	for _, r := range p.Rules {
 		if !sheddable(r) {
@@ -627,37 +653,26 @@ func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
 
 // shedObserve drops p's observe rules when, and only when, they are what keeps
 // the policy from being deployed on this node: a limit it passes only because of
-// them, or sniffing the inbounds cannot supply only for them. It reports
-// ok=false (and p unchanged) when there is nothing to shed or when the enforced
-// rules alone would still not deploy, which is today's fallback.
-func shedObserve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string, extraSubjects int) (*protocol.DestinationPolicy, string, bool) {
+// them. It reports ok=false (and p unchanged) when there is nothing to shed or
+// when the enforced rules alone would still not deploy, which is today's
+// fallback. (Sniffing is not a reason: see restrictForSniffing.)
+func shedObserve(p *protocol.DestinationPolicy, extraSubjects int) (*protocol.DestinationPolicy, string, bool) {
 	if p == nil || !slices.ContainsFunc(p.Rules, sheddable) {
 		return p, "", false
-	}
-	sniffs := func(q *protocol.DestinationPolicy) bool {
-		return q != nil && engine == xrayEngine && len(sniffingFindings(q, nodes)) > 0
 	}
 	usageOver := func(q *protocol.DestinationPolicy) bool {
 		u := usageOf(q)
 		u.Subjects += extraSubjects
 		return u.over() != nil
 	}
-	over := usageOver(p)
-	// Sniffing is prechecked only inside the limits, as for any policy.
-	why := ""
-	switch {
-	case over:
-		why = shedLimit
-	case sniffs(p):
-		why = shedSniffing
-	default:
+	if !usageOver(p) {
 		return p, "", false
 	}
 	enf := enforcedOnly(p)
-	if enf != nil && (usageOver(enf) || sniffs(enf)) {
+	if enf != nil && usageOver(enf) {
 		return p, "", false
 	}
-	return enf, why, true
+	return enf, shedLimit, true
 }
 
 // sniffNeed is what the policy needs the core's sniffer to supply.

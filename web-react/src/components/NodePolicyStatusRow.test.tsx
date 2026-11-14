@@ -15,7 +15,8 @@ const node = (over: Partial<DestNodeStatus> = {}): DestNodeStatus => ({
 })
 
 const STATES: Partial<DestNodeStatus>[] = [
-  { state: 'applied' }, { state: 'applied', engine: 'sing-box' }, { state: 'pending', pending_since: NOW - 1000 },
+  { state: 'applied' }, { state: 'applied', engine: 'sing-box' },
+  { state: 'applied', sniffing_insufficient: [{ listener: 'l', label: 'vless-443', node_id: 7 }] }, { state: 'pending', pending_since: NOW - 1000 },
   { state: 'pending', pending_since: NOW - 11 * 60_000 }, { state: 'rejected' },
   { state: 'sniffing', sniffing_insufficient: [{ listener: 'l', label: 'vless-443', node_id: 7 }] },
   { state: 'over_limit', over_limit: { kind: 'domains', used: 57312, limit: 50000 } }, { state: 'unsupported_version' },
@@ -52,6 +53,18 @@ describe('NodePolicyStatusRow', () => {
     renderAccess(<NodePolicyStatusRow node={node({ state: 'sniffing', sniffing_insufficient: [{ listener: 'l', label: 'vless-443', node_id: 7 }] })}
       variant="block" now={NOW} onOpenInbound={onOpenInbound} />)
     expect(screen.getAllByText(/vless-443/).length).toBeGreaterThan(1)
+    fireEvent.click(screen.getByRole('button', { name: '修改入站' }))
+    expect(onOpenInbound).toHaveBeenCalledWith(7)
+  })
+
+  it('applied with inbounds that cannot sniff: flagged, says what does not run, and links to the inbound', () => {
+    const onOpenInbound = vi.fn()
+    renderAccess(<NodePolicyStatusRow node={node({ sniffing_insufficient: [{ listener: 'l', label: 'vless-443', node_id: 7 }, { listener: 'm', label: 'vless-8443', node_id: 8 }] })}
+      variant="block" now={NOW} onOpenInbound={onOpenInbound} />)
+    expect(screen.getByTestId('node-state-badge').getAttribute('data-state')).toBe('applied_sniffing')
+    expect(screen.getByTestId('node-state-badge').textContent).toBe('已生效 · 部分入站嗅探不足')
+    expect(screen.getByText('2 个入站的嗅探不足：域名与协议规则（如 BT）在这些入站上不生效')).toBeTruthy()
+    expect(screen.getByText(/vless-443、vless-8443/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '修改入站' }))
     expect(onOpenInbound).toHaveBeenCalledWith(7)
   })
@@ -107,7 +120,7 @@ describe('the recording line of a row (2c)', () => {
 
 describe('report-only rules not deployed', () => {
   it.each([
-    ['sniffing', '该节点入站的嗅探无法支持仅报告规则，已只下发拦截规则'],
+    ['sniffing', '部分入站的嗅探无法支持仅报告规则，这些入站上未执行仅报告规则'],
     ['limit', '超出规则预算，仅报告规则未下发'],
   ] as const)('%s says so, on the row and in the block, and nothing is said when it is null', (why, words) => {
     const r = renderAccess(<NodePolicyStatusRow node={node({ report_only_not_deployed: why })} variant="row" now={NOW} />)

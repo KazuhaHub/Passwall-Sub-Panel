@@ -570,6 +570,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 
 	var policy *protocol.DestinationPolicy
 	var names map[string]TestStep
+	var snapNodes []*domain.Node
 	if st.PublishedGeneration > 0 {
 		cb, err := a.Service.baseFor(ctx, st.PublishedGeneration)
 		if err != nil {
@@ -588,6 +589,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 			for _, n := range snap.Nodes {
 				if n != nil {
 					view.nodeIDs[n.ID] = true
+					snapNodes = append(snapNodes, n)
 				}
 			}
 			seen := map[int64]bool{}
@@ -607,6 +609,11 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 			}
 		}
 		policy = cb.base.assemble(view)
+		if len(snapNodes) > 0 {
+			// What this node is actually sent: the rules that need the sniffer run
+			// only on the inbounds that can supply it.
+			policy, _ = restrictForSniffing(policy, snapNodes, a.engineOf(ctx, panelID))
+		}
 		names = describeRules(cb)
 	}
 
@@ -639,7 +646,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		case s.Builtin != "":
 			step.Kind = "builtin"
 		default:
-			info := names[s.RuleID]
+			info := stepInfo(names, s.RuleID)
 			step.Kind, step.ReportOnly, step.PolicyID, step.NodeID, step.Name = info.Kind, info.ReportOnly, info.PolicyID, info.NodeID, info.Name
 		}
 		res.Steps = append(res.Steps, step)

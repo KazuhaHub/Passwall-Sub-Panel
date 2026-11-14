@@ -656,9 +656,8 @@ var (
 // Compile counts once per node per sync, labelled by the CLOSED set of results
 // (service/destpolicy): cache_hit (nothing changed, answered from memory),
 // compiled (a fresh policy was built and sent), fallback_rejected /
-// fallback_sniffing / fallback_over_limit (the node runs the last policy that
-// applied, trimmed, because it refused the new one, its inbounds cannot sniff
-// what the policy needs, or the policy is too large for it), fallback_nil (the
+// fallback_over_limit (the node runs the last policy that applied, trimmed,
+// because it refused the new one or the policy is too large for it), fallback_nil (the
 // same, with no last policy to run: the node got none) and invalid (the policy
 // compiled for the node failed validation: a bug, never an admin's mistake).
 // Publish counts each publication by what triggered it: debounced (the edits
@@ -675,7 +674,6 @@ const (
 	DestCompileCacheHit       = "cache_hit"
 	DestCompileCompiled       = "compiled"
 	DestCompileFallbackReject = "fallback_rejected"
-	DestCompileFallbackSniff  = "fallback_sniffing"
 	DestCompileFallbackLimit  = "fallback_over_limit"
 	DestCompileFallbackNil    = "fallback_nil"
 	DestCompileInvalid        = "invalid"

@@ -65,7 +65,10 @@ type NodeState struct {
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
 	// State is none, paused, unsupported_kind, not_enrolled, unsupported_version, pending,
-	// applied, rejected, over_limit, sniffing or offline.
+	// applied, rejected, over_limit, sniffing or offline. "sniffing" is only the
+	// node refusing the policy for its sniffing; inbounds the PANEL found unable
+	// to sniff leave the state as it is and fill sniffing_insufficient, because
+	// the node runs everything else.
 	State          string                   `json:"state"`
 	FallbackReason string                   `json:"fallback_reason"`
 	OverLimit      *domain.DestPublishError `json:"over_limit"`
@@ -334,8 +337,11 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 			ns.State = "offline"
 		case row.FallbackReason == domain.DestFallbackOverLimit:
 			ns.State = "over_limit"
-		case row.FallbackReason == domain.DestFallbackSniffing ||
-			(row.FallbackReason == domain.DestFallbackRejected && row.ReportedIssue == IssueSniffInsufficient):
+		case row.FallbackReason == domain.DestFallbackRejected && row.ReportedIssue == IssueSniffInsufficient:
+			// The NODE refused the policy for sniffing the panel's own check let
+			// through; PSP itself sends a policy restricted to the inbounds that
+			// can sniff and leaves the state at applied (sniffing_insufficient
+			// then lists the inbounds).
 			ns.State = "sniffing"
 		case row.FallbackReason == domain.DestFallbackRejected:
 			ns.State = "rejected"

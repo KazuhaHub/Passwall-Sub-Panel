@@ -506,9 +506,16 @@ func TestStatus_StatesAndRuleDataVersion(t *testing.T) {
 		t.Fatalf("rejected: %+v", n)
 	}
 	bad := fleet{panelID: 9, nodes: []*domain.Node{node(1, `{"enabled":true,"destOverride":["http"]}`)}, users: []int64{10}}
-	ah.compile(bad)
-	if n := get(); n.State != "sniffing" || len(n.Sniffing) != 1 || n.Sniffing[0].NodeID != 1 {
+	// An inbound that cannot sniff is not a state of its own any more: the node
+	// is sent what it can enforce and reads as pending, then applied, with the
+	// inbound still listed (the page flags it).
+	weak := ah.compile(bad)
+	if n := get(); n.State != "pending" || n.FallbackReason != "" || len(n.Sniffing) != 1 || n.Sniffing[0].NodeID != 1 {
 		t.Fatalf("sniffing: %+v", n)
+	}
+	ah.observe(applied(weak.Digest))
+	if n := get(); n.State != "applied" || len(n.Sniffing) != 1 || n.Sniffing[0].NodeID != 1 {
+		t.Fatalf("sniffing, applied: %+v", n)
 	}
 	if err := ah.svc.SetPaused(ctx, true); err != nil {
 		t.Fatal(err)

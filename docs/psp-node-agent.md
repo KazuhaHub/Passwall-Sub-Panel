@@ -913,10 +913,10 @@ type PolicyStatus struct {
 ### 11.4 PSP 侧 issue 码
 
 除协议里的两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`）外，PSP 自己记两个：
-`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_report_only_not_deployed`（仅报告规则因嗅探不足或额度被去掉，开启的规则不受影响）。
+`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_report_only_not_deployed`（仅报告规则因额度被去掉，或在嗅探不足的入站上被限定/去掉，开启的规则不受影响）。
 用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等）。内容只有摘要前缀、入站键和额度数字，不含用户或目的地。
 
 ### 11.5 嗅探
 
 PSP 与 Node 共用 `protocol.CheckXraySniffing(raw, need)`（Xray 入站的 `sniffing` 对象）：`SniffInject`（关闭，节点注入）、`SniffOK`、`SniffInsufficient`（带原因）。
-注入的对象是 `protocol.XraySniffingInjection()`（`routeOnly:false`）原样写入。PSP 只对 Xray 预检；sing-box 的 sniff 在 `route.rules` 里，由节点编译器生成。
+注入的对象是 `protocol.XraySniffingInjection()`（`routeOnly:false`）原样写入。PSP 只对 Xray 检查；sing-box 的 sniff 在 `route.rules` 里，由节点编译器生成。节点按监听器检查（只看适用于该监听器的规则），PSP 据此把需要嗅探的规则用 `Inbounds` 限定到够用的入站，而不是整份不发（见 [access-control.md](access-control.md) §4.2 第 7 条）。

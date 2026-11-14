@@ -1,6 +1,7 @@
 package destpolicy
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -34,31 +35,41 @@ func TestFallback_ACoreVersionChangeAloneRetriesTheRefusedPolicy(t *testing.T) {
 	}
 }
 
-// Sniffing on an inbound becomes insufficient after the LKG applied: the fallback is the LKG,
-// whose domain rules need exactly the sniffing that is now missing.
-func TestFallback_TheFallbackMustPassTheSniffingPrecheckToo(t *testing.T) {
+// Sniffing on an inbound becomes insufficient after the LKG applied. The new
+// policy is not held back for it (no fallback): it is sent restricted to the
+// inbound that can sniff, and the LKG record is untouched until the node
+// applies something else. If the node then refuses it, the fallback is the LKG
+// restricted the same way, since its domain rules need exactly the sniffing
+// that is now missing on lst_2.
+func TestFallback_TheFallbackIsRestrictedForSniffingToo(t *testing.T) {
 	h, a, first := withLKG(t)
 	h.editPolicy(a, "DOMAIN-SUFFIX,b.example.com")
 	bad := base1()
 	bad.nodes[1].Sniffing = `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`
 	res := h.compile(bad)
-	if res.Digest == first.Digest || res.Policy != nil {
-		t.Fatalf("the sniffing fallback is the LKG %.12s, whose domain rules fail the same precheck (rules %v)", first.Digest, ruleIDs(res.Policy))
+	if res.Digest == first.Digest || res.Policy == nil || !slices.Equal(res.Policy.Rules[0].Inbounds, []protocol.ListenerKey{"lst_1"}) {
+		t.Fatalf("the new policy must go out, restricted to lst_1 (rules %+v)", res.Policy)
 	}
-	// The LKG is not refused by the node; it just cannot apply now.
-	if m := h.meta(); m.AppliedSHA256 != first.Digest {
-		t.Fatalf("the LKG record was dropped: %+v", m)
+	if m := h.meta(); m.AppliedSHA256 != first.Digest || m.FallbackReason != "" {
+		t.Fatalf("the LKG record must stay and nothing is a fallback: %+v", m)
 	}
-	found := false
-	for _, is := range res.Issues {
-		found = found || (is.Code == IssueSniffInsufficient && is.Key == "lst_2")
-	}
-	if !found {
+	if !hasSniffIssue(res, "lst_2") {
 		t.Fatalf("issues = %+v", res.Issues)
 	}
-	// Fixed: the LKG is still there to fall back to.
-	if again := h.compile(base1()); again.Policy == nil {
-		t.Fatal("not recovered")
+	// The node refuses it: the fallback is the LKG, restricted.
+	h.observe(rejected(res.Digest))
+	fb := h.compile(bad)
+	if fb.Policy == nil || fb.Digest == res.Digest || fb.Digest == first.Digest ||
+		!slices.Equal(fb.Policy.Rules[0].Inbounds, []protocol.ListenerKey{"lst_1"}) || !slices.Contains(fb.Policy.Rules[0].Domains, "domain:a.example.com") {
+		t.Fatalf("fallback = %+v", fb.Policy)
+	}
+	if err := protocol.ValidateDestinationPolicy(fb.Policy); err != nil {
+		t.Fatal(err)
+	}
+	// Fixed: the refusal was of the restricted bytes and the context changed, so
+	// the desired policy is tried again, unrestricted.
+	if again := h.compile(base1()); again.Policy == nil || len(again.Policy.Rules[0].Inbounds) != 0 || !slices.Contains(again.Policy.Rules[0].Domains, "domain:b.example.com") {
+		t.Fatalf("not recovered: %+v", again.Policy)
 	}
 }
 

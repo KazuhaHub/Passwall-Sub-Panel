@@ -80,7 +80,7 @@ type SettingsReader interface {
 // Metrics is where the service reports what it did. Every field may be nil.
 type Metrics struct {
 	// Compile is told the result of each Compile call: "cache_hit",
-	// "compiled", "fallback_rejected", "fallback_sniffing",
+	// "compiled", "fallback_rejected",
 	// "fallback_over_limit", "fallback_nil" or "invalid".
 	Compile func(result string)
 	// CompileDuration is told how long a full (non-cached) compile took.
@@ -124,7 +124,6 @@ const (
 	ResultCacheHit        = "cache_hit"
 	ResultCompiled        = "compiled"
 	ResultFallbackReject  = "fallback_rejected"
-	ResultFallbackSniff   = "fallback_sniffing"
 	ResultFallbackLimit   = "fallback_over_limit"
 	ResultFallbackNil     = "fallback_nil"
 	ResultInvalid         = "invalid"
