@@ -317,7 +317,7 @@ func (s *Service) queueCounts(ctx context.Context, w readWindow, all map[int64]*
 // it) and so is every risk kind.
 func globalDetectorsOff(w readWindow) bool {
 	return domain.GeoPolicyFromSettings(w.set.GeoPolicySettings()).Scope == domain.GeoScopeOff &&
-		w.set.RiskSubSpreadOff && w.set.RiskDevicesOff && w.set.RiskUsageShiftOff && w.set.RiskLoginCountryOff
+		w.set.RiskSubSpreadOff && w.set.RiskDevicesOff && w.set.RiskUsageShiftOff && w.set.RiskLoginCountryOff && w.set.RiskDestBlockOff
 }
 
 // explain loads what the page's rows show beside their levels: each geo

@@ -1288,7 +1288,12 @@ func TestDestPolicyRepo_EditsTheCompilerCannotSeeDoNotBump(t *testing.T) {
 	if err := repos.Policies.Update(ctx, cur, nil); err != nil || destGeneration(t, repos, ctx) != g+1 {
 		t.Fatalf("a state change must bump: %v generation %d", err, destGeneration(t, repos, ctx))
 	}
+	// counts_as_risk is read by the risk signal only: it does not bump.
 	cur.CountsAsRisk = true
+	if err := repos.Policies.Update(ctx, cur, nil); err != nil || destGeneration(t, repos, ctx) != g+1 {
+		t.Fatalf("a counts_as_risk edit must not bump: %v generation %d", err, destGeneration(t, repos, ctx))
+	}
+	cur.Inline.Ports = "26"
 	if err := repos.Policies.Update(ctx, cur, nil); err != nil || destGeneration(t, repos, ctx) != g+2 {
 		t.Fatalf("a compiled field must bump: %v", err)
 	}
@@ -1452,5 +1457,31 @@ func TestDestListRepo_ApplyBatchRecordsTheGeositeRelease(t *testing.T) {
 	}
 	if st, _ := repos.State.Get(ctx); st.GeositeRelease != "20261101000000" {
 		t.Fatalf("release after a failed batch %q", st.GeositeRelease)
+	}
+}
+
+// counts_as_risk is read by the risk signal, never by the compiler: an edit of
+// only that flag must not republish (and so must not restart a core).
+func TestPolicyUpdate_OnlyCountsAsRiskDoesNotBumpTheGeneration(t *testing.T) {
+	repos, _, ctx := newDestRepos(t)
+	if err := repos.Policies.Create(ctx, testPolicy("p", domain.DestActionBlock)); err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := repos.Policies.GetByName(ctx, "p")
+	g0 := destGeneration(t, repos, ctx)
+	pol.CountsAsRisk = true
+	if err := repos.Policies.Update(ctx, pol, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := destGeneration(t, repos, ctx); got != g0 {
+		t.Fatalf("a counts_as_risk-only edit moved the generation %d -> %d", g0, got)
+	}
+	back, _ := repos.Policies.GetByID(ctx, pol.ID)
+	if !back.CountsAsRisk {
+		t.Fatal("the flag was not stored")
+	}
+	pol.Inline.Ports = "25"
+	if err := repos.Policies.Update(ctx, pol, nil); err != nil || destGeneration(t, repos, ctx) != g0+1 {
+		t.Fatalf("a compiled change must bump: %v", err)
 	}
 }

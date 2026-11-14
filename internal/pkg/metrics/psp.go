@@ -714,6 +714,91 @@ var (
 )
 
 // ---------------------------------------------------------------------
+// Destination-rule hit recording — answers "are the hits a node reports
+// reaching the table, and when they are not, where are they lost?".
+//
+// Every label value is a member of a CLOSED set, and none is ever a
+// destination, a user, an agent or a policy: a hit's content must not reach a
+// metrics endpoint, nor a log line (a counter says THAT rows were lost, never
+// what they were).
+//
+// psp_node_audit_report_total counts each report's audit subtree once, by what
+// became of it:
+//
+//	accepted         valid, new, queued for the ingest worker
+//	oversized        the raw subtree was over the protocol's byte bound
+//	invalid          it did not decode or did not validate (a count out of
+//	                 range, a malformed destination...): the subtree is dropped
+//	                 and the sync still succeeds
+//	no_capability    the node sent hits without declaring audit.hits.v1
+//	duplicate_batch  the batch id was seen (a re-send): counted once
+//	queue_full       the bounded queue (4 per node, 256 in all) had no room;
+//	                 the batch is lost and counted by its rows
+//	ingest_error     the worker could not store (all of) it
+//
+// psp_dest_audit_rows_total counts hit and usage ROWS by what became of them.
+// The counter vec has one label by design, so kind and outcome are joined:
+//
+//	hits_stored          written to dest_hits
+//	hits_unknown_subject the account no longer exists
+//	hits_out_of_range    the hour was outside [now-48h, now+1h]
+//	hits_over_budget     the node's hourly row budget was spent
+//	usage_collect_off    per-site usage is not collected (tier B is not
+//	                     offered), so the rows are dropped unread
+//
+// The two node counters add up what the node itself reported losing: events it
+// had no room to aggregate (hits, trial rows and usage, together), and events
+// it could not use.
+// ---------------------------------------------------------------------
+
+const (
+	NodeAuditAccepted      = "accepted"
+	NodeAuditOversized     = "oversized"
+	NodeAuditInvalid       = "invalid"
+	NodeAuditNoCapability  = "no_capability"
+	NodeAuditDuplicate     = "duplicate_batch"
+	NodeAuditQueueFull     = "queue_full"
+	NodeAuditIngestError   = "ingest_error"
+	DestRowsHitsStored     = "hits_stored"
+	DestRowsHitsUnknown    = "hits_unknown_subject"
+	DestRowsHitsOutOfRange = "hits_out_of_range"
+	DestRowsHitsOverBudget = "hits_over_budget"
+	DestRowsUsageCollOff   = "usage_collect_off"
+
+	DestPruneHits       = "hits"
+	DestPruneTrial      = "trial"
+	DestPruneBatches    = "batches"
+	DestPruneExemptions = "exemptions"
+	DestPruneOrphans    = "orphans"
+)
+
+var (
+	NodeAuditReportTotal = NewCounterVec(
+		"psp_node_audit_report_total",
+		"Node audit (hit) reports handled, by outcome.",
+		"outcome",
+	)
+	DestAuditRowsTotal = NewCounterVec(
+		"psp_dest_audit_rows_total",
+		"Destination-rule hit and usage rows received, by kind and outcome.",
+		"outcome",
+	)
+	DestAuditNodeDroppedTotal = NewCounter(
+		"psp_dest_audit_node_dropped_total",
+		"Events nodes reported they had no room to aggregate (hits, trial rows and usage).",
+	)
+	DestAuditNodeUnmatchedTotal = NewCounter(
+		"psp_dest_audit_node_unmatched_total",
+		"Events and rows nodes reported they could not use (unparseable, no account, or an unknown rule).",
+	)
+	DestPrunedRowsTotal = NewCounterVec(
+		"psp_dest_pruned_rows_total",
+		"Destination-policy rows removed by retention, by table.",
+		"table",
+	)
+)
+
+// ---------------------------------------------------------------------
 // SAML ACS refusals — answers "is this refusal an attack, an outage, or a bad
 // configuration?" Those three need different responses and, before this counter,
 // all arrived as a single reason code.

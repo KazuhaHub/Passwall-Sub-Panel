@@ -70,6 +70,12 @@ type Template struct {
 	Ports     string   `json:"ports,omitempty"`
 	Network   string   `json:"network,omitempty"`
 	Private   bool     `json:"private,omitempty"`
+	// CountsAsRisk is the default of the policy the template creates: its
+	// enforced blocks feed the dest_block risk signal. True only where a hit is
+	// evidence of misuse by the account (BitTorrent, outbound mail ports); false
+	// where it is not (category lists, the private-address match, which a node
+	// blocks anyway).
+	CountsAsRisk bool `json:"counts_as_risk,omitempty"`
 }
 
 // Unavailable is a group the admin may look for and cannot have, with why.
@@ -272,8 +278,7 @@ func cloneTemplate(t Template) Template {
 // Instantiate adds a template: it prepares the geosite lists the template
 // covers (downloading the geosite data first if there is none), then creates
 // the lists — reusing identical ones — and the policy in one transaction. The
-// admin chooses the state; there is no default, and report is refused until
-// the hit recording that makes it useful exists. A group listed as unavailable
+// admin chooses the state (off, report or on); there is no default. A group listed as unavailable
 // creates nothing.
 func (s *Service) Instantiate(ctx context.Context, key, locale string, state domain.DestState) (*domain.DestPolicy, error) {
 	if _, ok := s.catalog.unavailable(key); ok {
@@ -283,8 +288,8 @@ func (s *Service) Instantiate(ctx context.Context, key, locale string, state dom
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTemplate, key)
 	}
-	if !domain.DestStateSelectable(state) {
-		return nil, fmt.Errorf("%w: the state must be off or on", domain.ErrValidation)
+	if !state.Valid() {
+		return nil, fmt.Errorf("%w: the state must be off, report or on", domain.ErrValidation)
 	}
 	var specs []domain.DestList
 	if len(t.Geosite) > 0 {
@@ -310,7 +315,7 @@ func (s *Service) Instantiate(ctx context.Context, key, locale string, state dom
 	}
 	p := &domain.DestPolicy{
 		Name: t.Name.pick(locale), Description: t.Description.pick(locale), Action: domain.DestActionBlock,
-		State: state, Scope: domain.DestScopeAll, TemplateKey: t.Key,
+		State: state, Scope: domain.DestScopeAll, TemplateKey: t.Key, CountsAsRisk: t.CountsAsRisk,
 		Inline: domain.DestPolicyInline{Ports: t.Ports, Network: t.Network, Protocols: slices.Clone(t.Protocols), Private: t.Private},
 	}
 	return s.store.InstantiateTemplate(ctx, specs, p)

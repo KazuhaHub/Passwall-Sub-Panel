@@ -1314,6 +1314,13 @@ type Panel struct {
 	// with an Enforcing state is how a node that lost fail2ban stays visible.
 	IPLimitEnforcement IPLimitEnforcement
 	IPLimitProbedAt    *time.Time
+
+	// AuditCollect is how much this Passwall Node server records of what its
+	// destination rules did. Only meaningful for Kind == psp. It is written
+	// ONLY through the native-metadata writer: a whole-row Save never touches it
+	// (an admin editing the server's credentials must not reset a privacy
+	// choice), and Create normalises empty to the default.
+	AuditCollect AuditCollect
 }
 
 // XUIPanel is a compatibility alias. New code should use Panel; retaining the

@@ -73,6 +73,8 @@ type NodeSyncHandler struct {
 	drops hostDropLog
 	// policyDrops is the same throttle for the policy status.
 	policyDrops hostDropLog
+	// auditDrops is the same throttle for the audit (hit) subtree.
+	auditDrops hostDropLog
 }
 
 // hostDropLogInterval is how often one agent's telemetry failure may be logged.
@@ -196,17 +198,20 @@ func (h *NodeSyncHandler) recordHostDrop(agentID, reason string) {
 }
 
 // nodeReportWire is the report as it is decoded off the wire: the typed
-// NodeReport with the policy status held back as raw bytes.
+// NodeReport with the policy status and the audit subtree held back as raw
+// bytes.
 //
-// Both fields are named policy_status, and encoding/json resolves the SHALLOWER
-// one, so the typed field of the embedded NodeReport is never reached by the
-// decoder and a status that is the wrong shape (a number for a digest, a string
-// for the object) cannot fail the decode of the whole report. The raw bytes are
-// then decoded, validated and capability-checked on their own, in
-// sanitizePolicyStatus, where any failure costs the status and nothing else.
+// Each field is named like the typed one it shadows, and encoding/json resolves
+// the SHALLOWER one, so the typed fields of the embedded NodeReport are never
+// reached by the decoder and a subtree that is the wrong shape (a number for a
+// digest, a port of 70000, a count that is a string) cannot fail the decode of
+// the whole report. The raw bytes are then measured, decoded, validated and
+// capability-checked on their own, in sanitizePolicyStatus and sanitizeAudit,
+// where any failure costs the subtree and nothing else.
 type nodeReportWire struct {
 	nodeprotocol.NodeReport
 	PolicyStatus json.RawMessage `json:"policy_status,omitempty"`
+	Audit        json.RawMessage `json:"audit,omitempty"`
 }
 
 // maxPolicyStatusBytes bounds the raw status. The protocol's own bounds
@@ -251,6 +256,50 @@ func (h *NodeSyncHandler) sanitizePolicyStatus(raw json.RawMessage, capabilities
 	return &status
 }
 
+// sanitizeAudit decodes and validates the audit (hit) subtree and returns nil
+// for one that is absent or unusable.
+//
+// DROPPING IS THE WHOLE POINT, as for the status and the host telemetry: a
+// subtree that is oversized, does not decode, fails ValidateAuditObservation or
+// arrives without audit.hits.v1 costs the panel a counter and the node one
+// batch, and the sync answers normally with the roster and config intact.
+//
+// The raw size is measured BEFORE the struct is trusted (a decoded struct has
+// forgotten what an unknown additive field weighed). Usage rows additionally
+// need audit.usage.v1 and are removed without it, the hits beside them kept.
+//
+// Nothing the subtree held is logged: a drop is a counter and an agent id.
+func (h *NodeSyncHandler) sanitizeAudit(raw json.RawMessage, capabilities []string, agentID string) *nodeprotocol.AuditObservation {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	drop := func(outcome string) *nodeprotocol.AuditObservation {
+		metrics.NodeAuditReportTotal.With(outcome).Inc()
+		if h.auditDrops.shouldLog(agentID, time.Now()) {
+			log.Warn("node audit batch dropped", "agent_id", agentID, "reason", outcome)
+		}
+		return nil
+	}
+	if len(raw) > nodeprotocol.MaxAuditObservationBytes {
+		return drop(metrics.NodeAuditOversized)
+	}
+	var observation nodeprotocol.AuditObservation
+	if err := json.Unmarshal(raw, &observation); err != nil {
+		return drop(metrics.NodeAuditInvalid)
+	}
+	if err := nodeprotocol.ValidateAuditObservation(observation); err != nil {
+		return drop(metrics.NodeAuditInvalid)
+	}
+	if !slices.Contains(capabilities, nodeprotocol.CapabilityAuditHits) {
+		return drop(metrics.NodeAuditNoCapability)
+	}
+	if !slices.Contains(capabilities, nodeprotocol.CapabilityAuditUsage) {
+		observation.Usage = nil
+	}
+	return &observation
+}
+
 func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost || request.URL.Path != "/v1/node/sync" {
 		http.NotFound(w, request)
@@ -286,7 +335,7 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 	report := wire.NodeReport
-	report.PolicyStatus = nil
+	report.PolicyStatus, report.Audit = nil, nil
 	if report.AgentID != agentID {
 		writeNodeError(w, http.StatusUnauthorized, ErrNodeAuthentication)
 		return
@@ -320,6 +369,8 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	// a report that is wrong about its roster is still refused outright, and
 	// one whose status is wrong keeps everything but the status.
 	report.PolicyStatus = h.sanitizePolicyStatus(wire.PolicyStatus, report.Capabilities, agentID)
+	// The audit subtree the same way: after the control half, on its own.
+	report.Audit = h.sanitizeAudit(wire.Audit, report.Capabilities, agentID)
 	response, err := h.service.Sync(request.Context(), report)
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this

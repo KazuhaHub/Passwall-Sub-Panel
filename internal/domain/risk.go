@@ -28,12 +28,15 @@ const (
 	// RiskKindLoginCountry — a panel login from a country the account's
 	// subscription fetches have not established.
 	RiskKindLoginCountry RiskKind = "login_country"
+	// RiskKindDestBlock: blocked connections to destinations an admin counts
+	// as risk, over the last 24 hours.
+	RiskKindDestBlock RiskKind = "dest_block"
 )
 
 // RiskKinds is every kind in display order — the admin table's column order,
 // and the order the API returns each account's signals in.
 func RiskKinds() []RiskKind {
-	return []RiskKind{RiskKindSubSpread, RiskKindDevices, RiskKindUsageShift, RiskKindLoginCountry}
+	return []RiskKind{RiskKindSubSpread, RiskKindDevices, RiskKindUsageShift, RiskKindLoginCountry, RiskKindDestBlock}
 }
 
 // RiskCode names the branch behind one signal's verdict, the way
@@ -70,6 +73,10 @@ const (
 	RiskCodeLearning       RiskCode = "learning"
 	RiskCodeNewCountry     RiskCode = "new_country"
 	RiskCodeKnownCountries RiskCode = "known_countries"
+	// dest_block's two own codes: no node of the account is recording hits,
+	// and none were blocked.
+	RiskCodeNoCollector RiskCode = "no_collector"
+	RiskCodeNoHits      RiskCode = "no_hits"
 )
 
 // AllRiskCodes maps each kind to every code its evaluator can return.
@@ -99,6 +106,10 @@ func AllRiskCodes() map[RiskKind][]RiskCode {
 			RiskCodeSignalOff, RiskCodeScopeOff, RiskCodeAllowAnywhere, RiskCodeTrusted, RiskCodeNoRecentLogins,
 			RiskCodeGeoUnavailable, RiskCodeUnplaced, RiskCodeLearning,
 			RiskCodeNewCountry, RiskCodeKnownCountries,
+		},
+		RiskKindDestBlock: {
+			RiskCodeSignalOff, RiskCodeNoCollector, RiskCodeNoHits,
+			RiskCodeWithin, RiskCodeOverBuilding, RiskCodeOver,
 		},
 	}
 }

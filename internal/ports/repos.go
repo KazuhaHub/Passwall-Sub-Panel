@@ -1564,6 +1564,12 @@ type UISettings struct {
 	RiskDevicesOff      bool `json:"risk_devices_off"`
 	RiskUsageShiftOff   bool `json:"risk_usage_shift_off"`
 	RiskLoginCountryOff bool `json:"risk_login_country_off"`
+	// RiskDestBlockOff switches the dest_block signal off (false = on), and
+	// RiskDestBlockThreshold is the count of BLOCKED connections in 24 hours at
+	// which it reads flagged (0 = 20, clamped to 1..10000; suspect from half).
+	// Both per-group overridable. Report-only hits never count.
+	RiskDestBlockOff       bool `json:"risk_dest_block_off"`
+	RiskDestBlockThreshold int  `json:"risk_dest_block_threshold"`
 	// RiskMinDays is how many distinct panel-local days of the fetch window a
 	// place or a device must be seen on before it counts as established: a
 	// province or device seen on fewer days can make a signal suspect, never
@@ -1717,6 +1723,15 @@ type UISettings struct {
 	// DestRulesUpdateMode is "manual" (the default: a new geosite release is
 	// only announced) or "auto" (it is downloaded, verified and applied).
 	DestRulesUpdateMode string `json:"dest_rules_update_mode"`
+	// DestHitRetentionDays is how long destination-rule hit records are kept.
+	// Default 30, 1..365. NEVER 0 for "for ever": 0 is the default, because a
+	// browsing record that cannot expire is the thing this key exists to
+	// prevent. The hourly cleanup deletes what is older.
+	DestHitRetentionDays int `json:"dest_hit_retention_days"`
+	// DestTrialRetentionDays is how long the allowlist trial rows (a group's
+	// would-deny, folded to group x site) are kept. Default 7, 1..30, and in
+	// effect never longer than DestHitRetentionDays.
+	DestTrialRetentionDays int `json:"dest_trial_retention_days"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -2058,19 +2073,21 @@ var OverridableScopeKeys = map[string]bool{
 	// live_snapshot_stale_minutes, live_refresh_cooldown_seconds,
 	// device_infer_hours) is absent for the same kind of reason: see
 	// UISettings.
-	"risk.sub_spread_off":      true,
-	"risk.devices_off":         true,
-	"risk.usage_shift_off":     true,
-	"risk.login_country_off":   true,
-	"risk.min_days":            true,
-	"risk.max_devices":         true,
-	"risk.usage_ratio":         true,
-	"risk.usage_floor_gb":      true,
-	"risk.login_warmup_logins": true,
-	"risk.login_hold_days":     true,
-	"risk.usage_warmup_days":   true,
-	"risk.usage_flag_days":     true,
-	"risk.usage_suspect_days":  true,
+	"risk.sub_spread_off":       true,
+	"risk.devices_off":          true,
+	"risk.usage_shift_off":      true,
+	"risk.login_country_off":    true,
+	"risk.dest_block_off":       true,
+	"risk.dest_block_threshold": true,
+	"risk.min_days":             true,
+	"risk.max_devices":          true,
+	"risk.usage_ratio":          true,
+	"risk.usage_floor_gb":       true,
+	"risk.login_warmup_logins":  true,
+	"risk.login_hold_days":      true,
+	"risk.usage_warmup_days":    true,
+	"risk.usage_flag_days":      true,
+	"risk.usage_suspect_days":   true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

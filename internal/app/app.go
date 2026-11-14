@@ -38,6 +38,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
@@ -179,8 +180,12 @@ type App struct {
 	destLists   *destlist.Service
 	destCatalog *destcatalog.Service
 	destPolicy  *destpolicy.Service
-	nativeSync  *nodesync.Service
-	saml        *auth.SAMLService
+	// destAudit is the hit-ingest queue and its worker (the dest-audit-ingest
+	// loop). Without the worker nothing drains the queue and a node's hits are
+	// dropped with the batch: TestBuildStoresAReportedHitBatch.
+	destAudit  *destaudit.Service
+	nativeSync *nodesync.Service
+	saml       *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
 	// misconfig / EACCES) doesn't leave the user staring at a closed
@@ -730,12 +735,26 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Service: destPolicy, Policies: destRepos.Policies, Lists: destRepos.Lists, Counter: destRepos,
 		Groups: repos.Group, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
 		Agents: repos.NodeAgent, Desired: repos.NativeDesired, Settings: repos.Settings,
-		Instantiate: destRepos.InstantiateTemplate, ExceptionEditor: destLists,
+		Instantiate: destRepos.InstantiateTemplate, ExceptionEditor: destLists, Hits: destRepos.Hits,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("destination policy admin: %w", err)
 	}
 	nativeSync.SetPolicies(destPolicy)
+	// The hit ingest: nodesync hands each validated batch to the queue after the
+	// response is built, and the dest-audit-ingest worker (started in Run,
+	// drained on Shutdown) stores them. An unbound sink silently drops every
+	// batch, which is why TestBuildStoresAReportedHitBatch drives one through.
+	destAudit := destaudit.New(destaudit.Deps{
+		Store: destRepos.Hits,
+		Metrics: destaudit.Metrics{
+			Report:        func(outcome string) { metrics.NodeAuditReportTotal.With(outcome).Inc() },
+			Rows:          func(outcome string, n int) { metrics.DestAuditRowsTotal.With(outcome).Add(int64(n)) },
+			NodeDropped:   func(n uint64) { metrics.DestAuditNodeDroppedTotal.Add(int64(n)) },
+			NodeUnmatched: func(n uint64) { metrics.DestAuditNodeUnmatchedTotal.Add(int64(n)) },
+		},
+	})
+	nativeSync.SetAudit(destAudit)
 
 	// --- transport layer ---
 	// The Node installation template is fetched from the release that published it
@@ -802,6 +821,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			Lists: destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
 			Policies: destRepos.Policies, Exemptions: destRepos.Exemptions, SourceRules: destRepos.SourceRules,
 			Users: repos.User, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel, Async: dispatcher,
+			Hits: destRepos.Hits,
 		},
 		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
 		// side of the telemetry the server list already shows, and the field is
@@ -851,6 +871,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists = destLists
 	a.destCatalog = destCatalog
 	a.destPolicy = destPolicy
+	a.destAudit = destAudit
 	a.nativeSync = nativeSync
 	// The observe-only risk signals. The worker is handed read-only views and
 	// one store that writes only risk_signals (and, in the same transaction,
@@ -877,6 +898,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		AuthEvents:   repos.AuthEvent,
 		LandingAddrs: trafficSvc.LandingAddresses,
 		Trust:        riskReviews,
+		// dest_block: the hit table and the recording state of the native
+		// nodes, read-only. Left out it compiles and the signal just never
+		// has a row: TestBuildJudgesDestBlock.
+		Dest: destpolicy.NewRiskView(destpolicy.RiskViewDeps{
+			Hits: destRepos.Hits, Policies: destRepos.Policies, Agents: repos.NodeAgent,
+			Meta: destRepos.Agents, Clients: repos.PSPClient,
+		}),
 	})
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
@@ -1027,6 +1055,11 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "cert-renewal-loop", func() { a.runCertRenewalLoop(bgCtx) })
+	// The hit-ingest worker. On shutdown it finishes the queue on a context that
+	// is not cancelled, so the last batches are stored and not thrown away; that
+	// is why it is tracked and Shutdown waits for it AFTER the server has drained
+	// (the requests still in flight can enqueue until then).
+	safego.GoTracked(&a.bgWG, "dest-audit-ingest", func() { a.destAudit.Run(bgCtx) })
 	safego.GoTracked(&a.bgWG, "dest-list-refresh", func() {
 		a.runDestListRefreshLoop(bgCtx, destRefreshFirstDelay, destRefreshMaxWait)
 	})
@@ -1526,6 +1559,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneDestRows(ctx)
 		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
@@ -1533,6 +1567,67 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// pruneDestRows ages the destination-rule hit records out and deletes what a
+// deleted account or panel left, with pruneConnectionHistory's rules and for its
+// reasons:
+//
+//   - Retention is dest.hit_retention_days (30 by default, 1..365), and the
+//     allowlist trial rows go at dest.trial_retention_days (7, 1..30, never
+//     longer than the hits). 0 is the default and never "for ever": these are
+//     records of where people went. The cutoffs are aligned down to a whole UTC
+//     hour, so a partly-aged hour is never half-deleted.
+//   - An unreadable setting skips the retention pass (with a Warn) rather than
+//     pruning at the default: an admin who keeps a year would lose most of it to
+//     one failed read, and the next hour retries. The orphan purge, which needs
+//     no setting, still runs.
+//   - Batch markers go at a day: they only exist to catch a re-sent batch.
+//
+// Nothing here logs a destination, an account or an address: only counts.
+func (a *App) pruneDestRows(ctx context.Context) {
+	if a.destRepos == nil || a.destRepos.Hits == nil {
+		return
+	}
+	hits := a.destRepos.Hits
+	settingsOK := true
+	var set ports.UISettings
+	if a.settings != nil {
+		loaded, err := a.settings.Load(ctx, ports.UISettings{})
+		if err != nil {
+			log.Warn("destination hit cleanup load settings; retention pass skipped", "err", err)
+			settingsOK = false
+		}
+		set = loaded
+	}
+	count := func(table string, n int64, err error) {
+		switch {
+		case err != nil:
+			log.Warn("destination hit cleanup", "table", table, "err", err)
+		case n > 0:
+			metrics.DestPrunedRowsTotal.With(table).Add(n)
+			log.Info("destination hit cleanup", "table", table, "deleted", n)
+		}
+	}
+	now := time.Now().UTC()
+	if settingsOK {
+		eff := ports.AccessControlEffectiveOf(set)
+		hitCutoff := now.Add(-eff.HitRetention()).Truncate(time.Hour).UnixMilli()
+		trialCutoff := now.Add(-eff.TrialRetention()).Truncate(time.Hour).UnixMilli()
+		// The trial rows first: they are the subset with the shorter life.
+		n, err := hits.PruneTrial(ctx, trialCutoff)
+		count(metrics.DestPruneTrial, n, err)
+		n, err = hits.PruneHits(ctx, hitCutoff)
+		count(metrics.DestPruneHits, n, err)
+		// The loss counters live as long as the hits they qualify.
+		if _, err := hits.PruneDrops(ctx, hitCutoff); err != nil {
+			log.Warn("destination hit cleanup", "table", "drops", "err", err)
+		}
+	}
+	n, err := hits.PruneBatches(ctx, now.Add(-domain.AuditBatchMarkerRetention))
+	count(metrics.DestPruneBatches, n, err)
+	n, err = hits.PruneOrphans(ctx)
+	count(metrics.DestPruneOrphans, n, err)
 }
 
 // runRollup re-emits EVERY hourly bucket (the hourly cleanup loop's

@@ -486,6 +486,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// would break.
 		boolField("risk", "sub_spread_off", &s.RiskSubSpreadOff),
 		boolField("risk", "devices_off", &s.RiskDevicesOff),
+		boolField("risk", "dest_block_off", &s.RiskDestBlockOff),
+		intField("risk", "dest_block_threshold", &s.RiskDestBlockThreshold),
 		boolField("risk", "usage_shift_off", &s.RiskUsageShiftOff),
 		boolField("risk", "login_country_off", &s.RiskLoginCountryOff),
 		intField("risk", "min_days", &s.RiskMinDays),
@@ -531,6 +533,12 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("dest", "policy_apply_min_seconds", &s.DestPolicyApplyMinSeconds),
 		intField("dest", "list_refresh_hours", &s.DestListRefreshHours),
 		strField("dest", "rules_update_mode", &s.DestRulesUpdateMode),
+		// The retention keys are NOT given Load's key-presence default either:
+		// 0 is the shipped default (30 / 7 days) and never "keep for ever"
+		// (ports.AccessControlEffectiveOf), the same rule as
+		// risk.connection_retention_days.
+		intField("dest", "hit_retention_days", &s.DestHitRetentionDays),
+		intField("dest", "trial_retention_days", &s.DestTrialRetentionDays),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

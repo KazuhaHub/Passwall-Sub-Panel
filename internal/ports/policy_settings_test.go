@@ -28,6 +28,7 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		RiskDevicesOff:        true,
 		RiskUsageShiftOff:     true,
 		RiskLoginCountryOff:   true,
+		RiskDestBlockOff:      true,
 		RiskMinDays:           4,
 		RiskMaxDevices:        5,
 		RiskUsageRatio:        2.5,
@@ -37,12 +38,15 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		RiskUsageWarmupDays:   9,
 		RiskUsageFlagDays:     10,
 		RiskUsageSuspectDays:  11,
+
+		RiskDestBlockThreshold: 12,
 	}
 	want := domain.RiskPolicySettings{
 		SubSpreadOff:      true,
 		DevicesOff:        true,
 		UsageShiftOff:     true,
 		LoginCountryOff:   true,
+		DestBlockOff:      true,
 		MinDays:           4,
 		MaxDevices:        5,
 		UsageRatio:        2.5,
@@ -52,6 +56,8 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		UsageWarmupDays:   9,
 		UsageFlagDays:     10,
 		UsageSuspectDays:  11,
+
+		DestBlockThreshold: 12,
 	}
 	got := s.RiskPolicySettings()
 	if got != want {
@@ -73,6 +79,7 @@ func TestUISettings_RiskPolicySettingsCarriesEveryRiskKnob(t *testing.T) {
 		{"devices", UISettings{RiskDevicesOff: true}, domain.RiskPolicySettings{DevicesOff: true}},
 		{"usage_shift", UISettings{RiskUsageShiftOff: true}, domain.RiskPolicySettings{UsageShiftOff: true}},
 		{"login_country", UISettings{RiskLoginCountryOff: true}, domain.RiskPolicySettings{LoginCountryOff: true}},
+		{"dest_block", UISettings{RiskDestBlockOff: true}, domain.RiskPolicySettings{DestBlockOff: true}},
 	} {
 		if got := c.in.RiskPolicySettings(); got != c.want {
 			t.Errorf("%s switch alone = %+v, want %+v", c.name, got, c.want)

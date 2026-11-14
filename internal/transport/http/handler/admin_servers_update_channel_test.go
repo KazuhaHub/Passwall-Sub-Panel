@@ -35,8 +35,11 @@ func (r *channelPanelRepo) Save(_ context.Context, panel *domain.Panel) error {
 	r.panel = &copy
 	return nil
 }
-func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel) error {
+func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error {
 	r.narrowWrites++
+	if collect != nil {
+		r.panel.AuditCollect = *collect
+	}
 	if name != nil {
 		r.panel.Name = *name
 	}
@@ -194,5 +197,41 @@ func TestServerDTOUpdateChannelOnlyNativeAndLegacyDefaultsStable(t *testing.T) {
 		if got := toServerDTO(&domain.Panel{Kind: test.kind, UpdateChannel: test.raw}).UpdateChannel; got != test.want {
 			t.Fatalf("effective DTO preference = %q, want %q", got, test.want)
 		}
+	}
+}
+
+// How much a native node records of its destination rules is a per-server
+// choice made through the same narrow writer as the other native metadata: a
+// whole-row save would let an admin editing a name reset a privacy choice made
+// meanwhile.
+func TestNativeServerAuditCollectIsAMetadataWriteAndOmissionPreserves(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := &channelPanelRepo{panel: &domain.Panel{ID: 41, Kind: domain.PanelKindPSP, Name: "n", URL: "psp://agt_n", AuditCollect: domain.AuditCollectHits, APIToken: "untouched-token"}}
+	h := NewAdminServersHandler(r, &channelPool{}, nil, nil, nil, nil)
+
+	w := updateChannelRequest(t, h, `{"audit_collect":"off"}`)
+	if w.Code != 200 || r.panel.AuditCollect != domain.AuditCollectOff || r.fullWrites != 0 {
+		t.Fatalf("audit_collect update = %d, collect %q, full writes %d", w.Code, r.panel.AuditCollect, r.fullWrites)
+	}
+	var dto serverDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &dto); err != nil || dto.AuditCollect != "off" {
+		t.Fatalf("the answer carries audit_collect %q (%v)", dto.AuditCollect, err)
+	}
+	// Omitted: kept.
+	if w = updateChannelRequest(t, h, `{"name":"renamed"}`); w.Code != 200 || r.panel.AuditCollect != domain.AuditCollectOff {
+		t.Fatalf("an omitted audit_collect changed to %q (%d)", r.panel.AuditCollect, w.Code)
+	}
+	for _, body := range []string{`{"audit_collect":"everything"}`, `{"audit_collect":""}`, `{"audit_collect":1}`} {
+		if w = updateChannelRequest(t, h, body); w.Code != 400 || r.panel.AuditCollect != domain.AuditCollectOff {
+			t.Fatalf("%s = %d, collect %q: an invalid level must be refused before any write", body, w.Code, r.panel.AuditCollect)
+		}
+	}
+	if w = updateChannelRequest(t, h, `{"audit_collect":"hits_and_usage"}`); w.Code != 200 || r.panel.AuditCollect != domain.AuditCollectHitsAndUsage {
+		t.Fatalf("hits_and_usage = %d, %q", w.Code, r.panel.AuditCollect)
+	}
+	// Not for a third-party panel.
+	third := &channelPanelRepo{panel: &domain.Panel{ID: 41, Kind: domain.PanelKind3XUI, Name: "x", URL: "u", APIToken: "t"}}
+	if w = updateChannelRequest(t, NewAdminServersHandler(third, &channelPool{}, nil, nil, nil, nil), `{"audit_collect":"off"}`); w.Code != 400 || third.narrowWrites != 0 || third.fullWrites != 0 {
+		t.Fatalf("third-party audit_collect = %d", w.Code)
 	}
 }

@@ -23,6 +23,8 @@ type AccessControlSettings struct {
 	DestPolicyApplyMinSeconds int    `json:"dest_policy_apply_min_seconds"`
 	DestListRefreshHours      int    `json:"dest_list_refresh_hours"`
 	DestRulesUpdateMode       string `json:"dest_rules_update_mode"`
+	DestHitRetentionDays      int    `json:"dest_hit_retention_days"`
+	DestTrialRetentionDays    int    `json:"dest_trial_retention_days"`
 }
 
 // AccessControlSettings copies the settings out of the record. Hand-written,
@@ -33,6 +35,8 @@ func (s UISettings) AccessControlSettings() AccessControlSettings {
 		DestPolicyApplyMinSeconds: s.DestPolicyApplyMinSeconds,
 		DestListRefreshHours:      s.DestListRefreshHours,
 		DestRulesUpdateMode:       s.DestRulesUpdateMode,
+		DestHitRetentionDays:      s.DestHitRetentionDays,
+		DestTrialRetentionDays:    s.DestTrialRetentionDays,
 	}
 }
 
@@ -42,6 +46,8 @@ func (s *UISettings) SetAccessControlSettings(p AccessControlSettings) {
 	s.DestPolicyApplyMinSeconds = p.DestPolicyApplyMinSeconds
 	s.DestListRefreshHours = p.DestListRefreshHours
 	s.DestRulesUpdateMode = p.DestRulesUpdateMode
+	s.DestHitRetentionDays = p.DestHitRetentionDays
+	s.DestTrialRetentionDays = p.DestTrialRetentionDays
 }
 
 var accessControlSettingsKeys = func() []string {
@@ -74,6 +80,12 @@ const (
 	DestListRefreshHoursDefault      = 24
 	DestListRefreshHoursMin          = 6
 	DestListRefreshHoursMax          = 168
+	DestHitRetentionDaysDefault      = 30
+	DestHitRetentionDaysMin          = 1
+	DestHitRetentionDaysMax          = 365
+	DestTrialRetentionDaysDefault    = 7
+	DestTrialRetentionDaysMin        = 1
+	DestTrialRetentionDaysMax        = 30
 )
 
 // AccessControlEffective is what the panel runs with for the stored settings:
@@ -82,6 +94,10 @@ type AccessControlEffective struct {
 	PolicyApplyMinSeconds int    `json:"dest_policy_apply_min_seconds"`
 	ListRefreshHours      int    `json:"dest_list_refresh_hours"`
 	RulesUpdateMode       string `json:"dest_rules_update_mode"`
+	// HitRetentionDays is how long hit records are kept. TrialRetentionDays is
+	// how long the allowlist trial rows are, and is never longer than it.
+	HitRetentionDays   int `json:"dest_hit_retention_days"`
+	TrialRetentionDays int `json:"dest_trial_retention_days"`
 }
 
 // PolicyApplyMin is the trailing debounce window of policy publication.
@@ -92,6 +108,16 @@ func (e AccessControlEffective) PolicyApplyMin() time.Duration {
 // ListRefresh is the interval of the list refresh loop.
 func (e AccessControlEffective) ListRefresh() time.Duration {
 	return time.Duration(e.ListRefreshHours) * time.Hour
+}
+
+// HitRetention is how long hit records are kept.
+func (e AccessControlEffective) HitRetention() time.Duration {
+	return time.Duration(e.HitRetentionDays) * 24 * time.Hour
+}
+
+// TrialRetention is how long the allowlist trial rows are kept.
+func (e AccessControlEffective) TrialRetention() time.Duration {
+	return time.Duration(e.TrialRetentionDays) * 24 * time.Hour
 }
 
 // AccessControlEffectiveOf applies the defaults and clamps. A negative number
@@ -112,10 +138,17 @@ func AccessControlEffectiveOf(s UISettings) AccessControlEffective {
 	if strings.EqualFold(strings.TrimSpace(s.DestRulesUpdateMode), DestRulesUpdateAuto) {
 		mode = DestRulesUpdateAuto
 	}
+	hit := clamp(s.DestHitRetentionDays, DestHitRetentionDaysDefault, DestHitRetentionDaysMin, DestHitRetentionDaysMax)
+	// The trial rows are shorter-lived than the hits, never longer: a retention
+	// of a few days for hits must not leave the more sensitive-looking fold of a
+	// whole group's browsing around for a week.
+	trial := min(clamp(s.DestTrialRetentionDays, DestTrialRetentionDaysDefault, DestTrialRetentionDaysMin, DestTrialRetentionDaysMax), hit)
 	return AccessControlEffective{
 		PolicyApplyMinSeconds: clamp(s.DestPolicyApplyMinSeconds, DestPolicyApplyMinSecondsDefault, DestPolicyApplyMinSecondsMin, DestPolicyApplyMinSecondsMax),
 		ListRefreshHours:      clamp(s.DestListRefreshHours, DestListRefreshHoursDefault, DestListRefreshHoursMin, DestListRefreshHoursMax),
 		RulesUpdateMode:       mode,
+		HitRetentionDays:      hit,
+		TrialRetentionDays:    trial,
 	}
 }
 
@@ -126,6 +159,8 @@ func AccessControlSettingsDefaults() map[string]float64 {
 	return map[string]float64{
 		"dest_policy_apply_min_seconds": DestPolicyApplyMinSecondsDefault,
 		"dest_list_refresh_hours":       DestListRefreshHoursDefault,
+		"dest_hit_retention_days":       DestHitRetentionDaysDefault,
+		"dest_trial_retention_days":     DestTrialRetentionDaysDefault,
 	}
 }
 
@@ -145,6 +180,12 @@ func ValidateAccessControlSettings(s AccessControlSettings) (field string, err e
 		return f, err
 	}
 	if f, err := check("dest_list_refresh_hours", s.DestListRefreshHours, DestListRefreshHoursMin, DestListRefreshHoursMax); err != nil {
+		return f, err
+	}
+	if f, err := check("dest_hit_retention_days", s.DestHitRetentionDays, DestHitRetentionDaysMin, DestHitRetentionDaysMax); err != nil {
+		return f, err
+	}
+	if f, err := check("dest_trial_retention_days", s.DestTrialRetentionDays, DestTrialRetentionDaysMin, DestTrialRetentionDaysMax); err != nil {
 		return f, err
 	}
 	switch s.DestRulesUpdateMode {

@@ -45,6 +45,7 @@ func TestRiskServiceCannotWriteServiceState(t *testing.T) {
 		"Geo":        {"Available", "Lookup"},
 		"AuthEvents": {"List"},
 		"Trust":      {"ListTrusted"},
+		"Dest":       {"DestBlockInputs"},
 	}
 	deps := reflect.TypeFor[Deps]()
 	seen := map[string]bool{}

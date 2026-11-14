@@ -33,7 +33,7 @@ const TAILED = [
   'geo_anomaly_flag_after_polls', 'geo_anomaly_clear_after_polls',
   'geo_anomaly_ban_max_countries', 'geo_anomaly_ban_max_regions', 'geo_anomaly_ban_max_cities',
   'geo_anomaly_ban_after_polls', 'geo_anomaly_min_placed_ratio',
-  'risk_min_days', 'risk_max_devices', 'risk_usage_ratio', 'risk_usage_floor_gb',
+  'risk_min_days', 'risk_max_devices', 'risk_usage_ratio', 'risk_usage_floor_gb', 'risk_dest_block_threshold',
 ]
 
 const everyField = (): PolicyFieldSpec[] => POLICY_CARDS.flatMap(cardFields)
@@ -47,17 +47,17 @@ function field(key: string): PolicyFieldSpec {
 describe('POLICY_KEYS', () => {
   // The JSON is the list a Go test holds to ports.RiskCenterPolicy; the
   // record is the list the compiler holds to the type. Equal, the page's
-  // type and the server's policy name the same 48 keys.
-  it('is the typed key set, 48 keys, each once', () => {
-    expect(POLICY_KEYS).toHaveLength(48)
-    expect(new Set(POLICY_KEYS).size).toBe(48)
+  // type and the server's policy name the same 50 keys.
+  it('is the typed key set, 50 keys, each once', () => {
+    expect(POLICY_KEYS).toHaveLength(50)
+    expect(new Set(POLICY_KEYS).size).toBe(50)
     expect([...POLICY_KEYS].sort()).toEqual(Object.keys(ALL_POLICY_KEYS).sort())
   })
 })
 
 describe('POLICY_CARDS', () => {
-  it('lays out the six cards in order', () => {
-    expect(POLICY_CARDS.map(c => c.id)).toEqual(['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'data'])
+  it('lays out the seven cards in order', () => {
+    expect(POLICY_CARDS.map(c => c.id)).toEqual(['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block', 'data'])
   })
 
   // Every key has exactly one place on the page: a key laid out nowhere is

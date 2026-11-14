@@ -55,19 +55,21 @@ func (s UISettings) GeoPolicySettings() domain.GeoPolicySettings {
 // echo the global value — whoever needs it reads it from the global settings.
 func (s UISettings) RiskPolicySettings() domain.RiskPolicySettings {
 	return domain.RiskPolicySettings{
-		SubSpreadOff:      s.RiskSubSpreadOff,
-		DevicesOff:        s.RiskDevicesOff,
-		UsageShiftOff:     s.RiskUsageShiftOff,
-		LoginCountryOff:   s.RiskLoginCountryOff,
-		MinDays:           s.RiskMinDays,
-		MaxDevices:        s.RiskMaxDevices,
-		UsageRatio:        s.RiskUsageRatio,
-		UsageFloorGB:      s.RiskUsageFloorGB,
-		LoginWarmupLogins: s.RiskLoginWarmupLogins,
-		LoginHoldDays:     s.RiskLoginHoldDays,
-		UsageWarmupDays:   s.RiskUsageWarmupDays,
-		UsageFlagDays:     s.RiskUsageFlagDays,
-		UsageSuspectDays:  s.RiskUsageSuspectDays,
+		SubSpreadOff:       s.RiskSubSpreadOff,
+		DevicesOff:         s.RiskDevicesOff,
+		UsageShiftOff:      s.RiskUsageShiftOff,
+		LoginCountryOff:    s.RiskLoginCountryOff,
+		DestBlockOff:       s.RiskDestBlockOff,
+		DestBlockThreshold: s.RiskDestBlockThreshold,
+		MinDays:            s.RiskMinDays,
+		MaxDevices:         s.RiskMaxDevices,
+		UsageRatio:         s.RiskUsageRatio,
+		UsageFloorGB:       s.RiskUsageFloorGB,
+		LoginWarmupLogins:  s.RiskLoginWarmupLogins,
+		LoginHoldDays:      s.RiskLoginHoldDays,
+		UsageWarmupDays:    s.RiskUsageWarmupDays,
+		UsageFlagDays:      s.RiskUsageFlagDays,
+		UsageSuspectDays:   s.RiskUsageSuspectDays,
 	}
 }
 

@@ -1065,6 +1065,7 @@ func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
 	// Tools and one account.
 	g.POST("/dest/test", h.Test)
 	g.GET("/dest/users/:id", h.User)
+	g.GET("/dest/hits", h.Hits)
 	// Status and control.
 	g.GET("/dest/status", h.Status)
 	g.POST("/dest/publish", h.Publish)

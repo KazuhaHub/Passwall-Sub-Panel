@@ -260,7 +260,7 @@ func TestEvaluateReview_LeavesItsInputsAlone(t *testing.T) {
 // The attention sources are every flag source but review, in display order;
 // the location sources are the three trust exempts.
 func TestAttentionAndLocationSources(t *testing.T) {
-	if got, want := AttentionSources(), []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country"}; !slices.Equal(got, want) {
+	if got, want := AttentionSources(), []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country", "dest_block"}; !slices.Equal(got, want) {
 		t.Fatalf("AttentionSources() = %v, want %v", got, want)
 	}
 	if got, want := LocationSources(), []string{"geo", "sub_spread", "login_country"}; !slices.Equal(got, want) {

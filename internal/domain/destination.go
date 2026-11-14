@@ -115,19 +115,15 @@ type DestState string
 const (
 	DestStateOff DestState = "off"
 	DestStateOn  DestState = "on"
-	// DestStateReport records what would be blocked and blocks nothing. It is
-	// stored and understood by the model, but the API refuses it until the hit
-	// recording that makes it useful ships (batch 2).
+	// DestStateReport records what would be blocked and blocks nothing: the
+	// rule compiles to a wire "observe" in the last phase, so it can never change
+	// a verdict. A block policy and a source rule may be in it; an allow policy
+	// may not.
 	DestStateReport DestState = "report"
 )
 
 // Valid reports whether s is a known state.
 func (s DestState) Valid() bool { return s == DestStateOff || s == DestStateOn || s == DestStateReport }
-
-// DestStateSelectable reports whether an admin may choose s today: off and on.
-// Report is part of the model but is refused until the hit recording that
-// gives it something to show (batch 2) ships.
-func DestStateSelectable(s DestState) bool { return s == DestStateOff || s == DestStateOn }
 
 // DestScope is who a policy applies to.
 type DestScope string
@@ -314,12 +310,20 @@ type DestAgentPolicy struct {
 	// PrecheckListeners is the JSON list of listeners whose sniffing is
 	// insufficient, "" when none.
 	PrecheckListeners string
-	AppliedSHA256     string
+	// ReportOnlyShed says why report-only rules were left out of what this node
+	// was sent: "sniffing" or "limit", "" when none was (the status page's
+	// report_only_not_deployed). Set by each compile, so it follows the node's
+	// current inbounds and the current budget instead of staying as an issue row.
+	ReportOnlyShed string
+	AppliedSHA256  string
 	// AppliedBody is the canonical policy that last applied (the LKG).
-	AppliedBody       []byte
-	AppliedAt         *time.Time
-	AppliedRuleCount  int
-	AppliedGroups     []int64
+	AppliedBody      []byte
+	AppliedAt        *time.Time
+	AppliedRuleCount int
+	AppliedGroups    []int64
+	// AppliedCollect is the recording level of the policy in AppliedBody: what
+	// the node runs while a newer minted policy is on its way to it.
+	AppliedCollect    string
 	CollectEffective  string
 	ReportedSHA256    string
 	ReportedState     string
@@ -362,11 +366,13 @@ type DestAgentPolicyPatch struct {
 	RejectedGeneration *int64
 	OverLimit          *string
 	PrecheckListeners  *string
+	ReportOnlyShed     *string
 	AppliedSHA256      *string
 	AppliedBody        *[]byte
 	AppliedAt          *time.Time
 	AppliedRuleCount   *int
 	AppliedGroups      *[]int64
+	AppliedCollect     *string
 	CollectEffective   *string
 	ReportedSHA256     *string
 	ReportedState      *string

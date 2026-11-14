@@ -56,6 +56,9 @@ const evidence: Record<RiskKind, object> = {
     skipped: { infra: 0, internal: 0, listed: 0, node_country: 0, unplaced: 0 }, known: ['CN'],
     events: [{ cc: 'JP', at_ms: 3, method: 'local' }, { cc: 'US', at_ms: 2, method: 'oidc' }, { cc: 'JP', at_ms: 1, method: 'local' }],
   },
+  dest_block: {
+    v: 1, window_hours: 24, threshold: 20, total: 12, by_source: [{ source: 'p1', count: 12 }], nodes: 1,
+  },
 }
 
 describe('riskCodeText', () => {

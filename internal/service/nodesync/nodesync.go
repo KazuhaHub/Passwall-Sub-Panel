@@ -71,11 +71,22 @@ type Service struct {
 	// feature existed. It is late-bound (SetPolicies) because the compiler needs
 	// the GeoIP and list services, which are built after this one.
 	policies DestPolicyCompiler
+	// audit takes the node's hit batches for storage. NIL MEANS THIS BUILD DOES
+	// NOT RECORD HITS: a batch a node reports is then simply not kept. It is
+	// late-bound (SetAudit) like the policy compiler.
+	audit AuditSink
 	// configCache holds, per agent, the canonical bytes of the last config
 	// that carried a policy, keyed by what they were built from: the policy
 	// is up to several MiB and re-encoding it on every thirty-second sync of
 	// every node is the cost this avoids.
 	configCache map[string]configCacheEntry
+}
+
+// AuditSink is the hit-recording collaborator (service/destaudit.Service).
+type AuditSink interface {
+	// Enqueue offers one validated batch for storage. It does no database work
+	// and never blocks: it is called while the node waits for its response.
+	Enqueue(agentID string, panelID int64, observation *nodeprotocol.AuditObservation)
 }
 
 // DestPolicyCompiler is the destination-policy collaborator
@@ -104,6 +115,9 @@ func (s *Service) PruneAgents(live map[string]bool) {
 		}
 	}
 }
+
+// SetAudit binds the hit sink. Left unbound, hit batches are dropped.
+func (s *Service) SetAudit(a AuditSink) { s.audit = a }
 
 // SetPolicies binds the destination-policy compiler. Left unbound, nodes are
 // never sent a policy.
@@ -180,6 +194,14 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// latest-full cache.
 	host := report.Host
 	report.Host = nil
+	// THE AUDIT SUBTREE LEAVES THE CONTROL PATH AT THE SAME PLACE, and for the
+	// same reason: nothing that decides config, roster or accounting may be
+	// influenced by it, and the clones that fill the latest-report cache must not
+	// carry up to a MiB of hits per agent. It is handed to the ingest queue only
+	// after the response exists (below), so a sync that fails is retried by the
+	// node with the same batch and the batch is not seen twice.
+	audit := report.Audit
+	report.Audit = nil
 	if err := nodeprotocol.ValidateNodeReportBase(report); err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: invalid report: %w", err)
 	}
@@ -201,7 +223,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err := s.ingestReport(ctx, agent, snapshot, report, now); err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	normalized, err := s.recordPanelObservation(ctx, agent, report, now)
+	normalized, collect, err := s.recordPanelObservation(ctx, agent, report, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -255,6 +277,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
 			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion,
+			AuditCollect: collect,
 		})
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
@@ -333,17 +356,27 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
 	}
+	// The response is complete and will be sent: only now does the node's batch
+	// leave for the store. Enqueue does no database work and cannot fail the sync.
+	if s.audit != nil && audit != nil {
+		s.audit.Enqueue(agent.AgentID, agent.PanelID, audit)
+	}
 	return response, nil
 }
 
-func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) (bool, error) {
+// recordPanelObservation records what the node reports about itself on its
+// panel row, and returns whether a REALITY fingerprint was normalized and the
+// panel's recording choice, read from the very row it loads (the destination
+// policy compile needs the choice and this is the one panel read of a sync).
+func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) (bool, domain.AuditCollect, error) {
 	if s.panels == nil || agent == nil {
-		return false, nil
+		return false, "", nil
 	}
 	panel, err := s.panels.GetByID(ctx, agent.PanelID)
 	if err != nil {
-		return false, fmt.Errorf("nodesync: load native panel observation target: %w", err)
+		return false, "", fmt.Errorf("nodesync: load native panel observation target: %w", err)
 	}
+	collect := panel.AuditCollect
 	panelVersion := report.AgentVersion
 	if panelVersion == "" {
 		panelVersion = panel.PanelVersion
@@ -356,11 +389,11 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	engineChanged := observedEngine != "" && observedEngine != agent.ObservedCoreEngine
 	if engineChanged && s.agents != nil {
 		if err := s.agents.UpdateCoreObservation(ctx, agent.AgentID, observedEngine); err != nil {
-			return false, fmt.Errorf("nodesync: persist native core engine observation: %w", err)
+			return false, "", fmt.Errorf("nodesync: persist native core engine observation: %w", err)
 		}
 	}
 	if err := s.panels.UpdateVersion(ctx, agent.PanelID, panelVersion, coreVersion, &now); err != nil {
-		return false, fmt.Errorf("nodesync: persist native panel observation: %w", err)
+		return false, "", fmt.Errorf("nodesync: persist native panel observation: %w", err)
 	}
 	engine := observedEngine
 	if engine == "" {
@@ -370,14 +403,14 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	if engine == domain.NodeCoreXray && s.normalizeRealityFingerprints != nil {
 		changed, err := s.normalizeRealityFingerprints(ctx, agent.PanelID, coreVersion)
 		if err != nil {
-			return false, fmt.Errorf("nodesync: normalize REALITY fingerprints: %w", err)
+			return false, "", fmt.Errorf("nodesync: normalize REALITY fingerprints: %w", err)
 		}
 		normalized = changed > 0
 	}
 	if (coreVersion != panel.XrayVersion || engineChanged) && s.invalidateRender != nil {
 		s.invalidateRender()
 	}
-	return normalized, nil
+	return normalized, collect, nil
 }
 
 func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream domain.NodeAgentStreamName, body any, now time.Time) (*domain.NodeAgentStream, error) {

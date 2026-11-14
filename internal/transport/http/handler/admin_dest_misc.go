@@ -122,7 +122,7 @@ type destInstantiateRequest struct {
 
 // InstantiateCatalog answers POST /api/admin/dest/catalog/:key/instantiate: the
 // lists a rule group needs and a policy over them, created in one transaction in
-// the state the admin chose (there is no default; report is not available yet).
+// the state the admin chose (there is no default; an allow policy cannot be report-only).
 func (h *AdminDestHandler) InstantiateCatalog(c *gin.Context) {
 	if !h.ready(c, h.w.Catalog != nil && h.w.Lists != nil) {
 		return
@@ -553,8 +553,9 @@ func (h *AdminDestHandler) Test(c *gin.Context) {
 // ---- one account ----
 
 // User answers GET /api/admin/dest/users/:id: the account's group and
-// exemption. (The recent-hits and usage parts are null until hit recording
-// exists.)
+// exemption, and its recent hits (hits_available says whether any node of the
+// account is recording, so an empty list can be told from nothing watched).
+// The usage part stays null: per-site usage is not offered.
 func (h *AdminDestHandler) User(c *gin.Context) {
 	if !h.ready(c, h.w.Users != nil && h.w.Exemptions != nil) {
 		return
@@ -583,6 +584,12 @@ func (h *AdminDestHandler) User(c *gin.Context) {
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		respondError(c, err)
 		return
+	}
+	if h.w.Hits != nil && h.w.Admin != nil {
+		if err := h.userHits(ctx, id, out); err != nil {
+			respondError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, out)
 }

@@ -161,7 +161,7 @@ describe('geo catalog', () => {
 describe('risk catalog', () => {
   const riskRows = () => SCOPE_KEYS.filter(k => k.cat === 'risk')
 
-  it('has exactly the thirteen overridable risk keys, in order', () => {
+  it('has exactly the fifteen overridable risk keys, in order', () => {
     // The mirror of ports.OverridableScopeKeys' risk block: the four
     // switches, the four tolerances, then usage_shift's three thresholds and
     // login_country's two, which became per-group settings with the risk
@@ -181,9 +181,11 @@ describe('risk catalog', () => {
       'risk.usage_suspect_days',
       'risk.login_warmup_logins',
       'risk.login_hold_days',
+      'risk.dest_block_off',
+      'risk.dest_block_threshold',
     ])
     expect(riskRows().map(k => k.kind)).toEqual(
-      ['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int', 'int', 'int', 'int', 'int', 'int'])
+      ['bool', 'bool', 'bool', 'bool', 'int', 'int', 'float', 'int', 'int', 'int', 'int', 'int', 'int', 'bool', 'int'])
   })
 
   it('never offers hwid capture per group', () => {
@@ -207,6 +209,7 @@ describe('risk catalog', () => {
       'risk.usage_suspect_days': '2',
       'risk.login_warmup_logins': '3',
       'risk.login_hold_days': '7',
+      'risk.dest_block_threshold': '20',
     })
     for (const k of riskRows()) {
       expect(`${k.type}.${k.name}`).toBe(k.key)
@@ -223,12 +226,12 @@ describe('risk catalog', () => {
 // (「上面」「下方」) or restate "0 = default": the editor is not that page,
 // and its inherited value already says the default.
 describe('geo and risk hints', () => {
-  const HINTLESS = ['risk.devices_off', 'risk.usage_shift_off', 'risk.login_country_off']
+  const HINTLESS = ['risk.devices_off', 'risk.usage_shift_off', 'risk.login_country_off', 'risk.dest_block_off']
   const rows = () => SCOPE_KEYS.filter(k => ['geo', 'geo_ban', 'risk'].includes(k.cat))
   const zh = flatten(zhBundle as Nested)
   const en = flatten(enBundle as Nested)
 
-  it('gives every geo and risk row a hint both bundles have, the three plain switches excepted', () => {
+  it('gives every geo and risk row a hint both bundles have, the plain switches excepted', () => {
     const missing: string[] = []
     for (const k of rows()) {
       if (HINTLESS.includes(k.key)) {

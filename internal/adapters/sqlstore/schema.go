@@ -965,8 +965,13 @@ type xuiPanelRow struct {
 	// UpdateIPLimitEnforcement for the same reason as the version columns.
 	IPLimitEnforcement string `gorm:"size:24;default:''"`
 	IPLimitProbedAt    *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// AuditCollect is how much a native node records of its destination rules'
+	// hits: off, hits or hits_and_usage. A sized varchar with a default, never
+	// text, so a legacy row reads as the default after AutoMigrate. Written ONLY
+	// by UpdateNativeMetadata: Save omits it on update.
+	AuditCollect string `gorm:"column:audit_collect;size:16;not null;default:'hits'"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type mailSettingsRow struct {
@@ -1094,6 +1099,7 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		// surfacing junk as a verdict about somebody's node.
 		IPLimitEnforcement: normalizeIPLimitEnforcement(r.IPLimitEnforcement),
 		IPLimitProbedAt:    r.IPLimitProbedAt,
+		AuditCollect:       domain.NormalizeAuditCollect(domain.AuditCollect(r.AuditCollect)),
 	}, nil
 }
 
@@ -1123,6 +1129,7 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		VersionCheckedAt:   p.VersionCheckedAt,
 		IPLimitEnforcement: string(normalizeIPLimitEnforcement(string(p.IPLimitEnforcement))),
 		IPLimitProbedAt:    p.IPLimitProbedAt,
+		AuditCollect:       string(domain.NormalizeAuditCollect(p.AuditCollect)),
 	}, nil
 }
 
@@ -1599,6 +1606,12 @@ var schemaModels = []any{
 	&destPolicyStateRow{},
 	&destPolicySnapshotRow{},
 	&destAgentPolicyRow{},
+	// Destination-rule hit records (v4.x): hourly aggregates, the batch ids
+	// that keep a re-sent batch from counting twice, and the per-hour counts
+	// of reported rows that were not stored. See dest_hit_schema.go.
+	&destHitRow{},
+	&destAuditBatchRow{},
+	&destAuditDropRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

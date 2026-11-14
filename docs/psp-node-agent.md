@@ -900,10 +900,20 @@ type PolicyStatus struct {
 - 它是**控制输入**，与 `Host` 不同：`Sync` 在构建 config **之前**调用 `ObserveStatus`（记录 LKG、处理拒绝），构建之后才 `Compile`；
   若放到响应之后，「被拒 → 回退」会晚一轮。
 
+### 11.3.1 上行：`NodeReport.Audit`（协议 v0.4.0）与采集档位
+
+- 能力 `audit.hits.v1`（命中）与 `audit.usage.v1`（用量，B 档，PSP 尚未提供）。同样**不是升级能力**。用量行还要求同时声明 `audit.hits.v1`。
+- `AuditObservation{BatchID, Hits, Usage, DroppedHits, DroppedTrial, DroppedUsage, Unmatched}`：没有行就整个省略；一个冻结批次一个 BatchID，重发原样沿用，PSP 只计一次。
+  `AuditHit.Action` 是 `block` 或 `observe`；`p*`/`s*` 上的 `observe` 表示**仅报告：被放行、本应拦截**，带账号、目的地与端口；`g*` 上的 `observe` 是白名单试运行行，节点已折叠（无账号、端口 0、目的地是主域名）。**没有任何来源地址。**
+- PSP 的接法与 `policy_status` 相同并且更严：`nodeReportWire` 另有同名的原始 `audit` 字段；原始大小 ≤ `MaxAuditObservationBytes`（1 MiB），单独解码，`ValidateAuditObservation`，检查能力（缺 `audit.hits.v1` 丢整棵，缺 `audit.usage.v1` 去掉用量行）。
+  任何失败只丢这棵子树并计 `psp_node_audit_report_total{outcome=oversized|invalid|no_capability}`，同步照常 200。子树不进 `ValidateNodeReportBase`。`Sync` 把它与 Host 同处剥离，**同步应答构建完成后**才投递入库队列（失败的同步不投递，节点会带同一批重试）。
+- 下行 `DestinationPolicy.Collect`（`""` / `hits` / `hits_and_usage`）：值是面板档位与节点能力中较低的一个，且只在策略里有 `block`/`observe` 规则时写（见 [access-control.md](access-control.md) §4.0）。`Collect` 变化是新摘要，节点会重启一次 core。
+- `action=observe` 的规则在线上是阶段 5（`p*`、`s*`），出站前缀 `psp-watch-`；PSP 只为状态是 `report` 的拦截策略 / 来源规则生成它。
+
 ### 11.4 PSP 侧 issue 码
 
 除协议里的两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`）外，PSP 自己记两个：
-`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）。
+`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_report_only_not_deployed`（仅报告规则因嗅探不足或额度被去掉，开启的规则不受影响）。
 用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等）。内容只有摘要前缀、入站键和额度数字，不含用户或目的地。
 
 ### 11.5 嗅探

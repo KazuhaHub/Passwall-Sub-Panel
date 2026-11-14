@@ -2,7 +2,7 @@
 // decides what an admin reads (riskCodeText, the day strips), so all of them
 // are pinned by unit tests rather than by rendering.
 import type {
-  DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
+  DestBlockEvidence, DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
 } from '@/api/riskSignals'
 import type { Translate } from './geoAnomaly'
 import type { RegionNamer, RegionRef } from './regionName'
@@ -69,6 +69,10 @@ function codeParams(sig: RiskSignal): Record<string, unknown> {
         warmup: ev.warmup,
         countries: [...new Set((ev.events ?? []).map(e => e.cc))].join(', '),
       }
+    }
+    case 'dest_block': {
+      const ev = evidenceOf<DestBlockEvidence>(sig)
+      return { hours: ev.window_hours, total: ev.total, threshold: ev.threshold }
     }
     default:
       return {}

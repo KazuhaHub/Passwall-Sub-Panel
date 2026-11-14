@@ -212,11 +212,13 @@ type destAgentPolicyRow struct {
 	RejectedGeneration int64   `gorm:"not null;default:0"`
 	OverLimit          *string `gorm:"column:over_limit;type:text"`
 	PrecheckListeners  *string `gorm:"column:precheck_listeners;type:text"`
+	ReportOnlyShed     string  `gorm:"column:report_only_shed;size:16;not null;default:''"`
 	AppliedSHA256      string  `gorm:"column:applied_sha256;size:64;not null;default:''"`
 	AppliedBody        []byte  `gorm:"column:applied_body"`
 	AppliedAt          *time.Time
 	AppliedRuleCount   int        `gorm:"not null;default:0"`
 	AppliedGroups      jsonInt64s `gorm:"column:applied_groups;type:text;not null"`
+	AppliedCollect     string     `gorm:"size:16;not null;default:''"`
 	CollectEffective   string     `gorm:"size:16;not null;default:''"`
 	ReportedSHA256     string     `gorm:"column:reported_sha256;size:64;not null;default:''"`
 	ReportedState      string     `gorm:"size:16;not null;default:''"`
@@ -238,9 +240,10 @@ func (r destAgentPolicyRow) toDomain() *domain.DestAgentPolicy {
 		AgentID: r.AgentID, DesiredSHA256: r.DesiredSHA256, MintedSHA256: r.MintedSHA256, MintedAt: utcPtr(r.MintedAt),
 		FallbackReason: domain.DestFallbackReason(r.FallbackReason), RejectedGeneration: r.RejectedGeneration,
 		OverLimit: derefString(r.OverLimit), PrecheckListeners: derefString(r.PrecheckListeners),
-		AppliedSHA256: r.AppliedSHA256, AppliedBody: r.AppliedBody, AppliedAt: utcPtr(r.AppliedAt),
+		ReportOnlyShed: r.ReportOnlyShed,
+		AppliedSHA256:  r.AppliedSHA256, AppliedBody: r.AppliedBody, AppliedAt: utcPtr(r.AppliedAt),
 		AppliedRuleCount: r.AppliedRuleCount, AppliedGroups: nilIfEmptyInt64s(r.AppliedGroups),
-		CollectEffective: r.CollectEffective, ReportedSHA256: r.ReportedSHA256, ReportedState: r.ReportedState,
+		AppliedCollect: r.AppliedCollect, CollectEffective: r.CollectEffective, ReportedSHA256: r.ReportedSHA256, ReportedState: r.ReportedState,
 		ReportedIssue: r.ReportedIssue, ReportedListeners: derefString(r.ReportedListeners),
 		ReportedAt: utcPtr(r.ReportedAt), RejectedCaps: r.RejectedCaps, RejectedSHA256: r.RejectedSHA256, MintedGeneration: r.MintedGeneration, MintedCtx: r.MintedCtx, RejectedCtx: r.RejectedCtx, UpdatedAt: r.UpdatedAt.UTC(),
 	}

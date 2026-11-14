@@ -101,7 +101,10 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// ("Incorrect datetime value: '0000-00-00'"). Omit it: created_at stays
 		// as first written, updated_at still refreshes. SQLite/Postgres tolerated
 		// the zero date; the cross-DB CI surfaced this MySQL-only bug.
-		err = db.Omit("CreatedAt").Save(row).Error
+		// audit_collect is omitted too: it is a recording choice with its own
+		// narrow writer (UpdateNativeMetadata), and the whole-row save of an
+		// admin editing credentials carries whatever the form read earlier.
+		err = db.Omit("CreatedAt", "AuditCollect").Save(row).Error
 	}
 	if err != nil {
 		return err
@@ -115,7 +118,7 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 // when an administrator only changes a native server's display/preference.
 // Input channel validation belongs to the HTTP boundary: rollback must be able
 // to restore the exact empty/unknown preference read from an existing row.
-func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel) error {
+func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, auditCollect *domain.AuditCollect) error {
 	if id <= 0 || (name != nil && *name == "") {
 		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
 	}
@@ -128,6 +131,14 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	}
 	if channel != nil {
 		updates["update_channel"] = string(*channel)
+	}
+	if auditCollect != nil {
+		// Refused rather than normalised: a junk level would otherwise be stored
+		// as "off" silently, and a recording choice should be a deliberate one.
+		if !auditCollect.Valid() {
+			return fmt.Errorf("%w: audit_collect is off, hits or hits_and_usage", domain.ErrValidation)
+		}
+		updates["audit_collect"] = string(*auditCollect)
 	}
 	db := r.db.WithContext(ctx)
 	var row xuiPanelRow

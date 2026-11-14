@@ -3,6 +3,7 @@
   "templates": [
     {
       "key": "bittorrent",
+      "counts_as_risk": true,
       "name": {"zh-CN": "BT 下载", "en-US": "BitTorrent"},
       "description": {
         "zh-CN": "拦截 BitTorrent 协议握手，以及公开 Tracker 的域名。协议识别需要入站开启嗅探，PSP 会在下发前检查，条件不满足时保持上一版策略。",
@@ -109,6 +110,7 @@
     },
     {
       "key": "smtp",
+      "counts_as_risk": true,
       "name": {"zh-CN": "发信端口", "en-US": "Outgoing mail ports"},
       "description": {
         "zh-CN": "拦截访问 25、465、587 端口（SMTP）的 TCP 连接，防止节点被用来发垃圾邮件。",

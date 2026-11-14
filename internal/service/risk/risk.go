@@ -83,6 +83,9 @@ type Deps struct {
 	// signals judge them exempt / trusted. Read once per run. Nil: nobody is
 	// trusted.
 	Trust TrustedLister
+	// Dest is the destination-rule hits and the recording state of the native
+	// nodes, for dest_block. Nil: dest_block is not computed.
+	Dest DestBlockReader
 }
 
 // UserLister pages through the accounts (ports.UserRepo's List, alone).
@@ -250,6 +253,14 @@ func (s *Service) RefreshOnce(ctx context.Context) (err error) {
 	}
 	if s.d.Traffic != nil {
 		if err := s.usageShift(ctx, r); err != nil {
+			return err
+		}
+	}
+
+	// dest_block reads the hit table, not the fetch log, so it neither waits for
+	// the infrastructure set nor depends on the window below.
+	if s.d.Dest != nil {
+		if err := s.destBlock(ctx, r); err != nil {
 			return err
 		}
 	}

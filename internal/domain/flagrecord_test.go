@@ -585,7 +585,7 @@ func TestGeoAutoFlag_LevelsAndParams(t *testing.T) {
 // filter is checked against. The events are the eight attention changes and
 // the four review actions, in that order.
 func TestFlagSources_AreGeoGeoAutoEveryRiskKindAndReview(t *testing.T) {
-	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country", "review"}
+	want := []string{"geo", "geo_auto", "sub_spread", "devices", "usage_shift", "login_country", "dest_block", "review"}
 	if got := FlagSources(); !slices.Equal(got, want) {
 		t.Fatalf("FlagSources() = %v, want %v", got, want)
 	}

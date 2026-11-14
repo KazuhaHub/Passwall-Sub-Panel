@@ -230,14 +230,14 @@ func TestInstantiate_BuildsTheListsAndThePolicyOfATemplate(t *testing.T) {
 
 func TestInstantiate_TheAdminChoosesTheState(t *testing.T) {
 	svc, _, store := newService(t)
-	for _, st := range []domain.DestState{domain.DestStateOff, domain.DestStateOn} {
+	for _, st := range []domain.DestState{domain.DestStateOff, domain.DestStateReport, domain.DestStateOn} {
 		if _, err := svc.Instantiate(context.Background(), "pt", "en-US", st); err != nil || store.pol.State != st {
 			t.Errorf("state %s: %+v %v", st, store.pol, err)
 		}
 	}
 	// There is no default: an empty state is refused, as is one that does not
-	// exist, and report until the hit recording that makes it useful ships.
-	for _, st := range []domain.DestState{"", "maybe", domain.DestStateReport} {
+	// exist.
+	for _, st := range []domain.DestState{"", "maybe"} {
 		if _, err := svc.Instantiate(context.Background(), "pt", "en-US", st); !errors.Is(err, domain.ErrValidation) {
 			t.Errorf("state %q: %v, want a validation error", st, err)
 		}
@@ -327,5 +327,28 @@ func TestInstantiate_HoldsTheGeositeLockAcrossDerivationAndStorage(t *testing.T)
 	_, _ = svc.Instantiate(context.Background(), "doh", "en-US", domain.DestStateOff)
 	if events[len(events)-1] != "unlock" {
 		t.Fatalf("the lock was not released after a failure: %v", events)
+	}
+}
+
+// A hit on BitTorrent or an outgoing mail port is evidence about the account, so
+// those two templates create a policy that counts as a risk signal; a category
+// list or the private-address match (which a node blocks anyway) does not.
+func TestInstantiate_OnlyBitTorrentAndMailPortsCountAsRiskByDefault(t *testing.T) {
+	svc, _, store := newService(t)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tpl := range c.Templates {
+		want := tpl.Key == "bittorrent" || tpl.Key == "smtp"
+		if tpl.CountsAsRisk != want {
+			t.Errorf("template %s counts_as_risk = %v, want %v", tpl.Key, tpl.CountsAsRisk, want)
+		}
+		if _, err := svc.Instantiate(context.Background(), tpl.Key, "en-US", domain.DestStateReport); err != nil {
+			t.Fatal(err)
+		}
+		if store.pol.CountsAsRisk != want {
+			t.Errorf("the policy made from %s has counts_as_risk = %v, want %v", tpl.Key, store.pol.CountsAsRisk, want)
+		}
 	}
 }

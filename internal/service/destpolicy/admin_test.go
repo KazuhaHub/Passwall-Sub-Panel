@@ -122,7 +122,9 @@ func TestPreparePolicy(t *testing.T) {
 	}{
 		{"blank name", func(i *PolicyInput) { i.Name = " x" }, CodePolicyInvalid},
 		{"unknown action", func(i *PolicyInput) { i.Action = "observe" }, CodePolicyInvalid},
-		{"report state", func(i *PolicyInput) { i.State = domain.DestStateReport }, CodeStateUnavailable},
+		// An allow policy has no report state: to be "reported" it would have to
+		// change a verdict, which is what report-only must never do.
+		{"report state on an allow policy", func(i *PolicyInput) { i.Action = domain.DestActionAllow; i.State = domain.DestStateReport }, CodeStateUnavailable},
 		{"unknown state", func(i *PolicyInput) { i.State = "maybe" }, CodePolicyInvalid},
 		{"no match", func(i *PolicyInput) { i.ListIDs = nil }, CodePolicyNoMatch},
 		{"missing list", func(i *PolicyInput) { i.ListIDs = []int64{999} }, CodePolicyInvalid},
@@ -265,11 +267,27 @@ func TestSourceRuleOnlyForNativeNodes(t *testing.T) {
 	for _, in := range []SourceRuleInput{
 		{Countries: []string{"CHN"}, State: domain.DestStateOn},
 		{CIDRs: []string{"x"}, State: domain.DestStateOn},
-		{State: domain.DestStateReport},
+		{State: "maybe"},
 	} {
 		if _, err := ah.admin.PrepareSourceRule(ctx, 1, in); err == nil || validationCode(t, err) == nil {
 			t.Fatalf("%+v was accepted", in)
 		}
+	}
+}
+
+// Report-only is available for a block policy and for a source rule, chosen
+// freely: there is no stage that must come first.
+func TestPreparePolicy_ReportIsAvailableForBlockPoliciesAndSourceRules(t *testing.T) {
+	ah := newAdminHarness(t)
+	ctx := ah.ctx
+	l := ah.list("l", "a.example.com")
+	p, err := ah.admin.PreparePolicy(ctx, PolicyInput{Name: "w", Action: domain.DestActionBlock, State: domain.DestStateReport, Scope: domain.DestScopeAll, ListIDs: []int64{l.ID}}, nil)
+	if err != nil || p.State != domain.DestStateReport {
+		t.Fatalf("a report-only block policy = (%+v, %v)", p, err)
+	}
+	r, err := ah.admin.PrepareSourceRule(ctx, 1, SourceRuleInput{Countries: []string{"CN"}, State: domain.DestStateReport})
+	if err != nil || r.State != domain.DestStateReport {
+		t.Fatalf("a report-only source rule = (%+v, %v)", r, err)
 	}
 }
 
