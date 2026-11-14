@@ -36,6 +36,17 @@ type eligGroups struct {
 }
 
 func (r *eligGroups) List(context.Context) ([]*domain.Group, error) { return r.groups, r.err }
+func (r *eligGroups) GetByID(_ context.Context, id int64) (*domain.Group, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, g := range r.groups {
+		if g.ID == id {
+			return g, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
 func (r *eligGroups) CountMembers(_ context.Context, id int64) (int64, error) {
 	r.counts.Add(1)
 	return r.members[id], r.err
@@ -701,5 +712,28 @@ func TestNoOscillation_InsufficientSniffingStaysIneligible(t *testing.T) {
 				t.Fatalf("round %d (fallback %q): included = %v, want %v on every round", round, reason, got, sniffing.want)
 			}
 		}
+	}
+}
+
+// Saving a group changes its tag filter and may change who is in it: the
+// cached member count and filter must not outlive the save.
+func TestUpdateDropsTheCachedMemberCount(t *testing.T) {
+	e := newEligEnv(t)
+	g := &domain.Group{ID: 5, TagFilter: domain.TagFilter{All: true}}
+	e.groups.groups = []*domain.Group{g}
+	e.groups.members = map[int64]int64{5: 40}
+	repo := &updatingGroups{eligGroups: e.groups}
+	e.svc.groups = repo
+	ctx := context.Background()
+	if n, _ := e.svc.TagMatchedMembers(ctx, 1, 5); n != 40 {
+		t.Fatalf("members = %d, want 40", n)
+	}
+	e.groups.members[5] = 7
+	g.TagFilter = domain.TagFilter{Tags: []string{"region:JP"}} // no longer selects panel 1
+	if err := e.svc.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := e.svc.TagMatchedMembers(ctx, 1, 5); n != 0 {
+		t.Fatalf("after the save members = %d, want 0 (the new filter does not select the panel)", n)
 	}
 }

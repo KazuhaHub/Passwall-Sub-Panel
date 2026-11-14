@@ -181,7 +181,7 @@ func (s *Service) readPanelCanEnforce(ctx context.Context, panelID int64) (bool,
 // It runs before the compile cache key on every sync of every node, so the
 // member count is cached per group for the eligibility TTL.
 func (s *Service) TagMatchedMembers(ctx context.Context, panelID, groupID int64) (int, error) {
-	g, err := s.groupForCount(ctx, groupID)
+	entry, err := s.groupMembership(ctx, groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -189,55 +189,45 @@ func (s *Service) TagMatchedMembers(ctx context.Context, panelID, groupID int64)
 	if err != nil {
 		return 0, err
 	}
-	selected := false
 	for _, n := range nodes {
-		if n.PanelID == panelID && !n.IsSeparator() && Matches(n, g.TagFilter) {
-			selected = true
-			break
+		if n.PanelID == panelID && !n.IsSeparator() && Matches(n, entry.filter) {
+			return entry.members, nil
 		}
 	}
-	if !selected {
-		return 0, nil
-	}
-	return s.memberCount(ctx, groupID)
+	return 0, nil
 }
 
-func (s *Service) groupForCount(ctx context.Context, groupID int64) (*domain.Group, error) {
-	groups, err := s.groups.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, g := range groups {
-		if g.ID == groupID {
-			return g, nil
-		}
-	}
-	return nil, domain.ErrNotFound
-}
-
-func (s *Service) memberCount(ctx context.Context, groupID int64) (int, error) {
+// groupMembership is a group's tag filter and member count, read together and
+// cached for the eligibility TTL (Update clears it).
+func (s *Service) groupMembership(ctx context.Context, groupID int64) (memberCountEntry, error) {
 	now := s.clock()
 	s.countMu.Lock()
 	if e, ok := s.counts[groupID]; ok && now.Before(e.expires) {
 		s.countMu.Unlock()
-		return e.n, nil
+		return e, nil
 	}
 	s.countMu.Unlock()
+	g, err := s.groups.GetByID(ctx, groupID)
+	if err != nil {
+		return memberCountEntry{}, err
+	}
 	n, err := s.groups.CountMembers(ctx, groupID)
 	if err != nil {
-		return 0, err
+		return memberCountEntry{}, err
 	}
+	e := memberCountEntry{filter: g.TagFilter, members: int(n), expires: now.Add(eligibilityTTL)}
 	s.countMu.Lock()
 	if s.counts == nil {
 		s.counts = map[int64]memberCountEntry{}
 	}
-	s.counts[groupID] = memberCountEntry{n: int(n), expires: now.Add(eligibilityTTL)}
+	s.counts[groupID] = e
 	s.countMu.Unlock()
-	return int(n), nil
+	return e, nil
 }
 
 type memberCountEntry struct {
-	n       int
+	filter  domain.TagFilter
+	members int
 	expires time.Time
 }
 
@@ -246,6 +236,13 @@ type memberCountEntry struct {
 func (s *Service) InvalidateEligibility(panelID int64) {
 	if s != nil {
 		s.eligCache.invalidate(panelID)
+		if panelID == 0 {
+			// The allowlist's state or the group itself changed: the cached tag
+			// filters and member counts go with the eligibility.
+			s.countMu.Lock()
+			clear(s.counts)
+			s.countMu.Unlock()
+		}
 	}
 }
 
