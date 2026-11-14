@@ -325,7 +325,17 @@ const budgetTTL = 10 * time.Second
 // when it has none). A refused hypothetical save is what the 400 over-limit
 // answers carry; the stored figure is what the lists page shows.
 func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, error) {
-	if hypo == nil {
+	return a.budget(ctx, hypo, GroupHypo{})
+}
+
+// BudgetWithGroup is Budget with an allowlist group saved as hypothesised.
+func (a *Admin) BudgetWithGroup(ctx context.Context, h GroupHypo) (*Budget, error) {
+	return a.budget(ctx, nil, h)
+}
+
+func (a *Admin) budget(ctx context.Context, hypo *domain.DestPolicy, gh GroupHypo) (*Budget, error) {
+	cacheable := hypo == nil && gh.Mode == nil
+	if cacheable {
 		a.budgetMu.Lock()
 		cached, gen, at := a.budgetCache, a.budgetGen, a.budgetAt
 		a.budgetMu.Unlock()
@@ -348,6 +358,11 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 			defs.Policies = append(defs.Policies, hypo)
 		}
 	}
+	if gh.Mode != nil {
+		defs.GroupModes = slices.DeleteFunc(slices.Clone(defs.GroupModes), func(m *domain.DestGroupMode) bool { return m.GroupID == gh.Mode.GroupID })
+		defs.GroupModes = append(defs.GroupModes, gh.Mode)
+		defs.Lists = append(slices.Clone(defs.Lists), gh.Lists...)
+	}
 	st, err := a.Service.state.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -362,6 +377,16 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 		usage = usageOf(p)
 	}
 	usage.Subjects = len(doc.Exempt)
+	// The allowlist groups: each member once per rule the group has on a node
+	// (the upper bound has no roster, so its synthetic subjects are not counted).
+	groupRules := map[int64]int{}
+	if p := b.assemble(nodeView{bound: true}); p != nil {
+		for _, r := range p.Rules {
+			if kind, gid, ok := ruleOrigin(r.ID); ok && kind == 'g' {
+				groupRules[gid]++
+			}
+		}
+	}
 	if a.Counter != nil {
 		counts, err := a.Counter.CountUsersByGroup(ctx)
 		if err != nil {
@@ -376,9 +401,12 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 				}
 			}
 		}
+		for gid, n := range groupRules {
+			usage.Subjects += counts[gid] * n
+		}
 	}
 	out := budgetOf(usage)
-	if hypo == nil {
+	if cacheable {
 		a.budgetMu.Lock()
 		a.budgetCache, a.budgetGen, a.budgetAt = out, defs.Generation, a.Now()
 		a.budgetMu.Unlock()
@@ -395,6 +423,11 @@ func (a *Admin) CheckBudget(ctx context.Context, hypo *domain.DestPolicy) error 
 	if err != nil {
 		return err
 	}
+	return b.over()
+}
+
+// over is the first limit the budget passes, as the API answers it.
+func (b *Budget) over() error {
 	for _, c := range []struct {
 		kind string
 		item BudgetItem
@@ -673,4 +706,22 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		res.Notes = append(res.Notes, string(n))
 	}
 	return res, nil
+}
+
+// GroupHypo is an allowlist group as it would be after a save: its state and
+// lists, and the lists that do not exist yet (a new group's own), under ids the
+// store has not assigned.
+type GroupHypo struct {
+	Mode  *domain.DestGroupMode
+	Lists []*domain.DestList
+}
+
+// CheckGroupBudget refuses a group save that would put the definitions over a
+// limit (dest_policy_over_limit), as CheckBudget does for a policy.
+func (a *Admin) CheckGroupBudget(ctx context.Context, h GroupHypo) error {
+	b, err := a.BudgetWithGroup(ctx, h)
+	if err != nil {
+		return err
+	}
+	return b.over()
 }

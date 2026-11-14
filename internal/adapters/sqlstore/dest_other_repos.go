@@ -388,6 +388,7 @@ func (r *DestAgentPolicyRepo) Patch(ctx context.Context, agentID string, patch d
 	}
 	nullable("over_limit", patch.OverLimit)
 	nullable("precheck_listeners", patch.PrecheckListeners)
+	nullable("sniffing_groups_dropped", patch.SniffingGroupsDropped)
 	nullable("reported_listeners", patch.ReportedListeners)
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

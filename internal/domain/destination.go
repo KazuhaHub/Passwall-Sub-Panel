@@ -348,7 +348,11 @@ type DestAgentPolicy struct {
 	// report_only_not_deployed). Set by each compile, so it follows the node's
 	// current inbounds and the current budget instead of staying as an issue row.
 	ReportOnlyShed string
-	AppliedSHA256  string
+	// SniffingGroupsDropped is the JSON list of allowlist group ids this node
+	// was not sent because an enabled inbound cannot supply the sniffing their
+	// domain rules need, "" when none was left out.
+	SniffingGroupsDropped string
+	AppliedSHA256         string
 	// AppliedBody is the canonical policy that last applied (the LKG).
 	AppliedBody      []byte
 	AppliedAt        *time.Time
@@ -408,25 +412,27 @@ type DestAgentPolicyPatch struct {
 	OverLimit          *string
 	PrecheckListeners  *string
 	ReportOnlyShed     *string
-	AppliedSHA256      *string
-	AppliedBody        *[]byte
-	AppliedAt          *time.Time
-	AppliedRuleCount   *int
-	AppliedGroups      *[]int64
-	AppliedCollect     *string
-	CollectEffective   *string
-	ResolveEffective   *string
-	ResolveUnavailable *string
-	ReportedSHA256     *string
-	ReportedState      *string
-	ReportedIssue      *string
-	ReportedListeners  *string
-	ReportedAt         *time.Time
-	RejectedCaps       *string
-	RejectedSHA256     *string
-	MintedGeneration   *int64
-	MintedCtx          *string
-	RejectedCtx        *string
+	// SniffingGroupsDropped: see DestAgentPolicy.
+	SniffingGroupsDropped *string
+	AppliedSHA256         *string
+	AppliedBody           *[]byte
+	AppliedAt             *time.Time
+	AppliedRuleCount      *int
+	AppliedGroups         *[]int64
+	AppliedCollect        *string
+	CollectEffective      *string
+	ResolveEffective      *string
+	ResolveUnavailable    *string
+	ReportedSHA256        *string
+	ReportedState         *string
+	ReportedIssue         *string
+	ReportedListeners     *string
+	ReportedAt            *time.Time
+	RejectedCaps          *string
+	RejectedSHA256        *string
+	MintedGeneration      *int64
+	MintedCtx             *string
+	RejectedCtx           *string
 }
 
 // Valid reports whether r is one of the four stored reasons.
