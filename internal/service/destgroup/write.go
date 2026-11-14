@@ -25,7 +25,7 @@ func badInput(field, msg string, bad ...string) error {
 // normalizeListIDs checks the lists an allowlist names: they exist, are lists of
 // destinations, belong to no other group, and a custom one is not empty. The ids
 // come back sorted and without duplicates.
-func (s *Service) normalizeListIDs(ctx context.Context, gid int64, in []int64) ([]int64, error) {
+func (s *Service) normalizeListIDs(ctx context.Context, gid int64, in []int64, probe bool) ([]int64, error) {
 	ids := slices.Clone(in)
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
@@ -42,6 +42,13 @@ func (s *Service) normalizeListIDs(ctx context.Context, gid int64, in []int64) (
 			return nil, badInput("list_ids", "a list that belongs to another group cannot be used here", fmt.Sprint(id))
 		case l.Kind == domain.DestListCustom && l.EntryCount == 0:
 			return nil, badInput("list_ids", "an empty custom list allows nothing", fmt.Sprint(id))
+		}
+		if probe {
+			// An allowlist lets traffic through: an entry that would let through all
+			// of a public suffix or nearly every host is refused, whatever wrote it.
+			if broad := destlist.BroadEntryOf(l); broad != nil {
+				return nil, broad
+			}
 		}
 	}
 	return ids, nil
@@ -147,7 +154,7 @@ func (s *Service) Put(ctx context.Context, gid int64, in PutInput) (*View, error
 		v, _, _, err := s.viewOf(ctx, gid)
 		return v, err
 	}
-	ids, err := s.normalizeListIDs(ctx, gid, in.ListIDs)
+	ids, err := s.normalizeListIDs(ctx, gid, in.ListIDs, in.State != domain.DestStateOff)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +281,7 @@ func (s *Service) Preview(ctx context.Context, gid int64, in PreviewInput) (*Pre
 	if err != nil {
 		return nil, err
 	}
-	ids, err := s.normalizeListIDs(ctx, gid, in.ListIDs)
+	ids, err := s.normalizeListIDs(ctx, gid, in.ListIDs, in.State != domain.DestStateOff)
 	if err != nil {
 		return nil, err
 	}

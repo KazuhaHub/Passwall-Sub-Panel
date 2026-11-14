@@ -49,7 +49,7 @@ type destFixture struct {
 	foreignNode    int64
 	nativePanelID  int64
 	foreignPanelID int64
-	users routerReleaseUsers
+	users          routerReleaseUsers
 	// resyncs are the groups the allowlist writes told the member sync about.
 	resyncs *resyncLog
 }

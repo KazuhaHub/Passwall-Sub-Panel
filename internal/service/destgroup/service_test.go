@@ -3,6 +3,7 @@ package destgroup
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -554,4 +555,46 @@ func TestSummaries_TheGroupsInForceAndForHowLong(t *testing.T) {
 			t.Fatalf("state_days = %d", s.StateDays)
 		}
 	}
+}
+
+// A list an allowlist names is probed like any list that lets traffic through: an
+// entry that would allow all of a public suffix, or nearly every host, is refused
+// (dest_list_too_broad), whatever wrote it into the list.
+func TestPut_RefusesAListWithAnEntryThatAllowsTooMuch(t *testing.T) {
+	h := newHarness(t)
+	g := h.group("Guests", 4)
+	wide := &domain.DestList{
+		Name: "wide", Kind: domain.DestListCustom, Side: domain.DestSideDest, Entries: []byte("domain:com\ndomain:example.com"),
+		EntryCount: 2, ContentSHA256: strings.Repeat("c", 64),
+	}
+	if err := h.dest.Lists.Create(h.ctx, wide); err != nil {
+		t.Fatal(err)
+	}
+	gen := h.generation()
+	for _, state := range []domain.DestState{domain.DestStateReport, domain.DestStateOn} {
+		_, err := h.put(g.ID, PutInput{State: state, ListIDs: []int64{wide.ID}, BaseHosts: hosts()})
+		var broad *destlist.BroadEntryError
+		if !errors.As(err, &broad) || broad.Entry != "domain:com" || broad.Reason != destlist.ReasonBroadSuffix {
+			t.Fatalf("%s: err = %v, want the broad entry named", state, err)
+		}
+	}
+	if h.generation() != gen {
+		t.Fatal("a refused save advanced the generation")
+	}
+	// An allowlist that is off holds its lists dormant: they are probed when it is switched on.
+	good := h.list("good", "DOMAIN-SUFFIX,news.example")
+	v, err := h.put(g.ID, PutInput{State: domain.DestStateReport, ListIDs: []int64{good.ID}, BaseHosts: hosts()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.put(g.ID, h.editLists(v, domain.DestStateOff, wide.ID)); err != nil {
+		t.Fatalf("an off group was probed: %v", err)
+	}
+}
+
+// editLists is the PUT a page sends to change the state and the lists of what it read.
+func (h *harness) editLists(v *View, to domain.DestState, lists ...int64) PutInput {
+	in := h.edit(v, to)
+	in.ListIDs = lists
+	return in
 }

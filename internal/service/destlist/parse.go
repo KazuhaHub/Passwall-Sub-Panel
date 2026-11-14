@@ -892,6 +892,22 @@ func BroadEntriesOf(l *domain.DestList) []string {
 	return broadEntries(l.Entries, l.Kind == domain.DestListGeosite)
 }
 
+// BroadEntryOf is the first entry of a stored list that the probes call broad,
+// as the error a save of something that lets traffic through answers with; nil
+// when there is none.
+func BroadEntryOf(l *domain.DestList) *BroadEntryError {
+	trust := l.Kind == domain.DestListGeosite
+	for _, e := range strings.Split(string(l.Entries), "\n") {
+		if e == "" {
+			continue
+		}
+		if reason := broadReasonFor(e, trust); reason != "" {
+			return &BroadEntryError{Entry: e, Reason: reason}
+		}
+	}
+	return nil
+}
+
 func broadEntries(entries []byte, trustSuffix bool) []string {
 	var out []string
 	for _, e := range strings.Split(string(entries), "\n") {

@@ -72,6 +72,15 @@ func TestDestGroupsAPI(t *testing.T) {
 		t.Fatalf("generation %d -> %d after refused saves", gen0.Generation, st.Generation)
 	}
 
+	// A list with an entry that would allow a whole public suffix is refused.
+	wide := &domain.DestList{Name: "wide", Kind: domain.DestListCustom, Side: domain.DestSideDest, Entries: []byte("domain:com"), EntryCount: 1, ContentSHA256: strings.Repeat("c", 64)}
+	if err := f.dest.Lists.Create(context.Background(), wide); err != nil {
+		t.Fatal(err)
+	}
+	if out := f.expect("PUT", gpath(g, ""), `{"state":"report","list_ids":[`+itoa(wide.ID)+`],"base_hosts":[]}`, 400, "dest_list_too_broad"); out["entry"] != "domain:com" {
+		t.Fatalf("body = %v", out)
+	}
+
 	// A list that has not arrived stops "on", and only on.
 	feed := &domain.DestList{Name: "feed", Kind: domain.DestListRemote, Side: domain.DestSideDest, SourceURL: "https://lists.example.test/feed"}
 	if err := f.dest.Lists.Create(context.Background(), feed); err != nil {
