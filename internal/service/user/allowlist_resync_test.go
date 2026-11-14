@@ -85,8 +85,8 @@ func (s exclusionSelector) AllowlistExcludedPanels(context.Context, *domain.Grou
 	return s.excluded, nil
 }
 
-// notRegisteredErr is what the pool answers for a panel that was deleted.
-var notRegisteredErr = fmt.Errorf("xui panel id 9 not registered: %w", ports.ErrPanelNotRegistered)
+// errNotRegistered is what the pool answers for a panel that was deleted.
+var errNotRegistered = fmt.Errorf("xui panel id 9 not registered: %w", ports.ErrPanelNotRegistered)
 
 func newRetirementService(psp PSPClientProvisioner, mig SharedMigrator, life SharedLifecycleSyncer, excluded ...int64) (*Service, *deletePool) {
 	u := &domain.User{ID: 7, Enabled: true, GroupID: 1}
@@ -258,7 +258,7 @@ func TestResyncMembership_AnAlreadyGoneClientOrPanelIsNotAFailure(t *testing.T) 
 			"client not found":     func(p *deletePool) { p.deleteBy = errors.New("POST /panel/api/clients/del/u7: client not found") },
 			"record not found":     func(p *deletePool) { p.deleteBy = errors.New("get: (record not found)") },
 			"ErrNotFound":          func(p *deletePool) { p.deleteBy = domain.ErrNotFound },
-			"panel not registered": func(p *deletePool) { p.getErr = notRegisteredErr },
+			"panel not registered": func(p *deletePool) { p.getErr = errNotRegistered },
 		} {
 			t.Run(name+"/"+how, func(t *testing.T) {
 				svc, pool := newRetirementService(&retirementPSP{retired: rc}, &resyncMigrator{}, &failingSharedLife{}, 9)
