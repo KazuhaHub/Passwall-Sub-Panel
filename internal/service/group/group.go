@@ -78,7 +78,13 @@ func (s *Service) Create(ctx context.Context, g *domain.Group) error {
 }
 
 func (s *Service) Update(ctx context.Context, g *domain.Group) error {
-	return s.groups.Update(ctx, g)
+	if err := s.groups.Update(ctx, g); err != nil {
+		return err
+	}
+	// The group's allowlist is part of the row: which nodes it includes may
+	// have changed for every panel.
+	s.InvalidateEligibility(0)
+	return nil
 }
 
 // Delete refuses to remove a group that still has members; the admin must

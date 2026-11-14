@@ -639,3 +639,67 @@ func TestInboundsChanged_OnlyNativePanelsResync(t *testing.T) {
 		t.Fatalf("resynced %v after a failed panel read", events)
 	}
 }
+
+type updatingGroups struct {
+	*eligGroups
+	updated []*domain.Group
+}
+
+func (r *updatingGroups) Update(_ context.Context, g *domain.Group) error {
+	r.updated = append(r.updated, g)
+	return nil
+}
+
+// An allowlist's state is part of the group, so saving the group can change
+// which nodes it includes; the cached eligibility of every panel goes with it.
+func TestUpdateInvalidatesEligibilityOfEveryPanel(t *testing.T) {
+	e := newEligEnv(t)
+	repo := &updatingGroups{eligGroups: e.groups}
+	e.svc.groups = repo
+	g := allowlistGroup(domain.DestStateOn)
+	if !e.eligible(t, g) {
+		t.Fatal("want eligible")
+	}
+	e.agents.byPanel[1].ObservedCapabilities = nil
+	if err := e.svc.Update(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+	if e.eligible(t, g) {
+		t.Fatal("Update left the cached eligibility standing")
+	}
+}
+
+// A6: a panel whose inbounds cannot supply the sniffing stays ineligible however
+// the policy's own sniffing fallback comes and goes with the roster. Judging by
+// that fallback would loop: ineligible, members removed, rules gone, the
+// precheck passes, eligible, members added, the precheck fails.
+func TestNoOscillation_InsufficientSniffingStaysIneligible(t *testing.T) {
+	for _, sniffing := range []struct {
+		json string
+		want bool
+	}{
+		{`{"enabled":true,"destOverride":["http"]}`, false},
+		{sniffOK, true},
+	} {
+		e := newEligEnv(t)
+		e.node.Sniffing = sniffing.json
+		g := allowlistGroup(domain.DestStateOn)
+		for round := 0; round < 6; round++ {
+			// The roster-dependent fallback flips every round, as it would as the
+			// members are removed and added back.
+			reason := domain.DestFallbackNone
+			if round%2 == 1 {
+				reason = domain.DestFallbackSniffing
+			}
+			e.policies.byAgent["agt_1"] = &domain.DestAgentPolicy{FallbackReason: reason}
+			e.svc.InvalidateEligibility(0)
+			nodes, err := e.svc.NodesFor(context.Background(), g)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(nodes) == 1; got != sniffing.want {
+				t.Fatalf("round %d (fallback %q): included = %v, want %v on every round", round, reason, got, sniffing.want)
+			}
+		}
+	}
+}
