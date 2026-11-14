@@ -382,6 +382,9 @@ func TestResolve_FallbackNeverRaisesTheMode(t *testing.T) {
 	if fb.Digest != first.Digest || fb.Policy == nil || fb.Policy.Resolve != protocol.ResolveAsIs {
 		t.Fatalf("the fallback raised the mode: %+v", fb.Policy)
 	}
+	if m := h.meta(); m.ResolveUnavailable != "" {
+		t.Fatalf("resolve_unavailable = %q: the policy has IP rules, the fallback state explains the rest", m.ResolveUnavailable)
+	}
 }
 
 func TestResolve_FallbackLowersToThePanelsChoiceAndKeepsAnApplied_OnDemand(t *testing.T) {
@@ -599,5 +602,29 @@ func TestResolve_OnDemandWithNoIPRulesIsRecordedAsSuch(t *testing.T) {
 	h.compileResolve(base1(), domain.DestResolveAsIs, "", policyCap, resolveCap)
 	if m := h.meta(); m.ResolveUnavailable != "" {
 		t.Fatalf("as_is recorded %q", m.ResolveUnavailable)
+	}
+}
+
+// Narrowing an unscoped report-only rule lists every other inbound; when that
+// pushes the policy over a limit the un-narrowed one is not over, the rules are
+// dropped instead, so report-only never causes an over_limit fallback.
+func TestSettleResolve_NarrowingThatWouldOverrunALimitDropsTheRule(t *testing.T) {
+	nodes := []*domain.Node{node(1, routeOnlySniffing)}
+	for i := int64(2); i < 3+protocol.MaxPolicyInbounds; i++ {
+		nodes = append(nodes, node(i, goodSniffing))
+	}
+	p := &protocol.DestinationPolicy{Resolve: protocol.ResolveOnDemand, Rules: []protocol.DestinationRule{
+		{ID: "p1", Action: protocol.RuleBlock, Ports: "25"},
+		{ID: "p2", Action: protocol.RuleObserve, Private: true},
+	}}
+	if usageOf(p).over() != nil {
+		t.Fatal("setup: the policy is over a limit already")
+	}
+	out, held, obs := settleResolve(p, nodes, xrayEngine)
+	if len(held) != 0 || !obs || out == nil || usageOf(out).over() != nil {
+		t.Fatalf("held %+v observe %v over %v", held, obs, out != nil && usageOf(out).over() != nil)
+	}
+	if len(out.Rules) != 1 || out.Rules[0].ID != "p1" || out.Resolve != protocol.ResolveAsIs {
+		t.Fatalf("out = %+v: the report-only rule should have been dropped", out)
 	}
 }

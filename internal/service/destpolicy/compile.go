@@ -324,8 +324,11 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	}
 	// XRAY'S domainStrategy IS ROUTER-WIDE: an inbound whose sniffing would
 	// substitute the name the router resolves (routeOnly:true) holds the WHOLE
-	// node at as_is. It is a downgrade, not a restriction: no rule is dropped or
-	// scoped, and the node is flagged.
+	// node at as_is, decided on the enforced rules alone (report-only must not
+	// disturb enforcement). That is a downgrade: no enforced rule is dropped or
+	// scoped, and the node is flagged. Report-only IP rules that meet such an
+	// inbound are instead taken off it (narrowed, or dropped when narrowing would
+	// overrun a limit) and reported as not deployed.
 	desired, desiredResolveHeld, resolveObserve := settleResolve(desired, nodes, engine)
 	if resolveObserve && desiredShed == "" {
 		desiredShed = shedResolve
@@ -564,7 +567,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	switch {
 	case len(resolveHeld) > 0:
 		outUnavailable = resolveReason(resolveHeld[0])
-	case resolve == protocol.ResolveOnDemand && output != nil && output.Resolve != protocol.ResolveOnDemand:
+	case resolve == protocol.ResolveOnDemand && output != nil && !hasIPRules(output):
 		// Asked for, nothing holds it back, and still none was written: the policy
 		// has no IP rule to resolve for.
 		outUnavailable = resolveNoIPRules

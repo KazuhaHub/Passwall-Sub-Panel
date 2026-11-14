@@ -161,29 +161,41 @@ func settleResolve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine s
 		}
 	}
 	slices.Sort(all)
-	out := make([]protocol.DestinationRule, 0, len(p.Rules))
-	for _, r := range p.Rules {
-		if sheddable(r) && ruleHasIPRules(r) {
-			targets := r.Inbounds
-			if len(targets) == 0 {
-				targets = all
-			}
-			kept := slices.DeleteFunc(slices.Clone(targets), func(k protocol.ListenerKey) bool { return bad[k] })
-			if len(kept) != len(targets) {
-				if len(kept) == 0 {
-					continue
+	// build is the policy with the report-only IP rules taken off the bad
+	// inbounds: narrowed to the others, or (drop) removed outright.
+	build := func(drop bool) *protocol.DestinationPolicy {
+		out := make([]protocol.DestinationRule, 0, len(p.Rules))
+		for _, r := range p.Rules {
+			if sheddable(r) && ruleHasIPRules(r) {
+				targets := r.Inbounds
+				if len(targets) == 0 {
+					targets = all
 				}
-				r.Inbounds = kept
+				kept := slices.DeleteFunc(slices.Clone(targets), func(k protocol.ListenerKey) bool { return bad[k] })
+				if len(kept) != len(targets) {
+					if len(kept) == 0 || drop {
+						continue
+					}
+					r.Inbounds = kept
+				}
 			}
+			out = append(out, r)
 		}
-		out = append(out, r)
+		if len(out) == 0 {
+			return nil
+		}
+		res := &protocol.DestinationPolicy{Rules: out, Exempt: slices.Clone(p.Exempt)}
+		withCollect(res, p.Collect)
+		withResolve(res, p.Resolve)
+		return res
 	}
-	if len(out) == 0 {
-		return nil, nil, true
+	res := build(false)
+	// Narrowing an unscoped rule lists every other inbound, which can overrun a
+	// limit the un-narrowed policy fits: report-only must not cause an over_limit
+	// fallback, so the rules are dropped instead.
+	if res != nil && usageOf(res).over() != nil && usageOf(p).over() == nil {
+		res = build(true)
 	}
-	res := &protocol.DestinationPolicy{Rules: out, Exempt: slices.Clone(p.Exempt)}
-	withCollect(res, p.Collect)
-	withResolve(res, p.Resolve)
 	return res, nil, true
 }
 
