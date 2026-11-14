@@ -6,7 +6,7 @@
 > 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。**命中记录**（A 档）随第二批上线：
 > 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**用量（B 档）、白名单分组的接口与界面、sing-box 采集** 在后续批次（白名单分组的数据模型与编译见 §3.2）。
 >
-> 线上协议见 Passwall-Protocol `v0.4.1`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
+> 线上协议见 Passwall-Protocol `v0.5.0`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
 > [psp-node-agent.md](psp-node-agent.md) §11。
 
 ## 1. 行为一句话
@@ -73,6 +73,22 @@ config ETag 不变，core 不会因为升级面板而重启。
 - 下发给节点的有效档位是**面板档位与节点能力中较低的一个**：`hits` 需要节点声明 `audit.hits.v1`；`hits_and_usage`（B 档）尚未提供，没有节点声明 `audit.usage.v1`，按 `hits` 处理（`usageTierAvailable`）。
 - **只在需要的地方编译采集**：有效档位非空，**并且**策略里至少有一条 `block` 或 `observe` 规则时才写 `Collect`，让节点给这些规则挂 webhook。没有规则可记录（只有放行策略）、面板关闭记录、节点没有能力时都不写：写了会改变摘要、让 core 白白重启一次。档位变化是新策略（摘要变），不变则 ETag 不动。回退（LKG）时的档位跟随面板**当前**的选择，但**只降不升**：取 LKG 铸出时的档位与面板当前档位中较低的一个。升到比 LKG 更高的档位会铸出节点从没应用过的字节（另一个摘要）；节点若连它也拒绝，LKG 就被清空、节点停止执行。
 - 实际下发的档位写进 `dest_agent_policy.collect_effective`。「**在记录**」（`collecting`）由 PSP 推导，不靠节点上报（安静的节点不发 audit，区分不了「在记录但没命中」和「没在记录」）：节点是 Xray、声明了 `audit.hits.v1`、`collect_effective` 非空，且最近一次 `PolicyStatus` 是对**当前铸出的摘要**的 `applied`。sing-box 节点只执行、不记录。 节点最近应用的那一版的档位记在 `dest_agent_policy.applied_collect`，风险信号靠它在发布与节点应用之间不抖动（见 `/policies` 一行）。
+
+### 4.0b 主机名与 IP 规则（`Policy.Resolve`）
+
+CIDR、私有地址这类**IP 规则**默认只对「以 IP 发起」的连接生效。`Resolve` 决定路由在遇到**主机名**时要不要先解析：
+
+- 面板（原生服务器）有 `dest_resolve`：`as_is`（按原样，默认）/ `on_demand`（按需解析），只能通过服务器编辑接口（`PUT /servers/:id`）改，整行保存不会碰它。**按节点而不是按策略**：Xray 的 `domainStrategy` 是整个路由器一个值，DNS 的代价与解析器也是节点的属性。
+- **`IPIfNonMatch`（不匹配时解析）不提供**：界面里置灰并写明原因，接口 400 `dest_resolve_unavailable`，线上协议里也无效。它先不带地址跑一遍全部规则、没命中才解析，会改变规则顺序：排在前面的 IP 拦截会被后面「不需要地址就命中」的仅报告规则、白名单成员的域名放行跳过，于是仅报告和试运行分组**会改变判定**，违背 §3.1。它省的 DNS 也很有限：策略默认放行，绝大多数主机名连接什么都不命中，照样要解析。
+- **有效模式**（下发给节点的）：面板选了 `on_demand`，**并且**节点声明了 `policy.destination.resolve.v1`（`EffectiveResolve`）。这个门是强制的：节点会忽略不认识的字段，旧节点收到 `on_demand` 会接受策略却悄悄按 `as_is` 执行，IP 规则永远不判主机名。能力不在时状态页 `resolve_unavailable = "version"`，由节点当前声明的能力推导，不存库。
+- **只在需要的地方编译**：策略里至少有一条规则带 `CIDRs` 或 `Private`（含仅报告与放行规则）才写 `Resolve`，否则不写：写了会改摘要、让 core 白白重启一次（`withResolve`）。仅报告剪枝、按入站限定之后重新推导。
+- **`routeOnly:true` 的入站让整台节点保持 `as_is`。** Xray 按 `routeOnly:true` 嗅探时，嗅探出的名字只用于路由，连接仍去原来的 IP，而按需解析**优先解析域名**，于是带假 SNI 的连接会按假名字的地址被判，真正的目的 IP 反而没被检查：按需解析在这样的入站上等于给绕过开了门。所以只要某个启用的入站上有适用的 IP 规则、且它的嗅探会用嗅探出的名字替代（`protocol.CheckXraySniffing` 以 `SniffForResolvedIPs` 判为 `route_only_resolve`；`destOverride` 为空、只有 `fakedns` 或 `fakedns+others`、嗅探关闭或 `metadataOnly` 都不算），**整台节点**降为 `as_is`，策略的其他部分原样下发（这是降级，不是 §4.2 第 7 条的按入站限定，不去掉也不限定任何规则）。记 issue `destination_policy_resolve_not_deployed`（每个相关入站一条，detail `route_only`），状态 `resolve_unavailable = "route_only"`。只检查 Xray 节点；sing-box 不用嗅探出的名字改写去向。运营者把入站改成 `routeOnly:false`（或去掉）后下一次编译自动恢复。
+- **回退（LKG）只降不升**：回退用的模式取 LKG 当时运行的模式与当前有效模式中较低的一个（`as_is` < `on_demand`），再按剩下的规则重新推导；升到 LKG 没应用过的模式会铸出节点从没运行过的字节。回退策略同样按入站当前的嗅探复核，`routeOnly` 入站让它降为 `as_is`。
+- 编译键含有效模式（只在 `on_demand` 时写入，所以 `as_is` 节点的键不变），能力 `r` 记进拒绝时的能力记号（`rejected_caps`）：节点获得或失去该能力是重试被拒策略的理由。
+- 实际下发的模式写进 `dest_agent_policy.resolve_effective`（`"on_demand"` 或空），被 `routeOnly` 入站拦下时 `resolve_unavailable` 记 `"route_only"`。
+- **「测试目的地」**（§6 `/test`）：加可选 `resolved_ips`（至多 16 个 IP 字面量，校验），用该面板有效模式（同上，含能力与 `routeOnly` 降级）求值，**永远不做 DNS**——PSP 的解析器不是节点的，查出来的结果看似权威其实不是。不给 `resolved_ips` 时，主机名遇到 IP 规则的结果是有条件的（注释 `hostname_needs_resolution`）；给空数组表示解析失败，IP 规则全部不命中（注释 `resolution_failed_engine_dependent`：Xray 放行、sing-box 连接失败）。
+
+**切换节点的 `dest_resolve` 到 `on_demand`（且策略里有 IP 规则）会让该节点的 core 重启一次**（摘要变了）；切回 `as_is` 同样一次。没有 IP 规则的节点切换不会重启。
 
 ### 4.1 发布（去抖）
 
@@ -158,10 +174,11 @@ config ETag 不变，core 不会因为升级面板而重启。
 | `dest_audit_batches` | 主键 `(agent_id, batch_id)`、`received_at`：BatchID 去重，保留 72 小时（接受的历史窗口 48 小时加 24 小时余量：标记在节点还可能重发的期间内必须在） |
 | `dest_audit_drops` | 主键 `(hour_ms, panel_id, kind)`、`count`：上报了但没有变成命中行的数量（节点聚合表满、超预算、队列满、写入失败），让「这段时间有 N 条未统计」说得出口。`kind`：`node_hits`、`node_trial`、`over_budget`、`queue_full`、`ingest_error` |
 | `xui_panels.audit_collect` | `varchar(16) NOT NULL DEFAULT 'hits'`，只对 `kind=psp` 有意义；整行 `Save` 不写它（更新分支 `Omit`），只有 `UpdateNativeMetadata` 写 |
+| `xui_panels.dest_resolve` | `varchar(16) NOT NULL DEFAULT 'as_is'`（`as_is` / `on_demand`），只对 `kind=psp` 有意义；与 `audit_collect` 一样整行 `Save` 不写（`Omit`），只有 `UpdateNativeMetadata` 写（§4.0b） |
 | `dest_policy_state` | 单行（id 1）：`generation`、`published_generation`、`first_unpublished_at`、`last_write_at`、`paused`、`geoip_sha256`、`geosite_release`、`publish_error` |
 | `dest_policy_snapshots` | 已发布快照的规范序列化，只保留最新一份 |
 | `groups_`（白名单列） | `dest_allowlist_state`（varchar(16)，NULL = off）、`dest_allowlist_list_ids`（text JSON）、`dest_allowlist_base_list_id`、`dest_allowlist_extra_list_id`、`dest_allowlist_state_changed_at`、`dest_allowlist_updated_at`（都可空，升级后为 NULL，text 列无 DEFAULT）。只有 dest 一侧的写入（`DestGroupAllowlistRepo`）改这几列，分组编辑不碰；写入带 `updated_at` 前置条件，并与 generation +1 同一事务。分组删除在同一事务里带走它自带的列表（`dest_lists.owner_group_id`），并在它有白名单或自带列表时推进 generation |
-| `dest_agent_policy` | 每个 agent 一行：期望 / 铸出 / 上报的摘要、`fallback_reason`、`rejected_generation`、`rejected_caps`、`over_limit`、`precheck_listeners`、LKG（`applied_sha256`、`applied_body`…） |
+| `dest_agent_policy` | 每个 agent 一行：期望 / 铸出 / 上报的摘要、`fallback_reason`、`rejected_generation`、`rejected_caps`、`over_limit`、`precheck_listeners`、LKG（`applied_sha256`、`applied_body`…）、`collect_effective`、`resolve_effective`（`varchar(16) NOT NULL DEFAULT ''`，下发的按需解析模式）、`resolve_unavailable`（同，`route_only` 或空） |
 
 三方言（SQLite、PostgreSQL、MySQL）都有测试；大列一律 `[]byte`，JSON 小列用 `text`，没有 `text` 列带 `DEFAULT`。
 节点删除时同一事务带走它的 `dest_source_rules`；账号删除时带走它的 `dest_exemptions`；原生面板删除时带走它的 `dest_agent_policy`。
@@ -190,12 +207,12 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | GET | `/source-rules`、`/source-rules/:node_id` | 全部 / 单个（无规则返回 `state:"off"`）；带 `geoip_available` |
 | PUT | `/source-rules/:node_id` | `{countries, cidrs, state, updated_at?}`；非原生节点 409 `dest_source_rule_not_native`；冲突 409 `dest_source_rule_stale` |
 | POST | `/exceptions` | 全局例外：`{target, match:"site"|"host", scope:"global"}`；第一次使用时在同一事务里建「放行例外」列表和排在放行第一位的 allow 策略 |
-| POST | `/test` | `{target, port?, network?, user_id?, panel_id?, inbound_node_id?, source_ip?}`。**写审计**（谁替谁测试过什么）。永不做 DNS。`steps[].kind` 取 `source`、`allow`、`block`、`exempt`、`builtin`；每个 step 另带 `report_only: bool`：**规则处于 `report`（仅报告）状态时为 true，策略规则与来源规则都一样**，此时 `kind` 仍是规则本身的种类（`block` 或 `source`），并带 `policy_id` / `node_id` 与 `name`。命中 `report_only` 的 step 不拦截：它**会**终止求值，`verdict` 为 `observe`，`terminating_step` 是该规则的 id（界面应显示「仅记录，本应拦截」，不要显示「被拦截」）。取舍：用独立的布尔而不是新的 `kind`，是因为界面既要知道这是哪一种规则，也要知道它只是报告|
+| POST | `/test` | `{target, port?, network?, user_id?, panel_id?, inbound_node_id?, source_ip?, resolved_ips?}`（`resolved_ips` 至多 16 个 IP 字面量，见 §4.0b；非法 400 `dest_test_invalid`，`field: "resolved_ips"`）。**写审计**（谁替谁测试过什么）。永不做 DNS。`steps[].kind` 取 `source`、`allow`、`block`、`exempt`、`builtin`；每个 step 另带 `report_only: bool`：**规则处于 `report`（仅报告）状态时为 true，策略规则与来源规则都一样**，此时 `kind` 仍是规则本身的种类（`block` 或 `source`），并带 `policy_id` / `node_id` 与 `name`。命中 `report_only` 的 step 不拦截：它**会**终止求值，`verdict` 为 `observe`，`terminating_step` 是该规则的 id（界面应显示「仅记录，本应拦截」，不要显示「被拦截」）。取舍：用独立的布尔而不是新的 `kind`，是因为界面既要知道这是哪一种规则，也要知道它只是报告|
 | GET | `/users/:id` | 账号的分组与豁免，加 `hits_available`（该账号有 client 的节点中至少一台在记录）与 `recent_hits:{days, items:[{source, source_name, action, count, top_dests(≤3), panels, last_at}]}`；用量部分仍为 null |
 | GET | `/hits` | 命中记录，分页。筛选 `user_id`、`panel_id`、`source`、`source_kind`（`policy`/`source`/`group`）、`action`（`block`/`observe`）、`since`、`until`（UTC 毫秒，间隔最长 31 天，超出 400 `dest_hits_range`）、`include_trial`、`q`（目的地关键词）、`group_by`（`none`/`site`/`user`/`policy`）、`page`、`page_size`。响应另带 `summary:{block, deny, observe, users}`（时间/账号/节点选择，**带 `source` 时再收窄到这个来源**，不受 `action`、`source_kind` 筛选影响。取舍：计划 P7 只把 `action` 与 `source_kind` 列为不影响摘要的筛选，而「转为拦截」对话框（S4）要的是「这条策略涉及多少账号」，读的就是 `source=p<id>` 请求的 `summary.users`，所以按来源收窄比另设 `summary_for_source` 更贴合计划，前端也不用多发一个请求；不带 `source` 时仍是整个选择，指标卡不随 `action` 变化）、`sources:[{source, name|null}]`（`null` = 已删除）与 `dropped_in_range` |
 | GET | `/policies` | 策略带 `hits_recent`（窗口内 `block` 命中数）、`last_hit_at`，**状态为 `report` 的另带 `would_block_recent`**（窗口内 `observe` 命中数，即本应拦截的次数）；`hit_window_days = min(7, 命中保留天数)`。没有任何节点在记录时 `hits_recent` / `would_block_recent` 为 null；放行策略不记录任何东西，三个字段恒为 null。`last_hit_at` 只在保留窗口内、只为列出的非放行策略读取（走 `(source, hour_ms)` 索引）。风险信号 `dest_block` 判断「节点是否在记录」用的是不随每次发布抖动的 `CollectingForRisk`（已应用过带记录级别的策略、且面板仍要求记录即算），`/status.collecting` 仍是「此刻确实在记录」的诚实答案（「0 次」对一条没人监视的策略是没有依据的说法）。仅报告的策略在 `block` 数组里，`observe` 数组恒为空 |
-| GET / PUT | `/servers`、`/servers/:id`（已有） | 原生服务器的 DTO 与更新多了 `audit_collect`（省略保持原值；对非原生服务器 400；非法值 400） |
-| GET | `/status` | 全局 `{generation, published_generation, last_write_at, next_publish_at, apply_eta_ms, paused, publish_error, geosite_release, geoip_unavailable, totals, nodes:[…]}`；每节点含 `state`、`fallback_reason`、`over_limit`、`sniffing_insufficient`、`rules_data_version`、`geoip_unavailable`、`collect`（面板档位）、`collect_effective`（下发给节点的档位）、`collecting`（推导的「在记录」，§4.0）、`hits_24h`（近 24 小时命中数，节点无记录能力时为 null）、`report_only_not_deployed`（`"sniffing"`、`"limit"` 或 null：这个节点收到的策略里被去掉了仅报告规则的原因，null 表示都已下发；开启的规则不受影响；每次编译重新写入，所以嗅探修好、额度够了就变回 null，与节点 issue `destination_policy_report_only_not_deployed` 同源，但 issue 行不会自己消失，这个字段会） |
+| GET / PUT | `/servers`、`/servers/:id`（已有） | 原生服务器的 DTO 与更新多了 `audit_collect`（省略保持原值；对非原生服务器 400；非法值 400）和 `dest_resolve`（`as_is` / `on_demand`；省略保持原值；对非原生服务器 400；非法值 400；`if_non_match` 400 且 `code: "dest_resolve_unavailable"`；DTO 对非原生服务器不带它，§4.0b） |
+| GET | `/status` | 全局 `{generation, published_generation, last_write_at, next_publish_at, apply_eta_ms, paused, publish_error, geosite_release, geoip_unavailable, totals, nodes:[…]}`；每节点含 `state`、`fallback_reason`、`over_limit`、`sniffing_insufficient`、`rules_data_version`、`geoip_unavailable`、`collect`（面板档位）、`collect_effective`（下发给节点的档位）、`collecting`（推导的「在记录」，§4.0）、`resolve`（面板选择：`as_is` / `on_demand`；非原生节点为空）、`resolve_effective`（下发给节点的模式，空 = `as_is`）、`resolve_unavailable`（面板选了 `on_demand` 却没有生效的原因：`"version"`（节点没有 `policy.destination.resolve.v1`，由当前能力推导）、`"route_only"`（某入站嗅探 `routeOnly:true` 会替换被解析的名字，整台节点保持 `as_is`），否则 null；§4.0b）、`hits_24h`（近 24 小时命中数，节点无记录能力时为 null）、`report_only_not_deployed`（`"sniffing"`、`"limit"` 或 null：这个节点收到的策略里被去掉了仅报告规则的原因，null 表示都已下发；开启的规则不受影响；每次编译重新写入，所以嗅探修好、额度够了就变回 null，与节点 issue `destination_policy_report_only_not_deployed` 同源，但 issue 行不会自己消失，这个字段会） |
 | POST / PUT | `/publish`、`/pause` | 立即发布（被校验拒绝 409 `dest_policy_over_limit` 带 `publish_error`）；紧急开关 `{paused}` |
 | POST | `/agents/:agent_id/retry` | 清除 `rejected`，下一轮重试新版 |
 
@@ -236,6 +253,8 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | 新 PSP + 旧节点 | 节点没有能力，状态显示 `unsupported_version` | 升级节点 |
 | 原生面板还没有节点注册 | 状态显示 `not_enrolled`，不计入执行节点，也不算需升级 | 在服务器页安装并注册节点 |
 | 生产节点升级到带 `audit.hits.v1` 的 agent，且已有第一批拦截策略、`audit_collect` 为默认 `hits` | 策略里多了记录级别，摘要变化，**core 再重启一次** | 想避免：升级前把该服务器的 `audit_collect` 设为 `off`（`PUT /servers/:id`） |
+| 升级 PSP（含 `dest_resolve`），所有服务器保持默认 `as_is` | 下发的字节与摘要同升级前逐字节相同（`TestResolve_AsIsEverywhereIsByteIdentical`），**没有任何节点重启** | 无 |
+| 把某台节点的 `dest_resolve` 切到 `on_demand`，节点有 `policy.destination.resolve.v1` 且策略里有 CIDR / 私有地址规则 | 该节点的摘要变化，**core 重启一次**（只这一台；切回 `as_is` 同样一次）。没有 IP 规则、节点无该能力、或被 `routeOnly` 入站拦下时，下发的策略不变，不重启 | 在维护窗口里切换；先看状态页的 `resolve_unavailable` |
 
 **每次策略变更，节点 core 重启一次**（Xray、sing-box 都没有热重载），现有连接会断开；去抖与摘要比对把次数压到最低。
 
@@ -264,9 +283,23 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
    Xray 一侧靠 `routeOnly:false` 的注入缩小了这个口子（见下一条），sing-box 一侧没有对等的手段；这是写进限制而不是承诺的原因。
 3. **Xray `routeOnly:false` 会改写去向。** 节点为域名规则在没开嗅探的入站上注入 `routeOnly:false` 后，Xray 会连接**嗅探出的主机**而不是客户端请求的地址：
    对携带可识别主机的连接，去向会被改成 SNI 指向的地方。这正是「拦的就是到达的」，但对原本没开嗅探的入站是行为变化。`routeOnly:true` 的入站在 PSP 预检里判为「嗅探不足」，
-   不会被改写。
-4. **IP/CIDR 与私有地址规则只对以 IP 发起的连接生效。** 路由不做 DNS 解析（Xray `AsIs`，sing-box 未加 `resolve`），所以**主机名解析到被拦网段的连接不会被这些规则匹配**；
-   「测试目的地」遇到这种情况会给出 `hostname_skips_ip_rules` 注释。Xray 的 freedom 出站对部分入站类型有默认的私有地址拦截，只是后备，不能依赖。
+   不会被改写。**在「按原样」下，被这样改写的连接可以到达那个名字解析到的任何地址，包括私有网段和 CIDR 拦截的网段**：域名规则判的是改写后的名字（正确），
+   IP 规则判的却什么都不是（目的已经不是原来的 IP，名字也从没被解析）；客户端只要发一个会解析到目标地址的 Host / SNI（通配域名或自己控制的 DNS），就能绕过。Xray freedom 对部分入站类型的默认私有地址拦截只是部分后备。
+   **「按需解析」（§4.0b）在 Xray 上堵上这个口子**：路由对改写后的名字解析并逐条判 IP 规则。它要求连接级 `routeOnly:false`（预检保证），所以 `routeOnly:true` 的入站会让整台节点保持「按原样」。
+4. **IP/CIDR 与私有地址规则对主机名的行为取决于节点的 `dest_resolve`（§4.0b）。**
+   - **按原样（默认）：** 路由不做 DNS（Xray `AsIs`，sing-box 不加 `resolve`），所以**主机名解析到被拦网段的连接不会被这些规则匹配**；「测试目的地」遇到这种情况给出 `hostname_skips_ip_rules` 注释。
+   - **按需解析：** 路由走到第一条 IP 规则时解析一次主机名，**解析结果里任一地址**落在规则里即命中：拦截偏保守，**CIDR 放行偏宽松**（拨号时可能用的是另一个地址）。两个引擎的行为和代价不同：
+
+   | | 按原样 | 按需解析，Xray | 按需解析，sing-box |
+   |---|---|---|---|
+   | DNS 代价 | 0 | 每个走到 IP 规则的主机名连接一次**不缓存**的系统解析（节点没有 `dns` 配置时用 localhost 客户端），外加 freedom 拨号时自己的那一次 | 一次带缓存的解析，拨号时直接用解析出的地址，放行的连接几乎没有额外代价 |
+   | 解析失败 | —（不解析） | IP 规则**不命中，放行（fail-open）** | **连接失败（fail-closed）** |
+   | 匹配的 IP 就是拨号的 IP | — | **否**：路由与拨号各解析一次，DNS 重绑定或轮询可以让两次结果不同 | 是 |
+   | `routeOnly:true` 的入站 | 无影响 | 不支持：**整台节点按原样执行**并标注（`resolve_unavailable = "route_only"`，issue `destination_policy_resolve_not_deployed`） | 不适用 |
+
+   - 其他事实：一条规则的条件按固定顺序检查、遇到第一个不满足即停，所以带 `user` 加 IP 的规则只在用户匹配时才触发解析；仅报告规则里的 CIDR 同样会触发解析（成本，不改变判定）。sing-box 上多出的仅报告 CIDR 规则会让解析失败的连接在 `resolve` 处而不是拨号处失败，对直连出站结果一样。
+   - 「测试目的地」不做 DNS：给 `resolved_ips` 才能得到确定的结果（§4.0b）。
+   - Xray 的 freedom 出站对部分入站类型有默认的私有地址拦截，只是后备，不能依赖。
 5. **尾随点拦截。** Xray 不会把 `example.com.` 当作 `example.com`，所以只要有拦截规则带域名，节点就多拦所有以 `.` 结尾的主机名（客户端没有理由那样请求）；
    大小写不需要处理，Xray 在匹配前统一小写。
 6. **DNS 搜索列表。** 无点的主机名（如 `intranet`）可能被节点的 DNS 搜索列表（resolv.conf 的 `search`，Docker / Kubernetes 常见）展开成别的名字，
@@ -299,6 +332,8 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 后台循环 `dest-list-refresh` 见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3。
 
 ## 12. 相对规划书的偏离
+
+关于「主机名与 IP 规则」（§4.0b）相对设计稿的两处不同：能力名是线上协议里实际的 `policy.destination.resolve.v1`（设计稿写作 `policy.resolve.v1`）；`dest_agent_policy` 多一列 `resolve_unavailable`（设计稿只列 `resolve_effective`），因为「被 `routeOnly` 入站拦下」与「策略里没有 IP 规则所以没写 `Resolve`」从 `resolve_effective` 为空看不出区别，状态页需要前一种。
 
 两处与 `node-audit-plan.md` 不同，都是有意的：
 
