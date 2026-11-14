@@ -99,3 +99,61 @@ func TestStatus_AFailingHitCountOnlyNullsHits24h(t *testing.T) {
 		t.Fatalf("node = %+v: hits_24h must be null and the rest intact", n)
 	}
 }
+
+// The status says, per node, what the panel is set to (resolve), what the node
+// was sent (resolve_effective) and why a node set to on_demand does not run it:
+// "version" (the node does not declare the capability, derived from what it
+// declares now) or "route_only" (an inbound's sniffing, recorded by the compile).
+func TestStatus_CarriesTheResolveFieldsOfANode(t *testing.T) {
+	ah := newAdminHarness(t)
+	ctx := ah.ctx
+	agent := ah.admin.Agents.(fakeAgents).agents[0]
+	agent.ObservedCapabilities = []string{policyCap, resolveCap}
+
+	v, err := ah.admin.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := nodeOf(t, v, 9)
+	if n.Resolve != "as_is" || n.ResolveEffective != "" || n.ResolveUnavailable != nil {
+		t.Fatalf("idle node = %q %q %v", n.Resolve, n.ResolveEffective, n.ResolveUnavailable)
+	}
+	if x := nodeOf(t, v, 10); x.Resolve != "" || x.ResolveEffective != "" || x.ResolveUnavailable != nil {
+		t.Fatalf("a 3X-UI node = %+v: the mode does not apply", x)
+	}
+
+	// Asked for and delivered.
+	ah.panels.panels[9].DestResolve = domain.DestResolveOnDemand
+	if err := ah.repos.Agents.Patch(ctx, "agt_9", domain.DestAgentPolicyPatch{ResolveEffective: ptr("on_demand")}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = ah.admin.Status(ctx)
+	if n = nodeOf(t, v, 9); n.Resolve != "on_demand" || n.ResolveEffective != "on_demand" || n.ResolveUnavailable != nil {
+		t.Fatalf("delivered = %q %q %v", n.Resolve, n.ResolveEffective, n.ResolveUnavailable)
+	}
+
+	// Held back by an inbound.
+	if err := ah.repos.Agents.Patch(ctx, "agt_9", domain.DestAgentPolicyPatch{ResolveEffective: ptr(""), ResolveUnavailable: ptr("route_only")}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = ah.admin.Status(ctx)
+	if n = nodeOf(t, v, 9); n.Resolve != "on_demand" || n.ResolveEffective != "" || n.ResolveUnavailable == nil || *n.ResolveUnavailable != "route_only" {
+		t.Fatalf("route_only = %q %q %v", n.Resolve, n.ResolveEffective, n.ResolveUnavailable)
+	}
+
+	// A node that does not declare the capability: "version", whatever else is recorded.
+	agent.ObservedCapabilities = []string{policyCap}
+	v, _ = ah.admin.Status(ctx)
+	if n = nodeOf(t, v, 9); n.ResolveUnavailable == nil || *n.ResolveUnavailable != "version" {
+		t.Fatalf("an old node = %v, want version", n.ResolveUnavailable)
+	}
+	// As_is is never "unavailable".
+	ah.panels.panels[9].DestResolve = domain.DestResolveAsIs
+	if err := ah.repos.Agents.Patch(ctx, "agt_9", domain.DestAgentPolicyPatch{ResolveUnavailable: ptr("")}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = ah.admin.Status(ctx)
+	if n = nodeOf(t, v, 9); n.ResolveUnavailable != nil {
+		t.Fatalf("an as_is node = %v", n.ResolveUnavailable)
+	}
+}

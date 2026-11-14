@@ -517,11 +517,23 @@ type destTestRequest struct {
 	PanelID       int64  `json:"panel_id"`
 	InboundNodeID int64  `json:"inbound_node_id"`
 	SourceIP      string `json:"source_ip"`
+	// ResolvedIPs are the addresses the admin says the target resolves to (at
+	// most 16 literals; the panel never looks a name up). Omitted is "not given"
+	// and an empty list is a failed resolution.
+	ResolvedIPs []string `json:"resolved_ips"`
+}
+
+// toTestInput is the request as the service takes it.
+func (r destTestRequest) toTestInput(port int) destpolicy.TestInput {
+	return destpolicy.TestInput{
+		Target: r.Target, Port: port, Network: r.Network, UserID: r.UserID, PanelID: r.PanelID,
+		InboundNodeID: r.InboundNodeID, SourceIP: r.SourceIP, ResolvedIPs: r.ResolvedIPs,
+	}
 }
 
 // Test answers POST /api/admin/dest/test: what the published policy does with
 // one connection, step by step, through protocol.MatchDestination. No name is
-// resolved. It is a POST and so leaves an audit row (who tested what for whom
+// resolved (resolved_ips is what the admin says it resolves to). It is a POST and so leaves an audit row (who tested what for whom
 // is administrator behaviour), which only administrators can read.
 func (h *AdminDestHandler) Test(c *gin.Context) {
 	if !h.ready(c, h.w.Admin != nil) {
@@ -539,10 +551,7 @@ func (h *AdminDestHandler) Test(c *gin.Context) {
 		}
 		port = *req.Port
 	}
-	res, err := h.w.Admin.Test(c.Request.Context(), destpolicy.TestInput{
-		Target: req.Target, Port: port, Network: req.Network, UserID: req.UserID, PanelID: req.PanelID,
-		InboundNodeID: req.InboundNodeID, SourceIP: req.SourceIP,
-	})
+	res, err := h.w.Admin.Test(c.Request.Context(), req.toTestInput(port))
 	if err != nil {
 		h.destError(c, err, errCodes{})
 		return

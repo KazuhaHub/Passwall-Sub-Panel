@@ -101,7 +101,7 @@ func policyHasCapability(caps []string) bool {
 }
 
 // capsToken is the three capabilities that gate delivery, as a short token:
-// "p" policy, "h" hits, "u" usage. A change of the set is a reason to try a
+// "p" policy, "h" hits, "u" usage, "g" groups, "r" resolve. A change of the set is a reason to try a
 // refused policy again; any other capability change is not (a node's task
 // capabilities come and go).
 func capsToken(caps []string) string {
@@ -124,6 +124,11 @@ func capsToken(caps []string) string {
 	for _, c := range caps {
 		if c == capabilityDestinationGroups {
 			tok = append(tok, 'g')
+		}
+	}
+	for _, c := range caps {
+		if c == capabilityDestinationResolve {
+			tok = append(tok, 'r')
 		}
 	}
 	return string(tok)
