@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -19,6 +21,27 @@ type ownershipRepo struct {
 	// then short-circuit to an empty result, so the surviving self-regulating
 	// per-node code paths no-op instead of erroring on a missing table.
 	gone atomic.Bool
+}
+
+// newOwnershipRepo gives the repo a logger that does not report "the table
+// does not exist" as a failed query. The repo reads that answer as "migrated"
+// (a fresh install never has user_xui_clients), so logging it would print an
+// error on every boot; every other failure is still logged.
+func newOwnershipRepo(db *gorm.DB) *ownershipRepo {
+	return &ownershipRepo{db: db.Session(&gorm.Session{Logger: retiredTableLogger{db.Logger}})}
+}
+
+type retiredTableLogger struct{ logger.Interface }
+
+func (l retiredTableLogger) LogMode(level logger.LogLevel) logger.Interface {
+	return retiredTableLogger{l.Interface.LogMode(level)}
+}
+
+func (l retiredTableLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	if isMissingTableErr(err) {
+		err = nil
+	}
+	l.Interface.Trace(ctx, begin, fc, err)
 }
 
 // isMissingTableErr reports whether a query error means user_xui_clients does not

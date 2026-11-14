@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -296,5 +297,35 @@ func TestOwnershipWritesNoopAfterDrop(t *testing.T) {
 	}
 	if err := repo.UpdateUUID(ctx, 10, 20, "a@x", "new-uuid"); err != nil {
 		t.Fatalf("post-drop UpdateUUID must be a no-op, got %v", err)
+	}
+}
+
+// A fresh install never has the retired user_xui_clients table. The repo
+// probes it on purpose and reads "no such table" as "migrated", so that probe
+// must not be logged as a failed query: every boot would print an error.
+func TestOwnershipProbeOfTheRetiredTableIsNotLoggedAsAFailure(t *testing.T) {
+	db, err := openIsolatedTestDB(t)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := NewRepos(db).Ownership
+	var ids []int64
+	var listErr error
+	logged := captureLog(t, func() {
+		ids, listErr = repo.DistinctUserIDs(context.Background())
+	})
+	if listErr != nil || len(ids) != 0 {
+		t.Fatalf("DistinctUserIDs = %v, %v; want nothing and no error on a fresh install", ids, listErr)
+	}
+	if strings.Contains(logged, "database query failed") {
+		t.Fatalf("the probe of the retired table was logged as a failure:\n%s", logged)
 	}
 }
