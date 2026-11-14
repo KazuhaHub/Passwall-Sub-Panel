@@ -88,6 +88,7 @@ export default function NodePolicyStatusRow({
   const theme = useTheme()
   const md = theme.palette.md
   const { key, label, note, reportNote } = nodeStateText(t, node, now)
+  const allowLine = node.sniffing_allow_exempt_lost && node.sniffing_insufficient.length > 0 && <Typography variant="body2" data-testid="node-sniffing-allow-lost" sx={{ color: md.onSurfaceVariant }}>{t(`${S}node_note.sniffing_allow_lost`)}</Typography>
   const reportLine = reportNote && <Typography variant="body2" data-testid="node-report-not-deployed" sx={{ color: md.onSurfaceVariant }}>{reportNote}</Typography>
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
@@ -123,7 +124,8 @@ export default function NodePolicyStatusRow({
       <Box data-testid="node-policy-block" sx={{ minWidth: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>{badge}</Box>
         <Typography variant="body2" sx={{ mt: 0.75, color: md.onSurfaceVariant }}>{note}</Typography>
-        {reportLine}
+        {allowLine}
+      {reportLine}
         {extra}
         {problem && (
           <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
@@ -145,6 +147,7 @@ export default function NodePolicyStatusRow({
         {badge}
       </Box>
       <Typography variant="body2" sx={{ mt: 0.25, color: md.onSurfaceVariant }}>{note}</Typography>
+      {allowLine}
       {reportLine}
       {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
       {extra}

@@ -138,6 +138,8 @@ export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pe
     case 'unsupported_kind': return 'unsupported_kind'
     case 'offline': return 'offline'
     case 'paused': return 'paused'
+    // Every rule was dropped for sniffing: nothing is sent, but the inbounds still need the operator.
+    case 'none': return (node.sniffing_insufficient?.length ?? 0) > 0 ? 'applied_sniffing' : 'none'
     default: return 'none'
   }
 }

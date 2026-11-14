@@ -283,10 +283,12 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// report_only_not_deployed); the policy is then restricted, not held back.
 	var findings []sniffFinding
 	if engine == xrayEngine {
-		if enf := enforcedOnly(desired); enf != nil {
-			findings = sniffingFindings(enf, nodes)
-		}
+		// The node's own check, per listener, on the enforced rules that apply to it.
+		findings = perListenerSniffFindings(enforcedOnly(desired), nodes)
 	}
+	// Whether the unrestricted policy was inside the limits: restricting adds
+	// explicit inbounds, and an over-limit it causes says so.
+	unrestrictedOver := desired != nil && usageOf(desired).over() != nil
 	desired, restricted := restrictForSniffing(desired, nodes, engine)
 	if restricted.observe {
 		desiredShed = shedSniffing
@@ -431,9 +433,20 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 				fallbackShed = shedSniffing
 				shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)})
 			}
-			if len(perListenerSniffFindings(output, nodes)) > 0 {
-				log.Error("destpolicy: a restricted fallback still needs sniffing an inbound cannot supply; sending none", "agent_id", in.AgentID)
-				output, fallbackShed = nil, ""
+			// Restricting adds inbounds and can split a rule, so the result is
+			// judged again: over a limit, invalid, or still needing sniffing an
+			// inbound cannot supply, it is nil, which is always deployable.
+			if output != nil {
+				switch verr := protocol.ValidateDestinationPolicy(output); {
+				case verr != nil:
+					log.Warn("destpolicy: the restricted fallback does not validate; sending none", "agent_id", in.AgentID, "err", verr)
+					output, fallbackShed = nil, ""
+				case usageOf(output).over() != nil:
+					output, fallbackShed = nil, ""
+				case len(perListenerSniffFindings(output, nodes)) > 0:
+					log.Error("destpolicy: a restricted fallback still needs sniffing an inbound cannot supply; sending none", "agent_id", in.AgentID)
+					output, fallbackShed = nil, ""
+				}
 			}
 		}
 		if result != ResultInvalid {
@@ -516,6 +529,13 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 
 	res := Result{Policy: output, Digest: outDigest}
 	res.Issues = s.issuesFor(reason, meta, desiredDigest, overLimit)
+	if overLimit != nil && restricted.changed && !unrestrictedOver {
+		for i := range res.Issues {
+			if res.Issues[i].Code == IssueOverLimit {
+				res.Issues[i].Detail += " after restricting rules to the inbounds that can sniff"
+			}
+		}
+	}
 	res.Issues = append(res.Issues, sniffIssues(findings)...)
 	res.Issues = append(res.Issues, fallbackIssues...)
 	res.Issues = append(res.Issues, shedNote...)
@@ -675,49 +695,6 @@ func shedObserve(p *protocol.DestinationPolicy, extraSubjects int) (*protocol.De
 	return enf, shedLimit, true
 }
 
-// sniffNeed is what the policy needs the core's sniffer to supply.
-func sniffNeed(p *protocol.DestinationPolicy) protocol.SniffNeed {
-	var need protocol.SniffNeed
-	for _, r := range p.Rules {
-		if len(r.Domains) > 0 {
-			need |= protocol.SniffForDomains
-		}
-		if len(r.Protocols) > 0 {
-			need |= protocol.SniffForProtocols
-		}
-	}
-	return need
-}
-
-// sniffingFindings prechecks the inbounds' sniffing against what the policy's
-// domain and protocol rules need (Xray only: sing-box takes its sniff rule from
-// the route, which the node writes itself). An inbound with sniffing off is
-// fine, because the node turns it on; one whose sniffing is on but configured
-// so it cannot supply the need is not the node's to override. A sniffing
-// object that does not parse is the operator's problem and is reported as one,
-// never guessed at.
-func sniffingFindings(p *protocol.DestinationPolicy, nodes []*domain.Node) []sniffFinding {
-	need := sniffNeed(p)
-	if need == 0 {
-		return nil
-	}
-	var out []sniffFinding
-	for _, n := range nodes {
-		if !n.Enabled {
-			continue
-		}
-		verdict, reason, err := protocol.CheckXraySniffing([]byte(n.Sniffing), need)
-		switch {
-		case err != nil:
-			out = append(out, sniffFinding{Listener: string(protocol.NewListenerKey(n.ID)), NodeID: n.ID, Label: n.DisplayName, Reason: sniffMalformed})
-		case verdict == protocol.SniffInsufficient:
-			out = append(out, sniffFinding{Listener: string(protocol.NewListenerKey(n.ID)), NodeID: n.ID, Label: n.DisplayName, Reason: reason})
-		}
-	}
-	slices.SortFunc(out, func(a, b sniffFinding) int { return strings.Compare(a.Listener, b.Listener) })
-	return out
-}
-
 // compileKey is everything a node's compiled output depends on besides the
 // agent's own delivery state. Two compiles with the same key give the same
 // output, which is what lets the next sync skip the work.
@@ -767,8 +744,11 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 
 // fallbackPolicy is the policy a node runs while it cannot run the new one: the
 // last policy it applied (the "last known good"), TRIMMED. The trimming only
-// ever loosens, so the result needs no new sniffing, cannot be over a limit the
-// original was not, and never blocks anything the new definitions would allow:
+// ever loosens, so it never blocks anything the new definitions would allow.
+// It is NOT free of new needs, though: the inbounds' sniffing may have changed
+// since it applied, so Compile restricts the result for sniffing afterwards,
+// which adds inbounds, and judges it again (validation and limits; failing
+// either, nil is sent):
 //
 //   - a rule of a policy that has since been deleted, switched off, or scoped
 //     away from this panel goes;

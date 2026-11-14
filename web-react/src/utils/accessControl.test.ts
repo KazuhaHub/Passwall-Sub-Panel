@@ -120,6 +120,7 @@ describe('node states: one table', () => {
     { node: { state: 'applied' }, key: 'applied' },
     { node: { state: 'applied', engine: 'sing-box' }, key: 'applied_exec_only' },
     { node: { state: 'applied', sniffing_insufficient: [{ listener: 'l1', label: 'v', node_id: 4 }] }, key: 'applied_sniffing' },
+    { node: { state: 'none', sniffing_insufficient: [{ listener: 'l1', label: 'v', node_id: 4 }] }, key: 'applied_sniffing' },
     { node: { state: 'pending', sniffing_insufficient: [{ listener: 'l1', label: 'v', node_id: 4 }], pending_since: NOW - 5000 }, key: 'pending' },
     { node: { state: 'pending', pending_since: NOW - 5000 }, key: 'pending' },
     { node: { state: 'pending', pending_since: NOW - PENDING_STUCK_MS - 5 }, key: 'pending_long' },

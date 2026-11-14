@@ -67,7 +67,7 @@ func sniffAdequate(n *domain.Node, need protocol.SniffNeed) bool {
 //     and addresses) is split: the address half is unchanged, the domain half
 //     is restricted under the next free x-suffix of the same policy.
 //   - Group rules cannot carry inbounds: when one that needs the sniffer has
-//     an inbound that cannot supply it, every group rule is dropped.
+//     an inbound that cannot supply it, every rule of that group is dropped.
 func restrictForSniffing(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string) (*protocol.DestinationPolicy, sniffRestriction) {
 	var info sniffRestriction
 	if p == nil || engine != xrayEngine {
@@ -106,24 +106,29 @@ func restrictForSniffing(p *protocol.DestinationPolicy, nodes []*domain.Node, en
 	// Group rules are an allowlist (members allowed what it names, everything
 	// else blocked), which only means something as a whole: one of them losing
 	// the inbounds it cannot run on would turn the rest into a block-all. They
-	// cannot carry inbounds either, so when any of them needs a sniffer some
-	// inbound cannot supply, the whole group section goes: the allowlist is not
-	// enforced on this node, which only relaxes.
-	dropGroups := false
+	// cannot carry inbounds either, so when any rule of a group needs a sniffer
+	// some inbound cannot supply, that whole group goes (every rule with its
+	// group id): its allowlist is not enforced on this node, which only relaxes.
+	// Other groups are untouched.
+	dropGroups := map[int64]bool{}
 	for _, r := range p.Rules {
 		if need := ruleSniffNeed(r); need != 0 && strings.HasPrefix(r.ID, "g") && len(adequate(need)) != len(all) {
-			dropGroups = true
+			if _, gid, ok := ruleOrigin(r.ID); ok {
+				dropGroups[gid] = true
+			}
 		}
 	}
 
 	out := make([]protocol.DestinationRule, 0, len(p.Rules))
 	for _, r := range p.Rules {
-		if dropGroups && strings.HasPrefix(r.ID, "g") {
-			info.changed = true
-			if r.Action == protocol.RuleObserve {
-				info.observe = true
+		if strings.HasPrefix(r.ID, "g") {
+			if _, gid, ok := ruleOrigin(r.ID); ok && dropGroups[gid] {
+				info.changed = true
+				if r.Action == protocol.RuleObserve {
+					info.observe = true
+				}
+				continue
 			}
-			continue
 		}
 		need := ruleSniffNeed(r)
 		if need == 0 {
@@ -188,10 +193,11 @@ func freeSuffix(used map[string]bool, id string) string {
 	return id
 }
 
-// perListenerSniffFindings is the node's own check, run on what is sent: for
-// each enabled inbound, the need of the rules that apply to it against its
-// sniffing. A restricted policy must come out empty; it is an assertion, not a
-// gate that normally decides anything.
+// perListenerSniffFindings is the node's own check, per listener: for each
+// enabled inbound, the need of the rules that apply to it against its sniffing,
+// with the reason CheckXraySniffing gives (an unparseable object is "malformed").
+// On the unrestricted policy it names the inbounds that cannot run what the
+// policy asks; on a restricted one it must come out empty, as an assertion.
 func perListenerSniffFindings(p *protocol.DestinationPolicy, nodes []*domain.Node) []sniffFinding {
 	if p == nil {
 		return nil
@@ -208,22 +214,30 @@ func perListenerSniffFindings(p *protocol.DestinationPolicy, nodes []*domain.Nod
 				need |= ruleSniffNeed(r)
 			}
 		}
-		if need != 0 && !sniffAdequate(n, need) {
-			out = append(out, sniffFinding{Listener: string(key), NodeID: n.ID, Label: n.DisplayName, Reason: "insufficient"})
+		if need == 0 {
+			continue
+		}
+		verdict, reason, err := protocol.CheckXraySniffing([]byte(n.Sniffing), need)
+		switch {
+		case err != nil:
+			out = append(out, sniffFinding{Listener: string(key), NodeID: n.ID, Label: n.DisplayName, Reason: sniffMalformed})
+		case verdict == protocol.SniffInsufficient:
+			out = append(out, sniffFinding{Listener: string(key), NodeID: n.ID, Label: n.DisplayName, Reason: reason})
 		}
 	}
 	slices.SortFunc(out, func(a, b sniffFinding) int { return strings.Compare(a.Listener, b.Listener) })
 	return out
 }
 
-// engineOf is the core engine the panel's node runs, as the last report says;
-// Xray when it has not said.
+// engineOf is the core engine the panel's node is configured for, which is what
+// Compile judges by (nodesync builds the config from the agent's desired core);
+// Xray when it has none.
 func (a *Admin) engineOf(ctx context.Context, panelID int64) string {
 	if a.Agents != nil {
 		if agents, err := a.Agents.List(ctx); err == nil {
 			for _, ag := range agents {
-				if ag.PanelID == panelID && ag.ObservedCoreEngine != "" {
-					return strings.ToLower(string(ag.ObservedCoreEngine))
+				if ag.PanelID == panelID {
+					return strings.ToLower(string(domain.NormalizeNodeCoreEngine(ag.DesiredCoreEngine)))
 				}
 			}
 		}

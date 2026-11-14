@@ -377,3 +377,178 @@ func TestSniffPartial_TestTraceShowsAWeakInboundAsNotApplying(t *testing.T) {
 		}
 	}
 }
+
+// A phase-1 ALLOW rule with domains is restricted like any domain rule, so on
+// an inbound that cannot sniff it does not fire, and a later block that needs
+// no sniffing (a port) then blocks what the allow exempted. That is a
+// tightening, accepted and documented (access-control.md §4.2 item 7).
+func TestSniffPartial_AnAllowWithDomainsDoesNotExemptOnAWeakInbound(t *testing.T) {
+	h := newHarness(t)
+	l := h.list("ok", "DOMAIN-SUFFIX,smtp.corp")
+	h.policy("allow", domain.DestActionAllow, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+	smtpPolicy(h, "smtp")
+	h.publishNow()
+	res := h.compile(mixedFleet(weakSniffing))
+	for in, want := range map[protocol.ListenerKey]protocol.MatchVerdict{"lst_1": protocol.MatchAllow, "lst_2": protocol.MatchBlock} {
+		m := protocol.MatchDestination(res.Policy, protocol.MatchInput{Target: "smtp.corp", Port: 25, Inbound: in})
+		if m.Verdict != want {
+			t.Fatalf("%s: verdict %s, want %s", in, m.Verdict, want)
+		}
+	}
+}
+
+// For every connection and inbound: an inbound that can sniff gets the verdict
+// of the unrestricted policy; a weak one gets the verdict the unrestricted
+// policy gives when the rules that need sniffing are not there, except that the
+// allow exception above and the trailing-dot guard (it blocks any hostname
+// ending in a dot while the policy still has a block rule with domains) apply.
+func TestSniffPartial_VerdictsAgainstTheUnrestrictedPolicy(t *testing.T) {
+	h := newHarness(t)
+	doms := h.list("doms", "DOMAIN-SUFFIX,bad.example.com")
+	mixed := h.list("mixed", "DOMAIN-SUFFIX,mix.example.com\nIP-CIDR,203.0.113.0/24")
+	h.policy("doms", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{doms.ID} })
+	h.policy("mixed", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{mixed.ID}; p.Inline.Ports = "443" })
+	h.policy("bt", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.Inline.Protocols = []string{"bittorrent"} })
+	smtpPolicy(h, "smtp")
+	h.publishNow()
+	f := mixedFleet(weakSniffing)
+	res := h.compile(f)
+	cb, err := h.svc.baseFor(h.ctx, h.state().PublishedGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := cb.base.assemble(nodeView{panelID: 9, nodeIDs: map[int64]bool{1: true, 2: true}})
+	// What a weak inbound runs: the reference without the rules that need sniffing.
+	var plain protocol.DestinationPolicy
+	plain.Rules = []protocol.DestinationRule{}
+	for _, r := range ref.Rules {
+		if ruleSniffNeed(r) == 0 {
+			plain.Rules = append(plain.Rules, r)
+		} else if len(r.Domains) > 0 && (len(r.CIDRs) > 0 || r.Private) {
+			r.Domains = nil
+			plain.Rules = append(plain.Rules, r)
+		}
+	}
+	for _, in := range []protocol.MatchInput{
+		{Target: "bad.example.com", Port: 443}, {Target: "mix.example.com", Port: 443}, {Target: "mix.example.com", Port: 80},
+		{Target: "203.0.113.9", Port: 80}, {Target: "203.0.113.9", Port: 443}, {Target: "198.51.100.1", Port: 25},
+		{Target: "ok.example.com", Port: 80}, {Target: "ok.example.com", Port: 25}, {Target: "bad.example.com", Port: 25},
+	} {
+		for _, net := range []string{"", "tcp"} {
+			in.Network = net
+			in.Inbound = "lst_1"
+			if got, want := protocol.MatchDestination(res.Policy, in).Verdict, protocol.MatchDestination(ref, in).Verdict; got != want {
+				t.Fatalf("good inbound, %+v: %s, want %s", in, got, want)
+			}
+			in.Inbound = "lst_2"
+			if got, want := protocol.MatchDestination(res.Policy, in).Verdict, protocol.MatchDestination(&plain, in).Verdict; got != want {
+				t.Fatalf("weak inbound, %+v: %s, want %s (reference over the rules that need no sniffing)", in, got, want)
+			}
+		}
+	}
+}
+
+func TestRestrictForSniffing_GroupsAreDroppedByGroupId(t *testing.T) {
+	nodes := mixedFleet(weakSniffing).nodes
+	p := &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{
+		{ID: "g7x1", Action: protocol.RuleAllow, Subjects: []protocol.SubjectKey{"usr_1"}, Domains: []string{"domain:g.example.com"}},
+		{ID: "g7", Action: protocol.RuleBlock, Subjects: []protocol.SubjectKey{"usr_1"}, CatchAll: true},
+		{ID: "g9x1", Action: protocol.RuleAllow, Subjects: []protocol.SubjectKey{"usr_2"}, Ports: "443"},
+		{ID: "g9", Action: protocol.RuleBlock, Subjects: []protocol.SubjectKey{"usr_2"}, CatchAll: true},
+	}}
+	out, _ := restrictForSniffing(p, nodes, xrayEngine)
+	if got := joinIDs(ruleIDs(out)); got != "g9x1,g9" {
+		t.Fatalf("rules = %s, want only group 9, which needs no sniffing", got)
+	}
+}
+
+func TestSniffPartial_OverLimitCausedByTheRestrictionSaysSo(t *testing.T) {
+	old := Limits.Inbounds
+	defer func() { Limits.Inbounds = old }()
+	h := newHarness(t)
+	for _, d := range []string{"a", "b"} {
+		l := h.list(d, "DOMAIN-SUFFIX,"+d+".example.com")
+		h.policy(d, domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+	}
+	h.publishNow()
+	Limits.Inbounds = 1
+	if res := h.compile(base1()); res.Policy == nil {
+		t.Fatal("unrestricted, the policy is inside the limit")
+	}
+	res := h.compile(mixedFleet(weakSniffing))
+	found := false
+	for _, i := range res.Issues {
+		found = found || (i.Code == IssueOverLimit && strings.Contains(i.Detail, "restrict"))
+	}
+	if !found {
+		t.Fatalf("issues = %+v, want an over-limit issue that names the restriction", res.Issues)
+	}
+}
+
+func TestSniffPartial_ARestrictedFallbackOverALimitIsNil(t *testing.T) {
+	old := Limits.Inbounds
+	defer func() { Limits.Inbounds = old }()
+	h := newHarness(t)
+	for _, d := range []string{"a", "b"} {
+		l := h.list(d, "DOMAIN-SUFFIX,"+d+".example.com")
+		h.policy(d, domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+	}
+	h.publishNow()
+	first := h.compile(base1())
+	h.observe(applied(first.Digest))
+	Limits.Inbounds = 1
+	res := h.compile(mixedFleet(weakSniffing))
+	if res.Policy != nil {
+		t.Fatalf("the restricted LKG is over the limit and must not be sent: %v", res.Policy.Rules)
+	}
+}
+
+func TestSniffPartial_TestTraceUsesTheEngineTheNodeIsConfiguredFor(t *testing.T) {
+	ah := newAdminHarness(t)
+	l := ah.list("l", "DOMAIN-SUFFIX,x.example.com")
+	ah.policy("p", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+	ah.publishNow()
+	ah.admin.Desired = fakeDesired{snap: mixedFleet(weakSniffing).snapshot()}
+	// Configured for sing-box (which sniffs itself) while the last report still says xray.
+	ah.admin.Agents = fakeAgents{agents: []*domain.NodeAgent{{AgentID: "agt_9", PanelID: 9, DesiredCoreEngine: domain.NodeCoreSingBox, ObservedCoreEngine: domain.NodeCoreXray}}}
+	res, err := ah.admin.Test(ah.ctx, TestInput{Target: "www.x.example.com", Port: 443, PanelID: 9, InboundNodeID: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != "block" {
+		t.Fatalf("verdict %q: a sing-box node is not restricted", res.Verdict)
+	}
+}
+
+// The status says what a flagged inbound costs beyond the rules it cannot run:
+// with an enforced domain ALLOW rule, non-domain blocks can catch what the
+// allow would have exempted. Without one the line would be noise.
+func TestSniffPartial_StatusSaysTheAllowExemptionIsLostOnlyWhenThereIsADomainAllow(t *testing.T) {
+	flag := func(withAllow bool) bool {
+		t.Helper()
+		ah := newAdminHarness(t)
+		l := ah.list("l", "DOMAIN-SUFFIX,smtp.corp")
+		if withAllow {
+			ah.policy("allow", domain.DestActionAllow, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+		}
+		ah.policy("block", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
+		smtpPolicy(ah.harness, "smtp")
+		ah.publishNow()
+		ah.compile(mixedFleet(weakSniffing))
+		v, err := ah.admin.Status(ah.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := nodeOf(t, v, 9)
+		if len(n.Sniffing) != 1 {
+			t.Fatalf("sniffing = %+v", n.Sniffing)
+		}
+		return n.SniffingAllowExemptLost
+	}
+	if !flag(true) {
+		t.Fatal("a domain allow rule is in force: the line must show")
+	}
+	if flag(false) {
+		t.Fatal("no domain allow rule: the line is noise")
+	}
+}

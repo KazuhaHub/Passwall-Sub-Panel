@@ -73,11 +73,16 @@ type NodeState struct {
 	FallbackReason string                   `json:"fallback_reason"`
 	OverLimit      *domain.DestPublishError `json:"over_limit"`
 	Sniffing       []SniffView              `json:"sniffing_insufficient"`
-	MintedAt       *int64                   `json:"minted_at"`
-	PendingSince   *int64                   `json:"pending_since"`
-	AppliedAt      *int64                   `json:"applied_at"`
-	AppliedRules   int                      `json:"applied_rules"`
-	LastReportAt   *int64                   `json:"last_report_at"`
+	// SniffingAllowExemptLost: with inbounds listed in sniffing_insufficient AND
+	// an enforced domain allow rule in force here, that allow does not apply on
+	// those inbounds, so blocks that need no sniffing (ports, IP ranges, source)
+	// can catch what it would have exempted.
+	SniffingAllowExemptLost bool   `json:"sniffing_allow_exempt_lost"`
+	MintedAt                *int64 `json:"minted_at"`
+	PendingSince            *int64 `json:"pending_since"`
+	AppliedAt               *int64 `json:"applied_at"`
+	AppliedRules            int    `json:"applied_rules"`
+	LastReportAt            *int64 `json:"last_report_at"`
 	// RulesDataVersion is the geosite release behind the policy the node
 	// reports it runs (null when unknown: a policy minted before this process
 	// started, or none).
@@ -312,6 +317,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 				}
 			}
 		}
+		ns.SniffingAllowExemptLost = len(ns.Sniffing) > 0 && (info.domainAllowAll || info.domainAllowPanels[panel.ID])
 		if row.ReportedState == protocol.PolicyStateApplied && row.ReportedSHA256 != "" {
 			a.Service.mu.Lock()
 			if info, ok := a.Service.digests[row.ReportedSHA256]; ok {

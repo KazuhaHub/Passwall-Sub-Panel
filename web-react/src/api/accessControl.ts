@@ -461,6 +461,8 @@ export interface DestNodeStatus {
   fallback_reason: string
   over_limit: DestPublishError | null
   sniffing_insufficient: DestSniffView[]
+  /** An enforced domain allow rule is in force and does not apply on the listed inbounds. */
+  sniffing_allow_exempt_lost?: boolean
   minted_at: number | null
   pending_since: number | null
   applied_at: number | null

@@ -63,10 +63,19 @@ describe('NodePolicyStatusRow', () => {
       variant="block" now={NOW} onOpenInbound={onOpenInbound} />)
     expect(screen.getByTestId('node-state-badge').getAttribute('data-state')).toBe('applied_sniffing')
     expect(screen.getByTestId('node-state-badge').textContent).toBe('已生效 · 部分入站嗅探不足')
-    expect(screen.getByText('2 个入站的嗅探不足：域名与协议规则（如 BT）在这些入站上不生效')).toBeTruthy()
+    expect(screen.getByText('2 个入站的嗅探不足：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效')).toBeTruthy()
     expect(screen.getByText(/vless-443、vless-8443/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '修改入站' }))
     expect(onOpenInbound).toHaveBeenCalledWith(7)
+  })
+
+  it('the allow-exemption line shows only when a domain allow rule is in force', () => {
+    const sn = [{ listener: 'l', label: 'vless-443', node_id: 7 }]
+    const r = renderAccess(<NodePolicyStatusRow node={node({ sniffing_insufficient: sn, sniffing_allow_exempt_lost: true })} variant="row" now={NOW} />)
+    expect(screen.getByTestId('node-sniffing-allow-lost').textContent).toBe('此入站上按域名的放行规则不生效，端口、IP 段等拦截规则可能拦下本应被放行的连接')
+    r.unmount()
+    renderAccess(<NodePolicyStatusRow node={node({ sniffing_insufficient: sn, sniffing_allow_exempt_lost: false })} variant="row" now={NOW} />)
+    expect(screen.queryByTestId('node-sniffing-allow-lost')).toBeNull()
   })
 
   it('3X-UI is the quiet "not applicable", not an alarm; sing-box reads enforce-only', () => {
