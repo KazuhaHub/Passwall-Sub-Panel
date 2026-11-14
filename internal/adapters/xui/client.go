@@ -1232,12 +1232,7 @@ func (c *Client) ListClientInbounds(ctx context.Context) (map[string][]int, erro
 // " (record not found)"; update/del report "client not found" / "not found in
 // inbound". Substring match mirrors isPermanentPanelMsg — fragile across
 // locales/versions, but it's the only signal the panel gives.
-func isClientNotFoundMsg(s string) bool {
-	m := strings.ToLower(s)
-	return strings.Contains(m, "record not found") ||
-		strings.Contains(m, "client not found") ||
-		strings.Contains(m, "not found in inbound")
-}
+func isClientNotFoundMsg(s string) bool { return ports.IsClientNotFoundMessage(s) }
 
 // --- helpers ---
 

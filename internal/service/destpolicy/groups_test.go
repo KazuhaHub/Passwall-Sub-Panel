@@ -556,3 +556,31 @@ func TestCompile_GroupAllowlistComesFromTheGroupRow(t *testing.T) {
 		t.Fatalf("rules = %v", got)
 	}
 }
+
+// When over_limit makes a panel ineligible, every member of the group leaves
+// its roster. The limit must not then look satisfied (no group rules, no
+// subjects) and let the next sync add them back: the slack counts every
+// allowlisted group the panel's tags select, with or without a member on the
+// roster, so the answer is the same on every sync.
+func TestOverLimit_StaysOverWithNoGroupMemberOnTheRoster(t *testing.T) {
+	h := newHarness(t)
+	h.setGroups(map[int64]int64{10: 5, 20: 6}) // user 20 is not in group 5
+	a := h.list("a", "DOMAIN-SUFFIX,a.example.com")
+	h.allowGroup(5, domain.DestStateOn, []*domain.DestList{a}, "DOMAIN-SUFFIX,doh.example", "")
+	h.publishNow()
+	h.svc.members = fixedMembers{5: 20000} // 3 rules x 20000 members: over the 50000
+	f := fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing)}, users: []int64{20}}
+
+	for i := 0; i < 4; i++ {
+		res := h.compile(f, policyCap, groupsCap)
+		if res.Policy != nil {
+			t.Fatalf("sync %d: a policy was sent although the group's tag-matched members are over the limit: %v", i, ruleIDs(res.Policy))
+		}
+		if len(res.Issues) != 1 || res.Issues[0].Code != IssueOverLimit {
+			t.Fatalf("sync %d: issues = %+v", i, res.Issues)
+		}
+	}
+	if m := h.meta(); m.FallbackReason != domain.DestFallbackOverLimit {
+		t.Fatalf("fallback = %q, want over_limit held", m.FallbackReason)
+	}
+}

@@ -132,6 +132,7 @@ type App struct {
 	traffic       *traffic.Service
 	reconcile     *reconcile.Service
 	user          *user.Service
+	group         *group.Service
 	node          *node.Service
 	cert          *cert.Service
 	audit         *audit.Service
@@ -697,6 +698,32 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// service: a country is expanded from the very database the risk center
 	// places addresses with.
 	destRepos := sqlstore.NewDestRepos(db)
+	// A group's destination allowlist is only true on a node that can enforce it
+	// (R5), which group.Service.Eligible decides from the panel, its agent and
+	// the agent's policy delivery state; every place that adds a member to a
+	// node asks it. What changes the answer (a capability, a refused or
+	// over-limit policy, an inbound's sniffing) drops the cached answer and
+	// resyncs the members of the groups that have an allowlist, and the
+	// subscriptions rendered from the old answer are dropped with it. Left
+	// unwired each of these degrades to "tags only" without a word, which is why
+	// TestBuildWiresTheDestinationRepos and TestBuildWiresTheAllowlistResyncTriggers
+	// drive them through the assembled application.
+	groupSvc.SetEligibilityDeps(group.EligibilityDeps{Panels: repos.XUIPanel, Agents: repos.NodeAgent, Policies: destRepos.Agents})
+	groupSvc.SetMemberResyncer(userSvc)
+	nodeSvc.SetGroupEligibility(groupSvc)
+	reconcileSvc.SetGroupEligibility(groupSvc)
+	allowlistResync := func(ctx context.Context, panelID int64) {
+		// Only an allowlist group's subscription depends on the answer.
+		if groupSvc.ResyncAllowlistGroups(ctx, panelID) > 0 {
+			renderSvc.InvalidateAll()
+		}
+	}
+	nativeSync.SetAllowlistResyncer(allowlistResync)
+	nodeSvc.SetAllowlistResyncer(func(ctx context.Context, panelID int64) {
+		if groupSvc.InboundsChanged(ctx, panelID) > 0 {
+			renderSvc.InvalidateAll()
+		}
+	})
 	destLists := destlist.New(destlist.Deps{
 		Lists:       destRepos.Lists,
 		Policies:    destRepos.Policies,
@@ -721,6 +748,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	destPolicy, err := destpolicy.New(destpolicy.Deps{
 		Definitions: destRepos, State: destRepos.State, Agents: destRepos.Agents,
 		Lists: destLists, Countries: destLists.Countries, Settings: repos.Settings,
+		// The per-node limit counts the members a panel's tags select, and a
+		// node entering or leaving a refusal or an over-limit fallback is a
+		// change in what it can enforce (allowlistResync, below).
+		GroupMembers: groupSvc,
+		FallbackChanged: func(ctx context.Context, agentID string) {
+			if agent, err := repos.NodeAgent.GetByAgentID(ctx, agentID); err == nil {
+				allowlistResync(ctx, agent.PanelID)
+			}
+		},
 		Metrics: destpolicy.Metrics{
 			Compile:         func(result string) { metrics.DestPolicyCompileTotal.With(result).Inc() },
 			CompileDuration: metrics.DestPolicyCompileMS.ObserveDuration,
@@ -853,6 +889,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.traffic = trafficSvc
 	a.reconcile = reconcileSvc
 	a.user = userSvc
+	a.group = groupSvc
 	a.node = nodeSvc
 	a.cert = certSvc
 	a.audit = auditSvc

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 
@@ -189,4 +190,71 @@ func TestBuildWiresTheDestinationRepos(t *testing.T) {
 	if _, err := a.destRepos.SourceRules.Get(ctx, node.ID); err == nil {
 		t.Fatal("a deleted node's source rule remained")
 	}
+
+	// The allowlist's eligibility is late-bound into five services; a link left
+	// out compiles and leaves the allowlist silently unenforced on that path (a
+	// member keeps a client on a node that cannot enforce it, or the per-node
+	// limit counts the roster). Each consumer must hold the real service.
+	if a.group == nil {
+		t.Fatal("Build did not expose the group service")
+	}
+	if eligibility, resyncer := a.group.Wired(); !eligibility || !resyncer {
+		t.Fatalf("group service: eligibility reads wired %v, member resyncer wired %v; both are required", eligibility, resyncer)
+	}
+	if !a.node.GroupEligibilityWired() {
+		t.Fatal("node service still decides group membership by tags alone")
+	}
+	if !a.reconcile.GroupEligibilityWired() {
+		t.Fatal("reconcile service still decides group membership by tags alone")
+	}
+	if !a.destPolicy.GroupMembersWired() {
+		t.Fatal("the policy compiler counts the roster, not the tag-matched members, against the per-node limit")
+	}
+	// And the reads behind it are the production stores: an allowlist group's
+	// nodes are the native ones that declare the capabilities.
+	native := &domain.XUIPanel{Name: "wired-native", Kind: domain.PanelKindPSP, URL: "psp://agt_wired_elig"}
+	agent := &domain.NodeAgent{AgentID: "agt_wired_elig", Epoch: 1, CredentialSHA256: strings.Repeat("a", 64), DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
+	if err := a.repos.NativeAgentProvisioning.Create(ctx, native, agent); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.repos.NodeAgent.UpdateProtocolObservation(ctx, agent.AgentID, 1,
+		[]string{nodeprotocol.CapabilityDestinationPolicy, nodeprotocol.CapabilityDestinationGroups}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	legacy := &domain.XUIPanel{Name: "wired-3xui", Kind: domain.PanelKind3XUI, URL: "https://3xui.example.test"}
+	if err := a.repos.XUIPanel.Save(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	nativeNode := &domain.Node{PanelID: native.ID, InboundID: 1, DisplayName: "wired-native-node", Enabled: true, Sniffing: `{}`}
+	legacyNode := &domain.Node{PanelID: legacy.ID, InboundID: 1, DisplayName: "wired-3xui-node", Enabled: true}
+	for _, n := range []*domain.Node{nativeNode, legacyNode} {
+		if err := a.repos.Node.Create(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g := &domain.Group{Slug: "wired-allowlist", Name: "wired", TagFilter: domain.TagFilter{All: true},
+		DestAllowlist: domain.DestAllowlist{State: domain.DestStateOn}}
+	if err := a.repos.Group.Create(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	groupNodes, err := a.group.NodesFor(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groupNodes) != 1 || groupNodes[0].ID != nativeNode.ID {
+		t.Fatalf("an allowlist group's nodes = %v; want only the native node that declares the capabilities (are the panel, agent and policy reads wired?)", nodeIDs(groupNodes))
+	}
+	// With the allowlist off the same group has both.
+	g.DestAllowlist.State = domain.DestStateOff
+	if offNodes, err := a.group.NodesFor(ctx, g); err != nil || len(offNodes) != 2 {
+		t.Fatalf("an off group's nodes = %v, %v; want both", nodeIDs(offNodes), err)
+	}
+}
+
+func nodeIDs(nodes []*domain.Node) []int64 {
+	out := make([]int64, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.ID
+	}
+	return out
 }

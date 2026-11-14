@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -629,3 +630,19 @@ type PanelKindResolver interface {
 
 // XUIPool is a source-compatibility alias for the generic pool contract.
 type XUIPool = PanelPool
+
+// ErrPanelNotRegistered is what a panel pool answers for a panel it holds no
+// client for (a deleted panel: the rows that referenced it stay).
+var ErrPanelNotRegistered = errors.New("panel not registered")
+
+// IsClientNotFoundMessage reports whether a 3X-UI error message says the client
+// is not there: /clients/get answers a missing email with GORM's " (record not
+// found)", update and delete with "client not found" / "not found in inbound".
+// The panel gives no other signal, so this matches by message; keep it narrow,
+// a broader "not found" also matches a wrong endpoint.
+func IsClientNotFoundMessage(s string) bool {
+	m := strings.ToLower(s)
+	return strings.Contains(m, "record not found") ||
+		strings.Contains(m, "client not found") ||
+		strings.Contains(m, "not found in inbound")
+}

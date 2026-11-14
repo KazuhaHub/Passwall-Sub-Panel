@@ -64,6 +64,13 @@ type Service struct {
 	groups       ports.GroupRepo
 	users        ports.UserRepo
 	resyncer     MemberResyncer
+	// eligibility decides whether a group's members get a client on a node
+	// (group.Service.Eligible). Late-bound; nil is MatchOnly.
+	eligibility GroupEligibility
+	// allowlistResync is told which panel's inbounds changed in a way that can
+	// change what the panel can enforce for a group allowlist
+	// (SetAllowlistResyncer). Nil is silent.
+	allowlistResync func(ctx context.Context, panelID int64)
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
 	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
@@ -77,6 +84,50 @@ type Service struct {
 	// repoWrapped guards SetSubscriptionInvalidator against stacking a second
 	// decorator on a re-wire.
 	repoWrapped bool
+}
+
+// GroupEligibility is the one test of "does this group include this node"
+// (group.Service.Eligible): the tag filter and, for a group with a destination
+// allowlist, whether the node can enforce it.
+type GroupEligibility interface {
+	Eligible(ctx context.Context, n *domain.Node, g *domain.Group) (bool, error)
+}
+
+// SetGroupEligibility late-binds the eligibility test the add paths use.
+func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
+
+// GroupEligibilityWired reports whether an eligibility has been bound, for the
+// application's wiring test: unbound, the add paths decide by tags alone.
+func (s *Service) GroupEligibilityWired() bool { return s.eligibility != nil }
+
+// SetAllowlistResyncer late-binds what runs when a panel's inbound sniffing or
+// enabled state changes: group.Service.InboundsChanged, which decides whether
+// the panel is one that enforces allowlists and resyncs the members if so.
+func (s *Service) SetAllowlistResyncer(resync func(ctx context.Context, panelID int64)) {
+	s.allowlistResync = resync
+}
+
+func (s *Service) inboundsChanged(ctx context.Context, panelID int64) {
+	if s.allowlistResync != nil {
+		s.allowlistResync(ctx, panelID)
+	}
+}
+
+// groupIncludes asks the wired eligibility, or only the tag filter before one
+// is wired. An error means the answer is unknown: the add paths skip the group
+// this round, which is the safe direction (nothing is added; the next round or
+// the heal sweep adds what is still missing), and log the group id alone.
+func (s *Service) groupIncludes(ctx context.Context, n *domain.Node, g *domain.Group) bool {
+	var e GroupEligibility = group.MatchOnly{}
+	if s.eligibility != nil {
+		e = s.eligibility
+	}
+	ok, err := e.Eligible(ctx, n, g)
+	if err != nil {
+		log.Warn("group eligibility unreadable; skipping the group this round", "group_id", g.ID)
+		return false
+	}
+	return ok
 }
 
 func (s *Service) SetRouteCleaner(clean func(context.Context, int64) error) { s.routeCleaner = clean }
@@ -449,6 +500,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if err := s.nodes.Create(ctx, n); err != nil {
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
@@ -483,6 +535,7 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 		_ = c.DelInbound(context.Background(), inboundID)
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
@@ -617,7 +670,7 @@ func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
 	seen := make(map[int64]bool)
 	var memberIDs []int64
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		if !s.groupIncludes(ctx, n, g) {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)
@@ -710,9 +763,14 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	// immediately and survives a 3X-UI outage; the push (or its retry task)
 	// then aligns 3X-UI. Use the column-scoped writer so a concurrent health
 	// pass doesn't clobber our snapshot — and we don't clobber its writes.
+	sniffingBefore := n.Sniffing
 	inboundcfg.ApplySpec(n, spec)
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		return err
+	}
+	if n.Sniffing != sniffingBefore {
+		// Whether the panel can enforce a group allowlist depends on it.
+		s.inboundsChanged(ctx, n.PanelID)
 	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
@@ -829,11 +887,16 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if clientErr == nil && !ports.SupportsCapability(c, ports.CapabilityInboundEnable) {
 		return fmt.Errorf("%w: selected panel cannot enable or disable individual inbounds", ports.ErrPanelCapabilityUnsupported)
 	}
-	n.Enabled = enabled
 	// Column-scoped write: a full-row Save here would revert the health/traffic/
 	// config columns the concurrent poll/health/reconcile loops are writing.
+	wasEnabled := n.Enabled
+	n.Enabled = enabled
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, enabled); err != nil {
 		return err
+	}
+	if wasEnabled != enabled {
+		// A disabled inbound is not one whose sniffing the panel is judged by.
+		s.inboundsChanged(ctx, n.PanelID)
 	}
 	// A queued retry is a real outcome, so nil is right whenever the enqueue
 	// lands. It is only wrong when the enqueue ITSELF fails — then the panel
@@ -882,6 +945,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, false); err != nil {
 		return err
 	}
+	s.inboundsChanged(ctx, n.PanelID)
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
 }
 
@@ -908,7 +972,11 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 		return fmt.Errorf("unclaim owned clients: %w", err)
 	}
-	return s.nodes.Delete(ctx, n.ID)
+	if err := s.nodes.Delete(ctx, n.ID); err != nil {
+		return err
+	}
+	s.inboundsChanged(ctx, n.PanelID)
+	return nil
 }
 
 // ProcessDueTasks runs pending node-scoped 3X-UI write tasks.
@@ -1421,7 +1489,7 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 	seen := make(map[int64]bool)
 	considered, enqueued := 0, 0
 	for _, g := range groups {
-		if !group.Matches(n, g.TagFilter) {
+		if !s.groupIncludes(ctx, n, g) {
 			continue
 		}
 		members, err := s.users.ListByGroup(ctx, g.ID)
