@@ -22,6 +22,8 @@ export interface ExceptionTarget {
   user: { id: number; upn: string } | null
   /** The allowlist group that refused it (a `g<id>` source), when one did: the exception can go to that group alone. */
   group?: { id: number; name: string } | null
+  /** A `g<id>` source whose group no longer exists: there is no group to add to, and nothing is chosen for the admin. */
+  groupGone?: boolean
 }
 
 /**
@@ -48,7 +50,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
   const status = useDestStatus(scope, { enabled: target !== null })
   const [match, setMatch] = useState<'site' | 'host'>('site')
   const [choice, setChoice] = useState<'global' | 'exempt' | 'group' | null>(null)
-  const where = choice ?? (target?.group ? 'group' : 'global')
+  const where: 'global' | 'exempt' | 'group' | 'none' = choice ?? (target?.group ? 'group' : target?.groupGone ? 'none' : 'global')
   const setWhere = (v: 'global' | 'exempt' | 'group') => setChoice(v)
   const [error, setError] = useState<string | null>(null)
   const minutes = applyMinutes(status.data)
@@ -77,7 +79,8 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
       <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
         <Box>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${E}where`)}</Typography>
-          <RadioGroup value={where} onChange={(_, v) => setWhere(v as 'global' | 'exempt' | 'group')} aria-label={t(`${E}where`)}>
+          {where === 'none' && <Typography variant="body2" sx={{ color: md.error }}>{t(`${E}group_gone`)}</Typography>}
+          <RadioGroup value={where === 'none' ? '' : where} onChange={(_, v) => setWhere(v as 'global' | 'exempt' | 'group')} aria-label={t(`${E}where`)}>
             {target?.group && <FormControlLabel value="group" control={<Radio />} label={t(`${E}group`, { group: target.group.name })} />}
             <FormControlLabel value="global" control={<Radio />} label={t(`${E}global`)} />
             {where === 'global' && (
@@ -106,7 +109,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
           </Box>
         )}
         {error && <Typography variant="body2" role="alert" sx={{ color: md.error }}>{error}</Typography>}
-        {where !== 'exempt' && (
+        {where !== 'exempt' && where !== 'none' && (
           <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
             {minutes === null ? t(`${E}eta_unknown`) : t(`${E}eta`, { count: minutes })}
           </Typography>
@@ -114,7 +117,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
       </DialogContent>
       <DialogActions>
         <Button onClick={close}>{t(`${E}cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
+        <AsyncButton variant="contained" disabled={where === 'none'} onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
       </DialogActions>
     </Dialog>
   )

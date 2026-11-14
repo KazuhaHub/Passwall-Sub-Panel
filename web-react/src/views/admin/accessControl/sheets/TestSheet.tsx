@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Skeleton, TextField, ToggleButton,
+  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Skeleton, TextField, ToggleButton,
   ToggleButtonGroup, Typography, useTheme,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+
+import FieldHint from '@/components/FieldHint'
 
 import { destErrorOf, type DestTestResult } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
@@ -178,26 +180,32 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
           </Box>
         )}
       </Box>
-      <ExceptionDialog open={exception} host={result?.host ?? ''} onClose={() => setException(false)} />
+      <ExceptionDialog open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
     </Box>
   )
 }
 
-/** A global allow exception for the tested destination: the site (and its subdomains) or just that host. */
-function ExceptionDialog({ open, host, onClose }: { open: boolean; host: string; onClose: () => void }) {
+/**
+ * An allow exception for the tested destination: the site (and its subdomains) or just that host. When an
+ * allowlist group refused it, the default is that group's supplement list (only its members); everyone is a
+ * deliberate choice and carries the warning the records dialog gives.
+ */
+function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: string; group: { id: number; name: string } | null; onClose: () => void }) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const add = useAddDestException(scope)
   const [entry, setEntry] = useState(host)
   const [match, setMatch] = useState<'site' | 'host'>('site')
   const [error, setError] = useState(false)
+  const [everyone, setEveryone] = useState(false)
   const [seen, setSeen] = useState(host)
-  if (open && seen !== host) { setSeen(host); setEntry(host) }
+  if (open && seen !== host) { setSeen(host); setEntry(host); setEveryone(false) }
+  const toGroup = group !== null && !everyone
 
   const save = async () => {
     setError(false)
     try {
-      const r = await add.mutateAsync({ target: entry.trim(), match })
+      const r = await add.mutateAsync({ target: entry.trim(), match, ...(toGroup && group ? { group_id: group.id } : {}) })
       pushSnack(t(`${T}exception_saved`, { entry: r.entry }), 'success')
       onClose()
     } catch (err) {
@@ -210,6 +218,17 @@ function ExceptionDialog({ open, host, onClose }: { open: boolean; host: string;
       <DialogTitle>{t(`${T}exception.title`)}</DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
         <Typography variant="body2">{t(`${T}exception.lead`)}</Typography>
+        {group && (
+          <RadioGroup value={toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
+            <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />
+            <FormControlLabel value="global" control={<Radio />} label={t('admin:access_control.records.exception.global')} />
+            {!toGroup && (
+              <Box sx={{ pl: 4 }}>
+                <FieldHint tone="amber" summary={t('admin:access_control.records.exception.global_hint.summary')} detail={t('admin:access_control.records.exception.global_hint.detail')} />
+              </Box>
+            )}
+          </RadioGroup>
+        )}
         <TextField label={t(`${T}target`)} value={entry} onChange={e => setEntry(e.target.value)} size="small" error={error}
           helperText={error ? t(`${T}exception.invalid`) : undefined} />
         <ToggleButtonGroup exclusive size="small" value={match} onChange={(_, v: 'site' | 'host' | null) => { if (v) setMatch(v) }} aria-label={t(`${T}exception.match`)}>

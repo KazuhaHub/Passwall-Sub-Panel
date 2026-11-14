@@ -48,7 +48,7 @@ describe('the allowlist confirmations', () => {
   it('taking lists out of an allowlist that is on names them', () => {
     const c = allowlistRemoveListsConfirm(t, 'Ops', ['Remote feed', 'Mine'])
     expect(c.title).toBe('从「Ops」的名单里去掉 Remote feed、Mine？')
-    expect(c.message).toBe('它们覆盖的目的地不在名单里了，本组成员访问这些目的地会被拒绝。')
+    expect(c.message).toBe('它们覆盖的目的地中，不在其他名单里的会被拒绝。')
     expect(c.confirmText).toBe('去掉')
     expect(c.destructive).toBe(true)
   })

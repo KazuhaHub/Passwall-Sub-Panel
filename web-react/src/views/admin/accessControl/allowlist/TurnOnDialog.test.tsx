@@ -128,4 +128,18 @@ describe('the turn-on dialog', () => {
     renderAccess(dialog())
     expect(await screen.findByText('同时，本组成员不再获得 2 台不执行白名单的节点。')).toBeTruthy()
   })
+
+  it('with lists edited, it cannot be confirmed while the preview is pending or refused', async () => {
+    vi.mocked(api.previewDestGroup).mockReturnValue(new Promise(() => {}))
+    const first = renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
+    const d = await screen.findByRole('dialog')
+    await within(d).findByText('所有名单都已就绪')
+    expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true)
+    first.unmount()
+    vi.mocked(api.previewDestGroup).mockRejectedValue(new Error('boom'))
+    renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
+    const d2 = await screen.findByRole('dialog')
+    await within(d2).findByText('所有名单都已就绪')
+    await waitFor(() => expect((within(d2).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true))
+  })
 })
