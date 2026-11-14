@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -141,5 +142,49 @@ func TestRefresh_KeepsTheEntriesOfAListAnOnGroupHoldsWhenTheFeedGoesEmpty(t *tes
 	}
 	if out, err := h.svc.RefreshList(ctx, l.ID); err != nil || out.Result != RefreshUpdated {
 		t.Fatalf("outcome = %+v, %v", out, err)
+	}
+}
+
+// The geosite update guard judges the lists the allowlist groups hold like the
+// ones the policies hold: an update that would push a group's category past the
+// wire's caps is refused, and a custom list only a group holds that references a
+// category still forces a republish when the category changes.
+func TestGeositeUpdate_JudgesTheListsAnAllowlistGroupHolds(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	big := func(n int, prefix string) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "domain:" + prefix + strconv.Itoa(i) + ".example"
+		}
+		return out
+	}
+	h.up.release("20261101000000", map[string][]string{"a": big(30000, "a"), "b": big(15000, "b"), "c": {"domain:c1.example"}})
+	if _, err := h.svc.GeositeUpdate(ctx, UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	la, _ := h.svc.CreateGeosite(ctx, "a", nil)
+	lb, _ := h.svc.CreateGeosite(ctx, "b", nil)
+	custom, _, err := h.svc.CreateCustom(ctx, "refs", "", []byte("geosite:c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.group("Guests", domain.DestStateOn, la.ID, lb.ID, custom.ID)
+
+	h.up.release("20261102000000", map[string][]string{"a": big(30000, "a"), "b": big(25000, "b"), "c": {"domain:c1.example"}}) // 55 000 > 50 000
+	_, err = h.svc.GeositeUpdate(ctx, UpdateOptions{})
+	var rej *UpdateRejectedError
+	if !errors.As(err, &rej) || rej.Reason != "policy_over_limit" || rej.Kind != "domains" || rej.Used != 55002 { // a, b, the custom list's geosite:c and the base host
+		t.Fatalf("err = %v (%+v): the group lists are not counted", err, *rej.UpdateRejection)
+	}
+
+	// Within the limits, a change to a category only the group's custom list uses republishes.
+	h.up.release("20261103000000", map[string][]string{"a": big(30000, "a"), "b": big(15000, "b"), "c": {"domain:c1.example", "domain:c2.example"}})
+	gen := h.generation()
+	if _, err := h.svc.GeositeUpdate(ctx, UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if h.generation() == gen {
+		t.Fatal("the update moved a category a group's custom list references and the generation stayed")
 	}
 }

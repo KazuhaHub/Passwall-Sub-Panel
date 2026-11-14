@@ -326,7 +326,7 @@ func TestDestListRepo_ApplyBatchDecidesInsideTheTransaction(t *testing.T) {
 	var sawForce []*domain.DestPolicy
 	changed, bumped, err := repos.Lists.ApplyBatch(ctx, domain.DestListBatch{
 		Contents: []domain.DestListContentUpdate{next(unused.ID, "e")},
-		Decide: func(inUse map[int64]bool, inForce []*domain.DestPolicy) (map[int64]string, bool, error) {
+		Decide: func(inUse map[int64]bool, inForce []*domain.DestPolicy, _ []*domain.DestGroupMode) (map[int64]string, bool, error) {
 			sawInUse, sawForce = inUse, inForce
 			return nil, false, nil
 		},
@@ -343,7 +343,7 @@ func TestDestListRepo_ApplyBatchDecidesInsideTheTransaction(t *testing.T) {
 
 	changed, bumped, err = repos.Lists.ApplyBatch(ctx, domain.DestListBatch{
 		Contents: []domain.DestListContentUpdate{next(used.ID, "f"), next(unused.ID, "a")},
-		Decide: func(map[int64]bool, []*domain.DestPolicy) (map[int64]string, bool, error) {
+		Decide: func(map[int64]bool, []*domain.DestPolicy, []*domain.DestGroupMode) (map[int64]string, bool, error) {
 			return map[int64]string{broken.ID: "geosite_category_gone"}, false, nil
 		},
 	})
@@ -360,7 +360,9 @@ func TestDestListRepo_ApplyBatchDecidesInsideTheTransaction(t *testing.T) {
 		t.Fatal("identical content bumped")
 	}
 	if _, bumped, _ = repos.Lists.ApplyBatch(ctx, domain.DestListBatch{
-		Decide: func(map[int64]bool, []*domain.DestPolicy) (map[int64]string, bool, error) { return nil, true, nil },
+		Decide: func(map[int64]bool, []*domain.DestPolicy, []*domain.DestGroupMode) (map[int64]string, bool, error) {
+			return nil, true, nil
+		},
 	}); !bumped || destGeneration(t, repos, ctx) != g0+2 {
 		t.Fatal("forceBump did not bump")
 	}
@@ -370,7 +372,9 @@ func TestDestListRepo_ApplyBatchDecidesInsideTheTransaction(t *testing.T) {
 	boom := errors.New("refused")
 	if _, _, err := repos.Lists.ApplyBatch(ctx, domain.DestListBatch{
 		Contents: []domain.DestListContentUpdate{next(used.ID, "9")},
-		Decide:   func(map[int64]bool, []*domain.DestPolicy) (map[int64]string, bool, error) { return nil, false, boom },
+		Decide: func(map[int64]bool, []*domain.DestPolicy, []*domain.DestGroupMode) (map[int64]string, bool, error) {
+			return nil, false, boom
+		},
 	}); !errors.Is(err, boom) {
 		t.Fatalf("a Decide error: %v", err)
 	}

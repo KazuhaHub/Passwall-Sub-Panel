@@ -196,7 +196,7 @@ func (r *DestListRepo) UpdateContent(ctx context.Context, id int64, c domain.Des
 		}
 		// Only a list a non-off policy references is something the compiler
 		// can see; a refresh of any other restarts nothing.
-		_, inUse, err := inForcePoliciesTx(tx)
+		_, inUse, _, err := inForcePoliciesTx(tx)
 		if err != nil {
 			return err
 		}
@@ -230,14 +230,14 @@ func (r *DestListRepo) ApplyBatch(ctx context.Context, batch domain.DestListBatc
 		if err := lockDestState(tx); err != nil {
 			return err
 		}
-		inForce, inUse, err := inForcePoliciesTx(tx)
+		inForce, inUse, modes, err := inForcePoliciesTx(tx)
 		if err != nil {
 			return err
 		}
 		var notes map[int64]string
 		force := false
 		if batch.Decide != nil {
-			if notes, force, err = batch.Decide(inUse, inForce); err != nil {
+			if notes, force, err = batch.Decide(inUse, inForce, modes); err != nil {
 				return err
 			}
 		}

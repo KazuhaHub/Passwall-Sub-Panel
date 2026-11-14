@@ -185,11 +185,12 @@ type DestListBatch struct {
 	// policy change. inUse is the set of list ids a non-off policy
 	// references: only a change to one of them advances the generation,
 	// because only then does the compiler see a different policy (F13).
+	// groups are the allowlist groups that are not off (their lists are in inUse too).
 	// It returns last_error notes to record on lists (entries untouched),
 	// whether to advance the generation whatever changed (a change the lists
 	// do not show: a category a custom list references), or an error that
 	// aborts the whole batch.
-	Decide func(inUse map[int64]bool, inForce []*DestPolicy) (notes map[int64]string, forceBump bool, err error)
+	Decide func(inUse map[int64]bool, inForce []*DestPolicy, groups []*DestGroupMode) (notes map[int64]string, forceBump bool, err error)
 }
 
 // DestPolicy is one rule of the access-control policy.
