@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -29,6 +30,7 @@ func (p *legacyPSP) SyncUser(context.Context, int64, string, domain.EmailRules, 
 }
 
 type deletePool struct {
+	getErr   error
 	deleted  map[int64][]string
 	offline  map[int64]bool
 	deleteBy error
@@ -41,6 +43,9 @@ type deleteClient struct {
 }
 
 func (p *deletePool) Get(id int64) (ports.XUIClient, error) {
+	if p.getErr != nil {
+		return nil, p.getErr
+	}
 	if p.offline[id] {
 		return nil, errors.New("panel offline")
 	}
@@ -69,13 +74,31 @@ func (offlineProvisionMigrator) ProvisionUser(context.Context, int64) error {
 	return errors.New("a native node is offline")
 }
 
-func newRetirementService(psp PSPClientProvisioner, mig SharedMigrator, life SharedLifecycleSyncer) (*Service, *deletePool) {
+// exclusionSelector is a node selector that also says which panels the
+// allowlist excluded (group.Service does).
+type exclusionSelector struct {
+	bfSelector
+	excluded map[int64]bool
+}
+
+func (s exclusionSelector) AllowlistExcludedPanels(context.Context, *domain.Group) (map[int64]bool, error) {
+	return s.excluded, nil
+}
+
+// notRegisteredErr is what the pool answers for a panel that was deleted.
+var notRegisteredErr = fmt.Errorf("xui panel id 9 not registered: %w", ports.ErrPanelNotRegistered)
+
+func newRetirementService(psp PSPClientProvisioner, mig SharedMigrator, life SharedLifecycleSyncer, excluded ...int64) (*Service, *deletePool) {
 	u := &domain.User{ID: 7, Enabled: true, GroupID: 1}
 	pool := &deletePool{}
+	excl := map[int64]bool{}
+	for _, p := range excluded {
+		excl[p] = true
+	}
 	svc := &Service{
 		users:    &memoryUserRepo{byID: map[int64]*domain.User{7: u}},
 		groups:   &bfGroupRepo{g: &domain.Group{ID: 1}},
-		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}},
+		selector: exclusionSelector{bfSelector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}}, excluded: excl},
 		settings: bfSettings{},
 		pool:     pool,
 	}
@@ -92,7 +115,7 @@ func newRetirementService(psp PSPClientProvisioner, mig SharedMigrator, life Sha
 // allowlist could be walked around with the old subscription.
 func TestResyncMembership_WholePanelRemovalDeletesDespiteProvisionFailure(t *testing.T) {
 	psp := &retirementPSP{retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}}}
-	svc, pool := newRetirementService(psp, offlineProvisionMigrator{&resyncMigrator{}}, &failingSharedLife{})
+	svc, pool := newRetirementService(psp, offlineProvisionMigrator{&resyncMigrator{}}, &failingSharedLife{}, 9)
 
 	err := svc.ResyncMembership(context.Background(), 7)
 	if err == nil {
@@ -105,7 +128,7 @@ func TestResyncMembership_WholePanelRemovalDeletesDespiteProvisionFailure(t *tes
 
 func TestResyncMembership_WholePanelRemovalDeletesDespiteLifecycleFailure(t *testing.T) {
 	psp := &retirementPSP{retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}}}
-	svc, pool := newRetirementService(psp, &resyncMigrator{}, &failingSharedLife{fail: true})
+	svc, pool := newRetirementService(psp, &resyncMigrator{}, &failingSharedLife{fail: true}, 9)
 	if err := svc.ResyncMembership(context.Background(), 7); err == nil {
 		t.Fatal("a lifecycle failure must be returned")
 	}
@@ -153,31 +176,21 @@ func TestResyncMembership_UndifferentiatedRetirementsKeepTheProvisionGate(t *tes
 	}
 }
 
-// A delete that fails is returned, so the user_resync task retries it on the
-// task cadence and the heal sweep, and an unreachable removed panel the same:
-// today it is only logged and the stray client lives until something else
-// happens to resync the user.
-func TestResyncMembership_FailedDeletionsAreReturned(t *testing.T) {
-	for name, tc := range map[string]struct {
-		retired domain.RetiredClients
-		arrange func(p *deletePool)
-	}{
-		"delete fails, whole panel": {
-			retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}},
-			arrange: func(p *deletePool) { p.deleteBy = errors.New("panel refused the delete") },
-		},
-		"removed panel unreachable": {
-			retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}},
-			arrange: func(p *deletePool) { p.offline = map[int64]bool{9: true} },
-		},
-		"delete fails, regrouped": {
-			retired: domain.RetiredClients{Regrouped: map[int64][]string{9: {"u7-k1@psp.local"}}},
-			arrange: func(p *deletePool) { p.deleteBy = errors.New("panel refused the delete") },
+// A client on a panel the ALLOWLIST excluded is deleted for good, so a failed
+// delete (or an unreachable panel) is returned: the user_resync task and the
+// heal sweep retry it, and the stray client is the way round the allowlist.
+func TestResyncMembership_FailedDeletionsOnAnExcludedPanelAreReturned(t *testing.T) {
+	for name, arrange := range map[string]func(p *deletePool){
+		"delete refused":    func(p *deletePool) { p.deleteBy = errors.New("panel refused the delete") },
+		"panel unreachable": func(p *deletePool) { p.offline = map[int64]bool{9: true} },
+		"a different not-found": func(p *deletePool) {
+			p.deleteBy = errors.New("POST /panel/api/clients/del/x: endpoint not found")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			svc, pool := newRetirementService(&retirementPSP{retired: tc.retired}, &resyncMigrator{}, &failingSharedLife{})
-			tc.arrange(pool)
+			psp := &retirementPSP{retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}}}
+			svc, pool := newRetirementService(psp, &resyncMigrator{}, &failingSharedLife{}, 9)
+			arrange(pool)
 			if err := svc.ResyncMembership(context.Background(), 7); err == nil {
 				t.Fatal("a stray client that could not be removed must make the resync fail")
 			}
@@ -185,20 +198,75 @@ func TestResyncMembership_FailedDeletionsAreReturned(t *testing.T) {
 	}
 }
 
-// The retained empty row of a removed panel is listed as retired on every
-// resync, so after the first delete the client is already gone and the panel
-// says so ("client not found"). That is the goal reached, not a failure: it
-// must not turn every later resync of the user into an error.
-func TestResyncMembership_AnAlreadyAbsentClientIsNotAFailure(t *testing.T) {
-	for _, gone := range []error{
-		errors.New("POST /panel/api/clients/del/u7%40psp.local: client not found"),
-		domain.ErrNotFound,
+// An ordinary move between panels (the tag filter now selects another panel)
+// is make-before-break: the old client stays until the new one is live, or the
+// user is cut off while the new panel is offline. Only an allowlist exclusion
+// skips that wait.
+func TestResyncMembership_OrdinaryPanelMoveKeepsMakeBeforeBreak(t *testing.T) {
+	psp := &retirementPSP{retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}}}
+	svc, pool := newRetirementService(psp, offlineProvisionMigrator{&resyncMigrator{}}, &failingSharedLife{}) // 9 not excluded
+	if err := svc.ResyncMembership(context.Background(), 7); err == nil {
+		t.Fatal("the failed provision must be returned")
+	}
+	if len(pool.deleted) != 0 {
+		t.Fatalf("the old panel's client was deleted before the new one was live: %v", pool.deleted)
+	}
+	svc, pool = newRetirementService(psp, &resyncMigrator{}, &failingSharedLife{})
+	if err := svc.ResyncMembership(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if len(pool.deleted[9]) != 1 {
+		t.Fatalf("once provisioned the old client must go: %v", pool.deleted)
+	}
+}
+
+// Outside an allowlist exclusion a delete that fails keeps the old behaviour:
+// logged, and the retained empty row is tried again on the next resync. Turning
+// it into an error would make a user with a row on a long-offline panel fail
+// every resync and every heal sweep for ever.
+func TestResyncMembership_OtherDeletionFailuresAreOnlyLogged(t *testing.T) {
+	for name, retired := range map[string]domain.RetiredClients{
+		"removed panel": {PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}},
+		"regrouped":     {Regrouped: map[int64][]string{9: {"u7-k1@psp.local"}}},
 	} {
-		psp := &retirementPSP{retired: domain.RetiredClients{PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}}}
-		svc, pool := newRetirementService(psp, &resyncMigrator{}, &failingSharedLife{})
-		pool.deleteBy = gone
-		if err := svc.ResyncMembership(context.Background(), 7); err != nil {
-			t.Fatalf("a client the panel no longer has failed the resync: %v", err)
+		for how, arrange := range map[string]func(p *deletePool){
+			"refused":     func(p *deletePool) { p.deleteBy = errors.New("panel refused the delete") },
+			"unreachable": func(p *deletePool) { p.offline = map[int64]bool{9: true} },
+		} {
+			t.Run(name+"/"+how, func(t *testing.T) {
+				svc, pool := newRetirementService(&retirementPSP{retired: retired}, &resyncMigrator{}, &failingSharedLife{})
+				arrange(pool)
+				if err := svc.ResyncMembership(context.Background(), 7); err != nil {
+					t.Fatalf("a failed delete outside an allowlist exclusion must not fail the resync: %v", err)
+				}
+			})
+		}
+	}
+}
+
+// The retained empty row of a removed panel is listed as retired on every
+// resync. A client the panel no longer has ("client not found") and a panel that
+// is no longer registered at all (deleted: its psp_clients rows stay) are the
+// goal reached, not failures, even for an excluded panel.
+func TestResyncMembership_AnAlreadyGoneClientOrPanelIsNotAFailure(t *testing.T) {
+	retired := map[string]domain.RetiredClients{
+		"excluded": {PanelRemoved: map[int64][]string{9: {"u7@psp.local"}}},
+		"regroup":  {Regrouped: map[int64][]string{9: {"u7-k1@psp.local"}}},
+	}
+	for name, rc := range retired {
+		for how, arrange := range map[string]func(p *deletePool){
+			"client not found":     func(p *deletePool) { p.deleteBy = errors.New("POST /panel/api/clients/del/u7: client not found") },
+			"record not found":     func(p *deletePool) { p.deleteBy = errors.New("get: (record not found)") },
+			"ErrNotFound":          func(p *deletePool) { p.deleteBy = domain.ErrNotFound },
+			"panel not registered": func(p *deletePool) { p.getErr = notRegisteredErr },
+		} {
+			t.Run(name+"/"+how, func(t *testing.T) {
+				svc, pool := newRetirementService(&retirementPSP{retired: rc}, &resyncMigrator{}, &failingSharedLife{}, 9)
+				arrange(pool)
+				if err := svc.ResyncMembership(context.Background(), 7); err != nil {
+					t.Fatalf("failed the resync: %v", err)
+				}
+			})
 		}
 	}
 }

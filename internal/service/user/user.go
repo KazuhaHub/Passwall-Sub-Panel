@@ -115,6 +115,13 @@ type PSPClientProvisioner interface {
 	SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (retired map[int64][]string, err error)
 }
 
+// allowlistExclusions is a NodeSelector that also says which panels a group's
+// allowlist kept its members off (group.Service). Without it no panel counts as
+// excluded and every retirement keeps the provision gate.
+type allowlistExclusions interface {
+	AllowlistExcludedPanels(ctx context.Context, g *domain.Group) (map[int64]bool, error)
+}
+
 // retirementReporter is a PSPClientProvisioner that also says which of the
 // clients it retired went because the user has no node left on their panel and
 // which because another client on the same panel replaced them
@@ -2310,27 +2317,48 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			firstErr = fmt.Errorf("orphan reconcile: %w", err)
 		}
 	}
+	// A client on a panel the user's ALLOWLIST excluded serves nothing it may,
+	// and removing it only tightens access, so it needs neither the provision nor
+	// the lifecycle to have succeeded: both fail whenever ANY of the user's other
+	// panels is down, and with the gate a group that became an allowlist could be
+	// walked around with the old subscription until that panel came back. Its
+	// failure is returned, so the user_resync task retries it. Every other
+	// retirement, including a panel left because the tags moved on, is
+	// make-before-break: it waits for its replacement to be live.
+	excluded := map[int64]bool{}
+	if ex, ok := s.selector.(allowlistExclusions); ok && s.migrator != nil && len(retiredClients.PanelRemoved) > 0 {
+		var exErr error
+		if excluded, exErr = ex.AllowlistExcludedPanels(ctx, g); exErr != nil {
+			// Unknown: keep the gate (the safe direction for connectivity) and
+			// have the task retry.
+			excluded = map[int64]bool{}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("allowlist exclusions: %w", exErr)
+			}
+		}
+	}
+	strict, gated := map[int64][]string{}, map[int64][]string{}
+	for panelID, emails := range retiredClients.PanelRemoved {
+		if excluded[panelID] {
+			strict[panelID] = emails
+		} else {
+			gated[panelID] = emails
+		}
+	}
+	for panelID, emails := range retiredClients.Regrouped {
+		gated[panelID] = append(gated[panelID], emails...)
+	}
 	if s.migrator != nil {
-		// A client on a panel where the user has no node left serves nothing, and
-		// removing it only tightens access, so it needs neither the provision nor
-		// the lifecycle to have succeeded: both fail whenever ANY of the user's
-		// other panels is down, and with the old gate a group that became an
-		// allowlist could be walked around with the old subscription until that
-		// panel came back. A failure is returned, so the user_resync task retries
-		// it on its own cadence.
-		if err := s.deleteRetiredSharedClients(ctx, retiredClients.PanelRemoved); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("delete clients on removed panels: %w", err)
+		if err := s.deleteRetiredSharedClients(ctx, strict, true); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("delete clients on excluded panels: %w", err)
 		}
 	}
 	if provisioned && lifeErr == nil && s.migrator != nil {
 		// The merged/current shared client(s) are now live (or an empty plan has
 		// deliberately detached every local attachment), so it is safe to remove
-		// the clients they replaced on the same panel: deleting one earlier would
-		// cut the user off. Stable counter rows for an empty plan remain in PSP
-		// for a later re-add.
-		if err := s.deleteRetiredSharedClients(ctx, retiredClients.Regrouped); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("delete replaced clients: %w", err)
-		}
+		// the clients they replaced or that sat on a panel the user moved off.
+		// Stable counter rows for an empty plan remain in PSP for a later re-add.
+		_ = s.deleteRetiredSharedClients(ctx, gated, false)
 		if err := s.migrator.DeleteLegacyForUser(ctx, u.ID); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("delete legacy: %w", err)
@@ -2344,27 +2372,33 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 // deleteRetiredSharedClients removes live upstream projections that the desired
 // plan no longer serves. Their DB rows may have been pruned after a repartition,
 // or retained without attachments to preserve counters across an empty node
-// intersection. It tries every one and returns the first failure: a panel that
-// is unreachable or refuses the delete is retried by the task that the failed
-// resync becomes, and by the heal sweep, which lists a retained empty row as
-// retired every time. Delete is by email (panel-wide).
-func (s *Service) deleteRetiredSharedClients(ctx context.Context, retired map[int64][]string) error {
+// intersection (and such a row is listed as retired on every resync). It tries
+// every one. A client the panel no longer has, or a panel that is no longer
+// registered, is done. Any other failure is logged and, only when strict (the
+// allowlist excluded the panel), returned for the task to retry: elsewhere a
+// panel that is down for good would fail every resync of the user for ever.
+// Delete is by email (panel-wide).
+func (s *Service) deleteRetiredSharedClients(ctx context.Context, retired map[int64][]string, strict bool) error {
 	var first error
+	note := func(panelID int64, err error) {
+		if strict && first == nil {
+			first = fmt.Errorf("panel %d: %w", panelID, err)
+		}
+	}
 	for panelID, emails := range retired {
 		cli, err := s.pool.Get(panelID)
+		if errors.Is(err, ports.ErrPanelNotRegistered) {
+			continue
+		}
 		if err != nil {
 			log.Warn("delete retired shared client: pool get", "panel_id", panelID, "err", err)
-			if first == nil {
-				first = fmt.Errorf("panel %d: %w", panelID, err)
-			}
+			note(panelID, err)
 			continue
 		}
 		for _, email := range emails {
 			if err := cli.DelClientByEmail(ctx, email); err != nil && !clientAlreadyGone(err) {
 				log.Warn("delete retired shared client", "panel_id", panelID, "email", email, "err", err)
-				if first == nil {
-					first = fmt.Errorf("panel %d: %w", panelID, err)
-				}
+				note(panelID, err)
 			}
 		}
 	}
@@ -2374,10 +2408,10 @@ func (s *Service) deleteRetiredSharedClients(ctx context.Context, retired map[in
 // clientAlreadyGone reports whether a failed delete only found nothing to
 // delete. A retained empty row stays in the retired list on every resync, so
 // after the first delete the panel answers "client not found", which is the
-// goal reached. The 3X-UI adapter signals it only by message (isClientNotFoundMsg),
-// so this matches the same way.
+// goal reached. The 3X-UI adapter signals it only by message, so this matches the
+// same narrow patterns it does (ports.IsClientNotFoundMessage).
 func clientAlreadyGone(err error) bool {
-	return errors.Is(err, domain.ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "not found")
+	return errors.Is(err, domain.ErrNotFound) || ports.IsClientNotFoundMessage(err.Error())
 }
 
 // HealSharedClients is the v3.9.0 shared-model drift heal. It walks every user and

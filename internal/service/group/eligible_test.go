@@ -737,3 +737,32 @@ func TestUpdateDropsTheCachedMemberCount(t *testing.T) {
 		t.Fatalf("after the save members = %d, want 0 (the new filter does not select the panel)", n)
 	}
 }
+
+// The panels an allowlist excluded are those the group's tags select but that
+// cannot enforce it: a panel merely outside the tags is an ordinary move.
+func TestAllowlistExcludedPanels(t *testing.T) {
+	e := newEligEnv(t)
+	e.panels.kinds[2] = domain.PanelKind3XUI
+	e.nodes.nodes = []*domain.Node{
+		e.node,
+		{ID: 20, PanelID: 2, Enabled: true, Region: "TW"}, // 3X-UI, selected by the tags
+		{ID: 21, PanelID: 3, Enabled: true, Region: "JP"}, // not selected by the tags
+	}
+	ctx := context.Background()
+	g := allowlistGroup(domain.DestStateOn)
+	g.TagFilter = domain.TagFilter{Tags: []string{"region:TW"}}
+	got, err := e.svc.AllowlistExcludedPanels(ctx, g)
+	if err != nil || len(got) != 1 || !got[2] {
+		t.Fatalf("excluded = %v, %v; want only panel 2", got, err)
+	}
+	g.DestAllowlist.State = domain.DestStateOff
+	if got, err := e.svc.AllowlistExcludedPanels(ctx, g); err != nil || len(got) != 0 {
+		t.Fatalf("an off group excludes %v, %v; want none", got, err)
+	}
+	g.DestAllowlist.State = domain.DestStateOn
+	e.svc.InvalidateEligibility(0)
+	e.agents.err = errors.New("db down")
+	if _, err := e.svc.AllowlistExcludedPanels(ctx, g); err == nil {
+		t.Fatal("a failed read must be an error")
+	}
+}

@@ -363,3 +363,35 @@ func (s *Service) InboundsChanged(ctx context.Context, panelID int64) {
 func (s *Service) Wired() (eligibility, resyncer bool) {
 	return s.elig.wired(), s.resyncer != nil
 }
+
+// AllowlistExcludedPanels are the panels the group's allowlist keeps its
+// members off: those that have an enabled node the group's tags select but
+// cannot enforce the allowlist. A panel outside the tags is not one (moving a
+// group from it is an ordinary move), and a group with no allowlist excludes
+// none.
+func (s *Service) AllowlistExcludedPanels(ctx context.Context, g *domain.Group) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if !allowlisted(g) || !s.elig.wired() {
+		return out, nil
+	}
+	nodes, err := s.listEnabledCached(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		if n.IsSeparator() || !Matches(n, g.TagFilter) {
+			continue
+		}
+		if _, seen := out[n.PanelID]; seen {
+			continue
+		}
+		ok, err := s.panelCanEnforce(ctx, n.PanelID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			out[n.PanelID] = true
+		}
+	}
+	return out, nil
+}
