@@ -76,6 +76,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 - **触发重新同步**（先失效缓存，再对每个状态不为 `off` 的分组调 `ResyncGroupMembersInBackground`，顺序不能反）：agent 上报的两个能力出现或消失（只看这两个，任务能力会逐次变化）；`fallback_reason` 进入或离开 `rejected` / `over_limit`；psp 面板的入站嗅探、启用状态变化，以及入站的新建、导入、删除、分离；分组保存。缓存的组员数在有人加入、离开分组或被删除时失效。没有接线时只失效缓存，由 heal 兜底。
 - **因白名单被排除的面板上，删除不依赖其他面板**：`clientprov` 把退役的 client 分成「用户在该面板上已没有任何节点」与「同面板内被另一个 client 取代」。只有**面板因白名单不合格而被排除**（分组的 tags 仍选中该面板的节点，分组是白名单，面板却不能执行：`group.Service.AllowlistExcludedPanels`）时，`ResyncMembership` 才不看 provision 与生命周期是否成功就删，失败（面板离线、拒绝）并入返回的错误，由 `user_resync` 任务和 heal 重试。其余情况，包括分组的 tags 改去选别的面板，仍是先建后拆：等替代者上线才删，否则目标面板离线时用户会断网；这些删除失败只记日志，不使重同步失败，否则一行留在长期离线或已删除面板上的空 client 会让该用户每次重同步、每次 heal 都报错。面板已不在池里（已删除）或面板上已没有该 client（「not found」，只认 3X-UI 的几种固定措辞）都算完成。
 - 每节点超额按 `TagMatchedMembers`（该面板 tags 选中的组员数，不论是否合格）计，由 `group.Service` 实现，见 §3.2。对**每个**状态不为 `off` 且 tags 选中该面板的分组都计，不要求 roster 里有该组的人：过额使面板不合格、组员全部离开 roster 后，额度不能因此看起来够用而把他们放回来；roster 里没有任何组员但按这个数会超额时，照样走 `over_limit`。
+- **已知限制（窄）**：作用范围是分组的策略，其 Subjects 取自 roster 上的白名单组员，这部分不在上面的余量里。若一条策略的作用范围恰好是白名单分组本身，且该组在一个面板上的组员数 × 规则数贴近每节点 50 000 个 subject 的上限，组员在 roster 时超额、移出后不超额，仍可能来回振荡；要单面板约 16 000 名组员才会出现。
 - **守卫**：`TestNoGroupMatchesOutsideGroupPackage` 扫描 `internal/service`、`internal/transport`、`internal/app`，`group` 包以外不得调用 `group.Matches`。
 
 ## 4. 发布、编译与回退
