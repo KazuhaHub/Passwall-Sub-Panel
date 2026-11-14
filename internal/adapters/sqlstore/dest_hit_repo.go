@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -603,6 +604,14 @@ func (r *DestHitRepo) TrialSites(ctx context.Context, source string, sinceMS int
 	for i, row := range rows {
 		out[i] = domain.DestTrialSite{Site: row.Dest, Count: row.N, LastMS: row.Last}
 	}
+	// Ties are ordered here, by bytes: the dialects' collations disagree on
+	// punctuation ("(ip)" sorts first in SQLite and after letters in PostgreSQL).
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Site < out[j].Site
+	})
 	return out, nil
 }
 
