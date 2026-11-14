@@ -195,8 +195,14 @@ func TestLive_RealNodePolicyContract(t *testing.T) {
 	// digest is how it says so. PSP must not read that as a missing report.
 	exchanges := runAgent()
 	last := exchanges[rounds-1].report
-	if !slices.Contains(last.Capabilities, nodeprotocol.CapabilityDestinationPolicy) {
-		t.Fatalf("the agent does not declare %s: %v", nodeprotocol.CapabilityDestinationPolicy, last.Capabilities)
+	for _, capability := range []string{
+		nodeprotocol.CapabilityDestinationPolicy,
+		nodeprotocol.CapabilityDestinationGroups,
+		nodeprotocol.CapabilityDestinationResolve,
+	} {
+		if !slices.Contains(last.Capabilities, capability) {
+			t.Fatalf("the agent does not declare %s: %v", capability, last.Capabilities)
+		}
 	}
 	if got := last.PolicyStatus; got == nil || got.Digest != "" || got.State != nodeprotocol.PolicyStateApplied {
 		t.Fatalf("a node with no policy reported %+v, want applied with an empty digest", got)
