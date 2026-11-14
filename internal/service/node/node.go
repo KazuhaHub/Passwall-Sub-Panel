@@ -495,8 +495,8 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 // server has nothing for the node to use — and PSP never creates inbounds on its own.
 // But PSP OWNS the inbound config (the v3.5 snapshot), so this pushes it back as a new
 // inbound instead of the admin re-creating it by hand. Clients follow:
-// syncExistingUsersToNode enqueues a resync per eligible member, re-provisioning each
-// member's shared client onto the new inbound.
+// provisionNodeMembersInBackground re-provisions each eligible member's shared
+// client onto the new inbound.
 //
 // Idempotent: it re-creates the inbound only when it is MISSING (otherwise it leaves
 // the live one and just re-provisions clients), so it never duplicates an inbound and
@@ -1347,8 +1347,11 @@ func sameSyncStamp(a, b *time.Time) bool {
 // Uses a fresh context (the request context is cancelled when the response
 // is written) and a value-copy of n (the caller may mutate / drop the
 // pointer before the goroutine runs). Anything the goroutine can't finish —
-// process restart, panel down, transient failure — is healed by reconcile
-// axis B's checkMissingOwnerships within the next full cycle. Mirrors
+// process restart, panel down, transient failure — is healed by
+// HealSharedClients, which re-runs every user's membership on the reconcile
+// ticker (every fourth cycle once the shared-client migration is complete).
+// Reconcile axis B's checkMissingOwnerships does NOT heal it: it only covers
+// users who still have legacy ownership rows. Mirrors
 // user.ResyncGroupMembersInBackground (beta.7).
 func (s *Service) syncExistingUsersToNodeInBackground(n *domain.Node) {
 	snap := *n
@@ -1361,14 +1364,14 @@ func (s *Service) syncExistingUsersToNodeInBackground(n *domain.Node) {
 
 // syncExistingUsersToNode walks every group; for groups whose tag_filter would
 // include this node, every enabled member gets a user_resync task. Errors per
-// user are logged and the loop continues — the reconciliation pass heals
-// anything left behind.
+// user are logged and the loop continues; HealSharedClients heals anything left
+// behind (see syncExistingUsersToNodeInBackground).
 func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) error {
-	info, err := s.inspectInbound(ctx, n)
+	protocol, err := s.newNodeProtocol(ctx, n)
 	if err != nil {
-		return fmt.Errorf("inspect inbound: %w", err)
+		return err
 	}
-	if info.protocol == "" {
+	if protocol == "" {
 		log.Warn("new-node sync skip: unsupported protocol", "node_id", n.ID)
 		return nil
 	}
@@ -1410,6 +1413,37 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 	log.Info("synced existing users on node", "node_id", n.ID,
 		"considered_members", considered, "enqueued_resyncs", enqueued)
 	return nil
+}
+
+// newNodeProtocol is the protocol syncExistingUsersToNode checks before it
+// enrols the members.
+//
+// A NATIVE panel answers from its own desired state. Its GetInbound reads the
+// agent's last full report, which has no entry for a node created a moment ago
+// (and none at all before the agent's first report), so asking it refused the
+// enqueue, and nothing retried: existing members got no client on the new node
+// until a heal or a recreate. The resync writes the members' shared clients and
+// attachments before it reads anything back, so the roster reaches the agent
+// whether or not the agent has reported yet; a later read-back that the report
+// cannot answer yet is retried by the task loop. The node row already says what
+// PSP will deploy.
+//
+// 3X-UI and S-UI keep reading the live inbound: there the inbound exists before
+// the node row does, and it is the source of the protocol (and of the
+// Shadowsocks method).
+func (s *Service) newNodeProtocol(ctx context.Context, n *domain.Node) (domain.Protocol, error) {
+	c, err := s.pool.Get(n.PanelID)
+	if err != nil {
+		return "", fmt.Errorf("inspect inbound: %w", err)
+	}
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		return crypto.DetectProtocol(n.DesiredProtocol, ""), nil
+	}
+	info, err := s.inspectInbound(ctx, n)
+	if err != nil {
+		return "", fmt.Errorf("inspect inbound: %w", err)
+	}
+	return info.protocol, nil
 }
 
 // enqueueUserResync queues a deduped user_resync task (mirrors user.enqueueUserTask).
