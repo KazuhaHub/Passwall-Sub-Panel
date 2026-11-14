@@ -109,6 +109,9 @@ func saveAllowlistTx(tx *gorm.DB, gid int64, a *domain.DestAllowlist, ifUpdatedA
 	if res.RowsAffected == 0 {
 		return domain.ErrNotFound
 	}
+	if err := requireAllowlistListsTx(tx, a); err != nil {
+		return err
+	}
 	prev := cur.destAllowlist()
 	if ifUpdatedAt != nil && (prev.UpdatedAt == nil || prev.UpdatedAt.UnixMilli() != ifUpdatedAt.UnixMilli()) {
 		return fmt.Errorf("%w: the group's allowlist changed since it was read", domain.ErrConflict)
@@ -131,6 +134,40 @@ func saveAllowlistTx(tx *gorm.DB, gid int64, a *domain.DestAllowlist, ifUpdatedA
 	a.StateChangedAt, a.UpdatedAt = next.StateChangedAt, next.UpdatedAt
 	a.ListIDs = sortedUniqueIDs(a.ListIDs)
 	return bumpDestGeneration(tx, time.Now())
+}
+
+// requireAllowlistListsTx checks, inside the locked transaction, the lists an
+// allowlist names: they exist (a list deleted between the admin's read and this
+// write would leave the group pointing at nothing, and an allowlist built on
+// nothing denies everything), and an allowlist that is on has them all ready.
+// DeleteUnused takes the same state lock, so no delete lands between this check
+// and the write.
+func requireAllowlistListsTx(tx *gorm.DB, a *domain.DestAllowlist) error {
+	ids := sortedUniqueIDs(a.ListIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	var rows []destListRow
+	if err := tx.Select("id", "kind", "last_fetched_at", "entry_count").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) != len(ids) {
+		return fmt.Errorf("%w: group allowlist: a list it names does not exist", domain.ErrValidation)
+	}
+	if a.State != domain.DestStateOn {
+		return nil
+	}
+	var notReady []int64
+	for _, row := range rows {
+		if !row.toDomain().Ready() {
+			notReady = append(notReady, row.ID)
+		}
+	}
+	if len(notReady) > 0 {
+		slices.Sort(notReady)
+		return &domain.DestListNotReadyError{ListIDs: notReady}
+	}
+	return nil
 }
 
 // Save writes group gid's allowlist and advances the generation.

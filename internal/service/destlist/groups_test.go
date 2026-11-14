@@ -108,3 +108,38 @@ func TestUpdateRemote_RefusesToMakeAListAnOnGroupHoldsNotReady(t *testing.T) {
 		t.Fatalf("a report group's list was refused: %v", err)
 	}
 }
+
+// A refresh is not an edit an admin can be told "no" to, but it must not blank
+// the list an "on" allowlist is made of: it is recorded as failed and the
+// previous entries stay.
+func TestRefresh_KeepsTheEntriesOfAListAnOnGroupHoldsWhenTheFeedGoesEmpty(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	body := "a.example.com\n"
+	srv := newListServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+	h.svc.doer = srv.Client()
+	l, _, err := h.svc.CreateRemote(ctx, "feed", srv.URL+"/one", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, al := h.group("Guests", domain.DestStateOn, l.ID)
+	gen := h.generation()
+
+	body = ""
+	out, err := h.svc.RefreshList(ctx, l.ID)
+	if err != nil || out.Result != RefreshFailed || out.Error == "" {
+		t.Fatalf("outcome = %+v, %v: the feed went empty under an on group", out, err)
+	}
+	stored, _ := h.repos.Lists.GetByID(ctx, l.ID)
+	if stored.EntryCount != 1 || stored.LastError == "" || h.generation() != gen {
+		t.Fatalf("entries %d, last_error %q, generation %d -> %d: the previous entries stay", stored.EntryCount, stored.LastError, gen, h.generation())
+	}
+	// With the group back to report the feed may go empty.
+	al.State = domain.DestStateReport
+	if err := h.repos.GroupAllowlists.Save(ctx, g.ID, al, al.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := h.svc.RefreshList(ctx, l.ID); err != nil || out.Result != RefreshUpdated {
+		t.Fatalf("outcome = %+v, %v", out, err)
+	}
+}

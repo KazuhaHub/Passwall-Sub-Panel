@@ -263,7 +263,7 @@ func TestDestUserViewCarriesTheGroupState(t *testing.T) {
 	f.expect("PUT", gpath(g, ""), `{"state":"on","list_ids":[`+itoa(lid)+`],"base_hosts":[]}`, 200, "")
 	f.users.users[2].GroupID = g.ID
 	got := f.expect("GET", "/users/2", "", 200, "")["group"].(map[string]any)
-	if num(got["id"]) != g.ID || got["name"] != "Guests" || got["state"] != "on" {
+	if num(got["id"]) != g.ID || got["name"] != "Guests" || got["state"] != "on" || got["mode"] != "allowlist" || got["stage"] != nil {
 		t.Fatalf("group = %v", got)
 	}
 }

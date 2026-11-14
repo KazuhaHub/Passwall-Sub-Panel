@@ -612,7 +612,17 @@ func (h *AdminDestHandler) User(c *gin.Context) {
 			if state == "" {
 				state = domain.DestStateOff
 			}
-			out["group"] = gin.H{"id": g.ID, "name": g.Name, "state": state, "state_changed_at": msPtr(g.DestAllowlist.StateChangedAt)}
+			// mode and stage are what the page shipped with: open for a group that
+			// has no allowlist, allowlist for one that has. They go when the page
+			// reads state.
+			mode := "open"
+			if state != domain.DestStateOff {
+				mode = "allowlist"
+			}
+			out["group"] = gin.H{
+				"id": g.ID, "name": g.Name, "state": state, "state_changed_at": msPtr(g.DestAllowlist.StateChangedAt),
+				"mode": mode, "stage": nil,
+			}
 		}
 	}
 	if e, err := h.w.Exemptions.Get(ctx, id); err == nil {

@@ -177,16 +177,11 @@ func (e *ListInUseError) Unwrap() error { return ErrListInUse }
 // ErrListNotReady refuses a change that would leave a list an "on" allowlist
 // group holds not ready (HTTP 409 dest_list_not_ready): the allowlist would
 // deny everything the list names.
-var ErrListNotReady = fmt.Errorf("%w: dest list would not be ready", domain.ErrConflict)
+var ErrListNotReady = domain.ErrDestListNotReady
 
 // ListNotReadyError names the lists that are not ready, and the groups that
 // hold them.
-type ListNotReadyError struct{ ListIDs, GroupIDs []int64 }
-
-func (e *ListNotReadyError) Error() string {
-	return fmt.Sprintf("%v: lists %v, groups %v", ErrListNotReady, e.ListIDs, e.GroupIDs)
-}
-func (e *ListNotReadyError) Unwrap() error { return ErrListNotReady }
+type ListNotReadyError = domain.DestListNotReadyError
 
 // HoldsList reports whether the allowlist names list id: among its lists, or as
 // its base or extra list.
@@ -372,6 +367,14 @@ func (s *Service) refreshRemote(ctx context.Context, l *domain.DestList) Refresh
 			return fail(RefreshBroad, err)
 		}
 		return fail(RefreshFailed, err)
+	}
+	if p.EntryCount == 0 {
+		// A feed that went empty must not blank the list an "on" allowlist is made
+		// of (D5): the refresh fails and the previous entries stay.
+		now := s.now().UTC()
+		if err := s.requireReadyForOnGroups(ctx, &domain.DestList{ID: l.ID, Kind: l.Kind, LastFetchedAt: &now}); err != nil {
+			return fail(RefreshFailed, err)
+		}
 	}
 	changed, err := s.lists.UpdateContent(ctx, l.ID, contentOf(p, s.now()))
 	if err != nil {

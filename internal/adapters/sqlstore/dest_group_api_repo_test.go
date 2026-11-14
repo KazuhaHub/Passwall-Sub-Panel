@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -134,5 +135,68 @@ func TestDestHitRepo_TrialDroppedCountsOnlyTrialOverflow(t *testing.T) {
 	}
 	if got, _ := r.TrialDropped(ctx, 0, 0); got != 1057 {
 		t.Fatalf("trial dropped overall = %d", got)
+	}
+}
+
+// The lists an allowlist names are checked inside the locked transaction: they
+// exist, and an allowlist that is on has them all ready. A list deleted (or not
+// yet fetched) between an admin's read and the write must not reach the row.
+func TestGroupAllowlistRepo_SaveChecksItsListsInsideTheTransaction(t *testing.T) {
+	repos, gr, ctx := newGroupAllowlistRepos(t)
+	g := mkGroup(t, gr, "g")
+	ready := testList("ready")
+	if err := repos.Lists.Create(ctx, ready); err != nil {
+		t.Fatal(err)
+	}
+	feed := &domain.DestList{Name: "feed", Kind: domain.DestListRemote, Side: domain.DestSideDest, SourceURL: "https://lists.example.test/feed"}
+	if err := repos.Lists.Create(ctx, feed); err != nil {
+		t.Fatal(err)
+	}
+	owned := func() (*domain.DestList, *domain.DestList) {
+		return ownedList("b", "domain:a.example"), ownedList("e", "domain:b.example")
+	}
+	gen := destGeneration(t, repos, ctx)
+
+	// A list that does not exist.
+	b, e := owned()
+	if err := repos.GroupAllowlists.CreateWithOwnedLists(ctx, g.ID, allowlist(domain.DestStateReport, ready.ID, 4242), b, e); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("an unknown list: %v", err)
+	}
+	// "on" with a list that never arrived: refused, naming it; "report" is fine.
+	b, e = owned()
+	err := repos.GroupAllowlists.CreateWithOwnedLists(ctx, g.ID, allowlist(domain.DestStateOn, ready.ID, feed.ID), b, e)
+	var nr *domain.DestListNotReadyError
+	if !errors.As(err, &nr) || !reflect.DeepEqual(nr.ListIDs, []int64{feed.ID}) || !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("on with a list that is not ready: %v", err)
+	}
+	if lists, _ := repos.Lists.List(ctx, false); len(lists) != 2 || destGeneration(t, repos, ctx) != gen {
+		t.Fatalf("%d lists, generation %d -> %d: a refused write left something behind", len(lists), gen, destGeneration(t, repos, ctx))
+	}
+	b, e = owned()
+	if err := repos.GroupAllowlists.CreateWithOwnedLists(ctx, g.ID, allowlist(domain.DestStateReport, ready.ID, feed.ID), b, e); err != nil {
+		t.Fatalf("report with a list that is not ready: %v", err)
+	}
+	// Switching that group to on is refused the same way, on Save.
+	al, _ := repos.GroupAllowlists.Get(ctx, g.ID)
+	al.State = domain.DestStateOn
+	if err := repos.GroupAllowlists.Save(ctx, g.ID, al, al.UpdatedAt); !errors.As(err, &nr) {
+		t.Fatalf("Save on: %v", err)
+	}
+	// A list the group names is not deleted under it (DeleteUnused), and one deleted
+	// before the write is not named by it.
+	if use, err := repos.Lists.DeleteUnused(ctx, ready.ID); err != nil || !reflect.DeepEqual(use.GroupIDs, []int64{g.ID}) {
+		t.Fatalf("DeleteUnused = %+v, %v", use, err)
+	}
+	gone := testList("gone")
+	if err := repos.Lists.Create(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.Lists.DeleteUnused(ctx, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	al.ListIDs = []int64{ready.ID, gone.ID}
+	al.State = domain.DestStateReport
+	if err := repos.GroupAllowlists.Save(ctx, g.ID, al, al.UpdatedAt); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("Save naming a deleted list: %v", err)
 	}
 }

@@ -246,6 +246,9 @@ func (s *Service) Put(ctx context.Context, gid int64, in PutInput) (*View, error
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return nil, ErrGroupNotFound
+	case errors.Is(err, domain.ErrValidation):
+		// A list the allowlist names was deleted between the checks and the write.
+		return nil, badInput("list_ids", "a list the allowlist names no longer exists")
 	case errors.Is(err, domain.ErrAlreadyExists):
 		// Another admin made the group's first allowlist between the read and the write.
 		return nil, fmt.Errorf("%w: the group's allowlist changed since it was read", domain.ErrConflict)

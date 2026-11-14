@@ -397,7 +397,7 @@ func TestPreview_NodesThatEnforceButDoNotRecord(t *testing.T) {
 	}
 	// A sing-box node enforces but records nothing (D2: still eligible).
 	h.panels[2].AuditCollect = domain.AuditCollectHits
-	h.agents[2].DesiredCoreEngine, h.agents[2].ObservedCoreEngine = domain.NodeCoreSingBox, domain.NodeCoreSingBox
+	h.agents[2].DesiredCoreEngine = domain.NodeCoreSingBox
 	if p, _ = h.svc.Preview(h.ctx, g.ID, PreviewInput{State: domain.DestStateReport}); p.NonRecordingNodes != 1 || p.EligibleNodes != 2 {
 		t.Fatalf("sing-box: eligible %d non-recording %d", p.EligibleNodes, p.NonRecordingNodes)
 	}

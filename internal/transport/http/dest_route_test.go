@@ -652,6 +652,10 @@ func TestDestExceptionsTestStatusAndControl(t *testing.T) {
 		t.Fatalf("report_only_not_deployed = %v (present %v): the field is always there, null when nothing was left out", v, present)
 	}
 
+	if v, ok := native["sniffing_groups_dropped"].([]any); !ok || len(v) != 0 {
+		t.Fatalf("sniffing_groups_dropped = %v: always a list, empty when no group was left out", native["sniffing_groups_dropped"])
+	}
+
 	f.expect("PUT", "/pause", `{}`, 400, "dest_bad_request")
 	if p := f.expect("PUT", "/pause", `{"paused":true}`, 200, ""); p["paused"] != true {
 		t.Fatalf("pause = %v", p)

@@ -285,6 +285,21 @@ type DestTrialSite struct {
 	LastMS int64
 }
 
+// ErrDestListNotReady refuses saving an allowlist that is on with a list that is
+// not ready (HTTP 409 dest_list_not_ready), or changing a list an on allowlist
+// holds into one that is not: an allowlist built on a list that never arrived
+// would deny everything.
+var ErrDestListNotReady = fmt.Errorf("%w: dest list would not be ready", ErrConflict)
+
+// DestListNotReadyError names the lists that are not ready, and the groups that
+// hold them (when the change was to a list).
+type DestListNotReadyError struct{ ListIDs, GroupIDs []int64 }
+
+func (e *DestListNotReadyError) Error() string {
+	return fmt.Sprintf("%v: lists %v, groups %v", ErrDestListNotReady, e.ListIDs, e.GroupIDs)
+}
+func (e *DestListNotReadyError) Unwrap() error { return ErrDestListNotReady }
+
 // DestGroupMode is one group's allowlist as the compiler reads it with the
 // other definitions.
 type DestGroupMode struct {

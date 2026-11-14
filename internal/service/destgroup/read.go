@@ -58,8 +58,9 @@ type panelInfo struct {
 	name string
 	// reason is why the panel cannot enforce an allowlist, "" when it can.
 	reason string
-	// canRecord: the panel is a native one that records hits (Xray, declaring
-	// audit.hits.v1, recording not switched off).
+	// canRecord: the panel is a native one that records hits (Xray, the engine
+	// it is configured to run as eligibility judges it, declaring audit.hits.v1,
+	// recording not switched off).
 	canRecord bool
 	// applied: the node's applied policy carries the group.
 	applied bool
@@ -93,7 +94,7 @@ func (s *Service) panelInfos(ctx context.Context, g *domain.Group) ([]panelInfo,
 			return nil, err
 		default:
 			info.canRecord = domain.NormalizeAuditCollect(panel.AuditCollect) != domain.AuditCollectOff &&
-				domain.NormalizeNodeCoreEngine(agent.ObservedCoreEngine) == domain.NodeCoreXray &&
+				domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine) == domain.NodeCoreXray &&
 				slices.Contains(agent.ObservedCapabilities, protocol.CapabilityAuditHits)
 			meta, err := s.Policies.GetMeta(ctx, agent.AgentID)
 			switch {
@@ -474,6 +475,9 @@ func (s *Service) groupAndAllowlist(ctx context.Context, gid int64) (*domain.Gro
 		return nil, nil, err
 	}
 	a, err := s.Allowlists.Get(ctx, gid)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil, ErrGroupNotFound
+	}
 	if err != nil {
 		return nil, nil, err
 	}
