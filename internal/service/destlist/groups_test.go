@@ -188,3 +188,40 @@ func TestGeositeUpdate_JudgesTheListsAnAllowlistGroupHolds(t *testing.T) {
 		t.Fatal("the update moved a category a group's custom list references and the generation stayed")
 	}
 }
+
+// A custom list an "on" group names is not edited down to nothing, the same end
+// state PUT /dest/groups refuses ("an empty custom list allows nothing"); the
+// group's own extra list may be empty.
+func TestCustomEdits_RefuseEmptyingAListAnOnGroupNames(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	l, _, _ := h.svc.CreateCustom(ctx, "mine", "", []byte("a.example.com\nb.example.com"))
+	g, al := h.group("Guests", domain.DestStateOn, l.ID)
+
+	if _, _, err := h.svc.AddEntries(ctx, l.ID, nil, []string{"a.example.com", "b.example.com"}); !errors.Is(err, ErrListNotReady) {
+		t.Fatalf("emptying by removal: %v", err)
+	}
+	if _, _, err := h.svc.UpdateCustom(ctx, l.ID, "mine", []byte("# nothing\n")); !errors.Is(err, ErrListNotReady) {
+		t.Fatalf("emptying by rewrite: %v", err)
+	}
+	if stored, _ := h.repos.Lists.GetByID(ctx, l.ID); stored.EntryCount != 2 {
+		t.Fatalf("a refused edit changed the list: %d entries", stored.EntryCount)
+	}
+	if _, _, err := h.svc.AddEntries(ctx, l.ID, nil, []string{"a.example.com"}); err != nil {
+		t.Fatalf("an edit that leaves entries was refused: %v", err)
+	}
+	// The group's own extra list may be emptied, and a report group's list too.
+	if _, _, err := h.svc.AddEntries(ctx, al.ExtraListID, []string{"x.example.com"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.svc.AddEntries(ctx, al.ExtraListID, nil, []string{"x.example.com"}); err != nil {
+		t.Fatalf("the group's own list was refused: %v", err)
+	}
+	al.State = domain.DestStateReport
+	if err := h.repos.GroupAllowlists.Save(ctx, g.ID, al, al.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.svc.AddEntries(ctx, l.ID, nil, []string{"b.example.com"}); err != nil {
+		t.Fatalf("a report group's list was refused: %v", err)
+	}
+}

@@ -141,6 +141,9 @@ func (r *DestListRepo) Update(ctx context.Context, l *domain.DestList) error {
 		if res.RowsAffected == 0 {
 			return domain.ErrNotFound
 		}
+		if err := requireHeldListUsableTx(tx, l); err != nil {
+			return err
+		}
 		row := destListToRow(l)
 		if err := tx.Model(&destListRow{}).Where("id = ?", l.ID).
 			Select("Name", "Kind", "Side", "SourceURL", "GeositeCategory", "GeositeAttrs", "Entries", "SourceText",
@@ -153,6 +156,33 @@ func (r *DestListRepo) Update(ctx context.Context, l *domain.DestList) error {
 		}
 		return nil
 	})
+}
+
+// requireHeldListUsableTx refuses, under the state lock, a write that would leave
+// a list an "on" allowlist group holds not ready (or, for a custom list the group
+// names, empty): an allowlist built on it would deny everything the list names.
+// A group's own base and extra lists may be empty.
+func requireHeldListUsableTx(tx *gorm.DB, l *domain.DestList) error {
+	emptied := l.Kind == domain.DestListCustom && l.OwnerGroupID == 0 && l.EntryCount == 0
+	if l.Ready() && !emptied {
+		return nil
+	}
+	var rows []groupRow
+	if err := tx.Select("id", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+		Where("dest_allowlist_state = ?", string(domain.DestStateOn)).Order("id").Find(&rows).Error; err != nil {
+		return err
+	}
+	var holders []int64
+	for _, g := range rows {
+		a := g.destAllowlist()
+		if slices.Contains(a.ListIDs, l.ID) || (!emptied && (a.BaseListID == l.ID || a.ExtraListID == l.ID)) {
+			holders = append(holders, g.ID)
+		}
+	}
+	if len(holders) > 0 {
+		return &domain.DestListNotReadyError{ListIDs: []int64{l.ID}, GroupIDs: holders}
+	}
+	return nil
 }
 
 // UpdateContent stores what a refresh derived. It always records that the
@@ -180,8 +210,18 @@ func (r *DestListRepo) UpdateContent(ctx context.Context, id int64, c domain.Des
 			return domain.ErrNotFound
 		}
 		fetched := c.FetchedAt.UTC()
-		set := map[string]any{"last_fetched_at": fetched, "last_error": ""}
 		changed = cur.ContentSHA256 != c.ContentSHA256
+		if changed && c.EntryCount == 0 {
+			// A feed that went empty must not blank the list an on group is made of.
+			var kind destListRow
+			if err := tx.Select("id", "kind", "owner_group_id").Where("id = ?", id).Take(&kind).Error; err != nil {
+				return err
+			}
+			if err := requireHeldListUsableTx(tx, &domain.DestList{ID: id, Kind: domain.DestListKind(kind.Kind), OwnerGroupID: kind.OwnerGroupID, LastFetchedAt: &fetched}); err != nil {
+				return err
+			}
+		}
+		set := map[string]any{"last_fetched_at": fetched, "last_error": ""}
 		if changed {
 			set["entries"] = c.Entries
 			set["entry_count"] = c.EntryCount

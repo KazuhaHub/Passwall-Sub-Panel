@@ -35,14 +35,17 @@ func source(gid int64) string { return "g" + strconv.FormatInt(gid, 10) }
 // trialDays is the window of the report-only figures: seven days, shortened to
 // the retention of the trial rows (a window longer than the data kept would say
 // "7 days" about 3).
-func (s *Service) trialDays(ctx context.Context) int {
+func (s *Service) trialDays(ctx context.Context) int { return min(7, s.trialRetention(ctx)) }
+
+// trialRetention is how many days of report-only rows are kept.
+func (s *Service) trialRetention(ctx context.Context) int {
 	set := ports.UISettings{}
 	if s.Settings != nil {
 		if loaded, err := s.Settings.Load(ctx, ports.UISettings{}); err == nil {
 			set = loaded
 		}
 	}
-	return min(7, ports.AccessControlEffectiveOf(set).TrialRetentionDays)
+	return ports.AccessControlEffectiveOf(set).TrialRetentionDays
 }
 
 // hourSince is the start of the hour days days ago: the hit rows are by hour.
@@ -435,8 +438,12 @@ func (s *Service) Report(ctx context.Context, gid int64, days int) (*Report, err
 	if err != nil {
 		return nil, err
 	}
-	keep := s.trialDays(ctx)
-	if days <= 0 || days > keep {
+	// What was asked, up to what is kept; a week when nothing was.
+	keep := s.trialRetention(ctx)
+	switch {
+	case days <= 0:
+		days = min(7, keep)
+	case days > keep:
 		days = keep
 	}
 	r := &Report{EffectiveDays: days, State: string(stateOf(a)), SinceAt: ms(a.StateChangedAt), Items: []ReportItem{}}

@@ -1,6 +1,7 @@
 package destgroup
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
@@ -597,4 +599,28 @@ func (h *harness) editLists(v *View, to domain.DestState, lists ...int64) PutInp
 	in := h.edit(v, to)
 	in.ListIDs = lists
 	return in
+}
+
+type fixedSettings struct{ s ports.UISettings }
+
+func (f fixedSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
+	return f.s, nil
+}
+
+// The report's window is what the caller asked for, up to what is kept: with a
+// 20-day retention 20 days is 20 days (the 7-day figure is only the default).
+func TestReport_DaysAreClampedToTheRetentionAndDefaultToAWeek(t *testing.T) {
+	h := newHarness(t)
+	h.svc.Settings = fixedSettings{ports.UISettings{DestTrialRetentionDays: 20, DestHitRetentionDays: 30}}
+	g := h.group("Guests", 1)
+	l := h.list("news", "DOMAIN-SUFFIX,news.example")
+	if _, err := h.put(g.ID, PutInput{State: domain.DestStateReport, ListIDs: []int64{l.ID}, BaseHosts: hosts()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ asked, want int }{{0, 7}, {3, 3}, {20, 20}, {90, 20}} {
+		r, err := h.svc.Report(h.ctx, g.ID, c.asked)
+		if err != nil || r.EffectiveDays != c.want {
+			t.Fatalf("days %d -> %d, %v, want %d", c.asked, r.EffectiveDays, err, c.want)
+		}
+	}
 }

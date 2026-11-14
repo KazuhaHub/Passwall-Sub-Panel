@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,5 +199,31 @@ func TestGroupAllowlistRepo_SaveChecksItsListsInsideTheTransaction(t *testing.T)
 	al.State = domain.DestStateReport
 	if err := repos.GroupAllowlists.Save(ctx, g.ID, al, al.UpdatedAt); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("Save naming a deleted list: %v", err)
+	}
+}
+
+// The write of a list checks, under the state lock, that it does not leave a list
+// an on group holds not ready: the service's check can race with a PUT to on.
+func TestDestListRepo_UpdateRefusesToLeaveAListAnOnGroupHoldsNotReady(t *testing.T) {
+	repos, gr, ctx := newGroupAllowlistRepos(t)
+	g := mkGroup(t, gr, "g")
+	feed := &domain.DestList{Name: "feed", Kind: domain.DestListRemote, Side: domain.DestSideDest, SourceURL: "https://lists.example.test/feed",
+		Entries: []byte("domain:a.example"), EntryCount: 1, ContentSHA256: strings.Repeat("a", 64)}
+	now := time.Now().UTC()
+	feed.LastFetchedAt = &now
+	if err := repos.Lists.Create(ctx, feed); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.GroupAllowlists.CreateWithOwnedLists(ctx, g.ID, allowlist(domain.DestStateOn, feed.ID), ownedList("b", "domain:a.example"), ownedList("e", "domain:b.example")); err != nil {
+		t.Fatal(err)
+	}
+	emptied := *feed
+	emptied.Entries, emptied.EntryCount, emptied.ContentSHA256 = nil, 0, strings.Repeat("b", 64)
+	var nr *domain.DestListNotReadyError
+	if err := repos.Lists.Update(ctx, &emptied); !errors.As(err, &nr) || !reflect.DeepEqual(nr.GroupIDs, []int64{g.ID}) {
+		t.Fatalf("Update to an empty list under an on group: %v", err)
+	}
+	if got, _ := repos.Lists.GetByID(ctx, feed.ID); got.EntryCount != 1 {
+		t.Fatal("the refused write changed the list")
 	}
 }
