@@ -965,7 +965,7 @@
       "directives_ahead_of_roster": "The policy depends on a client list not yet received.",
       "directive_unknown_client": "The policy references a client missing from the client list.",
       "report_missing_object": "A required object was absent from a full node report.",
-      "destination_policy_report_only_not_deployed": "This node received only the blocking rules, not the report-only ones (inbound sniffing cannot support them, or the rule budget is exceeded); blocking is unaffected.",
+      "destination_policy_report_only_not_deployed": "This node did not receive all the report-only rules (the rule budget is exceeded, or they were restricted away from inbounds whose sniffing cannot support them); blocking is unaffected.",
       "task_identity_conflict": "One task ID was used with different operation inputs.",
       "task_replay_fenced": "The node could not prove a safe fresh task start.",
       "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity."
@@ -4006,7 +4006,7 @@
       },
       "psp_dest_policy_compile_total": {
         "label": "Access-control policy compiles",
-        "desc": "Results of compiling the access-control policy for a node sync. \"Reused\" is the normal case; \"Fallback\" means the node runs the last policy that applied (it refused the new one, an inbound's sniffing cannot supply what the policy needs, or the policy is over the node's limit); \"Nothing to fall back to\" means no earlier policy exists and the node got none; \"Invalid\" is a bug in the panel."
+        "desc": "Results of compiling the access-control policy for a node sync. \"Reused\" is the normal case; \"Fallback\" means the node runs the last policy that applied (it refused the new one, or the policy is over the node's limit); \"Nothing to fall back to\" means no earlier policy exists and the node got none; \"Invalid\" is a bug in the panel."
       },
       "psp_dest_policy_compile_ms": {
         "label": "Access-control policy compile time",
@@ -4150,7 +4150,6 @@
         "cache_hit": "Reused",
         "compiled": "Recompiled",
         "fallback_rejected": "Fallback (refused by node)",
-        "fallback_sniffing": "Fallback (sniffing insufficient)",
         "fallback_over_limit": "Fallback (over the limit)",
         "fallback_nil": "Nothing to fall back to",
         "invalid": "Invalid"
@@ -4466,6 +4465,8 @@
         "upgrade_other": "{{count}} native nodes need an upgrade to enforce policies",
         "offline_one": "{{count}} native node is offline and will enforce the latest version once it reports again",
         "offline_other": "{{count}} native nodes are offline and will enforce the latest version once they report again",
+        "sniffing_partial_one": "{{count}} node is in effect, but sniffing is insufficient on some inbounds: domain rules (and, with metadataOnly, protocol rules) do not apply there",
+        "sniffing_partial_other": "{{count}} nodes are in effect, but sniffing is insufficient on some inbounds: domain rules (and, with metadataOnly, protocol rules) do not apply there",
         "list_failed": "List \"{{name}}\" failed to refresh; still using the content from {{ago}}",
         "list_pending": "List \"{{name}}\" has not downloaded yet; the parts that use it are not enforced",
         "waiting_one": "Change saved; goes out to {{count}} node within about {{minutes}} min",
@@ -4496,6 +4497,7 @@
         "countdown_other": "Goes out in {{count}} seconds",
         "restart": "Each node restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
         "sniffing": "Inbound \"{{inbounds}}\" does not detect domains, so domain rules do not apply on it. Still running the previous version.",
+        "sniffing_partial": "Sniffing is insufficient on {{n}} inbound(s): domain rules (and, with metadataOnly, protocol rules such as BitTorrent) do not apply on them",
         "over_limit": "{{what}} {{used}} / {{limit}}. Still running the previous version.",
         "rejected": "The node refused the new policy. Still running the previous version.",
         "publish_refused": "Saving again tries to apply it once more.",
@@ -4611,6 +4613,7 @@
     "node_state": {
       "applied": "In effect",
       "applied_exec_only": "In effect · enforce only",
+      "applied_sniffing": "In effect · some inbounds cannot sniff",
       "pending": "Applying",
       "pending_long": "Applying · {{minutes}} min",
       "rejected": "Node refused the new policy",
@@ -4627,6 +4630,8 @@
       "applied": "Enforcing {{rules}} rules · in effect {{ago}}",
       "applied_no_time": "Enforcing {{rules}} rules",
       "applied_exec_only": "sing-box nodes only enforce, they do not record",
+      "sniffing_allow_lost": "Allow rules by domain do not apply on these inbounds, so blocks by port, IP range and the like may catch connections they would have exempted",
+      "applied_sniffing": "Sniffing is insufficient on {{n}} inbound(s): domain rules (and, with metadataOnly, protocol rules such as BitTorrent) do not apply on them",
       "pending": "The node restarts its proxy at its next sync",
       "pending_long": "The node may be offline, or its proxy failed to restart",
       "rejected": "Still running the previous version. While it falls back, members newly added to a group a policy is scoped to are not covered by that group's block policies on this node.",
@@ -4636,7 +4641,7 @@
       "unsupported_kind": "Routing on 3X-UI / S-UI is managed by its operator; they do not enforce access policies.",
       "offline": "Applied automatically once it reports again",
       "none": "This node has no policy to enforce",
-      "report_not_deployed_sniffing": "This node's inbound sniffing cannot support report-only rules, so only the blocking rules were sent",
+      "report_not_deployed_sniffing": "Some inbounds' sniffing cannot support report-only rules, so they are not run on those inbounds",
       "report_not_deployed_limit": "Over the rule budget: the report-only rules were not sent",
       "paused": "Access control is paused; it resumes as it was.",
       "not_enrolled": "This native node has not enrolled: no agent has reported."
@@ -4652,6 +4657,8 @@
     "node_problem": {
       "sniffing_title": "Inbound \"{{inbounds}}\" does not detect domains",
       "sniffing_impact": "Impact: connections arriving on this inbound are not held to domain policies",
+      "sniffing_partial_title": "Sniffing is insufficient on inbound \"{{inbounds}}\"",
+      "sniffing_partial_impact": "Impact: domain rules (and, with metadataOnly, protocol rules such as BitTorrent) do not apply on these inbounds; rules that need no sniffing are still enforced",
       "rejected_title": "The node refused the new policy",
       "rejected_impact": "Impact: still running the previous version",
       "over_limit_title": "{{what}} {{used}} / {{limit}}, over the quota",

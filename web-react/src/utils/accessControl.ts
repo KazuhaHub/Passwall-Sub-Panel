@@ -73,7 +73,7 @@ export type ToneIcon = ComponentType<SvgIconProps>
 export const PENDING_STUCK_MS = 10 * 60 * 1000
 
 export type NodeStateKey =
-  | 'applied' | 'applied_exec_only' | 'pending' | 'pending_long' | 'rejected' | 'sniffing' | 'over_limit'
+  | 'applied' | 'applied_exec_only' | 'applied_sniffing' | 'pending' | 'pending_long' | 'rejected' | 'sniffing' | 'over_limit'
   | 'unsupported_version' | 'not_enrolled' | 'unsupported_kind' | 'offline' | 'none' | 'paused'
 
 /** Filter chips of the coverage sheet (`node_state`). */
@@ -87,6 +87,8 @@ export function parseNodeFilter(raw: string | null): NodeFilter | null {
 export const NODE_STATE_TONE: Record<NodeStateKey, AccessToneKind> = {
   applied: 'ok',
   applied_exec_only: 'ok',
+  // In effect, but some inbounds cannot sniff: domain and protocol rules do not run on them.
+  applied_sniffing: 'attention',
   pending: 'measuring',
   pending_long: 'attention',
   rejected: 'failing',
@@ -104,6 +106,7 @@ export const NODE_STATE_TONE: Record<NodeStateKey, AccessToneKind> = {
 export const NODE_STATE_FILTER: Record<NodeStateKey, NodeFilter> = {
   applied: 'applied',
   applied_exec_only: 'applied',
+  applied_sniffing: 'problem',
   pending: 'pending',
   pending_long: 'problem',
   rejected: 'problem',
@@ -117,9 +120,12 @@ export const NODE_STATE_FILTER: Record<NodeStateKey, NodeFilter> = {
   paused: 'inactive',
 }
 
-export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pending_since'> & Partial<Pick<DestNodeStatus, 'kind' | 'agent_id'>>, now: number): NodeStateKey {
+export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pending_since'> & Partial<Pick<DestNodeStatus, 'kind' | 'agent_id' | 'sniffing_insufficient'>>, now: number): NodeStateKey {
   switch (node.state as DestNodeState) {
-    case 'applied': return node.engine === 'sing-box' ? 'applied_exec_only' : 'applied'
+    // The node runs what it can; inbounds whose sniffing cannot supply domain and protocol rules are still listed.
+    case 'applied':
+      if ((node.sniffing_insufficient?.length ?? 0) > 0) return 'applied_sniffing'
+      return node.engine === 'sing-box' ? 'applied_exec_only' : 'applied'
     case 'pending':
       return node.pending_since && now - node.pending_since > PENDING_STUCK_MS ? 'pending_long' : 'pending'
     case 'rejected': return 'rejected'
@@ -132,6 +138,8 @@ export function nodeStateKey(node: Pick<DestNodeStatus, 'state' | 'engine' | 'pe
     case 'unsupported_kind': return 'unsupported_kind'
     case 'offline': return 'offline'
     case 'paused': return 'paused'
+    // Every rule was dropped for sniffing: nothing is sent, but the inbounds still need the operator.
+    case 'none': return (node.sniffing_insufficient?.length ?? 0) > 0 ? 'applied_sniffing' : 'none'
     default: return 'none'
   }
 }
@@ -158,7 +166,7 @@ export function limitKindKey(kind: string | undefined): 'rules' | 'domains' | 'r
 // ---------------------------------------------------------------------------
 
 export type VerdictKind =
-  | 'paused' | 'publish_refused' | 'rejected' | 'sniffing' | 'over_limit' | 'no_coverage'
+  | 'paused' | 'publish_refused' | 'rejected' | 'sniffing' | 'over_limit' | 'no_coverage' | 'sniffing_partial'
   | 'upgrade' | 'offline' | 'list_failed' | 'list_pending'
   | 'waiting' | 'rolling' | 'rolling_slow' | 'applied' | 'idle'
 
@@ -234,7 +242,8 @@ export function accessVerdict(
     notEnrolled: count(k => k === 'not_enrolled'),
     offline: states.filter(s => s.key === 'offline' && isNativeKind(s.n.kind)).length,
   }
-  const done = count(k => k === 'applied' || k === 'applied_exec_only')
+  // A node whose every rule was dropped for sniffing (state none) is flagged, but enforces nothing: not done.
+  const done = states.filter(s => s.key === 'applied' || s.key === 'applied_exec_only' || (s.key === 'applied_sniffing' && s.n.state !== 'none')).length
   const base: AccessVerdict = {
     tone: 'ok', kind: 'applied', n: done, done, total: executors.length, action: 'nodes', skipped,
     nextPublishAt: status.next_publish_at, executors: executors.length,
@@ -263,6 +272,14 @@ export function accessVerdict(
     return { ...base, tone: 'failing', kind: 'no_coverage', n: enabled }
   }
 
+  // Applied, but some inbounds cannot run domain and protocol rules: attention, not failure.
+  const partial = first('applied_sniffing')
+  if (partial) {
+    return {
+      ...base, tone: 'attention', kind: 'sniffing_partial', n: count(k => k === 'applied_sniffing'), node: partial.n.panel_name,
+      inbounds: partial.n.sniffing_insufficient.map(s => s.label), action: 'nodes',
+    }
+  }
   if (skipped.upgrade > 0) return { ...base, tone: 'attention', kind: 'upgrade', n: skipped.upgrade }
   if (skipped.offline > 0) return { ...base, tone: 'attention', kind: 'offline', n: skipped.offline }
   const listProblem = (opts.lists?.items ?? []).find(l =>

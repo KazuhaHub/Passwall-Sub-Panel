@@ -963,7 +963,7 @@
       "directives_ahead_of_roster": "策略依赖的客户端列表尚未收到。",
       "directive_unknown_client": "策略引用的客户端不在列表中。",
       "report_missing_object": "完整节点报告缺少应有的对象。",
-      "destination_policy_report_only_not_deployed": "这台节点只收到了拦截规则，没有收到仅报告规则（入站嗅探不支持，或超出规则预算）；拦截规则不受影响。",
+      "destination_policy_report_only_not_deployed": "这台节点没有收到全部仅报告规则（超出规则预算；或在嗅探不足的入站上被限定/去掉）；拦截规则不受影响。",
       "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
       "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
       "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。"
@@ -4003,7 +4003,7 @@
       },
       "psp_dest_policy_compile_total": {
         "label": "访问控制策略编译",
-        "desc": "为节点同步编译访问控制策略的结果。「沿用缓存」是常态；「回退」表示该节点正在运行上一份已生效的策略（被节点拒绝、入站嗅探不满足、或超出该节点的上限）；「无可回退」表示没有上一份可用，节点没有拿到策略；「无效」是面板自身的缺陷。"
+        "desc": "为节点同步编译访问控制策略的结果。「沿用缓存」是常态；「回退」表示该节点正在运行上一份已生效的策略（被节点拒绝、或超出该节点的上限）；「无可回退」表示没有上一份可用，节点没有拿到策略；「无效」是面板自身的缺陷。"
       },
       "psp_dest_policy_compile_ms": {
         "label": "访问控制策略编译耗时",
@@ -4147,7 +4147,6 @@
         "cache_hit": "沿用缓存",
         "compiled": "重新编译",
         "fallback_rejected": "回退（节点拒绝）",
-        "fallback_sniffing": "回退（嗅探不满足）",
         "fallback_over_limit": "回退（超出上限）",
         "fallback_nil": "无可回退",
         "invalid": "无效"
@@ -4459,6 +4458,7 @@
         "no_coverage_other": "有 {{count}} 条启用的策略，但没有任何节点会执行它们",
         "upgrade_other": "{{count}} 台原生节点需升级才能执行策略",
         "offline_other": "{{count}} 台原生节点离线，恢复上报后才会执行最新版本",
+        "sniffing_partial_other": "{{count}} 台节点已生效，但部分入站的嗅探不足，域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效",
         "list_failed": "列表「{{name}}」刷新失败，仍在使用 {{ago}}的内容",
         "list_pending": "列表「{{name}}」还没有下载成功，引用它的部分暂不生效",
         "waiting_other": "改动已保存，约 {{minutes}} 分钟内下发到 {{count}} 台节点",
@@ -4480,6 +4480,7 @@
         "countdown_other": "{{count}} 秒后下发",
         "restart": "每台节点会重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
         "sniffing": "入站「{{inbounds}}」没有识别域名，域名规则在它上面不生效。仍在执行上一版。",
+        "sniffing_partial": "{{n}} 个入站的嗅探不足：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效",
         "over_limit": "{{what}} {{used}} / {{limit}}。仍在执行上一版。",
         "rejected": "节点拒绝了新策略。仍在执行上一版。",
         "publish_refused": "再次保存会重新尝试下发。",
@@ -4593,6 +4594,7 @@
     "node_state": {
       "applied": "已生效",
       "applied_exec_only": "已生效 · 只执行",
+      "applied_sniffing": "已生效 · 部分入站嗅探不足",
       "pending": "下发中",
       "pending_long": "下发中 · {{minutes}} 分钟",
       "rejected": "节点拒绝了新策略",
@@ -4609,6 +4611,8 @@
       "applied": "执行 {{rules}} 条规则 · {{ago}}生效",
       "applied_no_time": "执行 {{rules}} 条规则",
       "applied_exec_only": "sing-box 节点只执行，不记录",
+      "sniffing_allow_lost": "此入站上按域名的放行规则不生效，端口、IP 段等拦截规则可能拦下本应被放行的连接",
+      "applied_sniffing": "{{n}} 个入站的嗅探不足：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效",
       "pending": "节点会在下次同步时重启代理程序",
       "pending_long": "节点可能离线，或代理程序重启失败",
       "rejected": "仍在执行上一版。回退期间新加入作用分组的成员，在这台节点上不受该分组的拦截策略约束。",
@@ -4618,7 +4622,7 @@
       "unsupported_kind": "3X-UI / S-UI 的路由由运营者自己管理，不执行访问策略。",
       "offline": "恢复上报后自动下发",
       "none": "这台节点没有要执行的策略",
-      "report_not_deployed_sniffing": "该节点入站的嗅探无法支持仅报告规则，已只下发拦截规则",
+      "report_not_deployed_sniffing": "部分入站的嗅探无法支持仅报告规则，这些入站上未执行仅报告规则",
       "report_not_deployed_limit": "超出规则预算，仅报告规则未下发",
       "paused": "访问控制已暂停，恢复后照原样执行。",
       "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。"
@@ -4634,6 +4638,8 @@
     "node_problem": {
       "sniffing_title": "入站「{{inbounds}}」没有识别域名",
       "sniffing_impact": "影响：从这个入站进来的连接不受域名策略约束",
+      "sniffing_partial_title": "入站「{{inbounds}}」的嗅探不足",
+      "sniffing_partial_impact": "影响：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效，不需要嗅探的规则仍然执行",
       "rejected_title": "节点拒绝了新策略",
       "rejected_impact": "影响：仍在执行上一版",
       "over_limit_title": "{{what}} {{used}} / {{limit}}，超出额度",

@@ -319,8 +319,11 @@ type DestPolicySnapshot struct {
 type DestFallbackReason string
 
 const (
-	DestFallbackNone      DestFallbackReason = ""
-	DestFallbackRejected  DestFallbackReason = "rejected"
+	DestFallbackNone     DestFallbackReason = ""
+	DestFallbackRejected DestFallbackReason = "rejected"
+	// DestFallbackSniffing is no longer set: inbounds that cannot sniff restrict
+	// the rules that need it instead of holding the node back. The value stays so
+	// a row written by an earlier version still reads.
 	DestFallbackSniffing  DestFallbackReason = "sniffing"
 	DestFallbackOverLimit DestFallbackReason = "over_limit"
 )

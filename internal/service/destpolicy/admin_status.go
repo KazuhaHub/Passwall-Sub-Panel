@@ -65,16 +65,24 @@ type NodeState struct {
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
 	// State is none, paused, unsupported_kind, not_enrolled, unsupported_version, pending,
-	// applied, rejected, over_limit, sniffing or offline.
+	// applied, rejected, over_limit, sniffing or offline. "sniffing" is only the
+	// node refusing the policy for its sniffing; inbounds the PANEL found unable
+	// to sniff leave the state as it is and fill sniffing_insufficient, because
+	// the node runs everything else.
 	State          string                   `json:"state"`
 	FallbackReason string                   `json:"fallback_reason"`
 	OverLimit      *domain.DestPublishError `json:"over_limit"`
 	Sniffing       []SniffView              `json:"sniffing_insufficient"`
-	MintedAt       *int64                   `json:"minted_at"`
-	PendingSince   *int64                   `json:"pending_since"`
-	AppliedAt      *int64                   `json:"applied_at"`
-	AppliedRules   int                      `json:"applied_rules"`
-	LastReportAt   *int64                   `json:"last_report_at"`
+	// SniffingAllowExemptLost: with inbounds listed in sniffing_insufficient AND
+	// an enforced domain allow rule in force here, that allow does not apply on
+	// those inbounds, so blocks that need no sniffing (ports, IP ranges, source)
+	// can catch what it would have exempted.
+	SniffingAllowExemptLost bool   `json:"sniffing_allow_exempt_lost"`
+	MintedAt                *int64 `json:"minted_at"`
+	PendingSince            *int64 `json:"pending_since"`
+	AppliedAt               *int64 `json:"applied_at"`
+	AppliedRules            int    `json:"applied_rules"`
+	LastReportAt            *int64 `json:"last_report_at"`
 	// RulesDataVersion is the geosite release behind the policy the node
 	// reports it runs (null when unknown: a policy minted before this process
 	// started, or none).
@@ -309,6 +317,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 				}
 			}
 		}
+		ns.SniffingAllowExemptLost = len(ns.Sniffing) > 0 && (info.domainAllowAll || info.domainAllowPanels[panel.ID])
 		if row.ReportedState == protocol.PolicyStateApplied && row.ReportedSHA256 != "" {
 			a.Service.mu.Lock()
 			if info, ok := a.Service.digests[row.ReportedSHA256]; ok {
@@ -334,8 +343,11 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 			ns.State = "offline"
 		case row.FallbackReason == domain.DestFallbackOverLimit:
 			ns.State = "over_limit"
-		case row.FallbackReason == domain.DestFallbackSniffing ||
-			(row.FallbackReason == domain.DestFallbackRejected && row.ReportedIssue == IssueSniffInsufficient):
+		case row.FallbackReason == domain.DestFallbackRejected && row.ReportedIssue == IssueSniffInsufficient:
+			// The NODE refused the policy for sniffing the panel's own check let
+			// through; PSP itself sends a policy restricted to the inbounds that
+			// can sniff and leaves the state at applied (sniffing_insufficient
+			// then lists the inbounds).
 			ns.State = "sniffing"
 		case row.FallbackReason == domain.DestFallbackRejected:
 			ns.State = "rejected"

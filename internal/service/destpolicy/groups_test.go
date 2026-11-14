@@ -261,7 +261,7 @@ func TestShed_NeverLeavesGroupMembersWithoutCatchAll(t *testing.T) {
 			t.Fatalf("issues = %+v", res.Issues)
 		}
 	})
-	t.Run("a report group that needs the sniffing the inbound cannot give is not deployed at all", func(t *testing.T) {
+	t.Run("a report group that needs the sniffing the inbound cannot give is dropped whole, not held back as a fallback", func(t *testing.T) {
 		h := newHarness(t)
 		h.setGroups(map[int64]int64{10: 5})
 		a := h.list("a", "DOMAIN-SUFFIX,a.example.com")
@@ -273,9 +273,9 @@ func TestShed_NeverLeavesGroupMembersWithoutCatchAll(t *testing.T) {
 			t.Fatalf("a policy was sent: %v", ruleIDs(res.Policy))
 		}
 		if !slices.ContainsFunc(res.Issues, func(i domain.NodeAgentIssue) bool { return i.Code == IssueSniffInsufficient }) {
-			t.Fatalf("issues = %+v, want the sniffing fallback (the node is not eligible for the group)", res.Issues)
+			t.Fatalf("issues = %+v, want the inbound named (the group cannot run on it)", res.Issues)
 		}
-		if m := h.meta(); m.FallbackReason != domain.DestFallbackSniffing {
+		if m := h.meta(); m.FallbackReason != domain.DestFallbackNone {
 			t.Fatalf("fallback = %q", m.FallbackReason)
 		}
 	})

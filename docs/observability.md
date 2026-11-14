@@ -170,7 +170,7 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 | 指标 | 含义 |
 |---|---|
-| `psp_dest_policy_compile_total{result=…}` | 为节点同步编译策略的结果：`cache_hit`（常态，从内存回答）、`compiled`（新编译并下发）、`fallback_rejected` / `fallback_sniffing` / `fallback_over_limit`（节点正在运行上一份已生效的策略，因为它拒绝了新版、入站嗅探不满足、或该节点超出上限）、`fallback_nil`（同样回退，但没有上一份可用，节点没拿到策略）、`invalid`（为节点编出的策略没通过校验：面板自身的缺陷，不是管理员的错） |
+| `psp_dest_policy_compile_total{result=…}` | 为节点同步编译策略的结果：`cache_hit`（常态，从内存回答）、`compiled`（新编译并下发）、`fallback_rejected` / `fallback_over_limit`（节点正在运行上一份已生效的策略，因为它拒绝了新版、或该节点超出上限；入站嗅探不足不再回退，而是把需要嗅探的规则限定到够用的入站，结果仍计 `compiled`）、`fallback_nil`（同样回退，但没有上一份可用，节点没拿到策略）、`invalid`（为节点编出的策略没通过校验：面板自身的缺陷，不是管理员的错） |
 | `psp_dest_policy_compile_ms` | 缓存未命中的编译耗时分布。命中缓存只是一次查找，混进来会盖住「几 MiB 的策略正在被编译」这个真正要看的分布 |
 | `psp_dest_policy_publish_total{trigger=…}` | 已发布的快照，按触发原因：`debounced`（修改停顿）、`max_wait`（连续修改，到了 5 倍窗口）、`manual`（管理员立即下发）、`pause`（紧急开关变化） |
 | `psp_dest_policy_publish_rejected_total` | 发布前校验拒绝的次数（超出上限或策略无效）；上一份快照继续生效，原因在访问控制页的结论条里 |

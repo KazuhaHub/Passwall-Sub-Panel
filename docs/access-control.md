@@ -52,7 +52,7 @@ config ETag 不变，core 不会因为升级面板而重启。
   如果放在拦截段，命中它的连接会就此终止匹配，排在后面的开启拦截就不再生效，等于悄悄放宽了限制；放在阶段 5，加上或去掉一条仅报告的策略，**任何连接的判定都不变**（`TestReport_NeverChangesAVerdict` 用 `MatchDestination` 逐条验证）。
 - 代价：已经被前面「开启」的规则拦掉、或被「放行」放过的连接，不会出现在仅报告的统计里。这是对的：它们的结果与这条策略无关。
 - `observe` 行在记录里表示「**本应拦截**」：连接被放行了。它不计入风险信号 `dest_block`（只数真正的 `block`）。
-- 仅报告的策略与开启的策略一样，带域名或协议时需要入站嗅探，预检同样适用；回退到 LKG 时，状态改变了的规则（开启 ↔ 仅报告）视为不同的规则，被修剪掉（只放宽、不收紧）。
+- 仅报告的策略与开启的策略一样，带域名或协议时需要入站嗅探，在嗅探不足的入站上同样按第 4.2 节第 7 条限定入站；回退到 LKG 时，状态改变了的规则（开启 ↔ 仅报告）视为不同的规则，被修剪掉（只放宽、不收紧）。
 
 ### 3.2 白名单分组（编译，数据模型与编译已就绪，接口与界面在后续批次）
 
@@ -62,7 +62,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 - `report` 永不改变判定：x1、x2 只放行本来就放行的连接，catch-all 只记录（`TestReport_GroupReportNeverChangesAVerdict`）。代价（A10）：组员的流量命中分组规则后终止，不会再落到阶段 5 的仅报告策略上，那部分的记录会偏少。
 - 一个组员在三条规则里各占一个 subject，所以每台节点每个分组约 3×成员数；`MaxPolicySubjects = 50 000`，单面板白名单组员上限约 16 000，超出走 `over_limit`。每节点超额按「该面板 tags 选中的组员数 × 该组规则条数」计，不按 roster 计，否则组员因不合格被移出 roster 后会在额度内外振荡。
 - 上界（发布前校验）用每组一个合成 subject 把所有分组的规则与列表算进去；超额则发布被拒（`publish_error`）。
-- 仅报告的剪枝（`shedObserve` / `enforcedOnly`）把分组的规则当执行类，**永不剪掉**：只剪掉 catch-all 会留下没有 catch-all 的 member 规则，整份无效。试运行组需要的嗅探不足时，整份走嗅探回退。
+- 仅报告的剪枝（`shedObserve` / `enforcedOnly`）把分组的规则当执行类，**永不剪掉**：只剪掉 catch-all 会留下没有 catch-all 的 member 规则，整份无效。试运行组需要的嗅探某入站不足时，该组在本节点按组整体去掉（见 §4.2 第 7 条），不再走回退。
 - 记录 LKG 时 `applied_groups` 写入 body 里出现 catch-all 的分组号；状态页 `allowlist_groups` 是 `[{id,name}]`。
 
 ## 4. 发布、编译与回退
@@ -105,28 +105,39 @@ config ETag 不变，core 不会因为升级面板而重启。
 5. **未就绪的列表或国家，跳过规则中对应的那部分匹配；匹配全空的规则整条跳过。** 一个例外：如果规则本来依赖列表而列表都不可用，
    端口、网络这些「收窄条件」**不会**单独顶上去（否则「某列表 + 端口 25」会变成「所有人的 25 端口」）。没有地址侧的策略（如发信端口）不受影响。
 6. 所有切片排序去重，`Rules` 规范成非 nil，`ValidateDestinationPolicy` 通过后才下发。
-7. **嗅探预检**（仅 Xray，且策略里有域名或协议规则）：用 `protocol.CheckXraySniffing` 检查每个启用的入站。嗅探关闭可以（节点会注入
-   `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false}`）；开着但配置得无法提供所需信息（`metadataOnly`、`routeOnly`、
-   缺 `destOverride`、有排除项、JSON 损坏）则这台节点**回退**，并记 PSP 侧 issue `destination_policy_sniffing_insufficient`。sing-box 不预检。
+7. **按入站限定需要嗅探的规则**（仅 Xray；`sniffrestrict.go`）：「给每台节点它能执行的部分」。用 `protocol.CheckXraySniffing` 逐个检查启用的入站，
+   **按规则自己的需要**（域名规则要 `destOverride` 含 http/tls/quic、无排除项、`routeOnly` 关；BT 协议规则只要不是 `metadataOnly`）。嗅探关闭可以
+   （节点会注入 `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false}`）；开着但配置得无法提供所需信息（`metadataOnly`、`routeOnly`、
+   缺 `destOverride`、有排除项、JSON 损坏）的入站是「嗅探不足」。对这台节点：
+   - 带域名或协议（含 BT）的规则，`Inbounds` 限定为（规则原有的入站，或本节点全部启用入站）∩ 能提供所需嗅探的入站；交集为空则这条规则不下发。
+     仅报告规则同样处理。端口、IP 段、来源国家/网段、网络、私网等**不需要嗅探的规则不变，仍在所有入站生效**。
+   - 一条规则同时含域名和地址（列表里既有域名又有 IP 段）时拆成两条：地址那一半不变，域名那一半（取同一策略下一个空闲的 `x<k>` 后缀）限定入站。
+   - 组规则（`g*`）不能带 `Inbounds`：某个分组（按组 id）里只要有规则需要嗅探而某入站提供不了，就把本节点上**该分组**的全部规则去掉（该白名单不在这台节点执行，只放宽）；其他分组不动。
+   - 结果会再按节点自己的逐入站检查复核一遍（断言，不过则视为面板缺陷，走「回退」）。引擎按 agent 的**期望内核**（与 Compile 用的 config 一致）判定，sing-box 不限定（它自己嗅探）。
+   - **不是只放宽，有两处收紧（已知、接受）。** ① 开启的**放行**规则（阶段 1）如果带域名，也按上面限定：在嗅探不足的入站上它不生效，排在后面、不需要嗅探的拦截（端口、IP 段、私网、来源）就会拦下本来被它放行的连接（例如放行 `smtp.corp` + 拦 25 端口：嗅探够用的入站放行，嗅探不足的入站拦截）。状态里在有这样的放行规则时，对被标注的入站多显示一行说明（`sniffing_allow_exempt_lost`）。② Node 的「尾点」保护（拦截所有以 `.` 结尾的主机名，只要策略里还有带域名的拦截规则就生成）对所有入站生效，包括嗅探不足的入站。
+   - **丢哪类规则取决于原因：** 只有 `metadata_only`（或嗅探 JSON 损坏）会让协议规则（BT）也不生效；`route_only`、`dest_override_missing:*`、`domains_excluded`、`ips_excluded` 只让域名规则不生效，BT 照常。状态按入站列出原因。
+   - 限定会给规则加上显式 `Inbounds`，占用入站额度；若原本在额度内、限定后超出，回退并记 `destination_policy_over_limit`，detail 注明是限定所致（`… after restricting rules to the inbounds that can sniff`）。回退用的 LKG 限定后同样复核校验与额度，任一不过则发 nil。
+   这**不是回退**：不查 LKG，铸出的就是限定后的期望策略，节点报告 `applied` 后照常记为 LKG。状态里仍列出嗅探不足的入站（`sniffing_insufficient`，按每个入站上适用规则的需要判定，逐入站给原因），
+   并记 PSP 侧 issue `destination_policy_sniffing_insufficient`（每个入站一条），页面据此标注意；节点状态仍是 `applied`。所有入站都不足时，域名与协议规则整条去掉，其余照常下发（不再是 nil）。
 8. **每节点超额**：该节点的 Subjects + Exempt 与序列化大小超限 → 回退，issue `destination_policy_over_limit`。**绝不截断**：截断一份拦截名单等于悄悄放行。
-9. **仅报告不干扰执行**：仅报告（`observe`）规则不改变判定，所以也不能间接改变判定。若只有 `observe` 规则让预检（嗅探不足）或额度（超额）过不了，就把这些 `observe` 规则从铸出的策略里去掉，保留开启的规则，节点照常执行；状态里记 issue `destination_policy_report_only_not_deployed`（`report-only rules not deployed on this node: sniffing` 或 `… : limit`）。只剩 `observe` 规则时本节点没有策略。开启的规则自己过不了预检或额度，仍然是回退（第 7、8 条）。回退用的 LKG 同理：只有其中的 `observe` 规则嗅探不足时，去掉它们，不再整份发 nil。
+9. **仅报告不干扰执行**：仅报告（`observe`）规则不改变判定，所以也不能间接改变判定。嗅探不足的入站上，它们按第 7 条限定入站（或在没有可用入站时去掉）；若只有 `observe` 规则让额度（超额）过不了，就把这些 `observe` 规则从铸出的策略里去掉，保留开启的规则，节点照常执行。任一情形都在状态里记 issue `destination_policy_report_only_not_deployed`（`report-only rules not deployed on this node: sniffing` 或 `… : limit`），`report_only_not_deployed` 为 `"sniffing"` 或 `"limit"`。只剩 `observe` 规则且都去掉时本节点没有策略。开启的规则自己过不了额度，仍然是回退（第 8 条）。回退用的 LKG 按第 7 条同样限定，所以回退也不会因为嗅探不足而整份发 nil。
 
 ### 4.3 回退到最近已知良好策略（LKG）
 
 - **记录**：节点上报 `PolicyStatus{state:applied}` 且 `digest == PSP 铸出的摘要` 时，把这一版写入 `dest_agent_policy.applied_*`。
   `paused` 期间不记录。
 - **被拒**：节点上报 `rejected` 且摘要等于铸出的摘要时，置 `fallback_reason=rejected`、记下当时的 `published_generation` 与三个投递能力，
-  并产生 issue `destination_policy_rejected`。节点报的是「嗅探不足」时，状态页显示 `sniffing` 并列出入站。
+  并产生 issue `destination_policy_rejected`。节点自己报「嗅探不足」而拒绝时（面板的预检与节点的检查不一致），状态页显示 `sniffing` 并列出入站；面板自己判定的嗅探不足不是拒绝，见第 4.2 节第 7 条。
 - **回退内容** 是修剪过的 LKG，修剪**只放宽、不收紧**：已删除、已停用、范围已不含本面板的策略的规则去掉；来源规则只保留仍有来源规则的入站；
   动作已改变的策略的规则去掉；Subjects 只保留当前 roster 里的账号，对分组范围的策略再限于该分组的**当前**成员（原来对所有人的规则收窄到成员），空了的规则去掉；Exempt 取 LKG 与当前豁免的并集（都限于 roster）；分组规则只保留「节点声明了分组能力、该分组仍在生效且状态与 LKG 相同（catch-all 的线上动作相同：开启 ↔ 仅报告视为不同规则）」的，Subjects 取 LKG ∩ 当前组员 ∩ roster，空了整组删掉，所以修剪后每个分组仍满足「member 与 catch-all 的 subjects 相同」。LKG 是展开后的明文，名单条目的增删修剪不了（与策略相同）。没有 LKG 或修剪后为空 → nil。**修剪处理不了「列表条目被删」**：LKG 是展开后的明文条目，策略仍在、只是列表里去掉了几条时，回退版仍会继续拦截已被删除的条目，直到新版部署成功。读取 LKG 失败（数据库瞬时错误）时本次同步失败，不会把「无策略」当结果下发或缓存；**连续失败 3 次（或自第一次失败起满 5 分钟）后**回退为 nil（总能部署，roster 照常流动），记 issue `destination_policy_lkg_unreadable`，该结果不缓存，库恢复后下一次同步会重新读取。
-- **被拒的是回退本身**（回退用的是修剪后的 LKG，其摘要不同于记录的 `applied_sha256`；或换了 core 版本、LKG 里有新核心不再接受的写法）：只要被拒摘要等于「作为回退铸出」的摘要（铸出的与期望的不同；包括嗅探或超额时铸出的回退），就清空 LKG，回退目标为 nil，issue `destination_policy_lkg_rejected`，不再重铸。
+- **被拒的是回退本身**（回退用的是修剪后的 LKG，其摘要不同于记录的 `applied_sha256`；或换了 core 版本、LKG 里有新核心不再接受的写法）：只要被拒摘要等于「作为回退铸出」的摘要（铸出的与期望的不同；包括超额时铸出的回退），就清空 LKG，回退目标为 nil，issue `destination_policy_lkg_rejected`，不再重铸。
   否则 PSP 会继续铸同一份被拒的 LKG，整份 config 永远部署不下去、roster 冻结。
-- 回退版本也要过同一个嗅探预检（LKG、修剪后的 LKG 都一样）：过不了就发 nil、保留 LKG 记录并记嗅探 issue，入站修好后再用——这不是节点拒绝，只是此刻无法应用。被拒的上下文还包括节点上报的 core 版本。
-- **被拒记录只在被拒的正是期望策略时才建立**；回退被拒只清 LKG，不会拖住期望策略，嗅探修好后期望策略照常下发。
-- **被拒记录**独立保存（`rejected_sha256` 加 `rejected_generation`），不受嗅探或超额回退、无策略、暂停的影响；`rejected_generation` 是被拒策略**被铸出时**的 generation（`minted_generation`），不是上报到达时已发布的那一个，所以在上报到达前又发布了新一版，新一版仍会被尝试。
+- 回退版本也按第 4.2 节第 7 条限定需要嗅探的规则（LKG、修剪后的 LKG 都一样），而不是在嗅探不足时发 nil：嗅探不足不会让节点失去其余规则的执行。被拒的上下文还包括节点上报的 core 版本。
+- **被拒记录只在被拒的正是期望策略时才建立**；回退被拒只清 LKG，不会拖住期望策略，期望策略照常下发。
+- **被拒记录**独立保存（`rejected_sha256` 加 `rejected_generation`），不受超额回退、无策略、暂停的影响；`rejected_generation` 是被拒策略**被铸出时**的 generation（`minted_generation`），不是上报到达时已发布的那一个，所以在上报到达前又发布了新一版，新一版仍会被尝试。
 - **何时重试新版**：被拒时的**上下文**（引擎、core 版本、各入站的嗅探配置的哈希，`rejected_ctx`）变化；`published_generation` 变化且期望摘要与被拒摘要不同（只是 generation 变化而字节相同则不重试，只推进记录的 generation）；`policy.destination.v1` / `audit.hits.v1` / `audit.usage.v1` 三项中任一项增减；
   管理员点「重新下发」（`POST /dest/agents/:id/retry`）。成员变化不触发，避免每次 roster 变动都重走一遍「被拒 → 回退」。
-- **何时清除回退**：重试的新版被报告 `applied` 且摘要等于期望摘要；嗅探预检通过；回到额度以内。
+- **何时清除回退**：重试的新版被报告 `applied` 且摘要等于期望摘要；回到额度以内。
 
 ### 4.4 缓存与空闲开销
 
@@ -234,7 +245,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 
 | family | 含义 |
 |---|---|
-| `psp_dest_policy_compile_total{result}` | 每次同步的编译结果：`cache_hit`、`compiled`、`fallback_rejected`、`fallback_sniffing`、`fallback_over_limit`、`fallback_nil`、`invalid` |
+| `psp_dest_policy_compile_total{result}` | 每次同步的编译结果：`cache_hit`、`compiled`、`fallback_rejected`、`fallback_over_limit`、`fallback_nil`、`invalid` |
 | `psp_dest_policy_compile_ms` | 缓存未命中的编译耗时 |
 | `psp_dest_policy_publish_total{trigger}` | 发布次数：`debounced`、`max_wait`、`manual`、`pause` |
 | `psp_dest_policy_publish_rejected_total` | 发布前校验拒绝的次数 |
@@ -266,7 +277,11 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 9. **BT 识别**只覆盖明文握手与 uTP；加密 BT（MSE/PE）、DHT 识别不到。
 10. **`geoip:` 行依赖 GeoIP 库，库不可用时整张列表被跳过。** 列表里只要有一条 `GEOIP` 行（国家展开成目的地网段）而 PSP 没有可用的 GeoIP 库，**整张列表**（包括其中的域名条目）在这次编译里都不参与，状态页标 `geoip_unavailable`；不会只丢那一行。需要域名条目照常生效时，把国家行拆到另一张列表。
 11. **正则很贵**：每个连接都要逐条跑，整份上限 256 条；保存时用 Go `regexp`（RE2）编译，编不过不让保存，没有字面量锚点或长于 256 字符的给警告。
-12. **入站嗅探配置不足时，策略在那台节点上不下发**（PSP 预检），节点继续执行上一版，直到运营者改好入站。
+12. **入站嗅探配置不足时，只有需要嗅探的规则在那个入站上不生效，其余规则照常。** 域名规则和协议规则（含 BT）只在嗅探够用的入站上执行（`Inbounds` 限定）；
+    端口、IP 段、来源国家/网段、网络、私网等规则在所有入站生效。节点的状态仍是 `applied`，状态页列出嗅探不足的入站并标注意；仅报告规则同理，`report_only_not_deployed` 为 `"sniffing"`。
+    有开启的域名放行规则时，被标注的入站上端口、IP 段等拦截可能拦下本应被放行的连接（放行规则在该入站不生效）；Node 的尾点保护在这些入站上同样生效。
+    所有入站都不足时，节点只执行不需要嗅探的那部分（状态仍标注，`state` 可能是 `none`）。运营者把入站嗅探改好（`enabled`、`destOverride` 含 http/tls/quic、无排除项、`routeOnly` 关、非 `metadataOnly`）后自动恢复。
+    组规则不能按入站限定，所以某个分组里一条需要嗅探而某入站不够时，该分组的白名单在这台节点不执行（按组，其他分组不受影响）。
 13. **策略被内核拒绝时，那台节点执行上一版**（修剪后的 LKG）；在此期间，新加入作用分组的成员在这台节点上不受该分组的拦截策略约束。
 14. **命中记录是尽力而为的**（见 §7）：节点重启、Xray 不重试失败的 webhook、PSP 队列满或重启都会丢数据，丢失被计数但补不回来。
 15. **仅报告只反映「本来就会放行」的连接**：被前面开启的规则拦掉或放行的连接不进仅报告的统计（§3.1）。

@@ -235,19 +235,25 @@ func TestReport_InsufficientSniffingForAnObserveRuleOnlyDropsThatRule(t *testing
 	}
 }
 
-// Enforced rules that need sniffing keep today's behaviour: the node falls back.
-func TestReport_AnEnforcedDomainRuleStillFallsBackOnInsufficientSniffing(t *testing.T) {
+// An enforced domain rule is not held back by inbounds that cannot sniff
+// either: with no inbound able to run it the rule is dropped (and the inbound
+// said so), and the node is not in a fallback.
+func TestReport_AnEnforcedDomainRuleIsDroppedWhereNoInboundCanSniff(t *testing.T) {
 	h := newHarness(t)
 	l := h.list("l", "DOMAIN-SUFFIX,x.example")
 	h.policy("block", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
 	h.policy("watch", domain.DestActionBlock, domain.DestStateReport, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
 	h.publishNow()
 	f := fleet{panelID: 9, nodes: []*domain.Node{node(1, `{"enabled":true,"metadataOnly":true}`)}, users: []int64{10}}
-	if res := h.compile(f); res.Policy != nil {
+	res := h.compile(f)
+	if res.Policy != nil {
 		t.Fatalf("sent %v", ruleIDs(res.Policy))
 	}
-	if m := h.meta(); m.FallbackReason != domain.DestFallbackSniffing {
-		t.Fatalf("fallback = %q", m.FallbackReason)
+	if m := h.meta(); m.FallbackReason != domain.DestFallbackNone || !strings.Contains(m.PrecheckListeners, `"lst_1"`) {
+		t.Fatalf("state = %+v", m)
+	}
+	if !hasSniffIssue(res, "lst_1") || !hasIssue(res, IssueReportOnlyNotDeployed, "sniffing") {
+		t.Fatalf("issues = %+v", res.Issues)
 	}
 }
 

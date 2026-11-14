@@ -1,6 +1,10 @@
 package destpolicy
 
-import "context"
+import (
+	"context"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
 
 // Info is what the published snapshot says about how it compiled: for the
 // status page, and for tests.
@@ -15,8 +19,12 @@ type Info struct {
 	GeoIPUnavailable bool `json:"geoip_unavailable"`
 	// Policies is the note of each policy in force; SourceNotes says why a
 	// source rule compiled to nothing ("geoip_unavailable" or "empty").
-	Policies    map[int64]*PolicyNote `json:"policies"`
-	SourceNotes map[int64]string      `json:"source_notes"`
+	// domainAllow: an enforced allow rule with domains is in force, fleet-wide
+	// or for the panels named in domainAllowPanels.
+	domainAllowAll    bool
+	domainAllowPanels map[int64]bool
+	Policies          map[int64]*PolicyNote `json:"policies"`
+	SourceNotes       map[int64]string      `json:"source_notes"`
 }
 
 // Info reads the published snapshot's compile notes. With nothing published it
@@ -38,6 +46,19 @@ func (s *Service) Info(ctx context.Context) (*Info, error) {
 	for id, n := range cb.base.policies {
 		c := *n
 		info.Policies[id] = &c
+	}
+	info.domainAllowPanels = map[int64]bool{}
+	for _, r := range cb.base.allow {
+		if len(r.domains) == 0 {
+			continue
+		}
+		if r.scope == domain.DestScopePanels {
+			for _, p := range r.panels {
+				info.domainAllowPanels[p] = true
+			}
+		} else {
+			info.domainAllowAll = true
+		}
 	}
 	for id, n := range cb.base.sourceNotes {
 		info.SourceNotes[id] = n

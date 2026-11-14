@@ -94,6 +94,7 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
     rejected: t(`${V}title.refused`, { count: verdict.n }),
     sniffing: t(`${V}title.refused`, { count: verdict.n }),
     over_limit: t(`${V}title.refused`, { count: verdict.n }),
+    sniffing_partial: t(`${V}title.sniffing_partial`, { count: verdict.n }),
     no_coverage: t(`${V}title.no_coverage`, { count: verdict.n }),
     upgrade: t(`${V}title.upgrade`, { count: verdict.n }),
     offline: t(`${V}title.offline`, { count: verdict.n }),
@@ -131,9 +132,12 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
     }
     case 'rejected':
     case 'over_limit':
+    case 'sniffing_partial':
     case 'sniffing': {
       const node = data.nodes.find(n => n.panel_name === verdict.node)
-      const reason = verdict.kind === 'sniffing'
+      const reason = verdict.kind === 'sniffing_partial'
+        ? t(`${V}detail.sniffing_partial`, { n: verdict.inbounds?.length ?? 0 })
+        : verdict.kind === 'sniffing'
         ? t(`${V}detail.sniffing`, { inbounds: (verdict.inbounds ?? []).join(t(`${V}detail.list_separator`)) })
         : verdict.kind === 'over_limit' && node?.over_limit
           ? t(`${V}detail.over_limit`, {

@@ -530,7 +530,7 @@ func TestFallback_TrimmingDropsAChangedActionAndFiltersByCurrentGroup(t *testing
 }
 
 func TestOverLimitIssueDetailDoesNotCarryALiveCount(t *testing.T) {
-	d := (&Service{}).issuesFor(domain.DestFallbackOverLimit, &domain.DestAgentPolicy{}, "", &domain.DestPublishError{Kind: "subjects", Used: 51000, Limit: 50000}, nil)
+	d := (&Service{}).issuesFor(domain.DestFallbackOverLimit, &domain.DestAgentPolicy{}, "", &domain.DestPublishError{Kind: "subjects", Used: 51000, Limit: 50000})
 	if len(d) != 1 || d[0].Detail != "subjects over limit" {
 		t.Fatalf("issue = %+v", d)
 	}
@@ -593,32 +593,6 @@ func TestPruneAgentsForgetsTheDeleted(t *testing.T) {
 }
 
 // ---- round 2 ----
-
-// A refusal of a SNIFFING fallback is a refused fallback and nothing more: it
-// must not hold back the desired policy once the sniffing is fixed.
-func TestFallback_RefusedSniffingFallbackDoesNotHoldBackTheDesiredPolicy(t *testing.T) {
-	h := newHarness(t)
-	smtpPolicy(h, "ports only") // an LKG that needs no sniffing
-	h.publishNow()
-	first := h.compile(base1())
-	h.observe(applied(first.Digest))
-	l := h.list("l", "DOMAIN-SUFFIX,b.example.com")
-	h.policy("domains", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.ListIDs = []int64{l.ID} })
-	h.publishNow()
-	bad := fleet{panelID: 9, nodes: []*domain.Node{node(1, `{"enabled":true,"destOverride":["http"]}`)}, users: []int64{10, 11, 12}}
-	fb := h.compile(bad)
-	if fb.Digest != first.Digest {
-		t.Fatalf("setup: want the LKG as the sniffing fallback, got %q", fb.Digest)
-	}
-	h.observe(rejected(fb.Digest))
-	res := h.compile(base1())
-	if res.Policy == nil || res.Digest == first.Digest || len(res.Policy.Rules) != 2 {
-		t.Fatalf("the desired policy was held back after the sniffing was fixed: %q", res.Digest)
-	}
-	if m := h.meta(); m.RejectedSHA256 != "" {
-		t.Fatalf("a refused fallback was recorded as a held refusal: %+v", m)
-	}
-}
 
 // A body that stays unreadable cannot freeze the node for ever: after a bound
 // the fallback is nil (always deployable) and the issue says why.

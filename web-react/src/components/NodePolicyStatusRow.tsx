@@ -32,6 +32,9 @@ export function nodeStateText(t: T, node: DestNodeStatus, now: number): { key: N
         ? t(`${S}node_note.applied`, { rules: node.applied_rules, ago: formatRelativeTimeShort(now - node.applied_at, t) })
         : t(`${S}node_note.applied_no_time`, { rules: node.applied_rules })
       break
+    case 'applied_sniffing':
+      note = t(`${S}node_note.applied_sniffing`, { n: node.sniffing_insufficient.length })
+      break
     case 'sniffing':
       note = t(`${S}node_note.sniffing`, { inbounds: node.sniffing_insufficient.map(s => s.label).join(t(`${S}node_problem.list_separator`)) })
       break
@@ -85,6 +88,7 @@ export default function NodePolicyStatusRow({
   const theme = useTheme()
   const md = theme.palette.md
   const { key, label, note, reportNote } = nodeStateText(t, node, now)
+  const allowLine = node.sniffing_allow_exempt_lost && node.sniffing_insufficient.length > 0 && <Typography variant="body2" data-testid="node-sniffing-allow-lost" sx={{ color: md.onSurfaceVariant }}>{t(`${S}node_note.sniffing_allow_lost`)}</Typography>
   const reportLine = reportNote && <Typography variant="body2" data-testid="node-report-not-deployed" sx={{ color: md.onSurfaceVariant }}>{reportNote}</Typography>
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
@@ -97,7 +101,7 @@ export default function NodePolicyStatusRow({
   if (key === 'rejected' && onRetry) {
     actions.push(<AsyncButton key="retry" size="small" variant="outlined" onClick={() => onRetry(node.agent_id)}>{t(`${S}node_action.retry`)}</AsyncButton>)
   }
-  if (key === 'sniffing' && first && onOpenInbound) actions.push(link('inbound', t(`${S}node_action.open_inbound`), () => onOpenInbound(first.node_id)))
+  if ((key === 'sniffing' || key === 'applied_sniffing') && first && onOpenInbound) actions.push(link('inbound', t(`${S}node_action.open_inbound`), () => onOpenInbound(first.node_id)))
   if (key === 'over_limit' && onOpenLists) actions.push(link('lists', t(`${S}node_action.view_lists`), onOpenLists))
   if (key === 'unsupported_version' && onUpgrade) actions.push(link('upgrade', t(`${S}node_action.upgrade`), onUpgrade))
   if (key === 'unsupported_version' && !onUpgrade && onOpenServer) actions.push(link('server', t(`${S}node_action.open_server`), onOpenServer))
@@ -106,6 +110,7 @@ export default function NodePolicyStatusRow({
     // Title → impact → action, the way diagnostics/FindingList writes a problem.
     let problem: { title: string; impact: string } | null = null
     if (key === 'sniffing') problem = { title: t(`${S}node_problem.sniffing_title`, { inbounds: node.sniffing_insufficient.map(s => s.label).join(t(`${S}node_problem.list_separator`)) }), impact: t(`${S}node_problem.sniffing_impact`) }
+    else if (key === 'applied_sniffing') problem = { title: t(`${S}node_problem.sniffing_partial_title`, { inbounds: node.sniffing_insufficient.map(s => s.label).join(t(`${S}node_problem.list_separator`)) }), impact: t(`${S}node_problem.sniffing_partial_impact`) }
     else if (key === 'rejected') problem = { title: t(`${S}node_problem.rejected_title`), impact: t(`${S}node_problem.rejected_impact`) }
     else if (key === 'over_limit') {
       problem = {
@@ -119,6 +124,7 @@ export default function NodePolicyStatusRow({
       <Box data-testid="node-policy-block" sx={{ minWidth: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>{badge}</Box>
         <Typography variant="body2" sx={{ mt: 0.75, color: md.onSurfaceVariant }}>{note}</Typography>
+        {allowLine}
         {reportLine}
         {extra}
         {problem && (
@@ -141,6 +147,7 @@ export default function NodePolicyStatusRow({
         {badge}
       </Box>
       <Typography variant="body2" sx={{ mt: 0.25, color: md.onSurfaceVariant }}>{note}</Typography>
+      {allowLine}
       {reportLine}
       {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
       {extra}
