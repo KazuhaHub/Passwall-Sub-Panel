@@ -226,3 +226,20 @@ func deleteGroupTx(tx *gorm.DB, id int64) error {
 	}
 	return nil
 }
+
+// List reads the groups that have an allowlist row (in any state, off included),
+// by group id.
+func (r *DestGroupAllowlistRepo) List(ctx context.Context) ([]*domain.DestGroupAllowlistEntry, error) {
+	var rows []groupRow
+	if err := r.db.WithContext(ctx).
+		Select("id", "name", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id",
+			"dest_allowlist_extra_list_id", "dest_allowlist_state_changed_at", "dest_allowlist_updated_at").
+		Where("dest_allowlist_state IS NOT NULL").Order("id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list group allowlists: %w", err)
+	}
+	out := make([]*domain.DestGroupAllowlistEntry, len(rows))
+	for i := range rows {
+		out[i] = &domain.DestGroupAllowlistEntry{GroupID: rows[i].ID, GroupName: rows[i].Name, Allowlist: rows[i].destAllowlist()}
+	}
+	return out, nil
+}

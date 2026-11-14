@@ -31,7 +31,7 @@ type ListStore interface {
 	SetFetchError(ctx context.Context, id int64, reason string) error
 	FindGeosite(ctx context.Context, category, attrs string) (*domain.DestList, error)
 	ApplyBatch(ctx context.Context, batch domain.DestListBatch) ([]int64, bool, error)
-	DeleteUnused(ctx context.Context, id int64) (using []int64, err error)
+	DeleteUnused(ctx context.Context, id int64) (using domain.DestListUse, err error)
 }
 
 // PolicyReader is what the list service needs of the policies: which lists are
@@ -156,10 +156,10 @@ func New(d Deps) *Service {
 var ErrListInUse = fmt.Errorf("%w: dest list is in use by a policy", domain.ErrConflict)
 
 // ListInUseError names the policies that hold a list.
-type ListInUseError struct{ PolicyIDs []int64 }
+type ListInUseError struct{ PolicyIDs, GroupIDs []int64 }
 
 func (e *ListInUseError) Error() string {
-	return fmt.Sprintf("%v: policies %v", ErrListInUse, e.PolicyIDs)
+	return fmt.Sprintf("%v: policies %v, groups %v", ErrListInUse, e.PolicyIDs, e.GroupIDs)
 }
 func (e *ListInUseError) Unwrap() error { return ErrListInUse }
 
@@ -339,8 +339,8 @@ func (s *Service) DeleteList(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if len(using) > 0 {
-		return &ListInUseError{PolicyIDs: using}
+	if using.Any() {
+		return &ListInUseError{PolicyIDs: using.PolicyIDs, GroupIDs: using.GroupIDs}
 	}
 	return nil
 }

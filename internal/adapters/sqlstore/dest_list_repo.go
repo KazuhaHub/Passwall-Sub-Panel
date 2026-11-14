@@ -357,9 +357,9 @@ func (r *DestListRepo) Delete(ctx context.Context, id int64) error {
 // deleting in ONE transaction under the state-row lock that policy writes also
 // take, so a policy cannot pick the list up between the check and the delete.
 // When policies hold it, they are returned and nothing is deleted.
-func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using []int64, err error) {
+func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using domain.DestListUse, err error) {
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		using = nil
+		using = domain.DestListUse{}
 		if err := lockDestState(tx); err != nil {
 			return err
 		}
@@ -372,16 +372,29 @@ func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using []int6
 		}
 		for _, row := range rows {
 			if slices.Contains([]int64(row.ListIDs), id) {
-				using = append(using, row.ID)
+				using.PolicyIDs = append(using.PolicyIDs, row.ID)
 			}
 		}
-		if len(using) > 0 {
+		// The allowlist groups hold lists too, in any state: an off group keeps
+		// its lists for when it is switched on again.
+		var groups []groupRow
+		if err := tx.Select("id", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+			Where("dest_allowlist_state IS NOT NULL").Order("id").Find(&groups).Error; err != nil {
+			return err
+		}
+		for _, g := range groups {
+			a := g.destAllowlist()
+			if a.BaseListID == id || a.ExtraListID == id || slices.Contains(a.ListIDs, id) {
+				using.GroupIDs = append(using.GroupIDs, g.ID)
+			}
+		}
+		if using.Any() {
 			return nil
 		}
 		return tx.Delete(&destListRow{}, id).Error
 	})
 	if err != nil {
-		return nil, err
+		return domain.DestListUse{}, err
 	}
 	return using, nil
 }

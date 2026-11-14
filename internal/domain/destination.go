@@ -259,6 +259,32 @@ type DestAllowlist struct {
 	UpdatedAt      *time.Time
 }
 
+// DestGroupAllowlistEntry is a group that has an allowlist row, with its name:
+// what the admin overview and the lists' "used by" are made of.
+type DestGroupAllowlistEntry struct {
+	GroupID   int64
+	GroupName string
+	Allowlist DestAllowlist
+}
+
+// DestListUse is who holds a list: the policies and the allowlist groups that
+// reference it (a group in any state, off included: it keeps its lists).
+type DestListUse struct {
+	PolicyIDs []int64
+	GroupIDs  []int64
+}
+
+// Any reports whether anything holds the list.
+func (u DestListUse) Any() bool { return len(u.PolicyIDs)+len(u.GroupIDs) > 0 }
+
+// DestTrialSite is one destination of an allowlist group's report-only rows,
+// folded over hours, panels and users.
+type DestTrialSite struct {
+	Site   string
+	Count  int64
+	LastMS int64
+}
+
 // DestGroupMode is one group's allowlist as the compiler reads it with the
 // other definitions.
 type DestGroupMode struct {
