@@ -23,11 +23,12 @@ const S = 'admin:access_control.settings.'
 // DestPolicyApplyMinSeconds 30–3600, DestListRefreshHours 6–168). The server
 // refuses a value outside them, and the defaults come from the served
 // `defaults`, never from here.
-const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours' | 'dest_hit_retention_days'; focus: SettingsFocus })[] = [
+const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours' | 'dest_hit_retention_days' | 'dest_trial_retention_days'; focus: SettingsFocus })[] = [
   { key: 'dest_policy_apply_min_seconds', kind: 'number', label: `${S}apply_seconds`, hint: `${S}apply_seconds_hint`, min: 30, max: 3600, tail: true, focus: 'apply' },
   { key: 'dest_list_refresh_hours', kind: 'number', label: `${S}refresh_hours`, hint: `${S}refresh_hours_hint`, min: 6, max: 168, tail: true, focus: 'refresh' },
-  // DestHitRetentionDays 1–365. The allowlist trial's own retention (1–30) is a later phase's field.
+  // DestHitRetentionDays 1–365; the allowlist report-only data's own retention is 1–30.
   { key: 'dest_hit_retention_days', kind: 'number', label: `${S}hit_retention_days`, hint: `${S}hit_retention_days_hint`, min: 1, max: 365, tail: true, focus: 'retention' },
+  { key: 'dest_trial_retention_days', kind: 'number', label: `${S}trial_retention_days`, hint: `${S}trial_retention_days_hint`, min: 1, max: 30, tail: true, focus: 'trial' },
 ]
 
 export interface AccessSettingsDialogProps {
@@ -132,6 +133,12 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
                   effective={read.data.effective.dest_hit_retention_days} error={errors.dest_hit_retention_days}
                   onChange={v => setDraft({ ...draft, dest_hit_retention_days: v as number })} />
                 {errors.dest_hit_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_hit_retention_days}</Typography>}
+              </Box>
+              <Box data-focus="trial" sx={{ mt: 2 }}>
+                <PolicyField spec={FIELDS[3]} value={draft.dest_trial_retention_days} defaults={read.data.defaults}
+                  effective={read.data.effective.dest_trial_retention_days} error={errors.dest_trial_retention_days}
+                  onChange={v => setDraft({ ...draft, dest_trial_retention_days: v as number })} />
+                {errors.dest_trial_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_trial_retention_days}</Typography>}
               </Box>
             </Box>
             <Box>

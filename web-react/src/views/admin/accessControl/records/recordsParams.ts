@@ -25,7 +25,7 @@ export const REC_MAX_RANGE_DAYS = 31
 export interface RecordsFilter {
   user_id?: number
   panel_id?: number
-  /** p<policy id> or s<inbound node id>. */
+  /** p<policy id>, s<inbound node id> or g<group id> (an allowlist group). */
   source?: string
   action?: RecAction
   /** `1h`, `24h`, `<N>d`, or browser-local datetime text (then `until` may be set). */
@@ -38,7 +38,7 @@ export interface RecordsFilter {
 
 const LOCAL_TIME = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?$/
 const RELATIVE = /^(\d{1,3})d$/
-const SOURCE = /^[ps]\d{1,12}$/
+const SOURCE = /^[psg]\d{1,12}$/
 
 function oneOf<T extends string>(raw: string | null, allowed: readonly T[]): T | undefined {
   return raw !== null && (allowed as readonly string[]).includes(raw) ? raw as T : undefined

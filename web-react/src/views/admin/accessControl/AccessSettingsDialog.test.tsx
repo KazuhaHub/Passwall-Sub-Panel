@@ -97,8 +97,19 @@ describe('the hit-record retention (S18, the records tab\'s "change")', () => {
     expect(days.value).toBe('')
     expect(days.placeholder).toBe('30')
     expect(screen.getByText(/1–365/)).toBeTruthy()
-    // The trial retention belongs to the allowlist, which is a later phase: no field for it.
-    expect(screen.queryByLabelText(/试运行/)).toBeNull()
+  })
+
+  it('has the report-only data retention beside it, with its own range, and sends only that when only it changed', async () => {
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_trial_retention_days: 10 }))
+    open()
+    const days = (await screen.findByLabelText('仅报告数据保留（天）')) as HTMLInputElement
+    expect(days.value).toBe('')
+    expect(days.placeholder).toBe('7')
+    expect(screen.getAllByText(/1–30/).length).toBeGreaterThan(0)
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_trial_retention_days: 10 }))
   })
 
   it('sends only the retention when only it changed; lengthening asks nothing', async () => {

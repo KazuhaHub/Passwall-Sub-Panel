@@ -9,9 +9,9 @@ import {
   useEditDestListEntries, useInstantiateDestTemplate, usePauseDest, usePublishDest, usePutSourceRule,
   useReorderDestPolicies, useRetryDestAgent, useRollbackGeosite, useSaveDestExemption, useSaveDestList,
   useSaveDestSettings, useUpdateDestPolicy, useUpdateGeosite, useTestDestination, useAddDestException,
-  useDestHits, useDestPolicies, useDestUser, useSetAuditCollect, useSetDestResolve,
+  useDestHits, useDestPolicies, useDestUser, useSetAuditCollect, useSetDestResolve, usePutDestGroup, useDestGroups,
 } from './accessControl'
-import { accessControlKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
+import { accessControlKeys, groupKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { policies } from './policies'
 import type { QueryScope } from './session'
 
@@ -98,7 +98,22 @@ describe('write → invalidate', () => {
     vi.mocked(api[fn] as (...a: unknown[]) => Promise<unknown>).mockResolvedValue({})
     const s = spy()
     await run(hook as never, s.client, arg)
-    s.expectKeys([ac.lists(scope), ac.listDetails(scope), ac.policies(scope), ac.status(scope)])
+    s.expectKeys([ac.lists(scope), ac.listDetails(scope), ac.policies(scope), ac.status(scope), ac.groupsAll(scope)])
+  })
+
+  it('an allowlist group write: the groups (list, detail, previews, reports), status, policies (its group list), lists (used by), their details, and the groups page that carries the badge', async () => {
+    vi.mocked(api.putDestGroup).mockResolvedValue({} as api.DestGroup)
+    const s = spy()
+    await run(() => usePutDestGroup(scope), s.client, { id: 3, input: { state: 'report', list_ids: [1] } })
+    s.expectKeys([ac.groupsAll(scope), ac.status(scope), ac.policies(scope), ac.lists(scope), ac.listDetails(scope), groupKeys.all(scope)])
+  })
+
+  it('the groups read is keyed by the scope and is not polled', async () => {
+    vi.mocked(api.getDestGroups).mockResolvedValue([])
+    const client = newClient()
+    const { result } = renderHook(() => useDestGroups(scope), { wrapper: queryWrapper(client) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(client.getQueryData(ac.groups(scope))).toEqual([])
   })
 
   it('an exemption: exemptions, policies (the count), status, the risk drawer and the access tab of that account', async () => {
@@ -126,7 +141,7 @@ describe('write → invalidate', () => {
     vi.mocked(api.putDestSettings).mockResolvedValue({} as api.DestSettingsView)
     const s = spy()
     await run(() => useSaveDestSettings(scope), s.client, { dest_list_refresh_hours: 12 })
-    s.expectKeys([ac.settings(scope), ac.status(scope), ac.lists(scope), ac.policies(scope), ac.hitsAll(scope), ac.usersAll(scope), settingsKeys.ui(scope)])
+    s.expectKeys([ac.settings(scope), ac.status(scope), ac.lists(scope), ac.policies(scope), ac.hitsAll(scope), ac.usersAll(scope), ac.groupsAll(scope), settingsKeys.ui(scope)])
   })
 
   it('a recording mode: the status, the servers list that carries audit_collect, and what is shown only while a node records (policy counters, hit records, account hits)', async () => {

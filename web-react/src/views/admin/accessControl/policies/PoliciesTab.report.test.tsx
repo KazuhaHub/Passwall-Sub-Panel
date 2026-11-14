@@ -46,7 +46,7 @@ const hits = (over: Partial<DestHits>): DestHits => ({
 })
 const hit = (dest: string, count: number) => ({ hour_ms: 0, panel_id: 0, panel_name: null, user_id: 0, upn: null, source: '', source_name: null, source_kind: 'policy' as const, action: 'observe' as const, dest, port: 0, count, first_ms: 0, last_ms: 0 })
 
-const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn() }
+const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn(), onOpenAllowlist: vi.fn() }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -72,12 +72,12 @@ describe('report-only in the rail', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('加密货币交易所')
     expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual([
-      '放行 · 命中即放行', '没有豁免账号 · 不受任何访问限制', '拦截',
+      '放行 · 命中即放行', '没有豁免账号 · 不受任何访问限制', '拦截', '没有分组启用白名单 · 成员只能访问名单里的目的地',
       '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行',
     ])
     // The enforced step holds the block and the off rows, the report step the report rows only.
     const heads = screen.getAllByRole('heading', { level: 2 })
-    const reportStep = heads[3].parentElement!.parentElement!
+    const reportStep = heads[4].parentElement!.parentElement!
     expect(within(reportStep).getByText('加密货币交易所')).toBeTruthy()
     expect(within(reportStep).getByText('成人内容')).toBeTruthy()
     expect(within(reportStep).queryByText('禁止发信')).toBeNull()

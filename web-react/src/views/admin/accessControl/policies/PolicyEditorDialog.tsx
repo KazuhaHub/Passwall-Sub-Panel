@@ -227,7 +227,7 @@ export default function PolicyEditorDialog({ open, policy, initial, onClose, onS
     const here = stepOf(form)
     const same = all.filter(p => stepOf(p) === here)
     const idx = policy && stepOf(policy) === here ? same.findIndex(p => p.id === policy.id) : same.length
-    return { index: idx >= 0 ? idx + 1 : same.length + 1, step: pipelineSteps({ report: true }).find(s => s.id === here)?.n ?? 1, report: here === 'report' }
+    return { index: idx >= 0 ? idx + 1 : same.length + 1, step: pipelineSteps({ report: true, allowlist: true }).find(s => s.id === here)?.n ?? 1, report: here === 'report' }
   }, [policies.data, policy, form]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const summary = summaryText(t, matchSummary({

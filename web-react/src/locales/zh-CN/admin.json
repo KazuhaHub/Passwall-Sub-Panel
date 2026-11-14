@@ -2662,7 +2662,8 @@
     "tabs": {
       "node_access": "节点范围",
       "policies": "策略",
-      "members": "成员"
+      "members": "成员",
+      "destination": "目的地"
     },
     "members": {
       "count": "本组共有 {{count}} 名成员",
@@ -2717,6 +2718,33 @@
       "delete_message": "确定删除分组 {{name}}？",
       "batch_delete_title": "批量删除分组",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？"
+    },
+    "destination": {
+      "tab": "目的地",
+      "mode": "访问模式",
+      "lists": "名单",
+      "nodes": "可用节点",
+      "open": "不限",
+      "open_hint": "本组成员可以访问所有目的地，仍受全局访问策略约束。",
+      "open_kept": "名单保留，可以再次开启。",
+      "report": "白名单 · 仅报告 · 第 {{days}} 天",
+      "report_nodays": "白名单 · 仅报告",
+      "on": "白名单 · 开启",
+      "lists_line": "{{lists}} · 基础放行 {{base}} 条",
+      "lists_none": "未选名单",
+      "nodes_line": "{{ok}} / {{total}}",
+      "not_open_other": "{{count}} 台节点不对本组开放",
+      "summary_note": "这里只显示摘要；名单和状态在访问控制页修改。",
+      "edit": "在访问控制中编辑 ›",
+      "enable": "为本组启用白名单… ›",
+      "save_first": "保存分组后即可设置访问模式",
+      "read_failed": "读取白名单信息失败",
+      "retry": "重试",
+      "badge": "白名单",
+      "badge_report": "白名单 · 仅报告",
+      "badge_on": "白名单 · 开启",
+      "list_item": "{{name}}（{{entries}}）",
+      "list_separator": "、"
     }
   },
   "certs": {
@@ -4427,7 +4455,8 @@
       "label": "说明",
       "policies": "访问控制由节点强制执行，命中拦截的连接会被断开。「规则库」只决定客户端怎么分流，用户可以自己改掉。只有 PSP 原生节点执行这些策略；3X-UI 和 S-UI 的路由由运营者自己管理。\n\n规则从上到下判断，命中第一条就停止。同一动作内的先后只决定命中记在哪条策略名下。\n\n每条拦截策略可以设为关闭、仅报告或开启，由你自己选。仅报告不拦截任何连接，只记录它本应拦截的连接；它排在所有生效的规则之后判断，所以不会改变任何连接的结果。看过命中之后再改为开启即可。放行策略没有仅报告。\n\n节点只看得到目的地（域名或 IP），看不到网址路径。可被绕过：ECH、先用 DoH 解析再直连 IP、客户端自带的加密隧道。\n\nIP 段只对以 IP 发起的连接生效，域名解析出的 IP 不参与匹配。BT 只识别明文握手与 uTP，加密 BT 和 DHT 识别不到。\n\n正则要对每个连接逐条匹配，很耗资源，最多 {{max_regexps}} 条。\n\n每次下发，节点会重启代理程序一次，正在使用的连接断开一次；最后一次修改后等 {{seconds}} 秒再下发，连续修改合并为一次。",
       "lists": "支持的写法：纯域名、`domain:` / `full:` / `keyword:` / `regexp:`、`*.x`、hosts 行、AdGuard `||x^`、Clash 规则、IP 与 IP 段；`#` 开头是注释。保存时统一转小写、去尾点、中文域名转 punycode、IP 段对齐到网络号。\n\n远程与分类列表每 {{hours}} 小时刷新一次，只在内容变化时才下发；刷新失败时继续用旧内容。\n\n过宽的条目（几乎匹配所有域名的正则、少于 4 个字符的关键词、公共后缀本身、太大的 IP 段）在自定义列表里会被忽略；放行策略引用的远程、分类列表里出现它们时，这次刷新算失败，继续用旧内容。",
-      "records": "每行是一个账号在一小时内对同一目的地的命中次数。记录的是节点识别出的域名，看不到网址路径。sing-box 节点只执行、不记录。「本应拦截」是仅报告的策略命中的连接：它们被放行了，只是记了下来。命中记录保留 {{days}} 天。"
+      "records": "每行是一个账号在一小时内对同一目的地的命中次数。记录的是节点识别出的域名，看不到网址路径。sing-box 节点只执行、不记录。「本应拦截」是仅报告的策略命中的连接：它们被放行了，只是记了下来。命中记录保留 {{days}} 天。",
+      "allowlist": "白名单分组的成员只能访问名单里的目的地，名单外的会被节点拒绝。状态有三种：关闭、仅报告、开启，任意两种之间都能直接切换。\n\n仅报告不拒绝任何连接，只记录本应被拒绝的主域名（只记到主域名，看不到完整主机名和账号），在报告里把需要的加进名单，再决定是否开启。\n\n只有 PSP 原生节点执行白名单，且入站要能识别域名；不能执行的节点（3X-UI、S-UI、版本过旧、规则太多等）不再对本组开放，这会让本组成员少几台节点。\n\n只有名单里有还没下载成功的列表时，才不能开启。每次状态变化，节点会重启代理程序一次。仅报告的数据保留 {{days}} 天。"
     },
     "header": {
       "test": "测试目的地",
@@ -4557,6 +4586,21 @@
         "title": "缩短保留期？",
         "message": "超过 {{days}} 天的记录会在一小时内删除，无法恢复。",
         "action": "缩短"
+      },
+      "allowlist_report": {
+        "title": "让「{{group}}」回到仅报告？",
+        "message": "成员访问名单外的目的地不再被拒绝，只记录。{{minutes}}内生效。",
+        "action": "改回仅报告"
+      },
+      "allowlist_off": {
+        "title": "关闭「{{group}}」的白名单？",
+        "message": "本组成员恢复访问所有目的地（仍受全局策略约束），并在{{minutes}}内重新获得 {{n}} 台此前不开放的节点。名单保留，以后可以再次开启。",
+        "action": "关闭白名单"
+      },
+      "allowlist_no_nodes": {
+        "title": "开启后「{{group}}」的成员将没有任何可用节点？",
+        "message": "本组 {{members}} 人在开启后就拿不到任何节点：{{n}} 台节点都不执行白名单（3X-UI、S-UI 或版本过旧）。通常应先升级原生节点。",
+        "action": "仍然开启"
       }
     },
     "errors": {
@@ -4592,7 +4636,10 @@
       "dest_settings_invalid": "设置超出范围",
       "dest_template_unavailable": "这个规则组没有现成的通用分类",
       "dest_template_exists": "这个规则组已经添加过了",
-      "dest_source_rule_invalid": "来源规则的内容无效"
+      "dest_source_rule_invalid": "来源规则的内容无效",
+      "dest_group_not_found": "分组不存在",
+      "dest_group_stale": "状态已被其他人修改，已重新载入",
+      "dest_list_not_ready": "有名单还没下载成功，不能开启"
     },
     "node_state": {
       "applied": "已生效",
@@ -4629,7 +4676,10 @@
       "report_not_deployed_limit": "超出规则预算，仅报告规则未下发",
       "report_not_deployed_resolve": "部分入站的 routeOnly 会替换被解析的名字，这些入站上的仅报告 IP 规则未执行",
       "paused": "访问控制已暂停，恢复后照原样执行。",
-      "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。"
+      "not_enrolled": "这台原生节点还没有接入，没有 agent 上报。",
+      "allowlist_groups": "已下发的白名单分组：{{groups}}",
+      "groups_dropped": "因入站的嗅探识别不出域名，这些分组没有下发：{{groups}}。它们在本节点的所有入站上都不生效。",
+      "groups_separator": "、"
     },
     "node_action": {
       "retry": "重新下发",
@@ -4875,7 +4925,9 @@
       "hits_deleted_policy": "已删除的策略",
       "hits_deleted_source_rule": "已删除的来源规则",
       "hits_source_rule": "来源规则 · {{name}}",
-      "hits_list_separator": "、"
+      "hits_list_separator": "、",
+      "allowlist_report": "白名单 · 仅报告",
+      "allowlist_on": "白名单 · 开启"
     },
     "sheet": {
       "close": "关闭"
@@ -4898,7 +4950,9 @@
       "save": "保存",
       "group_retention": "记录保留",
       "hit_retention_days": "命中记录保留（天）",
-      "hit_retention_days_hint": "命中记录保留多久；缩短后，更早的记录会被删除。"
+      "hit_retention_days_hint": "命中记录保留多久；缩短后，更早的记录会被删除。",
+      "trial_retention_days": "仅报告数据保留（天）",
+      "trial_retention_days_hint": "白名单分组在仅报告期间记下的主域名保留多久；不超过命中记录的保留期。"
     },
     "rule_data": {
       "read_failed": "读取规则数据版本失败",
@@ -5080,7 +5134,11 @@
         "report": "仅报告",
         "report_caption": "不拦截，只记录本应拦截的连接；不改变任何连接的结果",
         "add_report": "仅报告策略",
-        "add_report_aria": "新建仅报告策略"
+        "add_report_aria": "新建仅报告策略",
+        "allowlist_count_other": "白名单分组 · {{count}} 个",
+        "allowlist_none": "没有分组启用白名单",
+        "allowlist_caption": "成员只能访问名单里的目的地",
+        "allowlist_open": "打开白名单分组"
       },
       "row": {
         "paused": "已停用",
@@ -5283,7 +5341,9 @@
         "builtin": "被节点内置规则拦截：以 . 结尾的主机名",
         "source": "被入站的来源规则拦截（{{entry}}）",
         "observe": "没有被拦截：仅报告的策略命中了它，开启后会被拦截（{{entry}}）",
-        "observe_source": "没有被拦截：仅报告的来源规则命中了它，开启后会被拦截（{{entry}}）"
+        "observe_source": "没有被拦截：仅报告的来源规则命中了它，开启后会被拦截（{{entry}}）",
+        "group": "被白名单分组「{{group}}」拒绝：目的地不在它的名单里",
+        "observe_group": "没有被拒绝：白名单分组「{{group}}」处于仅报告，仅记录，开启后会被拒绝"
       },
       "kind": {
         "source": "来源规则",
@@ -5291,7 +5351,8 @@
         "block": "拦截",
         "exempt": "豁免",
         "builtin": "节点内置：拦截以 . 结尾的主机名",
-        "report": "仅报告"
+        "report": "仅报告",
+        "group": "白名单分组"
       },
       "result": {
         "miss": "未命中",
@@ -5326,7 +5387,8 @@
       "resolved_failed": "解析失败（空结果）",
       "resolved_ips_bad": "最多 16 个，每个都要是有效的 IP 地址",
       "note_hostname_needs_resolution": "这台节点会解析这个主机名，而这里没有解析：IP 段与内网地址规则的结果取决于解析出的地址，所以只是有条件的结果。在「解析出的 IP」里填上节点会看到的地址再测。",
-      "note_resolution_failed": "解析结果为空（或解析失败），IP 段与内网地址规则不会命中。真实结果取决于内核：Xray 放行，sing-box 拒绝连接。"
+      "note_resolution_failed": "解析结果为空（或解析失败），IP 段与内网地址规则不会命中。真实结果取决于内核：Xray 放行，sing-box 拒绝连接。",
+      "deleted_group": "已删除的分组"
     },
     "tab_records": "记录",
     "convert": {
@@ -5362,7 +5424,8 @@
         "panel_all": "全部节点",
         "range": "时间范围",
         "search": "搜索目的地…",
-        "more": "筛选"
+        "more": "筛选",
+        "group_allowlists": "白名单分组"
       },
       "range": {
         "h1": "过去 1 小时",
@@ -5401,7 +5464,9 @@
         "deleted_source_rule": "已删除的来源规则",
         "deleted_user": "已删除的账号 #{{id}}",
         "source_rule": "来源规则 · {{name}}",
-        "filter_by": "只看「{{name}}」"
+        "filter_by": "只看「{{name}}」",
+        "group_rule": "白名单 · {{name}}",
+        "deleted_group": "已删除的分组"
       },
       "hover": {
         "first_last": "首次 {{first}} · 最后 {{last}}"
@@ -5521,6 +5586,179 @@
         "sniffing": "入站嗅探配置无法解析，按原样执行",
         "no_ip_rules": "策略里没有 IP 段或内网规则，无需解析，按原样执行"
       }
+    },
+    "tab_allowlist": "白名单分组",
+    "allowlist": {
+      "intro": "白名单分组的成员只能访问名单里的目的地。",
+      "enable": {
+        "title": "启用白名单",
+        "title_edit": "编辑白名单",
+        "step": {
+          "group": "选择分组",
+          "lists": "名单",
+          "impact": "影响"
+        },
+        "step_of": "第 {{n}} 步，共 {{total}} 步",
+        "step1_hint": "只列出尚未启用白名单的分组",
+        "none_left": "所有分组都已启用白名单",
+        "search": "搜索分组",
+        "people_other": "{{count}} 人",
+        "step2_title": "本组成员只能访问这些列表里的目的地",
+        "pick_lists": "选择列表…",
+        "list_chip": "{{name}}（{{entries}}）",
+        "not_ready_summary": "仅报告时跳过，开启前必须就绪",
+        "not_ready_detail": "这个列表还没下载成功。仅报告期间它不参与判断，报告里会把它覆盖的目的地也列为本应拒绝；开启时，服务端要求所有名单都已就绪。",
+        "base": "基础放行",
+        "base_existing_other": "{{count}} 条，在「列表」里修改",
+        "base_prefilled_other": "已预填 {{count}} 条：{{hosts}}",
+        "host_separator": "、",
+        "base_edit": "编辑",
+        "base_none_summary": "没能从订阅模板读出 DNS 主机，请手动填写",
+        "base_none_detail": "订阅模板里没有经代理发出的 DNS 主机，或模板读不出来。请填写客户端用到的 DNS 主机名，每行一个。",
+        "base_placeholder": "每行一个主机名",
+        "base_hint": "订阅模板里经代理发出的 DNS 主机；缺了它，成员会全部打不开",
+        "extra": "补充",
+        "extra_hint": "自动创建；报告里「加入白名单」的条目放这里",
+        "kpi_members": "成员",
+        "kpi_usable": "可用节点",
+        "kpi_of": "共 {{total}} 台",
+        "kpi_lost": "不再开放",
+        "no_nodes": "启用后本组成员将没有任何可用节点",
+        "state_report": "仅报告（推荐）：访问不受限，只记录本应被拒绝的目的地",
+        "state_on": "开启：名单外的目的地立即被拒绝",
+        "lost_intro_other": "无论选哪一项，本组成员都不再获得以下 {{count}} 台节点：",
+        "lost_item": "{{name}} · {{reason}}",
+        "lost_none": "本组成员不会失去任何节点。",
+        "non_recording_other": "{{count}} 台节点只执行、不记录，仅报告的数据里没有它们的流量",
+        "base_empty_summary": "基础放行为空",
+        "base_empty_detail": "没有基础放行，成员访问订阅模板里的 DNS 主机会被拒绝，可能所有网站都打不开。",
+        "report_note": "仅报告期间访问不受限制，只记录本应被拒绝的目的地。",
+        "cancel": "取消",
+        "back": "上一步",
+        "next": "下一步",
+        "start_report": "开始仅报告",
+        "turn_on": "开启白名单",
+        "save": "保存",
+        "saved_report": "「{{group}}」已开始仅报告，{{minutes}}内生效",
+        "saved_on": "「{{group}}」已开启白名单，{{minutes}}内生效",
+        "saved_edit": "「{{group}}」的白名单已保存，{{minutes}}内生效",
+        "stale": "状态已被其他人修改，已重新载入"
+      },
+      "read_failed": "读取白名单分组失败",
+      "empty": {
+        "title": "还没有分组启用白名单",
+        "body": "白名单分组的成员只能访问名单里的目的地。先选「仅报告」，看看会拦到什么，再开启。"
+      },
+      "state": {
+        "report_day": "仅报告 · 第 {{days}} 天",
+        "report": "仅报告",
+        "on": "开启",
+        "off": "已关闭 · 名单保留"
+      },
+      "reason": {
+        "xui": "3X-UI",
+        "sui": "S-UI",
+        "capability": "节点版本过旧",
+        "over_limit": "规则太多",
+        "rejected": "节点拒绝了新策略",
+        "sniffing": "入站没有识别域名"
+      },
+      "snack": {
+        "report": "「{{group}}」已改回仅报告，{{minutes}}内生效",
+        "off": "「{{group}}」已关闭白名单，名单保留",
+        "on": "「{{group}}」已开启白名单，{{minutes}}内生效",
+        "stale": "状态已被其他人修改，已重新载入"
+      },
+      "card": {
+        "list_separator": "、",
+        "detail_separator": "；",
+        "members": "成员 {{members}}",
+        "lists_label": "名单：",
+        "lists_none": "未选名单",
+        "list_item": "{{name}}（{{entries}}）",
+        "extra_list": "补充",
+        "base_other": "基础放行 {{count}} 条",
+        "nodes": "可用节点 {{ok}} / {{total}}",
+        "not_open_other": "{{count}} 台节点不对本组开放",
+        "not_open_item": "{{name}} · {{reason}}",
+        "applying_other": "{{count}} 台节点正在下发本组规则",
+        "list_not_ready": "名单「{{list}}」还没下载",
+        "sniffing_dropped": "该分组在 {{nodes}} 上没有下发：入站的嗅探识别不出域名，所以它在这些节点的所有入站上都不生效",
+        "would_deny": "过去 {{days}} 天本应拒绝 {{sites}} 个主域名，共 {{times}} 次",
+        "denied_24h": "过去 24 小时拒绝 {{times}} 次",
+        "no_nodes": "本组成员现在没有任何可用节点",
+        "no_nodes_action": "查看原因",
+        "menu": "{{name}} 的操作",
+        "view_denied": "查看被拒记录",
+        "view_report": "查看报告",
+        "turn_on": "开启…",
+        "back_to_report": "改回仅报告…",
+        "reenable": "重新开启…",
+        "edit_lists": "编辑名单",
+        "turn_off": "关闭白名单…",
+        "open_group": "打开分组"
+      },
+      "turn_on": {
+        "title": "让「{{group}}」开启白名单？",
+        "reading": "正在读取",
+        "read_failed": "读取就绪情况失败",
+        "lists_ready": "所有名单都已就绪",
+        "not_ready": "名单「{{list}}」还没下载成功，不能开启",
+        "list_separator": "、",
+        "unapplied_other": "{{count}} 台可用节点还没生效本组规则",
+        "view": "查看",
+        "base_ok": "基础放行不为空",
+        "base_empty": "基础放行为空：成员的 DNS 主机若不在名单里会被拒绝，可能所有网站都打不开",
+        "remaining_other": "过去 24 小时仍有 {{count}} 个主域名本应被拒绝，最多的是 {{top}}",
+        "remaining_none": "过去 24 小时没有本应被拒绝的主域名",
+        "view_report": "看报告",
+        "age": "仅报告已 {{days}} 天",
+        "age_none": "还没有仅报告的数据：开启前看不到会拦到什么",
+        "consequence": "开启后，本组 {{members}} 人访问名单外的目的地会被拒绝，{{minutes}}内生效。可以随时改回仅报告。",
+        "cancel": "取消",
+        "confirm": "开启白名单",
+        "stale": "状态已被其他人修改，已重新载入"
+      },
+      "report": {
+        "crumb_label": "位置",
+        "crumb_root": "白名单分组",
+        "crumb_report": "本应拒绝的目的地",
+        "title_on": "{{group}} · 被拒绝的目的地",
+        "view_denied": "查看被拒记录",
+        "turn_on": "开启…",
+        "on_note": "本组已开启白名单。下面是开启前仅报告记下的目的地，之后不再增加；开启后的拒绝请看被拒记录。",
+        "range": "时间",
+        "day": "{{n}} 天",
+        "range_note": "受保留期限制，最多 {{days}} 天",
+        "edit_retention": "修改保留期",
+        "clamped": "保留期只有 {{days}} 天，已按 {{days}} 天显示",
+        "read_failed": "读取报告失败",
+        "kpi_sites": "本应拒绝的主域名",
+        "kpi_count": "次数",
+        "kpi_open": "未处理",
+        "kpi_lost": "未统计",
+        "lost_note": "节点上报有上限，报告可能漏了一些主域名；这是所有分组的合计",
+        "age_young": "仅报告刚开始 {{hours}} 小时，数据还少",
+        "age": "仅报告已 {{days}} 天",
+        "never": "本组没有仅报告的数据：开启前看不到会拦到什么",
+        "empty": "过去 {{days}} 天没有本应被拒绝的目的地",
+        "col_site": "主域名",
+        "site_help": "仅报告只记到主域名，看不到完整主机名和账号",
+        "site_help_label": "主域名的说明",
+        "col_count": "次数",
+        "col_last": "最近",
+        "select": "选择 {{site}}",
+        "add": "加入白名单",
+        "added": "已加入 · 下次下发后生效",
+        "ip_note": "客户端直接用 IP 连接，节点只记录为 (ip)；要放行请在名单里写 IP 段",
+        "edit_extra": "编辑补充列表",
+        "selected": "已选 {{n}} 个",
+        "add_to": "加到",
+        "add_n": "加入白名单（{{n}}）",
+        "extra_name": "{{group}} · 补充",
+        "snack_added_other": "已把 {{count}} 个主域名加入「{{list}}」，{{minutes}}内生效"
+      },
+      "enable_button": "启用白名单…"
     }
   }
 }

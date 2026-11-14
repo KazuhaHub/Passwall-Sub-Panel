@@ -219,6 +219,9 @@ describe('small decisions', () => {
     expect(needsFirstPublishConfirm({ policiesOn: 1, sourceRulesOn: 0 }, { turnsOn: true })).toBe(false)
     expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 1 }, { turnsOn: true })).toBe(false)
     expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0 }, { turnsOn: false })).toBe(false)
+    // An allowlist group in force is something enforced too: the fourth entry point is the enable dialog.
+    expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0, groupsOn: 1 }, { turnsOn: true })).toBe(false)
+    expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0, groupsOn: 0 }, { turnsOn: true })).toBe(true)
   })
 
   it('minutes come from the server, rounded up; unknown reads null', () => {

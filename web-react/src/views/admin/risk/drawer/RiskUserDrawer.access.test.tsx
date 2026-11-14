@@ -69,6 +69,13 @@ describe('the access tab', () => {
     expect(screen.getByText('未豁免')).toBeTruthy()
   })
 
+  it('names the allowlist the group is under, in the group words, and the unrestricted one by what it is', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(view({ group: { id: 2, name: 'Team A', state: 'report', state_changed_at: Date.now() - 3600_000, mode: 'allowlist', stage: null } }))
+    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    expect(await screen.findByText('白名单 · 仅报告 · 第 1 天')).toBeTruthy()
+    expect(screen.queryByText('不限')).toBeNull()
+  })
+
   it('host access opens on it', async () => {
     renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText('Team A')).toBeTruthy()

@@ -3,14 +3,14 @@ import {
   addDestException, createDestExemption, createDestList, createDestPolicy, deleteDestExemption, deleteDestList, deleteDestPolicy,
   editDestListEntries, getDestCatalog, getDestExemptions, getDestList, getDestLists, getDestPolicies, getDestSettings,
   getDestSourceRule, getDestSourceRules, getDestStatus, getDestUser, getGeositeCategories, getGeositeStatus,
-  getDestHits, instantiateDestTemplate, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
+  getDestGroup, getDestGroupReport, getDestGroups, getDestHits, instantiateDestTemplate, previewDestGroup, putDestGroup, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
   reorderDestPolicies, retryDestAgent, rollbackGeosite, setAuditCollect, setDestResolve, testDestination, updateDestExemption, updateDestList,
   updateDestPolicy, updateGeosite,
   type AuditCollect, type DestResolve, type DestAction, type DestExemptionInput, type DestHitsParams, type DestListInput, type DestPolicyInput,
-  type DestSettings, type DestSourceRuleInput, type DestState, type DestTestInput,
+  type DestGroupPut, type DestSettings, type DestSourceRuleInput, type DestState, type DestTestInput,
 } from '@/api/accessControl'
 import { destStatusActive, listsRefreshing } from '@/utils/accessControl'
-import { accessControlKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
+import { accessControlKeys, groupKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { freshness, policies } from './policies'
 import type { QueryScope } from './session'
 
@@ -21,7 +21,7 @@ import type { QueryScope } from './session'
 
 type Part =
   | 'status' | 'policies' | 'lists' | 'listDetails' | 'catalog' | 'exemptions' | 'sourceRules'
-  | 'geosite' | 'settings' | 'uiSettings' | 'hits' | 'users' | 'servers'
+  | 'geosite' | 'settings' | 'uiSettings' | 'hits' | 'users' | 'servers' | 'groups' | 'groupsPage'
 
 function invalidate(qc: QueryClient, scope: QueryScope, parts: Part[], extra: readonly (readonly unknown[])[] = []) {
   const k = accessControlKeys
@@ -39,6 +39,9 @@ function invalidate(qc: QueryClient, scope: QueryScope, parts: Part[], extra: re
     hits: [k.hitsAll(scope)],
     users: [k.usersAll(scope)],
     servers: [serverKeys.lists(scope)],
+    groups: [k.groupsAll(scope)],
+    // The groups page's list carries each group's `dest_state` badge.
+    groupsPage: [groupKeys.all(scope)],
   }
   return Promise.all([...parts.flatMap(p => keys[p]), ...extra].map(queryKey => qc.invalidateQueries({ queryKey })))
 }
@@ -178,6 +181,54 @@ export function useDestHits(scope: QueryScope, params: DestHitsParams, { enabled
   }))
 }
 
+export function destGroupsQuery(scope: QueryScope, enabled = true) {
+  return queryOptions({
+    queryKey: accessControlKeys.groups(scope),
+    queryFn: ({ signal }) => getDestGroups({ signal }),
+    enabled,
+    ...freshness(policies.destGroups),
+  })
+}
+
+/** Every group (the ones with no allowlist as `off`) with its nodes and, for a report-only group, what it would have denied. */
+export function useDestGroups(scope: QueryScope, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery(destGroupsQuery(scope, enabled))
+}
+
+/** One group with the readiness the turn-on dialog lists. */
+export function useDestGroup(scope: QueryScope, id: number | null, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery(queryOptions({
+    queryKey: accessControlKeys.group(scope, id ?? 0),
+    queryFn: ({ signal }) => getDestGroup(id as number, { signal }),
+    enabled: enabled && id !== null && id > 0,
+    // A confirmation reads it for the numbers it quotes: always fresh when it opens.
+    staleTime: 0,
+    gcTime: policies.destGroups.gcTime,
+  }))
+}
+
+/** What a save of this state and these lists would do, written nowhere. */
+export function useDestGroupPreview(scope: QueryScope, id: number | null, state: DestState, listIds: readonly number[], { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery(queryOptions({
+    queryKey: accessControlKeys.groupPreview(scope, id ?? 0, state, listIds),
+    queryFn: ({ signal }) => previewDestGroup(id as number, { state, list_ids: [...listIds] }, { signal }),
+    enabled: enabled && id !== null && id > 0,
+    placeholderData: keepPreviousData,
+    ...freshness(policies.destGroups),
+  }))
+}
+
+/** The destinations a report-only group would have denied, over `days` (the server clamps it to the retention). */
+export function useDestGroupReport(scope: QueryScope, id: number | null, days: number, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery(queryOptions({
+    queryKey: accessControlKeys.groupReport(scope, id ?? 0, days),
+    queryFn: ({ signal }) => getDestGroupReport(id as number, days || undefined, { signal }),
+    enabled: enabled && id !== null && id > 0,
+    placeholderData: keepPreviousData,
+    ...freshness(policies.destGroups),
+  }))
+}
+
 export function useDestSettings(scope: QueryScope, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery(queryOptions({
     queryKey: accessControlKeys.settings(scope),
@@ -237,7 +288,7 @@ export function useInstantiateDestTemplate(scope: QueryScope) {
 }
 
 /** Whatever a list write makes stale: the lists, their details, the policies that name them, the status. */
-const LIST_WRITE: Part[] = ['lists', 'listDetails', 'policies', 'status']
+const LIST_WRITE: Part[] = ['lists', 'listDetails', 'policies', 'status', 'groups']
 
 export function useCreateDestList(scope: QueryScope) {
   const qc = useQueryClient()
@@ -281,6 +332,20 @@ export function useRefreshDestList(scope: QueryScope) {
   })
 }
 
+/**
+ * A group's allowlist state and lists, from any state to any other. It moves the
+ * group reads, the status the verdict reads, the policies' group list and budget,
+ * the lists' used-by marks and the groups page's badge.
+ */
+export function usePutDestGroup(scope: QueryScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: DestGroupPut }) => putDestGroup(id, input),
+    // Settled either way: a stale or refused write leaves the screen holding an old copy.
+    onSettled: () => invalidate(qc, scope, ['groups', 'status', 'policies', 'lists', 'listDetails', 'groupsPage']),
+  })
+}
+
 export function useSaveDestExemption(scope: QueryScope) {
   const qc = useQueryClient()
   return useMutation({
@@ -311,7 +376,7 @@ export function useSaveDestSettings(scope: QueryScope) {
   return useMutation({
     mutationFn: (changed: Partial<DestSettings>) => putDestSettings(changed),
     // The refresh interval is quoted on the lists, the retention under the hit records, and the system settings record holds the same keys.
-    onSettled: () => invalidate(qc, scope, ['settings', 'status', 'lists', 'policies', 'hits', 'users', 'uiSettings']),
+    onSettled: () => invalidate(qc, scope, ['settings', 'status', 'lists', 'policies', 'hits', 'users', 'groups', 'uiSettings']),
   })
 }
 

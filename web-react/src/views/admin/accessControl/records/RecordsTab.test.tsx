@@ -79,6 +79,15 @@ afterEach(() => { useSiteStore.setState({ timezone: '' }) })
 
 const lastParams = () => vi.mocked(api.getDestHits).mock.calls.at(-1)![0]!
 
+describe('an allowlist group as the rule', () => {
+  it('is a filter by its name, and a link to its source is understood', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ sources: [{ source: 'g2', name: 'Guests' }, { source: 'g8', name: null }] }))
+    renderAccess(ui, { route: `${route}&rec_source=g2` })
+    expect(await screen.findByText('白名单 · Guests')).toBeTruthy()
+    expect(lastParams().source).toBe('g2')
+  })
+})
+
 describe('the metric tiles', () => {
   it('count the whole time / account / node selection; the first two filter by action, the third only counts', async () => {
     const { router } = renderAccess(ui, { route })

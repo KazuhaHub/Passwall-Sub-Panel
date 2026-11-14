@@ -27,6 +27,7 @@ import {
   TextField,
   Typography,
   alpha,
+  useMediaQuery,
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
@@ -34,7 +35,9 @@ import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
-import { Link as RouterLink } from 'react-router'
+import { Link as RouterLink, useSearchParams } from 'react-router'
+import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
+import GroupDestinationTab from './groups/GroupDestinationTab'
 import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
@@ -197,6 +200,9 @@ export default function GroupsView() {
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
+  const canAccess = useCan('access.view')
+  const phone = useMediaQuery(theme.breakpoints.down('sm'))
+  const [urlParams, setUrlParams] = useSearchParams()
 
   const [search, setSearch] = useState('')
   const qScope = useQueryScope()
@@ -219,7 +225,7 @@ export default function GroupsView() {
   const [editing, setEditing] = useState<Group | null>(null)
   // Group detail is tabbed: Node access (tag filter) / Policies (require_2fa +
   // per-group overrides) / Members. Reset to 'access' on every open.
-  const [dlgTab, setDlgTab] = useState<'access' | 'policies' | 'members'>('access')
+  const [dlgTab, setDlgTab] = useState<'access' | 'policies' | 'members' | 'destination'>('access')
   // Per-group setting overrides shown in the Policies tab (null while loading /
   // on create — overrides apply only to an existing group).
   const [scope, setScope] = useState<ScopeState | null>(null)
@@ -341,6 +347,21 @@ export default function GroupsView() {
     setDialogOpen(true)
     void loadScope(g.id)
   }
+
+  // A link from the access-control page (`?edit=<id>&dtab=destination`): open that group on that tab once the
+  // list is read, then drop the two params so a reload or Back does not open it again.
+  useEffect(() => {
+    const id = Number(urlParams.get('edit'))
+    if (!id || items.length === 0) return
+    const g = items.find(x => x.id === id)
+    if (g && canConfig) {
+      openEdit(g)
+      if (urlParams.get('dtab') === 'destination' && canAccess) setDlgTab('destination')
+    }
+    setUrlParams(prev => { const out = new URLSearchParams(prev); out.delete('edit'); out.delete('dtab'); return out }, { replace: true })
+    // openEdit is a plain function of this render; this runs when the list arrives with the params present.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, urlParams.get('edit')])
 
   async function loadScope(groupId: number) {
     try {
@@ -636,7 +657,14 @@ export default function GroupsView() {
                         disabled={!canSelect}
                       />
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>{g.name}</TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>
+                      {g.name}
+                      {g.dest_state && g.dest_state !== 'off' && (
+                        <Box component="span" sx={{ ml: 1, verticalAlign: 'middle' }}>
+                          <StateBadge scope="group-badge" state={g.dest_state} day={null} />
+                        </Box>
+                      )}
+                    </TableCell>
                     <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{g.slug}</TableCell>
                     <TableCell>{tagFilterCell(g)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{g.members}</TableCell>
@@ -678,8 +706,9 @@ export default function GroupsView() {
         open={dialogOpen}
         onClose={() => !busy && setDialogOpen(false)}
         slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '90vw' } }
+          paper: { sx: { borderRadius: phone ? 0 : 3, bgcolor: md.surfaceContainerHigh, ...(phone ? {} : { width: 600, maxWidth: '90vw' }) } }
         }}
+        fullScreen={phone}
       >
         <DialogTitle>
           {editing ? t('admin:groups.edit_title') : t('admin:groups.create')}
@@ -703,6 +732,7 @@ export default function GroupsView() {
             <Tabs
               value={dlgTab}
               onChange={(_, v) => setDlgTab(v)}
+              variant="scrollable" allowScrollButtonsMobile
               sx={{ minHeight: 40, borderBottom: `1px solid ${md.outlineVariant}` }}
             >
               <Tab value="access" sx={{ minHeight: 40 }}
@@ -713,7 +743,15 @@ export default function GroupsView() {
                 <Tab value="members" sx={{ minHeight: 40 }}
                   label={t('admin:groups.tabs.members', { defaultValue: '成员' })} />
               )}
+              {canAccess && (
+                <Tab value="destination" sx={{ minHeight: 40 }}
+                  label={t('admin:groups.tabs.destination', { defaultValue: '目的地' })} />
+              )}
             </Tabs>
+
+            {dlgTab === 'destination' && canAccess && (
+              <GroupDestinationTab groupId={editing?.id ?? null} onLeave={() => setDialogOpen(false)} />
+            )}
 
             {dlgTab === 'access' && (
               <>

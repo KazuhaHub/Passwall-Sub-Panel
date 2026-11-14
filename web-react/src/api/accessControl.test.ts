@@ -77,3 +77,57 @@ describe('the hostname-matching setting', () => {
     expect(r.notes).toEqual(['hostname_needs_resolution'])
   })
 })
+
+describe('the allowlist groups API', () => {
+  it('reads every group, with the nil arrays of a group that is off made []', async () => {
+    http.get.mockResolvedValueOnce(ok({
+      items: [{
+        group_id: 3, group_name: 'Guests', state: 'off', list_ids: null, lists: null, ineligible: null, pending_nodes: null,
+        not_ready_lists: null, would_deny_recent: null, denied_24h: null, updated_at: null,
+      }],
+    }))
+    const r = await api.getDestGroups()
+    expect(http.get).toHaveBeenLastCalledWith('/admin/dest/groups', expect.anything())
+    expect(r[0]).toMatchObject({ list_ids: [], lists: [], ineligible: [], pending_nodes: [], not_ready_lists: [], would_deny_recent: null })
+    http.get.mockResolvedValueOnce(ok({ items: null }))
+    expect(await api.getDestGroups()).toEqual([])
+  })
+
+  it('one group carries its readiness, nulls made []', async () => {
+    http.get.mockResolvedValueOnce(ok({ group_id: 3, lists: null, readiness: { not_ready_lists: null, top_sites: null } }))
+    const g = await api.getDestGroup(3)
+    expect(http.get).toHaveBeenLastCalledWith('/admin/dest/groups/3', expect.anything())
+    expect(g.readiness.not_ready_lists).toEqual([]); expect(g.readiness.top_sites).toEqual([])
+  })
+
+  it('PUT sends the state and the lists, and base_hosts only when given', async () => {
+    http.put.mockResolvedValue(ok({ group_id: 3, lists: null }))
+    await api.putDestGroup(3, { state: 'report', list_ids: [1, 2], base_hosts: ['dns.example'] })
+    expect(http.put).toHaveBeenLastCalledWith('/admin/dest/groups/3', { state: 'report', list_ids: [1, 2], base_hosts: ['dns.example'] }, expect.anything())
+    await api.putDestGroup(3, { state: 'on', list_ids: [1], updated_at: 99 })
+    expect(http.put).toHaveBeenLastCalledWith('/admin/dest/groups/3', { state: 'on', list_ids: [1], updated_at: 99 }, expect.anything())
+  })
+
+  it('the preview carries the state and the comma-joined lists, nulls made []', async () => {
+    http.get.mockResolvedValueOnce(ok({ members: 5, ineligible: null, nodes_lost: null, not_ready_lists: null, base_hosts: null, base_hosts_source: 'none', would_deny_recent: { days: 7, sites: 1, count: 2, top: null } }))
+    const p = await api.previewDestGroup(3, { state: 'report', list_ids: [1, 2] })
+    expect(http.get).toHaveBeenLastCalledWith('/admin/dest/groups/3/preview', expect.objectContaining({ params: { state: 'report', list_ids: '1,2' } }))
+    expect(p).toMatchObject({ ineligible: [], nodes_lost: [], not_ready_lists: [], base_hosts: [] })
+    expect(p.would_deny_recent?.top).toEqual([])
+  })
+
+  it('the report asks for days only when given, nulls made []', async () => {
+    http.get.mockResolvedValueOnce(ok({ effective_days: 3, items: null, dropped_in_range: 0 }))
+    const r = await api.getDestGroupReport(3, 3)
+    expect(http.get).toHaveBeenLastCalledWith('/admin/dest/groups/3/report', expect.objectContaining({ params: { days: 3 } }))
+    expect(r.items).toEqual([])
+    http.get.mockResolvedValueOnce(ok({ effective_days: 7, items: null }))
+    await api.getDestGroupReport(3)
+    expect(http.get).toHaveBeenLastCalledWith('/admin/dest/groups/3/report', expect.objectContaining({ params: {} }))
+  })
+
+  it('a node status names the groups it dropped for weak sniffing, null made []', async () => {
+    http.get.mockResolvedValueOnce(ok({ nodes: [{ sniffing_insufficient: null, allowlist_groups: null, sniffing_groups_dropped: null }] }))
+    expect((await api.getDestStatus()).nodes[0].sniffing_groups_dropped).toEqual([])
+  })
+})

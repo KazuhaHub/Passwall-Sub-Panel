@@ -161,3 +161,19 @@ describe('report-only rules not deployed', () => {
     expect(screen.queryByTestId('node-report-not-deployed')).toBeNull()
   })
 })
+
+describe('NodePolicyStatusRow allowlist groups', () => {
+  it('names the groups the node applied', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ allowlist_groups: [{ id: 1, name: 'Guests' }, { id: 2, name: 'Dev' }] })} variant="row" now={NOW} />)
+    expect(screen.getByTestId('node-allowlist-groups').textContent).toBe('已下发的白名单分组：Guests、Dev')
+  })
+  it('says which groups were left out for weak sniffing, and that they apply on no inbound', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ sniffing_groups_dropped: [{ id: 1, name: 'Guests' }] })} variant="block" now={NOW} />)
+    expect(screen.getByTestId('node-groups-dropped').textContent).toBe('因入站的嗅探识别不出域名，这些分组没有下发：Guests。它们在本节点的所有入站上都不生效。')
+  })
+  it('says nothing when there are none, and tolerates a status without the field', () => {
+    renderAccess(<NodePolicyStatusRow node={{ ...node(), sniffing_groups_dropped: undefined } as unknown as DestNodeStatus} variant="row" now={NOW} />)
+    expect(screen.queryByTestId('node-allowlist-groups')).toBeNull()
+    expect(screen.queryByTestId('node-groups-dropped')).toBeNull()
+  })
+})

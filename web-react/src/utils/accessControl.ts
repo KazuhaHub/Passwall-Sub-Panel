@@ -372,10 +372,10 @@ export const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦'] as cons
 // ---------------------------------------------------------------------------
 
 export function needsFirstPublishConfirm(
-  current: { policiesOn: number; sourceRulesOn: number },
+  current: { policiesOn: number; sourceRulesOn: number; /** Allowlist groups whose state is not off. */ groupsOn?: number },
   change: { turnsOn: boolean },
 ): boolean {
-  return change.turnsOn && current.policiesOn === 0 && current.sourceRulesOn === 0
+  return change.turnsOn && current.policiesOn === 0 && current.sourceRulesOn === 0 && (current.groupsOn ?? 0) === 0
 }
 
 /** `ceil(apply_eta_ms / 60000)`; null when the server did not say (the copy then says "a few minutes"). */

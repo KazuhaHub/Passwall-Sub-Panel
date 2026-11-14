@@ -26,6 +26,7 @@ import {
 } from './accessParams'
 import { pauseConfirm, resumeConfirm } from './confirmCopy'
 import { reportDestError } from './destErrors'
+import AllowlistTab from './allowlist/AllowlistTab'
 import ListsTab from './lists/ListsTab'
 import ListEntriesSheet from './lists/ListEntriesSheet'
 import PoliciesTab from './policies/PoliciesTab'
@@ -38,6 +39,7 @@ import VerdictBar from './VerdictBar'
 const HELP_KEY: Record<AccessTab, string> = {
   policies: 'admin:access_control.help.policies',
   lists: 'admin:access_control.help.lists',
+  allowlist: 'admin:access_control.help.allowlist',
   records: 'admin:access_control.help.records',
 }
 
@@ -65,7 +67,7 @@ export default function AccessControlView() {
   // The help texts name tunables (the regexp cap, the apply window, the refresh interval); they are read, never written in.
   const policiesRead = useDestPolicies(scope, { enabled: canView })
   const listsRead = useDestLists(scope, { enabled: canView })
-  const settingsRead = useDestSettings(scope, { enabled: canView && (tab === 'policies' || tab === 'records') })
+  const settingsRead = useDestSettings(scope, { enabled: canView && (tab === 'policies' || tab === 'records' || tab === 'allowlist') })
   const pause = usePauseDest(scope)
   const publish = usePublishDest(scope)
   const pendingEdit = useRef<number | null>(null)
@@ -84,6 +86,14 @@ export default function AccessControlView() {
     out.set('tab', next)
     return out
   }, { replace: true, state })
+
+  /** The rail's step and a group's badge: the allowlist tab, on a group's card when one is named. */
+  const openAllowlist = (groupId?: number) => setParams(prev => {
+    const out = new URLSearchParams(prev)
+    out.set('tab', 'allowlist')
+    if (groupId) out.set('al_group', String(groupId))
+    return out
+  }, { replace: true })
 
   const openListDialog = (id: number) => setParams(prev => {
     const out = new URLSearchParams(prev)
@@ -203,23 +213,30 @@ export default function AccessControlView() {
                 sx={{ flex: 1, minWidth: 0 }}>
                 <Tab value="policies" label={t('admin:access_control.tab_policies')} />
                 <Tab value="lists" label={t('admin:access_control.tab_lists')} />
+                <Tab value="allowlist" label={t('admin:access_control.tab_allowlist')} />
                 <Tab value="records" label={t('admin:access_control.tab_records')} />
               </Tabs>
               <HelpTip textKey={HELP_KEY[tab]} labelKey="admin:access_control.help.label" textValues={{
                 max_regexps: policiesRead.data?.budget.regexps.limit ?? '…',
                 seconds: settingsRead.data?.effective.dest_policy_apply_min_seconds ?? '…',
                 hours: listsRead.data?.refresh_hours ?? '…',
-                days: settingsRead.data?.effective.dest_hit_retention_days ?? '…',
+                days: tab === 'allowlist'
+                  ? settingsRead.data?.effective.dest_trial_retention_days ?? '…'
+                  : settingsRead.data?.effective.dest_hit_retention_days ?? '…',
               }} />
             </Box>
             {/* Only the open tab mounts, so only its reads are made. */}
             {tab === 'policies' && (
-              <PoliciesTab onOpenExemptions={() => sheet.open('exemptions')} onOpenSettings={openSettings}
+              <PoliciesTab onOpenExemptions={() => sheet.open('exemptions')} onOpenSettings={openSettings} onOpenAllowlist={openAllowlist}
                 onGoToLists={open => setTab('lists', open ? { openList: open } : undefined)} />
             )}
             {tab === 'records' && (
               <RecordsTab onOpenUser={id => account.open(id)} onTestDestination={target => sheet.open('test', { prefill: { target } })}
                 onOpenSettings={openSettings} onOpenNodes={() => sheet.open('nodes')} onGoToPolicies={() => setTab('policies')} />
+            )}
+            {tab === 'allowlist' && (
+              <AllowlistTab onOpenEntries={id => sheet.open('list', { extra: { list: String(id) } })} onOpenNodes={() => sheet.open('nodes')}
+                onOpenSettings={openSettings} onTestDestination={target => sheet.open('test', { prefill: { target } })} />
             )}
             {tab === 'lists' && (
               <ListsTab onOpenEntries={id => sheet.open('list', { extra: { list: String(id) } })} onOpenSettings={openSettings}

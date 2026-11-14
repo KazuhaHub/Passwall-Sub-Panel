@@ -316,6 +316,8 @@ export interface Group {
   traffic_limit_gb?: number | null
   ip_limit?: number | null
   device_limit?: number | null
+  /** The group's allowlist state (read-only here; staff may read it, never the lists). Absent from an older server. */
+  dest_state?: 'off' | 'report' | 'on'
   members: number
 }
 
