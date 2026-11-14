@@ -881,6 +881,15 @@ func (s *Service) checkNodes(ctx context.Context, report *Report, cache map[inbo
 			continue
 		}
 		entry, present := cache[inboundCacheKey{panelID: n.PanelID, inboundID: n.InboundID}]
+		if !present && s.panelIsNative(n.PanelID) {
+			// A native panel's inbound list is the agent's report, which omits a
+			// node whose config object is not applied yet or whose apply failed
+			// (a port conflict, a missing counter). That is "not applied": the node's
+			// config_sync_state stays pending until the agent confirms it. It is
+			// never "the inbound was deleted": PSP owns the inbound, and disabling
+			// the node would be permanent because the config intent carries Enabled.
+			continue
+		}
 		if !present {
 			if n.Enabled {
 				n.Enabled = false
@@ -1132,4 +1141,16 @@ func levelName(l Level) string {
 		return "full"
 	}
 	return "light"
+}
+
+// panelIsNative reports whether the panel applies asynchronously (a native
+// Passwall Node panel), whose inbound list is the agent's report rather than a
+// live read of an upstream panel.
+func (s *Service) panelIsNative(panelID int64) bool {
+	c, err := s.pool.Get(panelID)
+	if err != nil {
+		return false
+	}
+	async, ok := c.(ports.AsynchronousApplier)
+	return ok && async.ApplyIsAsynchronous()
 }

@@ -64,6 +64,14 @@ func (s *Service) ensureInboundDeletable(ctx context.Context, panelID int64, inb
 	if err != nil {
 		return err
 	}
+	// A native panel has no unmanaged clients: PSP owns the whole inbound and the
+	// agent deploys it from PSP's desired config, so there is nothing to protect.
+	// Its GetInbound answers from the agent's last full report, which has no entry
+	// for a node the agent has not reported yet (or no report at all), and reading
+	// it here would make such a node undeletable.
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		return nil
+	}
 	in, err := c.GetInbound(ctx, inboundID)
 	if err != nil {
 		return err
