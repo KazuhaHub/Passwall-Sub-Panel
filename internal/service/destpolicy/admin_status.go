@@ -404,6 +404,11 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		default:
 			ns.State = "applied"
 		}
+		if ns.State == "none" || ns.State == "paused" {
+			// The node runs no policy. The record of what it last applied is kept
+			// for a fallback, but it is not what the node runs now.
+			ns.AllowlistGroups, ns.AppliedRules = []AllowlistGroupRef{}, 0
+		}
 		v.Nodes = append(v.Nodes, ns)
 		v.Totals[ns.State]++
 	}
