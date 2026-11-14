@@ -4,9 +4,9 @@
 > 本批提供：自定义列表、远程列表、v2fly geosite 分类、内置规则组目录、按分组 / 按节点限定范围的拦截与放行策略、
 > 豁免账号、按入站的来源国家 / 来源 IP 段拒绝、测试目的地、发布与回退，以及状态页所需的全部接口。
 > 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。**命中记录**（A 档）随第二批上线：
-> 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**用量（B 档）、白名单分组、sing-box 采集** 在后续批次。
+> 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**用量（B 档）、白名单分组的接口与界面、sing-box 采集** 在后续批次（白名单分组的数据模型与编译见 §3.2）。
 >
-> 线上协议见 Passwall-Protocol `v0.3.0`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
+> 线上协议见 Passwall-Protocol `v0.4.1`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
 > [psp-node-agent.md](psp-node-agent.md) §11。
 
 ## 1. 行为一句话
@@ -36,7 +36,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 | 2 | 豁免（`Exempt` 字段，不是规则） | 命中即放行 |
 | 2.5 | 节点内置：尾随点域名拦截 | 策略里**有拦截规则带域名**时，节点自己加一条规则拦截以 `.` 结尾的主机名（Xray：`regexp:\.$` → blocked，ruleTag `psp-trailing-dot`）。PSP 不下发它 |
 | 3 | 拦截策略（`p<id>`，`block`，按 priority） | |
-| 4 | 白名单分组（`g<gid>…`） | 后续批次 |
+| 4 | 白名单分组（`g<gid>x1`、`g<gid>x2`、`g<gid>`；状态 `report` / `on`） | 见 §3.2。排在拦截策略之后、仅报告之前 |
 | 5 | 仅报告（`observe`，`p*` 与 `s*`；先来源规则，再策略） | 状态为 `report` 的拦截策略与来源规则。**永远不改变判定**：它排在所有开启的规则之后，只会命中「本来就会放行」的连接 |
 | — | 无命中 | 放行（核心默认出站） |
 
@@ -53,6 +53,17 @@ config ETag 不变，core 不会因为升级面板而重启。
 - 代价：已经被前面「开启」的规则拦掉、或被「放行」放过的连接，不会出现在仅报告的统计里。这是对的：它们的结果与这条策略无关。
 - `observe` 行在记录里表示「**本应拦截**」：连接被放行了。它不计入风险信号 `dest_block`（只数真正的 `block`）。
 - 仅报告的策略与开启的策略一样，带域名或协议时需要入站嗅探，预检同样适用；回退到 LKG 时，状态改变了的规则（开启 ↔ 仅报告）视为不同的规则，被修剪掉（只放宽、不收紧）。
+
+### 3.2 白名单分组（编译，数据模型与编译已就绪，接口与界面在后续批次）
+
+- 状态存在分组自己的行上（`groups_` 表的可空列，见 §5），`off` / `report` / `on`，NULL 等于 `off`；没有任何分组设置时，快照字节、下发给节点的策略字节与升级前逐字节相同（`TestCompile_NoGroupsIsByteIdentical`）。
+- 每个面板上，状态不是 `off` 且本面板 roster 里有组员 M 的分组，按分组号升序输出三条规则，Subjects 都是 M：`g<gid>x1`（allow：`list_ids` 里已就绪列表的域名与 CIDR）、`g<gid>x2`（allow：基础放行列表加补充列表）、`g<gid>`（catch-all：`on` 为 block，`report` 为 observe）。x1 或 x2 没有内容就不输出；M 为空整组不输出。未就绪的列表不贡献内容。
+- **只给声明了 `policy.destination.groups.v1` 的节点输出**（旧的 sing-box 节点会让「全局 BT 拦截」被分组放行绕过）。能力的增减是新的策略（编译键含它）。
+- `report` 永不改变判定：x1、x2 只放行本来就放行的连接，catch-all 只记录（`TestReport_GroupReportNeverChangesAVerdict`）。代价（A10）：组员的流量命中分组规则后终止，不会再落到阶段 5 的仅报告策略上，那部分的记录会偏少。
+- 一个组员在三条规则里各占一个 subject，所以每台节点每个分组约 3×成员数；`MaxPolicySubjects = 50 000`，单面板白名单组员上限约 16 000，超出走 `over_limit`。每节点超额按「该面板 tags 选中的组员数 × 该组规则条数」计，不按 roster 计，否则组员因不合格被移出 roster 后会在额度内外振荡。
+- 上界（发布前校验）用每组一个合成 subject 把所有分组的规则与列表算进去；超额则发布被拒（`publish_error`）。
+- 仅报告的剪枝（`shedObserve` / `enforcedOnly`）把分组的规则当执行类，**永不剪掉**：只剪掉 catch-all 会留下没有 catch-all 的 member 规则，整份无效。试运行组需要的嗅探不足时，整份走嗅探回退。
+- 记录 LKG 时 `applied_groups` 写入 body 里出现 catch-all 的分组号；状态页 `allowlist_groups` 是 `[{id,name}]`。
 
 ## 4. 发布、编译与回退
 
@@ -107,7 +118,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 - **被拒**：节点上报 `rejected` 且摘要等于铸出的摘要时，置 `fallback_reason=rejected`、记下当时的 `published_generation` 与三个投递能力，
   并产生 issue `destination_policy_rejected`。节点报的是「嗅探不足」时，状态页显示 `sniffing` 并列出入站。
 - **回退内容** 是修剪过的 LKG，修剪**只放宽、不收紧**：已删除、已停用、范围已不含本面板的策略的规则去掉；来源规则只保留仍有来源规则的入站；
-  动作已改变的策略的规则去掉；Subjects 只保留当前 roster 里的账号，对分组范围的策略再限于该分组的**当前**成员（原来对所有人的规则收窄到成员），空了的规则去掉；Exempt 取 LKG 与当前豁免的并集（都限于 roster）；组规则（后续批次）全部去掉。没有 LKG 或修剪后为空 → nil。**修剪处理不了「列表条目被删」**：LKG 是展开后的明文条目，策略仍在、只是列表里去掉了几条时，回退版仍会继续拦截已被删除的条目，直到新版部署成功。读取 LKG 失败（数据库瞬时错误）时本次同步失败，不会把「无策略」当结果下发或缓存；**连续失败 3 次（或自第一次失败起满 5 分钟）后**回退为 nil（总能部署，roster 照常流动），记 issue `destination_policy_lkg_unreadable`，该结果不缓存，库恢复后下一次同步会重新读取。
+  动作已改变的策略的规则去掉；Subjects 只保留当前 roster 里的账号，对分组范围的策略再限于该分组的**当前**成员（原来对所有人的规则收窄到成员），空了的规则去掉；Exempt 取 LKG 与当前豁免的并集（都限于 roster）；分组规则只保留「节点声明了分组能力、该分组仍在生效且状态与 LKG 相同（catch-all 的线上动作相同：开启 ↔ 仅报告视为不同规则）」的，Subjects 取 LKG ∩ 当前组员 ∩ roster，空了整组删掉，所以修剪后每个分组仍满足「member 与 catch-all 的 subjects 相同」。LKG 是展开后的明文，名单条目的增删修剪不了（与策略相同）。没有 LKG 或修剪后为空 → nil。**修剪处理不了「列表条目被删」**：LKG 是展开后的明文条目，策略仍在、只是列表里去掉了几条时，回退版仍会继续拦截已被删除的条目，直到新版部署成功。读取 LKG 失败（数据库瞬时错误）时本次同步失败，不会把「无策略」当结果下发或缓存；**连续失败 3 次（或自第一次失败起满 5 分钟）后**回退为 nil（总能部署，roster 照常流动），记 issue `destination_policy_lkg_unreadable`，该结果不缓存，库恢复后下一次同步会重新读取。
 - **被拒的是回退本身**（回退用的是修剪后的 LKG，其摘要不同于记录的 `applied_sha256`；或换了 core 版本、LKG 里有新核心不再接受的写法）：只要被拒摘要等于「作为回退铸出」的摘要（铸出的与期望的不同；包括嗅探或超额时铸出的回退），就清空 LKG，回退目标为 nil，issue `destination_policy_lkg_rejected`，不再重铸。
   否则 PSP 会继续铸同一份被拒的 LKG，整份 config 永远部署不下去、roster 冻结。
 - 回退版本也要过同一个嗅探预检（LKG、修剪后的 LKG 都一样）：过不了就发 nil、保留 LKG 记录并记嗅探 issue，入站修好后再用——这不是节点拒绝，只是此刻无法应用。被拒的上下文还包括节点上报的 core 版本。
@@ -138,6 +149,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 | `xui_panels.audit_collect` | `varchar(16) NOT NULL DEFAULT 'hits'`，只对 `kind=psp` 有意义；整行 `Save` 不写它（更新分支 `Omit`），只有 `UpdateNativeMetadata` 写 |
 | `dest_policy_state` | 单行（id 1）：`generation`、`published_generation`、`first_unpublished_at`、`last_write_at`、`paused`、`geoip_sha256`、`geosite_release`、`publish_error` |
 | `dest_policy_snapshots` | 已发布快照的规范序列化，只保留最新一份 |
+| `groups_`（白名单列） | `dest_allowlist_state`（varchar(16)，NULL = off）、`dest_allowlist_list_ids`（text JSON）、`dest_allowlist_base_list_id`、`dest_allowlist_extra_list_id`、`dest_allowlist_state_changed_at`、`dest_allowlist_updated_at`（都可空，升级后为 NULL，text 列无 DEFAULT）。只有 dest 一侧的写入（`DestGroupAllowlistRepo`）改这几列，分组编辑不碰；写入带 `updated_at` 前置条件，并与 generation +1 同一事务。分组删除在同一事务里带走它自带的列表（`dest_lists.owner_group_id`），并在它有白名单或自带列表时推进 generation |
 | `dest_agent_policy` | 每个 agent 一行：期望 / 铸出 / 上报的摘要、`fallback_reason`、`rejected_generation`、`rejected_caps`、`over_limit`、`precheck_listeners`、LKG（`applied_sha256`、`applied_body`…） |
 
 三方言（SQLite、PostgreSQL、MySQL）都有测试；大列一律 `[]byte`，JSON 小列用 `text`，没有 `text` 列带 `DEFAULT`。

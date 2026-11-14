@@ -33,6 +33,8 @@ type base struct {
 	// Enforced and report-only groups are kept apart (see baseSource.report).
 	sources []baseSource
 	exempt  []int64
+	// groups are the allowlist groups in force, by group id.
+	groups []baseGroup
 
 	// policies and sourceNotes are what the status page says about each
 	// definition: which part could not be compiled and why.
@@ -72,6 +74,21 @@ type baseRule struct {
 	protocols []string
 	private   bool
 }
+
+// baseGroup is one allowlist group: what its members may reach (x1 the lists,
+// x2 the base and extra lists) and whether the rest is recorded (report) or
+// refused (on).
+type baseGroup struct {
+	id     int64
+	report bool
+	x1, x2 groupAllow
+}
+
+type groupAllow struct {
+	domains, cidrs []string
+}
+
+func (a groupAllow) empty() bool { return len(a.domains)+len(a.cidrs) == 0 }
 
 type baseSource struct {
 	nodes []int64
@@ -193,6 +210,25 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 		}
 	}
 
+	for _, g := range doc.Groups {
+		bg := baseGroup{id: g.ID, report: g.State == string(domain.DestStateReport)}
+		var err error
+		if bg.x1, err = s.groupAllowOf(ctx, b, lists, g.Lists); err != nil {
+			return nil, err
+		}
+		var own []int64
+		for _, id := range []int64{g.Base, g.Extra} {
+			if id > 0 {
+				own = append(own, id)
+			}
+		}
+		if bg.x2, err = s.groupAllowOf(ctx, b, lists, own); err != nil {
+			return nil, err
+		}
+		b.groups = append(b.groups, bg)
+	}
+	slices.SortFunc(b.groups, func(x, y baseGroup) int { return int(x.id - y.id) })
+
 	groups := map[string]*baseSource{}
 	for _, src := range doc.Sources {
 		var cidrs []string
@@ -233,6 +269,33 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 	}
 	slices.SortFunc(b.sources, func(x, y baseSource) int { return int(x.nodes[0] - y.nodes[0]) })
 	return b, nil
+}
+
+// groupAllowOf is the union of the entries of the given lists that are ready. A
+// list that is not (missing, not fetched, a category or database that is not
+// there) contributes nothing: it is not guessed at.
+func (s *Service) groupAllowOf(ctx context.Context, b *base, lists map[int64]*snapList, ids []int64) (groupAllow, error) {
+	var domains, cidrs []string
+	for _, id := range ids {
+		l := lists[id]
+		if l == nil || !l.Ready || l.Side != string(domain.DestSideDest) {
+			continue
+		}
+		exp, err := s.lists.Expand(ctx, &domain.DestList{ID: l.ID, Name: l.Name, Entries: []byte(l.Entries)})
+		switch {
+		case err == nil:
+		case errors.Is(err, destlist.ErrGeoIPUnavailable):
+			b.geoipUnavailable = true
+			continue
+		case errors.Is(err, destlist.ErrGeositeUnavailable):
+			continue
+		default:
+			return groupAllow{}, fmt.Errorf("destpolicy: expand list %d: %w", id, err)
+		}
+		domains = append(domains, exp.Domains...)
+		cidrs = append(cidrs, exp.CIDRs...)
+	}
+	return groupAllow{domains: sortedUnique(domains), cidrs: mergeCIDRStrings(cidrs)}, nil
 }
 
 func sortedUnique(in []string) []string {

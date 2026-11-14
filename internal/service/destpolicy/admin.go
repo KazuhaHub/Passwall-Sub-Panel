@@ -575,7 +575,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		view := nodeView{nodeIDs: map[int64]bool{}}
+		view := nodeView{nodeIDs: map[int64]bool{}, groupCap: true}
 		if in.InboundNodeID != 0 {
 			view.nodeIDs[in.InboundNodeID] = true
 		}
@@ -584,7 +584,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 			if err != nil {
 				return nil, err
 			}
-			view = nodeView{panelID: panelID, nodeIDs: map[int64]bool{}}
+			view = nodeView{panelID: panelID, nodeIDs: map[int64]bool{}, groupCap: true}
 			for _, n := range snap.Nodes {
 				if n != nil {
 					view.nodeIDs[n.ID] = true
@@ -597,7 +597,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 					view.users = append(view.users, c.Client.UserID)
 				}
 			}
-			if cb.base.needsGroups() {
+			if cb.base.needsGroups(true) {
 				if view.groupOf, err = a.Service.defs.GroupIDsByUserIDs(ctx, view.users); err != nil {
 					return nil, err
 				}

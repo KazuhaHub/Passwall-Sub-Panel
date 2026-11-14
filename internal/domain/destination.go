@@ -239,6 +239,36 @@ type DestSourceRule struct {
 	UpdatedAt time.Time
 }
 
+// DestAllowlist is the allowlist state of a group: off (no allowlist; the lists
+// are kept), report (members may go anywhere, what an allowlist would have
+// denied is recorded) or on (members may only reach what the lists and the base
+// and extra allowances name). Any state can be set from any other. It lives on
+// the group (nullable columns: NULL reads as the zero value, which is off).
+type DestAllowlist struct {
+	State DestState
+	// ListIDs are the lists the allowlist is made of; BaseListID and
+	// ExtraListID are the two lists the group owns (0: none yet): the base
+	// allowance every group needs, and what the admin adds from the records.
+	ListIDs     []int64
+	BaseListID  int64
+	ExtraListID int64
+	// StateChangedAt moves only when State does. UpdatedAt moves on every write
+	// of the allowlist and is the precondition of the next one (nil: never
+	// written).
+	StateChangedAt *time.Time
+	UpdatedAt      *time.Time
+}
+
+// DestGroupMode is one group's allowlist as the compiler reads it with the
+// other definitions.
+type DestGroupMode struct {
+	GroupID     int64
+	State       DestState
+	ListIDs     []int64
+	BaseListID  int64
+	ExtraListID int64
+}
+
 // DestPublishError is why the last publish was refused: kind is the limit that
 // was exceeded ("domains", "regexps", "cidrs", "source_cidrs", "rules",
 // "bytes", ...) with how much was used against what limit, or "invalid" with
@@ -463,6 +493,9 @@ type DestDefinitions struct {
 	Policies    []*DestPolicy
 	Exemptions  []*DestExemption
 	SourceRules []*DestSourceRule
+	// GroupModes are the allowlist groups, in group-id order (off ones too:
+	// the compiler publishes only those in force).
+	GroupModes []*DestGroupMode
 }
 
 // ErrDestTemplateExists is a built-in rule group added a second time. It is an

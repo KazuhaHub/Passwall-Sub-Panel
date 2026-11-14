@@ -274,7 +274,23 @@ type groupRow struct {
 	TrafficLimitBytes *int64
 	IPLimit           *int
 	DeviceLimit       *int
-	CreatedAt         time.Time
+	// The group's destination allowlist (see domain.DestAllowlist). Like the
+	// limits above these arrive NULL on an existing table, and NULL is off. The
+	// list ids are JSON in a text column, which has no default. Only the dest
+	// side writes them (DestGroupAllowlistRepo): a group edit does not.
+	DestAllowlistState          *string    `gorm:"column:dest_allowlist_state;size:16"`
+	DestAllowlistListIDs        *string    `gorm:"column:dest_allowlist_list_ids;type:text"`
+	DestAllowlistBaseListID     *int64     `gorm:"column:dest_allowlist_base_list_id"`
+	DestAllowlistExtraListID    *int64     `gorm:"column:dest_allowlist_extra_list_id"`
+	DestAllowlistStateChangedAt *time.Time `gorm:"column:dest_allowlist_state_changed_at"`
+	DestAllowlistUpdatedAt      *time.Time `gorm:"column:dest_allowlist_updated_at"`
+	CreatedAt                   time.Time
+}
+
+// groupAllowlistColumns are the columns only the dest side writes.
+var groupAllowlistColumns = []string{
+	"DestAllowlistState", "DestAllowlistListIDs", "DestAllowlistBaseListID", "DestAllowlistExtraListID",
+	"DestAllowlistStateChangedAt", "DestAllowlistUpdatedAt",
 }
 
 // "groups" is a reserved word in some MySQL versions; use groups_ to avoid quoting issues.
@@ -294,12 +310,13 @@ func (r *groupRow) toDomain() *domain.Group {
 			IPLimit:           r.IPLimit,
 			DeviceLimit:       r.DeviceLimit,
 		},
-		CreatedAt: r.CreatedAt,
+		DestAllowlist: r.destAllowlist(),
+		CreatedAt:     r.CreatedAt,
 	}
 }
 
 func groupFromDomain(g *domain.Group) *groupRow {
-	return &groupRow{
+	row := &groupRow{
 		ID:                g.ID,
 		Slug:              g.Slug,
 		Name:              g.Name,
@@ -312,6 +329,8 @@ func groupFromDomain(g *domain.Group) *groupRow {
 		DeviceLimit:       g.Limits.DeviceLimit,
 		CreatedAt:         g.CreatedAt,
 	}
+	row.setDestAllowlist(g.DestAllowlist)
+	return row
 }
 
 type nodeRow struct {

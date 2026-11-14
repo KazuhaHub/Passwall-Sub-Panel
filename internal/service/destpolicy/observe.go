@@ -3,6 +3,7 @@ package destpolicy
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 
@@ -62,7 +63,7 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 					if err != nil {
 						return nil, err
 					}
-					count, groups := len(pol.Rules), []int64{}
+					count, groups := len(pol.Rules), appliedGroupIDs(pol)
 					patch.AppliedSHA256, patch.AppliedBody, patch.AppliedAt = &status.Digest, &body, &now
 					patch.AppliedRuleCount, patch.AppliedGroups = &count, &groups
 					level := string(pol.Collect)
@@ -115,6 +116,18 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 		return nil, err
 	}
 	return issues, nil
+}
+
+// appliedGroupIDs are the groups whose catch-all is in the policy, ascending.
+func appliedGroupIDs(p *protocol.DestinationPolicy) []int64 {
+	ids := []int64{}
+	for _, r := range p.Rules {
+		if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' && r.CatchAll {
+			ids = append(ids, n)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 func (s *Service) paused(ctx context.Context) (bool, error) {

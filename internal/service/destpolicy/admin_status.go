@@ -81,15 +81,21 @@ type NodeState struct {
 	RulesDataVersion *string `json:"rules_data_version"`
 	// GeoIPUnavailable: a source rule of one of this node's inbounds could
 	// not be expanded for want of a GeoIP database and is not enforced.
-	GeoIPUnavailable bool    `json:"geoip_unavailable"`
-	AllowlistGroups  []int64 `json:"allowlist_groups"`
-	Hits24h          *int64  `json:"hits_24h"`
+	GeoIPUnavailable bool                `json:"geoip_unavailable"`
+	AllowlistGroups  []AllowlistGroupRef `json:"allowlist_groups"`
+	Hits24h          *int64              `json:"hits_24h"`
 	// ReportOnlyNotDeployed says why this node was sent the policy without its
 	// report-only rules: "sniffing" (an inbound's sniffing cannot supply what
 	// they need) or "limit" (they overrun the node's budget). Null when all
 	// deployed. Enforced rules are unaffected either way. It is the status-page
 	// face of the node issue destination_policy_report_only_not_deployed.
 	ReportOnlyNotDeployed *string `json:"report_only_not_deployed"`
+}
+
+// AllowlistGroupRef is an allowlist group a node runs.
+type AllowlistGroupRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // SniffView names an inbound whose sniffing cannot supply the policy's needs.
@@ -211,10 +217,25 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		rows[r.AgentID] = r
 	}
 
+	// A group's name is read once per status read, however many nodes apply it.
+	groupNames := map[int64]string{}
+	groupName := func(gid int64) string {
+		if name, ok := groupNames[gid]; ok {
+			return name
+		}
+		name := ""
+		if a.Groups != nil {
+			if g, err := a.Groups.GetByID(ctx, gid); err == nil && g != nil {
+				name = g.Name
+			}
+		}
+		groupNames[gid] = name
+		return name
+	}
 	for _, panel := range panels {
 		ns := NodeState{
 			PanelID: panel.ID, PanelName: panel.Name, Kind: string(domain.NormalizePanelKind(panel.Kind)),
-			Sniffing: []SniffView{}, AllowlistGroups: []int64{},
+			Sniffing: []SniffView{}, AllowlistGroups: []AllowlistGroupRef{},
 		}
 		agent := agentByPanel[panel.ID]
 		switch {
@@ -257,6 +278,9 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		}
 		ns.FallbackReason = string(row.FallbackReason)
 		ns.MintedAt, ns.AppliedAt, ns.AppliedRules = ms(row.MintedAt), ms(row.AppliedAt), row.AppliedRuleCount
+		for _, gid := range row.AppliedGroups {
+			ns.AllowlistGroups = append(ns.AllowlistGroups, AllowlistGroupRef{ID: gid, Name: groupName(gid)})
+		}
 		if row.OverLimit != "" {
 			var o domain.DestPublishError
 			if json.Unmarshal([]byte(row.OverLimit), &o) == nil {
