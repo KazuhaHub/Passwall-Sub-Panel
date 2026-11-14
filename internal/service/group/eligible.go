@@ -119,43 +119,69 @@ func (s *Service) panelCanEnforce(ctx context.Context, panelID int64) (bool, err
 }
 
 func (s *Service) readPanelCanEnforce(ctx context.Context, panelID int64) (bool, error) {
+	reason, err := s.PanelEnforceReason(ctx, panelID)
+	return reason == "" && err == nil, err
+}
+
+// Why a panel cannot enforce an allowlist group.
+const (
+	EnforceXUI        = "xui"
+	EnforceSUI        = "sui"
+	EnforceCapability = "capability"
+	EnforceOverLimit  = "over_limit"
+	EnforceRejected   = "rejected"
+	EnforceSniffing   = "sniffing"
+)
+
+// PanelEnforceReason is why a panel cannot enforce an allowlist group, "" when
+// it can: the answer Eligible gives, with its reason (the admin API tells an
+// administrator why a node is not open to the group). A failed read is an
+// error and never a verdict. It reads the panel, agent and policy rows each
+// call; Eligible is the cached hot path.
+func (s *Service) PanelEnforceReason(ctx context.Context, panelID int64) (string, error) {
 	panel, err := s.elig.Panels.GetByID(ctx, panelID)
 	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
+		return EnforceCapability, nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	if domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
-		return false, nil
+	switch domain.NormalizePanelKind(panel.Kind) {
+	case domain.PanelKindPSP:
+	case domain.PanelKindSUI:
+		return EnforceSUI, nil
+	default:
+		return EnforceXUI, nil
 	}
 	agent, err := s.elig.Agents.GetByPanelID(ctx, panelID)
 	if errors.Is(err, domain.ErrNotFound) {
-		return false, nil
+		return EnforceCapability, nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if !slices.Contains(agent.ObservedCapabilities, protocol.CapabilityDestinationPolicy) ||
 		!slices.Contains(agent.ObservedCapabilities, protocol.CapabilityDestinationGroups) {
-		return false, nil
+		return EnforceCapability, nil
 	}
 	meta, err := s.elig.Policies.GetMeta(ctx, agent.AgentID)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		// No delivery state yet: nothing was refused or over a limit.
 	case err != nil:
-		return false, err
-	case meta.FallbackReason == domain.DestFallbackRejected || meta.FallbackReason == domain.DestFallbackOverLimit:
-		return false, nil
+		return "", err
+	case meta.FallbackReason == domain.DestFallbackRejected:
+		return EnforceRejected, nil
+	case meta.FallbackReason == domain.DestFallbackOverLimit:
+		return EnforceOverLimit, nil
 	}
 	if domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine) != domain.NodeCoreXray {
 		// sing-box takes its sniff rule from the route, which the node writes.
-		return true, nil
+		return "", nil
 	}
 	nodes, err := s.listEnabledCached(ctx)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	for _, n := range nodes {
 		if n.PanelID != panelID || !n.Enabled || n.IsSeparator() {
@@ -166,10 +192,30 @@ func (s *Service) readPanelCanEnforce(ctx context.Context, panelID int64) (bool,
 		if err != nil || verdict == protocol.SniffInsufficient {
 			// A sniffing object that does not parse is as unusable as an
 			// insufficient one: the policy compile reports it the same way.
-			return false, nil
+			return EnforceSniffing, nil
 		}
 	}
-	return true, nil
+	return "", nil
+}
+
+// PanelsFor are the panels a group's tags select, by id: the ones with an
+// enabled inbound the filter matches.
+func (s *Service) PanelsFor(ctx context.Context, g *domain.Group) ([]int64, error) {
+	nodes, err := s.listEnabledCached(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int64]bool{}
+	var out []int64
+	for _, n := range nodes {
+		if n.IsSeparator() || seen[n.PanelID] || !Matches(n, g.TagFilter) {
+			continue
+		}
+		seen[n.PanelID] = true
+		out = append(out, n.PanelID)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // TagMatchedMembers counts the members of a group that a panel's tags select,

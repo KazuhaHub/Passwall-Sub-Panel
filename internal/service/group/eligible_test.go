@@ -35,6 +35,8 @@ type eligGroups struct {
 	counts  atomic.Int32
 }
 
+func (r *eligGroups) Delete(context.Context, int64) error { return nil }
+
 func (r *eligGroups) List(context.Context) ([]*domain.Group, error) { return r.groups, r.err }
 func (r *eligGroups) GetByID(_ context.Context, id int64) (*domain.Group, error) {
 	if r.err != nil {

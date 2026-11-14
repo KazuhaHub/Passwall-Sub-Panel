@@ -31,7 +31,7 @@ type ListStore interface {
 	SetFetchError(ctx context.Context, id int64, reason string) error
 	FindGeosite(ctx context.Context, category, attrs string) (*domain.DestList, error)
 	ApplyBatch(ctx context.Context, batch domain.DestListBatch) ([]int64, bool, error)
-	DeleteUnused(ctx context.Context, id int64) (using []int64, err error)
+	DeleteUnused(ctx context.Context, id int64) (using domain.DestListUse, err error)
 }
 
 // PolicyReader is what the list service needs of the policies: which lists are
@@ -40,6 +40,13 @@ type ListStore interface {
 type PolicyReader interface {
 	List(ctx context.Context) ([]*domain.DestPolicy, error)
 	UsingList(ctx context.Context, listID int64) ([]int64, error)
+}
+
+// GroupAllowlistReader reads the allowlist groups (sqlstore.DestGroupAllowlistRepo):
+// which of them hold a list, to say so in "used by" and to keep a list an "on"
+// group holds from being edited into one that is not ready.
+type GroupAllowlistReader interface {
+	List(ctx context.Context) ([]*domain.DestGroupAllowlistEntry, error)
 }
 
 // SourceRuleReader reads the per-node source rules, to know whether a GeoIP
@@ -71,8 +78,11 @@ type Deps struct {
 	Policies    PolicyReader
 	SourceRules SourceRuleReader
 	State       StateStore
-	Settings    SettingsReader
-	Locator     MMDBLocator
+	// Groups: nil, no group is known to hold a list (the list is then judged by
+	// the policies alone).
+	Groups   GroupAllowlistReader
+	Settings SettingsReader
+	Locator  MMDBLocator
 	// DataDir is the panel's data directory; geosite files live in
 	// <DataDir>/destlists.
 	DataDir string
@@ -92,6 +102,7 @@ type Service struct {
 	policies    PolicyReader
 	sourceRules SourceRuleReader
 	state       StateStore
+	groups      GroupAllowlistReader
 	settings    SettingsReader
 	doer        Doer
 	now         func() time.Time
@@ -139,7 +150,7 @@ func New(d Deps) *Service {
 		observe = func(string) {}
 	}
 	s := &Service{
-		lists: d.Lists, policies: d.Policies, sourceRules: d.SourceRules, state: d.State, settings: d.Settings,
+		lists: d.Lists, policies: d.Policies, sourceRules: d.SourceRules, state: d.State, groups: d.Groups, settings: d.Settings,
 		doer: doer, now: now, observe: observe, Countries: NewCountryExpander(d.Locator),
 	}
 	s.geo = geositeStore{
@@ -156,12 +167,49 @@ func New(d Deps) *Service {
 var ErrListInUse = fmt.Errorf("%w: dest list is in use by a policy", domain.ErrConflict)
 
 // ListInUseError names the policies that hold a list.
-type ListInUseError struct{ PolicyIDs []int64 }
+type ListInUseError struct{ PolicyIDs, GroupIDs []int64 }
 
 func (e *ListInUseError) Error() string {
-	return fmt.Sprintf("%v: policies %v", ErrListInUse, e.PolicyIDs)
+	return fmt.Sprintf("%v: policies %v, groups %v", ErrListInUse, e.PolicyIDs, e.GroupIDs)
 }
 func (e *ListInUseError) Unwrap() error { return ErrListInUse }
+
+// ErrListNotReady refuses a change that would leave a list an "on" allowlist
+// group holds not ready (HTTP 409 dest_list_not_ready): the allowlist would
+// deny everything the list names.
+var ErrListNotReady = domain.ErrDestListNotReady
+
+// ListNotReadyError names the lists that are not ready, and the groups that
+// hold them.
+type ListNotReadyError = domain.DestListNotReadyError
+
+// HoldsList reports whether the allowlist names list id: among its lists, or as
+// its base or extra list.
+func HoldsList(a domain.DestAllowlist, id int64) bool {
+	return a.BaseListID == id || a.ExtraListID == id || slices.Contains(a.ListIDs, id)
+}
+
+// requireReadyForOnGroups refuses l (as it would be saved) when it is not ready
+// and an "on" group holds it.
+func (s *Service) requireReadyForOnGroups(ctx context.Context, l *domain.DestList) error {
+	if l.Ready() || s.groups == nil {
+		return nil
+	}
+	entries, err := s.groups.List(ctx)
+	if err != nil {
+		return err
+	}
+	var groups []int64
+	for _, e := range entries {
+		if e.Allowlist.State == domain.DestStateOn && HoldsList(e.Allowlist, l.ID) {
+			groups = append(groups, e.GroupID)
+		}
+	}
+	if len(groups) > 0 {
+		return &ListNotReadyError{ListIDs: []int64{l.ID}, GroupIDs: groups}
+	}
+	return nil
+}
 
 func contentOf(p *Parsed, at time.Time) domain.DestListContent {
 	return domain.DestListContent{
@@ -320,6 +368,14 @@ func (s *Service) refreshRemote(ctx context.Context, l *domain.DestList) Refresh
 		}
 		return fail(RefreshFailed, err)
 	}
+	if p.EntryCount == 0 {
+		// A feed that went empty must not blank the list an "on" allowlist is made
+		// of (D5): the refresh fails and the previous entries stay.
+		now := s.now().UTC()
+		if err := s.requireReadyForOnGroups(ctx, &domain.DestList{ID: l.ID, Kind: l.Kind, LastFetchedAt: &now}); err != nil {
+			return fail(RefreshFailed, err)
+		}
+	}
 	changed, err := s.lists.UpdateContent(ctx, l.ID, contentOf(p, s.now()))
 	if err != nil {
 		return fail(RefreshFailed, err)
@@ -339,8 +395,8 @@ func (s *Service) DeleteList(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	if len(using) > 0 {
-		return &ListInUseError{PolicyIDs: using}
+	if using.Any() {
+		return &ListInUseError{PolicyIDs: using.PolicyIDs, GroupIDs: using.GroupIDs}
 	}
 	return nil
 }

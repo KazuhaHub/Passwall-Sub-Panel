@@ -891,8 +891,18 @@ func (s *Service) applyData(ctx context.Context, cur *dlcData, curMeta *GeositeM
 	if err != nil {
 		return nil, err
 	}
-	inUse, inForce := inForceOf(policies)
-	pre := ev.decide(inUse, inForce)
+	var groups []*domain.DestGroupMode
+	if s.groups != nil {
+		entries, err := s.groups.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			groups = append(groups, &domain.DestGroupMode{GroupID: e.GroupID, State: e.Allowlist.State, ListIDs: e.Allowlist.ListIDs, BaseListID: e.Allowlist.BaseListID, ExtraListID: e.Allowlist.ExtraListID})
+		}
+	}
+	inUse, inForce, groups := inForceOf(policies, groups)
+	pre := ev.decide(inUse, inForce, groups)
 	res := &GeositeUpdateResult{DryRun: dryRun, From: curMeta, To: to, Categories: ev.diffs(pre.used), Rejection: pre.rejection}
 	if dryRun {
 		return res, nil
@@ -959,8 +969,8 @@ func (s *Service) applyData(ctx context.Context, cur *dlcData, curMeta *GeositeM
 	changed, bumped, err := s.lists.ApplyBatch(ctx, domain.DestListBatch{
 		Contents: ev.contents,
 		Release:  to.Tag,
-		Decide: func(inUse map[int64]bool, inForce []*domain.DestPolicy) (map[int64]string, bool, error) {
-			final = ev.decide(inUse, inForce)
+		Decide: func(inUse map[int64]bool, inForce []*domain.DestPolicy, groups []*domain.DestGroupMode) (map[int64]string, bool, error) {
+			final = ev.decide(inUse, inForce, groups)
 			if final.rejection != nil {
 				return nil, false, &UpdateRejectedError{final.rejection}
 			}
@@ -1150,7 +1160,7 @@ func (s *Service) evaluate(ctx context.Context, cur, target *dlcData) (*evaluati
 }
 
 // inForceOf splits policies into those that are not off and the lists they use.
-func inForceOf(policies []*domain.DestPolicy) (map[int64]bool, []*domain.DestPolicy) {
+func inForceOf(policies []*domain.DestPolicy, groups []*domain.DestGroupMode) (map[int64]bool, []*domain.DestPolicy, []*domain.DestGroupMode) {
 	inUse := map[int64]bool{}
 	var inForce []*domain.DestPolicy
 	for _, p := range policies {
@@ -1162,14 +1172,27 @@ func inForceOf(policies []*domain.DestPolicy) (map[int64]bool, []*domain.DestPol
 			inUse[id] = true
 		}
 	}
-	return inUse, inForce
+	// The allowlist groups that are not off hold lists too.
+	var live []*domain.DestGroupMode
+	for _, g := range groups {
+		if g.State == domain.DestStateOff || g.State == "" {
+			continue
+		}
+		live = append(live, g)
+		for _, id := range append([]int64{g.BaseListID, g.ExtraListID}, g.ListIDs...) {
+			if id > 0 {
+				inUse[id] = true
+			}
+		}
+	}
+	return inUse, inForce, live
 }
 
 // decide judges applying the evaluated data beside these policies: a list in
 // force that cannot take the data refuses the update, one that is not in force
 // just records why, a custom list referencing a category whose entries changed
 // forces a republish, and the policies in force must still fit the wire's caps.
-func (ev *evaluation) decide(inUse map[int64]bool, inForce []*domain.DestPolicy) verdict {
+func (ev *evaluation) decide(inUse map[int64]bool, inForce []*domain.DestPolicy, groups []*domain.DestGroupMode) verdict {
 	v := verdict{notes: map[int64]string{}, used: map[string]bool{}}
 	ids := make([]int64, 0, len(ev.problems))
 	for id := range ev.problems {
@@ -1207,7 +1230,7 @@ func (ev *evaluation) decide(inUse map[int64]bool, inForce []*domain.DestPolicy)
 		}
 	}
 	if v.rejection == nil {
-		v.rejection = overLimit(inForce, ev.byID, ev.newEntries, ev.target)
+		v.rejection = overLimit(inForce, groups, ev.byID, ev.newEntries, ev.target)
 	}
 	if v.rejection != nil {
 		v.forceBump = false
@@ -1254,11 +1277,23 @@ func geositeRefs(entries []byte) []geositeRef {
 // destination domains, regexps and CIDRs; GeoIP countries and the per-node
 // subjects are the publisher's to count exactly. This is the guard that keeps
 // an update from being applied only to fail every publish after it.
-func overLimit(inForce []*domain.DestPolicy, byID map[int64]*domain.DestList, entries map[int64][]byte, target *dlcData) *UpdateRejection {
+func overLimit(inForce []*domain.DestPolicy, groups []*domain.DestGroupMode, byID map[int64]*domain.DestList, entries map[int64][]byte, target *dlcData) *UpdateRejection {
 	var domains, regexps, cidrs int
 	for _, p := range inForce {
 		cidrs += len(p.Inline.CIDRs)
 		for _, id := range p.ListIDs {
+			l := byID[id]
+			if l == nil || l.Side == domain.DestSideSource {
+				continue
+			}
+			d, r, c := countEntryKinds(entries[id], target)
+			domains, regexps, cidrs = domains+d, regexps+r, cidrs+c
+		}
+	}
+	// An allowlist group sends two allow rules over its lists (x1 the named
+	// lists, x2 the base and extra), as a policy does.
+	for _, g := range groups {
+		for _, id := range append([]int64{g.BaseListID, g.ExtraListID}, g.ListIDs...) {
 			l := byID[id]
 			if l == nil || l.Side == domain.DestSideSource {
 				continue

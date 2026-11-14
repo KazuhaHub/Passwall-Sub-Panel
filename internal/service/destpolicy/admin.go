@@ -46,6 +46,11 @@ type GroupLookup interface {
 	GetByID(ctx context.Context, id int64) (*domain.Group, error)
 }
 
+// GroupPanels is the panels a group's tags select.
+type GroupPanels interface {
+	PanelsFor(ctx context.Context, g *domain.Group) ([]int64, error)
+}
+
 // PanelLookup reads panels.
 type PanelLookup interface {
 	GetByID(ctx context.Context, id int64) (*domain.XUIPanel, error)
@@ -83,12 +88,16 @@ type AdminDeps struct {
 	Lists    ListReader
 	Counter  GroupCounter
 	Groups   GroupLookup
-	Panels   PanelLookup
-	Nodes    NodeLookup
-	Clients  ClientLookup
-	Agents   AgentLister
-	Desired  DesiredReader
-	Settings SettingsReader
+	// GroupPanels says which panels a group's tags select (group.Service): the
+	// subject limit is per node, so an allowlist group counts on its own panels.
+	// Nil: every group is counted on one node, which is the upper bound.
+	GroupPanels GroupPanels
+	Panels      PanelLookup
+	Nodes       NodeLookup
+	Clients     ClientLookup
+	Agents      AgentLister
+	Desired     DesiredReader
+	Settings    SettingsReader
 	// Hits counts the hits each panel produced recently (sqlstore.DestHitRepo).
 	// Nil: hits_24h is null.
 	Hits HitCounter
@@ -325,7 +334,17 @@ const budgetTTL = 10 * time.Second
 // when it has none). A refused hypothetical save is what the 400 over-limit
 // answers carry; the stored figure is what the lists page shows.
 func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, error) {
-	if hypo == nil {
+	return a.budget(ctx, hypo, GroupHypo{})
+}
+
+// BudgetWithGroup is Budget with an allowlist group saved as hypothesised.
+func (a *Admin) BudgetWithGroup(ctx context.Context, h GroupHypo) (*Budget, error) {
+	return a.budget(ctx, nil, h)
+}
+
+func (a *Admin) budget(ctx context.Context, hypo *domain.DestPolicy, gh GroupHypo) (*Budget, error) {
+	cacheable := hypo == nil && gh.Mode == nil
+	if cacheable {
 		a.budgetMu.Lock()
 		cached, gen, at := a.budgetCache, a.budgetGen, a.budgetAt
 		a.budgetMu.Unlock()
@@ -348,6 +367,11 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 			defs.Policies = append(defs.Policies, hypo)
 		}
 	}
+	if gh.Mode != nil {
+		defs.GroupModes = slices.DeleteFunc(slices.Clone(defs.GroupModes), func(m *domain.DestGroupMode) bool { return m.GroupID == gh.Mode.GroupID })
+		defs.GroupModes = append(defs.GroupModes, gh.Mode)
+		defs.Lists = append(slices.Clone(defs.Lists), gh.Lists...)
+	}
 	st, err := a.Service.state.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -362,6 +386,16 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 		usage = usageOf(p)
 	}
 	usage.Subjects = len(doc.Exempt)
+	// The allowlist groups: each member once per rule the group has on a node
+	// (the upper bound has no roster, so its synthetic subjects are not counted).
+	groupRules := map[int64]int{}
+	if p := b.assemble(nodeView{bound: true}); p != nil {
+		for _, r := range p.Rules {
+			if kind, gid, ok := ruleOrigin(r.ID); ok && kind == 'g' {
+				groupRules[gid]++
+			}
+		}
+	}
 	if a.Counter != nil {
 		counts, err := a.Counter.CountUsersByGroup(ctx)
 		if err != nil {
@@ -376,9 +410,38 @@ func (a *Admin) Budget(ctx context.Context, hypo *domain.DestPolicy) (*Budget, e
 				}
 			}
 		}
+		// The limit is per node: a group counts on the panels its tags select, and
+		// the figure is the busiest panel's.
+		perPanel, flat := map[int64]int{}, 0
+		for gid, n := range groupRules {
+			members := counts[gid] * n
+			if a.GroupPanels == nil || a.Groups == nil {
+				flat += members
+				continue
+			}
+			g, err := a.Groups.GetByID(ctx, gid)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			panels, err := a.GroupPanels.PanelsFor(ctx, g)
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range panels {
+				perPanel[p] += members
+			}
+		}
+		busiest := flat
+		for _, n := range perPanel {
+			busiest = max(busiest, n)
+		}
+		usage.Subjects += busiest
 	}
 	out := budgetOf(usage)
-	if hypo == nil {
+	if cacheable {
 		a.budgetMu.Lock()
 		a.budgetCache, a.budgetGen, a.budgetAt = out, defs.Generation, a.Now()
 		a.budgetMu.Unlock()
@@ -395,6 +458,11 @@ func (a *Admin) CheckBudget(ctx context.Context, hypo *domain.DestPolicy) error 
 	if err != nil {
 		return err
 	}
+	return b.over()
+}
+
+// over is the first limit the budget passes, as the API answers it.
+func (b *Budget) over() error {
 	for _, c := range []struct {
 		kind string
 		item BudgetItem
@@ -497,15 +565,18 @@ type TestStep struct {
 	// Step is the 1-based position.
 	Step   int    `json:"step"`
 	RuleID string `json:"rule_id,omitempty"`
-	// Kind is "source", "allow", "block", "exempt" or "builtin".
+	// Kind is "source", "allow", "block", "group" (one of an allowlist group's
+	// rules), "exempt" or "builtin".
 	Kind string `json:"kind"`
 	// ReportOnly is true on a step whose rule is report-only (a policy or a
 	// source rule in the report state): the step records, and a hit on it does
 	// not block. Kind stays what the rule is (block, allow, source).
-	ReportOnly bool   `json:"report_only"`
-	PolicyID   int64  `json:"policy_id,omitempty"`
-	NodeID     int64  `json:"node_id,omitempty"`
-	Name       string `json:"name,omitempty"`
+	ReportOnly bool  `json:"report_only"`
+	PolicyID   int64 `json:"policy_id,omitempty"`
+	NodeID     int64 `json:"node_id,omitempty"`
+	// GroupID is the allowlist group a "group" step belongs to.
+	GroupID int64  `json:"group_id,omitempty"`
+	Name    string `json:"name,omitempty"`
 	// Result is "hit", "miss", "untestable", "shadowed" or "skipped".
 	Result  string `json:"result"`
 	Entry   string `json:"entry,omitempty"`
@@ -666,6 +737,9 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		default:
 			info := stepInfo(names, s.RuleID)
 			step.Kind, step.ReportOnly, step.PolicyID, step.NodeID, step.Name = info.Kind, info.ReportOnly, info.PolicyID, info.NodeID, info.Name
+			if info.Kind == "group" {
+				step.GroupID, step.Name = info.GroupID, a.groupName(ctx, info.GroupID)
+			}
 		}
 		res.Steps = append(res.Steps, step)
 	}
@@ -674,3 +748,38 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 	}
 	return res, nil
 }
+
+// GroupHypo is an allowlist group as it would be after a save: its state and
+// lists, and the lists that do not exist yet (a new group's own), under ids the
+// store has not assigned.
+type GroupHypo struct {
+	Mode  *domain.DestGroupMode
+	Lists []*domain.DestList
+}
+
+// CheckGroupBudget refuses a group save that would put the definitions over a
+// limit (dest_policy_over_limit), as CheckBudget does for a policy.
+func (a *Admin) CheckGroupBudget(ctx context.Context, h GroupHypo) error {
+	b, err := a.BudgetWithGroup(ctx, h)
+	if err != nil {
+		return err
+	}
+	return b.over()
+}
+
+// groupName is an allowlist group's name for a trace ("" when it cannot be read:
+// a trace is not refused for a name).
+func (a *Admin) groupName(ctx context.Context, gid int64) string {
+	if a.Groups == nil {
+		return ""
+	}
+	if g, err := a.Groups.GetByID(ctx, gid); err == nil && g != nil {
+		return g.Name
+	}
+	return ""
+}
+
+// GroupBudgetPerPanel reports whether the budget counts a group's subjects per
+// panel (it has GroupPanels and Groups); otherwise it sums every group onto one
+// node. For the application's wiring test.
+func (a *Admin) GroupBudgetPerPanel() bool { return a.GroupPanels != nil && a.Groups != nil }

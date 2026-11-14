@@ -103,6 +103,9 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	if err := s.groups.Delete(ctx, id); err != nil {
 		return err
 	}
+	// The row carried the group's allowlist and its owned lists went with it
+	// (one transaction in the store): nothing cached about it may outlive it.
+	s.InvalidateEligibility(0)
 	// Clean up the group's per-scope setting overrides so they don't linger as
 	// orphan rows. (Group IDs never recycle, so they'd be inert anyway, but tidy.)
 	if s.scope != nil {

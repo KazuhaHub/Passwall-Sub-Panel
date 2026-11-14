@@ -117,6 +117,7 @@ func (f *fakeSettings) Load(context.Context, ports.UISettings) (ports.UISettings
 type harness struct {
 	t        *testing.T
 	repos    *sqlstore.DestRepos
+	groups   ports.GroupRepo
 	svc      *Service
 	up       *fakeUpstream
 	settings *fakeSettings
@@ -150,7 +151,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	h := &harness{
-		t: t, repos: sqlstore.NewDestRepos(db), up: newFakeUpstream(t), settings: &fakeSettings{},
+		t: t, repos: sqlstore.NewDestRepos(db), groups: sqlstore.NewRepos(db).Group, up: newFakeUpstream(t), settings: &fakeSettings{},
 		dir: t.TempDir(), clock: &fakeClock{t: time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)},
 	}
 	h.svc = h.newService(nil)
@@ -162,7 +163,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) newService(loc MMDBLocator) *Service {
 	s := New(Deps{
 		Lists: h.repos.Lists, Policies: h.repos.Policies, SourceRules: h.repos.SourceRules, State: h.repos.State,
-		Settings: h.settings, Locator: loc, DataDir: h.dir, HTTP: h.up.srv.Client(), Now: h.clock.Now,
+		Groups: h.repos.GroupAllowlists, Settings: h.settings, Locator: loc, DataDir: h.dir, HTTP: h.up.srv.Client(), Now: h.clock.Now,
 	})
 	s.geo.apiURL = h.up.srv.URL + "/api/latest"
 	s.geo.downloadBase = h.up.srv.URL + "/dl"

@@ -218,7 +218,7 @@ func (s *Service) buildBase(ctx context.Context, doc *snapshotDoc) (*base, error
 		}
 		var own []int64
 		for _, id := range []int64{g.Base, g.Extra} {
-			if id > 0 {
+			if id != 0 {
 				own = append(own, id)
 			}
 		}

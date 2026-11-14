@@ -213,26 +213,28 @@ type destAgentPolicyRow struct {
 	OverLimit          *string `gorm:"column:over_limit;type:text"`
 	PrecheckListeners  *string `gorm:"column:precheck_listeners;type:text"`
 	ReportOnlyShed     string  `gorm:"column:report_only_shed;size:16;not null;default:''"`
-	AppliedSHA256      string  `gorm:"column:applied_sha256;size:64;not null;default:''"`
-	AppliedBody        []byte  `gorm:"column:applied_body"`
-	AppliedAt          *time.Time
-	AppliedRuleCount   int        `gorm:"not null;default:0"`
-	AppliedGroups      jsonInt64s `gorm:"column:applied_groups;type:text;not null"`
-	AppliedCollect     string     `gorm:"size:16;not null;default:''"`
-	CollectEffective   string     `gorm:"size:16;not null;default:''"`
-	ResolveEffective   string     `gorm:"column:resolve_effective;size:16;not null;default:''"`
-	ResolveUnavailable string     `gorm:"column:resolve_unavailable;size:16;not null;default:''"`
-	ReportedSHA256     string     `gorm:"column:reported_sha256;size:64;not null;default:''"`
-	ReportedState      string     `gorm:"size:16;not null;default:''"`
-	ReportedIssue      string     `gorm:"size:64;not null;default:''"`
-	ReportedListeners  *string    `gorm:"column:reported_listeners;type:text"`
-	ReportedAt         *time.Time
-	RejectedCaps       string `gorm:"size:8;not null;default:''"`
-	RejectedSHA256     string `gorm:"column:rejected_sha256;size:64;not null;default:''"`
-	MintedGeneration   int64  `gorm:"not null;default:0"`
-	MintedCtx          string `gorm:"column:minted_ctx;size:64;not null;default:''"`
-	RejectedCtx        string `gorm:"column:rejected_ctx;size:64;not null;default:''"`
-	UpdatedAt          time.Time
+	// SniffingGroupsDropped is a JSON list of group ids; NULL when none.
+	SniffingGroupsDropped *string `gorm:"column:sniffing_groups_dropped;type:text"`
+	AppliedSHA256         string  `gorm:"column:applied_sha256;size:64;not null;default:''"`
+	AppliedBody           []byte  `gorm:"column:applied_body"`
+	AppliedAt             *time.Time
+	AppliedRuleCount      int        `gorm:"not null;default:0"`
+	AppliedGroups         jsonInt64s `gorm:"column:applied_groups;type:text;not null"`
+	AppliedCollect        string     `gorm:"size:16;not null;default:''"`
+	CollectEffective      string     `gorm:"size:16;not null;default:''"`
+	ResolveEffective      string     `gorm:"column:resolve_effective;size:16;not null;default:''"`
+	ResolveUnavailable    string     `gorm:"column:resolve_unavailable;size:16;not null;default:''"`
+	ReportedSHA256        string     `gorm:"column:reported_sha256;size:64;not null;default:''"`
+	ReportedState         string     `gorm:"size:16;not null;default:''"`
+	ReportedIssue         string     `gorm:"size:64;not null;default:''"`
+	ReportedListeners     *string    `gorm:"column:reported_listeners;type:text"`
+	ReportedAt            *time.Time
+	RejectedCaps          string `gorm:"size:8;not null;default:''"`
+	RejectedSHA256        string `gorm:"column:rejected_sha256;size:64;not null;default:''"`
+	MintedGeneration      int64  `gorm:"not null;default:0"`
+	MintedCtx             string `gorm:"column:minted_ctx;size:64;not null;default:''"`
+	RejectedCtx           string `gorm:"column:rejected_ctx;size:64;not null;default:''"`
+	UpdatedAt             time.Time
 }
 
 func (destAgentPolicyRow) TableName() string { return "dest_agent_policy" }
@@ -242,8 +244,8 @@ func (r destAgentPolicyRow) toDomain() *domain.DestAgentPolicy {
 		AgentID: r.AgentID, DesiredSHA256: r.DesiredSHA256, MintedSHA256: r.MintedSHA256, MintedAt: utcPtr(r.MintedAt),
 		FallbackReason: domain.DestFallbackReason(r.FallbackReason), RejectedGeneration: r.RejectedGeneration,
 		OverLimit: derefString(r.OverLimit), PrecheckListeners: derefString(r.PrecheckListeners),
-		ReportOnlyShed: r.ReportOnlyShed,
-		AppliedSHA256:  r.AppliedSHA256, AppliedBody: r.AppliedBody, AppliedAt: utcPtr(r.AppliedAt),
+		ReportOnlyShed: r.ReportOnlyShed, SniffingGroupsDropped: derefString(r.SniffingGroupsDropped),
+		AppliedSHA256: r.AppliedSHA256, AppliedBody: r.AppliedBody, AppliedAt: utcPtr(r.AppliedAt),
 		AppliedRuleCount: r.AppliedRuleCount, AppliedGroups: nilIfEmptyInt64s(r.AppliedGroups),
 		AppliedCollect: r.AppliedCollect, CollectEffective: r.CollectEffective, ResolveEffective: r.ResolveEffective, ResolveUnavailable: r.ResolveUnavailable, ReportedSHA256: r.ReportedSHA256, ReportedState: r.ReportedState,
 		ReportedIssue: r.ReportedIssue, ReportedListeners: derefString(r.ReportedListeners),

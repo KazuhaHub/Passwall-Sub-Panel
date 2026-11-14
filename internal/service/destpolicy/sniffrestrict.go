@@ -33,6 +33,9 @@ type sniffRestriction struct {
 	changed bool
 	// observe: one of them was a report-only rule.
 	observe bool
+	// groupsDropped are the allowlist groups (by id, ascending) dropped as a
+	// whole because an inbound cannot supply the sniffing their rules need.
+	groupsDropped []int64
 }
 
 // ruleSniffNeed is what one rule needs the sniffer to supply.
@@ -118,6 +121,11 @@ func restrictForSniffing(p *protocol.DestinationPolicy, nodes []*domain.Node, en
 			}
 		}
 	}
+
+	for gid := range dropGroups {
+		info.groupsDropped = append(info.groupsDropped, gid)
+	}
+	slices.Sort(info.groupsDropped)
 
 	out := make([]protocol.DestinationRule, 0, len(p.Rules))
 	for _, r := range p.Rules {

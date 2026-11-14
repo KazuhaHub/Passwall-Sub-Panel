@@ -45,6 +45,10 @@ type groupDTO struct {
 	IPLimit        *int     `json:"ip_limit"`
 	DeviceLimit    *int     `json:"device_limit"`
 	Members        int64    `json:"members"`
+	// DestState is the group's destination allowlist state: off, report or on.
+	// It is all staff may read of the allowlist (the groups list is staff's);
+	// the lists and the nodes are the administrator's (/dest/groups).
+	DestState string `json:"dest_state"`
 }
 
 type tagFilterDTO struct {
@@ -293,7 +297,16 @@ func toGroupDTO(g *domain.Group) groupDTO {
 		TrafficLimitGB: bytesToGBPtr(g.Limits.TrafficLimitBytes),
 		IPLimit:        g.Limits.IPLimit,
 		DeviceLimit:    g.Limits.DeviceLimit,
+		DestState:      destStateOf(g),
 	}
+}
+
+// destStateOf is a group's allowlist state, off for a group that never had one.
+func destStateOf(g *domain.Group) string {
+	if g.DestAllowlist.State == "" {
+		return string(domain.DestStateOff)
+	}
+	return string(g.DestAllowlist.State)
 }
 
 // bytesToGBPtr renders a byte quota as GB for the API, preserving the
