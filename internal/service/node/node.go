@@ -67,6 +67,10 @@ type Service struct {
 	// eligibility decides whether a group's members get a client on a node
 	// (group.Service.Eligible). Late-bound; nil is MatchOnly.
 	eligibility GroupEligibility
+	// allowlistResync is told which panel's inbounds changed in a way that can
+	// change what the panel can enforce for a group allowlist
+	// (SetAllowlistResyncer). Nil is silent.
+	allowlistResync func(ctx context.Context, panelID int64)
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
 	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
@@ -91,6 +95,19 @@ type GroupEligibility interface {
 
 // SetGroupEligibility late-binds the eligibility test the add paths use.
 func (s *Service) SetGroupEligibility(e GroupEligibility) { s.eligibility = e }
+
+// SetAllowlistResyncer late-binds what runs when a panel's inbound sniffing or
+// enabled state changes: group.Service.InboundsChanged, which decides whether
+// the panel is one that enforces allowlists and resyncs the members if so.
+func (s *Service) SetAllowlistResyncer(resync func(ctx context.Context, panelID int64)) {
+	s.allowlistResync = resync
+}
+
+func (s *Service) inboundsChanged(ctx context.Context, panelID int64) {
+	if s.allowlistResync != nil {
+		s.allowlistResync(ctx, panelID)
+	}
+}
 
 // groupIncludes asks the wired eligibility, or only the tag filter before one
 // is wired. An error means the answer is unknown: the add paths skip the group
@@ -740,9 +757,14 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	// immediately and survives a 3X-UI outage; the push (or its retry task)
 	// then aligns 3X-UI. Use the column-scoped writer so a concurrent health
 	// pass doesn't clobber our snapshot — and we don't clobber its writes.
+	sniffingBefore := n.Sniffing
 	inboundcfg.ApplySpec(n, spec)
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		return err
+	}
+	if n.Sniffing != sniffingBefore {
+		// Whether the panel can enforce a group allowlist depends on it.
+		s.inboundsChanged(ctx, n.PanelID)
 	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
@@ -859,11 +881,16 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if clientErr == nil && !ports.SupportsCapability(c, ports.CapabilityInboundEnable) {
 		return fmt.Errorf("%w: selected panel cannot enable or disable individual inbounds", ports.ErrPanelCapabilityUnsupported)
 	}
-	n.Enabled = enabled
 	// Column-scoped write: a full-row Save here would revert the health/traffic/
 	// config columns the concurrent poll/health/reconcile loops are writing.
+	wasEnabled := n.Enabled
+	n.Enabled = enabled
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, enabled); err != nil {
 		return err
+	}
+	if wasEnabled != enabled {
+		// A disabled inbound is not one whose sniffing the panel is judged by.
+		s.inboundsChanged(ctx, n.PanelID)
 	}
 	// A queued retry is a real outcome, so nil is right whenever the enqueue
 	// lands. It is only wrong when the enqueue ITSELF fails — then the panel

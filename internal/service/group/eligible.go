@@ -344,3 +344,18 @@ func (c *eligibilityCache) invalidate(panelID int64) {
 	}
 	delete(c.entries, panelID)
 }
+
+// InboundsChanged is what an edit to a panel's inbounds (their sniffing, or
+// whether they are enabled) triggers. Only a native panel can enforce an
+// allowlist, so only for one does the change matter; its eligibility is then
+// re-read and the allowlist groups' members resynced.
+func (s *Service) InboundsChanged(ctx context.Context, panelID int64) {
+	if s == nil || s.elig.Panels == nil {
+		return
+	}
+	panel, err := s.elig.Panels.GetByID(ctx, panelID)
+	if err != nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		return
+	}
+	s.ResyncAllowlistGroups(ctx, panelID)
+}

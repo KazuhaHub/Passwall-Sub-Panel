@@ -612,3 +612,30 @@ func itoa(n int64) string {
 	}
 	return string(b)
 }
+
+// An inbound edit on a 3X-UI panel cannot change what that panel enforces (it
+// enforces nothing), so it must not resync every allowlist group's members.
+func TestInboundsChanged_OnlyNativePanelsResync(t *testing.T) {
+	e := newEligEnv(t)
+	e.panels.kinds[2] = domain.PanelKind3XUI
+	e.groups.groups = []*domain.Group{{ID: 4, DestAllowlist: domain.DestAllowlist{State: domain.DestStateOn}}}
+	e.svc.groups = e.groups
+	var events []string
+	e.svc.SetMemberResyncer(resyncLog{&events})
+
+	e.svc.InboundsChanged(context.Background(), 2)
+	if len(events) != 0 {
+		t.Fatalf("a 3X-UI panel's inbound edit resynced %v", events)
+	}
+	e.svc.InboundsChanged(context.Background(), 1)
+	if !equalStrings(events, []string{"resync:4"}) {
+		t.Fatalf("a native panel's inbound edit resynced %v, want group 4", events)
+	}
+	// An unreadable panel is not a reason to resync (and the heal sweep covers it).
+	events = nil
+	e.panels.err = errors.New("db down")
+	e.svc.InboundsChanged(context.Background(), 1)
+	if len(events) != 0 {
+		t.Fatalf("resynced %v after a failed panel read", events)
+	}
+}

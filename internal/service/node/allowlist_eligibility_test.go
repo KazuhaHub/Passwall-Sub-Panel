@@ -101,3 +101,57 @@ func TestAddPathsDefaultToMatchOnly(t *testing.T) {
 		t.Fatalf("unwired: enqueued %d, provisioned %d; want both groups' members (2 each)", len(tasks.created), len(resync.ids))
 	}
 }
+
+type enableOKClient struct{ *stubXUIClient }
+
+func (enableOKClient) SetInboundEnable(context.Context, int, bool) error { return nil }
+
+// An inbound whose sniffing changes (or that is enabled or disabled) can make
+// its panel able or unable to enforce an allowlist, which nothing else would
+// notice: the panel is told, and only then.
+func TestInboundEditsTriggerTheAllowlistResync(t *testing.T) {
+	newSvc := func(sniffing string, enabled bool) (*Service, *[]int64) {
+		repo := &captureNodeRepo{node: &domain.Node{ID: 1, PanelID: 4, InboundID: 3, Enabled: enabled, Sniffing: sniffing}}
+		svc := &Service{nodes: repo, pool: stubXUIPool{c: enableOKClient{&stubXUIClient{}}}}
+		var panels []int64
+		svc.SetAllowlistResyncer(func(_ context.Context, panelID int64) { panels = append(panels, panelID) })
+		return svc, &panels
+	}
+	spec := func(sniffing string) ports.InboundSpec {
+		s := updateSpec()
+		s.Sniffing = sniffing
+		return s
+	}
+
+	svc, panels := newSvc(`{"enabled":true}`, true)
+	if err := svc.UpdateInboundConfig(context.Background(), 1, spec(`{"enabled":true,"destOverride":["http","tls","quic"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*panels) != 1 || (*panels)[0] != 4 {
+		t.Fatalf("a sniffing change told %v, want panel 4 once", *panels)
+	}
+
+	svc, panels = newSvc(`{"enabled":true}`, true)
+	if err := svc.UpdateInboundConfig(context.Background(), 1, spec(`{"enabled":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(*panels) != 0 {
+		t.Fatalf("an edit that left the sniffing alone told %v", *panels)
+	}
+
+	svc, panels = newSvc(`{"enabled":true}`, true)
+	if err := svc.SetEnabled(context.Background(), 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(*panels) != 1 || (*panels)[0] != 4 {
+		t.Fatalf("disabling an inbound told %v, want panel 4 once", *panels)
+	}
+
+	svc, panels = newSvc(`{"enabled":true}`, true)
+	if err := svc.SetEnabled(context.Background(), 1, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(*panels) != 0 {
+		t.Fatalf("a no-op enable told %v", *panels)
+	}
+}

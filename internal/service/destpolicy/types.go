@@ -106,7 +106,12 @@ type Deps struct {
 	// select, for the per-node limit. Nil: the roster's members, which is the
 	// same until members can be made ineligible for a panel.
 	GroupMembers GroupMemberCounter
-	Metrics      Metrics
+	// FallbackChanged is called (after the change is stored) when an agent
+	// enters or leaves a refused or over-limit fallback, the two that stop a
+	// node enforcing a group allowlist. Nil: nobody is told. It must not call
+	// back into the Service.
+	FallbackChanged func(ctx context.Context, agentID string)
+	Metrics         Metrics
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }

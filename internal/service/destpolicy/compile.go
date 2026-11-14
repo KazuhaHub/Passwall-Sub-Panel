@@ -983,12 +983,12 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 		return fmt.Errorf("destpolicy: write agent state: %w", err)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cur := s.agentMeta[agentID]
 	next := domain.DestAgentPolicy{AgentID: agentID}
 	if cur != nil {
 		next = *cur
 	}
+	before := next.FallbackReason
 	if p.DesiredSHA256 != nil {
 		next.DesiredSHA256 = *p.DesiredSHA256
 	}
@@ -1065,7 +1065,21 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 		next.RejectedCtx = *p.RejectedCtx
 	}
 	s.agentMeta[agentID] = &next
+	after := next.FallbackReason
+	s.mu.Unlock()
+	if s.fallbackChanged != nil && blocksAllowlist(before) != blocksAllowlist(after) {
+		s.fallbackChanged(ctx, agentID)
+	}
 	return nil
+}
+
+// blocksAllowlist says whether a fallback reason makes a node unable to
+// enforce a group allowlist: a policy the node refused or one over a limit
+// means its groups' rules are not running. The sniffing fallback is not one:
+// it depends on the roster, which the allowlist shrinks, and eligibility
+// judges the inbounds' sniffing directly instead (group.Service.Eligible).
+func blocksAllowlist(r domain.DestFallbackReason) bool {
+	return r == domain.DestFallbackRejected || r == domain.DestFallbackOverLimit
 }
 
 // baseFor returns the expanded snapshot of generation gen, building it on a
