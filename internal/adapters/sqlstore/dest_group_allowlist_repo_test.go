@@ -138,7 +138,7 @@ func TestGroupAllowlistRepo_SaveAdvancesTheGenerationAndWritesOnlyItsColumns(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.State != domain.DestStateReport || len(a.ListIDs) != 2 || a.ListIDs[0] != 1 || a.ListIDs[1] != 2 || a.UpdatedAt == nil || a.StateChangedAt == nil {
+	if a.State != domain.DestStateReport || len(a.ListIDs) != 2 || a.ListIDs[0] != ls[0] || a.ListIDs[1] != ls[1] || a.UpdatedAt == nil || a.StateChangedAt == nil {
 		t.Fatalf("allowlist = %+v (list ids sorted, once each)", a)
 	}
 	if _, err := repos.GroupAllowlists.Get(ctx, 999); !errors.Is(err, domain.ErrNotFound) {
