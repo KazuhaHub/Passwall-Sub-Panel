@@ -404,6 +404,13 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		default:
 			ns.State = "applied"
 		}
+		if row.ReportedSHA256 == "" && row.ReportedState == protocol.PolicyStateApplied {
+			// The node has reported that it runs no policy (nothing in force, or
+			// a pause it has synced). The record of what it last applied is kept
+			// for a fallback, but it is not what the node runs now. Until it
+			// reports, a paused node still runs what it had.
+			ns.AllowlistGroups, ns.AppliedRules = []AllowlistGroupRef{}, 0
+		}
 		v.Nodes = append(v.Nodes, ns)
 		v.Totals[ns.State]++
 	}
