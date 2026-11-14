@@ -5429,7 +5429,8 @@
         "site": "The whole site (with subdomains)",
         "host": "This host only",
         "cancel": "Cancel",
-        "save": "Add"
+        "save": "Add",
+        "lead_group": "Allow this destination for the members of “{{group}}” only, in its supplement list."
       },
       "resolved_ips": "Resolved IPs (optional; PSP does no DNS)",
       "resolved_ips_hint": "The addresses the node would resolve the host name to, separated by commas or spaces. Used only when a node or inbound that runs on_demand is selected; ignored otherwise.",

@@ -180,7 +180,7 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
           </Box>
         )}
       </Box>
-      <ExceptionDialog open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
+      <ExceptionDialog key={`${exception}:${hit?.group_id ?? 0}:${result?.host ?? ''}`} open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
     </Box>
   )
 }
@@ -192,21 +192,28 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
  */
 function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: string; group: { id: number; name: string } | null; onClose: () => void }) {
   const { t } = useTranslation(['admin'])
+  const md = useTheme().palette.md
   const scope = useQueryScope()
   const add = useAddDestException(scope)
   const [entry, setEntry] = useState(host)
   const [match, setMatch] = useState<'site' | 'host'>('site')
   const [error, setError] = useState(false)
+  // Nothing here outlives the dialog's opening: the parent keys it by open state, group and host.
   const [everyone, setEveryone] = useState(false)
   const [seen, setSeen] = useState(host)
   if (open && seen !== host) { setSeen(host); setEntry(host); setEveryone(false) }
-  const toGroup = group !== null && !everyone
+  // A group step with no name is a group that was deleted while its rule is still published: nothing to add to, and no default.
+  const gone = group !== null && !group.name
+  const toGroup = group !== null && !gone && !everyone
+  const none = gone && !everyone
 
   const save = async () => {
     setError(false)
     try {
       const r = await add.mutateAsync({ target: entry.trim(), match, ...(toGroup && group ? { group_id: group.id } : {}) })
-      pushSnack(t(`${T}exception_saved`, { entry: r.entry }), 'success')
+      pushSnack(toGroup && group
+        ? t('admin:access_control.records.exception.saved_group', { group: group.name, entry: r.entry })
+        : t(`${T}exception_saved`, { entry: r.entry }), 'success')
       onClose()
     } catch (err) {
       if (destErrorOf(err)?.code === 'dest_exception_invalid') setError(true)
@@ -217,10 +224,11 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle>{t(`${T}exception.title`)}</DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
-        <Typography variant="body2">{t(`${T}exception.lead`)}</Typography>
+        {!none && <Typography variant="body2">{toGroup && group ? t(`${T}exception.lead_group`, { group: group.name }) : t(`${T}exception.lead`)}</Typography>}
+        {none && <Typography variant="body2" sx={{ color: md.error }}>{t('admin:access_control.records.exception.group_gone')}</Typography>}
         {group && (
-          <RadioGroup value={toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
-            <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />
+          <RadioGroup value={none ? '' : toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
+            {!gone && <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />}
             <FormControlLabel value="global" control={<Radio />} label={t('admin:access_control.records.exception.global')} />
             {!toGroup && (
               <Box sx={{ pl: 4 }}>
@@ -238,7 +246,7 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t(`${T}exception.cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
+        <AsyncButton variant="contained" disabled={none} onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
       </DialogActions>
     </Dialog>
   )
