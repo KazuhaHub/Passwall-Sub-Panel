@@ -4659,7 +4659,7 @@
       "dest_source_rule_invalid": "The source rule is not valid",
       "dest_group_not_found": "That group does not exist",
       "dest_group_stale": "The state was changed by someone else and has been reloaded",
-      "dest_list_not_ready": "A list has not been downloaded, so it cannot be turned on"
+      "dest_list_not_ready": "A list is not ready, so this cannot go on: it has not been downloaded, or the change would leave a group whose allowlist is on with a list that is not ready or empty. Put that group back to report only first."
     },
     "node_state": {
       "applied": "In effect",

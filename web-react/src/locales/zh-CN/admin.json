@@ -4639,7 +4639,7 @@
       "dest_source_rule_invalid": "来源规则的内容无效",
       "dest_group_not_found": "分组不存在",
       "dest_group_stale": "状态已被其他人修改，已重新载入",
-      "dest_list_not_ready": "有名单还没下载成功，不能开启"
+      "dest_list_not_ready": "有名单还没就绪，不能继续：名单没下载成功，或这次改动会让已开启白名单的分组用到未就绪、为空的名单。请先把该分组改回仅报告。"
     },
     "node_state": {
       "applied": "已生效",

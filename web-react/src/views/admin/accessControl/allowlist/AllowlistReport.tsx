@@ -77,9 +77,9 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
 
   const extraId = group?.extra_list_id ?? 0
   const targetId = target ?? extraId
-  const listName = (id: number) => id === extraId
-    ? t(`${R}extra_name`, { group: group?.group_name ?? '' })
-    : (lists.data?.items.find(l => l.id === id)?.name ?? String(id))
+  // The server names a group's own lists "<group> · <list>"; until the lists are read the supplement is named the same way here.
+  const listName = (id: number) => lists.data?.items.find(l => l.id === id)?.name
+    ?? (id === extraId ? t(`${R}extra_name`, { group: group?.group_name ?? '' }) : String(id))
   const targets = [extraId, ...(group?.lists ?? []).map(l => l.id).filter(id => lists.data?.items.find(l => l.id === id)?.kind === 'custom')].filter(id => id > 0)
 
   const isAdded = (i: DestGroupReportItem) => i.added || added.has(i.site)
