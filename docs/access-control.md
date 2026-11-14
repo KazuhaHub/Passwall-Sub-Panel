@@ -69,13 +69,13 @@ config ETag 不变，core 不会因为升级面板而重启。
 
 白名单只在「组员认证所在的那台原生节点、且策略已生效」时成立。3X-UI / S-UI、旧版节点、超额度、被拒或嗅探不足的节点都做不到，所以**只在订阅里隐藏不够**：组员在那些面板上的 client 还在，旧订阅照样能连。成员同步这一层必须排除它们。
 
-- **一个判断，全仓共用**：`group.Service.Eligible(ctx, node, group)`。状态 `off`（含 NULL）等同今天的 `Matches(node, tag_filter)`，行为与升级前完全相同。状态 `report` 或 `on`（两个都适用）还要同时满足：面板是原生（`psp`）；agent 本次上报的能力同时含 `policy.destination.v1` 与 `policy.destination.groups.v1`；`dest_agent_policy.fallback_reason` 不是 `rejected` 或 `over_limit`；引擎是 Xray 时，本面板**已启用的入站**的嗅探能满足域名规则（`protocol.CheckXraySniffing`，需求恒为域名）。能执行但不记录的节点（sing-box）算合格。
+- **一个判断，全仓共用**：`group.Service.Eligible(ctx, node, group)`。状态 `off`（含 NULL）等同今天的 `Matches(node, tag_filter)`，行为与升级前完全相同。状态 `report` 或 `on`（两个都适用）还要同时满足：面板是原生（`psp`）；agent 本次上报的能力同时含 `policy.destination.v1` 与 `policy.destination.groups.v1`；`dest_agent_policy.fallback_reason` 不是 `rejected` 或 `over_limit`；引擎是 Xray 时，本面板**已启用的入站**的嗅探能满足域名规则（`protocol.CheckXraySniffing`）。需求恒按「域名」判，不去读分组的列表：白名单本来就是域名白名单（基础放行里是 DoH 主机名），且这样合格性只取决于面板、不取决于名单内容。能执行但不记录的节点（sing-box）算合格。
 - **嗅探直接在入站上判，不看 `fallback_reason=sniffing`**：后者依赖 roster，而把组员移出 roster 会让它消失，于是「不合格 → 移出 → 规则没了 → 预检通过 → 合格 → 加回 → 预检失败」会无限振荡。`rejected` 只在 generation 变化时重试，不会振荡，但每次重新发布可能有一轮「加回 → 被拒 → 删除」。
 - **失败语义**：任何一次读失败都返回 error，绝不当作 true 或 false。`NodesFor` 原样返回（`/sub` 失败，客户端保留上次订阅）；三处「添加」方向的调用点（`node.go` 的新节点入组与重建入站、`reconcile.go` 的缺失 client 修复）出错就**跳过该分组**，只打一条带 `group_id` 的 Warn，下一轮或 heal 会补上。
-- **缓存**：按面板的合格性缓存，TTL 30 秒；`NodesFor` 对 `TagFilter.All` 的捷径之后也过滤。`/sub` 热路径不额外查库。
-- **触发重新同步**（先失效缓存，再对每个状态不为 `off` 的分组调 `ResyncGroupMembersInBackground`，顺序不能反）：agent 上报的两个能力出现或消失（只看这两个，任务能力会逐次变化）；`fallback_reason` 进入或离开 `rejected` / `over_limit`；psp 面板的入站嗅探或启用状态变化；分组保存。没有接线时只失效缓存，由 heal 兜底。
-- **整面板移出时的删除不依赖其他面板**：`clientprov` 把退役的 client 分成「用户在该面板上已没有任何节点」与「同面板内被另一个 client 取代」。前者只收紧权限，`ResyncMembership` 不看 provision 与生命周期是否成功都删；后者仍要等替代者上线，否则用户会断网。删除失败（面板离线、拒绝）并入返回的错误，由 `user_resync` 任务和 heal 重试；面板已经没有这个 client（「not found」）算完成。
-- 每节点超额按 `TagMatchedMembers`（该面板 tags 选中的组员数，不论是否合格）计，由 `group.Service` 实现，见 §3.2。
+- **缓存**：按面板的合格性缓存，TTL 30 秒；`NodesFor` 对 `TagFilter.All` 的捷径之后也过滤。缓存命中时 `/sub` 热路径不额外查库；未命中时每个面板读一次面板行、agent 行和策略状态行。
+- **触发重新同步**（先失效缓存，再对每个状态不为 `off` 的分组调 `ResyncGroupMembersInBackground`，顺序不能反）：agent 上报的两个能力出现或消失（只看这两个，任务能力会逐次变化）；`fallback_reason` 进入或离开 `rejected` / `over_limit`；psp 面板的入站嗅探、启用状态变化，以及入站的新建、导入、删除、分离；分组保存。缓存的组员数在有人加入、离开分组或被删除时失效。没有接线时只失效缓存，由 heal 兜底。
+- **因白名单被排除的面板上，删除不依赖其他面板**：`clientprov` 把退役的 client 分成「用户在该面板上已没有任何节点」与「同面板内被另一个 client 取代」。只有**面板因白名单不合格而被排除**（分组的 tags 仍选中该面板的节点，分组是白名单，面板却不能执行：`group.Service.AllowlistExcludedPanels`）时，`ResyncMembership` 才不看 provision 与生命周期是否成功就删，失败（面板离线、拒绝）并入返回的错误，由 `user_resync` 任务和 heal 重试。其余情况，包括分组的 tags 改去选别的面板，仍是先建后拆：等替代者上线才删，否则目标面板离线时用户会断网；这些删除失败只记日志，不使重同步失败，否则一行留在长期离线或已删除面板上的空 client 会让该用户每次重同步、每次 heal 都报错。面板已不在池里（已删除）或面板上已没有该 client（「not found」，只认 3X-UI 的几种固定措辞）都算完成。
+- 每节点超额按 `TagMatchedMembers`（该面板 tags 选中的组员数，不论是否合格）计，由 `group.Service` 实现，见 §3.2。对**每个**状态不为 `off` 且 tags 选中该面板的分组都计，不要求 roster 里有该组的人：过额使面板不合格、组员全部离开 roster 后，额度不能因此看起来够用而把他们放回来；roster 里没有任何组员但按这个数会超额时，照样走 `over_limit`。
 - **守卫**：`TestNoGroupMatchesOutsideGroupPackage` 扫描 `internal/service`、`internal/transport`、`internal/app`，`group` 包以外不得调用 `group.Matches`。
 
 ## 4. 发布、编译与回退

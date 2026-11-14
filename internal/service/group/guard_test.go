@@ -34,20 +34,7 @@ func TestNoGroupMatchesOutsideGroupPackage(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			ast.Inspect(f, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Matches" {
-					return true
-				}
-				if x, ok := sel.X.(*ast.Ident); ok && x.Name == "group" {
-					offenders = append(offenders, fset.Position(call.Pos()).String())
-				}
-				return true
-			})
+			offenders = append(offenders, groupMatchesCalls(fset, f)...)
 			return nil
 		})
 		if err != nil {
@@ -59,24 +46,65 @@ func TestNoGroupMatchesOutsideGroupPackage(t *testing.T) {
 	}
 }
 
-// The guard itself must be able to fail: a scan that matches nothing proves
-// nothing.
-func TestNoGroupMatchesGuardSeesCalls(t *testing.T) {
-	src := "package x\nimport \"g/group\"\nfunc f() { _ = group.Matches(nil, nil) }\n"
-	f, err := parser.ParseFile(token.NewFileSet(), "x.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
+const groupPackagePath = "internal/service/group"
+
+// groupMatchesCalls returns the positions of calls to Matches on the group
+// package in f, under whatever name f imports it as (an alias included).
+func groupMatchesCalls(fset *token.FileSet, f *ast.File) []string {
+	local := ""
+	for _, imp := range f.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		if path != groupPackagePath && !strings.HasSuffix(path, "/"+groupPackagePath) {
+			continue
+		}
+		local = "group"
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
 	}
-	found := false
+	if local == "" || local == "_" {
+		return nil
+	}
+	var out []string
 	ast.Inspect(f, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Matches" {
-				found = true
-			}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Matches" {
+			return true
+		}
+		if x, ok := sel.X.(*ast.Ident); ok && x.Name == local {
+			out = append(out, fset.Position(call.Pos()).String())
 		}
 		return true
 	})
-	if !found {
-		t.Fatal("the pattern the guard looks for does not parse as a selector call")
+	return out
+}
+
+// The guard itself must be able to fail, including through an aliased import,
+// and must not flag another package's Matches.
+func TestNoGroupMatchesGuardSeesCalls(t *testing.T) {
+	parse := func(src string) []string {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, "x.go", src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return groupMatchesCalls(fset, f)
+	}
+	const path = `"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"`
+	if got := parse("package x\nimport " + path + "\nfunc f() { _ = group.Matches(nil, nil) }\n"); len(got) != 1 {
+		t.Fatalf("plain import: %v", got)
+	}
+	if got := parse("package x\nimport g " + path + "\nfunc f() { _ = g.Matches(nil, nil) }\n"); len(got) != 1 {
+		t.Fatalf("aliased import: %v", got)
+	}
+	if got := parse("package x\nimport \"regexp\"\nfunc f() { var group regexp.Regexp; _ = group.Matches }\n"); len(got) != 0 {
+		t.Fatalf("another package named group flagged: %v", got)
+	}
+	if got := parse("package x\nimport g " + path + "\nfunc f() { var group T; group.Matches(1) }\n"); len(got) != 0 {
+		t.Fatalf("a local variable named group flagged: %v", got)
 	}
 }
