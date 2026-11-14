@@ -143,8 +143,8 @@ func TestAuditHook_ThePanelsCollectLevelIsPassedToTheCompiler(t *testing.T) {
 	}
 	off := domain.AuditCollectOff
 	if err := f.repos.XUIPanel.(interface {
-		UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error
-	}).UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, &off); err != nil {
+		UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect, resolve *domain.DestResolve) error
+	}).UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, &off, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.syncWith(t, caps); err != nil {

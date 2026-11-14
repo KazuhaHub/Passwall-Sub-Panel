@@ -182,8 +182,11 @@ type serverDTO struct {
 	// AuditCollect is how much a Passwall Node server records of its
 	// destination rules (off, hits, hits_and_usage); absent for other panels.
 	AuditCollect string `json:"audit_collect,omitempty"`
-	HasAPIToken  bool   `json:"has_api_token"`
-	HasPassword  bool   `json:"has_password"`
+	// DestResolve is how a Passwall Node server's routing treats a hostname
+	// against IP rules (as_is or on_demand); absent for other panels.
+	DestResolve string `json:"dest_resolve,omitempty"`
+	HasAPIToken bool   `json:"has_api_token"`
+	HasPassword bool   `json:"has_password"`
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
@@ -292,6 +295,9 @@ type serverUpdateRequest struct {
 	UpdateChannel *string `json:"update_channel,omitempty"`
 	// AuditCollect is a Passwall Node server's recording level; omitted keeps it.
 	AuditCollect *string `json:"audit_collect,omitempty"`
+	// DestResolve is a Passwall Node server's hostname-against-IP-rules mode;
+	// omitted keeps it. if_non_match is refused by name.
+	DestResolve *string `json:"dest_resolve,omitempty"`
 }
 
 // validAuthMethod gates the auth_method input to the known values.
@@ -665,7 +671,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
 		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel and audit_collect can be edited for a Passwall Node server"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
 		return
 	}
 	if req.AuditCollect != nil {
@@ -674,6 +680,23 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			return
 		}
 		existing.AuditCollect = domain.AuditCollect(*req.AuditCollect)
+	}
+	if req.DestResolve != nil {
+		mode := domain.DestResolve(*req.DestResolve)
+		switch {
+		case domain.NormalizePanelKind(existing.Kind) != domain.PanelKindPSP:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "dest_resolve is only for a Passwall Node server"})
+			return
+		case mode == domain.DestResolveIfNonMatch:
+			// Named, not merely invalid: it reorders rules and lets report-only
+			// change a verdict, so it is not offered.
+			c.JSON(http.StatusBadRequest, gin.H{"code": "dest_resolve_unavailable", "error": "if_non_match is not available: it lets report-only rules and trial groups change a verdict"})
+			return
+		case !mode.Valid():
+			c.JSON(http.StatusBadRequest, gin.H{"error": "dest_resolve must be as_is or on_demand for a Passwall Node server"})
+			return
+		}
+		existing.DestResolve = mode
 	}
 	if req.UpdateChannel != nil {
 		if domain.NormalizePanelKind(existing.Kind) != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid() {
@@ -723,11 +746,12 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	// and their rollback must never clobber runtime probe/identity columns.
 	persist := func(panel *domain.Panel) error {
 		if writer, ok := h.repo.(interface {
-			UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect) error
+			UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect, *domain.DestResolve) error
 		}); ok && domain.NormalizePanelKind(before.Kind) == domain.PanelKindPSP {
 			var name, remark *string
 			var channel *domain.PanelUpdateChannel
 			var collect *domain.AuditCollect
+			var resolve *domain.DestResolve
 			if req.Name != nil {
 				name = &panel.Name
 			}
@@ -740,7 +764,10 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			if req.AuditCollect != nil {
 				collect = &panel.AuditCollect
 			}
-			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel, collect)
+			if req.DestResolve != nil {
+				resolve = &panel.DestResolve
+			}
+			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel, collect, resolve)
 		}
 		return h.repo.Save(c.Request.Context(), panel)
 	}
@@ -1769,6 +1796,7 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
 		dto.UpdateChannel = string(p.UpdateChannel.Effective())
 		dto.AuditCollect = string(p.AuditCollect.Normalized())
+		dto.DestResolve = string(p.DestResolve.Normalized())
 		dto.URL = ""
 		dto.AuthMethod = ""
 	}

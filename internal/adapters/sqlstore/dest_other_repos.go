@@ -348,6 +348,8 @@ func (r *DestAgentPolicyRepo) Patch(ctx context.Context, agentID string, patch d
 		digest("minted_ctx", patch.MintedCtx),
 		digest("rejected_ctx", patch.RejectedCtx),
 		short("collect_effective", patch.CollectEffective, 16),
+		short("resolve_effective", patch.ResolveEffective, 16),
+		short("resolve_unavailable", patch.ResolveUnavailable, 16),
 		short("report_only_shed", patch.ReportOnlyShed, 16),
 		short("applied_collect", patch.AppliedCollect, 16),
 		short("reported_state", patch.ReportedState, 16),

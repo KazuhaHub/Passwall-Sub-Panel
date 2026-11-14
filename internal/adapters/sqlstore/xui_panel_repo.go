@@ -104,7 +104,8 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// audit_collect is omitted too: it is a recording choice with its own
 		// narrow writer (UpdateNativeMetadata), and the whole-row save of an
 		// admin editing credentials carries whatever the form read earlier.
-		err = db.Omit("CreatedAt", "AuditCollect").Save(row).Error
+		// dest_resolve is omitted for the same reason.
+		err = db.Omit("CreatedAt", "AuditCollect", "DestResolve").Save(row).Error
 	}
 	if err != nil {
 		return err
@@ -118,7 +119,7 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 // when an administrator only changes a native server's display/preference.
 // Input channel validation belongs to the HTTP boundary: rollback must be able
 // to restore the exact empty/unknown preference read from an existing row.
-func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, auditCollect *domain.AuditCollect) error {
+func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, auditCollect *domain.AuditCollect, destResolve *domain.DestResolve) error {
 	if id <= 0 || (name != nil && *name == "") {
 		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
 	}
@@ -139,6 +140,14 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 			return fmt.Errorf("%w: audit_collect is off, hits or hits_and_usage", domain.ErrValidation)
 		}
 		updates["audit_collect"] = string(*auditCollect)
+	}
+	if destResolve != nil {
+		// Refused rather than normalised, and if_non_match is not a mode: DNS at
+		// routing time is a cost the admin chooses on purpose.
+		if !destResolve.Valid() {
+			return fmt.Errorf("%w: dest_resolve is as_is or on_demand", domain.ErrValidation)
+		}
+		updates["dest_resolve"] = string(*destResolve)
 	}
 	db := r.db.WithContext(ctx)
 	var row xuiPanelRow

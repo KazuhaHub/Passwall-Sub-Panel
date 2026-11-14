@@ -1325,6 +1325,11 @@ type Panel struct {
 	// (an admin editing the server's credentials must not reset a privacy
 	// choice), and Create normalises empty to the default.
 	AuditCollect AuditCollect
+
+	// DestResolve is how this Passwall Node server's routing treats a hostname
+	// against IP rules (as_is or on_demand). Only meaningful for Kind == psp,
+	// and written ONLY through the native-metadata writer, like AuditCollect.
+	DestResolve DestResolve
 }
 
 // XUIPanel is a compatibility alias. New code should use Panel; retaining the
