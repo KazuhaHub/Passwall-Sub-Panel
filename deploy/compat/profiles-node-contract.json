@@ -1,0 +1,10 @@
+{
+  "node-policy-v1": {
+    "description": "The destination-policy round trip PSP must hold with the Node release named as contract_source in docs/compat/verification-v1.json: a minted policy is received, reported on with its digest, and withdrawn. It is NOT in profiles.json, because that file is expanded into one case per supported version by plan.mjs and check-case-set.mjs, and the floor release predates the policy.destination.v1 capability this needs. It runs in the pinned-source contract job only, and is judged here, never by go test's exit code.",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync",
+    "required": {
+      "TestLive_RealNodePolicyContract": {}
+    },
+    "notApplicable": {}
+  }
+}
