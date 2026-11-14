@@ -1,7 +1,9 @@
 package destpolicy
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -345,19 +347,14 @@ func TestResolve_AsIsEverywhereIsByteIdentical(t *testing.T) {
 		mode domain.DestResolve
 		caps []string
 	}{
-		"default":                   {"", []string{policyCap, groupsCap}},
-		"as_is":                     {domain.DestResolveAsIs, []string{policyCap, groupsCap, resolveCap}},
-		"on_demand, old node":       {domain.DestResolveOnDemand, []string{policyCap, groupsCap}},
-		"on_demand, no IP rules":    {domain.DestResolveOnDemand, []string{policyCap, groupsCap, resolveCap}},
-		"on_demand, new node, caps": {domain.DestResolveOnDemand, []string{policyCap, groupsCap, resolveCap, hitsCap}},
+		"default":                {"", []string{policyCap, groupsCap}},
+		"as_is":                  {domain.DestResolveAsIs, []string{policyCap, groupsCap, resolveCap}},
+		"on_demand, old node":    {domain.DestResolveOnDemand, []string{policyCap, groupsCap}},
+		"on_demand, no IP rules": {domain.DestResolveOnDemand, []string{policyCap, groupsCap, resolveCap}},
 	} {
 		res := h.compileResolve(base1(), in.mode, "", in.caps...)
-		want := goldenDigest
-		if name == "on_demand, new node, caps" {
-			continue // recording is on there, which is its own change
-		}
-		if res.Digest != want {
-			t.Errorf("%s: digest = %s, want the pre-feature %s", name, res.Digest, want)
+		if res.Digest != goldenDigest {
+			t.Errorf("%s: digest = %s, want the pre-feature %s", name, res.Digest, goldenDigest)
 		}
 	}
 }
@@ -457,5 +454,150 @@ func TestResolve_FallbackIsHeldAtAsIsByARouteOnlyInbound(t *testing.T) {
 	}
 	if m := h.meta(); m.ResolveEffective != "" || m.ResolveUnavailable != "route_only" {
 		t.Fatalf("recorded %q / %q", m.ResolveEffective, m.ResolveUnavailable)
+	}
+}
+
+// A policy WITH an IP rule: as_is, and an old node asked for on_demand, get the
+// bytes of before the feature existed. The literals have no "resolve" key.
+func TestResolve_AsIsWithAnIPRuleIsByteIdentical(t *testing.T) {
+	h := newHarness(t)
+	h.policy("lan", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) {
+		p.Inline = domain.DestPolicyInline{Private: true, CIDRs: []string{"198.51.100.0/24"}}
+	})
+	smtpPolicy(h, "smtp")
+	h.publishNow()
+	for name, in := range map[string]struct {
+		mode domain.DestResolve
+		caps []string
+	}{
+		"default":             {"", []string{policyCap, resolveCap}},
+		"as_is":               {domain.DestResolveAsIs, []string{policyCap, resolveCap}},
+		"on_demand, old node": {domain.DestResolveOnDemand, []string{policyCap}},
+		"as_is, old node":     {domain.DestResolveAsIs, []string{policyCap}},
+	} {
+		res := h.compileResolve(base1(), in.mode, "", in.caps...)
+		body, err := json.Marshal(res.Policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != goldenIPPolicy || res.Digest != goldenIPDigest {
+			t.Errorf("%s:\n%s\n%s", name, body, res.Digest)
+		}
+	}
+}
+
+const (
+	goldenIPPolicy = `{"rules":[{"id":"p1","action":"block","cidrs":["198.51.100.0/24"],"private":true},{"id":"p2","action":"block","ports":"25"}]}`
+	goldenIPDigest = "4bb5254ca2ce4729b174078311227ec14f907b89e7f812e0acfa3ac1cb4e5b88"
+)
+
+// ---- report-only IP rules never disturb enforcement ----
+
+func TestSettleResolve_ReportOnlyIPRuleOnARouteOnlyInboundIsRestrictedNotADowngrade(t *testing.T) {
+	nodes := []*domain.Node{node(1, goodSniffing), node(2, routeOnlySniffing)}
+	p := &protocol.DestinationPolicy{Resolve: protocol.ResolveOnDemand, Collect: protocol.CollectOff, Rules: []protocol.DestinationRule{
+		{ID: "p1", Action: protocol.RuleBlock, CIDRs: []string{"10.0.0.0/8"}, Inbounds: []protocol.ListenerKey{"lst_1"}},
+		{ID: "p2", Action: protocol.RuleBlock, Ports: "25"},
+		{ID: "p3", Action: protocol.RuleObserve, Private: true},
+	}}
+	out, held, obs := settleResolve(p, nodes, xrayEngine)
+	if len(held) != 0 || !obs || out == nil || out.Resolve != protocol.ResolveOnDemand {
+		t.Fatalf("held %+v observe %v out %+v: enforced rules do not touch the routeOnly inbound, so on_demand stays", held, obs, out)
+	}
+	for _, r := range out.Rules {
+		if r.ID == "p3" && !slices.Equal(r.Inbounds, []protocol.ListenerKey{"lst_1"}) {
+			t.Fatalf("the report-only IP rule still applies to the routeOnly inbound: %+v", r)
+		}
+		if r.ID == "p1" && !slices.Equal(r.Inbounds, []protocol.ListenerKey{"lst_1"}) {
+			t.Fatalf("an enforced rule was touched: %+v", r)
+		}
+	}
+	if f := resolveFindings(out, nodes); len(f) != 0 {
+		t.Fatalf("the result still needs what the routeOnly inbound cannot give: %+v", f)
+	}
+	// With nowhere left for the report-only rule it goes, and the others stay.
+	only := &protocol.DestinationPolicy{Resolve: protocol.ResolveOnDemand, Rules: []protocol.DestinationRule{
+		{ID: "p2", Action: protocol.RuleBlock, Ports: "25"},
+		{ID: "p3", Action: protocol.RuleObserve, Private: true},
+	}}
+	out, held, obs = settleResolve(only, []*domain.Node{node(2, routeOnlySniffing)}, xrayEngine)
+	if len(held) != 0 || !obs || out == nil || len(out.Rules) != 1 || out.Rules[0].ID != "p2" || out.Resolve != protocol.ResolveAsIs {
+		t.Fatalf("held %+v observe %v out %+v", held, obs, out)
+	}
+}
+
+func TestSettleResolve_AnEnforcedIPRuleOnARouteOnlyInboundStillDowngrades(t *testing.T) {
+	nodes := []*domain.Node{node(1, goodSniffing), node(2, routeOnlySniffing)}
+	p := &protocol.DestinationPolicy{Resolve: protocol.ResolveOnDemand, Rules: []protocol.DestinationRule{
+		{ID: "p1", Action: protocol.RuleBlock, Private: true},
+		{ID: "p3", Action: protocol.RuleObserve, CIDRs: []string{"10.0.0.0/8"}},
+	}}
+	out, held, obs := settleResolve(p, nodes, xrayEngine)
+	if len(held) != 1 || obs || out.Resolve != protocol.ResolveAsIs || len(out.Rules) != 2 {
+		t.Fatalf("held %+v observe %v out %+v", held, obs, out)
+	}
+}
+
+func TestSettleResolve_AnUnreadableSniffingObjectIsAFinding(t *testing.T) {
+	p := &protocol.DestinationPolicy{Resolve: protocol.ResolveOnDemand, Rules: []protocol.DestinationRule{{ID: "p1", Action: protocol.RuleBlock, Private: true}}}
+	_, held, _ := settleResolve(p, []*domain.Node{node(1, `{not json`)}, xrayEngine)
+	if len(held) != 1 || held[0].Reason != sniffMalformed {
+		t.Fatalf("held = %+v", held)
+	}
+}
+
+func TestResolve_ReportOnlyIPRuleOnARouteOnlyInboundKeepsOnDemandAndIsFlagged(t *testing.T) {
+	h := newHarness(t)
+	smtpPolicy(h, "smtp")
+	h.policy("watch", domain.DestActionBlock, domain.DestStateReport, func(p *domain.DestPolicy) { p.Inline = domain.DestPolicyInline{Private: true} })
+	h.publishNow()
+	f := fleet{panelID: 9, nodes: []*domain.Node{node(1, goodSniffing), node(2, routeOnlySniffing)}, users: []int64{10}}
+	res := h.compileResolve(f, domain.DestResolveOnDemand, "", policyCap, resolveCap)
+	if res.Policy == nil || res.Policy.Resolve != protocol.ResolveOnDemand {
+		t.Fatalf("the node was downgraded for a report-only rule: %+v", res.Policy)
+	}
+	if m := h.meta(); m.ResolveEffective != "on_demand" || m.ResolveUnavailable != "" || m.ReportOnlyShed != "resolve" {
+		t.Fatalf("recorded %q / %q / shed %q", m.ResolveEffective, m.ResolveUnavailable, m.ReportOnlyShed)
+	}
+	if !slices.ContainsFunc(res.Issues, func(i domain.NodeAgentIssue) bool {
+		return i.Code == IssueReportOnlyNotDeployed && strings.Contains(i.Detail, "resolve")
+	}) {
+		t.Fatalf("issues = %+v", res.Issues)
+	}
+	if err := protocol.ValidateDestinationPolicy(res.Policy); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ---- retry, and why on_demand did nothing ----
+
+func TestResolve_ARefusedOnDemandNodeSwitchedBackToAsIsIsRetried(t *testing.T) {
+	h := newHarness(t)
+	privatePolicy(h, "lan")
+	h.publishNow()
+	caps := []string{policyCap, resolveCap}
+	on := h.compileResolve(base1(), domain.DestResolveOnDemand, "", caps...)
+	h.observe(rejected(on.Digest), caps...)
+	if held := h.compileResolve(base1(), domain.DestResolveOnDemand, "", caps...); held.Policy != nil {
+		t.Fatalf("setup: the refusal was not held: %+v", held.Policy)
+	}
+	back := h.compileResolve(base1(), domain.DestResolveAsIs, "", caps...)
+	if back.Policy == nil || back.Policy.Resolve != protocol.ResolveAsIs {
+		t.Fatalf("the node was not retried after its effective mode changed: %+v", back.Policy)
+	}
+}
+
+func TestResolve_OnDemandWithNoIPRulesIsRecordedAsSuch(t *testing.T) {
+	h := newHarness(t)
+	smtpPolicy(h, "smtp")
+	h.publishNow()
+	h.compileResolve(base1(), domain.DestResolveOnDemand, "", policyCap, resolveCap)
+	if m := h.meta(); m.ResolveEffective != "" || m.ResolveUnavailable != "no_ip_rules" {
+		t.Fatalf("recorded %q / %q, want empty / no_ip_rules", m.ResolveEffective, m.ResolveUnavailable)
+	}
+	// As_is is not "unavailable".
+	h.compileResolve(base1(), domain.DestResolveAsIs, "", policyCap, resolveCap)
+	if m := h.meta(); m.ResolveUnavailable != "" {
+		t.Fatalf("as_is recorded %q", m.ResolveUnavailable)
 	}
 }

@@ -22,6 +22,11 @@ const IssueResolveNotDeployed = "destination_policy_resolve_not_deployed"
 // the status page's resolve_unavailable.
 const resolveRouteOnly = "route_only"
 
+// resolveNoIPRules is resolve_unavailable when on_demand is asked for and
+// delivered everywhere it could be, but nothing in the policy has an IP rule, so
+// no mode is written. Not a fault: the status page says so.
+const resolveNoIPRules = "no_ip_rules"
+
 // capabilityDestinationResolve is the capability a node declares when it
 // compiles DestinationPolicy.Resolve on every engine it runs.
 const capabilityDestinationResolve = protocol.CapabilityDestinationResolve
@@ -86,8 +91,14 @@ func lowerResolve(a, b protocol.ResolveMode) protocol.ResolveMode {
 // per listener, that where an IP rule applies, no sniffed name stands in for the
 // real target while the connection goes elsewhere (sniffing routeOnly:true).
 // Xray's domainStrategy is router-wide, so ONE such inbound holds the whole node
-// at as_is. Only a sniffing object that cannot be read is skipped here: the
-// node's own refusal says that.
+// at as_is. A sniffing object that cannot be read is a finding too (reason
+// "malformed", as for the other needs): the node would refuse it.
+//
+// This is deliberately stricter than the node's own planner in two ways: it
+// looks at every rule that applies to the inbound, where the node filters rules
+// whose subjects match nobody on its roster, and at every enabled inbound, where
+// the node checks only the inbounds it emits. PSP may hold a node at as_is that
+// the node would have run on_demand; it never lets the node refuse.
 func resolveFindings(p *protocol.DestinationPolicy, nodes []*domain.Node) []sniffFinding {
 	if p == nil {
 		return nil
@@ -104,7 +115,10 @@ func resolveFindings(p *protocol.DestinationPolicy, nodes []*domain.Node) []snif
 			continue
 		}
 		verdict, reason, err := protocol.CheckXraySniffing([]byte(n.Sniffing), protocol.SniffForResolvedIPs)
-		if err == nil && verdict == protocol.SniffInsufficient {
+		switch {
+		case err != nil:
+			out = append(out, sniffFinding{Listener: string(key), NodeID: n.ID, Label: n.DisplayName, Reason: sniffMalformed})
+		case verdict == protocol.SniffInsufficient:
 			out = append(out, sniffFinding{Listener: string(key), NodeID: n.ID, Label: n.DisplayName, Reason: reason})
 		}
 	}
@@ -112,18 +126,74 @@ func resolveFindings(p *protocol.DestinationPolicy, nodes []*domain.Node) []snif
 	return out
 }
 
-// settleResolve holds the policy at as_is when an inbound cannot run on_demand,
-// and returns the inbounds that were the reason (nil when it stays as it was).
-// Xray only: sing-box takes no sniffed name for routing.
-func settleResolve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string) []sniffFinding {
+// settleResolve makes the policy something the node can run. It returns the
+// policy to send, the inbounds that held the WHOLE node at as_is (nil when none
+// did) and whether report-only rules were taken off some inbounds. Xray only:
+// sing-box takes no sniffed name for routing.
+//
+//   - The decision to hold the node at as_is is made on the ENFORCED rules alone:
+//     report-only must not disturb enforcement, and an enforced CIDR block elsewhere
+//     must not stop judging hostnames because a report-only rule meets a routeOnly
+//     inbound.
+//   - When only report-only IP rules meet such an inbound, they are taken off it
+//     (their inbounds narrowed, or the rule dropped when none is left), the mode
+//     stays on_demand and the node is told report-only rules were not deployed.
+func settleResolve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine string) (*protocol.DestinationPolicy, []sniffFinding, bool) {
 	if p == nil || p.Resolve != protocol.ResolveOnDemand || engine != xrayEngine {
-		return nil
+		return p, nil, false
+	}
+	if held := resolveFindings(enforcedOnly(p), nodes); len(held) > 0 {
+		withResolve(p, protocol.ResolveAsIs)
+		return p, held, false
 	}
 	found := resolveFindings(p, nodes)
-	if len(found) > 0 {
-		withResolve(p, protocol.ResolveAsIs)
+	if len(found) == 0 {
+		return p, nil, false
 	}
-	return found
+	bad := map[protocol.ListenerKey]bool{}
+	for _, f := range found {
+		bad[protocol.ListenerKey(f.Listener)] = true
+	}
+	var all []protocol.ListenerKey
+	for _, n := range nodes {
+		if n != nil && n.Enabled {
+			all = append(all, protocol.NewListenerKey(n.ID))
+		}
+	}
+	slices.Sort(all)
+	out := make([]protocol.DestinationRule, 0, len(p.Rules))
+	for _, r := range p.Rules {
+		if sheddable(r) && ruleHasIPRules(r) {
+			targets := r.Inbounds
+			if len(targets) == 0 {
+				targets = all
+			}
+			kept := slices.DeleteFunc(slices.Clone(targets), func(k protocol.ListenerKey) bool { return bad[k] })
+			if len(kept) != len(targets) {
+				if len(kept) == 0 {
+					continue
+				}
+				r.Inbounds = kept
+			}
+		}
+		out = append(out, r)
+	}
+	if len(out) == 0 {
+		return nil, nil, true
+	}
+	res := &protocol.DestinationPolicy{Rules: out, Exempt: slices.Clone(p.Exempt)}
+	withCollect(res, p.Collect)
+	withResolve(res, p.Resolve)
+	return res, nil, true
+}
+
+// resolveReason is what an inbound that held the node at as_is is called in the
+// node issue and in the status page's resolve_unavailable.
+func resolveReason(f sniffFinding) string {
+	if f.Reason == sniffMalformed {
+		return "sniffing"
+	}
+	return resolveRouteOnly
 }
 
 // resolveIssues are the node issues of the inbounds that held the node at as_is,
@@ -131,7 +201,7 @@ func settleResolve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine s
 func resolveIssues(found []sniffFinding) []domain.NodeAgentIssue {
 	out := make([]domain.NodeAgentIssue, 0, len(found))
 	for _, f := range found {
-		out = append(out, domain.NodeAgentIssue{Code: IssueResolveNotDeployed, Key: f.Listener, Detail: resolveRouteOnly})
+		out = append(out, domain.NodeAgentIssue{Code: IssueResolveNotDeployed, Key: f.Listener, Detail: resolveReason(f)})
 	}
 	return out
 }

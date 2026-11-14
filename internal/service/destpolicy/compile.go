@@ -195,7 +195,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	// An empty observed core version (a report that left it out) is not a
 	// change: the last non-empty one stands.
 	in.CoreVersion = s.observedCore(in.AgentID, in.CoreVersion)
-	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes))
+	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 
 	s.mu.Lock()
 	cached := s.compiled[in.AgentID]
@@ -215,7 +215,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	// the key from before the write would never match the next sync and every
 	// state change would cost a second compile.
 	if after, merr := s.metaFor(ctx, in.AgentID); merr == nil {
-		key = compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, after, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes))
+		key = compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, after, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 	}
 	entry.key = key
 	if !entry.uncached {
@@ -251,8 +251,12 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	if meta.ResolveEffective != "" {
 		patch.ResolveEffective = &empty
 	}
-	if meta.ResolveUnavailable != "" {
-		patch.ResolveUnavailable = &empty
+	wantUnavailable := ""
+	if EffectiveResolve(in.DestResolve, in.Capabilities) == protocol.ResolveOnDemand {
+		wantUnavailable = resolveNoIPRules
+	}
+	if meta.ResolveUnavailable != wantUnavailable {
+		patch.ResolveUnavailable = &wantUnavailable
 	}
 	if meta.ReportOnlyShed != shed {
 		// Nothing is sent; what was left out of it is still worth showing when
@@ -322,7 +326,11 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// substitute the name the router resolves (routeOnly:true) holds the WHOLE
 	// node at as_is. It is a downgrade, not a restriction: no rule is dropped or
 	// scoped, and the node is flagged.
-	desiredResolveHeld := settleResolve(desired, nodes, engine)
+	desired, desiredResolveHeld, resolveObserve := settleResolve(desired, nodes, engine)
+	if resolveObserve && desiredShed == "" {
+		desiredShed = shedResolve
+		shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedResolve)})
+	}
 	if desired == nil && slack > 0 && (Usage{Subjects: slack}).over() != nil {
 		// Nothing is on the roster to carry rules, but the members its tags
 		// select would carry more than the limit allows. Answering "no policy"
@@ -366,7 +374,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// may accept D after the operator changes that, with D's bytes unchanged,
 	// so a changed context is a reason to retry too.
 	genNewer := st.PublishedGeneration > meta.RejectedGeneration
-	ctxNow := refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes)
+	ctxNow := refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes)
 	retryDue := rejectedHeld &&
 		(capsNow != meta.RejectedCaps || ctxNow != meta.RejectedCtx || (genNewer && desiredDigest != meta.RejectedSHA256))
 
@@ -470,7 +478,12 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			// inbound cannot supply, it is nil, which is always deployable.
 			// The inbounds' sniffing may have changed since the LKG applied: one that
 			// cannot run on_demand now holds it at as_is, as for the desired policy.
-			fallbackResolveHeld = settleResolve(output, nodes, engine)
+			var obs bool
+			output, fallbackResolveHeld, obs = settleResolve(output, nodes, engine)
+			if obs && fallbackShed == "" {
+				fallbackShed = shedResolve
+				shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedResolve)})
+			}
 			if output != nil {
 				switch verr := protocol.ValidateDestinationPolicy(output); {
 				case verr != nil:
@@ -548,8 +561,13 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		patch.ResolveEffective = &outResolve
 	}
 	outUnavailable := ""
-	if len(resolveHeld) > 0 {
-		outUnavailable = resolveRouteOnly
+	switch {
+	case len(resolveHeld) > 0:
+		outUnavailable = resolveReason(resolveHeld[0])
+	case resolve == protocol.ResolveOnDemand && output != nil && output.Resolve != protocol.ResolveOnDemand:
+		// Asked for, nothing holds it back, and still none was written: the policy
+		// has no IP rule to resolve for.
+		outUnavailable = resolveNoIPRules
 	}
 	if outUnavailable != meta.ResolveUnavailable {
 		patch.ResolveUnavailable = &outUnavailable
@@ -663,6 +681,9 @@ func sniffIssues(findings []sniffFinding) []domain.NodeAgentIssue {
 const (
 	shedLimit    = "limit"
 	shedSniffing = "sniffing"
+	// shedResolve: report-only IP rules were taken off the inbounds whose
+	// sniffing (routeOnly) would substitute the name they resolve.
+	shedResolve = "resolve"
 )
 
 func reportOnlyNote(why string) string {
@@ -771,9 +792,14 @@ func shedObserve(p *protocol.DestinationPolicy, extraSubjects int) (*protocol.De
 // output, which is what lets the next sync skip the work.
 // refusalContext hashes what a refusal depends on besides the policy's bytes:
 // the engine, the core release and each enabled inbound's sniffing.
-func refusalContext(engine, coreVersion, observedCore string, nodes []*domain.Node) string {
+func refusalContext(engine, coreVersion, observedCore string, resolve protocol.ResolveMode, nodes []*domain.Node) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "engine=%s;core=%s;observed=%s;", engine, coreVersion, observedCore)
+	// A change of the effective mode changes what a refused policy would be; only
+	// written for on_demand so an as_is node's context is what it was.
+	if resolve == protocol.ResolveOnDemand {
+		fmt.Fprintf(h, "resolve=%s;", resolve)
+	}
 	ordered := slices.Clone(nodes)
 	slices.SortFunc(ordered, func(a, b *domain.Node) int { return int(a.ID - b.ID) })
 	for _, n := range ordered {
