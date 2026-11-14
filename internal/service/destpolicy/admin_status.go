@@ -64,7 +64,7 @@ type NodeState struct {
 	Collect          string `json:"collect"`
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
-	// State is none, paused, unsupported_kind, unsupported_version, pending,
+	// State is none, paused, unsupported_kind, not_enrolled, unsupported_version, pending,
 	// applied, rejected, over_limit, sniffing or offline.
 	State          string                   `json:"state"`
 	FallbackReason string                   `json:"fallback_reason"`
@@ -224,7 +224,9 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 			v.Totals[ns.State]++
 			continue
 		case agent == nil:
-			ns.State = "unsupported_version"
+			// No agent has enrolled on this native panel yet: nothing can run a
+			// policy here, and it is not an old node that needs an upgrade.
+			ns.State = "not_enrolled"
 			v.Nodes = append(v.Nodes, ns)
 			v.Totals[ns.State]++
 			continue

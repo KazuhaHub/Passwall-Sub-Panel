@@ -433,7 +433,7 @@ export interface DestUserView {
 // ---- status ----
 
 export type DestNodeState =
-  | 'none' | 'paused' | 'unsupported_kind' | 'unsupported_version' | 'pending' | 'applied'
+  | 'none' | 'paused' | 'unsupported_kind' | 'not_enrolled' | 'unsupported_version' | 'pending' | 'applied'
   | 'rejected' | 'over_limit' | 'sniffing' | 'offline'
 
 export interface DestPublishError { kind: string; used?: number; limit?: number; field?: string }
