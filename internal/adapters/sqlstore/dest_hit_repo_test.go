@@ -574,7 +574,7 @@ func TestAuditCollect_AWholeRowSaveNeverWritesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	off := domain.AuditCollectOff
-	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &off); err != nil {
+	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &off, nil); err != nil {
 		t.Fatal(err)
 	}
 	stale, _ := r.GetByID(ctx, p.ID)
@@ -601,7 +601,7 @@ func TestAuditCollect_NativeMetadataWriteIsNarrowAndPspOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	full := domain.AuditCollectHitsAndUsage
-	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &full); err != nil {
+	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &full, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := r.GetByID(ctx, p.ID)
@@ -610,19 +610,19 @@ func TestAuditCollect_NativeMetadataWriteIsNarrowAndPspOnly(t *testing.T) {
 	}
 	// Omitted leaves it alone.
 	remark := "x"
-	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, &remark, nil, nil); err != nil {
+	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, &remark, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ = r.GetByID(ctx, p.ID); got.AuditCollect != domain.AuditCollectHitsAndUsage {
 		t.Fatalf("an omitted audit_collect changed to %q", got.AuditCollect)
 	}
 	bad := domain.AuditCollect("everything")
-	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &bad); !errors.Is(err, domain.ErrValidation) {
+	if err := r.UpdateNativeMetadata(ctx, p.ID, nil, nil, nil, &bad, nil); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("an unknown level = %v, want ErrValidation", err)
 	}
 	third := seedPanel(t, r)
 	off := domain.AuditCollectOff
-	if err := r.UpdateNativeMetadata(ctx, third.ID, nil, nil, nil, &off); !errors.Is(err, domain.ErrValidation) {
+	if err := r.UpdateNativeMetadata(ctx, third.ID, nil, nil, nil, &off, nil); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("a non-native server = %v, want ErrValidation", err)
 	}
 }

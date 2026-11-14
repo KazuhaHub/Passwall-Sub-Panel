@@ -30,3 +30,22 @@ export function validPort(raw: string): boolean {
   if (raw.trim() === '') return true
   return /^\d{1,5}$/.test(raw.trim()) && Number(raw) >= 1 && Number(raw) <= 65535
 }
+
+/**
+ * What `resolved_ips` is sent as: undefined (field omitted: not given), an empty
+ * array (the lookup failed; the backend reads it as a failed lookup) or the list typed.
+ */
+export function resolvedIpsPayload(raw: string, lookupFailed: boolean): string[] | undefined {
+  if (lookupFailed) return []
+  const { ips } = parseResolvedIps(raw)
+  return ips.length > 0 ? ips : undefined
+}
+
+/** The most addresses a test may be given as the resolution of the host name. */
+export const MAX_RESOLVED_IPS = 16
+
+/** IP literals typed with commas or spaces between them: the list, and whether it is usable (each a valid IP, at most 16). */
+export function parseResolvedIps(raw: string): { ips: string[]; bad: boolean } {
+  const ips = raw.split(/[\s,]+/).filter(Boolean)
+  return { ips, bad: ips.length > MAX_RESOLVED_IPS || !ips.every(validIp) }
+}

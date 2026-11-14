@@ -143,8 +143,8 @@ func TestAuditHook_ThePanelsCollectLevelIsPassedToTheCompiler(t *testing.T) {
 	}
 	off := domain.AuditCollectOff
 	if err := f.repos.XUIPanel.(interface {
-		UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error
-	}).UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, &off); err != nil {
+		UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect, resolve *domain.DestResolve) error
+	}).UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, &off, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.syncWith(t, caps); err != nil {
@@ -152,5 +152,55 @@ func TestAuditHook_ThePanelsCollectLevelIsPassedToTheCompiler(t *testing.T) {
 	}
 	if fake.input.AuditCollect != domain.AuditCollectOff {
 		t.Fatalf("collect = %q after the admin switched recording off", fake.input.AuditCollect)
+	}
+}
+
+// The panel's choice of how hostnames meet IP rules reaches the compiler through
+// the same panel row.
+func TestAuditHook_ThePanelsDestResolveIsPassedToTheCompiler(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	panel := &domain.Panel{Kind: domain.PanelKindPSP, Name: "resolve-panel", URL: "psp://agt_resolve"}
+	if err := f.repos.XUIPanel.Save(t.Context(), panel); err != nil {
+		t.Fatal(err)
+	}
+	agent := &domain.NodeAgent{
+		AgentID: "agt_resolve", PanelID: panel.ID, Epoch: 1, CredentialSHA256: strings.Repeat("c", 64),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
+	}
+	if err := f.repos.NodeAgent.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	f.agent = agent
+	f.service, err = New(Options{CoreCatalog: corefixtures.Static{},
+		Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask,
+		Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings,
+		Panels: f.repos.XUIPanel, Now: func() time.Time { return f.now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakePolicies{}
+	f.service.SetPolicies(fake)
+	caps := func(r *nodeprotocol.NodeReport) {
+		r.Capabilities = []string{nodeprotocol.CapabilityDestinationPolicy, nodeprotocol.CapabilityDestinationResolve}
+	}
+	if _, err := f.syncWith(t, caps); err != nil {
+		t.Fatal(err)
+	}
+	if fake.input.DestResolve != domain.DestResolveAsIs {
+		t.Fatalf("resolve = %q, want the default as_is", fake.input.DestResolve)
+	}
+	on := domain.DestResolveOnDemand
+	if err := f.repos.XUIPanel.(interface {
+		UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect, resolve *domain.DestResolve) error
+	}).UpdateNativeMetadata(t.Context(), panel.ID, nil, nil, nil, nil, &on); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.syncWith(t, caps); err != nil {
+		t.Fatal(err)
+	}
+	if fake.input.DestResolve != domain.DestResolveOnDemand {
+		t.Fatalf("resolve = %q after the admin switched it on", fake.input.DestResolve)
 	}
 }

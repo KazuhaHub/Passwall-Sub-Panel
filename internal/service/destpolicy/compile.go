@@ -54,6 +54,10 @@ type CompileInput struct {
 	// The level the node is told to run is the lower of it and the node's
 	// capabilities (EffectiveCollect).
 	AuditCollect domain.AuditCollect
+	// DestResolve is the panel's choice of how hostnames meet IP rules ("" is
+	// as_is). The mode the node is told to run is EffectiveResolve of it and the
+	// node's capabilities, held at as_is by an inbound that cannot run on_demand.
+	DestResolve domain.DestResolve
 }
 
 // Result is a compile's answer.
@@ -187,10 +191,11 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		engine = xrayEngine
 	}
 	collect := EffectiveCollect(in.AuditCollect, in.Capabilities)
+	resolve := EffectiveResolve(in.DestResolve, in.Capabilities)
 	// An empty observed core version (a report that left it out) is not a
 	// change: the last non-empty one stands.
 	in.CoreVersion = s.observedCore(in.AgentID, in.CoreVersion)
-	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes))
+	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 
 	s.mu.Lock()
 	cached := s.compiled[in.AgentID]
@@ -201,7 +206,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	}
 
 	started := time.Now()
-	res, entry, err := s.compileFresh(ctx, in, meta, cb, view, nodes, engine, collect, st, now)
+	res, entry, err := s.compileFresh(ctx, in, meta, cb, view, nodes, engine, collect, resolve, st, now)
 	if err != nil {
 		return Result{}, err
 	}
@@ -210,7 +215,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	// the key from before the write would never match the next sync and every
 	// state change would cost a second compile.
 	if after, merr := s.metaFor(ctx, in.AgentID); merr == nil {
-		key = compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, view, nodes, after, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes))
+		key = compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, after, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 	}
 	entry.key = key
 	if !entry.uncached {
@@ -243,6 +248,16 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 		// Nothing is minted, so nothing is being recorded.
 		patch.CollectEffective = &empty
 	}
+	if meta.ResolveEffective != "" {
+		patch.ResolveEffective = &empty
+	}
+	wantUnavailable := ""
+	if EffectiveResolve(in.DestResolve, in.Capabilities) == protocol.ResolveOnDemand {
+		wantUnavailable = resolveNoIPRules
+	}
+	if meta.ResolveUnavailable != wantUnavailable {
+		patch.ResolveUnavailable = &wantUnavailable
+	}
 	if meta.ReportOnlyShed != shed {
 		// Nothing is sent; what was left out of it is still worth showing when
 		// leaving it out is why nothing is sent.
@@ -267,12 +282,16 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 
 // compileFresh is a compile that missed the cache.
 func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, cb *cachedBase,
-	view nodeView, nodes []*domain.Node, engine string, collect protocol.CollectLevel, st *domain.DestPolicyState, now time.Time) (Result, *compiledEntry, error) {
+	view nodeView, nodes []*domain.Node, engine string, collect protocol.CollectLevel, resolve protocol.ResolveMode, st *domain.DestPolicyState, now time.Time) (Result, *compiledEntry, error) {
 
 	desired := cb.base.assemble(view)
 	// Recording is part of the desired policy, so it is part of its digest: a
 	// panel that switches recording off is a new policy for the node.
 	withCollect(desired, collect)
+	// How hostnames meet the IP rules is part of the desired policy too, set only
+	// where a rule has IP rules; an inbound that cannot run it holds the node at
+	// as_is below, once the rules are final.
+	withResolve(desired, resolve)
 	// REPORT-ONLY MUST NOT DISTURB ENFORCEMENT: observe rules that cannot be
 	// deployed on this node (an inbound's sniffing cannot supply them, or they
 	// are what overruns the budget) are left out, and the enforced rules go on
@@ -302,6 +321,18 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	if shed, why, ok := shedObserve(desired, slack); ok {
 		desired, desiredShed = shed, why
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(why)}}
+	}
+	// XRAY'S domainStrategy IS ROUTER-WIDE: an inbound whose sniffing would
+	// substitute the name the router resolves (routeOnly:true) holds the WHOLE
+	// node at as_is, decided on the enforced rules alone (report-only must not
+	// disturb enforcement). That is a downgrade: no enforced rule is dropped or
+	// scoped, and the node is flagged. Report-only IP rules that meet such an
+	// inbound are instead taken off it (narrowed, or dropped when narrowing would
+	// overrun a limit) and reported as not deployed.
+	desired, desiredResolveHeld, resolveObserve := settleResolve(desired, nodes, engine)
+	if resolveObserve && desiredShed == "" {
+		desiredShed = shedResolve
+		shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedResolve)})
 	}
 	if desired == nil && slack > 0 && (Usage{Subjects: slack}).over() != nil {
 		// Nothing is on the roster to carry rules, but the members its tags
@@ -346,7 +377,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// may accept D after the operator changes that, with D's bytes unchanged,
 	// so a changed context is a reason to retry too.
 	genNewer := st.PublishedGeneration > meta.RejectedGeneration
-	ctxNow := refusalContext(engine, in.Config.Core.Version, in.CoreVersion, nodes)
+	ctxNow := refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes)
 	retryDue := rejectedHeld &&
 		(capsNow != meta.RejectedCaps || ctxNow != meta.RejectedCtx || (genNewer && desiredDigest != meta.RejectedSHA256))
 
@@ -386,6 +417,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	result := ResultCompiled
 	unreadable, lkgDropped := false, false
 	var fallbackIssues []domain.NodeAgentIssue
+	var fallbackResolveHeld []sniffFinding
 	var output *protocol.DestinationPolicy
 	if reason == domain.DestFallbackNone {
 		err := protocol.ValidateDestinationPolicy(desired)
@@ -418,7 +450,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		var ferr error
 		if s.bodyReadBackedOff(bodyKey(in.AgentID, meta.AppliedSHA256), now) {
 			output, unreadable = nil, true
-		} else if output, ferr = s.fallbackPolicy(ctx, in.AgentID, meta, cb, view, collect); ferr != nil {
+		} else if output, ferr = s.fallbackPolicy(ctx, in.AgentID, meta, cb, view, collect, resolve); ferr != nil {
 			// A transient read error must not become "no policy": fail the
 			// sync, cache nothing, and the node keeps what it has. But a read
 			// that keeps failing cannot freeze the node (and its roster) for
@@ -447,6 +479,14 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			// Restricting adds inbounds and can split a rule, so the result is
 			// judged again: over a limit, invalid, or still needing sniffing an
 			// inbound cannot supply, it is nil, which is always deployable.
+			// The inbounds' sniffing may have changed since the LKG applied: one that
+			// cannot run on_demand now holds it at as_is, as for the desired policy.
+			var obs bool
+			output, fallbackResolveHeld, obs = settleResolve(output, nodes, engine)
+			if obs && fallbackShed == "" {
+				fallbackShed = shedResolve
+				shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedResolve)})
+			}
 			if output != nil {
 				switch verr := protocol.ValidateDestinationPolicy(output); {
 				case verr != nil:
@@ -509,6 +549,32 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	if outCollect != meta.CollectEffective {
 		patch.CollectEffective = &outCollect
 	}
+	// The mode as delivered, and why a panel that asked for on_demand did not get
+	// it (an inbound's sniffing): the status page's resolve_effective and
+	// resolve_unavailable. Only what the sent policy was held back by counts.
+	outResolve, resolveHeld := "", []sniffFinding(nil)
+	if output != nil {
+		outResolve = string(output.Resolve)
+		resolveHeld = desiredResolveHeld
+		if reason != domain.DestFallbackNone {
+			resolveHeld = fallbackResolveHeld
+		}
+	}
+	if outResolve != meta.ResolveEffective {
+		patch.ResolveEffective = &outResolve
+	}
+	outUnavailable := ""
+	switch {
+	case len(resolveHeld) > 0:
+		outUnavailable = resolveReason(resolveHeld[0])
+	case resolve == protocol.ResolveOnDemand && output != nil && !hasIPRules(output):
+		// Asked for, nothing holds it back, and still none was written: the policy
+		// has no IP rule to resolve for.
+		outUnavailable = resolveNoIPRules
+	}
+	if outUnavailable != meta.ResolveUnavailable {
+		patch.ResolveUnavailable = &outUnavailable
+	}
 	// Why report-only rules were left out of what this node is sent, as the
 	// status page shows it (cleared when nothing was).
 	sentShed := ""
@@ -551,6 +617,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	res.Issues = append(res.Issues, sniffIssues(findings)...)
 	res.Issues = append(res.Issues, fallbackIssues...)
 	res.Issues = append(res.Issues, shedNote...)
+	res.Issues = append(res.Issues, resolveIssues(resolveHeld)...)
 	if lkgDropped {
 		res.Issues = append(res.Issues, domain.NodeAgentIssue{Code: IssueLKGRejected, Detail: "the fallback equals the refused policy"})
 	}
@@ -617,6 +684,9 @@ func sniffIssues(findings []sniffFinding) []domain.NodeAgentIssue {
 const (
 	shedLimit    = "limit"
 	shedSniffing = "sniffing"
+	// shedResolve: report-only IP rules were taken off the inbounds whose
+	// sniffing (routeOnly) would substitute the name they resolve.
+	shedResolve = "resolve"
 )
 
 func reportOnlyNote(why string) string {
@@ -691,6 +761,8 @@ func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
 		return nil
 	}
 	withCollect(out, p.Collect)
+	// Without its observe rules the policy may have no IP rule left to resolve for.
+	withResolve(out, p.Resolve)
 	return out
 }
 
@@ -723,9 +795,14 @@ func shedObserve(p *protocol.DestinationPolicy, extraSubjects int) (*protocol.De
 // output, which is what lets the next sync skip the work.
 // refusalContext hashes what a refusal depends on besides the policy's bytes:
 // the engine, the core release and each enabled inbound's sniffing.
-func refusalContext(engine, coreVersion, observedCore string, nodes []*domain.Node) string {
+func refusalContext(engine, coreVersion, observedCore string, resolve protocol.ResolveMode, nodes []*domain.Node) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "engine=%s;core=%s;observed=%s;", engine, coreVersion, observedCore)
+	// A change of the effective mode changes what a refused policy would be; only
+	// written for on_demand so an as_is node's context is what it was.
+	if resolve == protocol.ResolveOnDemand {
+		fmt.Fprintf(h, "resolve=%s;", resolve)
+	}
 	ordered := slices.Clone(nodes)
 	slices.SortFunc(ordered, func(a, b *domain.Node) int { return int(a.ID - b.ID) })
 	for _, n := range ordered {
@@ -734,9 +811,13 @@ func refusalContext(engine, coreVersion, observedCore string, nodes []*domain.No
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func compileKey(gen int64, caps []string, engine string, collect protocol.CollectLevel, v nodeView, nodes []*domain.Node, meta *domain.DestAgentPolicy, refusalCtx string) string {
+func compileKey(gen int64, caps []string, engine string, collect protocol.CollectLevel, resolve protocol.ResolveMode, v nodeView, nodes []*domain.Node, meta *domain.DestAgentPolicy, refusalCtx string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "ctx=%s;", refusalCtx)
+	// Emitted only for on_demand, so an as_is node's key is what it was.
+	if resolve == protocol.ResolveOnDemand {
+		fmt.Fprintf(h, "resolve=%s;", resolve)
+	}
 	fmt.Fprintf(h, "gen=%d;caps=%s;engine=%s;collect=%s;panel=%d;fb=%s;rg=%d;rc=%s;rs=%s;rx=%s;applied=%s;", gen, capsToken(caps), engine, collect, v.panelID,
 		meta.FallbackReason, meta.RejectedGeneration, meta.RejectedCaps, meta.RejectedSHA256, meta.RejectedCtx, meta.AppliedSHA256)
 	ids := make([]int64, 0, len(nodes))
@@ -787,7 +868,7 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 // No LKG, an LKG that does not decode, or one that is invalid after trimming,
 // is nil: no policy is always deployable and matches a node that is not
 // enforcing, which is the truth.
-func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *domain.DestAgentPolicy, cb *cachedBase, v nodeView, collect protocol.CollectLevel) (*protocol.DestinationPolicy, error) {
+func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *domain.DestAgentPolicy, cb *cachedBase, v nodeView, collect protocol.CollectLevel, resolve protocol.ResolveMode) (*protocol.DestinationPolicy, error) {
 	if meta.AppliedSHA256 == "" {
 		return nil, nil
 	}
@@ -942,6 +1023,9 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 	// enforcing. So the level is the lower of what the LKG ran and the current
 	// one.
 	withCollect(out, lowerCollect(lkg.Collect, collect))
+	// The same for how hostnames meet the IP rules: the lower of what the LKG ran
+	// and the current choice, re-derived from the rules that are left.
+	withResolve(out, lowerResolve(lkg.Resolve, resolve))
 	if err := protocol.ValidateDestinationPolicy(out); err != nil {
 		log.Warn("destpolicy: the trimmed last-known-good policy does not validate; sending none", "agent_id", agentID, "err", err)
 		return nil, nil
@@ -1054,6 +1138,12 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 	}
 	if p.CollectEffective != nil {
 		next.CollectEffective = *p.CollectEffective
+	}
+	if p.ResolveEffective != nil {
+		next.ResolveEffective = *p.ResolveEffective
+	}
+	if p.ResolveUnavailable != nil {
+		next.ResolveUnavailable = *p.ResolveUnavailable
 	}
 	if p.ReportedSHA256 != nil {
 		next.ReportedSHA256 = *p.ReportedSHA256

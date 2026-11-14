@@ -64,6 +64,15 @@ type NodeState struct {
 	Collect          string `json:"collect"`
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
+	// Resolve is the panel's choice of how hostnames meet IP rules (as_is or
+	// on_demand), ResolveEffective what the node was sent ("on_demand", or "" for
+	// as_is), and ResolveUnavailable why a node set to on_demand does not run it:
+	// "version" (it does not declare the capability) or "route_only" (an inbound's
+	// sniffing would substitute the name), null when nothing holds it back. Empty
+	// for a node that is not a Passwall Node.
+	Resolve            string  `json:"resolve"`
+	ResolveEffective   string  `json:"resolve_effective"`
+	ResolveUnavailable *string `json:"resolve_unavailable"`
 	// State is none, paused, unsupported_kind, not_enrolled, unsupported_version, pending,
 	// applied, rejected, over_limit, sniffing or offline. "sniffing" is only the
 	// node refusing the policy for its sniffing; inbounds the PANEL found unable
@@ -276,6 +285,20 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		ns.Collect = string(panel.AuditCollect.Normalized())
 		ns.CollectEffective = row.CollectEffective
 		ns.Collecting = Collecting(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
+		// How hostnames meet IP rules: what the panel is set to, what the node was
+		// sent, and why a node set to on_demand is not running it.
+		ns.Resolve = string(panel.DestResolve.Normalized())
+		ns.ResolveEffective = row.ResolveEffective
+		if panel.DestResolve.Normalized() == domain.DestResolveOnDemand {
+			switch {
+			case resolveUnavailableVersion(panel.DestResolve, agent.ObservedCapabilities):
+				why := "version"
+				ns.ResolveUnavailable = &why
+			case row.ResolveUnavailable != "":
+				why := row.ResolveUnavailable
+				ns.ResolveUnavailable = &why
+			}
+		}
 		if panelHits != nil && ns.Supports.Hits {
 			n := panelHits[panel.ID]
 			ns.Hits24h = &n

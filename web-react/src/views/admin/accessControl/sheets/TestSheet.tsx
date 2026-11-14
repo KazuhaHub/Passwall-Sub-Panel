@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, TextField, ToggleButton,
+  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Skeleton, TextField, ToggleButton,
   ToggleButtonGroup, Typography, useTheme,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
@@ -17,7 +17,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { reportDestError } from '../destErrors'
 import EvalTrace, { terminatingStep, VerdictLine } from './EvalTrace'
 import SheetDrawer from './SheetDrawer'
-import { normalizeTarget, validIp, validPort } from './testInput'
+import { normalizeTarget, parseResolvedIps, resolvedIpsPayload, validIp, validPort } from './testInput'
 
 export interface TestSheetProps {
   open: boolean
@@ -56,6 +56,8 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
   const [userId, setUserId] = useState<number | null>(prefill?.userId ?? null)
   const [inbound, setInbound] = useState<number | null>(null)
   const [sourceIp, setSourceIp] = useState('')
+  const [resolvedIps, setResolvedIps] = useState('')
+  const [lookupFailed, setLookupFailed] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [result, setResult] = useState<{ r: DestTestResult; host: string } | null>(null)
@@ -68,12 +70,13 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
   const targetBad = submitted && norm.host === ''
   const portBad = !validPort(port)
   const ipBad = !validIp(sourceIp)
+  const resolved = lookupFailed ? { ips: [], bad: false } : parseResolvedIps(resolvedIps)
 
   const run = async (e?: FormEvent) => {
     e?.preventDefault()
     setSubmitted(true)
     setFieldError(null)
-    if (norm.host === '' || portBad || ipBad) return
+    if (norm.host === '' || portBad || ipBad || resolved.bad) return
     // A URL pasted whole: the host is what is tested, and a port in it fills the port field.
     const usePort = port.trim() !== '' ? Number(port) : norm.port ?? undefined
     if (norm.port && port.trim() === '') setPort(String(norm.port))
@@ -82,6 +85,7 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
       const r = await test.mutateAsync({
         target: norm.host, port: usePort, network, user_id: userId ?? undefined,
         inbound_node_id: inbound ?? undefined, source_ip: sourceIp.trim() || undefined,
+        ...(() => { const ips = resolvedIpsPayload(resolvedIps, lookupFailed); return ips ? { resolved_ips: ips } : {} })(),
       })
       setResult({ r, host: norm.host })
     } catch (err) {
@@ -121,6 +125,11 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
           renderInput={p => <TextField {...p} label={t(`${T}inbound`)} />} />
         <TextField label={t(`${T}source_ip`)} value={sourceIp} onChange={e => setSourceIp(e.target.value)} size="small"
           error={ipBad || fieldError === 'source_ip'} helperText={ipBad ? t(`${T}source_ip_bad`) : t(`${T}source_ip_hint`)} />
+        <TextField label={t(`${T}resolved_ips`)} value={resolvedIps} onChange={e => setResolvedIps(e.target.value)} size="small" disabled={lookupFailed}
+          error={resolved.bad || fieldError === 'resolved_ips'} helperText={resolved.bad ? t(`${T}resolved_ips_bad`) : t(`${T}resolved_ips_hint`)}
+          slotProps={{ htmlInput: { style: { fontFamily: 'ui-monospace, monospace', fontSize: 13 } } }} />
+        <FormControlLabel label={t(`${T}resolved_failed`)} sx={{ m: 0 }}
+          control={<Checkbox size="small" checked={lookupFailed} onChange={e => { setLookupFailed(e.target.checked); if (e.target.checked) setResolvedIps('') }} />} />
         <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
           <AsyncButton type="submit" variant="contained" onClick={run}>{t(`${T}run`)}</AsyncButton>
         </Box>
@@ -156,6 +165,8 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
               <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}note_no_dns`)}</Typography>
               {isIp && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}note_ip`)}</Typography>}
               {result.r.notes.includes('hostname_skips_ip_rules') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_hostname_skips_ip`)}</Typography>}
+              {result.r.notes.includes('hostname_needs_resolution') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_hostname_needs_resolution`)}</Typography>}
+              {result.r.notes.includes('resolution_failed_engine_dependent') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_resolution_failed`)}</Typography>}
               {result.r.conditional && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_conditional`)}</Typography>}
             </Box>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'space-between' }}>

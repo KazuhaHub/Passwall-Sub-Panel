@@ -49,6 +49,8 @@ export interface Server {
   update_channel?: NodeUpdateChannel
   /** How much a Passwall Node server records of its destination rules; absent for other panels. */
   audit_collect?: 'off' | 'hits' | 'hits_and_usage'
+  /** How a Passwall Node server's IP rules meet host names (as_is: no DNS; on_demand: resolve once); absent for other panels. */
+  dest_resolve?: 'as_is' | 'on_demand'
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -200,6 +202,7 @@ export interface UpdateServerRequest {
   panel_type?: PanelType
   update_channel?: NodeUpdateChannel
   audit_collect?: 'off' | 'hits' | 'hits_and_usage'
+  dest_resolve?: 'as_is' | 'on_demand'
   name?: string
   url?: string
   api_token?: string

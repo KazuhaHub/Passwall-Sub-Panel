@@ -177,6 +177,7 @@ func restrictForSniffing(p *protocol.DestinationPolicy, nodes []*domain.Node, en
 	// A report-only rule is one of the things that records, so the level is
 	// derived again from what is left.
 	withCollect(res, p.Collect)
+	withResolve(res, p.Resolve)
 	return res, info
 }
 

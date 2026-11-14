@@ -4,9 +4,9 @@ import {
   editDestListEntries, getDestCatalog, getDestExemptions, getDestList, getDestLists, getDestPolicies, getDestSettings,
   getDestSourceRule, getDestSourceRules, getDestStatus, getDestUser, getGeositeCategories, getGeositeStatus,
   getDestHits, instantiateDestTemplate, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
-  reorderDestPolicies, retryDestAgent, rollbackGeosite, setAuditCollect, testDestination, updateDestExemption, updateDestList,
+  reorderDestPolicies, retryDestAgent, rollbackGeosite, setAuditCollect, setDestResolve, testDestination, updateDestExemption, updateDestList,
   updateDestPolicy, updateGeosite,
-  type AuditCollect, type DestAction, type DestExemptionInput, type DestHitsParams, type DestListInput, type DestPolicyInput,
+  type AuditCollect, type DestResolve, type DestAction, type DestExemptionInput, type DestHitsParams, type DestListInput, type DestPolicyInput,
   type DestSettings, type DestSourceRuleInput, type DestState, type DestTestInput,
 } from '@/api/accessControl'
 import { destStatusActive, listsRefreshing } from '@/utils/accessControl'
@@ -325,6 +325,20 @@ export function useSetAuditCollect(scope: QueryScope) {
   return useMutation({
     mutationFn: ({ serverId, collect }: { serverId: number; collect: AuditCollect }) => setAuditCollect(serverId, collect),
     onSettled: () => invalidate(qc, scope, ['status', 'servers', 'policies', 'hits', 'users']),
+  })
+}
+
+/**
+ * A native server's hostname-matching mode (PUT /servers/:id, one key). It moves
+ * what the status says of the node (resolve, resolve_effective, the reason it is
+ * held back), the servers list that carries `dest_resolve`, and the policies,
+ * whose counters follow what is delivered.
+ */
+export function useSetDestResolve(scope: QueryScope) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ serverId, resolve }: { serverId: number; resolve: DestResolve }) => setDestResolve(serverId, resolve),
+    onSettled: () => invalidate(qc, scope, ['status', 'servers', 'policies']),
   })
 }
 

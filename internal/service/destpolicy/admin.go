@@ -481,7 +481,16 @@ type TestInput struct {
 	PanelID       int64
 	InboundNodeID int64
 	SourceIP      string
+	// ResolvedIPs are the addresses the admin says the target resolves to, for a
+	// node that resolves hostnames at routing time (on_demand). nil is "not
+	// given" (the answer for a hostname is then conditional); an empty list is a
+	// resolution that failed. At most maxResolvedIPs address literals. PSP never
+	// looks the name up itself: its resolver is not the node's.
+	ResolvedIPs []string
 }
+
+// maxResolvedIPs bounds the addresses a test may carry.
+const maxResolvedIPs = 16
 
 // TestStep is one line of the trace.
 type TestStep struct {
@@ -541,6 +550,9 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 		return nil, &ValidationError{Code: CodeTestInvalid, Field: "port", Msg: "the port is 1..65535"}
 	case in.Network != "" && in.Network != "tcp" && in.Network != "udp":
 		return nil, &ValidationError{Code: CodeTestInvalid, Field: "network", Msg: "the network is tcp or udp"}
+	}
+	if err := validateResolvedIPs(in.ResolvedIPs); err != nil {
+		return nil, err
 	}
 	st, err := a.Service.state.Get(ctx)
 	if err != nil {
@@ -614,6 +626,11 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 			// only on the inbounds that can supply it.
 			policy, _ = restrictForSniffing(policy, snapNodes, a.engineOf(ctx, panelID))
 		}
+		// How the node resolves a hostname against IP rules: the mode it would run,
+		// the panel's choice as the node's capabilities and inbounds allow it.
+		if panelID != 0 {
+			a.applyResolve(ctx, policy, panelID, snapNodes)
+		}
 		names = describeRules(cb)
 	}
 
@@ -624,6 +641,7 @@ func (a *Admin) Test(ctx context.Context, in TestInput) (*TestResult, error) {
 	if in.InboundNodeID != 0 {
 		input.Inbound = protocol.NewListenerKey(in.InboundNodeID)
 	}
+	input.Resolved = in.ResolvedIPs
 	m := protocol.MatchDestination(policy, input)
 	res.Verdict, res.Conditional = string(m.Verdict), m.Conditional
 	switch {

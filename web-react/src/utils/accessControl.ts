@@ -15,7 +15,7 @@ import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import type {
-  DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState,
+  DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState, ResolveUnavailable,
   DestStatus,
 } from '@/api/accessControl'
 import type { StatusLineTone } from '@/components/StatusLine'
@@ -505,4 +505,21 @@ export function nodeRecording(node: Pick<DestNodeStatus, 'kind' | 'state' | 'eng
   // What the node was told is what it does; the stored choice only stands in before anything was delivered.
   const set = node.collect_effective || node.collect
   return { mode: set === 'off' ? 'off' : 'hits', hits24h: node.hits_24h }
+}
+
+export type NodeResolveMode = 'as_is' | 'on_demand'
+
+/**
+ * A native node's hostname-matching mode: the panel's choice, what the node was
+ * actually sent (an empty effective mode is as_is) and why a node set to
+ * on_demand runs as_is. null for a node this page does not run policies on.
+ * An older answer without the fields reads as as_is.
+ */
+export function nodeResolve(node: Pick<DestNodeStatus, 'kind' | 'state' | 'resolve' | 'resolve_effective' | 'resolve_unavailable'>): { mode: NodeResolveMode; effective: NodeResolveMode; unavailable: ResolveUnavailable | null } | null {
+  if (!isNativeKind(node.kind) || node.state === 'unsupported_kind') return null
+  return {
+    mode: node.resolve === 'on_demand' ? 'on_demand' : 'as_is',
+    effective: node.resolve_effective === 'on_demand' ? 'on_demand' : 'as_is',
+    unavailable: node.resolve_unavailable ?? null,
+  }
 }

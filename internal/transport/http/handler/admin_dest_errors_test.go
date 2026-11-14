@@ -35,3 +35,26 @@ func TestDestError_TemplateExistsIsNotANameCollision(t *testing.T) {
 		}
 	}
 }
+
+// resolved_ips tells three things apart: omitted (the answer for a hostname is
+// conditional), an empty list (a failed resolution) and a list.
+func TestDestTestRequest_ResolvedIPsKeepsOmittedApartFromEmpty(t *testing.T) {
+	for body, want := range map[string]struct {
+		nilList bool
+		n       int
+	}{
+		`{"target":"a"}`:                                   {true, 0},
+		`{"target":"a","resolved_ips":null}`:               {true, 0},
+		`{"target":"a","resolved_ips":[]}`:                 {false, 0},
+		`{"target":"a","resolved_ips":["10.0.0.1","::1"]}`: {false, 2},
+	} {
+		var req destTestRequest
+		if err := json.Unmarshal([]byte(body), &req); err != nil {
+			t.Fatal(err)
+		}
+		in := req.toTestInput(0)
+		if (in.ResolvedIPs == nil) != want.nilList || len(in.ResolvedIPs) != want.n {
+			t.Errorf("%s: resolved = %#v", body, in.ResolvedIPs)
+		}
+	}
+}

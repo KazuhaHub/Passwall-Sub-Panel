@@ -356,13 +356,21 @@ type DestAgentPolicy struct {
 	AppliedGroups    []int64
 	// AppliedCollect is the recording level of the policy in AppliedBody: what
 	// the node runs while a newer minted policy is on its way to it.
-	AppliedCollect    string
-	CollectEffective  string
-	ReportedSHA256    string
-	ReportedState     string
-	ReportedIssue     string
-	ReportedListeners string
-	ReportedAt        *time.Time
+	AppliedCollect   string
+	CollectEffective string
+	// ResolveEffective is the Resolve mode of the policy minted for this node
+	// ("on_demand", or "" for as_is or nothing minted). ResolveUnavailable is why
+	// a panel set to on_demand is NOT delivered it by the compile: "route_only"
+	// (an inbound's sniffing would substitute the name; the whole node stays
+	// as_is), "" when nothing holds it back. A missing capability is derived from
+	// the node's capabilities where it is shown, not stored.
+	ResolveEffective   string
+	ResolveUnavailable string
+	ReportedSHA256     string
+	ReportedState      string
+	ReportedIssue      string
+	ReportedListeners  string
+	ReportedAt         *time.Time
 	// RejectedCaps is which of the three capabilities that gate delivery
 	// (policy, hits, usage) the agent advertised when the rejection was
 	// recorded, as a short token ("p", "ph", "phu"). A change of that set is
@@ -407,6 +415,8 @@ type DestAgentPolicyPatch struct {
 	AppliedGroups      *[]int64
 	AppliedCollect     *string
 	CollectEffective   *string
+	ResolveEffective   *string
+	ResolveUnavailable *string
 	ReportedSHA256     *string
 	ReportedState      *string
 	ReportedIssue      *string

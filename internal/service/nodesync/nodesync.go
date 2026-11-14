@@ -252,7 +252,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err := s.ingestReport(ctx, agent, snapshot, report, now); err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	normalized, collect, err := s.recordPanelObservation(ctx, agent, report, now)
+	normalized, choices, err := s.recordPanelObservation(ctx, agent, report, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -306,7 +306,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
 			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion,
-			AuditCollect: collect,
+			AuditCollect: choices.collect, DestResolve: choices.resolve,
 		})
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
@@ -393,19 +393,27 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	return response, nil
 }
 
+// panelChoices are the destination-policy choices read from the panel row a
+// sync already loads: how much the node records, and how its routing treats a
+// hostname against IP rules.
+type panelChoices struct {
+	collect domain.AuditCollect
+	resolve domain.DestResolve
+}
+
 // recordPanelObservation records what the node reports about itself on its
 // panel row, and returns whether a REALITY fingerprint was normalized and the
-// panel's recording choice, read from the very row it loads (the destination
-// policy compile needs the choice and this is the one panel read of a sync).
-func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) (bool, domain.AuditCollect, error) {
+// panel's destination-policy choices, read from the very row it loads (the
+// compile needs them and this is the one panel read of a sync).
+func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) (bool, panelChoices, error) {
 	if s.panels == nil || agent == nil {
-		return false, "", nil
+		return false, panelChoices{}, nil
 	}
 	panel, err := s.panels.GetByID(ctx, agent.PanelID)
 	if err != nil {
-		return false, "", fmt.Errorf("nodesync: load native panel observation target: %w", err)
+		return false, panelChoices{}, fmt.Errorf("nodesync: load native panel observation target: %w", err)
 	}
-	collect := panel.AuditCollect
+	choices := panelChoices{collect: panel.AuditCollect, resolve: panel.DestResolve}
 	panelVersion := report.AgentVersion
 	if panelVersion == "" {
 		panelVersion = panel.PanelVersion
@@ -418,11 +426,11 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	engineChanged := observedEngine != "" && observedEngine != agent.ObservedCoreEngine
 	if engineChanged && s.agents != nil {
 		if err := s.agents.UpdateCoreObservation(ctx, agent.AgentID, observedEngine); err != nil {
-			return false, "", fmt.Errorf("nodesync: persist native core engine observation: %w", err)
+			return false, panelChoices{}, fmt.Errorf("nodesync: persist native core engine observation: %w", err)
 		}
 	}
 	if err := s.panels.UpdateVersion(ctx, agent.PanelID, panelVersion, coreVersion, &now); err != nil {
-		return false, "", fmt.Errorf("nodesync: persist native panel observation: %w", err)
+		return false, panelChoices{}, fmt.Errorf("nodesync: persist native panel observation: %w", err)
 	}
 	engine := observedEngine
 	if engine == "" {
@@ -432,14 +440,14 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	if engine == domain.NodeCoreXray && s.normalizeRealityFingerprints != nil {
 		changed, err := s.normalizeRealityFingerprints(ctx, agent.PanelID, coreVersion)
 		if err != nil {
-			return false, "", fmt.Errorf("nodesync: normalize REALITY fingerprints: %w", err)
+			return false, panelChoices{}, fmt.Errorf("nodesync: normalize REALITY fingerprints: %w", err)
 		}
 		normalized = changed > 0
 	}
 	if (coreVersion != panel.XrayVersion || engineChanged) && s.invalidateRender != nil {
 		s.invalidateRender()
 	}
-	return normalized, collect, nil
+	return normalized, choices, nil
 }
 
 func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream domain.NodeAgentStreamName, body any, now time.Time) (*domain.NodeAgentStream, error) {

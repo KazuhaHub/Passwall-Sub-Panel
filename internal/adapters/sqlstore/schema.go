@@ -989,8 +989,13 @@ type xuiPanelRow struct {
 	// text, so a legacy row reads as the default after AutoMigrate. Written ONLY
 	// by UpdateNativeMetadata: Save omits it on update.
 	AuditCollect string `gorm:"column:audit_collect;size:16;not null;default:'hits'"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// DestResolve is how a native node's routing treats a hostname against IP
+	// rules: as_is or on_demand. Same shape and same rule as AuditCollect: a
+	// sized varchar with a default, written ONLY by UpdateNativeMetadata (Save
+	// omits it on update).
+	DestResolve string `gorm:"column:dest_resolve;size:16;not null;default:'as_is'"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type mailSettingsRow struct {
@@ -1119,6 +1124,7 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		IPLimitEnforcement: normalizeIPLimitEnforcement(r.IPLimitEnforcement),
 		IPLimitProbedAt:    r.IPLimitProbedAt,
 		AuditCollect:       domain.NormalizeAuditCollect(domain.AuditCollect(r.AuditCollect)),
+		DestResolve:        domain.NormalizeDestResolve(domain.DestResolve(r.DestResolve)),
 	}, nil
 }
 
@@ -1149,6 +1155,7 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		IPLimitEnforcement: string(normalizeIPLimitEnforcement(string(p.IPLimitEnforcement))),
 		IPLimitProbedAt:    p.IPLimitProbedAt,
 		AuditCollect:       string(domain.NormalizeAuditCollect(p.AuditCollect)),
+		DestResolve:        string(domain.NormalizeDestResolve(p.DestResolve)),
 	}, nil
 }
 

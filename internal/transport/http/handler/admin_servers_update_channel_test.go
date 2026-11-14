@@ -35,10 +35,13 @@ func (r *channelPanelRepo) Save(_ context.Context, panel *domain.Panel) error {
 	r.panel = &copy
 	return nil
 }
-func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect) error {
+func (r *channelPanelRepo) UpdateNativeMetadata(_ context.Context, _ int64, name, remark *string, channel *domain.PanelUpdateChannel, collect *domain.AuditCollect, resolve *domain.DestResolve) error {
 	r.narrowWrites++
 	if collect != nil {
 		r.panel.AuditCollect = *collect
+	}
+	if resolve != nil {
+		r.panel.DestResolve = *resolve
 	}
 	if name != nil {
 		r.panel.Name = *name
@@ -233,5 +236,62 @@ func TestNativeServerAuditCollectIsAMetadataWriteAndOmissionPreserves(t *testing
 	third := &channelPanelRepo{panel: &domain.Panel{ID: 41, Kind: domain.PanelKind3XUI, Name: "x", URL: "u", APIToken: "t"}}
 	if w = updateChannelRequest(t, NewAdminServersHandler(third, &channelPool{}, nil, nil, nil, nil), `{"audit_collect":"off"}`); w.Code != 400 || third.narrowWrites != 0 || third.fullWrites != 0 {
 		t.Fatalf("third-party audit_collect = %d", w.Code)
+	}
+}
+
+// How a native node's routing treats a hostname against IP rules is a per-server
+// choice through the same narrow writer as the other native metadata.
+func TestNativeServerDestResolveIsAMetadataWriteAndOmissionPreserves(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := &channelPanelRepo{panel: &domain.Panel{ID: 41, Kind: domain.PanelKindPSP, Name: "n", URL: "psp://agt_n", APIToken: "untouched-token"}}
+	h := NewAdminServersHandler(r, &channelPool{}, nil, nil, nil, nil)
+
+	w := updateChannelRequest(t, h, `{"dest_resolve":"on_demand"}`)
+	if w.Code != 200 || r.panel.DestResolve != domain.DestResolveOnDemand || r.fullWrites != 0 {
+		t.Fatalf("dest_resolve update = %d, %q, full writes %d", w.Code, r.panel.DestResolve, r.fullWrites)
+	}
+	var dto serverDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &dto); err != nil || dto.DestResolve != "on_demand" {
+		t.Fatalf("the answer carries dest_resolve %q (%v)", dto.DestResolve, err)
+	}
+	// Omitted: kept.
+	if w = updateChannelRequest(t, h, `{"name":"renamed"}`); w.Code != 200 || r.panel.DestResolve != domain.DestResolveOnDemand {
+		t.Fatalf("an omitted dest_resolve changed to %q (%d)", r.panel.DestResolve, w.Code)
+	}
+	for _, body := range []string{`{"dest_resolve":"everything"}`, `{"dest_resolve":""}`, `{"dest_resolve":1}`, `{"dest_resolve":"ON_DEMAND"}`} {
+		if w = updateChannelRequest(t, h, body); w.Code != 400 || r.panel.DestResolve != domain.DestResolveOnDemand {
+			t.Fatalf("%s = %d, %q: an invalid mode must be refused before any write", body, w.Code, r.panel.DestResolve)
+		}
+	}
+	// IPIfNonMatch is a named refusal, not just an invalid value.
+	w = updateChannelRequest(t, h, `{"dest_resolve":"if_non_match"}`)
+	var refusal struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &refusal); w.Code != 400 || err != nil || refusal.Code != "dest_resolve_unavailable" || r.panel.DestResolve != domain.DestResolveOnDemand {
+		t.Fatalf("if_non_match = %d %s, %q; want 400 dest_resolve_unavailable and no write", w.Code, w.Body.String(), r.panel.DestResolve)
+	}
+	if w = updateChannelRequest(t, h, `{"dest_resolve":"as_is"}`); w.Code != 200 || r.panel.DestResolve != domain.DestResolveAsIs {
+		t.Fatalf("as_is = %d, %q", w.Code, r.panel.DestResolve)
+	}
+	// Not for a third-party panel.
+	third := &channelPanelRepo{panel: &domain.Panel{ID: 41, Kind: domain.PanelKind3XUI, Name: "x", URL: "u", APIToken: "t"}}
+	if w = updateChannelRequest(t, NewAdminServersHandler(third, &channelPool{}, nil, nil, nil, nil), `{"dest_resolve":"on_demand"}`); w.Code != 400 || third.narrowWrites != 0 || third.fullWrites != 0 {
+		t.Fatalf("third-party dest_resolve = %d", w.Code)
+	}
+}
+
+func TestServerDTODestResolveOnlyNativeAndLegacyDefaultsAsIs(t *testing.T) {
+	for _, test := range []struct {
+		kind domain.PanelKind
+		raw  domain.DestResolve
+		want string
+	}{
+		{domain.PanelKindPSP, "", "as_is"}, {domain.PanelKindPSP, "junk", "as_is"}, {domain.PanelKindPSP, domain.DestResolveOnDemand, "on_demand"},
+		{domain.PanelKind3XUI, domain.DestResolveOnDemand, ""}, {domain.PanelKindSUI, "", ""},
+	} {
+		if got := toServerDTO(&domain.Panel{Kind: test.kind, DestResolve: test.raw}).DestResolve; got != test.want {
+			t.Fatalf("%s/%q: DTO dest_resolve = %q, want %q", test.kind, test.raw, got, test.want)
+		}
 	}
 }
