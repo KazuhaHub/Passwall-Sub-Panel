@@ -153,7 +153,7 @@ func TestUserUsage_FoldsToTopNAndTheRestWithoutLosingACount(t *testing.T) {
 		usage(h, 1, 7, "(ip)", 4),
 		usage(h, 1, 7, "tail1.example", 1),
 		usage(h, 1, 7, "tail2.example", 1),
-		usage(h, 1, 8, "other-user.example", 99), // another account: never in the answer
+		usage(h, 1, 8, "other-user.example", 99),  // another account: never in the answer
 		usage(h-5*hourMS, 1, 7, "old.example", 7), // outside the range
 	}
 	if _, err := r.StoreBatchWithUsage(ctx, "agt_a", "b1", time.Now(), nil, rows); err != nil {
