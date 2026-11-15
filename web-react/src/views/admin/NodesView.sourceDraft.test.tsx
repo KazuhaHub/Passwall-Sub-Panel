@@ -3,7 +3,7 @@ import { StrictMode } from 'react'
 import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api, installReads, list, node, server } from '@/test/adminSaveHarness'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
@@ -69,7 +69,8 @@ it('No or a dismiss aborts the OK and leaves the dialog open with both drafts in
   fireEvent.click(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }))
   submit(dialog)
   await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1))
-  await new Promise(r => setTimeout(r, 30))
+  // Let the refusal be acted on (the view's await on this very promise runs first), instead of sleeping and hoping.
+  await act(async () => { await confirmMock.mock.results[0].value })
   expect(inboundPuts()).toHaveLength(0)
   expect(screen.getByRole('dialog')).toBeTruthy()
   expect(within(section).getByRole('button', { name: 'admin:access_control.policies.state.on' }).getAttribute('aria-pressed')).toBe('true')

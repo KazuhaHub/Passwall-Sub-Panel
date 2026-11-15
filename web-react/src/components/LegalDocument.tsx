@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { DATA_COLLECTION_MARKER, type DataCollection } from '@/api/legal'
 import DataCollectionCard from './DataCollectionCard'
-import { safeLinkComponents, safeMarkdownProps } from './ReleaseNotes'
+import { legalLinkComponents, legalMarkdownProps } from './ReleaseNotes'
 
 // The marker is a line of its own, as the editor inserts it.
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -37,12 +37,12 @@ const components: Components = {
   ul: ({ children }) => <Box component="ul" sx={{ my: 1, pl: 3 }}>{children}</Box>,
   ol: ({ children }) => <Box component="ol" sx={{ my: 1, pl: 3 }}>{children}</Box>,
   li: ({ children }) => <Typography component="li" sx={{ fontSize: 15, lineHeight: 1.75 }}>{children}</Typography>,
-  ...safeLinkComponents,
+  ...legalLinkComponents,
 }
 
 /**
  * A published terms or privacy document: safe Markdown (the release notes'
- * rules: no raw HTML, http(s) links only, images as alt text), cut at the
+ * rules: no raw HTML, http(s) and mailto links only, images as alt text), cut at the
  * [[data-collection]] line so the generated list sits where the author put it.
  * `dataCollection` null is the editor preview before there is anything to list.
  */
@@ -66,7 +66,7 @@ export default function LegalDocument({ content, dataCollection }: { content: st
             : <Typography sx={{ my: 2, p: 2, borderRadius: 3, fontSize: 14, bgcolor: md.surfaceContainer, color: md.onSurfaceVariant }}>
               {t('legal.collect_placeholder')}
             </Typography>)}
-          {part.trim() && <Markdown {...safeMarkdownProps} components={components}>{part}</Markdown>}
+          {part.trim() && <Markdown {...legalMarkdownProps} components={components}>{part}</Markdown>}
         </Fragment>
       ))}
     </Box>

@@ -91,6 +91,15 @@ describe('LegalDocument', () => {
     expect(links[0].getAttribute('rel')).toContain('noopener')
   })
 
+  it('makes a mailto link clickable on a legal page, and nothing script-like', () => {
+    const md = '[write to us](mailto:privacy@example.test) [bad](javascript:alert(1)) [data](data:text/html,x) [vb](vbscript:x)'
+    renderAccess(<LegalDocument content={md} dataCollection={base} />)
+    const links = Array.from(document.querySelectorAll('a'))
+    expect(links.map(a => a.getAttribute('href'))).toEqual(['mailto:privacy@example.test'])
+    expect(links[0].getAttribute('target')).toBeNull()
+    for (const word of ['bad', 'data', 'vb']) expect(screen.getByText(new RegExp(word))).toBeTruthy()
+  })
+
   it('in English', () => {
     setTestLang('en-US')
     renderAccess(<LegalDocument content={doc} dataCollection={base} />)

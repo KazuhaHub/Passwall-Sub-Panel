@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
-import { installReads, list, node, server } from '@/test/adminSaveHarness'
+import { api, installReads, list, node, server } from '@/test/adminSaveHarness'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { createAppTheme } from '@/theme'
 import NodesView from './NodesView'
@@ -59,8 +59,11 @@ it('shows the deny-source section in the inbound dialog of a psp panel only', as
 it('does not show it for a 3X-UI panel', async () => {
   mountEdit('3xui')
   const dialog = await screen.findByRole('dialog')
-  await within(dialog).findByText(/admin:nodes.create_dialog/, undefined, { timeout: 3000 }).catch(() => undefined)
+  // The section is decided in the same render that shows the form, so the form being there is the signal to look.
+  await waitFor(() => expect(dialog.querySelector('#edit-inbound-form')).not.toBeNull())
   expect(screen.queryByTestId('source-rules-section')).toBeNull()
+  // The section shows a skeleton while its read is pending, so its absence alone could be that; the read itself is the proof.
+  expect(api.get.mock.calls.filter(([url]) => String(url).includes('/admin/dest/source-rules/1'))).toEqual([])
 })
 
 // An operator reads the nodes page but cannot edit an inbound or read adminGroup
