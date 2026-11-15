@@ -42,6 +42,11 @@ type Service struct {
 	settings  SettingsLoader
 	collector *Collector
 	now       func() time.Time
+
+	// reachable remembers the answer of the document lookup behind Current:
+	// /api/auth/methods reads it on every page load, and the settings it
+	// depends on are read fresh each time.
+	reachable memo[bool]
 }
 
 // New builds the service. A nil collector lists nothing.
@@ -129,11 +134,22 @@ func (s *Service) Current(ctx context.Context) (Current, error) {
 	}
 	cur := Current{Enabled: set.LegalEnabled, ConsentVersion: set.LegalConsentVersion}
 	if cur.Enabled && cur.ConsentVersion > 0 {
-		if cur.Reachable, err = s.store.HasDocumentIn(ctx, []string{"en-US", "zh-CN"}); err != nil {
+		if cur.Reachable, err = s.reachable.get(s.now(), func() (bool, error) {
+			return s.store.HasDocumentIn(ctx, []string{"en-US", "zh-CN"})
+		}); err != nil {
 			return Current{}, err
 		}
 	}
 	return cur, nil
+}
+
+// InvalidateReachable forgets the remembered reachability. Publishing calls it:
+// the first document of a locale makes consent askable at once, not up to a
+// memo lifetime later.
+func (s *Service) InvalidateReachable() {
+	s.reachable.mu.Lock()
+	s.reachable.ok = false
+	s.reachable.mu.Unlock()
 }
 
 // Pending reports whether the account must be asked to consent: the feature is

@@ -607,3 +607,29 @@ func TestUserMeLegalPending_StaffNeverAndNothingWiredNever(t *testing.T) {
 		t.Error("pending without the legal service wired")
 	}
 }
+
+// brokenLegalStore fails the reachability lookup.
+type brokenLegalStore struct{ legal.Store }
+
+func (brokenLegalStore) HasDocumentIn(context.Context, []string) (bool, error) {
+	return false, errors.New("db down")
+}
+
+// When the consent state cannot be read, the methods answer agrees with what
+// Required() would have said of an unreadable state: not enabled. Reporting the
+// raw setting would put a checkbox on the register form that registration then
+// would not ask for.
+func TestAuthMethods_LegalIsNotEnabledWhenTheStateCannotBeRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	s := ports.UISettings{LegalEnabled: true, LegalConsentVersion: 2}
+	svc := legal.New(brokenLegalStore{}, stubScoped{s}, nil)
+	h := &AuthLocalHandler{settings: stubScoped{s}, legal: svc}
+	r := gin.New()
+	r.GET("/m", h.Methods)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/m", nil))
+	blk, _ := decodeMap(t, rec)["legal"].(map[string]any)
+	if blk["enabled"] != false || blk["consent_version"] != float64(2) {
+		t.Errorf("legal block = %v, want enabled false", blk)
+	}
+}

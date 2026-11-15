@@ -653,9 +653,10 @@ func (h *AuthLocalHandler) SetLegal(svc *legal.Service) { h.legal = svc }
 func (h *AuthLocalHandler) legalBlock(ctx context.Context, s ports.UISettings) gin.H {
 	enabled := s.LegalEnabled
 	if h.legal != nil && enabled && s.LegalConsentVersion > 0 {
-		if cur, err := h.legal.Current(ctx); err == nil {
-			enabled = cur.Required()
-		}
+		// An unreadable state is "not enabled", as Required() treats it: a
+		// checkbox the register endpoint would not ask for is worse than none.
+		cur, err := h.legal.Current(ctx)
+		enabled = err == nil && cur.Required()
 	}
 	return gin.H{"enabled": enabled, "consent_version": s.LegalConsentVersion}
 }

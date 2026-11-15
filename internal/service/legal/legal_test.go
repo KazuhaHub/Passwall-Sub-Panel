@@ -248,3 +248,59 @@ func TestConsentIsOnlyRequiredWhenADocumentIsReachable(t *testing.T) {
 		})
 	}
 }
+
+// countingStore counts the reachability lookups.
+type countingStore struct {
+	*fakeStore
+	lookups int
+	err     error
+}
+
+func (c *countingStore) HasDocumentIn(ctx context.Context, locales []string) (bool, error) {
+	c.lookups++
+	if c.err != nil {
+		return false, c.err
+	}
+	return c.fakeStore.HasDocumentIn(ctx, locales)
+}
+
+// /api/auth/methods reads the consent state on every page load, so the
+// reachability lookup sits behind the 30 second memo the counts use.
+func TestCurrentRemembersReachabilityBriefly(t *testing.T) {
+	ctx := context.Background()
+	st := &countingStore{fakeStore: newFakeStore()}
+	s := New(st, fakeSettings{ports.UISettings{LegalEnabled: true, LegalConsentVersion: 1}}, nil)
+	now := time.Unix(1_700_000_000, 0)
+	s.now = func() time.Time { return now }
+	for i := 0; i < 5; i++ {
+		if cur, err := s.Current(ctx); err != nil || !cur.Reachable {
+			t.Fatalf("Current = %+v, %v", cur, err)
+		}
+	}
+	if st.lookups != 1 {
+		t.Fatalf("lookups = %d after five reads, want 1", st.lookups)
+	}
+	s.InvalidateReachable()
+	_, _ = s.Current(ctx)
+	if st.lookups != 2 {
+		t.Errorf("lookups = %d after an invalidation, want 2", st.lookups)
+	}
+	now = now.Add(countCacheTTL + time.Second)
+	_, _ = s.Current(ctx)
+	if st.lookups != 3 {
+		t.Errorf("lookups = %d after the memo expired, want 3", st.lookups)
+	}
+}
+
+func TestCurrentDoesNotRememberAFailedLookup(t *testing.T) {
+	ctx := context.Background()
+	st := &countingStore{fakeStore: newFakeStore(), err: errors.New("db down")}
+	s := New(st, fakeSettings{ports.UISettings{LegalEnabled: true, LegalConsentVersion: 1}}, nil)
+	if _, err := s.Current(ctx); err == nil {
+		t.Fatal("want the lookup error")
+	}
+	st.err = nil
+	if cur, err := s.Current(ctx); err != nil || !cur.Reachable {
+		t.Fatalf("after recovery = %+v, %v", cur, err)
+	}
+}

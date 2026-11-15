@@ -173,6 +173,9 @@ func (h *AdminLegalHandler) Publish(c *gin.Context) {
 	if inv, ok := h.settings.(interface{ Invalidate() }); ok {
 		inv.Invalidate()
 	}
+	if h.w.Service != nil {
+		h.w.Service.InvalidateReachable()
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"document":        legalVersionDTO{ID: doc.ID, Locale: doc.Locale, Version: doc.Version, ConsentBump: doc.ConsentBump, PublishedAt: doc.PublishedAt, PublishedBy: doc.PublishedBy},
 		"consent_version": version,
