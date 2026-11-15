@@ -233,7 +233,7 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     open()
     const section = await screen.findByTestId('access-usage')
     expect(section.textContent).toContain('按网站用量')
-    expect(section.textContent).toContain('每次查看都会记入管理审计日志，只有管理员能看到。')
+    expect(section.textContent).toContain('只有管理员能查看，每次查看都会记入管理审计日志。')
     expect(acApi.postDestUserUsage).not.toHaveBeenCalled()
     fireEvent.click(within(section).getByRole('button', { name: '查看用量' }))
     await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1))

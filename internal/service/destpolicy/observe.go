@@ -205,6 +205,11 @@ func (s *Service) collectOnlyRefused(agentID string, caps []string, version stri
 	if r.caps != capsToken(caps) {
 		return false
 	}
+	if version == "" {
+		// A report with no agent version says nothing about an upgrade: it is
+		// not a change (liftStaleCollectRefusal ignores it the same way).
+		return true
+	}
 	if r.version == "" {
 		// Learned from the report this sync carries: the release is the one that refused.
 		r.version = version
@@ -224,7 +229,7 @@ func (s *Service) CollectOnlyRefused(agentID string, caps []string, version stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.collectRefused[agentID]
-	return ok && r.caps == capsToken(caps) && (r.version == "" || r.version == version)
+	return ok && r.caps == capsToken(caps) && (r.version == "" || version == "" || r.version == version)
 }
 
 // liftStaleCollectRefusal forgets a refusal of the collect-only policy made by

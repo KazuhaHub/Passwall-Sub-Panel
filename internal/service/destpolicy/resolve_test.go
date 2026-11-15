@@ -147,9 +147,11 @@ func privatePolicy(h *harness, name string) *domain.DestPolicy {
 	})
 }
 
+// hasResolveIssue: the issue is on the listener key, and its detail names both
+// the reason and the inbound by its display name (the key alone is opaque).
 func hasResolveIssue(res Result, key, detail string) bool {
 	return slices.ContainsFunc(res.Issues, func(i domain.NodeAgentIssue) bool {
-		return i.Code == IssueResolveNotDeployed && i.Key == key && i.Detail == detail
+		return i.Code == IssueResolveNotDeployed && i.Key == key && strings.HasPrefix(i.Detail, detail) && strings.Contains(i.Detail, "inbound n2")
 	})
 }
 

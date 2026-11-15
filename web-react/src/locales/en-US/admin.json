@@ -4525,7 +4525,7 @@
     "tab_lists": "Lists",
     "help": {
       "label": "Help",
-      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match. Within one action, the order only decides which policy a hit is credited to.\n\nEach block policy can be Off, Report only or On: your choice. Report only blocks nothing and records the connections it would have blocked; it is checked after every rule that is in force, so it never changes the outcome of any connection. Turn it On once you have seen the hits. An allow policy has no Report only.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nIP ranges apply only to connections made to an IP; the IPs a domain resolves to are not matched. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
+      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match. Within one action, the order only decides which policy a hit is credited to.\n\nEach block policy can be Off, Report only or On: your choice. Report only blocks nothing and records the connections it would have blocked; it is checked after every rule that is in force, so it never changes the outcome of any connection. Turn it On once you have seen the hits. An allow policy has no Report only.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nBy default, IP ranges apply only to connections made to an IP, and the IPs a domain resolves to are not matched; to judge hostnames by what they resolve to, set the server's \"How IP rules treat host names\" to on-demand resolution, per node. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
       "lists": "Supported forms: plain domains, `domain:` / `full:` / `keyword:` / `regexp:`, `*.x`, hosts lines, AdGuard `||x^`, Clash rules, IPs and IP ranges; `#` starts a comment. On save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address.\n\nRemote and category lists refresh every {{hours}} hours and are applied only when their content changed; if a refresh fails the old content stays in use.\n\nEntries that are too broad (a regular expression that matches nearly every domain, a keyword under 4 characters, a public suffix itself, an IP range that is too large) are ignored in a custom list; when a remote or category list used by an allow policy contains one, the refresh counts as failed and the old content stays in use.",
       "records": "Each row is one account's hits on one destination within one hour. What is recorded is the domain the node recognised, never the URL path. sing-box nodes only enforce and do not record. \"Would be blocked\" is what report-only policies matched: those connections were let through and only noted. Hit records are kept {{days}} days.",
       "allowlist": "Members of an allowlist group can reach only the destinations in its lists; the node refuses the rest. The state is one of three: off, report only or on, and any can be changed to any other directly.\n\nReport only refuses nothing; it records the sites that would have been refused (only the registrable domain, never the full host name or the account). Add the ones that are wanted in the report, then decide whether to turn it on.\n\nOnly PSP native nodes enforce an allowlist, and an inbound must be able to read domains; a node that cannot (3X-UI, S-UI, an old version, too many rules) is no longer open to the group, so its members have fewer nodes.\n\nOnly a list that has not been downloaded stops turning it on. Every change of state restarts the proxy on the node once. Report-only data is kept {{days}} days."
@@ -5038,8 +5038,8 @@
       "allowlist_report": "Allowlist · report only",
       "allowlist_on": "Allowlist · on",
       "usage_title": "Per-site usage",
-      "usage_help": "Connections per hour, not traffic, grouped by the site's registrable domain (such as google.com); direct IP connections are counted as \"(ip)\". No URL paths or source IPs. Only nodes that record usage have data.",
-      "usage_audit": "Every view is written to the admin audit log, which only administrators can see.",
+      "usage_help": "Connections per hour, not traffic, grouped by the site's registrable domain (such as google.com); direct IP connections are counted as \"(ip)\". No URL paths or source IPs. Only Xray nodes that record usage have data; the top 20 sites are listed and the rest are summed in one row. Counts are best effort.",
+      "usage_audit": "Only administrators can open this, and every view is written to the admin audit log.",
       "usage_view": "View usage",
       "usage_range_24h": "24 hours",
       "usage_range_days_one": "{{count}} day",
@@ -5051,7 +5051,7 @@
       "usage_col_count": "Connections",
       "usage_others": "{{sites}} other sites",
       "usage_total": "{{n}} connections in all",
-      "usage_window": "Showing the past {{days}} days, the most usage is kept",
+      "usage_window": "Showing the past {{days}} days, the longest the usage is kept",
       "usage_none": "No usage in this range",
       "usage_dropped": "{{n}} usage rows were not saved because of node or panel limits, so the real counts may be higher.",
       "usage_from": "From {{nodes}}",
@@ -5691,7 +5691,7 @@
       "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
       "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
       "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
-      "usage_cost": "Cost: on a busy node the proxy uses about 40% more CPU (worst-case test). That is why it is an opt-in per node and off by default.",
+      "usage_cost": "Cost: in the worst case measured, the Xray proxy process on a busy node uses 43% more CPU, and the node agent that receives the records uses some more on top. That is why it is an opt-in per node and off by default.",
       "usage_too_old": "The node agent needs an upgrade to record usage",
       "usage_privacy_summary": "The privacy page is not enabled",
       "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",
@@ -5713,7 +5713,7 @@
       "label": "Matching",
       "option": {
         "as_is": "As is (default): no DNS. IP range and private-address rules apply only to connections made to an IP; a connection with a false SNI/Host is redirected to the address the SNI names, which the IP rules never see.",
-        "on_demand": "Resolve on demand: the host name is resolved once, when routing reaches the first IP rule, and a connection is blocked if any resolved address falls in a blocked range.",
+        "on_demand": "Resolve on demand: the host name is resolved once, when routing reaches the first IP rule, and a connection is blocked if any resolved address falls in a blocked range. Needs a node version that supports it; an older node keeps working as is.",
         "if_non_match": "Resolve if nothing matches (IPIfNonMatch): not offered, because it would let report-only and trial groups change the verdict."
       },
       "caveat": {
@@ -5748,7 +5748,7 @@
     },
     "tab_allowlist": "Allowlist groups",
     "allowlist": {
-      "intro": "Members of an allowlist group can reach only the destinations in its lists.",
+      "intro": "Members of an allowlist group can reach only the destinations in its lists. It is enforced only on native nodes that support it and read domains; on any other node (3X-UI, S-UI, too old, over the limit, refused, or an inbound that cannot sniff) the members' accounts are removed rather than left unrestricted.",
       "enable": {
         "title": "Enable an allowlist",
         "title_edit": "Edit the allowlist",
