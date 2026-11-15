@@ -607,3 +607,42 @@ func TestUserMeLegalPending_StaffNeverAndNothingWiredNever(t *testing.T) {
 		t.Error("pending without the legal service wired")
 	}
 }
+
+// brokenLegalStore fails the reachability lookup.
+type brokenLegalStore struct{ legal.Store }
+
+func (brokenLegalStore) HasDocumentIn(context.Context, []string) (bool, error) {
+	return false, errors.New("db down")
+}
+
+// When the consent state cannot be read, the methods answer agrees with what
+// Required() would have said of an unreadable state: not enabled. Reporting the
+// raw setting would put a checkbox on the register form that registration then
+// would not ask for.
+func TestAuthMethods_LegalIsNotEnabledWhenTheStateCannotBeRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	s := ports.UISettings{LegalEnabled: true, LegalConsentVersion: 2}
+	svc := legal.New(brokenLegalStore{}, stubScoped{s}, nil)
+	h := &AuthLocalHandler{settings: stubScoped{s}, legal: svc}
+	r := gin.New()
+	r.GET("/m", h.Methods)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/m", nil))
+	blk, _ := decodeMap(t, rec)["legal"].(map[string]any)
+	if blk["enabled"] != false || blk["consent_version"] != float64(2) {
+		t.Errorf("legal block = %v, want enabled false", blk)
+	}
+}
+
+// The editor previews the "what we collect" list before anything is published
+// or the feature is on, so the administration read carries it too: built from
+// the same settings as the public page, whatever the enabled switch says.
+func TestAdminGet_CarriesTheDataCollectionList(t *testing.T) {
+	f := newLegalFixture(t)
+	rec := f.do("GET", "/api/admin/legal/privacy", "")
+	dc, _ := decodeMap(t, rec)["data_collection"].(map[string]any)
+	sub, _ := dc["sub_log"].(map[string]any)
+	if sub == nil || sub["enabled"] != true {
+		t.Fatalf("data_collection = %v, want the sub_log item even while nothing is published and the feature is off", dc)
+	}
+}

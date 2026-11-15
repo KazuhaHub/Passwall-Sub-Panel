@@ -163,6 +163,15 @@ export const logKeys = {
 }
 
 /** The caller's own self-service reads (`/user/me/*`). */
+/** The terms and privacy administration (Settings > Privacy and terms). One
+ *  publish moves the consent version both documents share, so a write
+ *  invalidates `all`. */
+export const legalKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'legal'] as const,
+  admin: (s: QueryScope, kind: string) => [...legalKeys.all(s), 'admin', kind] as const,
+  affected: (s: QueryScope) => [...legalKeys.all(s), 'affected'] as const,
+}
+
 export const meKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'me'] as const,
   profile: (s: QueryScope) => [...meKeys.all(s), 'profile'] as const,

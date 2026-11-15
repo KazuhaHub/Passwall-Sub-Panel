@@ -30,6 +30,7 @@ import { homeForRole, isAdminPath } from '@/router/home'
 import { pushSnack } from '@/components/SnackbarHost'
 import LanguageMenu from '@/components/LanguageMenu'
 import AppearanceMenu from '@/components/AppearanceMenu'
+import SiteFooter from '@/components/SiteFooter'
 import BrandLogo from '@/components/BrandLogo'
 import { setLanguage, currentLanguage } from '@/i18n'
 import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
@@ -612,11 +613,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
         </Card>
       </Box>
 
-      {site.footerText && (
-        <Box sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }}>
-          {site.footerText}
-        </Box>
-      )}
+      <SiteFooter sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }} />
     </Box>
   )
 }

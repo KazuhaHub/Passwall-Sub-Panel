@@ -63,3 +63,19 @@ it('reveals and selects a line through the ref', () => {
   ref.current!.revealLine(99)
   expect(dispatch).toHaveBeenCalledTimes(1)
 })
+
+it('inserts a line of its own: in place of an empty cursor line, else after the cursor line', () => {
+  const dispatch = vi.fn()
+  const at = (text: string) => ({
+    state: { selection: { main: { head: 7 } }, doc: { lineAt: () => ({ from: 5, to: 5 + text.length, text }) } }, dispatch, focus: vi.fn(),
+  })
+  const ref = createRef<CodeEditorHandle>()
+  render(<CodeEditor ref={ref} value="" onChange={() => {}} language="plain" />)
+  const create = propsSpy.mock.calls.at(-1)![0].onCreateEditor
+  create(at('  '))
+  ref.current!.insertLine('[[x]]')
+  expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ changes: { from: 5, to: 7, insert: '[[x]]' } }))
+  create(at('some text'))
+  ref.current!.insertLine('[[x]]')
+  expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ changes: { from: 14, to: 14, insert: '\n[[x]]' } }))
+})
