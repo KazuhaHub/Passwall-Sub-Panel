@@ -407,7 +407,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		default:
 			ns.State = "applied"
 		}
-		if row.ReportedSHA256 == "" && row.ReportedState == protocol.PolicyStateApplied {
+		if (row.ReportedSHA256 == "" || row.ReportedSHA256 == collectOnlyDigest) && row.ReportedState == protocol.PolicyStateApplied {
 			// The node has reported that it runs no policy (nothing in force, or
 			// a pause it has synced). The record of what it last applied is kept
 			// for a fallback, but it is not what the node runs now. Until it

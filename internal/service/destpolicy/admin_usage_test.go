@@ -75,3 +75,26 @@ func TestUsageRetentionDays_IsTheSettingClamped(t *testing.T) {
 		t.Fatalf("default = %d, want 7", got)
 	}
 }
+
+// A node running the collect-only policy enforces nothing, whatever the record
+// of what it last applied says: the status must not show that record's rules and
+// groups as running (a pause and a node with nothing in force alike).
+func TestStatus_ACollectOnlyNodeShowsNoAppliedRulesOrGroups(t *testing.T) {
+	ah := newAdminHarness(t)
+	agent := ah.admin.Agents.(fakeAgents).agents[0]
+	agent.ObservedCapabilities = []string{policyCap, hitsCap, usageCap}
+	if err := ah.repos.Agents.Patch(ah.ctx, "agt_9", domain.DestAgentPolicyPatch{
+		AppliedSHA256: ptr("old"), AppliedRuleCount: ptr(5), AppliedGroups: &[]int64{3},
+		MintedSHA256: ptr(collectOnlyDigest), ReportedSHA256: ptr(collectOnlyDigest), ReportedState: ptr("applied"), CollectEffective: ptr("hits_and_usage"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := ah.admin.Status(ah.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := nodeOf(t, v, 9)
+	if n.AppliedRules != 0 || len(n.AllowlistGroups) != 0 {
+		t.Fatalf("applied_rules %d, groups %v: the node enforces nothing", n.AppliedRules, n.AllowlistGroups)
+	}
+}

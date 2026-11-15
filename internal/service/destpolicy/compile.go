@@ -190,7 +190,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	if engine == "" {
 		engine = xrayEngine
 	}
-	collect := EffectiveCollect(in.AuditCollect, in.Capabilities)
+	collect := effectiveCollectFor(in)
 	resolve := EffectiveResolve(in.DestResolve, in.Capabilities)
 	// An empty observed core version (a report that left it out) is not a
 	// change: the last non-empty one stands.
@@ -246,7 +246,7 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	// applied) but never made the last known good.
 	var out *protocol.DestinationPolicy
 	outDigest := ""
-	if EffectiveCollect(in.AuditCollect, in.Capabilities) == protocol.CollectHitsAndUsage {
+	if effectiveCollectFor(in) == protocol.CollectHitsAndUsage && !s.collectOnlyRefused(in.AgentID, in.Capabilities) {
 		out, outDigest = collectOnlyPolicy(), collectOnlyDigest
 	}
 	if meta.DesiredSHA256 != "" {
