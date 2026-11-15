@@ -46,9 +46,11 @@ export default function UsageSection({ userId, available, nodes }: {
 
   const days = Math.min(MAX_WINDOW_DAYS, settings.data?.effective.dest_usage_retention_days ?? 1)
   const ranges = ['24h', ...(days > 1 ? [`${days}d`] : [])]
-  const run = (r: string, p: number) => {
+  // One click is one read (one audit row): nothing starts while one is in flight.
+  const run = async (r: string, p: number) => {
+    if (read.isPending) return
     setAsked(true)
-    read.mutate({ userId, range: r, panelId: p || undefined })
+    try { await read.mutateAsync({ userId, range: r, panelId: p || undefined }) } catch { /* shown by read.isError */ }
   }
   const requestedDays = range === '24h' ? 1 : parseInt(range, 10)
   const answer: DestUsage | undefined = read.data
@@ -80,22 +82,22 @@ export default function UsageSection({ userId, available, nodes }: {
       <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}usage_audit`)}</Typography>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <ToggleButtonGroup exclusive size="small" value={range} aria-label={t(`${D}usage_range_label`)}
-          onChange={(_, v: string | null) => { if (v) { setRange(v); if (asked) run(v, panelId) } }}>
+          onChange={(_, v: string | null) => { if (v) { setRange(v); if (asked) void run(v, panelId) } }}>
           {ranges.map(r => (
-            <ToggleButton key={r} value={r}>{r === '24h' ? t(`${D}usage_range_24h`) : t(`${D}usage_range_days`, { count: parseInt(r, 10) })}</ToggleButton>
+            <ToggleButton key={r} value={r} disabled={read.isPending}>{r === '24h' ? t(`${D}usage_range_24h`) : t(`${D}usage_range_days`, { count: parseInt(r, 10) })}</ToggleButton>
           ))}
         </ToggleButtonGroup>
         {(nodes?.length ?? 0) > 1 && (
-          <TextField select size="small" label={t(`${D}usage_node_label`)} value={panelId} sx={{ minWidth: 160 }}
-            onChange={e => { const p = Number(e.target.value); setPanelId(p); if (asked) run(range, p) }}>
+          <TextField select size="small" label={t(`${D}usage_node_label`)} value={panelId} sx={{ minWidth: 160 }} disabled={read.isPending}
+            onChange={e => { const p = Number(e.target.value); setPanelId(p); if (asked) void run(range, p) }}>
             <MenuItem value={0}>{t(`${D}usage_node_all`)}</MenuItem>
             {nodes!.map(n => <MenuItem key={n.panel_id} value={n.panel_id}>{n.name}</MenuItem>)}
           </TextField>
         )}
-        <AsyncButton size="small" variant={asked ? 'text' : 'outlined'} onClick={async () => { run(range, panelId) }}>{t(`${D}usage_view`)}</AsyncButton>
+        <AsyncButton size="small" variant={asked ? 'text' : 'outlined'} onClick={() => run(range, panelId)}>{t(`${D}usage_view`)}</AsyncButton>
       </Box>
       {read.isError && (
-        <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => run(range, panelId)}>{t(`${D}retry`)}</Button>}>
+        <Alert severity="error" action={<Button color="inherit" size="small" disabled={read.isPending} onClick={() => void run(range, panelId)}>{t(`${D}retry`)}</Button>}>
           {t(`${D}usage_load_failed`)}
         </Alert>
       )}

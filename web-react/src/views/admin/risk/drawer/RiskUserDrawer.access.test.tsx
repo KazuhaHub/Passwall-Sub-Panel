@@ -240,6 +240,24 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     expect(acApi.postDestUserUsage).toHaveBeenCalledWith(7, { range: '24h' })
   })
 
+  it('one click is one read: while it is pending the button cannot be clicked again and the range and node controls are off', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available({ usage_nodes: [{ panel_id: 5, name: '东京 01' }, { panel_id: 6, name: '洛杉矶 02' }] }))
+    let release: (u: acApi.DestUsage) => void = () => {}
+    vi.mocked(acApi.postDestUserUsage).mockImplementation(() => new Promise<acApi.DestUsage>(r => { release = r }))
+    vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 3 } as never })
+    open()
+    const button = await screen.findByRole('button', { name: '查看用量' }) as HTMLButtonElement
+    const days = await screen.findByRole('button', { name: '3 天' }) as HTMLButtonElement
+    fireEvent.click(button)
+    fireEvent.click(button)
+    await waitFor(() => expect(button.disabled).toBe(true))
+    expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1)
+    expect(days.disabled).toBe(true)
+    expect(screen.getByRole('combobox', { name: '节点' }).getAttribute('aria-disabled')).toBe('true')
+    release(usage())
+    await waitFor(() => expect(button.disabled).toBe(false))
+  })
+
   it('lists the sites most used, then the rest as one line, the total and the node it came from', async () => {
     vi.mocked(acApi.getDestUser).mockResolvedValue(available())
     open()

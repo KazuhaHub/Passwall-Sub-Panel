@@ -134,7 +134,7 @@ export default function AccessTab({ userId }: { userId: number }) {
           onViewAll={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since: q.data.recent_hits!.days <= 1 ? '24h' : `${q.data.recent_hits!.days}d` })}`)}
           onNodes={() => void navigate('/admin/access-control?sheet=nodes')} />
       )}
-      <UsageSection userId={userId} available={q.data.usage_available} nodes={q.data.usage_nodes} />
+      <UsageSection key={userId} userId={userId} available={q.data.usage_available} nodes={q.data.usage_nodes} />
       <AddExemptionDialog open={adding} onClose={() => setAdding(false)} lockedUserId={userId} />
     </Box>
   )

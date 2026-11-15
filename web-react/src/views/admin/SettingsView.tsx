@@ -405,7 +405,7 @@ export default function SettingsView() {
       // Whether the links and the consent dialog are live is the server's call
       // (the switch AND a published document), so it is asked, not read off the
       // switch: a switch turned on before anything is published would link to a 404.
-      void getAuthMethods().then(m => site.update({ legalEnabled: !!m.legal?.enabled, legalConsentVersion: m.legal?.consent_version ?? 0 })).catch(() => {})
+      void getAuthMethods({ quiet: true }).then(m => site.update({ legalEnabled: !!m.legal?.enabled, legalConsentVersion: m.legal?.consent_version ?? 0 })).catch(() => {})
       setChangeGeoToken(false)
       setChangeCaptchaSecret(false)
       if (!opts.quiet) pushSnack(t('settings.saved'), 'success')

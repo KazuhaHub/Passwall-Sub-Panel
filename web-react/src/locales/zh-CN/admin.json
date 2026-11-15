@@ -5178,7 +5178,7 @@
       "recording_none": "没有节点在记录命中 · 原始访问日志不离开节点",
       "set_recording": "设置记录方式…",
       "set_resolve": "设置主机名匹配方式…",
-      "usage_note_other": "{{count}} 台还记录按网站用量（保留 {{days}} 天）",
+      "usage_note_other": "{{count}} 台记录按网站用量（含命中，保留 {{days}} 天）",
       "recording_raw_log": "原始访问日志不离开节点"
     },
     "policies": {

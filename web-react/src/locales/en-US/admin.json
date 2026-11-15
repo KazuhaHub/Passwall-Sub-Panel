@@ -5209,8 +5209,8 @@
       "recording_none": "No node is recording hits · the raw access log never leaves the node",
       "set_recording": "Set the recording…",
       "set_resolve": "Set host name matching…",
-      "usage_note_one": "{{count}} node also records per-site usage (kept {{days}} days)",
-      "usage_note_other": "{{count}} nodes also record per-site usage (kept {{days}} days)",
+      "usage_note_one": "{{count}} node records per-site usage, hits included (kept {{days}} days)",
+      "usage_note_other": "{{count}} nodes record per-site usage, hits included (kept {{days}} days)",
       "recording_raw_log": "The raw access log never leaves the node"
     },
     "policies": {

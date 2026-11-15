@@ -226,3 +226,15 @@ func (s *Service) CollectOnlyRefused(agentID string, caps []string, version stri
 	r, ok := s.collectRefused[agentID]
 	return ok && r.caps == capsToken(caps) && (r.version == "" || r.version == version)
 }
+
+// liftStaleCollectRefusal forgets a refusal of the collect-only policy made by
+// another agent release than the one reporting now, and the compile answer that
+// was cached under it.
+func (s *Service) liftStaleCollectRefusal(agentID, version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.collectRefused[agentID]; ok && r.version != "" && version != "" && r.version != version {
+		delete(s.collectRefused, agentID)
+		delete(s.compiled, agentID)
+	}
+}

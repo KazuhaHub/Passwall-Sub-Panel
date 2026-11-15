@@ -133,3 +133,39 @@ func TestCollectTierB_ANewAgentVersionLiftsARefusalWithUnchangedCapabilities(t *
 		t.Fatal("an upgrade did not lift the refusal")
 	}
 }
+
+// The same, when a generation is published whose rules reach other nodes only:
+// this node's no-policy answer comes from the compile cache, so the lift cannot
+// depend on the compile running.
+func TestCollectTierB_AnUpgradeLiftsARefusalOnTheCachedPublishedPath(t *testing.T) {
+	caps := []string{policyCap, hitsCap, usageCap}
+	h := newHarness(t)
+	h.policy("elsewhere", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) {
+		p.Inline = domain.DestPolicyInline{Ports: "25"}
+		p.Scope, p.PanelIDs = domain.DestScopePanels, []int64{77}
+	})
+	h.publishNow()
+	compile := func(version string) Result {
+		res, err := h.svc.Compile(h.ctx, CompileInput{
+			PanelID: 9, AgentID: "agt_9", Capabilities: caps, Snapshot: base1().snapshot(),
+			Config: protocol.ConfigBody{}, AuditCollect: domain.AuditCollectHitsAndUsage, AgentVersion: version,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	first := compile("4.2.0")
+	if first.Policy == nil {
+		t.Fatal("setup: no collect-only policy")
+	}
+	h.observe(rejected(first.Digest), caps...)
+	for i := 0; i < 2; i++ {
+		if res := compile("4.2.0"); res.Policy != nil {
+			t.Fatalf("the refused policy was minted again: %+v", res.Policy)
+		}
+	}
+	if res := compile("4.2.1"); res.Policy == nil {
+		t.Fatal("an upgrade did not lift the refusal on the cached path")
+	}
+}

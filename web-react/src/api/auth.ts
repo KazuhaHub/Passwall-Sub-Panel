@@ -13,8 +13,8 @@ import type {
   LoginCaptcha,
 } from './types'
 
-export async function getAuthMethods() {
-  const { data } = await client.get<AuthMethods>('/auth/methods')
+export async function getAuthMethods(opts: { quiet?: boolean } = {}) {
+  const { data } = await client.get<AuthMethods>('/auth/methods', opts.quiet ? { _skipErrorToast: true } : undefined)
   return data
 }
 

@@ -201,6 +201,10 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	in.CoreVersion = s.observedCore(in.AgentID, in.CoreVersion)
 	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 
+	// A refusal of the collect-only policy does not outlive the release that
+	// refused it; the cached answer was decided under that refusal, so it goes
+	// with it (the key does not know the release).
+	s.liftStaleCollectRefusal(in.AgentID, in.AgentVersion)
 	s.mu.Lock()
 	cached := s.compiled[in.AgentID]
 	s.mu.Unlock()

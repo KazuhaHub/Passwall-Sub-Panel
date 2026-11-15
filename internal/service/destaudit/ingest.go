@@ -458,7 +458,10 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 		if err != nil {
 			// Not "off": the panel could not be read, so nothing is known. The
 			// batch's hits do not wait on it; its usage is lost, and counted as
-			// that (once the batch is known not to be a duplicate).
+			// that (once the batch is known not to be a duplicate). The loss is
+			// counted per submitted row, before rows are mapped to accounts and
+			// merged, so it is an upper bound on the usage rows that would have
+			// been written: a gap is never understated.
 			log.Warn("destination usage rows not stored: panel lookup failed", "agent_id", q.agentID, "rows", len(o.Usage), "err", err)
 			for _, u := range o.Usage {
 				if u.Hour >= lo && u.Hour <= hi {

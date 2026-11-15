@@ -50,6 +50,8 @@ describe('Settings > Privacy and terms tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
     await waitFor(() => expect(useSiteStore.getState().legalEnabled).toBe(true))
     expect(useSiteStore.getState().legalConsentVersion).toBe(4)
+    // A failing re-read is not worth a toast: the save already said what it did.
+    expect(api.get).toHaveBeenCalledWith('/auth/methods', expect.objectContaining({ _skipErrorToast: true }))
   })
 
   it('switched on with nothing published, the server says the page is not live, so no link to a 404 appears', async () => {
@@ -58,7 +60,7 @@ describe('Settings > Privacy and terms tab', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
     api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods'))
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods', expect.anything()))
     await new Promise(r => setTimeout(r, 20))
     expect(useSiteStore.getState().legalEnabled).toBe(false)
   })
@@ -69,7 +71,7 @@ describe('Settings > Privacy and terms tab', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
     api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods'))
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods', expect.anything()))
     await new Promise(r => setTimeout(r, 20))
     expect(useSiteStore.getState().legalEnabled).toBe(false)
   })

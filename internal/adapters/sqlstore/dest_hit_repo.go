@@ -752,6 +752,10 @@ func (r *DestHitRepo) UserUsage(ctx context.Context, userID, panelID, sinceMS, u
 			if err := tx.Table("(?) AS u", grouped()).Select("n").Order("n DESC").Limit(1).Offset(limit - 1).Scan(&cut).Error; err != nil {
 				return fmt.Errorf("find dest usage cut: %w", err)
 			}
+			// Sites tied exactly at the cut all come back (their order is decided
+			// in Go, in byte order). For an account with a long tail of one-off
+			// sites that is the tail: accepted, since it is one account's sites
+			// over at most the retention, read once per click by an administrator.
 			if err := grouped().Having("SUM(count) >= ?", cut).Scan(&top).Error; err != nil {
 				return fmt.Errorf("fold dest usage: %w", err)
 			}
