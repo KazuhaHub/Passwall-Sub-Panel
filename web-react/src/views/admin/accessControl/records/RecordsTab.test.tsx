@@ -269,8 +269,15 @@ describe('filters', () => {
   it('the search term goes to the server and nowhere else: not in the URL, not in history', async () => {
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索目的地…' }), { target: { value: 'binance' } })
-    await waitFor(() => expect(lastParams().q).toBe('binance'), { timeout: 2000 })
+    // The debounce is a timer: it is run on a fake clock (only around the typing), not waited for.
+    vi.useFakeTimers()
+    try {
+      fireEvent.change(screen.getByRole('searchbox', { name: '搜索目的地…' }), { target: { value: 'binance' } })
+      act(() => { vi.advanceTimersByTime(399) })
+      expect(lastParams().q).toBeUndefined()
+      act(() => { vi.advanceTimersByTime(1) })
+    } finally { vi.useRealTimers() }
+    await waitFor(() => expect(lastParams().q).toBe('binance'))
     expect(whereIs(router)).not.toMatch(/binance|rec_q|q=/)
     expect(JSON.stringify(router.state.location.state ?? null)).not.toContain('binance')
   })

@@ -14,14 +14,19 @@ import remarkGfm from 'remark-gfm'
 
 const allowedProtocols = new Set(['http:', 'https:'])
 
-export function safeURL(url: string): string | undefined {
+export function safeURL(url: string, protocols: ReadonlySet<string> = allowedProtocols): string | undefined {
   try {
     const parsed = new URL(url)
-    return allowedProtocols.has(parsed.protocol) ? parsed.href : undefined
+    return protocols.has(parsed.protocol) ? parsed.href : undefined
   } catch {
     return undefined
   }
 }
+
+// A policy ends with a contact address, so the legal pages also keep a mailto:
+// link (an operator's own text, not a release body from another repository).
+// Still nothing script-like: javascript:, data: and the rest stay plain text.
+const legalProtocols = new Set([...allowedProtocols, 'mailto:'])
 
 // What every safe rendering of untrusted Markdown shares: GFM, no raw HTML, a link
 // only for http(s), and a link element that opens a new window without leaking
@@ -33,11 +38,26 @@ export const safeMarkdownProps: Pick<Options, 'remarkPlugins' | 'skipHtml' | 'ur
   urlTransform: url => safeURL(url),
 }
 
+export const legalMarkdownProps: typeof safeMarkdownProps = {
+  ...safeMarkdownProps,
+  urlTransform: url => safeURL(url, legalProtocols),
+}
+
 export const safeLinkComponents: Pick<Components, 'a' | 'img'> = {
   a: ({ href, children }) => href
     ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
     : <>{children}</>,
   img: ({ alt }) => alt ? <>{alt}</> : null,
+}
+
+// A mailto: link opens the mail client in place; only a web link gets a new window.
+export const legalLinkComponents: typeof safeLinkComponents = {
+  ...safeLinkComponents,
+  a: ({ href, children }) => href?.startsWith('mailto:')
+    ? <Link href={href}>{children}</Link>
+    : href
+      ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
+      : <>{children}</>,
 }
 
 // Headings are demoted to one small size: the dialog title is the page's

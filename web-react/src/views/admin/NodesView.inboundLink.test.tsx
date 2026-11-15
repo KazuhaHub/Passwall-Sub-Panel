@@ -59,7 +59,8 @@ it('shows the deny-source section in the inbound dialog of a psp panel only', as
 it('does not show it for a 3X-UI panel', async () => {
   mountEdit('3xui')
   const dialog = await screen.findByRole('dialog')
-  await within(dialog).findByText(/admin:nodes.create_dialog/, undefined, { timeout: 3000 }).catch(() => undefined)
+  // The section is decided in the same render that shows the form, so the form being there is the signal to look.
+  await waitFor(() => expect(dialog.querySelector('#edit-inbound-form')).not.toBeNull())
   expect(screen.queryByTestId('source-rules-section')).toBeNull()
 })
 
