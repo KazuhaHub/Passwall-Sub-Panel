@@ -55,7 +55,7 @@
 | `flag_records` | 风控标记记录（不含 IP） | `risk_flag_record_retention_days` | 未设置时是实际使用的默认值 |
 | `risk_signals` | 风险判定（不含 IP，每小时覆盖） | 无 | 五类信号的开关都可以按分组重新打开。全局全部关闭、但有分组打开了其中任何一类时，`enabled` 仍为 `true`，并带 `enabled_groups`（打开的分组数，不含分组名）；全局全部关闭且没有分组打开时才是 `false` |
 | `risk_reviews` | 管理员复核记录（不含 IP） | 无保留期 | 删除账号后一小时内清除 |
-| `dest_hits` | 访问规则命中（不含来源 IP） | `dest_hit_retention_days` | `nodes` 是**正在记录**的原生节点数；没有节点在记录时 `enabled` 为 `false` |
+| `dest_hits` | 访问规则命中（不含来源 IP） | `dest_hit_retention_days` | `nodes` 是 `collecting`（正在记录命中）的原生节点数；没有节点在记录时 `enabled` 为 `false` |
 | `dest_trial` | 白名单试运行（只记分组和主域名） | `dest_trial_retention_days` | 只有存在处于试运行的分组、且有节点在记录时 `enabled` 才为 `true` |
 
 保留天数一律是面板**实际生效**的值，和清理任务读到的是同一份，不是页面上抄的一份默认值。
@@ -65,9 +65,9 @@
 
 「按网站用量」（B 档，见 [access-control.md](access-control.md) §4.0c）记录每个账号每小时对各网站（主域名）的**连接次数**，不含网址路径、流量大小、来源 IP；以 IP 直连的记为 `(ip)`，不记 IP 本身。
 **默认情况下，公开页面不会出现任何关于用量记录的内容**，包括正在记录的节点数。管理员打开 `legal_disclose_usage` 之后，清单里才多出一项 `dest_usage`
-（正在记录用量的节点数 `nodes`：同「在记录用量」`collecting_usage`，见 [access-control.md](access-control.md) §4.0c，它**不**要求节点同时在记录命中，所以一台只收到「只采集」策略的 B 档节点算在这里、不算在 `dest_hits` 的 `nodes` 里；保留天数 `retention_days` 取自 `dest_usage_retention_days`，`includes_ip` 恒为 false；没有节点在记录时 `enabled` 为 false）。
-这是一个由管理员主动选择的披露，不是默认行为；本面板不提供逐个用户的提示。该项由 `legal` 收集器的受开关控制的提供者生成（`Gate = LegalDiscloseUsage`），节点数与 `dest_hits` 一样来自
-同一套「在记录」推导（`CollectingUsageNodes`），并带 30 秒缓存。
+（正在记录用量的节点数 `nodes`：是 `collecting_usage`（正在记录用量）的节点数，见 [access-control.md](access-control.md) §4.0c）、保留天数 `retention_days` 取自 `dest_usage_retention_days`，`includes_ip` 恒为 false；没有节点在记录时 `enabled` 为 false）。
+这是一个由管理员主动选择的披露，不是默认行为；本面板不提供逐个用户的提示。该项由 `legal` 收集器的受开关控制的提供者生成（`Gate = LegalDiscloseUsage`），节点数来自「在记录用量」推导（`CollectingUsageNodes`，即 `collecting_usage`），
+与 `dest_hits` 用的「在记录命中」（`CollectingNodes`，即 `collecting`）是两套不同的推导：只收到「只采集」策略的 B 档节点算在前者、不算在后者。两个数字都带 30 秒缓存。
 
 **谁能看、能看多久**：只有管理员，而且只能逐个账号查看（`POST /api/admin/dest/users/:id/usage`），每次查看都会写入管理审计日志（运维员看不到这些行）；每个账号只给出最常用的前 20 个站点和其余的合计。
 保留 `dest_usage_retention_days` 天（默认 7，1–30）。管理员关闭某台节点的用量记录后不再产生新记录，已有记录保留到期后自动删除。用户不能自行退出。用量不进入任何风险判定。

@@ -95,7 +95,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 
 B 档在命中记录之外，按**账号 × 小时 × 站点**记录**连接次数**（不是流量字节：Xray 与 sing-box 的独立二进制都拿不到按目的地的字节）。站点是主域名（eTLD+1），以 IP 直连的记为 `(ip)`，不记 IP 本身；不含 URL 路径、流量大小、来源 IP。只在 Xray 节点上做；sing-box 节点保持「只执行、不记录」。
 
-**代价（管理员必读）：开启按网站用量后，繁忙节点上的代理进程大约多用 40% 的 CPU（最坏情况压测实测 +43%），所以它是按节点自愿开启的，不是默认行为。** 原因是每条连接要多一次 webhook 与一次本地 socket 写入；Node 保留 webhook 采集，不回退到解析访问日志（访问日志始终为 `none`，不会重开 N0 修掉的泄漏路径）。
+**代价（管理员必读）：开启按网站用量后，最坏情况压测实测，繁忙节点上的 Xray 代理进程多用 +43% 的 CPU（这是最坏值，不是典型值；节点 agent 接收 webhook 的 CPU 另算，不含在内），所以它是按节点自愿开启的，不是默认行为。** 原因是每条连接要多一次 webhook 与一次本地 socket 写入；Node 保留 webhook 采集，不回退到解析访问日志（访问日志始终为 `none`，不会重开 N0 修掉的泄漏路径）。
 
 - **采集来源**：节点的 `audit.usage.v1`（协议 v0.5.0 `NodeReport.Audit.Usage`：`{hour, subject, site, count}`，另有 `dropped_usage`）。PSP 只认这个线上格式，不关心节点内部怎么采。
 - **有效档位**：`EffectiveCollect`——B 需要 `audit.hits.v1` 与 `audit.usage.v1`，缺 `usage` 降为 `hits`；**非 Xray 引擎（sing-box）一律封顶在 `hits`**（`effectiveCollectFor`），永远不会收到 B 档或「只采集」策略，下发的字节与 B 档出现之前相同。`usageTierAvailable` 常量已删除。
@@ -115,7 +115,7 @@ CIDR、私有地址这类**IP 规则**默认只对「以 IP 发起」的连接�
 - **`IPIfNonMatch`（不匹配时解析）不提供**：界面里置灰并写明原因，接口 400 `dest_resolve_unavailable`，线上协议里也无效。它先不带地址跑一遍全部规则、没命中才解析，会改变规则顺序：排在前面的 IP 拦截会被后面「不需要地址就命中」的仅报告规则、白名单成员的域名放行跳过，于是仅报告和试运行分组**会改变判定**，违背 §3.1。它省的 DNS 也很有限：策略默认放行，绝大多数主机名连接什么都不命中，照样要解析。
 - **有效模式**（下发给节点的）：面板选了 `on_demand`，**并且**节点声明了 `policy.destination.resolve.v1`（`EffectiveResolve`）。这个门是强制的：节点会忽略不认识的字段，旧节点收到 `on_demand` 会接受策略却悄悄按 `as_is` 执行，IP 规则永远不判主机名。能力不在时状态页 `resolve_unavailable = "version"`，由节点当前声明的能力推导，不存库。
 - **只在需要的地方编译**：策略里至少有一条规则带 `CIDRs` 或 `Private`（含仅报告与放行规则）才写 `Resolve`，否则不写：写了会改摘要、让 core 白白重启一次（`withResolve`）。仅报告剪枝、按入站限定之后重新推导。
-- **`routeOnly:true` 的入站让整台节点保持 `as_is`。** Xray 按 `routeOnly:true` 嗅探时，嗅探出的名字只用于路由，连接仍去原来的 IP，而按需解析**优先解析域名**，于是带假 SNI 的连接会按假名字的地址被判，真正的目的 IP 反而没被检查：按需解析在这样的入站上等于给绕过开了门。所以只要某个启用的入站上有适用的 IP 规则、且它的嗅探会用嗅探出的名字替代（`protocol.CheckXraySniffing` 以 `SniffForResolvedIPs` 判为 `route_only_resolve`；`destOverride` 为空、只有 `fakedns` 或 `fakedns+others`、嗅探关闭或 `metadataOnly` 都不算），**整台节点**降为 `as_is`，策略的其他部分原样下发（这是降级，不是 §4.2 第 7 条的按入站限定，不去掉也不限定任何规则）。**是否降级只按开启（非仅报告）的规则判断**：仅报告不得干扰执行。只有仅报告的 IP 规则碰到这样的入站时，**不降级**：这些仅报告规则从该入站上去掉（缩小 `Inbounds`，没有入站可用就整条去掉），节点保持 `on_demand`，并记 `destination_policy_report_only_not_deployed`（`report_only_not_deployed = "resolve"`）。降级时记 issue `destination_policy_resolve_not_deployed`（每个相关入站一条，key 是入站键 `lst_<node_id>`，detail 以原因 `route_only` 开头、后接入站的显示名，如 `route_only: inbound <名称>`），状态 `resolve_unavailable = "route_only"`。嗅探配置无法解析的入站同样算（节点会拒绝），detail 以 `sniffing` 开头，状态为 `sniffing`。PSP 的检查比节点自己的规划更严：它看适用于该入站的**所有**规则和**所有**启用的入站，而节点会过滤掉主体在本节点 roster 里没人匹配的规则、且只检查它实际生成的入站，所以 PSP 可能让节点保持 `as_is` 而节点本可运行 `on_demand`，但不会让节点拒绝策略。只检查 Xray 节点；sing-box 不用嗅探出的名字改写去向。运营者把入站改成 `routeOnly:false`（或去掉）后下一次编译自动恢复。
+- **`routeOnly:true` 的入站让整台节点保持 `as_is`。** Xray 按 `routeOnly:true` 嗅探时，嗅探出的名字只用于路由，连接仍去原来的 IP，而按需解析**优先解析域名**，于是带假 SNI 的连接会按假名字的地址被判，真正的目的 IP 反而没被检查：按需解析在这样的入站上等于给绕过开了门。所以只要某个启用的入站上有适用的 IP 规则、且它的嗅探会用嗅探出的名字替代（`protocol.CheckXraySniffing` 以 `SniffForResolvedIPs` 判为 `route_only_resolve`；`destOverride` 为空、只有 `fakedns` 或 `fakedns+others`、嗅探关闭或 `metadataOnly` 都不算），**整台节点**降为 `as_is`，策略的其他部分原样下发（这是降级，不是 §4.2 第 7 条的按入站限定，不去掉也不限定任何规则）。**是否降级只按开启（非仅报告）的规则判断**：仅报告不得干扰执行。只有仅报告的 IP 规则碰到这样的入站时，**不降级**：这些仅报告规则从该入站上去掉（缩小 `Inbounds`，没有入站可用就整条去掉），节点保持 `on_demand`，并记 `destination_policy_report_only_not_deployed`（`report_only_not_deployed = "resolve"`）。降级时记 issue `destination_policy_resolve_not_deployed`（每个相关入站一条，key 是入站键 `lst_<node_id>`，detail 以原因 `route_only` 开头、后接入站的显示名，如 `route_only: inbound <名称>`；显示名不属于问题的指纹，改名只更新 detail，不会多出第二条），状态 `resolve_unavailable = "route_only"`。嗅探配置无法解析的入站同样算（节点会拒绝），detail 以 `sniffing` 开头，状态为 `sniffing`。PSP 的检查比节点自己的规划更严：它看适用于该入站的**所有**规则和**所有**启用的入站，而节点会过滤掉主体在本节点 roster 里没人匹配的规则、且只检查它实际生成的入站，所以 PSP 可能让节点保持 `as_is` 而节点本可运行 `on_demand`，但不会让节点拒绝策略。只检查 Xray 节点；sing-box 不用嗅探出的名字改写去向。运营者把入站改成 `routeOnly:false`（或去掉）后下一次编译自动恢复。
 - **回退（LKG）只降不升**：回退用的模式取 LKG 当时运行的模式与当前有效模式中较低的一个（`as_is` < `on_demand`），再按剩下的规则重新推导；升到 LKG 没应用过的模式会铸出节点从没运行过的字节。回退策略同样按入站当前的嗅探复核，`routeOnly` 入站让它降为 `as_is`。
 - 面板选了 `on_demand`、没有任何东西拦着、但策略里没有一条 IP 规则（所以没写 `Resolve`）时，`resolve_unavailable = "no_ip_rules"`：不是故障，状态页如实说明，不显示「尚未下发」。
 - 有效模式也在拒绝上下文里（`refusalContext`，只对 `on_demand` 写入）：被节点拒绝的 `on_demand` 策略在面板改回 `as_is`（有效模式变了）后会重试。
@@ -392,7 +392,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 
 B 档（§4.0c）相对 `node-audit-plan.md` 的偏离，都是有意的：
 
-- **采集用 Xray webhook，不解析访问日志**（偏离 N5）。访问日志保持 `none`，拿到的是嗅探出的域名；代价是每条连接多一次 webhook，繁忙节点的代理进程约多 40% CPU（最坏情况 +43%），所以按节点自愿开启。
+- **采集用 Xray webhook，不解析访问日志**（偏离 N5）。访问日志保持 `none`，拿到的是嗅探出的域名；代价是每条连接多一次 webhook，繁忙节点的 Xray 代理进程最坏多 +43% CPU（agent 接收端另算），所以按节点自愿开启。
 - **度量是连接次数，不是字节**；sing-box 不做用量。
 - **读取用 POST，由审计中间件自动写审计行**（偏离 R6 的「GET 加手写审计」），并落入 `adminOnlyAuditTargets`。
 - **仅报告和拦截的连接不计入用量；用量不进风险信号；只能按人查，前 20 个站点加「其余」。**

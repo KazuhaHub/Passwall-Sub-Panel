@@ -35,7 +35,18 @@ func (nodeAgentIssueRow) TableName() string { return "node_agent_issues" }
 
 type nodeAgentIssueRepo struct{ db *gorm.DB }
 
+// resolveNotDeployedCode is destpolicy.IssueResolveNotDeployed. Its detail is a
+// stable reason, then ": inbound <display name>"; the name is not part of the
+// issue's identity, so renaming an inbound updates the issue instead of opening
+// a second one.
+const resolveNotDeployedCode = "destination_policy_resolve_not_deployed"
+
 func nodeIssueFingerprint(code, key, detail string) string {
+	if code == resolveNotDeployedCode {
+		if i := strings.Index(detail, ": inbound "); i >= 0 {
+			detail = detail[:i]
+		}
+	}
 	payload, _ := json.Marshal([3]string{code, key, detail})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -64,6 +75,7 @@ func (r *nodeAgentIssueRepo) RecordBatch(ctx context.Context, agentID string, is
 				DoUpdates: clause.Assignments(map[string]any{
 					"last_seen_at": seenAt,
 					"updated_at":   seenAt,
+					"detail":       issue.Detail,
 				}),
 			}).Create(&row).Error; err != nil {
 				return err

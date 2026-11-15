@@ -5691,7 +5691,7 @@
       "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
       "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
       "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
-      "usage_cost": "Cost: on a busy node the proxy uses about 40% more CPU (worst case measured: +43%). That is why it is an opt-in per node and off by default.",
+      "usage_cost": "Cost: in the worst case measured, the Xray proxy process on a busy node uses 43% more CPU, and the node agent that receives the records uses some more on top. That is why it is an opt-in per node and off by default.",
       "usage_too_old": "The node agent needs an upgrade to record usage",
       "usage_privacy_summary": "The privacy page is not enabled",
       "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",

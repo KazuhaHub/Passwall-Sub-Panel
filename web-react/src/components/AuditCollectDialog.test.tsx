@@ -42,8 +42,8 @@ describe('the recording-mode dialog (S14/S15)', () => {
     // The retentions in the words are the settings', not literals.
     expect(await within(dialog).findByText(/保留 14 天/)).toBeTruthy()
     expect(within(dialog).getByText(/用量保留 9 天/)).toBeTruthy()
-    // The cost, plainly (owner decision): about 40% more proxy CPU on a busy node, per node.
-    expect(within(dialog).getByText(/繁忙节点上代理程序的 CPU 约多 40%/)).toBeTruthy()
+    // The cost, plainly: the worst case measured is +43% on the Xray process of a busy node, per node.
+    expect(within(dialog).getByText(/Xray 代理进程的 CPU 多 \+43%/)).toBeTruthy()
     expect((radios[2] as HTMLInputElement).disabled).toBe(false)
   })
 

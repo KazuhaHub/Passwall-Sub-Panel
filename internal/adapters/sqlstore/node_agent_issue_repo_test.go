@@ -339,3 +339,34 @@ func TestNodeAgentIssueDiagnosticPredicateUsesFixedDialectExpressionsAndParamete
 		})
 	}
 }
+
+// The resolve issue's detail names the inbound by its display name, which an
+// operator can rename: a rename must update the one issue, not open a second.
+func TestNodeAgentIssueRepoRenamedInboundIsTheSameIssue(t *testing.T) {
+	db, err := openIsolatedTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepos(db).NodeAgentIssue
+	ctx := context.Background()
+	at := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	issue := func(name string) domain.NodeAgentIssue {
+		return domain.NodeAgentIssue{Code: "destination_policy_resolve_not_deployed", Key: "lst_2", Detail: "route_only: inbound " + name}
+	}
+	if err := repo.RecordBatch(ctx, "agt_1", []domain.NodeAgentIssue{issue("old")}, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RecordBatch(ctx, "agt_1", []domain.NodeAgentIssue{issue("new")}, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	items, total, err := repo.List(ctx, ports.NodeAgentIssueFilter{})
+	if err != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("a rename opened a second issue: (%+v, %d, %v)", items, total, err)
+	}
+	if items[0].Detail != "route_only: inbound new" {
+		t.Fatalf("detail = %q, want the current name", items[0].Detail)
+	}
+}
