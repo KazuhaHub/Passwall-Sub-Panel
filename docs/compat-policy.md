@@ -329,6 +329,8 @@ P1 的具体 schema 与 P2 反方向验证的旧 PSP 清单应在实现 PR 中�
 - 2026-11-14：PN `4.2.0-beta.3`（`6a6f7a4e`）、`4.2.0-beta.4`（`e7ed6687`）与 `4.2.0-beta.5`（`124e42cb`）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`，没有任何版本变为未测试。
   - 矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.5`；`4.2.0-beta.1` 至 `4.2.0-beta.4` 位于两端之间，只作为评审记录。
   - `contract_source` 移到 `v4.2.0-beta.5`（提交 `124e42cb`）。该版本的契约代理在 `policy.destination.v1` 之外还声明 `policy.destination.groups.v1` 与 `policy.destination.resolve.v1`，`TestLive_RealNodePolicyContract` 现在对三者都做断言。
+- 2026-11-15：PN `4.2.0-beta.6`（`eca6b7b4`，按网站用量）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`；矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.6`。
+  - `contract_source` 移到 `v4.2.0-beta.6`。契约代理仍声明三项目的地能力，且有意不声明任何 `audit.*` 能力（它不采集），`TestLive_RealNodePolicyContract` 的断言不变。
 
 原反方向实测日期记录为 2026-09-19，组合为 PN `v0.0.1-beta11` 与 PSP `v4.0.0-beta.19`；
 原始过程见 [观测进展记录](psp-node-rootless-observability-progress.md)。本文未重新执行该测试。
