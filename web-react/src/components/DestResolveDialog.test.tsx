@@ -39,7 +39,7 @@ describe('the hostname-matching dialog', () => {
     expect(radios.map(r => r.disabled)).toEqual([false, false, true])
     expect(radios[0].checked).toBe(true)
     expect(within(dialog).getByText('按原样（默认）：不做 DNS。IP 段与内网地址规则只对以 IP 发起的连接生效；带假 SNI/Host 的连接会被改去 SNI 指向的地址，IP 规则看不到它。')).toBeTruthy()
-    expect(within(dialog).getByText('按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。')).toBeTruthy()
+    expect(within(dialog).getByText('按需解析：路由走到第一条 IP 规则时解析一次主机名，任一解析结果落在被拦网段即拦截。需要节点版本支持，旧节点仍按原样。')).toBeTruthy()
     expect(within(dialog).getByText('不匹配时解析（IPIfNonMatch）：不提供——会让仅报告和试运行分组改变判定。')).toBeTruthy()
   })
 

@@ -861,7 +861,7 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 
 ### 11.1 能力
 
-`policy.destination.v1`（`protocol.CapabilityDestinationPolicy`）。**它不是升级能力**：不在 `AgentUpgradeCapabilities()` 里，缺了它不代表协议不兼容，
+`policy.destination.v1`（`protocol.CapabilityDestinationPolicy`）。后续又加了三个，规则相同：`policy.destination.groups.v1`（白名单分组，只给声明了它的节点输出 `g*` 规则，见 [access-control.md](access-control.md) §3.2）、`policy.destination.resolve.v1`（按需解析，`Policy.Resolve`，§4.0b）、`audit.hits.v1` / `audit.usage.v1`（见 §11.3.1）。**它不是升级能力**：不在 `AgentUpgradeCapabilities()` 里，缺了它不代表协议不兼容，
 也不妨碍节点被远程升级。PSP **只向本次上报声明了它的 agent** 下发 `ConfigBody.Policy`；没声明的 agent 永远看不到这个字段（旧节点收到不认识的字段会静默丢弃却仍报已应用，
 所以必须靠能力把关）。PSP 用**本次上报**的能力，不用 agent 行上记的旧值。
 
@@ -872,9 +872,9 @@ Policy *DestinationPolicy `json:"policy,omitempty"` // omitempty 是承重的
 ```
 
 - `Policy == nil` 时 `ConfigBody` 的规范序列化与 v0.2.x **逐字节相同**（PSP 与 Protocol 各有一个测试钉住）。没有策略的面板升级后，所有现有节点的 config ETag 不变。
-- `DestinationPolicy{Rules, Exempt, Collect}`：`Rules` 永远非 nil（`[]` 与 `null` 是不同字节、不同摘要）；`Collect` 第一批恒为 `""`；
+- `DestinationPolicy{Rules, Exempt, Collect, Resolve}`：`Rules` 永远非 nil（`[]` 与 `null` 是不同字节、不同摘要）；`Collect` 是 `""` / `hits` / `hits_and_usage`（§11.3.1）；`Resolve` 是 `""`（按原样）或 `on_demand`，只在策略里有 IP 规则且节点有 `policy.destination.resolve.v1` 时写；
   `Exempt` 是本节点 roster 里有 client 的豁免账号。
-- `DestinationRule` 的 ID 是 `p<policy>[x<k>]`（策略）、`s<node>`（来源规则）、`g<gid>…`（白名单分组，后续批次）。规则必须按阶段非递减排列；每个切片排序（按字节序）去重。
+- `DestinationRule` 的 ID 是 `p<policy>[x<k>]`（策略）、`s<node>`（来源规则）、`g<gid>x1` / `g<gid>x2` / `g<gid>`（白名单分组，见 [access-control.md](access-control.md) §3.2）。规则必须按阶段非递减排列；每个切片排序（按字节序）去重。
   PSP 在铸出之前用同一个 `protocol.ValidateDestinationPolicy` 校验，节点收到时再校验一遍：**校验失败等于整段 config 被拒（连带 listener 变更）**，
   所以 PSP 必须先判断，定义层面的失败在发布时拦下，每节点的失败走回退。
 - 来源规则的字段是 `Inbounds`（`lst_<node_id>`）与 `SourceCIDRs`；`Inbounds` 也可以出现在 `p*` 规则上，`g*` 规则不带。
@@ -902,7 +902,7 @@ type PolicyStatus struct {
 
 ### 11.3.1 上行：`NodeReport.Audit`（协议 v0.4.0）与采集档位
 
-- 能力 `audit.hits.v1`（命中）与 `audit.usage.v1`（用量，B 档，PSP 尚未提供）。同样**不是升级能力**。用量行还要求同时声明 `audit.hits.v1`。
+- 能力 `audit.hits.v1`（命中）与 `audit.usage.v1`（用量，B 档，PSP 已接，见 [access-control.md](access-control.md) §4.0c）。同样**不是升级能力**。用量行还要求同时声明 `audit.hits.v1`。
 - `AuditObservation{BatchID, Hits, Usage, DroppedHits, DroppedTrial, DroppedUsage, Unmatched}`：没有行就整个省略；一个冻结批次一个 BatchID，重发原样沿用，PSP 只计一次。
   `AuditHit.Action` 是 `block` 或 `observe`；`p*`/`s*` 上的 `observe` 表示**仅报告：被放行、本应拦截**，带账号、目的地与端口；`g*` 上的 `observe` 是白名单试运行行，节点已折叠（无账号、端口 0、目的地是主域名）。**没有任何来源地址。**
 - PSP 的接法与 `policy_status` 相同并且更严：`nodeReportWire` 另有同名的原始 `audit` 字段；原始大小 ≤ `MaxAuditObservationBytes`（1 MiB），单独解码，`ValidateAuditObservation`，检查能力（缺 `audit.hits.v1` 丢整棵，缺 `audit.usage.v1` 去掉用量行）。
@@ -912,8 +912,8 @@ type PolicyStatus struct {
 
 ### 11.4 PSP 侧 issue 码
 
-除协议里的两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`）外，PSP 自己记两个：
-`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_report_only_not_deployed`（仅报告规则因额度被去掉，或在嗅探不足的入站上被限定/去掉，开启的规则不受影响）。
+协议里有两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`，后者 PSP 在面板侧判定嗅探不足时也会按入站记）。PSP 自己另记五个：
+`destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_lkg_unreadable`（读不到 LKG，连续失败后发无策略）、`destination_policy_report_only_not_deployed`（仅报告规则因额度被去掉，或在嗅探不足 / 会替换被解析名字的入站上被限定/去掉，开启的规则不受影响）、`destination_policy_resolve_not_deployed`（面板选了按需解析却没有下发：每个相关入站一条，key 是入站键 `lst_<node_id>`，detail 是原因加入站显示名，如 `route_only: inbound <名称>`）。
 用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等）。内容只有摘要前缀、入站键和额度数字，不含用户或目的地。
 
 ### 11.5 嗅探

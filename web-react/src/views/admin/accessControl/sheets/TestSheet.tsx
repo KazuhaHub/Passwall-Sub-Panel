@@ -180,7 +180,7 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
           </Box>
         )}
       </Box>
-      <ExceptionDialog key={`${exception}:${hit?.group_id ?? 0}:${result?.host ?? ''}`} open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
+      <ExceptionDialog key={`${hit?.group_id ?? 0}:${result?.host ?? ''}`} open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
     </Box>
   )
 }
@@ -198,10 +198,10 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
   const [entry, setEntry] = useState(host)
   const [match, setMatch] = useState<'site' | 'host'>('site')
   const [error, setError] = useState(false)
-  // Nothing here outlives the dialog's opening: the parent keys it by open state, group and host.
+  // The parent keys this by group and host, so a new destination starts fresh; the choice is reset once the
+  // close transition has finished, so the content stays on screen while the dialog fades out.
   const [everyone, setEveryone] = useState(false)
-  const [seen, setSeen] = useState(host)
-  if (open && seen !== host) { setSeen(host); setEntry(host); setEveryone(false) }
+  const reset = () => { setEntry(host); setMatch('site'); setEveryone(false); setError(false) }
   // A group step with no name is a group that was deleted while its rule is still published: nothing to add to, and no default.
   const gone = group !== null && !group.name
   const toGroup = group !== null && !gone && !everyone
@@ -221,7 +221,7 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
     }
   }
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" slotProps={{ transition: { onExited: reset } }}>
       <DialogTitle>{t(`${T}exception.title`)}</DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
         {!none && <Typography variant="body2">{toGroup && group ? t(`${T}exception.lead_group`, { group: group.name }) : t(`${T}exception.lead`)}</Typography>}
@@ -230,7 +230,7 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
           <RadioGroup value={none ? '' : toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
             {!gone && <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />}
             <FormControlLabel value="global" control={<Radio />} label={t('admin:access_control.records.exception.global')} />
-            {!toGroup && (
+            {everyone && (
               <Box sx={{ pl: 4 }}>
                 <FieldHint tone="amber" summary={t('admin:access_control.records.exception.global_hint.summary')} detail={t('admin:access_control.records.exception.global_hint.detail')} />
               </Box>

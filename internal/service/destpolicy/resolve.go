@@ -209,11 +209,17 @@ func resolveReason(f sniffFinding) string {
 }
 
 // resolveIssues are the node issues of the inbounds that held the node at as_is,
-// one each, named by listener like the sniffing issues.
+// one each, keyed by listener like the sniffing issues, and naming the inbound
+// in the detail (reason first, so it stays the stable prefix).
 func resolveIssues(found []sniffFinding) []domain.NodeAgentIssue {
 	out := make([]domain.NodeAgentIssue, 0, len(found))
 	for _, f := range found {
-		out = append(out, domain.NodeAgentIssue{Code: IssueResolveNotDeployed, Key: f.Listener, Detail: resolveReason(f)})
+		detail := resolveReason(f)
+		if f.Label != "" {
+			// The key is an opaque listener id; the name is what the operator knows.
+			detail += `: inbound ` + f.Label
+		}
+		out = append(out, domain.NodeAgentIssue{Code: IssueResolveNotDeployed, Key: f.Listener, Detail: detail})
 	}
 	return out
 }

@@ -329,3 +329,35 @@ func TestOwnershipProbeOfTheRetiredTableIsNotLoggedAsAFailure(t *testing.T) {
 		t.Fatalf("the probe of the retired table was logged as a failure:\n%s", logged)
 	}
 }
+
+// Deleting a 3X-UI panel also probes the retired user_xui_clients table, and on
+// a fresh install that table does not exist. The probe is read as "no legacy
+// clients"; it must not be logged as a failed query on every deletion.
+func TestPanelDeleteProbeOfTheRetiredTableIsNotLoggedAsAFailure(t *testing.T) {
+	db, err := openIsolatedTestDB(t)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repos := NewRepos(db)
+	ctx := context.Background()
+	panel := &domain.XUIPanel{Name: "p", URL: "https://p.example"}
+	if err := repos.XUIPanel.Save(ctx, panel); err != nil {
+		t.Fatalf("save panel: %v", err)
+	}
+	var delErr error
+	logged := captureLog(t, func() { delErr = repos.XUIPanel.Delete(ctx, panel.ID) })
+	if delErr != nil {
+		t.Fatalf("Delete = %v, want nil on a fresh install", delErr)
+	}
+	if strings.Contains(logged, "database query failed") {
+		t.Fatalf("the probe of the retired table was logged as a failure:\n%s", logged)
+	}
+}

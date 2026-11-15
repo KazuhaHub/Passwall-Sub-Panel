@@ -1,13 +1,16 @@
 # 访问控制：原生节点的目的地策略
 
-> **范围（第一批）。** 只对 **原生节点（Passwall Node，`kind=psp`）** 生效；3X-UI、S-UI 节点不执行任何策略。
-> 本批提供：自定义列表、远程列表、v2fly geosite 分类、内置规则组目录、按分组 / 按节点限定范围的拦截与放行策略、
-> 豁免账号、按入站的来源国家 / 来源 IP 段拒绝、测试目的地、发布与回退，以及状态页所需的全部接口。
-> 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。**命中记录**（A 档）随第二批上线：
-> 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**B 档（按网站用量）** 的后端见 §4.0c，界面在后续批次；**白名单分组的界面、sing-box 采集** 也在后续批次（白名单分组的数据模型与编译见 §3.2，成员同步见 §3.3，接口见 §6.1）。
+> **范围。** 只对 **原生节点（Passwall Node，`kind=psp`）** 生效；3X-UI、S-UI 节点不执行任何策略。
+> 已上线的能力：自定义列表、远程列表、v2fly geosite 分类、内置规则组目录、按分组 / 按节点限定范围的拦截与放行策略、
+> 豁免账号、按入站的来源国家 / 来源 IP 段拒绝、测试目的地、发布与回退、状态页；**命中记录**（A 档，§4.0、§7）；
+> **白名单分组**（编译 §3.2、成员同步 §3.3、接口 §6.1，管理界面在「访问控制」页与分组编辑里）；
+> **主机名与 IP 规则的按需解析**（§4.0b）；**按网站用量**（B 档，后端 §4.0c，管理界面在账号的风控抽屉里与服务器的记录设置里）。
+> 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。
+> 记录只在 **Xray** 节点上做：sing-box 节点只执行、不记录（§4.0、§4.0c），所以没有 sing-box 采集。
 >
 > 线上协议见 Passwall-Protocol `v0.5.0`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
-> [psp-node-agent.md](psp-node-agent.md) §11。
+> [psp-node-agent.md](psp-node-agent.md) §11；隐私与服务条款（含「我们收集什么」清单）见 [privacy.md](privacy.md)；
+> 从 v4.1.0 升级到本功能所在版本线的步骤见 [UPGRADE-v4.md](UPGRADE-v4.md) 的「升级到 4.2.0 线」一节。
 
 ## 1. 行为一句话
 
@@ -54,7 +57,7 @@ config ETag 不变，core 不会因为升级面板而重启。
 - `observe` 行在记录里表示「**本应拦截**」：连接被放行了。它不计入风险信号 `dest_block`（只数真正的 `block`）。
 - 仅报告的策略与开启的策略一样，带域名或协议时需要入站嗅探，在嗅探不足的入站上同样按第 4.2 节第 7 条限定入站；回退到 LKG 时，状态改变了的规则（开启 ↔ 仅报告）视为不同的规则，被修剪掉（只放宽、不收紧）。
 
-### 3.2 白名单分组（编译；数据模型、编译、成员同步与接口已就绪，界面在后续批次）
+### 3.2 白名单分组（编译；数据模型、编译、成员同步、接口与管理界面均已上线）
 
 - 状态存在分组自己的行上（`groups_` 表的可空列，见 §5），`off` / `report` / `on`，NULL 等于 `off`；没有任何分组设置时，快照字节、下发给节点的策略字节与升级前逐字节相同（`TestCompile_NoGroupsIsByteIdentical`）。
 - 每个面板上，状态不是 `off` 且本面板 roster 里有组员 M 的分组，按分组号升序输出三条规则，Subjects 都是 M：`g<gid>x1`（allow：`list_ids` 里已就绪列表的域名与 CIDR）、`g<gid>x2`（allow：基础放行列表加补充列表）、`g<gid>`（catch-all：`on` 为 block，`report` 为 observe）。x1 或 x2 没有内容就不输出；M 为空整组不输出。未就绪的列表不贡献内容。
@@ -96,8 +99,8 @@ B 档在命中记录之外，按**账号 × 小时 × 站点**记录**连接次�
 
 - **采集来源**：节点的 `audit.usage.v1`（协议 v0.5.0 `NodeReport.Audit.Usage`：`{hour, subject, site, count}`，另有 `dropped_usage`）。PSP 只认这个线上格式，不关心节点内部怎么采。
 - **有效档位**：`EffectiveCollect`——B 需要 `audit.hits.v1` 与 `audit.usage.v1`，缺 `usage` 降为 `hits`；**非 Xray 引擎（sing-box）一律封顶在 `hits`**（`effectiveCollectFor`），永远不会收到 B 档或「只采集」策略，下发的字节与 B 档出现之前相同。`usageTierAvailable` 常量已删除。
-- **编译**：`withCollect` 在 B 档时即使没有可记录的规则也保留 `Collect`（只有放行策略也照常采集）。暂停、没有生效策略、规则被全部剔除这三种本来返回「无策略」的情形，B 档且有能力的节点得到 `{Rules: [], Collect: hits_and_usage}`（`collectOnlyPolicy`），其摘要照常铸出、可被报告为 `applied`。**这份「只采集」策略永远不会成为 LKG**：暂停期间不改写节点最近应用的记录，节点拒绝它也不会清空 LKG（`mintedPolicy`、`ObserveStatus` 都跳过它）。节点拒绝它时，拒绝按「能力集合 + 节点程序版本」记在内存里（`collectOnlyRefused`；版本由拒绝之后的那次编译补上），此后每次同步都不再下发（节点得到无策略）；能力变化、节点升级（版本变了）或管理员点「重新下发」才再试一次（进程重启后会再下发一次、再被拒一次）。被拒期间 `/status` 的该节点带 `usage_refused: true`（面板设为 B 档、且仍记着这次拒绝时），状态页和服务器页据此说「节点拒绝了记录用量的设置」并给出重新下发按钮；规则与命中不受影响。它不含规则，所以不算「在记录命中」：`Collecting` 与 `CollectingForRisk` 都排除它，选择 B 档不会改变 `dest_block` 风险信号的判断；`collecting_usage` 则只看有效档位与是否应用。未开 B 档的节点收到的字节与此前完全相同（`TestCollect_HitsNodesByteIdentical` 用 golden 文件钉住）。回退（LKG）路径仍只降不升。
-- **「在记录用量」**（`collecting_usage`）= 「在记录」且 `collect_effective == hits_and_usage`，同样由 PSP 推导。`/status` 每个节点带这个字段（以及上面的 `usage_refused`）；`GET /users/:id` 带 `usage_available`（该账号有 client 的节点中至少一台在记录用量）与 `usage_nodes:[{panel_id,name}]`。
+- **编译**：`withCollect` 在 B 档时即使没有可记录的规则也保留 `Collect`（只有放行策略也照常采集）。暂停、没有生效策略、规则被全部剔除这三种本来返回「无策略」的情形，B 档且有能力的节点得到 `{Rules: [], Collect: hits_and_usage}`（`collectOnlyPolicy`），其摘要照常铸出、可被报告为 `applied`。**这份「只采集」策略永远不会成为 LKG**：暂停期间不改写节点最近应用的记录，节点拒绝它也不会清空 LKG（`mintedPolicy`、`ObserveStatus` 都跳过它）。节点拒绝它时，拒绝按「能力集合 + 节点程序版本」记在内存里（`collectOnlyRefused`；版本由拒绝之后的那次编译补上），此后每次同步都不再下发（节点得到无策略）；能力变化、节点升级（版本变了；上报里没有版本不算变化，不会解除拒绝）或管理员点「重新下发」才再试一次（进程重启后会再下发一次、再被拒一次）。被拒期间 `/status` 的该节点带 `usage_refused: true`（面板设为 B 档、且仍记着这次拒绝时），状态页和服务器页据此说「节点拒绝了记录用量的设置」并给出重新下发按钮；规则与命中不受影响。它不含规则，所以不算「在记录命中」：`Collecting` 与 `CollectingForRisk` 都排除它，选择 B 档不会改变 `dest_block` 风险信号的判断；`collecting_usage` 则只看有效档位、能力与是否应用（不排除它）。未开 B 档的节点收到的字节与此前完全相同（`TestCollect_HitsNodesByteIdentical` 用 golden 文件钉住）。回退（LKG）路径仍只降不升。
+- **「在记录用量」**（`collecting_usage`，`destpolicy.CollectingUsage`）由 PSP 推导，不靠节点上报：节点是 Xray，同时声明 `audit.hits.v1` 与 `audit.usage.v1`，`collect_effective == hits_and_usage`，且最近一次 `PolicyStatus` 是对**当前铸出摘要**的 `applied`。它**不要求「在记录命中」，也不排除「只采集」策略**：`Collecting`（`collecting`）与 `CollectingForRisk` 都排除「只采集」摘要（它没有规则，不会产生命中，见上一条），所以一台 B 档节点在没有生效策略、暂停或规则被全部剔除时，收到并应用「只采集」策略后会是 `collecting = false`、`collecting_usage = true`：在记录用量，但此刻不记录命中。因此**不能**把 `collecting_usage` 读成 `collecting` 的子集。`/status` 每个节点带这两个字段（以及上面的 `usage_refused`）；`GET /users/:id` 带 `usage_available`（该账号有 client 的节点中至少一台 `collecting_usage`）与 `usage_nodes:[{panel_id,name}]`；隐私页的 `dest_usage` 节点数用的也是 `collecting_usage`（见 [privacy.md](privacy.md) §3），`dest_hits` 的节点数用的是 `collecting`。
 - **入库**（`destaudit`）：subject 映射到 user_id（账号已不存在的计数）；小时须在 [now−48h, now+1h]；每个 agent 每小时用量预算 50000 行（与命中预算分开，互不挤占）。**只有面板档位不是 B 档时才丢弃用量并计 `usage_collect_off`**（此前是无条件丢弃）。批次的命中与用量在**同一事务**写入，批次去重（`dest_audit_batches`）同时覆盖两者，重发的批次两边都不重复计数。节点上报的 `dropped_usage` 记为 `node_usage`，预算拒绝记为 `usage_over_budget`，队列满与写入失败（含部分写入）记为 `usage_queue_full`、`usage_ingest_error`（`dest_audit_drops`；只对 B 档面板计，写入时才按面板档位过滤）；它们**不计入**命中记录的 `dropped_in_range`，而是计入用量读取的 `dropped_in_range`。查询面板档位失败是一次 `ingest_error`，不是 `usage_collect_off`。命中与用量的账号查找各有自己的上限，用量不会把命中的账号挤出去。
 - **保留与清理**：`dest_usage_retention_days`（默认 7，1–30，0 = 默认，永远不是永久；与命中保留期互相独立）。每小时清理按整点对齐的截止时间删除（指标 `table="usage"`），孤儿清理覆盖已删账号与已删面板的行。**关闭 B 档不立即删除已有用量**：它们保留到期后自然删除。
 - **读取**：`POST /api/admin/dest/users/:id/usage {range:"24h"|"<N>d", panel_id?}`，**只有管理员**（运维员 403），只能按人查，没有全站浏览接口。返回 `{effective_days, nodes, items:[{site,count}], others:{sites,count}, total, dropped_in_range}`：最常用的前 20 个站点，其余折成一行（总数不缺）；`N` 夹到 `min(请求值, dest_usage_retention_days)`；`Cache-Control: no-store`。**用 POST 是为了让审计中间件自动为每一次读取写一条审计行**（含账号与范围），该行在 `/api/admin/dest/` 之下，所以落入 `adminOnlyAuditTargets`，运维员读不到。
@@ -112,7 +115,7 @@ CIDR、私有地址这类**IP 规则**默认只对「以 IP 发起」的连接�
 - **`IPIfNonMatch`（不匹配时解析）不提供**：界面里置灰并写明原因，接口 400 `dest_resolve_unavailable`，线上协议里也无效。它先不带地址跑一遍全部规则、没命中才解析，会改变规则顺序：排在前面的 IP 拦截会被后面「不需要地址就命中」的仅报告规则、白名单成员的域名放行跳过，于是仅报告和试运行分组**会改变判定**，违背 §3.1。它省的 DNS 也很有限：策略默认放行，绝大多数主机名连接什么都不命中，照样要解析。
 - **有效模式**（下发给节点的）：面板选了 `on_demand`，**并且**节点声明了 `policy.destination.resolve.v1`（`EffectiveResolve`）。这个门是强制的：节点会忽略不认识的字段，旧节点收到 `on_demand` 会接受策略却悄悄按 `as_is` 执行，IP 规则永远不判主机名。能力不在时状态页 `resolve_unavailable = "version"`，由节点当前声明的能力推导，不存库。
 - **只在需要的地方编译**：策略里至少有一条规则带 `CIDRs` 或 `Private`（含仅报告与放行规则）才写 `Resolve`，否则不写：写了会改摘要、让 core 白白重启一次（`withResolve`）。仅报告剪枝、按入站限定之后重新推导。
-- **`routeOnly:true` 的入站让整台节点保持 `as_is`。** Xray 按 `routeOnly:true` 嗅探时，嗅探出的名字只用于路由，连接仍去原来的 IP，而按需解析**优先解析域名**，于是带假 SNI 的连接会按假名字的地址被判，真正的目的 IP 反而没被检查：按需解析在这样的入站上等于给绕过开了门。所以只要某个启用的入站上有适用的 IP 规则、且它的嗅探会用嗅探出的名字替代（`protocol.CheckXraySniffing` 以 `SniffForResolvedIPs` 判为 `route_only_resolve`；`destOverride` 为空、只有 `fakedns` 或 `fakedns+others`、嗅探关闭或 `metadataOnly` 都不算），**整台节点**降为 `as_is`，策略的其他部分原样下发（这是降级，不是 §4.2 第 7 条的按入站限定，不去掉也不限定任何规则）。**是否降级只按开启（非仅报告）的规则判断**：仅报告不得干扰执行。只有仅报告的 IP 规则碰到这样的入站时，**不降级**：这些仅报告规则从该入站上去掉（缩小 `Inbounds`，没有入站可用就整条去掉），节点保持 `on_demand`，并记 `destination_policy_report_only_not_deployed`（`report_only_not_deployed = "resolve"`）。降级时记 issue `destination_policy_resolve_not_deployed`（每个相关入站一条，detail `route_only`），状态 `resolve_unavailable = "route_only"`。嗅探配置无法解析的入站同样算（节点会拒绝），detail 与状态为 `sniffing`。PSP 的检查比节点自己的规划更严：它看适用于该入站的**所有**规则和**所有**启用的入站，而节点会过滤掉主体在本节点 roster 里没人匹配的规则、且只检查它实际生成的入站，所以 PSP 可能让节点保持 `as_is` 而节点本可运行 `on_demand`，但不会让节点拒绝策略。只检查 Xray 节点；sing-box 不用嗅探出的名字改写去向。运营者把入站改成 `routeOnly:false`（或去掉）后下一次编译自动恢复。
+- **`routeOnly:true` 的入站让整台节点保持 `as_is`。** Xray 按 `routeOnly:true` 嗅探时，嗅探出的名字只用于路由，连接仍去原来的 IP，而按需解析**优先解析域名**，于是带假 SNI 的连接会按假名字的地址被判，真正的目的 IP 反而没被检查：按需解析在这样的入站上等于给绕过开了门。所以只要某个启用的入站上有适用的 IP 规则、且它的嗅探会用嗅探出的名字替代（`protocol.CheckXraySniffing` 以 `SniffForResolvedIPs` 判为 `route_only_resolve`；`destOverride` 为空、只有 `fakedns` 或 `fakedns+others`、嗅探关闭或 `metadataOnly` 都不算），**整台节点**降为 `as_is`，策略的其他部分原样下发（这是降级，不是 §4.2 第 7 条的按入站限定，不去掉也不限定任何规则）。**是否降级只按开启（非仅报告）的规则判断**：仅报告不得干扰执行。只有仅报告的 IP 规则碰到这样的入站时，**不降级**：这些仅报告规则从该入站上去掉（缩小 `Inbounds`，没有入站可用就整条去掉），节点保持 `on_demand`，并记 `destination_policy_report_only_not_deployed`（`report_only_not_deployed = "resolve"`）。降级时记 issue `destination_policy_resolve_not_deployed`（每个相关入站一条，key 是入站键 `lst_<node_id>`，detail 以原因 `route_only` 开头、后接入站的显示名，如 `route_only: inbound <名称>`），状态 `resolve_unavailable = "route_only"`。嗅探配置无法解析的入站同样算（节点会拒绝），detail 以 `sniffing` 开头，状态为 `sniffing`。PSP 的检查比节点自己的规划更严：它看适用于该入站的**所有**规则和**所有**启用的入站，而节点会过滤掉主体在本节点 roster 里没人匹配的规则、且只检查它实际生成的入站，所以 PSP 可能让节点保持 `as_is` 而节点本可运行 `on_demand`，但不会让节点拒绝策略。只检查 Xray 节点；sing-box 不用嗅探出的名字改写去向。运营者把入站改成 `routeOnly:false`（或去掉）后下一次编译自动恢复。
 - **回退（LKG）只降不升**：回退用的模式取 LKG 当时运行的模式与当前有效模式中较低的一个（`as_is` < `on_demand`），再按剩下的规则重新推导；升到 LKG 没应用过的模式会铸出节点从没运行过的字节。回退策略同样按入站当前的嗅探复核，`routeOnly` 入站让它降为 `as_is`。
 - 面板选了 `on_demand`、没有任何东西拦着、但策略里没有一条 IP 规则（所以没写 `Resolve`）时，`resolve_unavailable = "no_ip_rules"`：不是故障，状态页如实说明，不显示「尚未下发」。
 - 有效模式也在拒绝上下文里（`refusalContext`，只对 `on_demand` 写入）：被节点拒绝的 `on_demand` 策略在面板改回 `as_is`（有效模式变了）后会重试。
@@ -305,7 +308,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | 新节点 + 旧 PSP | 多出来的 `policy_status` 被旧 PSP 静默忽略 | 无 |
 | 新 PSP + 旧节点 | 节点没有能力，状态显示 `unsupported_version` | 升级节点 |
 | 原生面板还没有节点注册 | 状态显示 `not_enrolled`，不计入执行节点，也不算需升级 | 在服务器页安装并注册节点 |
-| 生产节点升级到带 `audit.hits.v1` 的 agent，且已有第一批拦截策略、`audit_collect` 为默认 `hits` | 策略里多了记录级别，摘要变化，**core 再重启一次** | 想避免：升级前把该服务器的 `audit_collect` 设为 `off`（`PUT /servers/:id`） |
+| 节点升级到带 `audit.hits.v1` 的 agent，且升级前已有拦截策略（只在运行过更早 4.2.0 测试构建的机队上出现）、`audit_collect` 为默认 `hits` | 策略里多了记录级别，摘要变化，**core 再重启一次** | 想避免：升级前把该服务器的 `audit_collect` 设为 `off`（`PUT /servers/:id`） |
 | 升级 PSP（含 `dest_resolve`），所有服务器保持默认 `as_is` | 下发的字节与摘要同升级前逐字节相同（`TestResolve_AsIsEverywhereIsByteIdentical`），**没有任何节点重启** | 无 |
 | 把某台节点的 `dest_resolve` 切到 `on_demand`，节点有 `policy.destination.resolve.v1` 且策略里有 CIDR / 私有地址规则 | 该节点的摘要变化，**core 重启一次**（只这一台；切回 `as_is` 同样一次）。没有 IP 规则、节点无该能力、或被 `routeOnly` 入站拦下时，下发的策略不变，不重启 | 在维护窗口里切换；先看状态页的 `resolve_unavailable` |
 

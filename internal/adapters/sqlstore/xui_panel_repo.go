@@ -197,8 +197,11 @@ func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
 	// never exists on a fresh install and is dropped after migration, so a
 	// missing-table error means "no legacy clients" (count 0), not a failure —
 	// without this, panel deletion would break on every post-migration install.
+	// The probe goes through the quiet logger (retiredTableLogger) so the absence
+	// is not printed as a failed query on every deletion.
 	var clientRefs int64
-	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).Where("panel_id = ?", id).Count(&clientRefs).Error; err != nil {
+	quiet := r.db.Session(&gorm.Session{Logger: retiredTableLogger{r.db.Logger}})
+	if err := quiet.WithContext(ctx).Model(&ownershipRow{}).Where("panel_id = ?", id).Count(&clientRefs).Error; err != nil {
 		if !isMissingTableErr(err) {
 			return err
 		}
