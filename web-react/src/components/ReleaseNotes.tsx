@@ -1,5 +1,5 @@
 import { Box, Link, Typography } from '@mui/material'
-import Markdown, { type Components } from 'react-markdown'
+import Markdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 // A RELEASE BODY IS MARKDOWN WRITTEN FOR A GITHUB RELEASE PAGE — a heading, one
@@ -14,13 +14,30 @@ import remarkGfm from 'remark-gfm'
 
 const allowedProtocols = new Set(['http:', 'https:'])
 
-function safeURL(url: string): string | undefined {
+export function safeURL(url: string): string | undefined {
   try {
     const parsed = new URL(url)
     return allowedProtocols.has(parsed.protocol) ? parsed.href : undefined
   } catch {
     return undefined
   }
+}
+
+// What every safe rendering of untrusted Markdown shares: GFM, no raw HTML, a link
+// only for http(s), and a link element that opens a new window without leaking
+// the opener. The legal pages build their own typography on top of it, so the
+// rules that decide what may be rendered live in one place.
+export const safeMarkdownProps: Pick<Options, 'remarkPlugins' | 'skipHtml' | 'urlTransform'> = {
+  remarkPlugins: [remarkGfm],
+  skipHtml: true,
+  urlTransform: url => safeURL(url),
+}
+
+export const safeLinkComponents: Pick<Components, 'a' | 'img'> = {
+  a: ({ href, children }) => href
+    ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
+    : <>{children}</>,
+  img: ({ alt }) => alt ? <>{alt}</> : null,
 }
 
 // Headings are demoted to one small size: the dialog title is the page's
@@ -34,15 +51,12 @@ const components: Components = {
   ul: ({ children }) => <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>{children}</Box>,
   ol: ({ children }) => <Box component="ol" sx={{ my: 0.5, pl: 2.5 }}>{children}</Box>,
   li: ({ children }) => <Typography component="li" variant="body2" sx={{ my: 0.25 }}>{children}</Typography>,
-  a: ({ href, children }) => href
-    ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
-    : <>{children}</>,
-  img: ({ alt }) => alt ? <>{alt}</> : null,
+  ...safeLinkComponents,
 }
 
 export default function ReleaseNotes({ children }: { children: string }) {
   return <Box sx={{ overflowWrap: 'anywhere' }}>
-    <Markdown remarkPlugins={[remarkGfm]} skipHtml components={components} urlTransform={url => safeURL(url)}>
+    <Markdown {...safeMarkdownProps} components={components}>
       {children}
     </Markdown>
   </Box>

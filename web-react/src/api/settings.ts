@@ -379,6 +379,14 @@ export interface UISettings {
   /** Force every admin/operator (local-password) account to enroll a second
    *  factor before using the panel. */
   require_2fa_for_staff: boolean
+
+  // ---- Privacy and terms ----
+  /** Publishes /legal/* and asks accounts to consent. Default off. */
+  legal_enabled: boolean
+  /** Shown only: the publish endpoint is its one writer; the PUT keeps it. */
+  legal_consent_version: number
+  /** List per-site usage in the privacy policy's data-collection list. Default off. */
+  legal_disclose_usage: boolean
 }
 
 export async function getUISettings(opts: { signal?: AbortSignal } = {}) {

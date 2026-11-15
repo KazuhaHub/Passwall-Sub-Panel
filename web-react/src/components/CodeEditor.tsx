@@ -8,6 +8,9 @@ import { useTheme } from '@mui/material'
 export interface CodeEditorHandle {
   /** Scrolls to line `n` (1-based) and selects it. An out-of-range line does nothing. */
   revealLine: (n: number) => void
+  /** Puts `text` on a line of its own at the cursor: in place of an empty cursor
+   *  line, else on a new line after the cursor's line. */
+  insertLine: (text: string) => void
 }
 
 // One CodeMirror line at the 13px font: the height `minRows` is worth.
@@ -42,6 +45,16 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
       if (!v || !Number.isInteger(n) || n < 1 || n > v.state.doc.lines) return
       const line = v.state.doc.line(n)
       v.dispatch({ selection: { anchor: line.from, head: line.to }, scrollIntoView: true })
+      v.focus()
+    },
+    insertLine(text: string) {
+      const v = view.current
+      if (!v) return
+      const line = v.state.doc.lineAt(v.state.selection.main.head)
+      const blank = line.text.trim() === ''
+      const insert = blank ? text : `\n${text}`
+      const from = blank ? line.from : line.to
+      v.dispatch({ changes: { from, to: line.to, insert }, selection: { anchor: from + insert.length }, scrollIntoView: true })
       v.focus()
     },
   }), [])

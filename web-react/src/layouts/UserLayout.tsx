@@ -21,6 +21,8 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import AppearanceMenu from '@/components/AppearanceMenu'
 import LanguageMenu from '@/components/LanguageMenu'
 import BrandLogo from '@/components/BrandLogo'
+import ConsentDialog from '@/components/ConsentDialog'
+import SiteFooter from '@/components/SiteFooter'
 import { useAuthStore, selectLabel } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useAppearanceStore } from '@/stores/appearance'
@@ -102,16 +104,13 @@ export default function UserLayout() {
           <Outlet />
         </Suspense>
       </Box>
-      {site.footerText && (
-        <Box component="footer" sx={{
-          py: 1.25, textAlign: 'center',
-          fontSize: 11, color: md.onSurfaceVariant,
-          borderTop: `1px solid ${md.outlineVariant}`,
-          bgcolor: md.surfaceContainerLow,
-        }}>
-          {site.footerText}
-        </Box>
-      )}
+      <SiteFooter component="footer" sx={{
+        py: 1.25, textAlign: 'center',
+        fontSize: 11, color: md.onSurfaceVariant,
+        borderTop: `1px solid ${md.outlineVariant}`,
+        bgcolor: md.surfaceContainerLow,
+      }} />
+      <ConsentDialog />
     </Box>
   )
 }

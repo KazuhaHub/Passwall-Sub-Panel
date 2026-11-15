@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
+import zhAuth from '@/locales/zh-CN/auth.json'
+import enAuth from '@/locales/en-US/auth.json'
 import { flatten, type Nested } from './options'
 
 // THE RISK TEXTS NAME NO TUNABLE AS A FACT. The risk worker's cadence,
@@ -26,6 +28,8 @@ const scanned = [
   // The access-control page: its windows are settings (the apply wait, the
   // refresh interval, the quotas) and its texts interpolate them.
   'access_control.', 'servers.access.',
+  // The privacy page: the retention it states is the setting's, never a literal.
+  'settings.legal.',
 ]
 
 // The access-control keys are also held to the stricter rule below: no digit
@@ -88,6 +92,21 @@ describe('no hard-coded tunable text remains', () => {
     expect(hits('en', 'recomputed at the risk refresh interval (hourly by default)')).toEqual([])
     expect(hits('zh', '每小时计算一次')).toEqual(['每小时'])
     expect(hits('en', 'recomputed hourly')).toEqual(['hourly'])
+  })
+})
+
+// The public page's list states each retention from the data it is sent
+// ({{days}}; 0 is "kept for ever"). A literal number of days in these texts would
+// be true only on the shipped settings and read as the rule on every other.
+describe('the privacy texts state no retention of their own', () => {
+  it.each([['zh', zhAuth], ['en', enAuth]] as const)('%s: no literal days or cadence in auth legal.*', (lang, bundle) => {
+    const found: string[] = []
+    for (const [key, value] of Object.entries(flatten(bundle as Nested))) {
+      if (!key.startsWith('legal.')) continue
+      if (/(?<![{\w])\d+\s*(天|days?)(?!\w)/.test(unqualified(value))) found.push(`${key}: ${JSON.stringify(value)}`)
+      for (const l of hits(lang, value)) found.push(`${key}: "${l}" in ${JSON.stringify(value)}`)
+    }
+    expect(found).toEqual([])
   })
 })
 

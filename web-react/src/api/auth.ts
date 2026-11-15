@@ -169,6 +169,8 @@ export async function registerUser(input: {
   captcha_id?: string
   captcha_answer?: string
   captcha_token?: string
+  /** The consent_version the form showed; required while the terms are on. */
+  accepted_consent_version?: number
 }): Promise<{ ok: boolean; requires_verification: boolean }> {
   const { data } = await client.post('/auth/register', input, { _skipErrorToast: true })
   return data

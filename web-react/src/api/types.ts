@@ -396,6 +396,9 @@ export interface AuthMethods {
   registration_enabled?: boolean
   registration_require_email_verification?: boolean
   registration_delivery?: 'link' | 'otp'
+  /** Privacy and terms: enabled only when a document can really be opened.
+   *  consent_version is the one a signup echoes back as accepted_consent_version. */
+  legal?: { enabled: boolean; consent_version: number }
   // Passkeys (v3.7.0). passkey_passwordless gates the login page's "Sign in with
   // a passkey" button (usernameless login); passkey_enabled alone only allows
   // enrollment as a second factor from the profile page.
