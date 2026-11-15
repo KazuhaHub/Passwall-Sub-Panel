@@ -53,7 +53,7 @@
 | `connection_history` | 连接历史（含 IP） | `risk_connection_retention_days` | 未设置时是清理任务实际使用的默认值 |
 | `hwid` | 设备标识（摘要） | 无 | `enabled` 在 `risk_hwid_capture_off` 为真时是 `false` |
 | `flag_records` | 风控标记记录（不含 IP） | `risk_flag_record_retention_days` | 未设置时是实际使用的默认值 |
-| `risk_signals` | 风险判定（不含 IP，每小时覆盖） | 无 | 五类信号全部关闭时 `enabled` 为 `false` |
+| `risk_signals` | 风险判定（不含 IP，每小时覆盖） | 无 | 五类信号的开关都可以按分组重新打开。全局全部关闭、但有分组打开了其中任何一类时，`enabled` 仍为 `true`，并带 `enabled_groups`（打开的分组数，不含分组名）；全局全部关闭且没有分组打开时才是 `false` |
 | `risk_reviews` | 管理员复核记录（不含 IP） | 无保留期 | 删除账号后一小时内清除 |
 | `dest_hits` | 访问规则命中（不含来源 IP） | `dest_hit_retention_days` | `nodes` 是**正在记录**的原生节点数；没有节点在记录时 `enabled` 为 `false` |
 | `dest_trial` | 白名单试运行（只记分组和主域名） | `dest_trial_retention_days` | 只有存在处于试运行的分组、且有节点在记录时 `enabled` 才为 `true` |
@@ -79,6 +79,8 @@
 - **其他来源的账号**（管理员创建、SSO 首次登录、升级前已有的账号）：个人资料接口 `GET /api/user/me` 返回 `legal_pending: true`，
   界面据此弹出同意对话框。`legal_pending` 的条件是：功能已启用，`legal_consent_version > 0`，账号是普通用户，
   并且没有版本号**不低于**当前值的同意记录。
+  另外，**必须有一份文档能被读到**：en-US 或 zh-CN 任一语言（回落链的两个终点）里至少发布过一份文档，
+  否则不要求同意，注册页不出现必勾项（只在 ja-JP 之类的语言里发布，大多数访问者读不到，勾选框会指向一个 404）。
 - `POST /api/user/me/legal/accept {"consent_version": N}`：`N` 必须等于当前版本，否则 `409 legal_consent_outdated`；
   功能关闭时 `404`。成功返回 `204`，记录 `method = prompt`。重复同意不报错。
 - **不做 403 门禁，不阻断订阅**。拒绝同意只是反复被提示。
@@ -92,13 +94,17 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/legal/:kind?lang=` | `kind` 为 `terms` 或 `privacy`。功能关闭、`kind` 不认识、或没有可用版本时 `404`。响应：`{kind, version, consent_version, locale, fallback_from?, content, published_at, data_collection}` |
-| GET | `/api/auth/methods` | 多了 `legal: {enabled, consent_version}`，注册页和页脚据此渲染 |
+| GET | `/api/auth/methods` | 多了 `legal: {enabled, consent_version}`，注册页和页脚据此渲染。`enabled` 为真的条件是功能已启用、已发布过版本、且有可读到的文档（见 §4） |
 
 **语言回落链**：请求的语言 → （`zh-TW` 回落到 `zh-CN`）→ `en-US` → `zh-CN` → 404。返回的 `locale` 是实际给出的语言，
 和请求的不同时 `fallback_from` 是请求的那个。不带 `lang`、或 `lang` 不是合法语言标签时，从 `en-US` 开始。
 
 **ETag**：响应带 `ETag` 和 `Cache-Control: no-cache`，`If-None-Match` 命中时返回 `304`（304 同样带这两个头）。
 ETag 是整个响应的摘要，包括 `data_collection`：管理员改了某个保留天数，同一份文档就是一个新的页面，缓存会自动失效。
+`If-None-Match` 按 RFC 9110 的弱比较处理：可以是逗号分隔的列表，可以带 `W/` 前缀，`*` 匹配任何值。
+
+公开接口不需要登录，所以它对数据库的开销是有界的：`data_collection` 里需要查数据库的数字（记录中的节点数、试运行分组数、
+按分组重新打开风险信号的分组数）各缓存 **30 秒**；来自设置的数值（各保留天数、开关）不缓存，改完立即生效。因此节点数这类数字最多滞后 30 秒。
 
 ### 管理员（只有管理员，运维员返回 403）
 
@@ -114,8 +120,8 @@ ETag 是整个响应的摘要，包括 `data_collection`：管理员改了某个
 - 正文不能为空，并且**不超过 60000 字节**（是字节不是字数，一个汉字三字节）。超出返回 `400`，`code` 为 `legal_content_too_large`。
 - 版本号按 `(kind, locale)` 各自从 1 递增。两个人同时发布撞了号会自动重试一次，第二次还撞则返回 `409`。
 - 版本是**不可变**的：没有编辑接口，改动就是发布下一版。
-- 文档先写入，再在系统设置的写锁内保存 `legal_consent_version`；后一步失败时刚写入的文档会被撤回，
-  不会出现「文档已发布但版本号没动」的状态。
+- 文档的写入和 `legal_consent_version` 的变动在**同一个数据库事务**里完成：要么都生效，要么都不生效，
+  不会出现「文档已发布但版本号没动」的状态。发布时持有系统设置的写锁，并在提交后让设置缓存失效。
 
 审计：这三个接口的写操作会像其他管理操作一样记入审计日志，**不属于仅管理员可见的审计行**
 （发布的内容本来就是公开的）。审计中间件会把单个字符串值截到 8192 个字符，所以审计行里的 `content` 只有开头，这是预期的。
@@ -129,7 +135,7 @@ ETag 是整个响应的摘要，包括 `data_collection`：管理员改了某个
 
 两张表在 SQLite、PostgreSQL、MySQL 上都由自动迁移创建，升级时无需手工操作。
 没有外键。每小时的清理任务会删除 `legal_consents` 里账号已不存在的行（不设保留期：同意记录与账号同寿命）。
-已发布的文档从不被删除。
+已发布的文档从不被删除（发布失败时事务回滚，也不会留下半个版本）。
 
 ## 7. 管理员注意事项
 

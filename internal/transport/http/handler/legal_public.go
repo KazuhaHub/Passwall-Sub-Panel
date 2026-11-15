@@ -70,7 +70,7 @@ func (h *LegalPublicHandler) Get(c *gin.Context) {
 	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
 	c.Header("ETag", etag)
 	c.Header("Cache-Control", "no-cache")
-	if c.GetHeader("If-None-Match") == etag {
+	if etagMatches(c.GetHeader("If-None-Match"), etag) {
 		c.Status(http.StatusNotModified)
 		return
 	}

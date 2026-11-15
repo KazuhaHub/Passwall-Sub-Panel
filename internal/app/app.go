@@ -836,7 +836,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// derivation the status page uses; a later feature that records something
 	// new registers a provider on the collector rather than editing the list.
 	legalRepo := sqlstore.NewLegalRepo(db)
-	legalSvc := legalsvc.New(legalRepo, repos.Settings, legalsvc.NewCollector(legalDestRecording{admin: destAdmin, groups: destRepos.GroupAllowlists}))
+	legalCollector := legalsvc.NewCollector(legalDestRecording{admin: destAdmin, groups: destRepos.GroupAllowlists})
+	legalCollector.SetRiskOverrides(legalRepo)
+	legalSvc := legalsvc.New(legalRepo, repos.Settings, legalCollector)
 	a.legalConsents = legalRepo
 	a.legal = legalSvc
 	httpHandler := httptransport.NewRouter(httptransport.Deps{

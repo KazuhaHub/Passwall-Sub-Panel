@@ -2,7 +2,9 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -63,6 +65,9 @@ type LegalRepo struct {
 	// beforeInsert is a test seam: it runs after the next version was read and
 	// before the row is inserted, which is where a competing publisher lands.
 	beforeInsert func(kind, locale string, version int)
+	// beforeConsentWrite is a test seam: it runs inside the transaction before
+	// the consent version is written, and an error from it fails the write.
+	beforeConsentWrite func() error
 }
 
 // NewLegalRepo builds the store over db.
@@ -70,17 +75,38 @@ func NewLegalRepo(db *gorm.DB) *LegalRepo { return &LegalRepo{db: db} }
 
 // Publish stores d as the next version of its (kind, locale) and returns it.
 // d.ID, d.Version and a zero d.PublishedAt are filled in. A collision on the
-// version number is retried once; a second one is domain.ErrConflict.
+// version number is retried once; a second one is domain.ErrConflict. It does
+// not touch the consent version: see PublishWithConsent.
 func (r *LegalRepo) Publish(ctx context.Context, d domain.LegalDocument) (*domain.LegalDocument, error) {
+	doc, _, _, err := r.publish(ctx, d, false, false)
+	return doc, err
+}
+
+// PublishWithConsent is Publish and the move of the panel-wide consent version
+// (settings legal.consent_version) in ONE transaction, so a published text never
+// exists without the version that announces it, and the reverse. The version
+// goes to 1 on the very first publication whether or not it is marked, up by
+// one when bump is set, and stays put otherwise. It returns the version now in
+// force and whether this call moved it.
+//
+// It writes the settings row itself, which the settings store's cache cannot
+// see: the caller must invalidate that cache afterwards, and must hold the lock
+// the whole-record settings writers hold, or one of them could save an older
+// copy of the record over this value.
+func (r *LegalRepo) PublishWithConsent(ctx context.Context, d domain.LegalDocument, bump bool) (*domain.LegalDocument, int, bool, error) {
+	return r.publish(ctx, d, true, bump)
+}
+
+func (r *LegalRepo) publish(ctx context.Context, d domain.LegalDocument, withConsent, bump bool) (*domain.LegalDocument, int, bool, error) {
 	if _, ok := domain.ParseLegalKind(string(d.Kind)); !ok {
-		return nil, fmt.Errorf("%w: unknown legal document kind", domain.ErrValidation)
+		return nil, 0, false, fmt.Errorf("%w: unknown legal document kind", domain.ErrValidation)
 	}
 	locale, ok := domain.NormalizeLegalLocale(d.Locale)
 	if !ok {
-		return nil, fmt.Errorf("%w: locale is not a valid language tag", domain.ErrValidation)
+		return nil, 0, false, fmt.Errorf("%w: locale is not a valid language tag", domain.ErrValidation)
 	}
 	if err := domain.ValidateLegalContent(d.Content); err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
 	at := d.PublishedAt
 	if at.IsZero() {
@@ -91,7 +117,7 @@ func (r *LegalRepo) Publish(ctx context.Context, d domain.LegalDocument) (*domai
 		if err := r.db.WithContext(ctx).Model(&legalDocumentRow{}).
 			Select("COALESCE(MAX(version), 0) + 1").
 			Where("kind = ? AND locale = ?", string(d.Kind), locale).Scan(&next).Error; err != nil {
-			return nil, fmt.Errorf("next legal version: %w", err)
+			return nil, 0, false, fmt.Errorf("next legal version: %w", err)
 		}
 		if r.beforeInsert != nil {
 			r.beforeInsert(string(d.Kind), locale, next)
@@ -100,15 +126,69 @@ func (r *LegalRepo) Publish(ctx context.Context, d domain.LegalDocument) (*domai
 			Kind: string(d.Kind), Locale: locale, Version: next, Content: d.Content,
 			ConsentBump: d.ConsentBump, PublishedAt: at.UTC(), PublishedBy: d.PublishedBy,
 		}
-		err := r.db.WithContext(ctx).Create(&row).Error
+		var consent int
+		var bumped bool
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+			if !withConsent {
+				return nil
+			}
+			var err error
+			consent, bumped, err = r.moveConsentVersion(tx, bump)
+			return err
+		})
 		if err == nil {
-			return row.toDomain(), nil
+			return row.toDomain(), consent, bumped, nil
 		}
 		if !isUniqueViolationErr(err) {
-			return nil, fmt.Errorf("publish legal document: %w", err)
+			return nil, 0, false, fmt.Errorf("publish legal document: %w", err)
 		}
 	}
-	return nil, fmt.Errorf("%w: another publication took the version number twice", domain.ErrConflict)
+	return nil, 0, false, fmt.Errorf("%w: another publication took the version number twice", domain.ErrConflict)
+}
+
+// moveConsentVersion reads settings legal.consent_version and writes the next
+// value (see PublishWithConsent) inside tx.
+func (r *LegalRepo) moveConsentVersion(tx *gorm.DB, bump bool) (int, bool, error) {
+	var cell settingRow
+	cur := 0
+	err := tx.Where("type = ? AND name = ?", "legal", "consent_version").Take(&cell).Error
+	exists := err == nil
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, fmt.Errorf("read consent version: %w", err)
+	}
+	if exists && cell.Value != "" {
+		v, perr := strconv.Atoi(cell.Value)
+		if perr != nil {
+			return 0, false, fmt.Errorf("stored consent version %q: %w", cell.Value, perr)
+		}
+		cur = v
+	}
+	next := cur
+	if cur == 0 || bump {
+		next = cur + 1
+	}
+	if next == cur {
+		return cur, false, nil
+	}
+	if r.beforeConsentWrite != nil {
+		if err := r.beforeConsentWrite(); err != nil {
+			return 0, false, err
+		}
+	}
+	val := strconv.Itoa(next)
+	if exists {
+		err = tx.Model(&settingRow{}).Where("type = ? AND name = ?", "legal", "consent_version").
+			Updates(map[string]any{"value": val, "encrypted": false, "updated_at": time.Now()}).Error
+	} else {
+		err = tx.Create(&settingRow{Type: "legal", Name: "consent_version", Value: val, UpdatedAt: time.Now()}).Error
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("write consent version: %w", err)
+	}
+	return next, true, nil
 }
 
 // Latest is the highest version of a (kind, locale), domain.ErrNotFound when
@@ -159,13 +239,6 @@ func (r *LegalRepo) History(ctx context.Context, kind domain.LegalKind) ([]domai
 			ConsentBump: row.ConsentBump, PublishedAt: row.PublishedAt.UTC(), PublishedBy: row.PublishedBy}
 	}
 	return out, nil
-}
-
-// Delete removes one version by id. It exists to undo a publication whose
-// consent version could not be saved; published documents are otherwise never
-// deleted.
-func (r *LegalRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&legalDocumentRow{}).Error
 }
 
 // RecordConsent stores that an account accepted a consent version. Accepting
@@ -223,4 +296,41 @@ func (r *LegalRepo) CountAffectedUsers(ctx context.Context, version int) (affect
 		return 0, 0, fmt.Errorf("count accepted users: %w", err)
 	}
 	return affected, accepted, nil
+}
+
+// HasDocumentIn reports whether any document of any kind exists in one of the
+// locales.
+func (r *LegalRepo) HasDocumentIn(ctx context.Context, locales []string) (bool, error) {
+	if len(locales) == 0 {
+		return false, nil
+	}
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&legalDocumentRow{}).Where("locale IN ?", locales).Limit(1).Count(&n).Error; err != nil {
+		return false, fmt.Errorf("legal document lookup: %w", err)
+	}
+	return n > 0, nil
+}
+
+// CountGroupsOverridingBool counts the existing groups that override at least
+// one of the boolean settings typ.name (names) to want. A stored boolean is true
+// exactly when its text is "1" or "true" (boolField), so any other text, "0",
+// "false" or empty, is false: the override API stores whatever text it is given.
+// A group counts once however many of the names it overrides; the override rows
+// of a deleted group are not counted.
+func (r *LegalRepo) CountGroupsOverridingBool(ctx context.Context, typ string, names []string, want bool) (int, error) {
+	if len(names) == 0 {
+		return 0, nil
+	}
+	cond := "value IN ('1', 'true')"
+	if !want {
+		cond = "value NOT IN ('1', 'true')"
+	}
+	var n int64
+	err := r.db.WithContext(ctx).Table("scope_settings").
+		Where("scope_type = ? AND type = ? AND name IN ? AND "+cond+" AND scope_id IN (SELECT id FROM groups_)", "group", typ, names).
+		Distinct("scope_id").Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("count group overrides: %w", err)
+	}
+	return int(n), nil
 }

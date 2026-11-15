@@ -17,10 +17,9 @@ import (
 // AdminLegalStore is what the administration of the documents needs of the
 // store (sqlstore.LegalRepo).
 type AdminLegalStore interface {
-	Publish(ctx context.Context, d domain.LegalDocument) (*domain.LegalDocument, error)
+	PublishWithConsent(ctx context.Context, d domain.LegalDocument, bump bool) (*domain.LegalDocument, int, bool, error)
 	LatestPerLocale(ctx context.Context, kind domain.LegalKind) ([]*domain.LegalDocument, error)
 	History(ctx context.Context, kind domain.LegalKind) ([]domain.LegalDocumentMeta, error)
-	Delete(ctx context.Context, id int64) error
 	CountAffectedUsers(ctx context.Context, version int) (affected, accepted int64, err error)
 }
 
@@ -37,9 +36,11 @@ type LegalWiring struct {
 // public by design, and the audit middleware keeps only the first 8192
 // characters of the content in the row, which is expected.
 //
-// It is the ONLY writer of legal_consent_version. The settings store saves
-// whole records only, so Publish takes the same lock as the system settings PUT
-// (uiSettingsWriteMu) around its load, the version bump and the save.
+// It is the ONLY writer of legal_consent_version. The store inserts the
+// document and moves the version in one transaction; because the settings store
+// saves whole records, Publish holds the same lock as the system settings PUT
+// (uiSettingsWriteMu) so a record loaded before the bump is never saved over it,
+// and drops the settings cache afterwards.
 type AdminLegalHandler struct {
 	w        LegalWiring
 	settings ports.SettingsRepo
@@ -128,11 +129,9 @@ type publishLegalRequest struct {
 // Publish stores the next version of a document and, when this is the first
 // publication or it is marked as a material change, moves the consent version:
 // to 1 on the first (whether or not it is marked), by one on a marked one,
-// never on an unmarked later one.
-//
-// The document is inserted first and the version saved second, both inside the
-// settings lock. If the save fails the document is deleted again, so a
-// published text never exists without the version that announces it.
+// never on an unmarked later one. Both happen in one transaction
+// (LegalRepo.PublishWithConsent): a published text never exists without the
+// version that announces it.
 func (h *AdminLegalHandler) Publish(c *gin.Context) {
 	kind, ok := domain.ParseLegalKind(c.Param("kind"))
 	if !ok {
@@ -165,35 +164,19 @@ func (h *AdminLegalHandler) Publish(c *gin.Context) {
 	uiSettingsWriteMu.Lock()
 	defer uiSettingsWriteMu.Unlock()
 
-	prev, err := h.settings.Load(ctx, h.defaults())
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	doc, err := h.w.Store.Publish(ctx, domain.LegalDocument{Kind: kind, Locale: locale, Content: req.Content, ConsentBump: req.ConsentBump, PublishedBy: by})
+	doc, version, bumped, err := h.w.Store.PublishWithConsent(ctx, domain.LegalDocument{Kind: kind, Locale: locale, Content: req.Content, ConsentBump: req.ConsentBump, PublishedBy: by}, req.ConsentBump)
 	if err != nil {
 		h.contentError(c, err)
 		return
 	}
-	next := prev.LegalConsentVersion
-	if next == 0 || req.ConsentBump {
-		next++
-	}
-	if next != prev.LegalConsentVersion {
-		saved := prev
-		saved.LegalConsentVersion = next
-		if err := h.settings.Save(ctx, saved); err != nil {
-			// Best effort, and detached from the request: a cancelled request
-			// is the likeliest reason the save failed.
-			_ = h.w.Store.Delete(context.WithoutCancel(ctx), doc.ID)
-			respondError(c, err)
-			return
-		}
+	// The version was written behind the settings store's back.
+	if inv, ok := h.settings.(interface{ Invalidate() }); ok {
+		inv.Invalidate()
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"document":        legalVersionDTO{ID: doc.ID, Locale: doc.Locale, Version: doc.Version, ConsentBump: doc.ConsentBump, PublishedAt: doc.PublishedAt, PublishedBy: doc.PublishedBy},
-		"consent_version": next,
-		"consent_bumped":  next != prev.LegalConsentVersion,
+		"consent_version": version,
+		"consent_bumped":  bumped,
 	})
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -23,6 +25,45 @@ type Item struct {
 	Nodes *int `json:"nodes,omitempty"`
 	// IncludesIP is whether the record carries the client's IP address.
 	IncludesIP bool `json:"includes_ip"`
+	// EnabledGroups is set when the item is off panel-wide but a number of
+	// groups turned it back on for themselves (risk signals): Enabled is then
+	// true, and this is how many groups, never which.
+	EnabledGroups *int `json:"enabled_groups,omitempty"`
+}
+
+// countCacheTTL is how long the database-derived counts are remembered. The
+// public page is anonymous, so what one request can make the database do is
+// bounded; the values read from the settings are never cached.
+const countCacheTTL = 30 * time.Second
+
+// memo remembers one successful answer for countCacheTTL. A failure is not
+// remembered.
+type memo[T any] struct {
+	mu sync.Mutex
+	at time.Time
+	v  T
+	ok bool
+}
+
+func (m *memo[T]) get(now time.Time, fn func() (T, error)) (T, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ok && now.Sub(m.at) < countCacheTTL {
+		return m.v, nil
+	}
+	v, err := fn()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	m.v, m.at, m.ok = v, now, true
+	return v, nil
+}
+
+// RiskOverrides counts the groups that override boolean settings
+// (sqlstore.LegalRepo). Nil: no group is asked about.
+type RiskOverrides interface {
+	CountGroupsOverridingBool(ctx context.Context, typ string, names []string, want bool) (int, error)
 }
 
 // DestRecording is what the access-control items need to know. Nil: none of
@@ -51,11 +92,19 @@ type Provider struct {
 // Collector builds the list.
 type Collector struct {
 	providers []Provider
+	now       func() time.Time
+
+	nodes, trial, groups memo[int]
+	overrides            RiskOverrides
 }
+
+// SetRiskOverrides gives the collector the group-override lookup the
+// risk_signals item needs. Without it only the panel-wide switches are read.
+func (c *Collector) SetRiskOverrides(o RiskOverrides) { c.overrides = o }
 
 // NewCollector returns a collector with the built-in items.
 func NewCollector(dest DestRecording) *Collector {
-	c := &Collector{}
+	c := &Collector{now: time.Now}
 	days := func(v int) *int { return &v }
 	static := func(key string, build func(s ports.UISettings) Item) {
 		c.Register(Provider{Key: key, Build: func(_ context.Context, s ports.UISettings) (Item, error) { return build(s), nil }})
@@ -78,16 +127,46 @@ func NewCollector(dest DestRecording) *Collector {
 		rt := domain.RiskRuntimeFromSettings(s.RiskRuntimeSettings())
 		return Item{Enabled: true, RetentionDays: days(rt.FlagRecordRetentionDays)}
 	})
-	static("risk_signals", func(s ports.UISettings) Item {
-		allOff := s.RiskSubSpreadOff && s.RiskDevicesOff && s.RiskDestBlockOff && s.RiskUsageShiftOff && s.RiskLoginCountryOff
-		return Item{Enabled: !allOff}
-	})
+	// Every one of the five signals can be switched back on for a group
+	// (ports.OverridableScopeKeys) and the worker honours that, so "off
+	// panel-wide" is not "not judged": the groups that turn one on are counted.
+	c.Register(Provider{Key: "risk_signals", Build: func(ctx context.Context, s ports.UISettings) (Item, error) {
+		signals := []struct {
+			name string
+			off  bool
+		}{
+			{"sub_spread_off", s.RiskSubSpreadOff}, {"devices_off", s.RiskDevicesOff}, {"dest_block_off", s.RiskDestBlockOff},
+			{"usage_shift_off", s.RiskUsageShiftOff}, {"login_country_off", s.RiskLoginCountryOff},
+		}
+		var offNames []string
+		for _, sig := range signals {
+			if sig.off {
+				offNames = append(offNames, sig.name)
+			}
+		}
+		if len(offNames) < len(signals) {
+			return Item{Enabled: true}, nil
+		}
+		if c.overrides == nil {
+			return Item{}, nil
+		}
+		n, err := c.groups.get(c.now(), func() (int, error) {
+			return c.overrides.CountGroupsOverridingBool(ctx, "risk", offNames, false)
+		})
+		if err != nil {
+			return Item{}, fmt.Errorf("groups enabling risk signals: %w", err)
+		}
+		if n == 0 {
+			return Item{}, nil
+		}
+		return Item{Enabled: true, EnabledGroups: &n}, nil
+	}})
 	// Admin review notes and dismissals: no address, no retention, removed with
 	// the account.
 	static("risk_reviews", func(ports.UISettings) Item { return Item{Enabled: true} })
 
 	c.Register(Provider{Key: "dest_hits", Build: func(ctx context.Context, s ports.UISettings) (Item, error) {
-		nodes, err := collectingNodes(ctx, dest)
+		nodes, err := c.collectingNodes(ctx, dest)
 		if err != nil {
 			return Item{}, err
 		}
@@ -95,13 +174,13 @@ func NewCollector(dest DestRecording) *Collector {
 		return Item{Enabled: nodes > 0, Nodes: &nodes, RetentionDays: days(eff.HitRetentionDays)}, nil
 	}})
 	c.Register(Provider{Key: "dest_trial", Build: func(ctx context.Context, s ports.UISettings) (Item, error) {
-		nodes, err := collectingNodes(ctx, dest)
+		nodes, err := c.collectingNodes(ctx, dest)
 		if err != nil {
 			return Item{}, err
 		}
 		trial := 0
 		if dest != nil {
-			if trial, err = dest.AllowlistTrialGroups(ctx); err != nil {
+			if trial, err = c.trial.get(c.now(), func() (int, error) { return dest.AllowlistTrialGroups(ctx) }); err != nil {
 				return Item{}, fmt.Errorf("allowlist trial groups: %w", err)
 			}
 		}
@@ -111,11 +190,11 @@ func NewCollector(dest DestRecording) *Collector {
 	return c
 }
 
-func collectingNodes(ctx context.Context, dest DestRecording) (int, error) {
+func (c *Collector) collectingNodes(ctx context.Context, dest DestRecording) (int, error) {
 	if dest == nil {
 		return 0, nil
 	}
-	n, err := dest.CollectingNodes(ctx)
+	n, err := c.nodes.get(c.now(), func() (int, error) { return dest.CollectingNodes(ctx) })
 	if err != nil {
 		return 0, fmt.Errorf("collecting nodes: %w", err)
 	}

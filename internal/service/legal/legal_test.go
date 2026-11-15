@@ -16,8 +16,27 @@ type fakeStore struct {
 	methods  []string
 }
 
-func newFakeStore() *fakeStore {
+// emptyStore has nothing published.
+func emptyStore() *fakeStore {
 	return &fakeStore{docs: map[string]*domain.LegalDocument{}, consents: map[int64]int{}}
+}
+
+// newFakeStore has one document published in zh-CN, so consent is reachable.
+func newFakeStore() *fakeStore {
+	f := emptyStore()
+	f.put(domain.LegalKindTerms, "zh-CN", "terms")
+	return f
+}
+
+func (f *fakeStore) HasDocumentIn(_ context.Context, locales []string) (bool, error) {
+	for _, d := range f.docs {
+		for _, l := range locales {
+			if d.Locale == l {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeStore) put(kind domain.LegalKind, locale, content string) {
@@ -81,7 +100,7 @@ func TestPublic_FallbackChain(t *testing.T) {
 		{"no language asked is not a fallback", []string{"zh-CN"}, "", "zh-CN", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			st := newFakeStore()
+			st := emptyStore()
 			for _, l := range c.have {
 				st.put(domain.LegalKindTerms, l, "doc "+l)
 			}
@@ -100,7 +119,7 @@ func TestPublic_FallbackChain(t *testing.T) {
 }
 
 func TestPublic_NotFoundWhenNothingPublished(t *testing.T) {
-	_, err := svc(newFakeStore(), ports.UISettings{LegalEnabled: true, LegalConsentVersion: 1}).Public(context.Background(), domain.LegalKindTerms, "zh-CN")
+	_, err := svc(emptyStore(), ports.UISettings{LegalEnabled: true, LegalConsentVersion: 1}).Public(context.Background(), domain.LegalKindTerms, "zh-CN")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("nothing published: %v", err)
 	}
@@ -187,6 +206,44 @@ func TestCheckRegistration(t *testing.T) {
 			}
 			if wantRequired := c.settings.LegalEnabled && c.settings.LegalConsentVersion > 0; required != wantRequired {
 				t.Errorf("required = %v, want %v", required, wantRequired)
+			}
+		})
+	}
+}
+
+// Consent is only asked for when somebody can read what they consent to. The
+// fallback chain always ends at en-US and zh-CN, so a document that exists only
+// in another locale (or none at all) is unreachable for most visitors: asking
+// for consent to it would make a checkbox that links to a 404.
+func TestConsentIsOnlyRequiredWhenADocumentIsReachable(t *testing.T) {
+	ctx := context.Background()
+	on := ports.UISettings{LegalEnabled: true, LegalConsentVersion: 2}
+	user := &domain.User{ID: 5, Role: domain.RoleUser}
+	for _, c := range []struct {
+		name string
+		st   func() *fakeStore
+		want bool
+	}{
+		{"nothing published", emptyStore, false},
+		{"only a ja-JP document", func() *fakeStore { s := emptyStore(); s.put(domain.LegalKindPrivacy, "ja-JP", "x"); return s }, false},
+		{"an en-US document", func() *fakeStore { s := emptyStore(); s.put(domain.LegalKindPrivacy, "en-US", "x"); return s }, true},
+		{"a zh-CN document", newFakeStore, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := svc(c.st(), on)
+			cur, err := s.Current(ctx)
+			if err != nil || cur.Required() != c.want {
+				t.Fatalf("Required = %v, %v; want %v", cur.Required(), err, c.want)
+			}
+			if pending, _ := s.Pending(ctx, user); pending != c.want {
+				t.Errorf("Pending = %v, want %v", pending, c.want)
+			}
+			required, err := s.CheckRegistration(ctx, nil)
+			if required != c.want || (c.want != errors.Is(err, domain.ErrLegalConsentOutdated)) {
+				t.Errorf("CheckRegistration = %v, %v; want required %v", required, err, c.want)
+			}
+			if err := s.Accept(ctx, 5, 2, domain.LegalConsentPrompt); c.want == (err != nil) {
+				t.Errorf("Accept = %v, want an error exactly when consent is not required", err)
 			}
 		})
 	}

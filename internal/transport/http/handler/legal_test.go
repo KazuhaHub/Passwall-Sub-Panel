@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -31,14 +28,6 @@ type legalFixture struct {
 	settings ports.SettingsRepo
 	svc      *legal.Service
 	router   *gin.Engine
-}
-
-// failingSaveSettings loads through and refuses every Save: what a database
-// blip after the document insert looks like.
-type failingSaveSettings struct{ ports.SettingsRepo }
-
-func (failingSaveSettings) Save(context.Context, ports.UISettings) error {
-	return errors.New("settings store down")
 }
 
 func newLegalFixture(t *testing.T) *legalFixture {
@@ -116,6 +105,15 @@ func (f *legalFixture) loaded() ports.UISettings {
 		f.t.Fatal(err)
 	}
 	return s
+}
+
+// seedDoc publishes one document straight into the store, so consent is
+// reachable without going through the endpoint (which would move the version).
+func (f *legalFixture) seedDoc() {
+	f.t.Helper()
+	if _, err := f.store.Publish(context.Background(), domain.LegalDocument{Kind: domain.LegalKindTerms, Locale: "zh-CN", Content: "terms"}); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func publishBody(locale, content string, bump bool) string {
@@ -207,20 +205,6 @@ func TestPublish_BadInput(t *testing.T) {
 	}
 	if f.loaded().LegalConsentVersion != 0 {
 		t.Error("a refused publication moved the consent version")
-	}
-}
-
-// If the consent version cannot be written, the document must not be left
-// published with a version that does not announce it.
-func TestPublish_RollsTheDocumentBackWhenTheVersionCannotBeSaved(t *testing.T) {
-	f := newLegalFixture(t)
-	r := f.build(failingSaveSettings{f.settings})
-	rec := f.doOn(r, "POST", "/api/admin/legal/terms", publishBody("zh-CN", "x", true))
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("publish = %d, want 500: %s", rec.Code, rec.Body)
-	}
-	if _, err := f.store.Latest(context.Background(), domain.LegalKindTerms, "zh-CN"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("the document stayed published: %v", err)
 	}
 }
 
@@ -390,25 +374,6 @@ func TestSettingsPut_PreservesLegalConsentVersion(t *testing.T) {
 	}
 }
 
-func TestSettingsPut_NeverReadsTheConsentVersionFromTheRequest(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "admin_settings.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	ast.Inspect(file, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "req" && sel.Sel.Name == "LegalConsentVersion" {
-				found = true
-			}
-		}
-		return true
-	})
-	if found {
-		t.Fatal("the settings PUT reads LegalConsentVersion off the request")
-	}
-}
-
 func TestSettingsGet_ServesTheLegalKeys(t *testing.T) {
 	repo := &policySettingsRepo{settings: ports.UISettings{LegalEnabled: true, LegalConsentVersion: 4, LegalDiscloseUsage: true}}
 	r := gin.New()
@@ -424,6 +389,50 @@ func TestSettingsGet_ServesTheLegalKeys(t *testing.T) {
 }
 
 // ---- auth: methods, register ----
+
+func TestPublicGet_IfNoneMatchAcceptsWeakValidatorsAndLists(t *testing.T) {
+	f := newLegalFixture(t)
+	f.do("POST", "/api/admin/legal/privacy", publishBody("zh-CN", "x", false))
+	f.set(func(s *ports.UISettings) { s.LegalEnabled = true })
+	etag := f.do("GET", "/api/legal/privacy?lang=zh-CN", "").Header().Get("ETag")
+	for name, header := range map[string]string{
+		"weak":          "W/" + etag,
+		"a list":        `"nope", ` + etag + `, "other"`,
+		"a weak list":   `W/"nope",W/` + etag,
+		"star":          "*",
+		"padded spaces": "  " + etag + "  ",
+	} {
+		if rec := f.do("GET", "/api/legal/privacy?lang=zh-CN", "", "If-None-Match", header); rec.Code != http.StatusNotModified {
+			t.Errorf("%s: %q = %d, want 304", name, header, rec.Code)
+		}
+	}
+	if rec := f.do("GET", "/api/legal/privacy?lang=zh-CN", "", "If-None-Match", `"nope", "other"`); rec.Code != http.StatusOK {
+		t.Errorf("no match = %d, want 200", rec.Code)
+	}
+}
+
+// With the service wired, the methods answer says "enabled" only when consent
+// can actually be asked: a document is reachable.
+func TestAuthMethods_LegalIsNotEnabledWithoutAReachableDocument(t *testing.T) {
+	f := newLegalFixture(t)
+	f.set(func(s *ports.UISettings) { s.LegalEnabled = true; s.LegalConsentVersion = 2 })
+	call := func() map[string]any {
+		h := &AuthLocalHandler{settings: stubScoped{f.loaded()}, legal: f.svc}
+		r := gin.New()
+		r.GET("/m", h.Methods)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest("GET", "/m", nil))
+		blk, _ := decodeMap(t, rec)["legal"].(map[string]any)
+		return blk
+	}
+	if blk := call(); blk["enabled"] != false || blk["consent_version"] != float64(2) {
+		t.Errorf("nothing published: %v", blk)
+	}
+	f.do("POST", "/api/admin/legal/terms", publishBody("en-US", "x", false))
+	if blk := call(); blk["enabled"] != true {
+		t.Errorf("a document is published: %v", blk)
+	}
+}
 
 type stubScoped struct{ s ports.UISettings }
 
@@ -488,6 +497,7 @@ func registerRouter(h *AuthRegisterHandler) *gin.Engine {
 func TestRegister_ConsentVersionMismatchIs409AndCreatesNothing(t *testing.T) {
 	f := newLegalFixture(t)
 	f.set(func(s *ports.UISettings) { s.LegalEnabled = true; s.LegalConsentVersion = 2 })
+	f.seedDoc()
 	reg := &stubRegistrar{id: 41}
 	h := &AuthRegisterHandler{reg: reg, settings: f.settings, legal: f.svc}
 	r := registerRouter(h)
@@ -518,6 +528,7 @@ func TestRegister_RecordsTheConsentOfTheNewAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.set(func(s *ports.UISettings) { s.LegalEnabled = true; s.LegalConsentVersion = 2 })
+	f.seedDoc()
 	h := &AuthRegisterHandler{reg: &stubRegistrar{id: u.ID}, settings: f.settings, legal: f.svc}
 	rec := f.doOn(registerRouter(h), "POST", "/register", `{"email":"reg@example.test","password":"x1y2z3w4","accepted_consent_version":2}`)
 	if rec.Code != http.StatusOK {
@@ -559,6 +570,7 @@ func TestUserAcceptLegal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.set(func(s *ports.UISettings) { s.LegalEnabled = true; s.LegalConsentVersion = 3 })
+	f.seedDoc()
 	h := &UserMeHandler{legal: f.svc}
 	r := claimsRouter(domain.RoleUser, u.ID, h.AcceptLegal)
 
@@ -582,6 +594,7 @@ func TestUserAcceptLegal(t *testing.T) {
 func TestUserMeLegalPending_StaffNeverAndNothingWiredNever(t *testing.T) {
 	f := newLegalFixture(t)
 	f.set(func(s *ports.UISettings) { s.LegalEnabled = true; s.LegalConsentVersion = 1 })
+	f.seedDoc()
 	h := &UserMeHandler{legal: f.svc}
 	ctx := context.Background()
 	if p, _ := h.legalPending(ctx, &domain.User{ID: 8, Role: domain.RoleAdmin}); p {

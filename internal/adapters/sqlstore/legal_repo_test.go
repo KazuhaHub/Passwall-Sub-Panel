@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // The legal tables hold the two published documents (immutable rows, one per
@@ -208,20 +210,6 @@ func TestLegalLatestPerLocale(t *testing.T) {
 	}
 }
 
-func TestLegalDelete_RemovesOneRow(t *testing.T) {
-	r, _ := newLegalRepo(t)
-	ctx := context.Background()
-	a, _ := r.Publish(ctx, pub(domain.LegalKindTerms, "zh-CN", "a", false))
-	b, _ := r.Publish(ctx, pub(domain.LegalKindTerms, "zh-CN", "b", false))
-	if err := r.Delete(ctx, b.ID); err != nil {
-		t.Fatal(err)
-	}
-	got, err := r.Latest(ctx, domain.LegalKindTerms, "zh-CN")
-	if err != nil || got.ID != a.ID {
-		t.Errorf("after deleting the newest, latest = %+v, %v", got, err)
-	}
-}
-
 func TestLegalConsent_RecordsIdempotentlyAndAnswersAtLeast(t *testing.T) {
 	r, db := newLegalRepo(t)
 	ctx := context.Background()
@@ -300,5 +288,146 @@ func TestLegalCountAffectedUsers_CountsOnlyRoleUser(t *testing.T) {
 	}
 	if affected-before != 2 || accepted-beforeAccepted != 1 {
 		t.Errorf("affected +%d (want 2), accepted +%d (want 1)", affected-before, accepted-beforeAccepted)
+	}
+}
+
+func consentVersionOf(t *testing.T, db *gorm.DB) int {
+	t.Helper()
+	s, err := NewRepos(db).Settings.Load(context.Background(), ports.UISettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.LegalConsentVersion
+}
+
+// The document and the consent version it announces are one transaction: the
+// row and the setting land together or not at all.
+func TestLegalPublishWithConsent_MovesTheVersionWithTheDocument(t *testing.T) {
+	r, db := newLegalRepo(t)
+	ctx := context.Background()
+	step := func(bump bool, wantVersion int, wantBumped bool) {
+		t.Helper()
+		d, v, bumped, err := r.PublishWithConsent(ctx, pub(domain.LegalKindTerms, "zh-CN", "text", bump), bump)
+		if err != nil || d == nil {
+			t.Fatalf("publish: %v", err)
+		}
+		if v != wantVersion || bumped != wantBumped {
+			t.Fatalf("bump=%v: consent version %d (bumped %v), want %d (%v)", bump, v, bumped, wantVersion, wantBumped)
+		}
+		if got := consentVersionOf(t, db); got != wantVersion {
+			t.Fatalf("the settings read back %d, want %d", got, wantVersion)
+		}
+	}
+	step(false, 1, true) // the first publication is always version 1
+	step(false, 1, false)
+	step(true, 2, true)
+	step(true, 3, true)
+	step(false, 3, false)
+}
+
+// A value written through the settings store (a whole-record save) is what the
+// bump starts from: both writers use the one key.
+func TestLegalPublishWithConsent_BumpsTheStoredValue(t *testing.T) {
+	r, db := newLegalRepo(t)
+	ctx := context.Background()
+	if err := NewRepos(db).Settings.Save(ctx, ports.UISettings{LegalConsentVersion: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, v, _, err := r.PublishWithConsent(ctx, pub(domain.LegalKindTerms, "zh-CN", "x", true), true); err != nil || v != 6 {
+		t.Fatalf("v = %d, %v; want 6", v, err)
+	}
+}
+
+func TestLegalPublishWithConsent_RollsTheDocumentBackWhenTheVersionCannotBeWritten(t *testing.T) {
+	r, db := newLegalRepo(t)
+	ctx := context.Background()
+	r.beforeConsentWrite = func() error { return errors.New("disk full") }
+	if _, _, _, err := r.PublishWithConsent(ctx, pub(domain.LegalKindTerms, "zh-CN", "x", true), true); err == nil {
+		t.Fatal("want the write error")
+	}
+	if _, err := r.Latest(ctx, domain.LegalKindTerms, "zh-CN"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("the document stayed published: %v", err)
+	}
+	if got := consentVersionOf(t, db); got != 0 {
+		t.Errorf("consent version = %d after a rolled-back publication", got)
+	}
+}
+
+func TestLegalPublishWithConsent_RetriesOnceOnAVersionCollision(t *testing.T) {
+	r, db := newLegalRepo(t)
+	ctx := context.Background()
+	calls := 0
+	r.beforeInsert = func(kind, locale string, version int) {
+		calls++
+		if calls == 1 {
+			_ = db.Create(&legalDocumentRow{Kind: kind, Locale: locale, Version: version, Content: "rival", PublishedAt: time.Now().UTC()}).Error
+		}
+	}
+	d, v, _, err := r.PublishWithConsent(ctx, pub(domain.LegalKindTerms, "zh-CN", "mine", false), false)
+	if err != nil || d.Version != 2 || v != 1 || calls != 2 {
+		t.Fatalf("version %v consent %d after %d attempts, err %v", d, v, calls, err)
+	}
+}
+
+func TestLegalHasDocumentIn(t *testing.T) {
+	r, _ := newLegalRepo(t)
+	ctx := context.Background()
+	if ok, err := r.HasDocumentIn(ctx, []string{"en-US", "zh-CN"}); ok || err != nil {
+		t.Fatalf("empty: %v, %v", ok, err)
+	}
+	if _, err := r.Publish(ctx, pub(domain.LegalKindPrivacy, "ja-JP", "x", false)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := r.HasDocumentIn(ctx, []string{"en-US", "zh-CN"}); ok {
+		t.Error("a ja-JP document is not reachable through the fallback chain")
+	}
+	if _, err := r.Publish(ctx, pub(domain.LegalKindPrivacy, "en-US", "x", false)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := r.HasDocumentIn(ctx, []string{"en-US", "zh-CN"}); !ok {
+		t.Error("an en-US document is reachable")
+	}
+}
+
+func TestLegalCountGroupsOverridingBool(t *testing.T) {
+	r, db := newLegalRepo(t)
+	ctx := context.Background()
+	repos := NewRepos(db)
+	mk := func(name string) int64 {
+		g := &domain.Group{Slug: name, Name: name}
+		if err := repos.Group.Create(ctx, g); err != nil {
+			t.Fatalf("group %s: %v", name, err)
+		}
+		return g.ID
+	}
+	set := func(g int64, typ, name, v string) {
+		t.Helper()
+		if err := repos.ScopeSettings.SetOverride(ctx, "group", g, ports.ScopeOverride{Type: typ, Name: name, Value: v}); err != nil {
+			t.Fatalf("override %s.%s: %v", typ, name, err)
+		}
+	}
+	a, b, c, gone := mk(fmt.Sprintf("la-%d", time.Now().UnixNano())), mk(fmt.Sprintf("lb-%d", time.Now().UnixNano())), mk(fmt.Sprintf("lc-%d", time.Now().UnixNano())), mk(fmt.Sprintf("ld-%d", time.Now().UnixNano()))
+	set(a, "risk", "devices_off", "0")    // counts
+	set(a, "risk", "sub_spread_off", "0") // the same group again: counted once
+	set(b, "risk", "dest_block_off", "0") // counts
+	set(c, "risk", "devices_off", "1")    // switches a signal OFF: not an enabling override
+	set(gone, "risk", "devices_off", "0") // its group is deleted below
+	set(c, "risk", "max_devices", "0")    // not one of the asked names
+	d := mk(fmt.Sprintf("le-%d", time.Now().UnixNano()))
+	set(d, "risk", "devices_off", "false") // the text "false" is false too: counts
+	set(d, "risk", "dest_block_off", "true")
+	if err := repos.Group.Delete(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"sub_spread_off", "devices_off", "dest_block_off"}
+	if n, err := r.CountGroupsOverridingBool(ctx, "risk", names, false); err != nil || n != 3 {
+		t.Fatalf("counted %d groups (%v), want a, b and d", n, err)
+	}
+	set(c, "risk", "dest_block_off", "0")
+	if n, _ := r.CountGroupsOverridingBool(ctx, "risk", names, false); n != 4 {
+		t.Errorf("after c enables one: %d, want 4", n)
+	}
+	if n, _ := r.CountGroupsOverridingBool(ctx, "risk", nil, false); n != 0 {
+		t.Errorf("no names: %d, want 0", n)
 	}
 }

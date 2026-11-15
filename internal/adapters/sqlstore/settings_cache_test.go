@@ -209,3 +209,21 @@ func TestCachingSettings_ConcurrentLoadSaveRace(t *testing.T) {
 		t.Fatalf("final load after concurrent churn: %v", err)
 	}
 }
+
+// A writer that bypasses Save (the legal publication writes one settings row in
+// its own transaction) tells the cache so, and the next Load reads the database.
+func TestCachingSettingsRepo_InvalidateForcesAReload(t *testing.T) {
+	inner := &fakeSettingsInner{}
+	r := NewCachingSettingsRepo(inner).(*cachingSettingsRepo)
+	ctx := context.Background()
+	_, _ = r.Load(ctx, ports.UISettings{})
+	_, _ = r.Load(ctx, ports.UISettings{})
+	if inner.loads != 1 {
+		t.Fatalf("loads = %d, want 1 (cached)", inner.loads)
+	}
+	r.Invalidate()
+	_, _ = r.Load(ctx, ports.UISettings{})
+	if inner.loads != 2 {
+		t.Fatalf("loads = %d after Invalidate, want 2", inner.loads)
+	}
+}

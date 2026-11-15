@@ -14,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
@@ -35,6 +36,8 @@ type AuthLocalHandler struct {
 	twofa      *twofa.Service
 	passkey    *passkey.Service
 	login2fa   *login2fa.Service
+	// legal is optional: unset, the methods answer reports the raw settings.
+	legal *legal.Service
 }
 
 func NewAuthLocalHandler(authSvc *auth.Service, userSvc *user.Service, samlSvc *auth.SAMLService, oidcSvc *auth.OIDCService, settings ports.ScopedSettings, authEvents ports.AuthEventRepo, guard *loginguard.Guard, captchaSvc *captcha.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, login2faSvc *login2fa.Service) *AuthLocalHandler {
@@ -128,7 +131,7 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		// Privacy and terms: the register form's required checkbox and the
 		// footer links render off this. consent_version is the one a signup
 		// must echo back as accepted_consent_version.
-		"legal": gin.H{"enabled": s.LegalEnabled, "consent_version": s.LegalConsentVersion},
+		"legal": h.legalBlock(c.Request.Context(), s),
 	})
 }
 
@@ -641,4 +644,18 @@ func (h *AuthLocalHandler) TwoFAPasskeyFinish(c *gin.Context) {
 		return
 	}
 	h.completeLogin(c, u, "2fa_passkey")
+}
+
+// SetLegal makes the methods answer say the privacy and terms feature is on
+// only when consent can really be asked (a document is reachable).
+func (h *AuthLocalHandler) SetLegal(svc *legal.Service) { h.legal = svc }
+
+func (h *AuthLocalHandler) legalBlock(ctx context.Context, s ports.UISettings) gin.H {
+	enabled := s.LegalEnabled
+	if h.legal != nil && enabled && s.LegalConsentVersion > 0 {
+		if cur, err := h.legal.Current(ctx); err == nil {
+			enabled = cur.Required()
+		}
+	}
+	return gin.H{"enabled": enabled, "consent_version": s.LegalConsentVersion}
 }

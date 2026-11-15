@@ -3,7 +3,9 @@ package legal
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -179,4 +181,132 @@ func TestRegister_DuplicateKeyPanics(t *testing.T) {
 	p := Provider{Key: "x", Build: func(context.Context, ports.UISettings) (Item, error) { return Item{}, nil }}
 	c.Register(p)
 	c.Register(p)
+}
+
+type fakeOverrides struct {
+	n     int
+	err   error
+	calls int
+	typ   string
+	names []string
+	want  bool
+}
+
+func (f *fakeOverrides) CountGroupsOverridingBool(_ context.Context, typ string, names []string, want bool) (int, error) {
+	f.calls++
+	f.typ, f.names, f.want = typ, names, want
+	return f.n, f.err
+}
+
+func allSignalsOff() ports.UISettings {
+	return ports.UISettings{RiskSubSpreadOff: true, RiskDevicesOff: true, RiskDestBlockOff: true, RiskUsageShiftOff: true, RiskLoginCountryOff: true}
+}
+
+// Every risk signal can be switched back on for a group (risk.*_off is in
+// ports.OverridableScopeKeys) and the worker honours that. A page that said
+// "not judged" because the GLOBAL switches are all off would understate what
+// happens to those groups' members.
+func TestCollect_RiskSignalsAreOnWhereAGroupTurnsThemBackOn(t *testing.T) {
+	ov := &fakeOverrides{n: 2}
+	c := NewCollector(nil)
+	c.SetRiskOverrides(ov)
+	got, err := c.Collect(context.Background(), allSignalsOff())
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := got["risk_signals"]
+	if !it.Enabled || it.EnabledGroups == nil || *it.EnabledGroups != 2 {
+		t.Fatalf("risk_signals = %+v, want enabled for 2 groups", dump(it))
+	}
+	// An enabling override sets a negative switch to false, and only the five
+	// signal switches are asked about.
+	if ov.typ != "risk" || ov.want || !reflect.DeepEqual(ov.names, []string{"sub_spread_off", "devices_off", "dest_block_off", "usage_shift_off", "login_country_off"}) {
+		t.Errorf("asked %q %v %v", ov.typ, ov.names, ov.want)
+	}
+}
+
+func TestCollect_RiskSignalsAreOffWhenNoGroupTurnsThemOn(t *testing.T) {
+	c := NewCollector(nil)
+	c.SetRiskOverrides(&fakeOverrides{n: 0})
+	got, _ := c.Collect(context.Background(), allSignalsOff())
+	if got["risk_signals"].Enabled || got["risk_signals"].EnabledGroups != nil {
+		t.Errorf("risk_signals = %+v, want off", dump(got["risk_signals"]))
+	}
+}
+
+func TestCollect_AGloballyOnSignalNeedsNoGroupLookup(t *testing.T) {
+	ov := &fakeOverrides{n: 9}
+	c := NewCollector(nil)
+	c.SetRiskOverrides(ov)
+	s := allSignalsOff()
+	s.RiskLoginCountryOff = false
+	got, _ := c.Collect(context.Background(), s)
+	if !got["risk_signals"].Enabled || got["risk_signals"].EnabledGroups != nil || ov.calls != 0 {
+		t.Errorf("risk_signals = %+v after %d lookups", dump(got["risk_signals"]), ov.calls)
+	}
+}
+
+func TestCollect_AFailingGroupLookupFailsTheDocument(t *testing.T) {
+	c := NewCollector(nil)
+	c.SetRiskOverrides(&fakeOverrides{err: errors.New("db down")})
+	if _, err := c.Collect(context.Background(), allSignalsOff()); err == nil {
+		t.Fatal("an understated disclosure must not be served as if it were complete")
+	}
+}
+
+type countingDest struct{ nodes, trial int }
+
+func (d *countingDest) CollectingNodes(context.Context) (int, error) {
+	d.nodes++
+	return 3, nil
+}
+func (d *countingDest) AllowlistTrialGroups(context.Context) (int, error) {
+	d.trial++
+	return 1, nil
+}
+
+// The public page is anonymous, so what it asks the database is bounded: the
+// node and group counts are remembered for 30 seconds, while everything read
+// from the settings stays live.
+func TestCollect_CachesTheDatabaseDerivedCountsFor30Seconds(t *testing.T) {
+	d := &countingDest{}
+	ov := &fakeOverrides{n: 1}
+	c := NewCollector(d)
+	c.SetRiskOverrides(ov)
+	now := time.Unix(1_700_000_000, 0)
+	c.now = func() time.Time { return now }
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, err := c.Collect(ctx, allSignalsOff()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d.nodes != 1 || d.trial != 1 || ov.calls != 1 {
+		t.Fatalf("5 requests asked nodes %d, trial %d, overrides %d times; want once each", d.nodes, d.trial, ov.calls)
+	}
+	// A setting is read live, with no wait.
+	s := allSignalsOff()
+	s.SubLogRetentionDays = 77
+	if got, _ := c.Collect(ctx, s); *got["sub_log"].RetentionDays != 77 {
+		t.Errorf("a settings change was not visible at once: %d", *got["sub_log"].RetentionDays)
+	}
+	now = now.Add(31 * time.Second)
+	c.Collect(ctx, allSignalsOff())
+	if d.nodes != 2 || d.trial != 2 || ov.calls != 2 {
+		t.Errorf("after 31s: nodes %d, trial %d, overrides %d; want a second read each", d.nodes, d.trial, ov.calls)
+	}
+}
+
+func TestCollect_AFailedCountIsNotCached(t *testing.T) {
+	d := &fakeDest{err: errors.New("down")}
+	c := NewCollector(d)
+	if _, err := c.Collect(context.Background(), ports.UISettings{}); err == nil {
+		t.Fatal("want the error")
+	}
+	d.err = nil
+	d.nodes = 4
+	got, err := c.Collect(context.Background(), ports.UISettings{})
+	if err != nil || got["dest_hits"].Nodes == nil || *got["dest_hits"].Nodes != 4 {
+		t.Fatalf("after recovery: %v, %v; a failure must not be remembered", err, got["dest_hits"])
+	}
 }

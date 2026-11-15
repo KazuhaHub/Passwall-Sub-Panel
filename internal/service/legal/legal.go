@@ -27,6 +27,8 @@ type Store interface {
 	Latest(ctx context.Context, kind domain.LegalKind, locale string) (*domain.LegalDocument, error)
 	HasConsentAtLeast(ctx context.Context, userID int64, version int) (bool, error)
 	RecordConsent(ctx context.Context, c domain.LegalConsent) error
+	// HasDocumentIn reports whether any document exists in one of the locales.
+	HasDocumentIn(ctx context.Context, locales []string) (bool, error)
 }
 
 // SettingsLoader reads the global settings.
@@ -107,11 +109,17 @@ func (s *Service) Public(ctx context.Context, kind domain.LegalKind, lang string
 type Current struct {
 	Enabled        bool
 	ConsentVersion int
+	// Reachable is whether a document is published in a locale every visitor's
+	// fallback chain ends in (en-US or zh-CN). Without one there is nothing to
+	// consent to that anybody can open.
+	Reachable bool
 }
 
-// Required reports whether consent is asked for at all: the feature is on and
-// something was published.
-func (c Current) Required() bool { return c.Enabled && c.ConsentVersion > 0 }
+// Required reports whether consent is asked for at all: the feature is on,
+// something was published, and a published document can be read. Without the
+// last condition a document that exists only in, say, ja-JP would make the
+// register form require a checkbox that links to a 404.
+func (c Current) Required() bool { return c.Enabled && c.ConsentVersion > 0 && c.Reachable }
 
 // Current reads the consent state.
 func (s *Service) Current(ctx context.Context) (Current, error) {
@@ -119,7 +127,13 @@ func (s *Service) Current(ctx context.Context) (Current, error) {
 	if err != nil {
 		return Current{}, err
 	}
-	return Current{Enabled: set.LegalEnabled, ConsentVersion: set.LegalConsentVersion}, nil
+	cur := Current{Enabled: set.LegalEnabled, ConsentVersion: set.LegalConsentVersion}
+	if cur.Enabled && cur.ConsentVersion > 0 {
+		if cur.Reachable, err = s.store.HasDocumentIn(ctx, []string{"en-US", "zh-CN"}); err != nil {
+			return Current{}, err
+		}
+	}
+	return cur, nil
 }
 
 // Pending reports whether the account must be asked to consent: the feature is

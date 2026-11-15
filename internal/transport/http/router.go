@@ -324,6 +324,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Auth endpoints
 	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.ScopedSettings, d.Repos.AuthEvent,
 		loginguard.New(d.Repos.AuthEvent), captchaSvc, twofaSvc, passkeySvc, login2faSvc)
+	authLocal.SetLegal(d.Legal.Service)
 	loginLimiter := middleware.NewPerIPLimiter(d.LoginPerIPPerMin, time.Minute)
 	loginLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.LoginPerIPPerMin, func(s ports.UISettings) int { return s.LoginPerIPPerMin }).get)
 	authGroup := g.Group("/api/auth")
