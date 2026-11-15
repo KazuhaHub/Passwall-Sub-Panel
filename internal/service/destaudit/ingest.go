@@ -452,16 +452,21 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 	// Per-site usage rows count only on a panel that is on tier B; anywhere else
 	// they are dropped unread and counted (the node may still send a batch that
 	// was in flight when the admin switched the level down).
-	collectUsage := false
+	collectUsage, tierUnknown := false, false
 	if len(o.Usage) > 0 && s.usageTier != nil {
 		on, err := s.usageTier(ctx, q.panelID)
 		if err != nil {
-			// Not "off": the panel could not be read, so nothing is known.
-			s.failBatch(q, domain.DestDropIngest)
-			log.Warn("destination usage batch not stored: panel lookup failed", "agent_id", q.agentID, "rows", len(o.Usage), "err", err)
-			return
+			// Not "off": the panel could not be read, so nothing is known. The
+			// batch's hits do not wait on it; its usage is lost, and counted as
+			// that (once the batch is known not to be a duplicate).
+			log.Warn("destination usage rows not stored: panel lookup failed", "agent_id", q.agentID, "rows", len(o.Usage), "err", err)
+			for _, u := range o.Usage {
+				if u.Hour >= lo && u.Hour <= hi {
+					lose(u.Hour, domain.DestDropUsageIngest)
+				}
+			}
 		}
-		collectUsage = on
+		collectUsage, tierUnknown = on && err == nil, err != nil
 	}
 	var usageOutOfRange, usageUnknown, usageOverBudget int
 	type prepared struct {
@@ -602,7 +607,7 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 	s.rows(metricsOutOfRange, outOfRange)
 	s.rows(metricsUnknown, unknown)
 	s.rows(metricsOverBudget, overBudget)
-	if !collectUsage {
+	if !collectUsage && !tierUnknown {
 		s.rows(metricsUsageOff, len(o.Usage))
 	}
 	if err != nil {

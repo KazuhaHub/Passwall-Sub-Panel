@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"sort"
@@ -709,35 +710,71 @@ func usageScope(q *gorm.DB, userID, panelID, sinceMS, untilMS int64) *gorm.DB {
 // panel): its limit most-used sites, then what the other sites add up to, so
 // the total is never short. Ties are ordered by site, by bytes, because the
 // dialects' collations disagree on punctuation ("(ip)").
+//
+// The database finds the cut and the totals; only the sites above it, and the
+// names of those tied exactly at it, come back, so an account with a long tail
+// of one-off sites is not loaded whole. The reads share one transaction, so the
+// total, the site count and the list cannot disagree the way separate
+// statements can when a batch lands between them.
 func (r *DestHitRepo) UserUsage(ctx context.Context, userID, panelID, sinceMS, untilMS int64, limit int) (domain.DestUsageSummary, error) {
 	out := domain.DestUsageSummary{Items: []domain.DestUsageSite{}}
-	// ONE READ. The total, the site count and the list all come from the same
-	// grouped result, so they cannot disagree the way separate statements can
-	// when a batch lands between them.
-	var rows []struct {
-		Site string
-		N    int64
+	if limit < 1 {
+		limit = 1
 	}
-	if err := usageScope(r.db.WithContext(ctx).Model(&destUsageRow{}), userID, panelID, sinceMS, untilMS).
-		Select("site, SUM(count) AS n").Group("site").Scan(&rows).Error; err != nil {
-		return out, fmt.Errorf("fold dest usage: %w", err)
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].N != rows[j].N {
-			return rows[i].N > rows[j].N
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		grouped := func() *gorm.DB {
+			return usageScope(tx.Model(&destUsageRow{}), userID, panelID, sinceMS, untilMS).Select("site, SUM(count) AS n").Group("site")
 		}
-		return rows[i].Site < rows[j].Site
-	})
-	for i, row := range rows {
-		out.Total += row.N
-		if i < limit {
+		var totals struct {
+			Sites int64
+			Total int64
+		}
+		if err := tx.Table("(?) AS u", grouped()).Select("COUNT(*) AS sites, COALESCE(SUM(n), 0) AS total").Scan(&totals).Error; err != nil {
+			return fmt.Errorf("total dest usage: %w", err)
+		}
+		out.Total = totals.Total
+		if totals.Sites == 0 {
+			return nil
+		}
+		type siteCount struct {
+			Site string
+			N    int64
+		}
+		var top []siteCount
+		if totals.Sites <= int64(limit) {
+			if err := grouped().Scan(&top).Error; err != nil {
+				return fmt.Errorf("fold dest usage: %w", err)
+			}
+		} else {
+			// The count of the limit-th site: everything above it is in, and
+			// of the sites tied at it only as many as are needed are.
+			var cut int64
+			if err := tx.Table("(?) AS u", grouped()).Select("n").Order("n DESC").Limit(1).Offset(limit - 1).Scan(&cut).Error; err != nil {
+				return fmt.Errorf("find dest usage cut: %w", err)
+			}
+			if err := grouped().Having("SUM(count) >= ?", cut).Scan(&top).Error; err != nil {
+				return fmt.Errorf("fold dest usage: %w", err)
+			}
+		}
+		sort.Slice(top, func(i, j int) bool {
+			if top[i].N != top[j].N {
+				return top[i].N > top[j].N
+			}
+			return top[i].Site < top[j].Site
+		})
+		if len(top) > limit {
+			top = top[:limit]
+		}
+		var shown int64
+		for _, row := range top {
 			out.Items = append(out.Items, domain.DestUsageSite{Site: row.Site, Count: row.N})
-			continue
+			shown += row.N
 		}
-		out.OtherSites++
-		out.OtherCount += row.N
-	}
-	return out, nil
+		out.OtherSites = totals.Sites - int64(len(top))
+		out.OtherCount = totals.Total - shown
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return out, err
 }
 
 // UsageDropped is how many usage rows are missing from [sinceMS, untilMS) on one

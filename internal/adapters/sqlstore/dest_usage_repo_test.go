@@ -188,6 +188,36 @@ func TestUserUsage_FoldsToTopNAndTheRestWithoutLosingACount(t *testing.T) {
 	}
 }
 
+// Equal counts straddling the Top-N cut are ordered by site in byte order, on
+// every dialect ("(ip)" sorts before letters; a database collation may not say
+// so), so the same sites make the cut however the rows are stored.
+func TestUserUsage_EqualCountsAtTheCutAreOrderedByByteOrderOfTheSite(t *testing.T) {
+	r, _ := newHitRepo(t)
+	ctx := context.Background()
+	h := 400 * hourMS
+	rows := []domain.DestUsage{
+		usage(h, 1, 7, "top.example", 9),
+		usage(h, 1, 7, "z.example", 5),
+		usage(h, 1, 7, "a.example", 5),
+		usage(h, 1, 7, "(ip)", 5),
+		usage(h, 1, 7, "B.example", 5), // uppercase sorts before lowercase in bytes
+		usage(h, 1, 7, "tail.example", 1),
+	}
+	if _, err := r.StoreBatchWithUsage(ctx, "agt_a", "b1", time.Now(), nil, rows); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.UserUsage(ctx, 7, 0, h, h+hourMS, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 3 || got.Items[0].Site != "top.example" || got.Items[1].Site != "(ip)" || got.Items[2].Site != "B.example" {
+		t.Fatalf("items = %+v, want top.example, (ip), B.example", got.Items)
+	}
+	if got.Total != 30 || got.OtherSites != 3 || got.OtherCount != 11 {
+		t.Fatalf("summary = %+v, want total 30 with 3 sites (11) in the rest", got)
+	}
+}
+
 // Usage losses are counted per hour and panel with their own kinds, and are NOT
 // part of the hit gap count a hits listing reports.
 func TestUsageDropped_IsSeparateFromTheHitGap(t *testing.T) {

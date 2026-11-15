@@ -611,18 +611,28 @@ func TestIngestUsage_ADuplicateBatchCountsOnce(t *testing.T) {
 	}
 }
 
-// A tier lookup that fails is an ingest error, not a panel that is "not on tier
-// B": the usage is not silently counted as switched off.
-func TestIngestUsage_AFailedTierLookupIsAnIngestError(t *testing.T) {
+// A tier lookup that fails does not fail the batch: its hits are stored as
+// usual, and only its usage is lost, counted as an ingest loss (not as "switched
+// off", which is for a panel known not to be on tier B).
+func TestIngestUsage_AFailedTierLookupLosesOnlyTheUsage(t *testing.T) {
 	f := newFixture(t, func(d *Deps) {
 		d.UsageTier = func(context.Context, int64) (bool, error) { return false, errors.New("panel read failed") }
 	})
 	h := f.hour()
 	o := obs(batchID(1), hitRow(h, "p1", "block", f.subject(0), "a.example", 1, 1))
-	o.Usage = []protocol.AuditUsage{usageRow(h, f.subject(0), "a.example", 3)}
+	o.Usage = []protocol.AuditUsage{usageRow(h, f.subject(0), "a.example", 3), usageRow(h, f.subject(0), "b.example", 1)}
 	f.enqueueAndDrain("agt_1", 5, o)
-	if f.ctr.reports["ingest_error"] != 1 || f.ctr.rows[metricsUsageOff] != 0 {
+	if rows := f.stored(); len(rows) != 1 {
+		t.Fatalf("the hit was not stored: %+v", rows)
+	}
+	if got := f.usageOf(f.users[0]); got.Total != 0 {
+		t.Fatalf("usage = %+v, want none stored", got)
+	}
+	if f.ctr.reports["ingest_error"] != 0 || f.ctr.rows[metricsUsageOff] != 0 {
 		t.Fatalf("reports %+v rows %+v", f.ctr.reports, f.ctr.rows)
+	}
+	if n, _ := f.store.UsageDropped(context.Background(), h, h+hourMS, 5); n != 2 {
+		t.Fatalf("usage drops = %d, want the 2 usage rows", n)
 	}
 }
 

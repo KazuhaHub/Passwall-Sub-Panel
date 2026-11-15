@@ -51,7 +51,7 @@ type Service struct {
 	compiled map[string]*compiledEntry
 	// collectRefused remembers, per agent, the capabilities under which it refused
 	// the tier-B collect-only policy (see collectOnlyRefused).
-	collectRefused map[string]string
+	collectRefused map[string]collectRefusal
 	// digests remembers which rule-data version produced a digest, to tell an
 	// admin which version a node runs from the digest it reports.
 	digests map[string]digestInfo
@@ -159,3 +159,12 @@ const (
 )
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
+
+// collectRefusal is a refusal of the collect-only policy: the capabilities the
+// node had, and the agent release it ran. The release is learned by the compile
+// that follows the report (the status does not carry it), so it is empty until
+// then.
+type collectRefusal struct {
+	caps    string
+	version string
+}

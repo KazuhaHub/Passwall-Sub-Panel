@@ -58,6 +58,10 @@ type CompileInput struct {
 	// as_is). The mode the node is told to run is EffectiveResolve of it and the
 	// node's capabilities, held at as_is by an inbound that cannot run on_demand.
 	DestResolve domain.DestResolve
+	// AgentVersion is the release of the Passwall Node agent that reported. A
+	// refusal of the tier-B collect-only policy is held against it: a node that
+	// upgraded is offered the policy again.
+	AgentVersion string
 }
 
 // Result is a compile's answer.
@@ -246,7 +250,7 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	// applied) but never made the last known good.
 	var out *protocol.DestinationPolicy
 	outDigest := ""
-	if effectiveCollectFor(in) == protocol.CollectHitsAndUsage && !s.collectOnlyRefused(in.AgentID, in.Capabilities) {
+	if effectiveCollectFor(in) == protocol.CollectHitsAndUsage && !s.collectOnlyRefused(in.AgentID, in.Capabilities, in.AgentVersion) {
 		out, outDigest = collectOnlyPolicy(), collectOnlyDigest
 	}
 	if meta.DesiredSHA256 != "" {
