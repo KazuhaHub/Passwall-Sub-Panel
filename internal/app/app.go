@@ -2065,6 +2065,10 @@ func (d legalDestRecording) CollectingNodes(ctx context.Context) (int, error) {
 	return d.admin.CollectingNodes(ctx)
 }
 
+func (d legalDestRecording) CollectingUsageNodes(ctx context.Context) (int, error) {
+	return d.admin.CollectingUsageNodes(ctx)
+}
+
 func (d legalDestRecording) AllowlistTrialGroups(ctx context.Context) (int, error) {
 	entries, err := d.groups.List(ctx)
 	if err != nil {

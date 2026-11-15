@@ -587,7 +587,8 @@ func (h *AdminDestHandler) Test(c *gin.Context) {
 // User answers GET /api/admin/dest/users/:id: the account's group and
 // exemption, and its recent hits (hits_available says whether any node of the
 // account is recording, so an empty list can be told from nothing watched).
-// The usage part stays null: per-site usage is not offered.
+// usage_available says whether any node of the account is recording per-site
+// usage, and usage_nodes which (null where the build has no access control).
 func (h *AdminDestHandler) User(c *gin.Context) {
 	if !h.ready(c, h.w.Users != nil && h.w.Exemptions != nil) {
 		return
@@ -633,6 +634,12 @@ func (h *AdminDestHandler) User(c *gin.Context) {
 	}
 	if h.w.Hits != nil && h.w.Admin != nil {
 		if err := h.userHits(ctx, id, out); err != nil {
+			respondError(c, err)
+			return
+		}
+	}
+	if h.w.Admin != nil {
+		if err := h.userUsage(ctx, id, out); err != nil {
 			respondError(c, err)
 			return
 		}

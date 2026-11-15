@@ -1095,6 +1095,8 @@ func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
 	// Tools and one account.
 	g.POST("/dest/test", h.Test)
 	g.GET("/dest/users/:id", h.User)
+	// A POST so the audit middleware records every read (see Usage).
+	g.POST("/dest/users/:id/usage", h.Usage)
 	g.GET("/dest/hits", h.Hits)
 	// Status and control.
 	g.GET("/dest/status", h.Status)

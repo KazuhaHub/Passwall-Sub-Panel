@@ -495,7 +495,7 @@ func TestOutcomeStringsMatchTheMetricLabels(t *testing.T) {
 		metricsUsageOff: metrics.DestRowsUsageCollOff, metricsUsageStored: metrics.DestRowsUsageStored,
 		metricsUsageUnknown: metrics.DestRowsUsageUnknown, metricsUsageOutOfRange: metrics.DestRowsUsageOutOfRange,
 		metricsUsageOverBudget: metrics.DestRowsUsageOverBudget,
-		reportAccepted:  metrics.NodeAuditAccepted, reportDuplicate: metrics.NodeAuditDuplicate,
+		reportAccepted:         metrics.NodeAuditAccepted, reportDuplicate: metrics.NodeAuditDuplicate,
 		reportQueueFull: metrics.NodeAuditQueueFull, reportIngestError: metrics.NodeAuditIngestError,
 	} {
 		if got != want {

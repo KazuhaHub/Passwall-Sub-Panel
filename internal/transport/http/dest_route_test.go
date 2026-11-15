@@ -189,7 +189,7 @@ func newDestFixture(t *testing.T, wired bool) *destFixture {
 			AllowlistGroups: allowlistGroups,
 			Lists:           lists, Catalog: catalog, Policy: policy, Admin: adminSvc, Policies: dest.Policies, Exemptions: dest.Exemptions,
 			SourceRules: dest.SourceRules, Users: users, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel,
-			Hits: dest.Hits,
+			Hits: dest.Hits, Usage: dest.Hits,
 		}
 	}
 	router := NewRouter(deps)
@@ -255,6 +255,7 @@ var destRoutes = []destRoute{
 	{"GET", "/api/admin/dest/groups/1/report", ""},
 	{"POST", "/api/admin/dest/test", `{"target":"example.com"}`},
 	{"GET", "/api/admin/dest/users/2", ""},
+	{"POST", "/api/admin/dest/users/2/usage", `{"range":"24h"}`},
 	{"GET", "/api/admin/dest/hits", ""},
 	{"GET", "/api/admin/dest/status", ""},
 	{"POST", "/api/admin/dest/publish", ""},
@@ -497,7 +498,7 @@ func TestDestExemptionsAPI(t *testing.T) {
 	}
 	f.expect("GET", "/exemptions/2", "", 200, "")
 	user := f.expect("GET", "/users/2", "", 200, "")
-	if user["exemption"] == nil || user["upn"] != "operator@example.test" || user["usage_available"] != nil {
+	if user["exemption"] == nil || user["upn"] != "operator@example.test" || user["usage_available"] != false {
 		t.Fatalf("user = %v", user)
 	}
 	f.expect("GET", "/users/999", "", 404, "")

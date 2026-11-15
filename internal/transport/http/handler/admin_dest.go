@@ -61,6 +61,8 @@ type DestWiring struct {
 	// Hits is the hit-record read side. Nil: the hit routes answer 503 and the
 	// hit fields of the policy list and the account view stay null.
 	Hits DestHitStore
+	// Usage is the per-site usage read side. Nil: the usage route answers 503.
+	Usage DestUsageStore
 	// Async runs a list refresh in the background. Nil runs it inline.
 	Async interface {
 		Go(name string, fn func(ctx context.Context))
