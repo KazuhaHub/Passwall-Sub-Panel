@@ -40,6 +40,15 @@ describe('the single-node dialog: recording and the last 24 hours (S15, 2c)', ()
     await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?tab=records&rec_panel=5'))
   })
 
+  it('a node on the usage mode says so, with the usage retention and its hits', async () => {
+    vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_hit_retention_days: 30, dest_usage_retention_days: 7 } as never })
+    show(node({ supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: 'hits_and_usage', collecting_usage: true }))
+    const recording = await screen.findByTestId('server-recording')
+    expect(recording.textContent).toContain('记录命中和按网站用量')
+    expect(await within(recording).findByText('用量保留 7 天')).toBeTruthy()
+    expect(screen.getByTestId('server-hits').textContent).toContain('1,204')
+  })
+
   it('Change opens the recording dialog on this node', async () => {
     show(node())
     fireEvent.click(await within(await screen.findByTestId('server-recording')).findByRole('button', { name: '修改' }))

@@ -21,6 +21,7 @@ import { formatMsDualTz } from '@/utils/datetime'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { timeLeft } from '../../accessControl/timeLeft'
 import { removeExemptionConfirm } from '../../accessControl/confirmCopy'
+import UsageSection from './UsageSection'
 import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
 import { reportDestError } from '../../accessControl/destErrors'
 
@@ -42,7 +43,7 @@ function Row({ label, children, action, tinted }: { label: string; children: Rea
 
 /**
  * The drawer's access tab: the account's group, its exemption and the hits it
- * had in the window (per-site usage is a later phase's). Read only while the
+ * had in the window and, on request, its per-site usage. Read only while the
  * tab is open — the parent mounts it on selection — and the exemption can be
  * added or lifted in place, through the same mutations the exemptions sheet uses.
  */
@@ -133,6 +134,7 @@ export default function AccessTab({ userId }: { userId: number }) {
           onViewAll={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since: q.data.recent_hits!.days <= 1 ? '24h' : `${q.data.recent_hits!.days}d` })}`)}
           onNodes={() => void navigate('/admin/access-control?sheet=nodes')} />
       )}
+      <UsageSection userId={userId} available={q.data.usage_available} nodes={q.data.usage_nodes} />
       <AddExemptionDialog open={adding} onClose={() => setAdding(false)} lockedUserId={userId} />
     </Box>
   )

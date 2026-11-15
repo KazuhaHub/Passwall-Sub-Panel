@@ -99,4 +99,4 @@ export function allowlistSearch(current: URLSearchParams, patch: Partial<Allowli
 }
 
 /** Where the settings dialog is asked to put the focus. */
-export type SettingsFocus = 'apply' | 'refresh' | 'rules' | 'retention' | 'trial'
+export type SettingsFocus = 'apply' | 'refresh' | 'rules' | 'retention' | 'trial' | 'usage'

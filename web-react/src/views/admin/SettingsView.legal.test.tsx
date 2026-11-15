@@ -7,8 +7,9 @@ import SettingsView from './SettingsView'
 
 const adminLegal = (kind: string) => ({ kind, enabled: false, consent_version: 0, documents: [], versions: [], data_collection: {} })
 
-async function openLegalTab(settings: Record<string, unknown> = {}) {
+async function openLegalTab(settings: Record<string, unknown> = {}, reads: Record<string, unknown> = {}) {
   installReads({
+    ...reads,
     '/admin/settings/ui': { sub_base_url: 'https://panel.example.test', timezone: 'UTC', node_poll_seconds: 30, full_report_seconds: 60, node_task_offline_reconcile_days: 30, node_task_backup_restore_days: 30, node_task_result_retention_days: 90, max_panel_concurrency: 8, audit_retention_days: 90, auth_event_retention_days: 90, sync_task_retention_days: 90, traffic_history_days: 730, expire_before_days: 7, traffic_remain_percent: 10, emergency_access_hours: 1, emergency_access_max_count: 1, sub_clients: [], quick_links: [], ...settings },
     '/admin/groups': list([]),
     '/admin/legal/terms': adminLegal('terms'),
@@ -41,12 +42,35 @@ describe('Settings > Privacy and terms tab', () => {
     expect((screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }) as HTMLInputElement).checked).toBe(true)
   })
 
-  it('a saved switch is live on the site store at once, so the links and the dialog follow without a reload', async () => {
-    useSiteStore.setState({ legalEnabled: false })
-    await openLegalTab()
+  it('after a save the footer links and the consent dialog follow the server\'s own answer (/auth/methods), not the raw switch', async () => {
+    useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
+    await openLegalTab({}, { '/auth/methods': { legal: { enabled: true, consent_version: 4 } } })
     fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
     api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
     await waitFor(() => expect(useSiteStore.getState().legalEnabled).toBe(true))
+    expect(useSiteStore.getState().legalConsentVersion).toBe(4)
+  })
+
+  it('switched on with nothing published, the server says the page is not live, so no link to a 404 appears', async () => {
+    useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
+    await openLegalTab({}, { '/auth/methods': { legal: { enabled: false, consent_version: 0 } } })
+    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
+    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods'))
+    await new Promise(r => setTimeout(r, 20))
+    expect(useSiteStore.getState().legalEnabled).toBe(false)
+  })
+
+  it('a failed re-read leaves what the site store had, rather than guessing from the switch', async () => {
+    useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
+    await openLegalTab()
+    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
+    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods'))
+    await new Promise(r => setTimeout(r, 20))
+    expect(useSiteStore.getState().legalEnabled).toBe(false)
   })
 })

@@ -35,7 +35,7 @@ describe('the consent dialog (S23)', () => {
   it('asks a user whose consent is pending, with the two documents one click away', async () => {
     mount()
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('服务条款和隐私政策已更新')).toBeTruthy()
+    expect(within(dialog).getByText('请阅读服务条款和隐私政策')).toBeTruthy()
     expect(within(dialog).getByText(/你的订阅不受影响/)).toBeTruthy()
     for (const [name, href] of [['《服务条款》', '/legal/terms'], ['《隐私政策》', '/legal/privacy']]) {
       const link = within(dialog).getByRole('link', { name })
@@ -139,7 +139,7 @@ describe('the consent dialog (S23)', () => {
     setTestLang('en-US')
     mount()
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Terms of Service and Privacy Policy updated')).toBeTruthy()
+    expect(within(dialog).getByText('Please review the Terms of Service and Privacy Policy')).toBeTruthy()
     expect(within(dialog).getByRole('button', { name: 'Agree' })).toBeTruthy()
   })
 })

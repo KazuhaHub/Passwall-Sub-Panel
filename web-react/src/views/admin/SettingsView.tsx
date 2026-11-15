@@ -87,6 +87,7 @@ import {
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
 import LegalTab from './legal/LegalTab'
+import { getAuthMethods } from '@/api/auth'
 import { listAllGroups } from '@/api/groups'
 import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -400,8 +401,11 @@ export default function SettingsView() {
         iconUrl: saved.icon_url || '',
         footerText: saved.footer_text || '© Kazuha Hub Passwall',
         themeColor: saved.theme_color || undefined,
-        legalEnabled: !!saved.legal_enabled,
       })
+      // Whether the links and the consent dialog are live is the server's call
+      // (the switch AND a published document), so it is asked, not read off the
+      // switch: a switch turned on before anything is published would link to a 404.
+      void getAuthMethods().then(m => site.update({ legalEnabled: !!m.legal?.enabled, legalConsentVersion: m.legal?.consent_version ?? 0 })).catch(() => {})
       setChangeGeoToken(false)
       setChangeCaptchaSecret(false)
       if (!opts.quiet) pushSnack(t('settings.saved'), 'success')

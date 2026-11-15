@@ -101,6 +101,25 @@ describe('recording (2c)', () => {
     expect(box.textContent).toBe('2 台只记录规则命中（保留 30 天）· 原始访问日志不离开节点')
   })
 
+  it('a node on the usage mode is counted on its own line, with the usage retention, and not as "rule matches only"', async () => {
+    vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {}, defaults: {}, effective: { dest_hit_retention_days: 30, dest_usage_retention_days: 7 } } as unknown as api.DestSettingsView)
+    const usage = { supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: 'hits_and_usage', collecting_usage: true }
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([
+      rec(), rec({ panel_id: 2, agent_id: 'a2', panel_name: 'Osaka', ...usage }), rec({ panel_id: 4, agent_id: 'a4', panel_name: 'Seoul', collecting: false, ...usage }),
+    ]))
+    sheet()
+    expect((await screen.findByTestId('recording-note')).textContent).toContain('1 台只记录规则命中（保留 30 天）')
+    expect((await screen.findByTestId('recording-usage-note')).textContent).toBe('2 台还记录按网站用量（保留 7 天）')
+  })
+
+  it('a node that only collects usage (nothing recording hits) still says so, instead of "no node records"', async () => {
+    vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {}, defaults: {}, effective: { dest_hit_retention_days: 30, dest_usage_retention_days: 7 } } as unknown as api.DestSettingsView)
+    vi.mocked(api.getDestStatus).mockResolvedValue(status([rec({ collecting: false, collect: 'hits_and_usage', collect_effective: 'hits_and_usage', collecting_usage: true, supports: { policy: true, hits: true, usage: true } })]))
+    sheet()
+    expect((await screen.findByTestId('recording-usage-note')).textContent).toBe('1 台还记录按网站用量（保留 7 天）')
+    expect(screen.getByTestId('recording-note').textContent).not.toContain('没有节点在记录命中')
+  })
+
   it('no node recording is said, not drawn as 0', async () => {
     sheet()
     expect((await screen.findByTestId('recording-note')).textContent).toBe('没有节点在记录命中 · 原始访问日志不离开节点')

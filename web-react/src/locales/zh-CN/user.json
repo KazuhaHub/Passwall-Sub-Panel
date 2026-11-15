@@ -216,8 +216,8 @@
     "mute": "不再提醒"
   },
   "legal": {
-    "consent_title": "服务条款和隐私政策已更新",
-    "consent_body": "我们更新了服务条款和隐私政策，其中写明本服务记录哪些数据、保留多久。你的订阅不受影响。",
+    "consent_title": "请阅读服务条款和隐私政策",
+    "consent_body": "服务条款和隐私政策写明了本服务记录哪些数据、保留多久。你的订阅不受影响。",
     "consent_terms": "《服务条款》",
     "consent_privacy": "《隐私政策》",
     "consent_later": "稍后",

@@ -61,9 +61,9 @@ export function nodeStateText(t: T, node: DestNodeStatus, now: number): { key: N
  */
 export function nodeRecordingText(t: T, node: DestNodeStatus, now: number): string | null {
   const rec = nodeRecording(node)
-  if (!rec || (rec.mode !== 'off' && rec.mode !== 'hits')) return null
+  if (!rec || (rec.mode !== 'off' && rec.mode !== 'hits' && rec.mode !== 'hits_and_usage')) return null
   const parts = [t(`${S}node_recording.mode.${rec.mode}`)]
-  if (rec.mode === 'hits' && rec.hits24h !== null) parts.push(t(`${S}node_recording.hits_24h`, { n: new Intl.NumberFormat().format(rec.hits24h) }))
+  if ((rec.mode === 'hits' || rec.mode === 'hits_and_usage') && rec.hits24h !== null) parts.push(t(`${S}node_recording.hits_24h`, { n: new Intl.NumberFormat().format(rec.hits24h) }))
   if (node.last_report_at) parts.push(t(`${S}node_recording.reported`, { ago: formatRelativeTimeShort(now - node.last_report_at, t) }))
   return parts.join(t(`${S}node_recording.separator`))
 }
@@ -124,6 +124,7 @@ export default function NodePolicyStatusRow({
   const badge = <ToneBadge tone={accessTone(theme, NODE_STATE_TONE[key])} label={label} testId="node-state-badge" data={key} />
   const first = node.sniffing_insufficient[0]
   const recording = nodeRecordingText(t, node, now)
+  const usageLine = node.usage_refused && <Typography variant="body2" data-testid="node-usage-refused" sx={{ color: md.onSurface }}>{t(`${S}node_note.usage_refused`)}</Typography>
   const resolveText = nodeResolveText(t, node)
   const resolveView = nodeResolve(node)
 
@@ -133,6 +134,9 @@ export default function NodePolicyStatusRow({
   )
   if (key === 'rejected' && onRetry) {
     actions.push(<AsyncButton key="retry" size="small" variant="outlined" onClick={() => onRetry(node.agent_id)}>{t(`${S}node_action.retry`)}</AsyncButton>)
+  }
+  if (node.usage_refused && key !== 'rejected' && onRetry) {
+    actions.push(<AsyncButton key="usage-retry" size="small" variant="outlined" onClick={() => onRetry(node.agent_id)}>{t(`${S}node_action.retry`)}</AsyncButton>)
   }
   if ((key === 'sniffing' || key === 'applied_sniffing') && first && onOpenInbound) actions.push(link('inbound', t(`${S}node_action.open_inbound`), () => onOpenInbound(first.node_id)))
   if (key === 'over_limit' && onOpenLists) actions.push(link('lists', t(`${S}node_action.view_lists`), onOpenLists))
@@ -153,6 +157,8 @@ export default function NodePolicyStatusRow({
         impact: t(`${S}node_problem.over_limit_impact`),
       }
     }
+    // The node's refusal of the usage setting is a problem of its own, but never hides a worse one.
+    if (!problem && node.usage_refused) problem = { title: t(`${S}node_problem.usage_refused_title`), impact: t(`${S}node_problem.usage_refused_impact`) }
     return (
       <Box data-testid="node-policy-block" sx={{ minWidth: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>{badge}</Box>
@@ -184,6 +190,7 @@ export default function NodePolicyStatusRow({
       {allowLine}
       {reportLine}
       {groupLines}
+      {usageLine}
       {recording && <Typography variant="body2" data-testid="node-recording" sx={{ color: md.onSurfaceVariant }}>{recording}</Typography>}
       {resolveText && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>

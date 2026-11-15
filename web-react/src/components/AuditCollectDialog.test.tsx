@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import { confirmMock, renderAccess, setTestLang, snack } from '@/test/accessControlHarness'
+import { useSiteStore } from '@/stores/site'
 import AuditCollectDialog from './AuditCollectDialog'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -24,23 +25,72 @@ const open = (n = node()) => renderAccess(<AuditCollectDialog node={n} onClose={
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.getDestStatus).mockResolvedValue({ nodes: [node()], apply_eta_ms: 150_000, policy_notes: {}, totals: {} } as unknown as api.DestStatus)
-  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_hit_retention_days: 14 } as never })
+  vi.mocked(api.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_hit_retention_days: 14, dest_usage_retention_days: 9 } as never })
   vi.mocked(api.setAuditCollect).mockResolvedValue()
 })
 
 describe('the recording-mode dialog (S14/S15)', () => {
-  it('offers Don\'t record and Rule matches only, and not the per-site usage mode (a later phase), each with what it records', async () => {
-    open()
+  it('offers the three modes, each with what it records; the usage mode only where the node can, with its cost said plainly', async () => {
+    open(node({ supports: { policy: true, hits: true, usage: true } }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('东京 01 记录什么？')).toBeTruthy()
     const radios = within(dialog).getAllByRole('radio')
     expect(radios.map(r => (r.closest('label') as HTMLElement).textContent)).toEqual([
-      expect.stringContaining('不记录'), expect.stringContaining('只记录规则命中'),
+      expect.stringContaining('不记录'), expect.stringContaining('只记录规则命中'), expect.stringContaining('记录命中和按网站用量'),
     ])
     expect(within(dialog).getByText(/只执行策略，不留任何记录/)).toBeTruthy()
-    // The retention in the words is the setting, not a literal.
+    // The retentions in the words are the settings', not literals.
     expect(await within(dialog).findByText(/保留 14 天/)).toBeTruthy()
-    expect(within(dialog).queryByText(/按网站用量/)).toBeNull()
+    expect(within(dialog).getByText(/用量保留 9 天/)).toBeTruthy()
+    // The cost, plainly (owner decision): about 40% more proxy CPU on a busy node, per node.
+    expect(within(dialog).getByText(/繁忙节点上代理程序的 CPU 约多 40%/)).toBeTruthy()
+    expect((radios[2] as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('a node that does not declare usage cannot be set to it, and says to upgrade', async () => {
+    open()
+    const dialog = await screen.findByRole('dialog')
+    const usage = within(dialog).getByRole('radio', { name: /命中和按网站用量/ }) as HTMLInputElement
+    expect(usage.disabled).toBe(true)
+    expect(within(dialog).getByText('节点版本需升级才能记录用量')).toBeTruthy()
+  })
+
+  it('choosing usage while the privacy page is off hints in amber and does not block; with it on there is no hint', async () => {
+    useSiteStore.setState({ legalEnabled: false })
+    open(node({ supports: { policy: true, hits: true, usage: true } }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByText(/隐私政策还没有启用/)).toBeNull()
+    fireEvent.click(within(dialog).getByRole('radio', { name: /命中和按网站用量/ }))
+    expect(within(dialog).getByText(/隐私政策还没有启用/)).toBeTruthy()
+    const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+    await waitFor(() => expect(api.setAuditCollect).toHaveBeenCalledWith(5, 'hits_and_usage'))
+    useSiteStore.setState({ legalEnabled: true })
+  })
+
+  it('with the privacy page on, choosing usage shows no privacy hint', async () => {
+    useSiteStore.setState({ legalEnabled: true })
+    open(node({ supports: { policy: true, hits: true, usage: true } }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('radio', { name: /命中和按网站用量/ }))
+    expect(within(dialog).queryByText(/隐私政策还没有启用/)).toBeNull()
+  })
+
+  it('with usage chosen, the line beside Save adds how long the usage is kept to the restart sentence', async () => {
+    open(node({ supports: { policy: true, hits: true, usage: true } }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('保存后这台节点会重启代理程序一次。')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('radio', { name: /命中和按网站用量/ }))
+    expect(within(dialog).getByText('保存后这台节点会重启代理程序一次；按网站用量保留 9 天，到期自动删除。')).toBeTruthy()
+  })
+
+  it('turning usage off says the existing usage stays until it expires', async () => {
+    open(node({ supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: 'hits_and_usage' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByText(/已有的用量/)).toBeNull()
+    fireEvent.click(within(dialog).getByRole('radio', { name: /只记录规则命中/ }))
+    expect(within(dialog).getByText(/已有的用量会保留到 9 天期满后自动删除/)).toBeTruthy()
   })
 
   it('labels each stored value for what it is: unset is the default (hits), hits_and_usage is its own mode, never "rule matches only"', async () => {

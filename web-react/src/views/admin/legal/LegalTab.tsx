@@ -75,7 +75,7 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
         </Box>
       )}
 
-      {editing && <LegalEditorDialog kind={editing} onClose={() => setEditing(null)} />}
+      {editing && <LegalEditorDialog kind={editing} discloseUsage={discloseUsage} onClose={() => setEditing(null)} />}
       {history && <LegalHistorySheet kind={history} onClose={() => setHistory(null)} />}
     </Box>
   )

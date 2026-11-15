@@ -216,8 +216,8 @@
     "mute": "Don't show again"
   },
   "legal": {
-    "consent_title": "Terms of Service and Privacy Policy updated",
-    "consent_body": "We updated the Terms of Service and the Privacy Policy. They say what data this service records and for how long. Your subscription is not affected.",
+    "consent_title": "Please review the Terms of Service and Privacy Policy",
+    "consent_body": "The Terms of Service and the Privacy Policy say what data this service records and for how long. Your subscription is not affected.",
     "consent_terms": "Terms of Service",
     "consent_privacy": "Privacy Policy",
     "consent_later": "Later",
