@@ -525,7 +525,9 @@ func TestPruneOrphans_KeepsTrialRowsAndLiveReferences(t *testing.T) {
 }
 
 // The MySQL spelling cannot be run here, so its SQL is generated offline.
-func TestDestHitConflict_PerDialectSQL(t *testing.T) {
+// dryRunMySQL is a MySQL-dialect handle that only generates SQL.
+func dryRunMySQL(t *testing.T) *gorm.DB {
+	t.Helper()
 	conn, _ := sql.Open("mysql", "u:p@tcp(127.0.0.1:1)/d")
 	t.Cleanup(func() { _ = conn.Close() })
 	mdb, err := gorm.Open(mysqldriver.New(mysqldriver.Config{Conn: conn, SkipInitializeWithVersion: true}),
@@ -533,6 +535,11 @@ func TestDestHitConflict_PerDialectSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return mdb
+}
+
+func TestDestHitConflict_PerDialectSQL(t *testing.T) {
+	mdb := dryRunMySQL(t)
 	rows := []destHitRow{{HourMS: 1, PanelID: 1, UserID: 1, Source: "p1", Action: "block", Dest: "a", Port: 1, Count: 1}}
 	mysqlSQL := mdb.ToSQL(func(tx *gorm.DB) *gorm.DB { return tx.Clauses(destHitConflict("mysql")).Create(&rows) })
 	for _, want := range []string{"ON DUPLICATE KEY UPDATE", "`count`=`count` + VALUES(`count`)", "LEAST(`first_ms`, VALUES(`first_ms`))", "GREATEST(`last_ms`, VALUES(`last_ms`))"} {

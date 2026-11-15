@@ -26,7 +26,8 @@ const (
 	destHitActionWidth = 8
 	destHitDestWidth   = 253
 	destBatchIDWidth   = 32
-	destDropKindWidth  = 16
+	destDropKindWidth  = 24
+	destUsageSiteWidth = 253
 )
 
 type destHitRow struct {
@@ -62,8 +63,23 @@ func (destAuditBatchRow) TableName() string { return "dest_audit_batches" }
 type destAuditDropRow struct {
 	HourMS  int64  `gorm:"column:hour_ms;primaryKey;autoIncrement:false"`
 	PanelID int64  `gorm:"column:panel_id;primaryKey;autoIncrement:false"`
-	Kind    string `gorm:"column:kind;primaryKey;size:16"`
+	Kind    string `gorm:"column:kind;primaryKey;size:24"`
 	Count   int64  `gorm:"column:count;not null;default:0"`
 }
 
 func (destAuditDropRow) TableName() string { return "dest_audit_drops" }
+
+// destUsageRow is per-site usage (tier B): one row per (hour, panel, account,
+// site) with a connection count. Like dest_hits it holds no client address; the
+// site is the main domain or "(ip)". Rows age out on dest_usage_retention_days.
+// The primary key is the aggregation key; the two indexes serve the per-account
+// read and the per-panel purge.
+type destUsageRow struct {
+	HourMS  int64  `gorm:"column:hour_ms;primaryKey;autoIncrement:false;index:idx_dest_usage_user,priority:2;index:idx_dest_usage_panel,priority:2"`
+	PanelID int64  `gorm:"column:panel_id;primaryKey;autoIncrement:false;index:idx_dest_usage_panel,priority:1"`
+	UserID  int64  `gorm:"column:user_id;primaryKey;autoIncrement:false;index:idx_dest_usage_user,priority:1"`
+	Site    string `gorm:"column:site;primaryKey;size:253"`
+	Count   int64  `gorm:"column:count;not null;default:0"`
+}
+
+func (destUsageRow) TableName() string { return "dest_usage_hourly" }
