@@ -1,0 +1,98 @@
+{
+  "allow-only policy": {
+    "digest": "56aff939271f5645549ea0c56e491ffc6abacc086e249a0ece1156ddd433354e",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "allow",
+          "ports": "443"
+        }
+      ]
+    }
+  },
+  "default panel": {
+    "digest": "6a316c623979b7545298c28b6031da47fd0b231d2fa2c6e9ae6ee97138ff9e15",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ],
+      "collect": "hits"
+    }
+  },
+  "hits block policy": {
+    "digest": "6a316c623979b7545298c28b6031da47fd0b231d2fa2c6e9ae6ee97138ff9e15",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ],
+      "collect": "hits"
+    }
+  },
+  "hits panel on a node that also declares usage": {
+    "digest": "6a316c623979b7545298c28b6031da47fd0b231d2fa2c6e9ae6ee97138ff9e15",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ],
+      "collect": "hits"
+    }
+  },
+  "node cannot record": {
+    "digest": "7ba8cd1b81f42df4393747c9b9313b48338c908d2b866e67b450ced654521d0c",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ]
+    }
+  },
+  "nothing in force": {
+    "digest": "",
+    "policy": null
+  },
+  "paused": {
+    "digest": "",
+    "policy": null
+  },
+  "recording off": {
+    "digest": "7ba8cd1b81f42df4393747c9b9313b48338c908d2b866e67b450ced654521d0c",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ]
+    }
+  },
+  "usage panel on a node without the usage capability": {
+    "digest": "6a316c623979b7545298c28b6031da47fd0b231d2fa2c6e9ae6ee97138ff9e15",
+    "policy": {
+      "rules": [
+        {
+          "id": "p1",
+          "action": "block",
+          "ports": "25"
+        }
+      ],
+      "collect": "hits"
+    }
+  }
+}
