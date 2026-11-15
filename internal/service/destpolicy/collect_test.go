@@ -1,6 +1,7 @@
 package destpolicy
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
@@ -21,9 +22,9 @@ const (
 )
 
 func TestEffectiveCollect_Matrix(t *testing.T) {
-	// Tier B (hits_and_usage) is not offered yet: no node declares usage, and a
-	// panel set to it is recorded at tier A, whatever the node says, so what is
-	// stored by a later build is never collected by this one by accident.
+	// Tier B (hits_and_usage) needs the node to declare audit.usage.v1 as well as
+	// audit.hits.v1; a node that lacks the usage capability falls back to hits,
+	// and one that lacks both to nothing.
 	cases := []struct {
 		panel domain.AuditCollect
 		caps  []string
@@ -41,7 +42,7 @@ func TestEffectiveCollect_Matrix(t *testing.T) {
 
 		{domain.AuditCollectHitsAndUsage, nil, protocol.CollectOff},
 		{domain.AuditCollectHitsAndUsage, []string{hitsCap}, protocol.CollectHits},
-		{domain.AuditCollectHitsAndUsage, []string{hitsCap, usageCap}, protocol.CollectHits},
+		{domain.AuditCollectHitsAndUsage, []string{hitsCap, usageCap}, protocol.CollectHitsAndUsage},
 		{domain.AuditCollectHitsAndUsage, []string{usageCap}, protocol.CollectOff},
 
 		// The default of a row with no value is hits; junk is off.
@@ -154,7 +155,7 @@ func TestCollect_AChangeOfLevelIsANewPolicyAndNoChangeIsNot(t *testing.T) {
 	}
 }
 
-func TestCollect_PausedAndEmptyAreStillNil(t *testing.T) {
+func TestCollect_PausedAndEmptyAreStillNilBelowTierB(t *testing.T) {
 	h := newHarness(t)
 	if res := h.compileCollect(base1(), domain.AuditCollectHits, policyCap, hitsCap); res.Policy != nil {
 		t.Fatalf("nothing in force produced %+v", res.Policy)
@@ -354,5 +355,161 @@ func TestObserveStatus_RecordsTheRecordingLevelOfWhatApplied(t *testing.T) {
 	}
 	if !CollectingForRisk(m, []string{policyCap, hitsCap}, domain.NodeCoreXray) {
 		t.Fatal("the risk signal flapped on a publish")
+	}
+}
+
+// ---- tier B: per-site usage ----
+
+func usageOnly() *protocol.DestinationPolicy {
+	return &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}, Collect: protocol.CollectHitsAndUsage}
+}
+
+func sameBytes(t *testing.T, got *protocol.DestinationPolicy, want *protocol.DestinationPolicy) {
+	t.Helper()
+	g, _ := json.Marshal(got)
+	w, _ := json.Marshal(want)
+	if string(g) != string(w) {
+		t.Fatalf("policy = %s, want %s", g, w)
+	}
+}
+
+// Usage is collected for every connection, whether or not a rule records a hit,
+// so a tier-B node keeps its level on a policy of nothing but allows.
+func TestCollectTierB_AnAllowOnlyPolicyStillCarriesTheLevel(t *testing.T) {
+	h := newHarness(t)
+	h.policy("allow", domain.DestActionAllow, domain.DestStateOn, func(p *domain.DestPolicy) { p.Inline = domain.DestPolicyInline{Ports: "443"} })
+	h.publishNow()
+	res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, policyCap, hitsCap, usageCap)
+	if res.Policy == nil || res.Policy.Collect != protocol.CollectHitsAndUsage {
+		t.Fatalf("collect = %+v", res.Policy)
+	}
+	if err := protocol.ValidateDestinationPolicy(res.Policy); err != nil {
+		t.Fatal(err)
+	}
+	if m := h.meta(); m.CollectEffective != "hits_and_usage" {
+		t.Fatalf("collect_effective = %q", m.CollectEffective)
+	}
+}
+
+// Nothing in force, a pause and a policy with every rule left out are all "no
+// policy" below tier B; a tier-B node is sent a policy with no rules that only
+// asks for collection, so usage keeps flowing.
+func TestCollectTierB_NodesWithNothingToEnforceGetTheCollectOnlyPolicy(t *testing.T) {
+	caps := []string{policyCap, hitsCap, usageCap}
+	t.Run("nothing in force", func(t *testing.T) {
+		h := newHarness(t)
+		res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...)
+		sameBytes(t, res.Policy, usageOnly())
+		if res.Digest == "" || res.Digest != protocol.PolicyDigest(usageOnly()) {
+			t.Fatalf("digest = %q", res.Digest)
+		}
+		if err := protocol.ValidateDestinationPolicy(res.Policy); err != nil {
+			t.Fatal(err)
+		}
+		m := h.meta()
+		if m.CollectEffective != "hits_and_usage" || m.MintedSHA256 != res.Digest {
+			t.Fatalf("meta = %+v", m)
+		}
+		// The same answer on the next sync, and a hits-tier node is still nil.
+		if again := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...); again.Digest != res.Digest {
+			t.Fatal("the collect-only policy moved between syncs")
+		}
+		if hits := h.compileCollect(base1(), domain.AuditCollectHits, caps...); hits.Policy != nil {
+			t.Fatalf("a hits node was sent %+v", hits.Policy)
+		}
+	})
+	t.Run("every rule left out of this node", func(t *testing.T) {
+		h := newHarness(t)
+		h.policy("elsewhere", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) {
+			p.Inline = domain.DestPolicyInline{Ports: "25"}
+			p.Scope, p.PanelIDs = domain.DestScopePanels, []int64{77}
+		})
+		h.publishNow()
+		sameBytes(t, h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...).Policy, usageOnly())
+	})
+	t.Run("a node without the usage capability", func(t *testing.T) {
+		h := newHarness(t)
+		if res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, policyCap, hitsCap); res.Policy != nil {
+			t.Fatalf("an old node was sent %+v", res.Policy)
+		}
+	})
+	t.Run("a node that cannot hold a policy", func(t *testing.T) {
+		h := newHarness(t)
+		if res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, hitsCap, usageCap); res.Policy != nil {
+			t.Fatalf("a node without the policy capability was sent %+v", res.Policy)
+		}
+	})
+}
+
+// A pause switches enforcement off, not collection, and it must not rewrite the
+// record of what the node last applied: what a pause is lifted back to is that.
+func TestCollectTierB_PausedStillCollectsAndLeavesTheLKGAlone(t *testing.T) {
+	caps := []string{policyCap, hitsCap, usageCap}
+	h := newHarness(t)
+	h.policy("smtp", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.Inline = domain.DestPolicyInline{Ports: "25"} })
+	h.publishNow()
+	enforcing := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...)
+	if enforcing.Policy == nil || len(enforcing.Policy.Rules) != 1 {
+		t.Fatalf("setup: %+v", enforcing.Policy)
+	}
+	h.observe(applied(enforcing.Digest), caps...)
+	lkg := h.meta()
+	if lkg.AppliedSHA256 != enforcing.Digest {
+		t.Fatalf("setup: the LKG is %q", lkg.AppliedSHA256)
+	}
+
+	if err := h.svc.SetPaused(h.ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...)
+	sameBytes(t, res.Policy, usageOnly())
+	h.observe(applied(res.Digest), caps...)
+	m := h.meta()
+	if m.AppliedSHA256 != lkg.AppliedSHA256 || string(m.AppliedBody) != string(lkg.AppliedBody) || m.AppliedRuleCount != lkg.AppliedRuleCount {
+		t.Fatalf("a pause rewrote the last known good: %+v", m)
+	}
+	// A node that is not on tier B is told nothing while paused, as before.
+	if hits := h.compileCollect(base1(), domain.AuditCollectHits, caps...); hits.Policy != nil {
+		t.Fatalf("a paused hits node was sent %+v", hits.Policy)
+	}
+}
+
+// The collect-only policy is not a last known good either when nothing is in
+// force and the node is not paused: a refusal of it must not wipe the record.
+func TestCollectTierB_ARefusedCollectOnlyPolicyDoesNotWipeTheLKG(t *testing.T) {
+	caps := []string{policyCap, hitsCap, usageCap}
+	h := newHarness(t)
+	h.policy("smtp", domain.DestActionBlock, domain.DestStateOn, func(p *domain.DestPolicy) { p.Inline = domain.DestPolicyInline{Ports: "25"} })
+	h.publishNow()
+	enforcing := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...)
+	h.observe(applied(enforcing.Digest), caps...)
+	if err := h.svc.SetPaused(h.ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	res := h.compileCollect(base1(), domain.AuditCollectHitsAndUsage, caps...)
+	h.observe(rejected(res.Digest), caps...)
+	if m := h.meta(); m.AppliedSHA256 != enforcing.Digest {
+		t.Fatalf("refusing the collect-only policy dropped the LKG: %q", m.AppliedSHA256)
+	}
+}
+
+func TestCollectTierB_TheNodeIsCollectingUsageOnlyWhenItRunsTheLevel(t *testing.T) {
+	m := &domain.DestAgentPolicy{CollectEffective: "hits_and_usage", MintedSHA256: "d", ReportedSHA256: "d", ReportedState: "applied"}
+	caps := []string{policyCap, hitsCap, usageCap}
+	if !CollectingUsage(m, caps, domain.NodeCoreXray) {
+		t.Fatal("a node applying the tier-B policy is collecting usage")
+	}
+	m2 := *m
+	m2.CollectEffective = "hits"
+	if CollectingUsage(&m2, caps, domain.NodeCoreXray) {
+		t.Fatal("a hits policy is not usage")
+	}
+	m3 := *m
+	m3.ReportedSHA256 = "older"
+	if CollectingUsage(&m3, caps, domain.NodeCoreXray) {
+		t.Fatal("not applied yet")
+	}
+	if CollectingUsage(m, caps, domain.NodeCoreSingBox) || CollectingUsage(nil, caps, domain.NodeCoreXray) {
+		t.Fatal("sing-box and no-meta never collect usage")
 	}
 }

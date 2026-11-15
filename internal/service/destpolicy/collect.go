@@ -8,20 +8,13 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-// usageTierAvailable says whether tier B (per-site usage) is offered. It is
-// not: no node declares the capability, there is no usage table and no privacy
-// page to disclose it. A panel set to hits_and_usage is therefore recorded at
-// tier A, and the one constant to change when the tier ships is this.
-const usageTierAvailable = false
-
 // EffectiveCollect is the recording level a node is told to run: the LOWER of
 // what the panel's admin chose and what the node can do.
 //
 //   - off records nothing;
 //   - hits needs the node to declare audit.hits.v1;
 //   - hits_and_usage needs audit.usage.v1 as well, and falls back to hits (and
-//     to nothing when hits is missing too: usage presupposes hits). Until the
-//     tier is offered (usageTierAvailable) it is capped at hits.
+//     to nothing when hits is missing too: usage presupposes hits).
 //
 // Telling a node to record at a level it cannot would make it write every
 // connection to its log for nothing: the leak the access-log hot fix closed.
@@ -35,7 +28,7 @@ func EffectiveCollect(panel domain.AuditCollect, caps []string) protocol.Collect
 		}
 	case domain.AuditCollectHitsAndUsage:
 		switch {
-		case hasHits && hasUsage && usageTierAvailable:
+		case hasHits && hasUsage:
 			return protocol.CollectHitsAndUsage
 		case hasHits:
 			return protocol.CollectHits
@@ -63,15 +56,34 @@ func recordsHits(p *protocol.DestinationPolicy) bool {
 // it empty where it is not: emitting it for a policy that records nothing, or
 // for a panel that has recording off, would change the digest and restart the
 // core for no benefit.
+//
+// TIER B IS THE EXCEPTION. Per-site usage counts every connection that no rule
+// blocks or reports, so the level is kept whatever the rules are: a policy of
+// allows alone, or of none, still asks the node to collect.
 func withCollect(p *protocol.DestinationPolicy, level protocol.CollectLevel) {
 	if p == nil {
 		return
 	}
 	p.Collect = protocol.CollectOff
-	if level != protocol.CollectOff && recordsHits(p) {
+	switch {
+	case level == protocol.CollectHitsAndUsage:
+		p.Collect = level
+	case level != protocol.CollectOff && recordsHits(p):
 		p.Collect = level
 	}
 }
+
+// collectOnlyPolicy is what a tier-B node is sent when there is nothing to
+// enforce (nothing in force, a pause, every rule left out of the node): no
+// rules, and the request to collect. It is a policy the node runs, but never
+// one the panel records as that node's last known good (see mintedPolicy): it
+// says nothing about what the node enforces.
+func collectOnlyPolicy() *protocol.DestinationPolicy {
+	return &protocol.DestinationPolicy{Rules: []protocol.DestinationRule{}, Collect: protocol.CollectHitsAndUsage}
+}
+
+// collectOnlyDigest is the digest of collectOnlyPolicy.
+var collectOnlyDigest = protocol.PolicyDigest(collectOnlyPolicy())
 
 // lowerCollect is the lower of two recording levels (off < hits <
 // hits_and_usage).
@@ -109,6 +121,14 @@ func Collecting(m *domain.DestAgentPolicy, caps []string, engine domain.NodeCore
 		m.MintedSHA256 != "" &&
 		m.ReportedState == protocol.PolicyStateApplied &&
 		m.ReportedSHA256 == m.MintedSHA256
+}
+
+// CollectingUsage is whether a node is, as far as the panel can tell, recording
+// per-site usage right now: it is Collecting at the tier-B level. Like Collecting
+// it is derived, never reported.
+func CollectingUsage(m *domain.DestAgentPolicy, caps []string, engine domain.NodeCoreEngine) bool {
+	return Collecting(m, caps, engine) && m.CollectEffective == string(protocol.CollectHitsAndUsage) &&
+		slices.Contains(caps, protocol.CapabilityAuditUsage)
 }
 
 // CollectingForRisk is the steadier question the dest_block risk signal asks:

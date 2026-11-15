@@ -88,7 +88,9 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 		// the whole config undeployable (roster frozen, disabled users still
 		// connecting). It must NOT hold back the desired policy, which was
 		// never what the node refused.
-		if status.Digest == meta.AppliedSHA256 || meta.MintedSHA256 != meta.DesiredSHA256 {
+		// The collect-only policy of a tier-B node is not a fallback and never the
+		// record, so refusing it leaves the record alone.
+		if status.Digest != collectOnlyDigest && (status.Digest == meta.AppliedSHA256 || meta.MintedSHA256 != meta.DesiredSHA256) {
 			empty, none := "", []byte{}
 			zero, noGroups := 0, []int64{}
 			patch.AppliedSHA256, patch.AppliedBody, patch.AppliedRuleCount, patch.AppliedGroups = &empty, &none, &zero, &noGroups
@@ -145,6 +147,9 @@ func (s *Service) paused(ctx context.Context) (bool, error) {
 func (s *Service) mintedPolicy(agentID, d string) *protocol.DestinationPolicy {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if d == collectOnlyDigest {
+		return nil
+	}
 	if e := s.compiled[agentID]; e != nil && e.res.Digest == d && e.res.Policy != nil {
 		return e.res.Policy
 	}

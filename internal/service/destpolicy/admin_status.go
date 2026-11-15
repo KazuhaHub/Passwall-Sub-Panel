@@ -72,6 +72,8 @@ type NodeState struct {
 	Collect          string `json:"collect"`
 	CollectEffective string `json:"collect_effective"`
 	Collecting       bool   `json:"collecting"`
+	// CollectingUsage is Collecting at the per-site usage level (tier B).
+	CollectingUsage bool `json:"collecting_usage"`
 	// Resolve is the panel's choice of how hostnames meet IP rules (as_is or
 	// on_demand), ResolveEffective what the node was sent ("on_demand", or "" for
 	// as_is), and ResolveUnavailable why a node set to on_demand does not run it:
@@ -297,6 +299,7 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		ns.Collect = string(panel.AuditCollect.Normalized())
 		ns.CollectEffective = row.CollectEffective
 		ns.Collecting = Collecting(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
+		ns.CollectingUsage = CollectingUsage(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
 		// How hostnames meet IP rules: what the panel is set to, what the node was
 		// sent, and why a node set to on_demand is not running it.
 		ns.Resolve = string(panel.DestResolve.Normalized())

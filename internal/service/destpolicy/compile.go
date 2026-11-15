@@ -241,12 +241,30 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed, precheck, dropped string, now time.Time) (Result, error) {
 	var patch domain.DestAgentPolicyPatch
 	empty := ""
-	if meta.DesiredSHA256 != "" || meta.MintedSHA256 != "" {
-		patch.DesiredSHA256, patch.MintedSHA256 = &empty, &empty
+	// A tier-B node still has something to be told: to collect usage. It gets
+	// the collect-only policy, minted like any other (so the status can say it
+	// applied) but never made the last known good.
+	var out *protocol.DestinationPolicy
+	outDigest := ""
+	if EffectiveCollect(in.AuditCollect, in.Capabilities) == protocol.CollectHitsAndUsage {
+		out, outDigest = collectOnlyPolicy(), collectOnlyDigest
 	}
-	if meta.CollectEffective != "" {
-		// Nothing is minted, so nothing is being recorded.
-		patch.CollectEffective = &empty
+	if meta.DesiredSHA256 != "" {
+		patch.DesiredSHA256 = &empty
+	}
+	if meta.MintedSHA256 != outDigest {
+		patch.MintedSHA256 = &outDigest
+		if out != nil {
+			patch.MintedAt = &now
+		}
+	}
+	wantCollect := ""
+	if out != nil {
+		wantCollect = string(out.Collect)
+	}
+	if meta.CollectEffective != wantCollect {
+		// Nothing is minted below tier B, so nothing is being recorded.
+		patch.CollectEffective = &wantCollect
 	}
 	if meta.ResolveEffective != "" {
 		patch.ResolveEffective = &empty
@@ -280,7 +298,7 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	delete(s.compiled, in.AgentID)
 	s.mu.Unlock()
 	s.countCompile(ResultCacheHit)
-	return Result{}, nil
+	return Result{Policy: out, Digest: outDigest}, nil
 }
 
 // compileFresh is a compile that missed the cache.
