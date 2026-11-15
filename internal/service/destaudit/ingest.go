@@ -108,8 +108,10 @@ type Deps struct {
 	HourlyUsageBudget int
 	// UsageTier says whether a panel is on tier B (per-site usage). Nil: no
 	// panel is, and every usage row is dropped and counted as such. It is asked
-	// only for a batch that carries usage rows.
-	UsageTier func(ctx context.Context, panelID int64) bool
+	// only for a batch that carries usage rows (and, when the queue lost one, once
+	// per panel when the loss is written). An error is an ingest error, never "not
+	// on tier B".
+	UsageTier func(ctx context.Context, panelID int64) (bool, error)
 }
 
 type queued struct {
@@ -137,7 +139,7 @@ type Service struct {
 	now         func() time.Time
 	budget      int
 	usageBudget int
-	usageTier   func(ctx context.Context, panelID int64) bool
+	usageTier   func(ctx context.Context, panelID int64) (bool, error)
 
 	mu       sync.Mutex
 	queue    []queued
@@ -239,6 +241,7 @@ func (s *Service) Enqueue(agentID string, panelID int64, o *protocol.AuditObserv
 		s.forget(key)
 		s.report(reportQueueFull)
 		s.noteLost(panelID, o.Hits, domain.DestDropQueueFull)
+		s.noteLostUsage(panelID, o.Usage, domain.DestDropUsageQueueFull)
 		s.signal()
 		return
 	}
@@ -270,6 +273,24 @@ func (s *Service) noteLost(panelID int64, hits []protocol.AuditHit, kind string)
 			continue
 		}
 		s.lost[lostKey{h.Hour, panelID, kind}]++
+	}
+}
+
+// noteLostUsage is noteLost for usage rows. Whether the panel is on tier B is
+// not known here (Enqueue does no database work), so the count is kept only if
+// the panel is when the worker writes it (flushLost).
+func (s *Service) noteLostUsage(panelID int64, usage []protocol.AuditUsage, kind string) {
+	if len(usage) == 0 {
+		return
+	}
+	lo, hi := s.window()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range usage {
+		if u.Hour < lo || u.Hour > hi {
+			continue
+		}
+		s.lost[lostKey{u.Hour, panelID, kind}]++
 	}
 }
 
@@ -345,7 +366,29 @@ func (s *Service) flushLost(ctx context.Context) {
 	pending := s.lost
 	s.lost = map[lostKey]int64{}
 	s.mu.Unlock()
+	usageKinds := map[string]bool{}
+	for _, k := range domain.DestUsageDropKinds() {
+		usageKinds[k] = true
+	}
+	tier := map[int64]bool{}
 	for k, n := range pending {
+		if usageKinds[k.kind] {
+			// A usage loss is a loss only where usage is collected.
+			on, known := tier[k.panel]
+			if !known {
+				if s.usageTier != nil {
+					var err error
+					// A failing lookup keeps the count: an understated gap is worse.
+					if on, err = s.usageTier(ctx, k.panel); err != nil {
+						on = true
+					}
+				}
+				tier[k.panel] = on
+			}
+			if !on {
+				continue
+			}
+		}
 		if err := s.store.AddDrops(ctx, k.hour, k.panel, k.kind, n); err != nil {
 			// Put it back: a lost count must not be lost twice.
 			s.mu.Lock()
@@ -388,6 +431,7 @@ func (s *Service) process(ctx context.Context, q queued) {
 func (s *Service) failBatch(q queued, kind string) {
 	s.report(reportIngestError)
 	s.noteLost(q.panelID, q.obs.Hits, kind)
+	s.noteLostUsage(q.panelID, q.obs.Usage, domain.DestDropUsageIngest)
 	s.forget(q.agentID + "/" + q.obs.BatchID)
 }
 
@@ -408,31 +452,18 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 	// Per-site usage rows count only on a panel that is on tier B; anywhere else
 	// they are dropped unread and counted (the node may still send a batch that
 	// was in flight when the admin switched the level down).
-	collectUsage := len(o.Usage) > 0 && s.usageTier != nil && s.usageTier(ctx, q.panelID)
-	var usageOutOfRange, usageUnknown, usageOverBudget int
-	type preparedUsage struct {
-		u    protocol.AuditUsage
-		user int64
-	}
-	usageCands := make([]preparedUsage, 0, len(o.Usage))
-	if collectUsage {
-		for _, u := range o.Usage {
-			if u.Hour < lo || u.Hour > hi {
-				usageOutOfRange++
-				continue
-			}
-			id, err := u.Subject.RowID()
-			if err != nil || id <= 0 {
-				usageUnknown++
-				continue
-			}
-			if !idSeen[id] && len(ids) < userIDLookupMaxIDs {
-				idSeen[id] = true
-				ids = append(ids, id)
-			}
-			usageCands = append(usageCands, preparedUsage{u: u, user: id})
+	collectUsage := false
+	if len(o.Usage) > 0 && s.usageTier != nil {
+		on, err := s.usageTier(ctx, q.panelID)
+		if err != nil {
+			// Not "off": the panel could not be read, so nothing is known.
+			s.failBatch(q, domain.DestDropIngest)
+			log.Warn("destination usage batch not stored: panel lookup failed", "agent_id", q.agentID, "rows", len(o.Usage), "err", err)
+			return
 		}
+		collectUsage = on
 	}
+	var usageOutOfRange, usageUnknown, usageOverBudget int
 	type prepared struct {
 		hit  protocol.AuditHit
 		user int64
@@ -458,6 +489,33 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 			}
 		}
 		cands = append(cands, p)
+	}
+	// The usage rows' accounts come AFTER the hits' and have a bound of their own,
+	// so a batch full of usage cannot crowd a hit's account out of the lookup.
+	type preparedUsage struct {
+		u    protocol.AuditUsage
+		user int64
+	}
+	usageCands := make([]preparedUsage, 0, len(o.Usage))
+	if collectUsage {
+		usageIDs := 0
+		for _, u := range o.Usage {
+			if u.Hour < lo || u.Hour > hi {
+				usageOutOfRange++
+				continue
+			}
+			id, err := u.Subject.RowID()
+			if err != nil || id <= 0 {
+				usageUnknown++
+				continue
+			}
+			if !idSeen[id] && usageIDs < userIDLookupMaxIDs {
+				idSeen[id] = true
+				ids = append(ids, id)
+				usageIDs++
+			}
+			usageCands = append(usageCands, preparedUsage{u: u, user: id})
+		}
 	}
 	var existing map[int64]bool
 	if len(ids) > 0 {
@@ -554,8 +612,12 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 		for _, r := range merged[res.Stored:] {
 			lose(r.HourMS, domain.DestDropIngest)
 		}
-		// The usage rows not stored are given back to the budget they reserved.
+		// The usage rows not stored are given back to the budget they reserved and
+		// counted as lost, by the hour they belong to.
 		s.refundUsage(q.agentID, len(usageMerged)-res.UsageStored)
+		for _, r := range usageMerged[res.UsageStored:] {
+			lose(r.HourMS, domain.DestDropUsageIngest)
+		}
 	}
 	// What the node itself lost, attributed to the hour it was noticed in: the
 	// node's counters carry no hour. A lost BLOCK hit is a gap in the record;

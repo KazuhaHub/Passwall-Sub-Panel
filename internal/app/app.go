@@ -817,9 +817,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		// Per-site usage is kept only for a panel set to tier B. The panel row's
 		// choice is the one question: a node that was told a lower level may still
 		// send a batch that was in flight, and that is dropped and counted.
-		UsageTier: func(ctx context.Context, panelID int64) bool {
+		UsageTier: func(ctx context.Context, panelID int64) (bool, error) {
 			panel, err := repos.XUIPanel.GetByID(ctx, panelID)
-			return err == nil && domain.NormalizeAuditCollect(panel.AuditCollect) == domain.AuditCollectHitsAndUsage
+			switch {
+			case errors.Is(err, domain.ErrNotFound):
+				return false, nil // a deleted panel has no tier
+			case err != nil:
+				return false, err
+			}
+			return domain.NormalizeAuditCollect(panel.AuditCollect) == domain.AuditCollectHitsAndUsage, nil
 		},
 		Metrics: destaudit.Metrics{
 			Report:        func(outcome string) { metrics.NodeAuditReportTotal.With(outcome).Inc() },
