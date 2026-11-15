@@ -49,6 +49,9 @@ type Service struct {
 	agentMeta map[string]*domain.DestAgentPolicy
 	// compiled is each agent's last result, valid while its key still matches.
 	compiled map[string]*compiledEntry
+	// collectRefused remembers, per agent, the capabilities under which it refused
+	// the tier-B collect-only policy (see collectOnlyRefused).
+	collectRefused map[string]string
 	// digests remembers which rule-data version produced a digest, to tell an
 	// admin which version a node runs from the digest it reports.
 	digests map[string]digestInfo

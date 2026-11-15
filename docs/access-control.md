@@ -4,7 +4,7 @@
 > 本批提供：自定义列表、远程列表、v2fly geosite 分类、内置规则组目录、按分组 / 按节点限定范围的拦截与放行策略、
 > 豁免账号、按入站的来源国家 / 来源 IP 段拒绝、测试目的地、发布与回退，以及状态页所需的全部接口。
 > 策略状态有 **关闭 / 仅报告 / 开启** 三态，管理员自由选择，没有「必须先仅报告」的门槛。**命中记录**（A 档）随第二批上线：
-> 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**用量（B 档）、白名单分组的界面、sing-box 采集** 在后续批次（白名单分组的数据模型与编译见 §3.2，成员同步见 §3.3，接口见 §6.1）。
+> 节点上报命中，PSP 入库并在记录接口、策略列表、账号视图和风险信号里使用。**B 档（按网站用量）** 的后端见 §4.0c，界面在后续批次；**白名单分组的界面、sing-box 采集** 也在后续批次（白名单分组的数据模型与编译见 §3.2，成员同步见 §3.3，接口见 §6.1）。
 >
 > 线上协议见 Passwall-Protocol `v0.5.0`（`protocol/policy.go`、`match.go`、`sniff.go`）；字段说明见
 > [psp-node-agent.md](psp-node-agent.md) §11。
@@ -84,9 +84,25 @@ config ETag 不变，core 不会因为升级面板而重启。
 ### 4.0 记录档位（`Policy.Collect`）
 
 - 面板（原生服务器）有 `audit_collect`：`off` / `hits`（默认）/ `hits_and_usage`，只能通过服务器编辑接口（`PUT /servers/:id`）改，整行保存不会碰它。
-- 下发给节点的有效档位是**面板档位与节点能力中较低的一个**：`hits` 需要节点声明 `audit.hits.v1`；`hits_and_usage`（B 档）尚未提供，没有节点声明 `audit.usage.v1`，按 `hits` 处理（`usageTierAvailable`）。
-- **只在需要的地方编译采集**：有效档位非空，**并且**策略里至少有一条 `block` 或 `observe` 规则时才写 `Collect`，让节点给这些规则挂 webhook。没有规则可记录（只有放行策略）、面板关闭记录、节点没有能力时都不写：写了会改变摘要、让 core 白白重启一次。档位变化是新策略（摘要变），不变则 ETag 不动。回退（LKG）时的档位跟随面板**当前**的选择，但**只降不升**：取 LKG 铸出时的档位与面板当前档位中较低的一个。升到比 LKG 更高的档位会铸出节点从没应用过的字节（另一个摘要）；节点若连它也拒绝，LKG 就被清空、节点停止执行。
+- 下发给节点的有效档位是**面板档位与节点能力中较低的一个**：`hits` 需要节点声明 `audit.hits.v1`；`hits_and_usage`（B 档，§4.0c）还需要 `audit.usage.v1`，缺它按 `hits` 处理，两者都缺则关闭（用量以命中为前提）。
+- **只在需要的地方编译采集**：有效档位非空，**并且**策略里至少有一条 `block` 或 `observe` 规则时才写 `Collect`（**B 档例外**，见 §4.0c：用量统计每一条连接，无论有没有可记录的规则都保留档位），让节点给这些规则挂 webhook。没有规则可记录（只有放行策略）、面板关闭记录、节点没有能力时都不写：写了会改变摘要、让 core 白白重启一次。档位变化是新策略（摘要变），不变则 ETag 不动。回退（LKG）时的档位跟随面板**当前**的选择，但**只降不升**：取 LKG 铸出时的档位与面板当前档位中较低的一个。升到比 LKG 更高的档位会铸出节点从没应用过的字节（另一个摘要）；节点若连它也拒绝，LKG 就被清空、节点停止执行。
 - 实际下发的档位写进 `dest_agent_policy.collect_effective`。「**在记录**」（`collecting`）由 PSP 推导，不靠节点上报（安静的节点不发 audit，区分不了「在记录但没命中」和「没在记录」）：节点是 Xray、声明了 `audit.hits.v1`、`collect_effective` 非空，且最近一次 `PolicyStatus` 是对**当前铸出的摘要**的 `applied`。sing-box 节点只执行、不记录。 节点最近应用的那一版的档位记在 `dest_agent_policy.applied_collect`，风险信号靠它在发布与节点应用之间不抖动（见 `/policies` 一行）。
+
+### 4.0c B 档：按网站用量（`hits_and_usage`）
+
+B 档在命中记录之外，按**账号 × 小时 × 站点**记录**连接次数**（不是流量字节：Xray 与 sing-box 的独立二进制都拿不到按目的地的字节）。站点是主域名（eTLD+1），以 IP 直连的记为 `(ip)`，不记 IP 本身；不含 URL 路径、流量大小、来源 IP。只在 Xray 节点上做；sing-box 节点保持「只执行、不记录」。
+
+**代价（管理员必读）：开启按网站用量后，繁忙节点上的代理进程大约多用 40% 的 CPU（最坏情况压测实测 +43%），所以它是按节点自愿开启的，不是默认行为。** 原因是每条连接要多一次 webhook 与一次本地 socket 写入；Node 保留 webhook 采集，不回退到解析访问日志（访问日志始终为 `none`，不会重开 N0 修掉的泄漏路径）。
+
+- **采集来源**：节点的 `audit.usage.v1`（协议 v0.5.0 `NodeReport.Audit.Usage`：`{hour, subject, site, count}`，另有 `dropped_usage`）。PSP 只认这个线上格式，不关心节点内部怎么采。
+- **有效档位**：`EffectiveCollect`——B 需要 `audit.hits.v1` 与 `audit.usage.v1`，缺 `usage` 降为 `hits`；**非 Xray 引擎（sing-box）一律封顶在 `hits`**（`effectiveCollectFor`），永远不会收到 B 档或「只采集」策略，下发的字节与 B 档出现之前相同。`usageTierAvailable` 常量已删除。
+- **编译**：`withCollect` 在 B 档时即使没有可记录的规则也保留 `Collect`（只有放行策略也照常采集）。暂停、没有生效策略、规则被全部剔除这三种本来返回「无策略」的情形，B 档且有能力的节点得到 `{Rules: [], Collect: hits_and_usage}`（`collectOnlyPolicy`），其摘要照常铸出、可被报告为 `applied`。**这份「只采集」策略永远不会成为 LKG**：暂停期间不改写节点最近应用的记录，节点拒绝它也不会清空 LKG（`mintedPolicy`、`ObserveStatus` 都跳过它）。节点拒绝它时，拒绝按「能力集合」记在内存里（`collectOnlyRefused`），此后每次同步都不再下发（节点得到无策略）；能力变化或管理员点「重试」才再试一次（进程重启后会再下发一次、再被拒一次）。它不含规则，所以不算「在记录命中」：`Collecting` 与 `CollectingForRisk` 都排除它，选择 B 档不会改变 `dest_block` 风险信号的判断；`collecting_usage` 则只看有效档位与是否应用。未开 B 档的节点收到的字节与此前完全相同（`TestCollect_HitsNodesByteIdentical` 用 golden 文件钉住）。回退（LKG）路径仍只降不升。
+- **「在记录用量」**（`collecting_usage`）= 「在记录」且 `collect_effective == hits_and_usage`，同样由 PSP 推导。`/status` 每个节点带这个字段；`GET /users/:id` 带 `usage_available`（该账号有 client 的节点中至少一台在记录用量）与 `usage_nodes:[{panel_id,name}]`。
+- **入库**（`destaudit`）：subject 映射到 user_id（账号已不存在的计数）；小时须在 [now−48h, now+1h]；每个 agent 每小时用量预算 50000 行（与命中预算分开，互不挤占）。**只有面板档位不是 B 档时才丢弃用量并计 `usage_collect_off`**（此前是无条件丢弃）。批次的命中与用量在**同一事务**写入，批次去重（`dest_audit_batches`）同时覆盖两者，重发的批次两边都不重复计数。节点上报的 `dropped_usage` 记为 `node_usage`，预算拒绝记为 `usage_over_budget`，队列满与写入失败（含部分写入）记为 `usage_queue_full`、`usage_ingest_error`（`dest_audit_drops`；只对 B 档面板计，写入时才按面板档位过滤）；它们**不计入**命中记录的 `dropped_in_range`，而是计入用量读取的 `dropped_in_range`。查询面板档位失败是一次 `ingest_error`，不是 `usage_collect_off`。命中与用量的账号查找各有自己的上限，用量不会把命中的账号挤出去。
+- **保留与清理**：`dest_usage_retention_days`（默认 7，1–30，0 = 默认，永远不是永久；与命中保留期互相独立）。每小时清理按整点对齐的截止时间删除（指标 `table="usage"`），孤儿清理覆盖已删账号与已删面板的行。**关闭 B 档不立即删除已有用量**：它们保留到期后自然删除。
+- **读取**：`POST /api/admin/dest/users/:id/usage {range:"24h"|"<N>d", panel_id?}`，**只有管理员**（运维员 403），只能按人查，没有全站浏览接口。返回 `{effective_days, nodes, items:[{site,count}], others:{sites,count}, total, dropped_in_range}`：最常用的前 20 个站点，其余折成一行（总数不缺）；`N` 夹到 `min(请求值, dest_usage_retention_days)`；`Cache-Control: no-store`。**用 POST 是为了让审计中间件自动为每一次读取写一条审计行**（含账号与范围），该行在 `/api/admin/dest/` 之下，所以落入 `adminOnlyAuditTargets`，运维员读不到。
+- **用量不进任何风险信号。**
+- **「尽力而为」**：webhook 失败不重试，节点重启丢最多一个同步周期，PSP 队列满时丢弃；仅报告与拦截的连接只计在命中里，不计入用量；入站没有嗅探时记录的是客户端请求的地址；反向代理自己的访问日志 PSP 管不到。开启后该节点会重启一次代理程序。
 
 ### 4.0b 主机名与 IP 规则（`Policy.Resolve`）
 
@@ -187,8 +203,9 @@ CIDR、私有地址这类**IP 规则**默认只对「以 IP 发起」的连接�
 | `dest_exemptions` | 豁免：`user_id` 主键、`reason`、`created_by`、`expires_at` |
 | `dest_source_rules` | 每入站一行：`node_id` 主键、`countries`、`cidrs`、`state`（`off`/`report`/`on`） |
 | `dest_hits` | 命中的小时聚合。主键 `(hour_ms, panel_id, user_id, source, action, dest, port)`，`count`、`first_ms`、`last_ms`（毫秒，bigint：MySQL 的 datetime 没有毫秒，SQLite 把时间存成文本，MIN/MAX 会成字符串比较）。`source` 是 `p<策略号>`、`s<入站号>` 或 `g<分组号>`（`x<k>` 后缀已去掉）；`action` 是 `block` 或 `observe`（本应拦截）。白名单试运行行 `user_id = 0`、`port = 0`。索引 `(user_id, hour_ms)`、`(source, hour_ms)`、`(panel_id, hour_ms)`。**不存来源 IP** |
+| `dest_usage_hourly` | 按网站用量（B 档）的小时聚合。主键 `(hour_ms, panel_id, user_id, site)`（`site` varchar(253)），`count`（连接次数，bigint）；索引 `(user_id, hour_ms)`、`(panel_id, hour_ms)`。三方言的 upsert 都是 `count = count + excluded`，写入前在内存里按主键归并；与命中、批次标记在同一事务里写，每条语句 200 行。**不存来源 IP、不存 URL、不存字节** |
 | `dest_audit_batches` | 主键 `(agent_id, batch_id)`、`received_at`：BatchID 去重，保留 72 小时（接受的历史窗口 48 小时加 24 小时余量：标记在节点还可能重发的期间内必须在） |
-| `dest_audit_drops` | 主键 `(hour_ms, panel_id, kind)`、`count`：上报了但没有变成命中行的数量（节点聚合表满、超预算、队列满、写入失败），让「这段时间有 N 条未统计」说得出口。`kind`：`node_hits`、`node_trial`、`over_budget`、`queue_full`、`ingest_error` |
+| `dest_audit_drops` | 主键 `(hour_ms, panel_id, kind)`、`count`：上报了但没有变成命中行的数量（节点聚合表满、超预算、队列满、写入失败），让「这段时间有 N 条未统计」说得出口。`kind`：`node_hits`、`node_trial`、`over_budget`、`queue_full`、`ingest_error`，以及用量的 `node_usage`、`usage_over_budget`、`usage_queue_full`、`usage_ingest_error`（列宽因此从 16 放宽到 24，AutoMigrate 自动处理） |
 | `xui_panels.audit_collect` | `varchar(16) NOT NULL DEFAULT 'hits'`，只对 `kind=psp` 有意义；整行 `Save` 不写它（更新分支 `Omit`），只有 `UpdateNativeMetadata` 写 |
 | `xui_panels.dest_resolve` | `varchar(16) NOT NULL DEFAULT 'as_is'`（`as_is` / `on_demand`），只对 `kind=psp` 有意义；与 `audit_collect` 一样整行 `Save` 不写（`Omit`），只有 `UpdateNativeMetadata` 写（§4.0b） |
 | `dest_policy_state` | 单行（id 1）：`generation`、`published_generation`、`first_unpublished_at`、`last_write_at`、`paused`、`geoip_sha256`、`geosite_release`、`publish_error` |
@@ -208,7 +225,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET / PUT | `/settings` | `dest_policy_apply_min_seconds`、`dest_list_refresh_hours`、`dest_rules_update_mode`、`dest_hit_retention_days`、`dest_trial_retention_days`；只提交改过的键 |
+| GET / PUT | `/settings` | `dest_policy_apply_min_seconds`、`dest_list_refresh_hours`、`dest_rules_update_mode`、`dest_hit_retention_days`、`dest_trial_retention_days`、`dest_usage_retention_days`；只提交改过的键 |
 | GET | `/lists` | `{items:[…], refresh_hours, budget}`；`state` 为 `ready`/`refreshing`/`failed`/`pending` |
 | POST | `/lists/preview` | 只读：解析报告与前 50 条规范条目（远程列表会真的拉取一次）。**不写库、不写审计** |
 | POST / PUT / DELETE | `/lists[/:id]` | PUT 带 `updated_at`，冲突 409 `dest_list_stale`；删除被策略或白名单分组（任何状态，含 `off`）引用的列表 409 `dest_list_in_use` 带 `used_by`（项是 `{kind:"policy"|"group", id, name}`，先策略后分组）。被 `on` 的分组引用的远程列表，若这次编辑（改 URL）让它变成未就绪，409 `dest_list_not_ready`（带 `not_ready_lists`，D5；要先把分组改回仅报告）；D5 在写列表的事务里、持有状态锁时再判一次（与 `PUT` 成 `on` 并发也不会漏）；被 `on` 的分组按名引用的 custom 列表也不能被编辑成空（与 `PUT /groups` 拒绝空 custom 列表一致；分组自己的基础放行 / 补充列表可以为空）。刷新（后台或 `POST /lists/:id/refresh`）拿到空内容时同理，但那不是一次可以拒绝的编辑：刷新记为失败、保留原条目（`last_error`） |
@@ -224,7 +241,8 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | PUT | `/source-rules/:node_id` | `{countries, cidrs, state, updated_at?}`；非原生节点 409 `dest_source_rule_not_native`；冲突 409 `dest_source_rule_stale` |
 | POST | `/exceptions` | 例外：`{target, match:"site"|"host", scope:"global"|"group", group_id?}`。`global`：第一次使用时在同一事务里建「放行例外」列表和排在放行第一位的 allow 策略。`group`：加进该组的**补充列表**，与 `lists/:id/entries` 同一个写法（一次改动 generation 只 +1），返回 `{entry, created:null, group_id, list_id}`；组不存在 404 `dest_group_not_found`，组没有白名单（没有补充列表）400 `dest_policy_invalid`（`field:"group_id"`） |
 | POST | `/test` | `{target, port?, network?, user_id?, panel_id?, inbound_node_id?, source_ip?, resolved_ips?}`（`resolved_ips` 至多 16 个 IP 字面量，见 §4.0b；非法 400 `dest_test_invalid`，`field: "resolved_ips"`）。**写审计**（谁替谁测试过什么）。永不做 DNS。`steps[].kind` 取 `source`、`allow`、`block`、`group`（白名单分组的 `g<gid>x1`、`g<gid>x2`、`g<gid>`，带 `group_id` 与组名 `name`，`report_only` 同上）、`exempt`、`builtin`；每个 step 另带 `report_only: bool`：**规则处于 `report`（仅报告）状态时为 true，策略规则与来源规则都一样**，此时 `kind` 仍是规则本身的种类（`block` 或 `source`），并带 `policy_id` / `node_id` 与 `name`。命中 `report_only` 的 step 不拦截：它**会**终止求值，`verdict` 为 `observe`，`terminating_step` 是该规则的 id（界面应显示「仅记录，本应拦截」，不要显示「被拦截」）。取舍：用独立的布尔而不是新的 `kind`，是因为界面既要知道这是哪一种规则，也要知道它只是报告|
-| GET | `/users/:id` | 账号的分组（`{id,name,state,state_changed_at}`，`state` 是分组的白名单状态；旧字段 `mode`（`open` 表示没有白名单、`allowlist` 表示有）与 `stage`（恒为 null）暂留给还没改读 `state` 的页面），加 `hits_available`（该账号有 client 的节点中至少一台在记录）与 `recent_hits:{days, items:[{source, source_name, action, count, top_dests(≤3), panels, last_at}]}`；用量部分仍为 null |
+| GET | `/users/:id` | 账号的分组（`{id,name,state,state_changed_at}`，`state` 是分组的白名单状态；旧字段 `mode`（`open` 表示没有白名单、`allowlist` 表示有）与 `stage`（恒为 null）暂留给还没改读 `state` 的页面），加 `hits_available`（该账号有 client 的节点中至少一台在记录）与 `recent_hits:{days, items:[{source, source_name, action, count, top_dests(≤3), panels, last_at}]}`；另有 `usage_available` 与 `usage_nodes:[{panel_id,name}]`（§4.0c） |
+| POST | `/users/:id/usage` | 一个账号的按网站用量（§4.0c）：`{range:"24h"|"<N>d", panel_id?}` → `{effective_days, nodes, items(≤20), others, total, dropped_in_range}`。非法的 `range` / `panel_id` 400 `dest_usage_invalid`；`no-store`；每次读取自动写审计行（仅管理员可读） |
 | GET | `/hits` | 命中记录，分页。筛选 `user_id`、`panel_id`、`source`、`source_kind`（`policy`/`source`/`group`）、`action`（`block`/`observe`）、`since`、`until`（UTC 毫秒，间隔最长 31 天，超出 400 `dest_hits_range`）、`include_trial`、`q`（目的地关键词）、`group_by`（`none`/`site`/`user`/`policy`）、`page`、`page_size`。响应另带 `summary:{block, deny, observe, users}`（时间/账号/节点选择，**带 `source` 时再收窄到这个来源**，不受 `action`、`source_kind` 筛选影响。取舍：计划 P7 只把 `action` 与 `source_kind` 列为不影响摘要的筛选，而「转为拦截」对话框（S4）要的是「这条策略涉及多少账号」，读的就是 `source=p<id>` 请求的 `summary.users`，所以按来源收窄比另设 `summary_for_source` 更贴合计划，前端也不用多发一个请求；不带 `source` 时仍是整个选择，指标卡不随 `action` 变化）、`sources:[{source, name|null}]`（`null` = 已删除）与 `dropped_in_range` |
 | GET | `/policies` | 策略带 `hits_recent`（窗口内 `block` 命中数）、`last_hit_at`，**状态为 `report` 的另带 `would_block_recent`**（窗口内 `observe` 命中数，即本应拦截的次数）；`hit_window_days = min(7, 命中保留天数)`。没有任何节点在记录时 `hits_recent` / `would_block_recent` 为 null；放行策略不记录任何东西，三个字段恒为 null。`last_hit_at` 只在保留窗口内、只为列出的非放行策略读取（走 `(source, hour_ms)` 索引）。风险信号 `dest_block` 判断「节点是否在记录」用的是不随每次发布抖动的 `CollectingForRisk`（已应用过带记录级别的策略、且面板仍要求记录即算），`/status.collecting` 仍是「此刻确实在记录」的诚实答案（「0 次」对一条没人监视的策略是没有依据的说法）。仅报告的策略在 `block` 数组里，`observe` 数组恒为空；`allowlist_groups` 是状态不为 `off` 的分组 `[{group_id, name, state, state_days}]`（`state_days` 是自状态改变起的整天数），`budget.subjects` 含白名单分组的成员（§3.2） |
 | GET / PUT | `/servers`、`/servers/:id`（已有） | 原生服务器的 DTO 与更新多了 `audit_collect`（省略保持原值；对非原生服务器 400；非法值 400）和 `dest_resolve`（`as_is` / `on_demand`；省略保持原值；对非原生服务器 400；非法值 400；`if_non_match` 400 且 `code: "dest_resolve_unavailable"`；DTO 对非原生服务器不带它，§4.0b） |
@@ -257,7 +275,7 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 
 ## 7. 存储与隐私
 
-- **命中记录（A 档）默认开启**（面板 `audit_collect = hits`，且存在会记录的规则时）：记录**哪条规则对谁、去往哪个目的地与端口命中了几次**，按小时聚合。**不存客户端来源 IP**（协议里没有这个字段，来源规则的命中也一样），不存 URL 路径（看不到），不存用量（B 档未提供）。
+- **命中记录（A 档）默认开启**（面板 `audit_collect = hits`，且存在会记录的规则时）：记录**哪条规则对谁、去往哪个目的地与端口命中了几次**，按小时聚合。**不存客户端来源 IP**（协议里没有这个字段，来源规则的命中也一样），不存 URL 路径（看不到），按网站用量（B 档）是单独的、默认关闭的记录，见 §4.0c。
   目的地是客户端请求的主机名（嗅探出的域名）或 IP，已由节点规范化。原始访问日志永远不离开节点。
 - **保留期**：`dest.hit_retention_days`（默认 30，1–365；0 是默认，永远不是「永久」）；白名单试运行行 `dest.trial_retention_days`（默认 7，1–30，有效值不超过命中保留期）；批次标记 72 小时。每小时一次的清理（`runAuditCleanupLoop`，`pruneRiskReviews` 之后）按**整点对齐**的截止时间删除，并清理孤儿（已删账号、已删面板的行与计数，已不存在的 agent 的投递状态）。读不到设置时跳过按时间的删除并打 Warn，孤儿清理照常。
 - **「尽力而为」，不是审计级保证**：①节点把批次放在内存里，重启丢最多一个同步周期的数据；②Xray 对失败的 webhook POST **不重试**，接收器不可用的那一刻命中就丢了；③PSP 在同步应答之后才入库（有界队列：每节点 4 批、全局 256 批，满了丢弃并计 `queue_full`；PSP 重启丢队列里的批次）；④每个 agent 每小时最多入库 20000 行，超出计 `over_budget`。
@@ -306,9 +324,9 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | `psp_node_policy_status_dropped_total` | 整体丢弃的节点策略状态（解码失败、校验失败、缺能力） |
 | `psp_dest_list_refresh_total{result}` | 列表与 geosite 刷新：`unchanged`、`updated`、`failed`、`broad` |
 | `psp_node_audit_report_total{outcome}` | 每份 audit 子树的去向：`accepted`、`oversized`、`invalid`、`no_capability`、`duplicate_batch`、`queue_full`、`ingest_error` |
-| `psp_dest_audit_rows_total{outcome}` | 收到的行的去向（计数器只有一个标签，种类与结果合在一起）：`hits_stored`、`hits_unknown_subject`、`hits_out_of_range`、`hits_over_budget`、`usage_collect_off` |
+| `psp_dest_audit_rows_total{outcome}` | 收到的行的去向（计数器只有一个标签，种类与结果合在一起）：`usage_stored`、`usage_unknown_subject`、`usage_out_of_range`、`usage_over_budget`、`usage_collect_off`（面板不在 B 档）、`hits_stored`、`hits_unknown_subject`、`hits_out_of_range`、`hits_over_budget` |
 | `psp_dest_audit_node_dropped_total`、`psp_dest_audit_node_unmatched_total` | 节点自己报告的丢弃（命中、试运行、用量合计）与无法使用的事件 |
-| `psp_dest_pruned_rows_total{table}` | 保留期清理的行数：`hits`、`trial`、`batches`、`orphans` |
+| `psp_dest_pruned_rows_total{table}` | 保留期清理的行数：`hits`、`trial`、`usage`、`batches`、`orphans` |
 
 ## 10. 已知限制（不是保证）
 
@@ -362,11 +380,21 @@ PostgreSQL 的多行 `ON CONFLICT DO UPDATE` 遇到同一语句内的重复键�
 | `dest_list_refresh_hours` | 24 | 6–168 | 远程列表的刷新间隔，不能关闭（过期的列表是悄悄变旧的规则） |
 | `dest_hit_retention_days` | 30 | 1–365 | 命中记录的保留天数（0 = 默认，永远不是永久）；风险信号 `risk.dest_block_*` 见 [connection-limits.md](connection-limits.md) §13.12 |
 | `dest_trial_retention_days` | 7 | 1–30 | 白名单试运行折叠行的保留天数，有效值不超过命中保留期 |
+| `dest_usage_retention_days` | 7 | 1–30 | 按网站用量（B 档）的保留天数（0 = 默认，永远不是永久）；独立于命中保留期；保存时不立即删除；下一次整点清理按新值删除 |
 | `dest_rules_update_mode` | `manual` | `manual` / `auto` | `auto`：检查到新 geosite 版本就下载、校验并应用；`manual`：只提示，管理员点更新。两种模式下，只有**正在使用的分类**内容变化时才让 generation +1。让已启用的策略超额或出现过宽条目的更新会失败并保留旧数据 |
 
 后台循环 `dest-list-refresh` 见 [ARCHITECTURE.md](ARCHITECTURE.md) §3.3。
 
 ## 12. 相对规划书的偏离
+
+B 档（§4.0c）相对 `node-audit-plan.md` 的偏离，都是有意的：
+
+- **采集用 Xray webhook，不解析访问日志**（偏离 N5）。访问日志保持 `none`，拿到的是嗅探出的域名；代价是每条连接多一次 webhook，繁忙节点的代理进程约多 40% CPU（最坏情况 +43%），所以按节点自愿开启。
+- **度量是连接次数，不是字节**；sing-box 不做用量。
+- **读取用 POST，由审计中间件自动写审计行**（偏离 R6 的「GET 加手写审计」），并落入 `adminOnlyAuditTargets`。
+- **仅报告和拦截的连接不计入用量；用量不进风险信号；只能按人查，前 20 个站点加「其余」。**
+- **关闭 B 档不立即删除已有用量**，保留到期自然删除；`dest_audit_drops.kind` 列宽放宽到 24 以容纳 `usage_over_budget`。
+- **「只采集」策略不是 LKG**：它只让节点收集，不代表节点执行什么；暂停的 B 档节点状态仍是 `paused`；没有生效策略、或规则被全部剔除的 B 档节点因为收到了「只采集」策略，状态是 `applied` 而不是 `none`，但此时 `applied_rules` 与 `allowlist_groups` 为空（节点报告的是「只采集」摘要，视同没有策略在执行，不显示 LKG 的规则与分组）。
 
 关于「主机名与 IP 规则」（§4.0b）相对设计稿的两处不同：能力名是线上协议里实际的 `policy.destination.resolve.v1`（设计稿写作 `policy.resolve.v1`）；`dest_agent_policy` 多一列 `resolve_unavailable`（设计稿只列 `resolve_effective`），因为「被 `routeOnly` 入站拦下」与「策略里没有 IP 规则所以没写 `Resolve`」从 `resolve_effective` 为空看不出区别，状态页需要前一种。
 

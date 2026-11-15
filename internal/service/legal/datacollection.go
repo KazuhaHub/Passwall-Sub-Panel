@@ -71,6 +71,8 @@ type RiskOverrides interface {
 type DestRecording interface {
 	// CollectingNodes is how many native nodes are recording rule hits now.
 	CollectingNodes(ctx context.Context) (int, error)
+	// CollectingUsageNodes is how many native nodes record per-site usage now.
+	CollectingUsageNodes(ctx context.Context) (int, error)
 	// AllowlistTrialGroups is how many groups are in allowlist trial mode.
 	AllowlistTrialGroups(ctx context.Context) (int, error)
 }
@@ -94,8 +96,8 @@ type Collector struct {
 	providers []Provider
 	now       func() time.Time
 
-	nodes, trial, groups memo[int]
-	overrides            RiskOverrides
+	nodes, trial, groups, usage memo[int]
+	overrides                   RiskOverrides
 }
 
 // SetRiskOverrides gives the collector the group-override lookup the
@@ -187,6 +189,20 @@ func NewCollector(dest DestRecording) *Collector {
 		eff := ports.AccessControlEffectiveOf(s)
 		return Item{Enabled: nodes > 0 && trial > 0, Nodes: &nodes, RetentionDays: days(eff.TrialRetentionDays)}, nil
 	}})
+	// Per-site usage (tier B) is an opt-in disclosure: the entry exists only
+	// while the administrator has switched legal_disclose_usage on.
+	c.Register(Provider{Key: "dest_usage", Gate: func(s ports.UISettings) bool { return s.LegalDiscloseUsage },
+		Build: func(ctx context.Context, s ports.UISettings) (Item, error) {
+			n := 0
+			if dest != nil {
+				var err error
+				if n, err = c.usage.get(c.now(), func() (int, error) { return dest.CollectingUsageNodes(ctx) }); err != nil {
+					return Item{}, fmt.Errorf("collecting usage nodes: %w", err)
+				}
+			}
+			eff := ports.AccessControlEffectiveOf(s)
+			return Item{Enabled: n > 0, Nodes: &n, RetentionDays: days(eff.UsageRetentionDays)}, nil
+		}})
 	return c
 }
 

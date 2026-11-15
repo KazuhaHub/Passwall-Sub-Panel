@@ -74,14 +74,14 @@ func (f *failStore) ExistingUserIDs(ctx context.Context, ids []int64) (map[int64
 	return f.Store.ExistingUserIDs(ctx, ids)
 }
 
-func (f *failStore) StoreBatch(ctx context.Context, agent, batch string, at time.Time, rows []domain.DestHit) (domain.DestBatchResult, error) {
+func (f *failStore) StoreBatchWithUsage(ctx context.Context, agent, batch string, at time.Time, rows []domain.DestHit, usage []domain.DestUsage) (domain.DestBatchResult, error) {
 	if f.panicStore {
 		panic("nil dereference in the store")
 	}
 	if f.failStore {
 		return domain.DestBatchResult{}, f.err
 	}
-	return f.Store.StoreBatch(ctx, agent, batch, at, rows)
+	return f.Store.StoreBatchWithUsage(ctx, agent, batch, at, rows, usage)
 }
 
 func newFixture(t *testing.T, mut func(*Deps)) *fixture {
@@ -128,6 +128,26 @@ func (f *fixture) enqueueAndDrain(agent string, panel int64, o *protocol.AuditOb
 	f.t.Helper()
 	f.svc.Enqueue(agent, panel, o)
 	f.svc.Drain(context.Background())
+}
+
+// tierB is the Deps option that makes every panel a tier-B panel.
+func tierB(d *Deps) { d.UsageTier = func(context.Context, int64) (bool, error) { return true, nil } }
+
+func usageRow(hour int64, subject protocol.SubjectKey, site string, count uint32) protocol.AuditUsage {
+	return protocol.AuditUsage{Hour: hour, Subject: subject, Site: site, Count: count}
+}
+
+func (f *fixture) usageObs(id string, rows ...protocol.AuditUsage) *protocol.AuditObservation {
+	return &protocol.AuditObservation{BatchID: id, Usage: rows}
+}
+
+func (f *fixture) usageOf(user int64) domain.DestUsageSummary {
+	f.t.Helper()
+	got, err := f.store.UserUsage(context.Background(), user, 0, 0, 0, 100)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return got
 }
 
 func (f *fixture) stored() []domain.DestHitRow {
@@ -472,12 +492,206 @@ func TestOutcomeStringsMatchTheMetricLabels(t *testing.T) {
 	for got, want := range map[string]string{
 		metricsStored: metrics.DestRowsHitsStored, metricsUnknown: metrics.DestRowsHitsUnknown,
 		metricsOutOfRange: metrics.DestRowsHitsOutOfRange, metricsOverBudget: metrics.DestRowsHitsOverBudget,
-		metricsUsageOff: metrics.DestRowsUsageCollOff,
-		reportAccepted:  metrics.NodeAuditAccepted, reportDuplicate: metrics.NodeAuditDuplicate,
+		metricsUsageOff: metrics.DestRowsUsageCollOff, metricsUsageStored: metrics.DestRowsUsageStored,
+		metricsUsageUnknown: metrics.DestRowsUsageUnknown, metricsUsageOutOfRange: metrics.DestRowsUsageOutOfRange,
+		metricsUsageOverBudget: metrics.DestRowsUsageOverBudget,
+		reportAccepted:         metrics.NodeAuditAccepted, reportDuplicate: metrics.NodeAuditDuplicate,
 		reportQueueFull: metrics.NodeAuditQueueFull, reportIngestError: metrics.NodeAuditIngestError,
 	} {
 		if got != want {
 			t.Errorf("%q != %q", got, want)
 		}
+	}
+}
+
+// ---- per-site usage (tier B) ----
+
+func TestIngestUsage_OnATierBPanelTheRowsAreMappedAndStoredWithTheirHits(t *testing.T) {
+	f := newFixture(t, tierB)
+	h := f.hour()
+	o := obs(batchID(1), hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 2))
+	o.Usage = []protocol.AuditUsage{
+		usageRow(h, f.subject(0), "a.example", 3), usageRow(h, f.subject(0), "(ip)", 1), usageRow(h, f.subject(1), "a.example", 4),
+	}
+	f.enqueueAndDrain("agt_1", 5, o)
+	if got := f.usageOf(f.users[0]); got.Total != 4 || len(got.Items) != 2 {
+		t.Fatalf("alice = %+v", got)
+	}
+	if got := f.usageOf(f.users[1]); got.Total != 4 || got.Items[0].Site != "a.example" {
+		t.Fatalf("bob = %+v", got)
+	}
+	if rows := f.stored(); len(rows) != 1 {
+		t.Fatalf("the hit beside the usage was not stored: %+v", rows)
+	}
+	if f.ctr.rows[metricsUsageStored] != 3 || f.ctr.rows[metricsUsageOff] != 0 {
+		t.Fatalf("counters = %+v", f.ctr.rows)
+	}
+}
+
+// P4 7: usage is dropped (and counted) only for a panel that is not on tier B.
+func TestIngestUsage_APanelBelowTierBDropsAndCountsItsUsage(t *testing.T) {
+	f := newFixture(t, func(d *Deps) { d.UsageTier = func(context.Context, int64) (bool, error) { return false, nil } })
+	h := f.hour()
+	f.enqueueAndDrain("agt_1", 5, f.usageObs(batchID(1), usageRow(h, f.subject(0), "a.example", 3)))
+	if f.ctr.rows[metricsUsageOff] != 1 || f.usageOf(f.users[0]).Total != 0 {
+		t.Fatalf("counters = %+v", f.ctr.rows)
+	}
+}
+
+func TestIngestUsage_UnknownAccountsAndHoursOutOfRangeAreCounted(t *testing.T) {
+	f := newFixture(t, tierB)
+	h := f.hour()
+	f.enqueueAndDrain("agt_1", 5, f.usageObs(batchID(1),
+		usageRow(h, f.subject(0), "ok.example", 1),
+		usageRow(h, protocol.NewSubjectKey(f.users[1]+500), "gone.example", 1), // an account that no longer exists
+		usageRow(h-49*hourMS, f.subject(0), "old.example", 1),
+		usageRow(h+2*hourMS, f.subject(0), "future.example", 1),
+	))
+	if got := f.usageOf(f.users[0]); got.Total != 1 {
+		t.Fatalf("alice = %+v, want only the in-range row", got)
+	}
+	if f.ctr.rows[metricsUsageStored] != 1 || f.ctr.rows[metricsUsageUnknown] != 1 || f.ctr.rows[metricsUsageOutOfRange] != 2 {
+		t.Fatalf("counters = %+v", f.ctr.rows)
+	}
+}
+
+// The usage budget is its own: usage cannot spend the hits' rows, and what it
+// refuses is recorded as a usage_over_budget drop, not as a hit gap.
+func TestIngestUsage_HasItsOwnHourlyBudget(t *testing.T) {
+	f := newFixture(t, func(d *Deps) { tierB(d); d.HourlyUsageBudget = 2; d.HourlyRowBudget = 1 })
+	h := f.hour()
+	o := obs(batchID(1), hitRow(h, "p1", "block", f.subject(0), "x.example", 1, 1))
+	o.Usage = []protocol.AuditUsage{
+		usageRow(h, f.subject(0), "a.example", 1), usageRow(h, f.subject(0), "b.example", 1), usageRow(h, f.subject(0), "c.example", 1),
+	}
+	f.enqueueAndDrain("agt_1", 5, o)
+	if len(f.stored()) != 1 {
+		t.Fatalf("the hit was starved by usage")
+	}
+	if got := f.usageOf(f.users[0]); len(got.Items) != 2 {
+		t.Fatalf("usage = %+v, want the budget of 2", got)
+	}
+	if f.ctr.rows[metricsUsageOverBudget] != 1 {
+		t.Fatalf("counters = %+v", f.ctr.rows)
+	}
+	if n, _ := f.store.UsageDropped(context.Background(), h, h+hourMS, 5); n != 1 {
+		t.Fatalf("usage drops = %d, want 1", n)
+	}
+	if n, _ := f.store.DroppedInRange(context.Background(), h, h+hourMS); n != 0 {
+		t.Fatalf("a usage drop leaked into the hit gap: %d", n)
+	}
+	if defaultHourlyUsageBudget != 50000 {
+		t.Fatalf("usage budget = %d", defaultHourlyUsageBudget)
+	}
+}
+
+func TestIngestUsage_TheNodesOwnUsageLossIsRecordedAsNodeUsage(t *testing.T) {
+	f := newFixture(t, tierB)
+	h := f.hour()
+	o := f.usageObs(batchID(1), usageRow(h, f.subject(0), "a.example", 1))
+	o.DroppedUsage = 12
+	f.enqueueAndDrain("agt_1", 5, o)
+	if n, _ := f.store.UsageDropped(context.Background(), h, h+hourMS, 5); n != 12 {
+		t.Fatalf("node usage drops = %d, want 12", n)
+	}
+}
+
+// A re-sent batch counts once, usage included.
+func TestIngestUsage_ADuplicateBatchCountsOnce(t *testing.T) {
+	f := newFixture(t, tierB)
+	h := f.hour()
+	o := f.usageObs(batchID(1), usageRow(h, f.subject(0), "a.example", 5))
+	f.enqueueAndDrain("agt_1", 5, o)
+	f.enqueueAndDrain("agt_1", 5, o)
+	restarted := New(Deps{Store: f.store, Now: func() time.Time { return f.now }, Metrics: f.ctr.metrics(), UsageTier: func(context.Context, int64) (bool, error) { return true, nil }})
+	restarted.Enqueue("agt_1", 5, o)
+	restarted.Drain(context.Background())
+	if got := f.usageOf(f.users[0]); got.Total != 5 {
+		t.Fatalf("usage = %+v, want counted once", got)
+	}
+}
+
+// A tier lookup that fails is an ingest error, not a panel that is "not on tier
+// B": the usage is not silently counted as switched off.
+func TestIngestUsage_AFailedTierLookupIsAnIngestError(t *testing.T) {
+	f := newFixture(t, func(d *Deps) {
+		d.UsageTier = func(context.Context, int64) (bool, error) { return false, errors.New("panel read failed") }
+	})
+	h := f.hour()
+	o := obs(batchID(1), hitRow(h, "p1", "block", f.subject(0), "a.example", 1, 1))
+	o.Usage = []protocol.AuditUsage{usageRow(h, f.subject(0), "a.example", 3)}
+	f.enqueueAndDrain("agt_1", 5, o)
+	if f.ctr.reports["ingest_error"] != 1 || f.ctr.rows[metricsUsageOff] != 0 {
+		t.Fatalf("reports %+v rows %+v", f.ctr.reports, f.ctr.rows)
+	}
+}
+
+// Usage rows lost with a batch that could not be queued or stored are counted
+// under usage kinds (and only for a panel on tier B).
+func TestIngestUsage_RowsLostWithAFailedOrUnqueuedBatchAreCounted(t *testing.T) {
+	fs := &failStore{err: errors.New("disk on fire")}
+	f := newFixture(t, func(d *Deps) { tierB(d); fs.Store = d.Store; d.Store = fs })
+	h := f.hour()
+	ctx := context.Background()
+
+	fs.failStore = true
+	f.enqueueAndDrain("agt_1", 5, f.usageObs(batchID(1), usageRow(h, f.subject(0), "a.example", 1), usageRow(h, f.subject(0), "b.example", 1)))
+	fs.failStore = false
+	if n, _ := f.store.UsageDropped(ctx, h, h+hourMS, 5); n != 2 {
+		t.Fatalf("usage drops after a failed write = %d, want 2", n)
+	}
+
+	// Queue full: no worker drains, so the fifth batch of one agent is refused.
+	for i := 2; i <= 6; i++ {
+		f.svc.Enqueue("agt_2", 6, f.usageObs(batchID(i), usageRow(h, f.subject(0), fmt.Sprintf("q%d.example", i), 1)))
+	}
+	f.svc.Drain(ctx)
+	if n, _ := f.store.UsageDropped(ctx, h, h+hourMS, 6); n != 1 {
+		t.Fatalf("usage drops of the unqueued batch = %d, want 1", n)
+	}
+	if n, _ := f.store.DroppedInRange(ctx, h, h+hourMS); n != 0 {
+		t.Fatalf("usage losses leaked into the hit gap: %d", n)
+	}
+}
+
+// A panel that is not on tier B has no usage to lose.
+func TestIngestUsage_AnUnqueuedBatchOfAPanelBelowTierBCountsNoUsageLoss(t *testing.T) {
+	f := newFixture(t, func(d *Deps) {
+		d.UsageTier = func(context.Context, int64) (bool, error) { return false, nil }
+	})
+	h := f.hour()
+	for i := 1; i <= 5; i++ {
+		f.svc.Enqueue("agt_1", 5, f.usageObs(batchID(i), usageRow(h, f.subject(0), "a.example", 1)))
+	}
+	f.svc.Drain(context.Background())
+	if n, _ := f.store.UsageDropped(context.Background(), h, h+hourMS, 5); n != 0 {
+		t.Fatalf("usage drops = %d, want 0 below tier B", n)
+	}
+}
+
+type idRecorder struct {
+	Store
+	asked []int64
+}
+
+func (r *idRecorder) ExistingUserIDs(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	r.asked = append(r.asked, ids...)
+	return r.Store.ExistingUserIDs(ctx, ids)
+}
+
+// Usage cannot crowd hits out of the account lookup: the hits' accounts are
+// collected first and each side has its own bound.
+func TestIngestUsage_DoesNotCrowdTheHitsOutOfTheAccountLookup(t *testing.T) {
+	rec := &idRecorder{}
+	f := newFixture(t, func(d *Deps) { tierB(d); rec.Store = d.Store; d.Store = rec })
+	h := f.hour()
+	o := &protocol.AuditObservation{BatchID: batchID(1)}
+	for i := 0; i < userIDLookupMaxIDs; i++ {
+		o.Usage = append(o.Usage, usageRow(h, protocol.NewSubjectKey(int64(100000+i)), "u.example", 1))
+	}
+	o.Hits = []protocol.AuditHit{hitRow(h, "p1", "block", f.subject(0), "hit.example", 443, 2)}
+	f.enqueueAndDrain("agt_1", 5, o)
+	if rows := f.stored(); len(rows) != 1 {
+		t.Fatalf("the hit was crowded out by usage accounts: %+v (asked %d ids)", rows, len(rec.asked))
 	}
 }

@@ -814,6 +814,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// batch, which is why TestBuildStoresAReportedHitBatch drives one through.
 	destAudit := destaudit.New(destaudit.Deps{
 		Store: destRepos.Hits,
+		// Per-site usage is kept only for a panel set to tier B. The panel row's
+		// choice is the one question: a node that was told a lower level may still
+		// send a batch that was in flight, and that is dropped and counted.
+		UsageTier: func(ctx context.Context, panelID int64) (bool, error) {
+			panel, err := repos.XUIPanel.GetByID(ctx, panelID)
+			switch {
+			case errors.Is(err, domain.ErrNotFound):
+				return false, nil // a deleted panel has no tier
+			case err != nil:
+				return false, err
+			}
+			return domain.NormalizeAuditCollect(panel.AuditCollect) == domain.AuditCollectHitsAndUsage, nil
+		},
 		Metrics: destaudit.Metrics{
 			Report:        func(outcome string) { metrics.NodeAuditReportTotal.With(outcome).Inc() },
 			Rows:          func(outcome string, n int) { metrics.DestAuditRowsTotal.With(outcome).Add(int64(n)) },
@@ -899,7 +912,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			Lists:           destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
 			Policies: destRepos.Policies, Exemptions: destRepos.Exemptions, SourceRules: destRepos.SourceRules,
 			Users: repos.User, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel, Async: dispatcher,
-			Hits: destRepos.Hits,
+			Hits: destRepos.Hits, Usage: destRepos.Hits,
 		},
 		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
 		// side of the telemetry the server list already shows, and the field is
@@ -1663,6 +1676,9 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 //     pruning at the default: an admin who keeps a year would lose most of it to
 //     one failed read, and the next hour retries. The orphan purge, which needs
 //     no setting, still runs.
+//   - Per-site usage goes at dest.usage_retention_days (7, 1..30; 0 is the
+//     default, never "for ever"). Switching a node's usage recording off does not
+//     delete what it recorded: the rows age out here.
 //   - Batch markers go at a day: they only exist to catch a re-sent batch.
 //
 // Nothing here logs a destination, an account or an address: only counts.
@@ -1694,12 +1710,17 @@ func (a *App) pruneDestRows(ctx context.Context) {
 	if settingsOK {
 		eff := ports.AccessControlEffectiveOf(set)
 		hitCutoff := now.Add(-eff.HitRetention()).Truncate(time.Hour).UnixMilli()
+		usageCutoff := now.Add(-eff.UsageRetention()).Truncate(time.Hour).UnixMilli()
 		trialCutoff := now.Add(-eff.TrialRetention()).Truncate(time.Hour).UnixMilli()
 		// The trial rows first: they are the subset with the shorter life.
 		n, err := hits.PruneTrial(ctx, trialCutoff)
 		count(metrics.DestPruneTrial, n, err)
 		n, err = hits.PruneHits(ctx, hitCutoff)
 		count(metrics.DestPruneHits, n, err)
+		// Per-site usage has its own retention (7 days by default, 1..30), which
+		// neither follows nor is capped by the hits'.
+		n, err = hits.PruneUsage(ctx, usageCutoff)
+		count(metrics.DestPruneUsage, n, err)
 		// The loss counters live as long as the hits they qualify.
 		if _, err := hits.PruneDrops(ctx, hitCutoff); err != nil {
 			log.Warn("destination hit cleanup", "table", "drops", "err", err)
@@ -2063,6 +2084,10 @@ type legalDestRecording struct {
 
 func (d legalDestRecording) CollectingNodes(ctx context.Context) (int, error) {
 	return d.admin.CollectingNodes(ctx)
+}
+
+func (d legalDestRecording) CollectingUsageNodes(ctx context.Context) (int, error) {
+	return d.admin.CollectingUsageNodes(ctx)
 }
 
 func (d legalDestRecording) AllowlistTrialGroups(ctx context.Context) (int, error) {

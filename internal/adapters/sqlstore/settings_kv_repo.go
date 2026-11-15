@@ -539,6 +539,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// risk.connection_retention_days.
 		intField("dest", "hit_retention_days", &s.DestHitRetentionDays),
 		intField("dest", "trial_retention_days", &s.DestTrialRetentionDays),
+		intField("dest", "usage_retention_days", &s.DestUsageRetentionDays),
 
 		// legal --- privacy and terms. legal.consent_version is written by the
 		// publish endpoint only (the system settings PUT keeps it as stored).

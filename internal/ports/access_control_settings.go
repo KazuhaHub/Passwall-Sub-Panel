@@ -25,6 +25,7 @@ type AccessControlSettings struct {
 	DestRulesUpdateMode       string `json:"dest_rules_update_mode"`
 	DestHitRetentionDays      int    `json:"dest_hit_retention_days"`
 	DestTrialRetentionDays    int    `json:"dest_trial_retention_days"`
+	DestUsageRetentionDays    int    `json:"dest_usage_retention_days"`
 }
 
 // AccessControlSettings copies the settings out of the record. Hand-written,
@@ -37,6 +38,7 @@ func (s UISettings) AccessControlSettings() AccessControlSettings {
 		DestRulesUpdateMode:       s.DestRulesUpdateMode,
 		DestHitRetentionDays:      s.DestHitRetentionDays,
 		DestTrialRetentionDays:    s.DestTrialRetentionDays,
+		DestUsageRetentionDays:    s.DestUsageRetentionDays,
 	}
 }
 
@@ -48,6 +50,7 @@ func (s *UISettings) SetAccessControlSettings(p AccessControlSettings) {
 	s.DestRulesUpdateMode = p.DestRulesUpdateMode
 	s.DestHitRetentionDays = p.DestHitRetentionDays
 	s.DestTrialRetentionDays = p.DestTrialRetentionDays
+	s.DestUsageRetentionDays = p.DestUsageRetentionDays
 }
 
 var accessControlSettingsKeys = func() []string {
@@ -86,6 +89,9 @@ const (
 	DestTrialRetentionDaysDefault    = 7
 	DestTrialRetentionDaysMin        = 1
 	DestTrialRetentionDaysMax        = 30
+	DestUsageRetentionDaysDefault    = 7
+	DestUsageRetentionDaysMin        = 1
+	DestUsageRetentionDaysMax        = 30
 )
 
 // AccessControlEffective is what the panel runs with for the stored settings:
@@ -98,6 +104,9 @@ type AccessControlEffective struct {
 	// how long the allowlist trial rows are, and is never longer than it.
 	HitRetentionDays   int `json:"dest_hit_retention_days"`
 	TrialRetentionDays int `json:"dest_trial_retention_days"`
+	// UsageRetentionDays is how long per-site usage rows (tier B) are kept. It
+	// is its own setting: it neither follows nor is capped by the hit retention.
+	UsageRetentionDays int `json:"dest_usage_retention_days"`
 }
 
 // PolicyApplyMin is the trailing debounce window of policy publication.
@@ -118,6 +127,11 @@ func (e AccessControlEffective) HitRetention() time.Duration {
 // TrialRetention is how long the allowlist trial rows are kept.
 func (e AccessControlEffective) TrialRetention() time.Duration {
 	return time.Duration(e.TrialRetentionDays) * 24 * time.Hour
+}
+
+// UsageRetention is how long per-site usage rows are kept.
+func (e AccessControlEffective) UsageRetention() time.Duration {
+	return time.Duration(e.UsageRetentionDays) * 24 * time.Hour
 }
 
 // AccessControlEffectiveOf applies the defaults and clamps. A negative number
@@ -149,6 +163,7 @@ func AccessControlEffectiveOf(s UISettings) AccessControlEffective {
 		RulesUpdateMode:       mode,
 		HitRetentionDays:      hit,
 		TrialRetentionDays:    trial,
+		UsageRetentionDays:    clamp(s.DestUsageRetentionDays, DestUsageRetentionDaysDefault, DestUsageRetentionDaysMin, DestUsageRetentionDaysMax),
 	}
 }
 
@@ -161,6 +176,7 @@ func AccessControlSettingsDefaults() map[string]float64 {
 		"dest_list_refresh_hours":       DestListRefreshHoursDefault,
 		"dest_hit_retention_days":       DestHitRetentionDaysDefault,
 		"dest_trial_retention_days":     DestTrialRetentionDaysDefault,
+		"dest_usage_retention_days":     DestUsageRetentionDaysDefault,
 	}
 }
 
@@ -186,6 +202,9 @@ func ValidateAccessControlSettings(s AccessControlSettings) (field string, err e
 		return f, err
 	}
 	if f, err := check("dest_trial_retention_days", s.DestTrialRetentionDays, DestTrialRetentionDaysMin, DestTrialRetentionDaysMax); err != nil {
+		return f, err
+	}
+	if f, err := check("dest_usage_retention_days", s.DestUsageRetentionDays, DestUsageRetentionDaysMin, DestUsageRetentionDaysMax); err != nil {
 		return f, err
 	}
 	switch s.DestRulesUpdateMode {

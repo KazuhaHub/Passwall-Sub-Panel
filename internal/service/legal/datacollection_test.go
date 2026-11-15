@@ -11,12 +11,13 @@ import (
 )
 
 type fakeDest struct {
-	nodes, trialGroups int
-	err                error
+	nodes, trialGroups, usageNodes int
+	err                            error
 }
 
 func (f fakeDest) CollectingNodes(context.Context) (int, error)      { return f.nodes, f.err }
 func (f fakeDest) AllowlistTrialGroups(context.Context) (int, error) { return f.trialGroups, f.err }
+func (f fakeDest) CollectingUsageNodes(context.Context) (int, error) { return f.usageNodes, f.err }
 
 func intp(v int) *int { return &v }
 
@@ -150,7 +151,7 @@ func TestCollect_AGatedProviderAppearsOnlyWhenItsGateIsOn(t *testing.T) {
 	c := NewCollector(nil)
 	built := 0
 	c.Register(Provider{
-		Key:  "dest_usage",
+		Key:  "dest_example",
 		Gate: func(s ports.UISettings) bool { return s.LegalDiscloseUsage },
 		Build: func(context.Context, ports.UISettings) (Item, error) {
 			built++
@@ -162,12 +163,12 @@ func TestCollect_AGatedProviderAppearsOnlyWhenItsGateIsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := got["dest_usage"]; ok || built != 0 {
+	if _, ok := got["dest_example"]; ok || built != 0 {
 		t.Fatalf("a gated-off entry was disclosed (built %d times)", built)
 	}
 	got, _ = c.Collect(ctx, ports.UISettings{LegalDiscloseUsage: true})
-	if it, ok := got["dest_usage"]; !ok || it.Nodes == nil || *it.Nodes != 4 {
-		t.Fatalf("a gated-on entry is missing or wrong: %+v", got["dest_usage"])
+	if it, ok := got["dest_example"]; !ok || it.Nodes == nil || *it.Nodes != 4 {
+		t.Fatalf("a gated-on entry is missing or wrong: %+v", got["dest_example"])
 	}
 }
 
@@ -260,6 +261,7 @@ func (d *countingDest) CollectingNodes(context.Context) (int, error) {
 	d.nodes++
 	return 3, nil
 }
+func (d *countingDest) CollectingUsageNodes(context.Context) (int, error) { return 2, nil }
 func (d *countingDest) AllowlistTrialGroups(context.Context) (int, error) {
 	d.trial++
 	return 1, nil
@@ -308,5 +310,33 @@ func TestCollect_AFailedCountIsNotCached(t *testing.T) {
 	got, err := c.Collect(context.Background(), ports.UISettings{})
 	if err != nil || got["dest_hits"].Nodes == nil || *got["dest_hits"].Nodes != 4 {
 		t.Fatalf("after recovery: %v, %v; a failure must not be remembered", err, got["dest_hits"])
+	}
+}
+
+// PER-SITE USAGE IS DISCLOSED ONLY WHEN THE ADMINISTRATOR CHOSE TO. The entry is
+// absent while legal_disclose_usage is off, whatever is recording; when on it
+// carries the number of nodes recording it and the usage retention.
+func TestCollect_UsageIsListedOnlyWhenTheAdminDiscloses(t *testing.T) {
+	c := NewCollector(fakeDest{nodes: 3, usageNodes: 2})
+	ctx := context.Background()
+	got, err := c.Collect(ctx, ports.UISettings{DestUsageRetentionDays: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["dest_usage"]; ok {
+		t.Fatal("usage recording was disclosed without the administrator's switch")
+	}
+	got, err = c.Collect(ctx, ports.UISettings{LegalDiscloseUsage: true, DestUsageRetentionDays: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, ok := got["dest_usage"]
+	if !ok || !it.Enabled || it.Nodes == nil || *it.Nodes != 2 || it.RetentionDays == nil || *it.RetentionDays != 10 || it.IncludesIP {
+		t.Fatalf("dest_usage = %+v", it)
+	}
+	// Switch on but nothing records it: listed, not enabled.
+	got, _ = NewCollector(fakeDest{nodes: 3}).Collect(ctx, ports.UISettings{LegalDiscloseUsage: true})
+	if it := got["dest_usage"]; it.Enabled || it.Nodes == nil || *it.Nodes != 0 {
+		t.Fatalf("dest_usage with no usage node = %+v", it)
 	}
 }

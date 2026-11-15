@@ -88,7 +88,20 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 		// the whole config undeployable (roster frozen, disabled users still
 		// connecting). It must NOT hold back the desired policy, which was
 		// never what the node refused.
-		if status.Digest == meta.AppliedSHA256 || meta.MintedSHA256 != meta.DesiredSHA256 {
+		// The collect-only policy of a tier-B node is not a fallback and never the
+		// record, so refusing it leaves the record alone. The refusal is remembered
+		// (with the capabilities it happened under) so it is not minted again every
+		// sync; see collectOnlyRefused.
+		if status.Digest == collectOnlyDigest {
+			s.mu.Lock()
+			if s.collectRefused == nil {
+				s.collectRefused = map[string]string{}
+			}
+			s.collectRefused[agentID] = capsToken(caps)
+			delete(s.compiled, agentID)
+			s.mu.Unlock()
+		}
+		if status.Digest != collectOnlyDigest && (status.Digest == meta.AppliedSHA256 || meta.MintedSHA256 != meta.DesiredSHA256) {
 			empty, none := "", []byte{}
 			zero, noGroups := 0, []int64{}
 			patch.AppliedSHA256, patch.AppliedBody, patch.AppliedRuleCount, patch.AppliedGroups = &empty, &none, &zero, &noGroups
@@ -145,6 +158,9 @@ func (s *Service) paused(ctx context.Context) (bool, error) {
 func (s *Service) mintedPolicy(agentID, d string) *protocol.DestinationPolicy {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if d == collectOnlyDigest {
+		return nil
+	}
 	if e := s.compiled[agentID]; e != nil && e.res.Digest == d && e.res.Policy != nil {
 		return e.res.Policy
 	}
@@ -154,12 +170,17 @@ func (s *Service) mintedPolicy(agentID, d string) *protocol.DestinationPolicy {
 // Retry clears a refusal so the next sync tries the current policy again (the
 // admin's "send again"). It reports whether the agent was in a refused state.
 func (s *Service) Retry(ctx context.Context, agentID string) (bool, error) {
+	s.mu.Lock()
+	_, collectRefused := s.collectRefused[agentID]
+	delete(s.collectRefused, agentID)
+	delete(s.compiled, agentID)
+	s.mu.Unlock()
 	meta, err := s.metaFor(ctx, agentID)
 	if err != nil {
 		return false, err
 	}
 	if meta.RejectedSHA256 == "" {
-		return false, nil
+		return collectRefused, nil
 	}
 	noDigest := ""
 	patch := domain.DestAgentPolicyPatch{RejectedSHA256: &noDigest}
@@ -168,4 +189,15 @@ func (s *Service) Retry(ctx context.Context, agentID string) (bool, error) {
 		patch.FallbackReason = &none
 	}
 	return true, s.patchMeta(ctx, agentID, patch)
+}
+
+// collectOnlyRefused says whether the node refused the collect-only policy under
+// these very capabilities. A change of capabilities (or the admin's Retry) lifts
+// it. It is held in memory: after a restart the policy is offered once more and
+// refused once more, which costs one sync.
+func (s *Service) collectOnlyRefused(agentID string, caps []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tok, ok := s.collectRefused[agentID]
+	return ok && tok == capsToken(caps)
 }

@@ -741,8 +741,12 @@ var (
 //	hits_unknown_subject the account no longer exists
 //	hits_out_of_range    the hour was outside [now-48h, now+1h]
 //	hits_over_budget     the node's hourly row budget was spent
-//	usage_collect_off    per-site usage is not collected (tier B is not
-//	                     offered), so the rows are dropped unread
+//	usage_collect_off    the panel is not on tier B (per-site usage), so the
+//	                     rows are dropped unread
+//	usage_stored         written to dest_usage_hourly
+//	usage_unknown_subject the account no longer exists
+//	usage_out_of_range   the hour was outside [now-48h, now+1h]
+//	usage_over_budget    the node's hourly usage budget was spent
 //
 // The two node counters add up what the node itself reported losing: events it
 // had no room to aggregate (hits, trial rows and usage, together), and events
@@ -762,12 +766,18 @@ const (
 	DestRowsHitsOutOfRange = "hits_out_of_range"
 	DestRowsHitsOverBudget = "hits_over_budget"
 	DestRowsUsageCollOff   = "usage_collect_off"
+	// The per-site usage outcomes (tier B).
+	DestRowsUsageStored     = "usage_stored"
+	DestRowsUsageUnknown    = "usage_unknown_subject"
+	DestRowsUsageOutOfRange = "usage_out_of_range"
+	DestRowsUsageOverBudget = "usage_over_budget"
 
 	DestPruneHits       = "hits"
 	DestPruneTrial      = "trial"
 	DestPruneBatches    = "batches"
 	DestPruneExemptions = "exemptions"
 	DestPruneOrphans    = "orphans"
+	DestPruneUsage      = "usage"
 )
 
 var (
