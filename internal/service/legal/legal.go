@@ -110,6 +110,16 @@ func (s *Service) Public(ctx context.Context, kind domain.LegalKind, lang string
 	return nil, domain.ErrNotFound
 }
 
+// Collection is the "what we collect" list as the public page would show it
+// now, whether or not the feature is switched on: the editor's preview.
+func (s *Service) Collection(ctx context.Context) (map[string]Item, error) {
+	set, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return nil, err
+	}
+	return s.collector.Collect(ctx, set)
+}
+
 // Current is the live consent state.
 type Current struct {
 	Enabled        bool

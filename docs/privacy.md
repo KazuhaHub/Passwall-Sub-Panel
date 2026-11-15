@@ -110,7 +110,7 @@ ETag 是整个响应的摘要，包括 `data_collection`：管理员改了某个
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/legal/:kind` | 每种语言的最新版本（含正文，给编辑器用），加全部历史版本（不含正文）。同时带 `enabled`、`consent_version` |
+| GET | `/api/admin/legal/:kind` | 每种语言的最新版本（含正文，给编辑器用），加全部历史版本（不含正文）。同时带 `enabled`、`consent_version`，以及 `data_collection`（和公开页同一份「我们收集什么」，不论是否启用，给编辑器预览用） |
 | POST | `/api/admin/legal/:kind` | 发布新版本 `{locale, content, consent_bump}`，返回 `{document, consent_version, consent_bumped}` |
 | GET | `/api/admin/legal/affected-users` | `{consent_version, affected_users, accepted_current}`：一次重大变更会让多少普通用户重新被提示，以及其中已经同意了当前版本的有多少 |
 

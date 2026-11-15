@@ -114,10 +114,18 @@ func (h *AdminLegalHandler) Get(c *gin.Context) {
 	for i, m := range hist {
 		vers[i] = legalVersionDTO{ID: m.ID, Locale: m.Locale, Version: m.Version, ConsentBump: m.ConsentBump, PublishedAt: m.PublishedAt, PublishedBy: m.PublishedBy}
 	}
-	c.JSON(http.StatusOK, gin.H{
+	out := gin.H{
 		"kind": kind, "enabled": set.LegalEnabled, "consent_version": set.LegalConsentVersion,
 		"documents": docs, "versions": vers,
-	})
+	}
+	// The editor's preview of the generated list. A failure leaves it out: the
+	// page still edits and publishes, the preview says it has nothing to show.
+	if h.w.Service != nil {
+		if dc, err := h.w.Service.Collection(ctx); err == nil {
+			out["data_collection"] = dc
+		}
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 type publishLegalRequest struct {

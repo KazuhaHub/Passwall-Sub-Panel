@@ -304,3 +304,11 @@ func TestCurrentDoesNotRememberAFailedLookup(t *testing.T) {
 		t.Fatalf("after recovery = %+v, %v", cur, err)
 	}
 }
+
+func TestCollectionIgnoresTheEnabledSwitch(t *testing.T) {
+	s := svc(emptyStore(), ports.UISettings{LegalEnabled: false, SubLogRetentionDays: 7})
+	dc, err := s.Collection(context.Background())
+	if err != nil || dc["sub_log"].RetentionDays == nil || *dc["sub_log"].RetentionDays != 7 {
+		t.Fatalf("Collection = %+v, %v", dc, err)
+	}
+}
