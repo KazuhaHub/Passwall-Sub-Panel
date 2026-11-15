@@ -914,7 +914,7 @@ type PolicyStatus struct {
 
 协议里有两个码（`destination_policy_rejected`、`destination_policy_sniffing_insufficient`，后者 PSP 在面板侧判定嗅探不足时也会按入站记）。PSP 自己另记五个：
 `destination_policy_over_limit`（该节点超出 Subjects / 字节上限，回退）、`destination_policy_lkg_rejected`（回退用的上一版自己也被拒，已清空 LKG）、`destination_policy_lkg_unreadable`（读不到 LKG，连续失败后发无策略）、`destination_policy_report_only_not_deployed`（仅报告规则因额度被去掉，或在嗅探不足 / 会替换被解析名字的入站上被限定/去掉，开启的规则不受影响）、`destination_policy_resolve_not_deployed`（面板选了按需解析却没有下发：每个相关入站一条，key 是入站键 `lst_<node_id>`，detail 是原因加入站显示名，如 `route_only: inbound <名称>`；显示名**不属于**问题的指纹（`nodeIssueFingerprint` 对这个码只取 `: inbound ` 之前的部分），改名只更新同一条的 detail，不会多出第二条）。
-用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等）。内容只有摘要前缀、入站键和额度数字，不含用户或目的地。
+用现有的 `NodeAgentIssueRepo.RecordBatch`（按 agent + code + key + detail 幂等；`destination_policy_resolve_not_deployed` 例外：入站显示名不参与指纹；指纹是 code、key 与 detail 前缀（detail 里 `: inbound ` 之前的原因）的哈希，见 `nodeIssueFingerprint`）。内容只有摘要前缀、入站键、额度数字，以及 `destination_policy_resolve_not_deployed` 的 detail 里的入站显示名（`resolveIssues` 写入，入站有名称时才有），不含用户或目的地。
 
 ### 11.5 嗅探
 
