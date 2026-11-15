@@ -165,7 +165,9 @@ async function render(endpoint, url) {
     const deadline = Date.now() + renderWaitMs
     let dom = ''
     for (;;) {
-      dom = await snapshot()
+      // A navigation commit can destroy the execution context under the read: that is a page
+      // still loading, not a failure, so keep polling until the deadline.
+      try { dom = await snapshot() } catch { dom = '' }
       const root = dom.match(/<div id="root">([\s\S]*?)<\/body>/)
       if (root && /<form\b/.test(root[1])) break
       if (Date.now() >= deadline) break
@@ -203,8 +205,10 @@ function runChrome(command, url) {
       // Report only once the browser has gone: it is still writing into the
       // profile directory the caller is about to delete.
       if (exited) { fn(value); return }
-      child.once('close', () => fn(value))
+      child.once('close', () => { clearTimeout(killer); fn(value) })
       child.kill()
+      // Chrome can ignore SIGTERM while it is wedged: force it after a grace period.
+      const killer = setTimeout(() => child.kill('SIGKILL'), 3000)
     }
     const timeout = setTimeout(() => {
       timedOut = true
