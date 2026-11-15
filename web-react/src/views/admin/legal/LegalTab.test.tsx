@@ -216,6 +216,59 @@ describe('the editor (S21)', () => {
   })
 })
 
+describe('the editor, review follow-ups', () => {
+  it('on a phone the preview tab has no editor to insert into, so the insert button is off there and on again in the edit tab', async () => {
+    asPhone()
+    mount()
+    const dlg = await openEditor()
+    type('只有正文')
+    const insert = () => within(dlg).getByRole('button', { name: '插入「我们收集什么」' }) as HTMLButtonElement
+    expect(insert().disabled).toBe(false)
+    fireEvent.click(within(dlg).getByRole('tab', { name: '预览' }))
+    expect(insert().disabled).toBe(true)
+    fireEvent.click(within(dlg).getByRole('tab', { name: '编辑' }))
+    expect(insert().disabled).toBe(false)
+    fireEvent.click(insert())
+    expect(code().value).toBe('只有正文\n[[data-collection]]')
+  })
+
+  const usageRow = { enabled: true, nodes: 2, retention_days: 7, includes_ip: false }
+  const withUsage = (on: boolean): legalApi.AdminLegal => ({ ...privacy, data_collection: on ? { ...dc, dest_usage: usageRow } : dc })
+
+  it('the preview follows the unsaved "disclose usage" switch: switched off, the usage line is not in it', async () => {
+    served = { terms, privacy: withUsage(true) }
+    mount({ discloseUsage: false })
+    const dlg = await openEditor()
+    expect(within(dlg).getByRole('heading', { name: '隐私' })).toBeTruthy()
+    expect(within(dlg).queryByText('按网站用量')).toBeNull()
+    expect(within(dlg).getByText('访问规则命中')).toBeTruthy()
+  })
+
+  it('switched on and listed, the usage line is in the preview and there is no hint', async () => {
+    served = { terms, privacy: withUsage(true) }
+    mount({ discloseUsage: true })
+    const dlg = await openEditor()
+    expect(await within(dlg).findByText('按网站用量')).toBeTruthy()
+    expect(within(dlg).queryByText('预览里没有按网站用量')).toBeNull()
+  })
+
+  it('switched on but not in the saved list yet (unsaved switch, or no node records it), the preview says why the line is missing', async () => {
+    served = { terms, privacy: withUsage(false) }
+    mount({ discloseUsage: true })
+    const dlg = await openEditor()
+    expect(await within(dlg).findByText('预览里没有按网站用量')).toBeTruthy()
+    expect(within(dlg).queryByText('按网站用量')).toBeNull()
+  })
+
+  it('no hint while the switch is off', async () => {
+    served = { terms, privacy: withUsage(false) }
+    mount({ discloseUsage: false })
+    const dlg = await openEditor()
+    expect(within(dlg).getByRole('heading', { name: '隐私' })).toBeTruthy()
+    expect(within(dlg).queryByText('预览里没有按网站用量')).toBeNull()
+  })
+})
+
 describe('publishing (S21)', () => {
   async function toPublish(text = `${privacyText}新增`) {
     mount()
@@ -235,6 +288,9 @@ describe('publishing (S21)', () => {
     const pub = await toPublish()
     fireEvent.click(within(pub).getByRole('checkbox', { name: '重大变更：要求用户重新同意' }))
     expect(await within(pub).findByText(/约 1,240 名普通用户/)).toBeTruthy()
+    // Users are asked when they next open the portal, not at a sign-in (a session can be days old).
+    expect(within(pub).getByText(/下次打开门户时/)).toBeTruthy()
+    expect(within(pub).queryByText(/下次登录时/)).toBeNull()
   })
 
   it('publishes the text with the box as asked, says so, and closes both dialogs', async () => {

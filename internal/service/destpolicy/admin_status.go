@@ -74,6 +74,11 @@ type NodeState struct {
 	Collecting       bool   `json:"collecting"`
 	// CollectingUsage is Collecting at the per-site usage level (tier B).
 	CollectingUsage bool `json:"collecting_usage"`
+	// UsageRefused: the panel is set to per-site usage and the node refused the
+	// collect-only policy that records it, so none is recorded and PSP does not
+	// send it again until the node's capabilities or release change or the
+	// administrator retries. Rules and hits are unaffected.
+	UsageRefused bool `json:"usage_refused"`
 	// Resolve is the panel's choice of how hostnames meet IP rules (as_is or
 	// on_demand), ResolveEffective what the node was sent ("on_demand", or "" for
 	// as_is), and ResolveUnavailable why a node set to on_demand does not run it:
@@ -300,6 +305,8 @@ func (a *Admin) Status(ctx context.Context) (*StatusView, error) {
 		ns.CollectEffective = row.CollectEffective
 		ns.Collecting = Collecting(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
 		ns.CollectingUsage = CollectingUsage(row, agent.ObservedCapabilities, agent.ObservedCoreEngine)
+		ns.UsageRefused = panel.AuditCollect.Normalized() == domain.AuditCollectHitsAndUsage &&
+			a.Service.CollectOnlyRefused(agent.AgentID, agent.ObservedCapabilities, panel.PanelVersion)
 		// How hostnames meet IP rules: what the panel is set to, what the node was
 		// sent, and why a node set to on_demand is not running it.
 		ns.Resolve = string(panel.DestResolve.Normalized())

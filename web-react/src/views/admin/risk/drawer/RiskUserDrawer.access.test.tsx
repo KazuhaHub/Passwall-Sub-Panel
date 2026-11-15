@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useAuthStore } from '@/stores/auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -212,5 +212,134 @@ describe('the access tab: the hits of this account (S16, 2c)', () => {
     expect(section.textContent).toContain('Hits in the past 3 days')
     expect(screen.getByRole('button', { name: 'View all in records' })).toBeTruthy()
     expect(section.textContent).toContain('Would be blocked')
+  })
+})
+
+describe('the access tab: per-site usage of this account (S16, tier B)', () => {
+  const nodes = [{ panel_id: 5, name: '东京 01' }]
+  const usage = (over: Partial<acApi.DestUsage> = {}): acApi.DestUsage => ({
+    effective_days: 1, nodes, items: [{ site: 'google.com', count: 1204 }, { site: '(ip)', count: 40 }],
+    others: { sites: 3, count: 12 }, total: 1256, dropped_in_range: 0, ...over,
+  })
+  const open = () => renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+  const available = (over: Partial<acApi.DestUserView> = {}) => view({ usage_available: true, usage_nodes: nodes, ...over })
+  beforeEach(() => {
+    vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 7 } as never })
+    vi.mocked(acApi.postDestUserUsage).mockResolvedValue(usage())
+  })
+
+  it('reads nothing until the button is clicked, and says that the view is audited', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    open()
+    const section = await screen.findByTestId('access-usage')
+    expect(section.textContent).toContain('按网站用量')
+    expect(section.textContent).toContain('每次查看都会记入管理审计日志，只有管理员能看到。')
+    expect(acApi.postDestUserUsage).not.toHaveBeenCalled()
+    fireEvent.click(within(section).getByRole('button', { name: '查看用量' }))
+    await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1))
+    expect(acApi.postDestUserUsage).toHaveBeenCalledWith(7, { range: '24h' })
+  })
+
+  it('one click is one read: while it is pending the button cannot be clicked again and the range and node controls are off', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available({ usage_nodes: [{ panel_id: 5, name: '东京 01' }, { panel_id: 6, name: '洛杉矶 02' }] }))
+    let release: (u: acApi.DestUsage) => void = () => {}
+    vi.mocked(acApi.postDestUserUsage).mockImplementation(() => new Promise<acApi.DestUsage>(r => { release = r }))
+    vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 3 } as never })
+    open()
+    const button = await screen.findByRole('button', { name: '查看用量' }) as HTMLButtonElement
+    const days = await screen.findByRole('button', { name: '3 天' }) as HTMLButtonElement
+    fireEvent.click(button)
+    fireEvent.click(button)
+    await waitFor(() => expect(button.disabled).toBe(true))
+    expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1)
+    expect(days.disabled).toBe(true)
+    expect(screen.getByRole('combobox', { name: '节点' }).getAttribute('aria-disabled')).toBe('true')
+    release(usage())
+    await waitFor(() => expect(button.disabled).toBe(false))
+  })
+
+  it('lists the sites most used, then the rest as one line, the total and the node it came from', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: '查看用量' }))
+    const section = await screen.findByTestId('access-usage')
+    await waitFor(() => expect(section.textContent).toContain('google.com'))
+    const rows = Array.from(section.querySelectorAll('[data-testid="usage-site"]'))
+    expect(rows.map(r => r.textContent)).toEqual(['google.com1,204', '(ip)40'])
+    expect(section.textContent).toContain('其他 3 个网站')
+    expect(section.textContent).toContain('12')
+    expect(section.textContent).toContain('共 1,256 次连接')
+    expect(section.textContent).toContain('来自 东京 01')
+  })
+
+  it('offers 24 hours and min(7, retention) days: a retention of 3 offers 3, and choosing it reads again', async () => {
+    vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 3 } as never })
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    open()
+    const section = await screen.findByTestId('access-usage')
+    const days = await within(section).findByRole('button', { name: '3 天' })
+    expect(within(section).getByRole('button', { name: '24 小时' })).toBeTruthy()
+    expect(within(section).queryByRole('button', { name: '7 天' })).toBeNull()
+    fireEvent.click(within(section).getByRole('button', { name: '查看用量' }))
+    await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1))
+    fireEvent.click(days)
+    await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenLastCalledWith(7, { range: '3d' }))
+  })
+
+  it('says when the answer covers fewer days than asked, and how many usage rows are known to be missing', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    vi.mocked(acApi.postDestUserUsage).mockResolvedValue(usage({ effective_days: 5, dropped_in_range: 8 }))
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: '查看用量' }))
+    expect(await screen.findByText('有 8 行用量因节点或面板的限制没有保存，实际次数可能更多。')).toBeTruthy()
+  })
+
+  it('an empty range says so', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    vi.mocked(acApi.postDestUserUsage).mockResolvedValue(usage({ items: [], others: { sites: 0, count: 0 }, total: 0 }))
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: '查看用量' }))
+    expect(await screen.findByText('这段时间没有记录')).toBeTruthy()
+  })
+
+  it('with several nodes the usage can be narrowed to one, which is sent as panel_id', async () => {
+    const two = [{ panel_id: 5, name: '东京 01' }, { panel_id: 6, name: '洛杉矶 02' }]
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available({ usage_nodes: two }))
+    open()
+    const select = await screen.findByLabelText('节点')
+    fireEvent.mouseDown(select)
+    fireEvent.click(await screen.findByRole('option', { name: '洛杉矶 02' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看用量' }))
+    await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledWith(7, { range: '24h', panel_id: 6 }))
+  })
+
+  it('no node of the account records usage: says so, offers no read, never calls the endpoint', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(view({ usage_available: false, usage_nodes: [] }))
+    open()
+    expect(await screen.findByText('这个账号所在的节点都没有开启按网站用量')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '查看用量' })).toBeNull()
+    expect(acApi.postDestUserUsage).not.toHaveBeenCalled()
+  })
+
+  it('a failed read is said in the section with a retry', async () => {
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    vi.mocked(acApi.postDestUserUsage).mockRejectedValueOnce(new Error('x'))
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: '查看用量' }))
+    expect(await screen.findByText('读取用量失败')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(2))
+  })
+
+  it('in English the range words follow the count', async () => {
+    setTestLang('en-US')
+    vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 1 } as never })
+    vi.mocked(acApi.getDestUser).mockResolvedValue(available())
+    open()
+    const section = await screen.findByTestId('access-usage')
+    expect(await within(section).findByRole('button', { name: '24 hours' })).toBeTruthy()
+    // A retention of one day is the 24 hours: no second button for the same window.
+    expect(within(section).queryByRole('button', { name: '1 day' })).toBeNull()
+    setTestLang('zh-CN')
   })
 })

@@ -6,18 +6,20 @@ import { useTranslation } from 'react-i18next'
 
 import type { AuditCollect, DestNodeStatus } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
+import FieldHint from '@/components/FieldHint'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestSettings, useDestStatus, useSetAuditCollect } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useSiteStore } from '@/stores/site'
 import { applyMinutes } from '@/utils/accessControl'
 import { discardChangesConfirm } from '@/views/admin/accessControl/confirmCopy'
 import { destErrorText } from '@/views/admin/accessControl/destErrors'
 
 const A = 'admin:access_control.audit_collect.'
 
-/** What this build offers: not recording, or the rule matches. The per-site usage mode is a later phase's. */
-const MODES: AuditCollect[] = ['off', 'hits']
+/** The modes, in the order they are offered. The usage mode is offered only where the node declares it. */
+const MODES: AuditCollect[] = ['off', 'hits', 'hits_and_usage']
 
 /**
  * "What does this node record?" (S14/S15): the one place a native server's
@@ -26,7 +28,12 @@ const MODES: AuditCollect[] = ['off', 'hits']
  * there is no confirmation after it (S20). A node that cannot record (too old)
  * may only be set to not recording; a sing-box node only enforces, and its
  * dialog is read-only. The days a mode keeps its records are the retention
- * setting, read, never written in.
+ * settings, read, never written in.
+ *
+ * The usage mode (per-site connection counts, Xray nodes that declare it) says
+ * what it costs: about 40% more proxy CPU on a busy node, which is why it is a
+ * per-node opt-in. Choosing it while the privacy page is off only hints (amber);
+ * turning it off says the usage already recorded stays until it expires.
  */
 export default function AuditCollectDialog({ node, onClose }: {
   /** The node being set, or null (closed). */
@@ -49,12 +56,15 @@ export default function AuditCollectDialog({ node, onClose }: {
   const execOnly = node?.engine === 'sing-box'
   const tooOld = !!node && !node.supports.hits && !execOnly
   const dirty = open && mode !== stored
+  const legalOn = useSiteStore(s => s.legalEnabled)
+  const noUsage = !!node && !node.supports.usage && !execOnly && !tooOld
 
   // Seeded on each open: a node's mode read while the dialog is open never overwrites a choice in progress.
   useEffect(() => { if (open) { setMode(stored); setError(null) } }, [open, node?.panel_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const guard = useDirtyClose(dirty, discardChangesConfirm(t))
   const days = settings.data?.effective.dest_hit_retention_days
+  const usageDays = settings.data?.effective.dest_usage_retention_days
   const minutes = applyMinutes(status.data)
 
   const submit = async () => {
@@ -72,15 +82,17 @@ export default function AuditCollectDialog({ node, onClose }: {
   }
 
   const option = (value: AuditCollect) => {
-    const disabled = execOnly || (tooOld && value !== 'off') || save.isPending || value === 'hits_and_usage'
+    const disabled = execOnly || (tooOld && value !== 'off') || save.isPending || (value === 'hits_and_usage' && (tooOld || noUsage))
     return (
       <FormControlLabel key={value} value={value} disabled={disabled} sx={{ alignItems: 'flex-start', m: 0, p: 1, borderRadius: 2, border: `1px solid ${mode === value ? md.primary : md.outlineVariant}` }}
         control={<Radio />}
         label={(
           <Box sx={{ pt: 0.75 }}>
             <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{t(`${A}mode.${value}`)}</Typography>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}mode_help.${value}`, { days: days ?? '…' })}</Typography>
+            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}mode_help.${value}`, { days: days ?? '…', usageDays: usageDays ?? '…' })}</Typography>
             {value === 'hits' && tooOld && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}too_old`)}</Typography>}
+            {value === 'hits_and_usage' && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}usage_cost`)}</Typography>}
+            {value === 'hits_and_usage' && (noUsage || tooOld) && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}usage_too_old`)}</Typography>}
           </Box>
         )} />
     )
@@ -94,12 +106,17 @@ export default function AuditCollectDialog({ node, onClose }: {
         {execOnly && <Typography variant="body2">{t(`${A}exec_only`)}</Typography>}
         {error && <Alert severity="error">{error}</Alert>}
         <RadioGroup value={mode} onChange={(_, v) => setMode(v as AuditCollect)} aria-label={t(`${A}label`)} sx={{ gap: 1 }}>
-          {/* A node already set to the usage mode (which this build cannot offer) shows it, so it is not mistaken for "hits". */}
-          {(stored === 'hits_and_usage' ? [...MODES, 'hits_and_usage' as const] : MODES).map(option)}
+          {MODES.map(option)}
         </RadioGroup>
+        {mode === 'hits_and_usage' && !legalOn && (
+          <FieldHint tone="amber" summary={t(`${A}usage_privacy_summary`)} detail={t(`${A}usage_privacy_detail`)} />
+        )}
+        {stored === 'hits_and_usage' && mode !== 'hits_and_usage' && (
+          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}usage_off_note`, { usageDays: usageDays ?? '…' })}</Typography>
+        )}
       </DialogContent>
       <DialogActions sx={{ flexDirection: 'column', alignItems: 'stretch', gap: 1, p: 2 }}>
-        {!execOnly && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t(`${A}restart`)}</Typography>}
+        {!execOnly && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{mode === 'hits_and_usage' ? t(`${A}restart_usage`, { usageDays: usageDays ?? '…' }) : t(`${A}restart`)}</Typography>}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
           <Button onClick={() => guard(onClose)}>{t(`${A}cancel`)}</Button>
           {!execOnly && <AsyncButton variant="contained" disabled={!dirty} onClick={submit}>{t(`${A}save`)}</AsyncButton>}

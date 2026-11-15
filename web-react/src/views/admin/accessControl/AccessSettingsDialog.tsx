@@ -23,12 +23,14 @@ const S = 'admin:access_control.settings.'
 // DestPolicyApplyMinSeconds 30–3600, DestListRefreshHours 6–168). The server
 // refuses a value outside them, and the defaults come from the served
 // `defaults`, never from here.
-const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours' | 'dest_hit_retention_days' | 'dest_trial_retention_days'; focus: SettingsFocus })[] = [
+const FIELDS: (FieldSpec & { key: 'dest_policy_apply_min_seconds' | 'dest_list_refresh_hours' | 'dest_hit_retention_days' | 'dest_trial_retention_days' | 'dest_usage_retention_days'; focus: SettingsFocus })[] = [
   { key: 'dest_policy_apply_min_seconds', kind: 'number', label: `${S}apply_seconds`, hint: `${S}apply_seconds_hint`, min: 30, max: 3600, tail: true, focus: 'apply' },
   { key: 'dest_list_refresh_hours', kind: 'number', label: `${S}refresh_hours`, hint: `${S}refresh_hours_hint`, min: 6, max: 168, tail: true, focus: 'refresh' },
   // DestHitRetentionDays 1–365; the allowlist report-only data's own retention is 1–30.
   { key: 'dest_hit_retention_days', kind: 'number', label: `${S}hit_retention_days`, hint: `${S}hit_retention_days_hint`, min: 1, max: 365, tail: true, focus: 'retention' },
   { key: 'dest_trial_retention_days', kind: 'number', label: `${S}trial_retention_days`, hint: `${S}trial_retention_days_hint`, min: 1, max: 30, tail: true, focus: 'trial' },
+  // DestUsageRetentionDays (per-site usage, tier B) 1–30.
+  { key: 'dest_usage_retention_days', kind: 'number', label: `${S}usage_retention_days`, hint: `${S}usage_retention_days_hint`, min: 1, max: 30, tail: true, focus: 'usage' },
 ]
 
 export interface AccessSettingsDialogProps {
@@ -99,9 +101,12 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
   const submit = async () => {
     setErrors({})
     // A shorter retention deletes records within the hour, for good: asked first (S20).
-    if (read.data && 'dest_hit_retention_days' in changed) {
-      const next = changed.dest_hit_retention_days || read.data.defaults.dest_hit_retention_days
-      if (next && next < read.data.effective.dest_hit_retention_days && !(await confirm(shortenRetentionConfirm(t, next)))) return
+    // Each retention is asked about on its own, so a save that shortens two asks twice.
+    for (const key of ['dest_hit_retention_days', 'dest_usage_retention_days'] as const) {
+      if (!read.data || !(key in changed)) continue
+      const next = changed[key] || read.data.defaults[key]
+      const now = read.data.effective[key] ?? read.data.defaults[key]
+      if (next && now && next < now && !(await confirm(shortenRetentionConfirm(t, next)))) return
     }
     try {
       await save.mutateAsync(changed)
@@ -133,6 +138,12 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
                   effective={read.data.effective.dest_hit_retention_days} error={errors.dest_hit_retention_days}
                   onChange={v => setDraft({ ...draft, dest_hit_retention_days: v as number })} />
                 {errors.dest_hit_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_hit_retention_days}</Typography>}
+              </Box>
+              <Box data-focus="usage" sx={{ mt: 2 }}>
+                <PolicyField spec={FIELDS[4]} value={draft.dest_usage_retention_days ?? 0} defaults={read.data.defaults}
+                  effective={read.data.effective.dest_usage_retention_days ?? read.data.defaults.dest_usage_retention_days} error={errors.dest_usage_retention_days}
+                  onChange={v => setDraft({ ...draft, dest_usage_retention_days: v as number })} />
+                {errors.dest_usage_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_usage_retention_days}</Typography>}
               </Box>
               <Box data-focus="trial" sx={{ mt: 2 }}>
                 <PolicyField spec={FIELDS[3]} value={draft.dest_trial_retention_days} defaults={read.data.defaults}

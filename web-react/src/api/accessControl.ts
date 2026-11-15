@@ -436,8 +436,27 @@ export interface DestUserView {
   hits_available: boolean | null
   /** Absent when the server has no hit store. `days` is the window, already clamped to the retention. */
   recent_hits: { days: number; items: DestUserHit[] } | null
+  /** Whether at least one node the account has a client on records per-site usage now; when false, "no usage" says nothing. */
   usage_available: boolean | null
-  usage_nodes: unknown
+  usage_nodes: DestUsageNode[] | null
+}
+
+/** A node that records an account's per-site usage. */
+export interface DestUsageNode { panel_id: number; name: string }
+
+/** One site's connection count in an account's usage. */
+export interface DestUsageSite { site: string; count: number }
+
+/** What POST /dest/users/:id/usage answers: the twenty most-used sites and the rest as one line. */
+export interface DestUsage {
+  /** The window that was read: the requested days held to the usage retention. */
+  effective_days: number
+  nodes: DestUsageNode[]
+  items: DestUsageSite[]
+  others: { sites: number; count: number }
+  total: number
+  /** Usage rows the nodes or the panel could not keep in the window; the counts are at least this much short. */
+  dropped_in_range: number
 }
 
 // ---- status ----
@@ -465,6 +484,10 @@ export interface DestNodeStatus {
   collect_effective: string
   /** Whether it records now (derived; a quiet node sends nothing). */
   collecting: boolean
+  /** Whether it records per-site usage now (derived like `collecting`). Absent from an older panel. */
+  collecting_usage?: boolean
+  /** The panel is set to per-site usage and the node refused the policy that records it: no usage is recorded until a retry, an upgrade or a capability change. */
+  usage_refused?: boolean
   /** How the panel is set to treat host names under IP rules. Absent from an older panel (read as as_is). */
   resolve?: DestResolve
   /** What the node was actually sent; '' is as_is. */
@@ -603,6 +626,8 @@ export interface DestSettings {
   /** How long hit records are kept; 0 is unset (the default). */
   dest_hit_retention_days: number
   dest_trial_retention_days: number
+  /** How long per-site usage is kept; 0 is unset (the default). Absent from an older panel. */
+  dest_usage_retention_days?: number
 }
 
 export interface DestSettingsView {
@@ -728,7 +753,18 @@ export async function getDestUser(id: number, opts: ReadOptions = {}): Promise<D
   return {
     ...data,
     recent_hits: hits ? { ...hits, items: arr(hits.items).map(h => ({ ...h, top_dests: arr(h.top_dests), panels: arr(h.panels) })) } : null,
+    usage_nodes: data.usage_nodes ? arr(data.usage_nodes) : null,
   }
+}
+
+/**
+ * One account's per-site usage over a range ("24h" or "<N>d"; the server holds N
+ * to the usage retention). A POST on purpose: every read is a row in the admin
+ * audit log, and nothing is cached.
+ */
+export async function postDestUserUsage(id: number, body: { range: string; panel_id?: number }, opts: ReadOptions = {}): Promise<DestUsage> {
+  const { data } = await client.post<DestUsage>(`${BASE}/users/${id}/usage`, body, { signal: opts.signal, _skipErrorToast: true })
+  return { ...data, nodes: arr(data.nodes), items: arr(data.items), others: data.others ?? { sites: 0, count: 0 } }
 }
 
 /**
@@ -926,7 +962,7 @@ export async function addDestException(input: { target: string; match: 'site' | 
   return data
 }
 
-/** What a Passwall Node server records of its destination rules. `hits_and_usage` is not offered yet. */
+/** What a Passwall Node server records of its destination rules. `hits_and_usage` adds per-site connection counts (Xray nodes that declare it). */
 export type AuditCollect = 'off' | 'hits' | 'hits_and_usage'
 
 /** The recording mode of one native server: PUT /servers/:id with this one key (the others are kept). */

@@ -95,9 +95,9 @@ func (s *Service) ObserveStatus(ctx context.Context, agentID string, caps []stri
 		if status.Digest == collectOnlyDigest {
 			s.mu.Lock()
 			if s.collectRefused == nil {
-				s.collectRefused = map[string]string{}
+				s.collectRefused = map[string]collectRefusal{}
 			}
-			s.collectRefused[agentID] = capsToken(caps)
+			s.collectRefused[agentID] = collectRefusal{caps: capsToken(caps)}
 			delete(s.compiled, agentID)
 			s.mu.Unlock()
 		}
@@ -192,12 +192,49 @@ func (s *Service) Retry(ctx context.Context, agentID string) (bool, error) {
 }
 
 // collectOnlyRefused says whether the node refused the collect-only policy under
-// these very capabilities. A change of capabilities (or the admin's Retry) lifts
-// it. It is held in memory: after a restart the policy is offered once more and
-// refused once more, which costs one sync.
-func (s *Service) collectOnlyRefused(agentID string, caps []string) bool {
+// these very capabilities and this agent release. A change of either (or the
+// admin's Retry) lifts it. It is held in memory: after a restart the policy is
+// offered once more and refused once more, which costs one sync.
+func (s *Service) collectOnlyRefused(agentID string, caps []string, version string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tok, ok := s.collectRefused[agentID]
-	return ok && tok == capsToken(caps)
+	r, ok := s.collectRefused[agentID]
+	if !ok {
+		return false
+	}
+	if r.caps != capsToken(caps) {
+		return false
+	}
+	if r.version == "" {
+		// Learned from the report this sync carries: the release is the one that refused.
+		r.version = version
+		s.collectRefused[agentID] = r
+		return true
+	}
+	if r.version != version {
+		delete(s.collectRefused, agentID)
+		return false
+	}
+	return true
+}
+
+// CollectOnlyRefused is collectOnlyRefused for a reader (the status page): it
+// never changes what is remembered.
+func (s *Service) CollectOnlyRefused(agentID string, caps []string, version string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.collectRefused[agentID]
+	return ok && r.caps == capsToken(caps) && (r.version == "" || r.version == version)
+}
+
+// liftStaleCollectRefusal forgets a refusal of the collect-only policy made by
+// another agent release than the one reporting now, and the compile answer that
+// was cached under it.
+func (s *Service) liftStaleCollectRefusal(agentID, version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.collectRefused[agentID]; ok && r.version != "" && version != "" && r.version != version {
+		delete(s.collectRefused, agentID)
+		delete(s.compiled, agentID)
+	}
 }

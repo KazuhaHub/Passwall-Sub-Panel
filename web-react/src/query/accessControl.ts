@@ -2,7 +2,7 @@ import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient, 
 import {
   addDestException, createDestExemption, createDestList, createDestPolicy, deleteDestExemption, deleteDestList, deleteDestPolicy,
   editDestListEntries, getDestCatalog, getDestExemptions, getDestList, getDestLists, getDestPolicies, getDestSettings,
-  getDestSourceRule, getDestSourceRules, getDestStatus, getDestUser, getGeositeCategories, getGeositeStatus,
+  getDestSourceRule, getDestSourceRules, getDestStatus, getDestUser, postDestUserUsage, getGeositeCategories, getGeositeStatus,
   getDestGroup, getDestGroupReport, getDestGroups, getDestHits, instantiateDestTemplate, previewDestGroup, putDestGroup, pauseDest, publishDest, putDestSettings, putDestSourceRule, refreshDestList,
   reorderDestPolicies, retryDestAgent, rollbackGeosite, setAuditCollect, setDestResolve, testDestination, updateDestExemption, updateDestList,
   updateDestPolicy, updateGeosite,
@@ -168,6 +168,18 @@ export function useDestUser(scope: QueryScope, userId: number, { enabled = true 
     enabled: enabled && userId > 0,
     ...freshness(policies.destUser),
   }))
+}
+
+/**
+ * One account's per-site usage. A mutation, not a query: a read is a deliberate
+ * click that leaves an audit row, so nothing fetches it by itself, caches it or
+ * refetches it on focus.
+ */
+export function useDestUserUsage(_scope: QueryScope) {
+  return useMutation({
+    mutationFn: ({ userId, range, panelId }: { userId: number; range: string; panelId?: number }) =>
+      postDestUserUsage(userId, panelId ? { range, panel_id: panelId } : { range }),
+  })
 }
 
 /** The hit records of one filter set; the previous page stays on screen while the next loads. */

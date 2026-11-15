@@ -41,11 +41,16 @@ export class PreviewBoundary extends Component<{ message: string; children: Reac
 
 const bytesOf = (s: string) => new TextEncoder().encode(s).length
 
-interface Props { kind: LegalKind; onClose: () => void }
+interface Props {
+  kind: LegalKind
+  onClose: () => void
+  /** The settings draft's "disclose per-site usage" switch, saved or not: the preview follows it. */
+  discloseUsage?: boolean
+}
 
 /** The full-screen editor of one document: Markdown on the left, the page's own
  *  rendering on the right. A write is independent of the settings draft. */
-export default function LegalEditorDialog({ kind, onClose }: Props) {
+export default function LegalEditorDialog({ kind, onClose, discloseUsage = false }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
@@ -90,6 +95,17 @@ export default function LegalEditorDialog({ kind, onClose }: Props) {
   const used = bytesOf(text)
   const over = used > LEGAL_CONTENT_MAX_BYTES
   const hasMarker = splitAtMarker(text).length > 1
+  // The generated list is the server's, from the SAVED settings. The switch may
+  // be unsaved: switched off, the usage line is taken out; switched on and not
+  // in the list, the preview says why (an unsaved switch, or no node records it).
+  const saved = q.data?.data_collection
+  const previewCollection = useMemo(() => {
+    if (!saved) return null
+    if (discloseUsage || !saved.dest_usage) return saved
+    const { dest_usage: _off, ...rest } = saved
+    return rest
+  }, [saved, discloseUsage])
+  const usageMissing = discloseUsage && !!saved && !saved.dest_usage?.enabled
   const canPublish = draft !== null && !over && text.trim() !== '' && text !== (published?.content ?? null)
   const nextVersion = Math.max(0, ...(q.data?.versions ?? []).filter(v => v.locale === locale).map(v => v.version)) + 1
 
@@ -121,7 +137,7 @@ export default function LegalEditorDialog({ kind, onClose }: Props) {
     </TextField>
   )
   const insertButton = (
-    <Button size="small" variant="outlined" disabled={hasMarker || draft === null}
+    <Button size="small" variant="outlined" disabled={hasMarker || draft === null || (phone && pane === 'preview')}
       onClick={() => editor.current?.insertLine(DATA_COLLECTION_MARKER)}>
       {t('settings.legal.editor.insert')}
     </Button>
@@ -142,8 +158,13 @@ export default function LegalEditorDialog({ kind, onClose }: Props) {
           <FieldHint tone="amber" summary={t('settings.legal.editor.no_marker_summary')} detail={t('settings.legal.editor.no_marker_detail')} />
         </Box>
       )}
+      {usageMissing && (
+        <Box sx={{ mb: 1.5 }}>
+          <FieldHint tone="amber" summary={t('settings.legal.editor.usage_missing_summary')} detail={t('settings.legal.editor.usage_missing_detail')} />
+        </Box>
+      )}
       <PreviewBoundary message={t('settings.legal.editor.preview_failed')}>
-        <LegalDocument content={preview} dataCollection={q.data?.data_collection ?? null} />
+        <LegalDocument content={preview} dataCollection={previewCollection} />
       </PreviewBoundary>
     </Box>
   )

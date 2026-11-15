@@ -12,7 +12,7 @@ import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import NodePolicyStatusRow from '@/components/NodePolicyStatusRow'
 import { useDestSettings, useDestStatus, useRetryDestAgent } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { collectingNodeCount, isNativeKind, NODE_FILTERS, NODE_STATE_FILTER, nodeStateKey } from '@/utils/accessControl'
+import { isNativeKind, NODE_FILTERS, NODE_STATE_FILTER, nodeStateKey } from '@/utils/accessControl'
 import { reportDestError, reportRetry } from '../destErrors'
 import type { NodeFilter } from '../accessParams'
 import SheetDrawer from './SheetDrawer'
@@ -67,7 +67,9 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
   }
   const toServer = (n: DestNodeStatus) => void navigate(`/admin/servers?q=${encodeURIComponent(n.panel_name)}`)
   const release = status.data?.geosite_release
-  const recordingCount = collectingNodeCount(status.data)
+  const usageCount = status.data ? status.data.nodes.filter(n => n.collecting_usage).length : 0
+  // A node on the usage mode is counted on its own line, not as one that records rule matches only.
+  const recordingCount = status.data ? status.data.nodes.filter(n => n.collecting && !n.collecting_usage).length : 0
 
   return (
     <SheetDrawer open={open} onClose={onClose} headingId="coverage-heading"
@@ -82,11 +84,18 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
         <>
           <Box data-testid="recording-note" sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', p: 1.25, mb: 1, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
             <InfoOutlinedIcon aria-hidden sx={{ fontSize: 18, mt: '2px', color: md.onSurfaceVariant }} />
-            <Typography variant="body2">
-              {recordingCount > 0
-                ? t(`${C}recording_note`, { count: recordingCount, days: settings.data?.effective.dest_hit_retention_days ?? '…' })
-                : t(`${C}recording_none`)}
-            </Typography>
+            <Box sx={{ display: 'grid', gap: 0.5 }}>
+              <Typography variant="body2">
+                {recordingCount > 0
+                  ? t(`${C}recording_note`, { count: recordingCount, days: settings.data?.effective.dest_hit_retention_days ?? '…' })
+                  : usageCount > 0 ? t(`${C}recording_raw_log`) : t(`${C}recording_none`)}
+              </Typography>
+              {usageCount > 0 && (
+                <Typography variant="body2" data-testid="recording-usage-note">
+                  {t(`${C}usage_note`, { count: usageCount, days: settings.data?.effective.dest_usage_retention_days ?? '…' })}
+                </Typography>
+              )}
+            </Box>
           </Box>
           <KpiGrid>
             {NODE_FILTERS.map(f => (

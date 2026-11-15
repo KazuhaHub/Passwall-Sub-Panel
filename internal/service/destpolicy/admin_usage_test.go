@@ -98,3 +98,47 @@ func TestStatus_ACollectOnlyNodeShowsNoAppliedRulesOrGroups(t *testing.T) {
 		t.Fatalf("applied_rules %d, groups %v: the node enforces nothing", n.AppliedRules, n.AllowlistGroups)
 	}
 }
+
+// A node that refused the collect-only policy runs no usage collection, and
+// nothing else says so: the status carries it, so the administrator can see
+// that usage stopped and retry. A retry clears it.
+func TestStatus_ARefusedCollectOnlyPolicyIsSaidAndRetryClearsIt(t *testing.T) {
+	ah := newAdminHarness(t)
+	agent := ah.admin.Agents.(fakeAgents).agents[0]
+	agent.ObservedCapabilities = []string{policyCap, hitsCap, usageCap}
+	ah.panels.panels[9].AuditCollect = domain.AuditCollectHitsAndUsage
+	if n := nodeOf(t, mustStatus(t, ah), 9); n.UsageRefused {
+		t.Fatal("a node that refused nothing is flagged")
+	}
+	if err := ah.repos.Agents.Patch(ah.ctx, "agt_9", domain.DestAgentPolicyPatch{MintedSHA256: ptr(collectOnlyDigest)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ah.admin.Service.ObserveStatus(ah.ctx, "agt_9", agent.ObservedCapabilities, rejected(collectOnlyDigest)); err != nil {
+		t.Fatal(err)
+	}
+	n := nodeOf(t, mustStatus(t, ah), 9)
+	if !n.UsageRefused || n.CollectingUsage {
+		t.Fatalf("usage_refused %v collecting_usage %v", n.UsageRefused, n.CollectingUsage)
+	}
+	// Set to hits, there is nothing to refuse, so nothing is said.
+	ah.panels.panels[9].AuditCollect = domain.AuditCollectHits
+	if nodeOf(t, mustStatus(t, ah), 9).UsageRefused {
+		t.Fatal("a hits node is flagged")
+	}
+	ah.panels.panels[9].AuditCollect = domain.AuditCollectHitsAndUsage
+	if ok, err := ah.admin.Service.Retry(ah.ctx, "agt_9"); err != nil || !ok {
+		t.Fatalf("Retry = %v, %v", ok, err)
+	}
+	if nodeOf(t, mustStatus(t, ah), 9).UsageRefused {
+		t.Fatal("retry did not clear it")
+	}
+}
+
+func mustStatus(t *testing.T, ah *adminHarness) *StatusView {
+	t.Helper()
+	v, err := ah.admin.Status(ah.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}

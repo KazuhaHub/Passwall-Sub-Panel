@@ -717,15 +717,17 @@
         "discard_message": "The draft is lost when you close.",
         "discard_confirm": "Discard",
         "switch_title": "Switch language?",
-        "switch_message": "This language has unsaved changes, which are lost when you switch."
+        "switch_message": "This language has unsaved changes, which are lost when you switch.",
+        "usage_missing_summary": "The preview has no per-site usage line",
+        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings."
       },
       "publish": {
         "title": "Publish {{doc}} ({{locale}}) version {{version}}?",
         "diff": "{{added}} characters added, {{removed}} removed since the last version",
         "first": "This is the first version in this language.",
         "bump": "Material change: ask users to consent again",
-        "bump_hint": "When checked, about {{users}} ordinary users will see the consent dialog at their next sign-in; subscriptions are not interrupted. Leave it off for typo fixes.",
-        "bump_hint_loading": "When checked, ordinary users will see the consent dialog at their next sign-in; subscriptions are not interrupted. Leave it off for typo fixes.",
+        "bump_hint": "When checked, about {{users}} ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
+        "bump_hint_loading": "When checked, ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
         "cancel": "Cancel",
         "confirm": "Publish",
         "done": "Version {{version}} published",
@@ -3435,7 +3437,9 @@
       "hits_24h": "Hits, 24 hours",
       "view_records": "View records",
       "hits_none_note": "This node has not started reporting hits yet; numbers appear once a policy is applied. The dash does not mean zero.",
-      "resolve": "Host name matching"
+      "resolve": "Host name matching",
+      "recording_hits_and_usage": "Rule matches and per-site usage",
+      "usage_retention": "usage kept {{days}} days"
     }
   },
   "diagnostics": {
@@ -4775,7 +4779,8 @@
       "not_enrolled": "This native node has not enrolled: no agent has reported.",
       "allowlist_groups": "Allowlist groups delivered: {{groups}}",
       "groups_dropped": "These groups were not delivered because an inbound's sniffing cannot read domains: {{groups}}. They do not apply on any inbound of this node.",
-      "groups_separator": ", "
+      "groups_separator": ", ",
+      "usage_refused": "The node refused the usage setting, so no usage is recorded"
     },
     "node_action": {
       "retry": "Apply again",
@@ -4794,7 +4799,9 @@
       "rejected_impact": "Impact: still running the previous version",
       "over_limit_title": "{{what}} {{used}} / {{limit}}, over the quota",
       "over_limit_impact": "Impact: still running the previous version",
-      "list_separator": ", "
+      "list_separator": ", ",
+      "usage_refused_title": "The node refused the per-site usage setting",
+      "usage_refused_impact": "Impact: this node records no usage; rules and hits are unaffected. It is tried again after Apply again, and after the node is upgraded."
     },
     "lists": {
       "new": "New list",
@@ -5029,7 +5036,29 @@
       "hits_source_rule": "Source rule · {{name}}",
       "hits_list_separator": ", ",
       "allowlist_report": "Allowlist · report only",
-      "allowlist_on": "Allowlist · on"
+      "allowlist_on": "Allowlist · on",
+      "usage_title": "Per-site usage",
+      "usage_help": "Connections per hour, not traffic, grouped by the site's registrable domain (such as google.com); direct IP connections are counted as \"(ip)\". No URL paths or source IPs. Only nodes that record usage have data.",
+      "usage_audit": "Every view is written to the admin audit log, which only administrators can see.",
+      "usage_view": "View usage",
+      "usage_range_24h": "24 hours",
+      "usage_range_days_one": "{{count}} day",
+      "usage_range_days_other": "{{count}} days",
+      "usage_range_label": "Usage range",
+      "usage_node_all": "All nodes",
+      "usage_node_label": "Node",
+      "usage_col_site": "Site",
+      "usage_col_count": "Connections",
+      "usage_others": "{{sites}} other sites",
+      "usage_total": "{{n}} connections in all",
+      "usage_window": "Showing the past {{days}} days, the most usage is kept",
+      "usage_none": "No usage in this range",
+      "usage_dropped": "{{n}} usage rows were not saved because of node or panel limits, so the real counts may be higher.",
+      "usage_from": "From {{nodes}}",
+      "usage_not_recorded": "None of this account's nodes record per-site usage",
+      "usage_load_failed": "Could not read the usage",
+      "usage_nodes": "Recording settings",
+      "usage_help_label": "About per-site usage"
     },
     "sheet": {
       "close": "Close"
@@ -5055,7 +5084,9 @@
       "hit_retention_days": "Hit-record retention (days)",
       "hit_retention_days_hint": "How long hit records are kept; after shortening it, older records are deleted.",
       "trial_retention_days": "Report-only data retention (days)",
-      "trial_retention_days_hint": "How long the sites recorded while an allowlist group is report only are kept; never longer than the hit-record retention."
+      "trial_retention_days_hint": "How long the sites recorded while an allowlist group is report only are kept; never longer than the hit-record retention.",
+      "usage_retention_days": "Per-site usage kept (days)",
+      "usage_retention_days_hint": "How long per-site usage is kept; shortening it deletes the older usage."
     },
     "rule_data": {
       "read_failed": "Could not read the rule data version",
@@ -5177,7 +5208,10 @@
       "recording_note_other": "{{count}} nodes record rule matches only (kept {{days}} days) · the raw access log never leaves the node",
       "recording_none": "No node is recording hits · the raw access log never leaves the node",
       "set_recording": "Set the recording…",
-      "set_resolve": "Set host name matching…"
+      "set_resolve": "Set host name matching…",
+      "usage_note_one": "{{count}} node records per-site usage, hits included (kept {{days}} days)",
+      "usage_note_other": "{{count}} nodes record per-site usage, hits included (kept {{days}} days)",
+      "recording_raw_log": "The raw access log never leaves the node"
     },
     "policies": {
       "read_failed": "Could not read the policies",
@@ -5645,7 +5679,7 @@
         "hits_and_usage": "Rule matches and per-site usage"
       },
       "mode_help": {
-        "hits_and_usage": "This node was set to also record per-site usage; this version does not offer it, so it runs as \"Rule matches only\". Pick one of the modes above to change it.",
+        "hits_and_usage": "Besides rule matches, records how many connections each account makes to each site (registrable domain, such as google.com) per hour: no URL paths, byte counts or source IPs. Usage is kept {{usageDays}} days.",
         "off": "Only enforces the policies and keeps no record.",
         "hits": "Notes the connections that matched a block or a report-only rule: account, destination, count, summed by the hour and kept {{days}} days. The raw access log never leaves the node."
       },
@@ -5656,12 +5690,19 @@
       "save": "Save",
       "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
       "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
-      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes"
+      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
+      "usage_cost": "Cost: on a busy node the proxy uses about 40% more CPU (worst-case test). That is why it is an opt-in per node and off by default.",
+      "usage_too_old": "The node agent needs an upgrade to record usage",
+      "usage_privacy_summary": "The privacy page is not enabled",
+      "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",
+      "usage_off_note": "Turning it off stops new usage from being recorded; the usage already recorded is kept until its {{usageDays}} days are up, then deleted automatically.",
+      "restart_usage": "Saving restarts this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
     },
     "node_recording": {
       "mode": {
         "off": "Don't record",
-        "hits": "Rule matches only"
+        "hits": "Rule matches only",
+        "hits_and_usage": "Rule matches and per-site usage"
       },
       "hits_24h": "{{n}} in 24 hours",
       "reported": "reported {{ago}}",

@@ -258,10 +258,6 @@ export const policies = {
     refetchInterval: false,
     note: 'Paced by the observation window (15s, 5 min budget), not by this policy.',
   },
-  /**
-   * The global UI settings blob. Slow to change and edited in forms, so it is
-   * never polled and its cached copy is only a starting point for a draft.
-   */
   /** The published terms and privacy documents, their history, and how many users a material change would ask again. */
   legalAdmin: {
     staleTime: 30 * SECOND,
@@ -269,6 +265,10 @@ export const policies = {
     refetchInterval: false,
     note: 'Edited by the admin on this page; a publish invalidates both documents. The affected-user count is re-read each time the publish dialog opens.',
   },
+  /**
+   * The global UI settings blob. Slow to change and edited in forms, so it is
+   * never polled and its cached copy is only a starting point for a draft.
+   */
   uiSettings: {
     staleTime: 5 * MINUTE,
     gcTime: 15 * MINUTE,
