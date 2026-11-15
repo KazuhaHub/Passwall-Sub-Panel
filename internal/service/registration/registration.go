@@ -146,6 +146,9 @@ type RegisterInput struct {
 // verification before it can be used.
 type RegisterResult struct {
 	RequiresVerification bool
+	// UserID is the account the signup created (or, for a resumed signup, the
+	// pending account it picked up again).
+	UserID int64
 }
 
 // Register validates and creates a new local account. Unlike password recovery,
@@ -195,10 +198,11 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 
 	if !requireVerify {
 		// No verification → create and provision immediately (account is live).
-		if _, err := s.d.Users.CreateLocalAndSync(ctx, cin); err != nil {
+		created, err := s.d.Users.CreateLocalAndSync(ctx, cin)
+		if err != nil {
 			return nil, err
 		}
-		return &RegisterResult{RequiresVerification: false}, nil
+		return &RegisterResult{RequiresVerification: false, UserID: created.User.ID}, nil
 	}
 
 	// Resume an abandoned signup: if a PENDING (unverified, disabled) account
@@ -217,7 +221,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 				return nil, perr
 			}
 			s.sendVerification(ctx, set, existing)
-			return &RegisterResult{RequiresVerification: true}, nil
+			return &RegisterResult{RequiresVerification: true, UserID: existing.ID}, nil
 		}
 		return nil, domain.ErrAlreadyExists
 	}
@@ -229,7 +233,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 		return nil, err
 	}
 	s.sendVerification(ctx, set, res.User)
-	return &RegisterResult{RequiresVerification: true}, nil
+	return &RegisterResult{RequiresVerification: true, UserID: res.User.ID}, nil
 }
 
 // ResendVerification re-sends the email-verify code/link for a PENDING account.

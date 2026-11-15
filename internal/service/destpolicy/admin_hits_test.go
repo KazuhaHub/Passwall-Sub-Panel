@@ -157,3 +157,28 @@ func TestStatus_CarriesTheResolveFieldsOfANode(t *testing.T) {
 		t.Fatalf("an as_is node = %v", n.ResolveUnavailable)
 	}
 }
+
+// The privacy page counts the nodes that record rule hits with the same
+// derivation the status page uses (R17), not a second one.
+func TestCollectingNodes_CountsTheRecordingNodes(t *testing.T) {
+	ah := newAdminHarness(t)
+	ctx := ah.ctx
+	agent := ah.admin.Agents.(fakeAgents).agents[0]
+	agent.ObservedCapabilities = []string{policyCap, hitsCap}
+
+	if n, err := ah.admin.CollectingNodes(ctx); err != nil || n != 0 {
+		t.Fatalf("nothing minted: %d, %v; want 0", n, err)
+	}
+	if err := ah.repos.Agents.Patch(ctx, "agt_9", domain.DestAgentPolicyPatch{
+		MintedSHA256: ptr("d1"), ReportedSHA256: ptr("d1"), ReportedState: ptr("applied"), CollectEffective: ptr("hits"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := ah.admin.CollectingNodes(ctx); err != nil || n != 1 {
+		t.Fatalf("one node applied a recording policy: %d, %v; want 1", n, err)
+	}
+	agent.ObservedCoreEngine = domain.NodeCoreSingBox
+	if n, _ := ah.admin.CollectingNodes(ctx); n != 0 {
+		t.Fatalf("a sing-box node enforces but does not record: %d", n)
+	}
+}

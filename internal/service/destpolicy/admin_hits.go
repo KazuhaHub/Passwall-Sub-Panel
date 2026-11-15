@@ -79,3 +79,10 @@ func (a *Admin) HitRetentionDays(ctx context.Context) int {
 	}
 	return days
 }
+
+// CollectingNodes is how many native nodes are recording hits right now
+// (derived, R17): the number the privacy page states.
+func (a *Admin) CollectingNodes(ctx context.Context) (int, error) {
+	rec, err := a.recordingPanels(ctx)
+	return len(rec), err
+}

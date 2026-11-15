@@ -258,6 +258,12 @@ type settingsDTO struct {
 	TwoFAEmailResendCooldownSec int  `json:"twofa_email_resend_cooldown_sec"`
 	CodeResendCooldownSec       int  `json:"code_resend_cooldown_sec"`
 	Require2FAForStaff          bool `json:"require_2fa_for_staff"`
+	// Privacy and terms. legal_enabled and legal_disclose_usage are saved by this
+	// page; legal_consent_version is shown only: the publish endpoint is its one
+	// writer and Put keeps the stored value whatever the request carries.
+	LegalEnabled        bool `json:"legal_enabled"`
+	LegalConsentVersion int  `json:"legal_consent_version"`
+	LegalDiscloseUsage  bool `json:"legal_disclose_usage"`
 
 	// Native task evidence policy; these settings do not themselves prune data.
 	NodeTaskOfflineReconcileDays int `json:"node_task_offline_reconcile_days"`
@@ -435,6 +441,9 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		PasswordRecoveryEnabled:              s.PasswordRecoveryEnabled,
 		PasswordRecoveryDelivery:             s.PasswordRecoveryDelivery,
 		RegistrationEnabled:                  s.RegistrationEnabled,
+		LegalEnabled:                         s.LegalEnabled,
+		LegalConsentVersion:                  s.LegalConsentVersion,
+		LegalDiscloseUsage:                   s.LegalDiscloseUsage,
 		RegistrationRequireEmailVerification: !s.RegistrationAllowUnverified,
 		RegistrationEmailDomains:             s.RegistrationEmailDomains,
 		RegistrationDefaultGroupID:           s.RegistrationDefaultGroupID,
@@ -620,6 +629,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		TwoFAEmailResendCooldownSec:   req.TwoFAEmailResendCooldownSec,
 		CodeResendCooldownSec:         req.CodeResendCooldownSec,
 		Require2FAForStaff:            req.Require2FAForStaff,
+		LegalEnabled:                  req.LegalEnabled,
+		LegalDiscloseUsage:            req.LegalDiscloseUsage,
+		// The consent version is the publish endpoint's: kept as stored.
+		LegalConsentVersion: prev.LegalConsentVersion,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 
 		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
