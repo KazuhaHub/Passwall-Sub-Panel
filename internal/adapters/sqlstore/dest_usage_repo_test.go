@@ -69,10 +69,15 @@ func TestStoreBatchWithUsage_AddsCountsAcrossBatchesAndMergesWithinOne(t *testin
 		t.Fatal(err)
 	}
 	var rows []destUsageRow
-	if err := db.Order("site").Find(&rows).Error; err != nil {
+	if err := db.Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0].Site != "(ip)" || rows[0].Count != 1 || rows[1].Site != "a.example" || rows[1].Count != 9 {
+	// Compared as a set: the dialects' collations order "(ip)" differently.
+	got := map[string]int64{}
+	for _, row := range rows {
+		got[row.Site] = row.Count
+	}
+	if len(rows) != 2 || got["(ip)"] != 1 || got["a.example"] != 9 {
 		t.Fatalf("rows = %+v, want (ip)=1 and a.example=3+2+4", rows)
 	}
 }
