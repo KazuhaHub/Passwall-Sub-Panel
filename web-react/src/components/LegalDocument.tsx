@@ -8,7 +8,8 @@ import DataCollectionCard from './DataCollectionCard'
 import { safeLinkComponents, safeMarkdownProps } from './ReleaseNotes'
 
 // The marker is a line of its own, as the editor inserts it.
-const MARKER_LINE = new RegExp(`^[ \\t]*${DATA_COLLECTION_MARKER.replace(/[[\]]/g, '\\$&')}[ \\t]*$`, 'm')
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const MARKER_LINE = new RegExp(`^[ \\t]*${escapeRegExp(DATA_COLLECTION_MARKER)}[ \\t]*$`, 'm')
 
 /** The text cut at every marker line; one more segment than markers. */
 export function splitAtMarker(content: string): string[] {
