@@ -995,7 +995,7 @@ func TestSettingsKV_DestKeysRoundTrip(t *testing.T) {
 	}
 
 	in := fresh
-	in.SetAccessControlSettings(ports.AccessControlSettings{DestPolicyApplyMinSeconds: 90, DestListRefreshHours: 12, DestRulesUpdateMode: "auto", DestHitRetentionDays: 45, DestTrialRetentionDays: 5})
+	in.SetAccessControlSettings(ports.AccessControlSettings{DestPolicyApplyMinSeconds: 90, DestListRefreshHours: 12, DestRulesUpdateMode: "auto", DestHitRetentionDays: 45, DestTrialRetentionDays: 5, DestUsageRetentionDays: 9})
 	if err := repo.Save(ctx, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -1020,6 +1020,7 @@ func TestSettingsKV_DestKeysRoundTrip(t *testing.T) {
 		"rules_update_mode":        "auto",
 		"hit_retention_days":       "45",
 		"trial_retention_days":     "5",
+		"usage_retention_days":     "9",
 	} {
 		if got, ok := stored[name]; !ok || got != want {
 			t.Errorf("dest.%s stored as %q (present %v), want %q", name, got, ok, want)

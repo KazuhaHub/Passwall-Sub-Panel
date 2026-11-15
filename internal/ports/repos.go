@@ -1732,6 +1732,12 @@ type UISettings struct {
 	// would-deny, folded to group x site) are kept. Default 7, 1..30, and in
 	// effect never longer than DestHitRetentionDays.
 	DestTrialRetentionDays int `json:"dest_trial_retention_days"`
+	// DestUsageRetentionDays is how long per-site usage rows (tier B: how many
+	// connections an account made to which site, per hour) are kept. Default 7,
+	// 1..30; 0 is the default and never "for ever". Independent of the hit
+	// retention. Switching a node's recording off does not delete what it already
+	// recorded: the rows age out here.
+	DestUsageRetentionDays int `json:"dest_usage_retention_days"`
 
 	// ---- Privacy and terms ----
 	// LegalEnabled publishes the terms and privacy pages and turns on consent

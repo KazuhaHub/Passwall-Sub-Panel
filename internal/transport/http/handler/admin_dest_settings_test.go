@@ -95,11 +95,11 @@ func TestDestSettingsGet_ServesSettingsDefaultsAndEffective(t *testing.T) {
 func TestDestSettingsPut_ChangesOnlyDestKeys(t *testing.T) {
 	stored := storedEverywhere()
 	repo := &policySettingsRepo{settings: stored}
-	body := `{"settings":{"dest_policy_apply_min_seconds":120,"dest_list_refresh_hours":12,"dest_rules_update_mode":"manual","dest_hit_retention_days":60,"dest_trial_retention_days":3}}`
+	body := `{"settings":{"dest_policy_apply_min_seconds":120,"dest_list_refresh_hours":12,"dest_rules_update_mode":"manual","dest_hit_retention_days":60,"dest_trial_retention_days":3,"dest_usage_retention_days":14}}`
 
 	rec := requestRiskPolicy(destSettingsRouter(repo), http.MethodPut, destSettingsPath, body)
 	_, echoed := decodeDestSettings(t, rec.Code, rec.Body.Bytes())
-	want := ports.AccessControlSettings{DestPolicyApplyMinSeconds: 120, DestListRefreshHours: 12, DestRulesUpdateMode: "manual", DestHitRetentionDays: 60, DestTrialRetentionDays: 3}
+	want := ports.AccessControlSettings{DestPolicyApplyMinSeconds: 120, DestListRefreshHours: 12, DestRulesUpdateMode: "manual", DestHitRetentionDays: 60, DestTrialRetentionDays: 3, DestUsageRetentionDays: 14}
 	if echoed != want {
 		t.Errorf("the answer's settings = %+v, want %+v", echoed, want)
 	}
@@ -150,6 +150,7 @@ func TestDestSettingsPut_RefusesTheWholeSave(t *testing.T) {
 		"bad mode":           {`{"settings":{"dest_rules_update_mode":"always"}}`, "dest_rules_update_mode"},
 		"hit retention high": {`{"settings":{"dest_hit_retention_days":366}}`, "dest_hit_retention_days"},
 		"trial retention":    {`{"settings":{"dest_trial_retention_days":31}}`, "dest_trial_retention_days"},
+		"usage retention":    {`{"settings":{"dest_usage_retention_days":31}}`, "dest_usage_retention_days"},
 		"negative retention": {`{"settings":{"dest_hit_retention_days":-1}}`, "dest_hit_retention_days"},
 		"one bad of two":     {`{"settings":{"dest_list_refresh_hours":24,"dest_policy_apply_min_seconds":1}}`, "dest_policy_apply_min_seconds"},
 		"unknown key":        {`{"settings":{"dest_nope":1}}`, ""},
@@ -184,6 +185,7 @@ func sentDestOtherThan(stored ports.AccessControlSettings) map[string]any {
 		"dest_rules_update_mode":        stored.DestRulesUpdateMode + "-sent",
 		"dest_hit_retention_days":       stored.DestHitRetentionDays + 7,
 		"dest_trial_retention_days":     stored.DestTrialRetentionDays + 7,
+		"dest_usage_retention_days":     stored.DestUsageRetentionDays + 7,
 	}
 }
 
