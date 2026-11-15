@@ -17,7 +17,9 @@
 // retry would block the node's roster and config.
 //
 // WHAT IS STORED. Hourly aggregates of (rule, account, destination, port) and a
-// count, never the client's source address (the protocol has none). Nothing in
+// count, never the client's source address (the protocol has none). On a panel
+// set to tier B the batch's per-site usage rows (account, site, count per hour)
+// are stored too, in the same write as the hits. Nothing in
 // this package may put a destination, an account or an address in a log line or
 // a metric label: a counter says that rows were lost, never what they were.
 package destaudit
@@ -48,6 +50,9 @@ const (
 	// defaultHourlyRowBudget is the most rows one agent may store per hour. A
 	// legitimate node is far under it; a node that is not is flooding the table.
 	defaultHourlyRowBudget = 20000
+	// defaultHourlyUsageBudget is the same bound for usage rows, kept apart so a
+	// flood of one cannot starve the other. A node's own key cap is 50000.
+	defaultHourlyUsageBudget = 50000
 	// flushEvery is how often the worker writes the loss counts that Enqueue
 	// noted in memory (it does no database work itself).
 	flushEvery = 15 * time.Second
@@ -56,21 +61,26 @@ const (
 
 	// The outcomes the row counter is told. They are the metric's label values
 	// (metrics.DestRows*), kept equal by a test.
-	metricsStored      = "hits_stored"
-	metricsUnknown     = "hits_unknown_subject"
-	metricsOutOfRange  = "hits_out_of_range"
-	metricsOverBudget  = "hits_over_budget"
-	metricsUsageOff    = "usage_collect_off"
-	reportAccepted     = "accepted"
-	reportDuplicate    = "duplicate_batch"
-	reportQueueFull    = "queue_full"
-	reportIngestError  = "ingest_error"
-	userIDLookupMaxIDs = 4096
+	metricsStored     = "hits_stored"
+	metricsUnknown    = "hits_unknown_subject"
+	metricsOutOfRange = "hits_out_of_range"
+	metricsOverBudget = "hits_over_budget"
+	metricsUsageOff   = "usage_collect_off"
+
+	metricsUsageStored     = "usage_stored"
+	metricsUsageUnknown    = "usage_unknown_subject"
+	metricsUsageOutOfRange = "usage_out_of_range"
+	metricsUsageOverBudget = "usage_over_budget"
+	reportAccepted         = "accepted"
+	reportDuplicate        = "duplicate_batch"
+	reportQueueFull        = "queue_full"
+	reportIngestError      = "ingest_error"
+	userIDLookupMaxIDs     = 4096
 )
 
 // Store is the write side (sqlstore.DestHitRepo).
 type Store interface {
-	StoreBatch(ctx context.Context, agentID, batchID string, receivedAt time.Time, rows []domain.DestHit) (domain.DestBatchResult, error)
+	StoreBatchWithUsage(ctx context.Context, agentID, batchID string, receivedAt time.Time, rows []domain.DestHit, usage []domain.DestUsage) (domain.DestBatchResult, error)
 	AddDrops(ctx context.Context, hourMS, panelID int64, kind string, n int64) error
 	ExistingUserIDs(ctx context.Context, ids []int64) (map[int64]bool, error)
 }
@@ -94,6 +104,12 @@ type Deps struct {
 	Now func() time.Time
 	// HourlyRowBudget overrides the per-agent hourly row budget (0: 20000).
 	HourlyRowBudget int
+	// HourlyUsageBudget is the same for usage rows (0: 50000).
+	HourlyUsageBudget int
+	// UsageTier says whether a panel is on tier B (per-site usage). Nil: no
+	// panel is, and every usage row is dropped and counted as such. It is asked
+	// only for a batch that carries usage rows.
+	UsageTier func(ctx context.Context, panelID int64) bool
 }
 
 type queued struct {
@@ -109,16 +125,19 @@ type lostKey struct {
 }
 
 type budget struct {
-	hour int64
-	used int
+	hour      int64
+	used      int
+	usageUsed int
 }
 
 // Service is the ingest queue and its worker.
 type Service struct {
-	store   Store
-	metrics Metrics
-	now     func() time.Time
-	budget  int
+	store       Store
+	metrics     Metrics
+	now         func() time.Time
+	budget      int
+	usageBudget int
+	usageTier   func(ctx context.Context, panelID int64) bool
 
 	mu       sync.Mutex
 	queue    []queued
@@ -144,8 +163,12 @@ func New(d Deps) *Service {
 	if b <= 0 {
 		b = defaultHourlyRowBudget
 	}
+	ub := d.HourlyUsageBudget
+	if ub <= 0 {
+		ub = defaultHourlyUsageBudget
+	}
 	return &Service{
-		store: d.Store, metrics: d.Metrics, now: now, budget: b,
+		store: d.Store, metrics: d.Metrics, now: now, budget: b, usageBudget: ub, usageTier: d.UsageTier,
 		perAgent: map[string]int{}, lost: map[lostKey]int64{}, budgets: map[string]*budget{},
 		seen: map[string]*list.Element{}, order: list.New(), wake: make(chan struct{}, 1),
 	}
@@ -347,16 +370,16 @@ func sourceOf(ruleID string) string {
 // is recovered, counted as an ingest error, recorded as dropped rows, and the
 // budget the batch had reserved is given back.
 func (s *Service) process(ctx context.Context, q queued) {
-	reserved := 0
+	reserved, usageReserved := 0, 0
 	defer func() {
 		if r := recover(); r != nil {
 			// Nothing of the batch is logged: only its size and the panic's type.
 			log.Error("destination hit batch panicked; dropped", "agent_id", q.agentID, "rows", len(q.obs.Hits), "panic", fmt.Sprintf("%T", r))
-			s.refund(q.agentID, reserved)
+			s.refund(q.agentID, reserved, usageReserved)
 			s.failBatch(q, domain.DestDropIngest)
 		}
 	}()
-	s.processBatch(ctx, q, &reserved)
+	s.processBatch(ctx, q, &reserved, &usageReserved)
 }
 
 // failBatch accounts for a batch that was lost whole: an ingest error, its rows
@@ -368,7 +391,7 @@ func (s *Service) failBatch(q queued, kind string) {
 	s.forget(q.agentID + "/" + q.obs.BatchID)
 }
 
-func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
+func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageReserved *int) {
 	o := q.obs
 	now := s.now()
 	lo, hi := s.window()
@@ -382,6 +405,34 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 
 	var ids []int64
 	idSeen := map[int64]bool{}
+	// Per-site usage rows count only on a panel that is on tier B; anywhere else
+	// they are dropped unread and counted (the node may still send a batch that
+	// was in flight when the admin switched the level down).
+	collectUsage := len(o.Usage) > 0 && s.usageTier != nil && s.usageTier(ctx, q.panelID)
+	var usageOutOfRange, usageUnknown, usageOverBudget int
+	type preparedUsage struct {
+		u    protocol.AuditUsage
+		user int64
+	}
+	usageCands := make([]preparedUsage, 0, len(o.Usage))
+	if collectUsage {
+		for _, u := range o.Usage {
+			if u.Hour < lo || u.Hour > hi {
+				usageOutOfRange++
+				continue
+			}
+			id, err := u.Subject.RowID()
+			if err != nil || id <= 0 {
+				usageUnknown++
+				continue
+			}
+			if !idSeen[id] && len(ids) < userIDLookupMaxIDs {
+				idSeen[id] = true
+				ids = append(ids, id)
+			}
+			usageCands = append(usageCands, preparedUsage{u: u, user: id})
+		}
+	}
 	type prepared struct {
 		hit  protocol.AuditHit
 		user int64
@@ -431,6 +482,15 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 		})
 	}
 	merged := domain.MergeDestHits(mapped)
+	usageMapped := make([]domain.DestUsage, 0, len(usageCands))
+	for _, c := range usageCands {
+		if !existing[c.user] {
+			usageUnknown++
+			continue
+		}
+		usageMapped = append(usageMapped, domain.DestUsage{HourMS: c.u.Hour, PanelID: q.panelID, UserID: c.user, Site: c.u.Site, Count: int64(c.u.Count)})
+	}
+	usageMerged := domain.MergeDestUsage(usageMapped)
 
 	// The agent's hourly budget, in stored rows. Counted per wall-clock hour of
 	// ingestion: what it protects is the write rate, not the data's own hour.
@@ -450,6 +510,14 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 	}
 	b.used += len(merged)
 	*reserved = len(merged)
+	usageRoom := max(s.usageBudget-b.usageUsed, 0)
+	if len(usageMerged) > usageRoom {
+		usageOverBudget = len(usageMerged) - usageRoom
+		usageMerged = usageMerged[:usageRoom]
+		lostRows[lostKey{nowHour, q.panelID, domain.DestDropUsageOverBudget}] += int64(usageOverBudget)
+	}
+	b.usageUsed += len(usageMerged)
+	*usageReserved = len(usageMerged)
 	if len(s.budgets) > 4096 {
 		for k, v := range s.budgets {
 			if v.hour != nowHour {
@@ -459,20 +527,26 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 	}
 	s.mu.Unlock()
 
-	res, err := s.store.StoreBatch(ctx, q.agentID, o.BatchID, q.receivedAt, merged)
+	res, err := s.store.StoreBatchWithUsage(ctx, q.agentID, o.BatchID, q.receivedAt, merged, usageMerged)
 	if res.Duplicate {
 		// A batch the store already holds (the process restarted since it was
 		// first sent, so the in-memory id was gone). Nothing is counted again.
-		s.refund(q.agentID, len(merged))
-		*reserved = 0
+		s.refund(q.agentID, len(merged), len(usageMerged))
+		*reserved, *usageReserved = 0, 0
 		s.report(reportDuplicate)
 		return
 	}
 	s.rows(metricsStored, res.Stored)
+	s.rows(metricsUsageStored, res.UsageStored)
+	s.rows(metricsUsageUnknown, usageUnknown)
+	s.rows(metricsUsageOutOfRange, usageOutOfRange)
+	s.rows(metricsUsageOverBudget, usageOverBudget)
 	s.rows(metricsOutOfRange, outOfRange)
 	s.rows(metricsUnknown, unknown)
 	s.rows(metricsOverBudget, overBudget)
-	s.rows(metricsUsageOff, len(o.Usage))
+	if !collectUsage {
+		s.rows(metricsUsageOff, len(o.Usage))
+	}
 	if err != nil {
 		s.report(reportIngestError)
 		log.Warn("destination hits not (fully) stored", "agent_id", q.agentID, "rows", len(merged)-res.Stored, "err", redactErr(err, merged))
@@ -480,6 +554,8 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 		for _, r := range merged[res.Stored:] {
 			lose(r.HourMS, domain.DestDropIngest)
 		}
+		// The usage rows not stored are given back to the budget they reserved.
+		s.refundUsage(q.agentID, len(usageMerged)-res.UsageStored)
 	}
 	// What the node itself lost, attributed to the hour it was noticed in: the
 	// node's counters carry no hour. A lost BLOCK hit is a gap in the record;
@@ -489,6 +565,9 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 	}
 	if o.DroppedTrial > 0 {
 		lostRows[lostKey{nowHour, q.panelID, domain.DestDropNodeTrial}] += int64(o.DroppedTrial)
+	}
+	if o.DroppedUsage > 0 {
+		lostRows[lostKey{nowHour, q.panelID, domain.DestDropNodeUsage}] += int64(o.DroppedUsage)
 	}
 	if s.metrics.NodeDropped != nil && o.DroppedHits+o.DroppedTrial+o.DroppedUsage > 0 {
 		s.metrics.NodeDropped(o.DroppedHits + o.DroppedTrial + o.DroppedUsage)
@@ -503,12 +582,19 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved *int) {
 	s.mu.Unlock()
 }
 
-// refund gives back the budget a duplicate batch reserved.
-func (s *Service) refund(agentID string, n int) {
+// refund gives back the budgets a duplicate or failed batch reserved.
+func (s *Service) refund(agentID string, n, usage int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if b := s.budgets[agentID]; b != nil {
 		b.used = max(b.used-n, 0)
+		b.usageUsed = max(b.usageUsed-usage, 0)
+	}
+}
+
+func (s *Service) refundUsage(agentID string, n int) {
+	if n > 0 {
+		s.refund(agentID, 0, n)
 	}
 }
 
