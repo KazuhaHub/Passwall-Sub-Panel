@@ -97,7 +97,16 @@ const (
 	// kinds so a gap in the usage record is never read as a gap in the hits.
 	DestDropNodeUsage       = "node_usage"
 	DestDropUsageOverBudget = "usage_over_budget"
+	// Usage rows lost with a batch the panel could not queue or store.
+	DestDropUsageQueueFull = "usage_queue_full"
+	DestDropUsageIngest    = "usage_ingest_error"
 )
+
+// DestUsageDropKinds are the drop kinds that count lost usage rows, as opposed
+// to lost hits.
+func DestUsageDropKinds() []string {
+	return []string{DestDropNodeUsage, DestDropUsageOverBudget, DestDropUsageQueueFull, DestDropUsageIngest}
+}
 
 // DestHitFilter selects hit rows. Zero fields select everything; times are
 // UTC milliseconds on the hour grid the rows are stored on.

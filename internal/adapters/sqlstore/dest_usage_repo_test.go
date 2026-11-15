@@ -44,7 +44,8 @@ func TestDestUsageTable_IsInTheSchemaWithItsIndexes(t *testing.T) {
 	}
 	// Every drop kind the ingest writes fits the column that stores it.
 	kinds := []string{domain.DestDropNodeHits, domain.DestDropNodeTrial, domain.DestDropOverBudget, domain.DestDropQueueFull,
-		domain.DestDropIngest, domain.DestDropNodeUsage, domain.DestDropUsageOverBudget}
+		domain.DestDropIngest, domain.DestDropNodeUsage, domain.DestDropUsageOverBudget,
+		domain.DestDropUsageQueueFull, domain.DestDropUsageIngest}
 	for _, k := range kinds {
 		if len(k) > destDropKindWidth {
 			t.Errorf("drop kind %q is %d bytes, the column holds %d", k, len(k), destDropKindWidth)
@@ -194,16 +195,17 @@ func TestUsageDropped_IsSeparateFromTheHitGap(t *testing.T) {
 		n     int64
 	}{
 		{1, domain.DestDropNodeUsage, 4}, {1, domain.DestDropUsageOverBudget, 3}, {2, domain.DestDropNodeUsage, 10}, {1, domain.DestDropNodeHits, 2},
+		{1, domain.DestDropUsageQueueFull, 5}, {1, domain.DestDropUsageIngest, 6},
 	} {
 		if err := r.AddDrops(ctx, h, d.panel, d.kind, d.n); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := r.UsageDropped(ctx, 0, h+hourMS, 1); err != nil || n != 7 {
-		t.Fatalf("panel 1 usage drops = %d, %v; want 7", n, err)
+	if n, err := r.UsageDropped(ctx, 0, h+hourMS, 1); err != nil || n != 18 {
+		t.Fatalf("panel 1 usage drops = %d, %v; want 18", n, err)
 	}
-	if n, err := r.UsageDropped(ctx, 0, h+hourMS, 0); err != nil || n != 17 {
-		t.Fatalf("all usage drops = %d, %v; want 17", n, err)
+	if n, err := r.UsageDropped(ctx, 0, h+hourMS, 0); err != nil || n != 28 {
+		t.Fatalf("all usage drops = %d, %v; want 28", n, err)
 	}
 	if n, err := r.DroppedInRange(ctx, 0, h+hourMS); err != nil || n != 2 {
 		t.Fatalf("hit gap = %d, %v; want only the hit-side drop (2)", n, err)

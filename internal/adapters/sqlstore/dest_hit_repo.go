@@ -211,7 +211,7 @@ func (r *DestHitRepo) AddDrops(ctx context.Context, hourMS, panelID int64, kind 
 // expected on a busy node and is not a gap in the record of what was blocked,
 // and neither are the usage kinds (see UsageDropped).
 func (r *DestHitRepo) DroppedInRange(ctx context.Context, sinceMS, untilMS int64) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind NOT IN ?", []string{domain.DestDropNodeTrial, domain.DestDropNodeUsage, domain.DestDropUsageOverBudget})
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind NOT IN ?", append([]string{domain.DestDropNodeTrial}, domain.DestUsageDropKinds()...))
 	if sinceMS > 0 {
 		q = q.Where("hour_ms >= ?", sinceMS)
 	}
@@ -710,47 +710,33 @@ func usageScope(q *gorm.DB, userID, panelID, sinceMS, untilMS int64) *gorm.DB {
 // the total is never short. Ties are ordered by site, by bytes, because the
 // dialects' collations disagree on punctuation ("(ip)").
 func (r *DestHitRepo) UserUsage(ctx context.Context, userID, panelID, sinceMS, untilMS int64, limit int) (domain.DestUsageSummary, error) {
-	var out domain.DestUsageSummary
-	var agg struct {
-		Total int64
-		Sites int64
-	}
-	if err := usageScope(r.db.WithContext(ctx).Model(&destUsageRow{}), userID, panelID, sinceMS, untilMS).
-		Select("COALESCE(SUM(count), 0) AS total, COUNT(DISTINCT site) AS sites").Scan(&agg).Error; err != nil {
-		return out, fmt.Errorf("total dest usage: %w", err)
-	}
-	out.Items = []domain.DestUsageSite{}
-	out.Total = agg.Total
-	if agg.Total == 0 || limit <= 0 {
-		out.OtherSites, out.OtherCount = agg.Sites, agg.Total
-		return out, nil
-	}
+	out := domain.DestUsageSummary{Items: []domain.DestUsageSite{}}
+	// ONE READ. The total, the site count and the list all come from the same
+	// grouped result, so they cannot disagree the way separate statements can
+	// when a batch lands between them.
 	var rows []struct {
 		Site string
 		N    int64
 	}
-	// One more than the limit is read, so a tie across the cut is ordered by
-	// bytes below and the cut falls where a byte order puts it.
 	if err := usageScope(r.db.WithContext(ctx).Model(&destUsageRow{}), userID, panelID, sinceMS, untilMS).
-		Select("site, SUM(count) AS n").Group("site").Order("n DESC, site ASC").Limit(limit + 1).Scan(&rows).Error; err != nil {
+		Select("site, SUM(count) AS n").Group("site").Scan(&rows).Error; err != nil {
 		return out, fmt.Errorf("fold dest usage: %w", err)
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
+	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].N != rows[j].N {
 			return rows[i].N > rows[j].N
 		}
 		return rows[i].Site < rows[j].Site
 	})
-	var shown int64
 	for i, row := range rows {
-		if i == limit {
-			break
+		out.Total += row.N
+		if i < limit {
+			out.Items = append(out.Items, domain.DestUsageSite{Site: row.Site, Count: row.N})
+			continue
 		}
-		out.Items = append(out.Items, domain.DestUsageSite{Site: row.Site, Count: row.N})
-		shown += row.N
+		out.OtherSites++
+		out.OtherCount += row.N
 	}
-	out.OtherSites = agg.Sites - int64(len(out.Items))
-	out.OtherCount = agg.Total - shown
 	return out, nil
 }
 
@@ -758,7 +744,7 @@ func (r *DestHitRepo) UserUsage(ctx context.Context, userID, panelID, sinceMS, u
 // panel (0: every panel): what the nodes could not aggregate and what the
 // panel's hourly usage budget refused. Zero bounds are open.
 func (r *DestHitRepo) UsageDropped(ctx context.Context, sinceMS, untilMS, panelID int64) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind IN ?", []string{domain.DestDropNodeUsage, domain.DestDropUsageOverBudget})
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind IN ?", domain.DestUsageDropKinds())
 	if panelID > 0 {
 		q = q.Where("panel_id = ?", panelID)
 	}
