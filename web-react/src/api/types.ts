@@ -184,6 +184,11 @@ export interface Node {
   hide_direct?: boolean
   /** Read-only derived value: true whenever an enabled relay exists. */
   show_relay_status?: boolean
+  /** Passwall Node server this node's traffic leaves from, through a tunnel.
+   *  0 / absent leaves from the node's own server. */
+  egress_panel_id?: number
+  /** Response-only: the tunnel runs on both servers, so the node is published. */
+  egress_ready?: boolean
 }
 
 /** One transit front for a Node. See domain.RelayLine. */

@@ -30,6 +30,39 @@ type nodeView struct {
 	// tagMatched is, per allowlist group, how many members the panel's tags
 	// select. Only the per-node limit reads it.
 	tagMatched map[int64]int
+	// egress maps each listener that leaves through a tunnel to the server it
+	// leaves from. A panel-scoped policy follows the traffic's exit: on such a
+	// listener it applies when the exit server is in its scope, whatever this
+	// server's own scope says.
+	egress map[int64]int64
+}
+
+// panelScope answers which of the node's inbounds a policy scoped to panels
+// applies to. all means every inbound (the rule needs no inbound list); with
+// all false, inbounds names them, and is empty when it applies to none. A node
+// without tunnels gets all or nothing, as it always did.
+func (v nodeView) panelScope(panels []int64) (all bool, inbounds []protocol.ListenerKey) {
+	here := slices.Contains(panels, v.panelID)
+	if len(v.egress) == 0 {
+		return here, nil
+	}
+	all = true
+	for id := range v.nodeIDs {
+		applies := here
+		if exit, bound := v.egress[id]; bound {
+			applies = slices.Contains(panels, exit)
+		}
+		if applies {
+			inbounds = append(inbounds, protocol.NewListenerKey(id))
+		} else {
+			all = false
+		}
+	}
+	if all {
+		return true, nil
+	}
+	slices.Sort(inbounds)
+	return false, inbounds
 }
 
 // syntheticSubject stands for a group's members in the upper bound, which has
@@ -92,9 +125,11 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 			if !v.bound {
 				switch r.scope {
 				case domain.DestScopePanels:
-					if !slices.Contains(r.panels, v.panelID) {
+					all, inbounds := v.panelScope(r.panels)
+					if !all && len(inbounds) == 0 {
 						continue
 					}
+					rule.Inbounds = inbounds
 				case domain.DestScopeGroups:
 					var subjects []protocol.SubjectKey
 					for _, u := range v.users {

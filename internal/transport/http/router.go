@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sourceaddr"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/subdevice"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
@@ -40,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
@@ -280,7 +282,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 		if err != nil {
 			panic("configure native node sync: " + err.Error())
 		}
-		g.POST("/v1/node/sync", gin.WrapH(nodeSync))
+		// The client address is resolved here, through the trusted-proxy
+		// setting, and handed down: it is what the panel records as the
+		// server's address (a default the administrator sees and can change).
+		g.POST("/v1/node/sync", func(c *gin.Context) {
+			c.Request = c.Request.WithContext(sourceaddr.With(c.Request.Context(), c.ClientIP()))
+			nodeSync.ServeHTTP(c.Writer, c.Request)
+		})
 	}
 
 	// Subscription handler — uses dynamic path from settings.
@@ -563,6 +571,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
+		if d.Repos.TransitLinks != nil {
+			links := handler.NewAdminTransitHandler(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))
+			adminGroup.GET("/transit/links/:entry/:exit", links.GetLink)
+			adminGroup.PUT("/transit/links/:entry/:exit", links.UpdateLink)
+		}
 		// A read dressed as a POST (it carries the editor's draft): see previewPOST.
 		previewPOST(adminGroup, "/nodes/:id/line-visibility", nodes.PreviewLineVisibility)
 		adminGroup.PUT("/nodes/:id/inbound", nodes.UpdateInboundConfig)

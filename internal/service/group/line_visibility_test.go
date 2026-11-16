@@ -174,3 +174,23 @@ func TestPreviewLineVisibilityPropagatesEligibilityErrors(t *testing.T) {
 		t.Fatal("an allowlist eligibility read failure must surface as an error")
 	}
 }
+
+// A node whose traffic leaves through a tunnel that is not running on both
+// servers is withheld from subscriptions, never shown as working.
+func TestSubscriptionNodesForWithholdsUnreadyEgress(t *testing.T) {
+	n := lineNode()
+	waiting := &domain.Node{ID: 2, Enabled: true, Region: "HK", EgressPanelID: 7}
+	running := &domain.Node{ID: 3, Enabled: true, Region: "HK", EgressPanelID: 7, EgressReady: true}
+	svc := New(&eligGroups{}, &eligNodes{nodes: []*domain.Node{n, waiting, running}}, nil)
+	nodes, err := svc.SubscriptionNodesFor(context.Background(), filterGroup(1, "", "region:HK"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, node := range nodes {
+		ids = append(ids, node.ID)
+	}
+	if want := []int64{1, 3}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("nodes %v want %v", ids, want)
+	}
+}

@@ -133,6 +133,11 @@ type nodeDTO struct {
 	RouteState      *domain.NodeRouteState `json:"route_state,omitempty"`
 	HideDirect      bool                   `json:"hide_direct"`
 	ShowRelayStatus bool                   `json:"show_relay_status"`
+	// EgressPanelID is the server the node's traffic leaves from (0: its
+	// own); EgressReady reports that the tunnel runs on both servers, which
+	// is when the node is published.
+	EgressPanelID int64 `json:"egress_panel_id,omitempty"`
+	EgressReady   bool  `json:"egress_ready,omitempty"`
 }
 
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
@@ -235,6 +240,10 @@ type updateMetadataRequest struct {
 	// them untouched, an explicit [] clears them — same patch semantics as Tags.
 	Relays     []relayLineDTO `json:"relays"`
 	HideDirect bool           `json:"hide_direct"`
+	// EgressPanelID is the Passwall Node server the node's traffic leaves
+	// from, through a tunnel; 0 leaves from its own server. nil (field
+	// absent) leaves it unchanged.
+	EgressPanelID *int64 `json:"egress_panel_id"`
 }
 
 type setNodeEnabledRequest struct {
@@ -636,6 +645,9 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.Relays != nil {
 		n.Relays = relays
 		n.HideDirect = req.HideDirect
+	}
+	if req.EgressPanelID != nil {
+		n.EgressPanelID = *req.EgressPanelID
 	}
 	if err := h.node.UpdateMetadata(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
@@ -1092,6 +1104,8 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		RouteState:         routeState,
 		HideDirect:         n.HideDirect,
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
+		EgressPanelID:      n.EgressPanelID,
+		EgressReady:        n.EgressPanelID != 0 && n.EgressReady,
 	}
 }
 

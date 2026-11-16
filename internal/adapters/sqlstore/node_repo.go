@@ -78,6 +78,7 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 			"relays":            jsonRelays(n.Relays),
 			"hide_direct":       n.HideDirect,
 			"show_relay_status": n.ShowRelayStatus,
+			"egress_panel_id":   n.EgressPanelID,
 		}).Error
 }
 

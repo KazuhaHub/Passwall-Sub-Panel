@@ -190,10 +190,13 @@ type serverDTO struct {
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
-	AuthMethod                   string   `json:"auth_method"`
-	InsecureHTTPS                bool     `json:"insecure_https"`
-	PanelVersion                 string   `json:"panel_version,omitempty"`
-	XrayVersion                  string   `json:"xray_version,omitempty"`
+	AuthMethod    string `json:"auth_method"`
+	InsecureHTTPS bool   `json:"insecure_https"`
+	PanelVersion  string `json:"panel_version,omitempty"`
+	XrayVersion   string `json:"xray_version,omitempty"`
+	// Address is where a Passwall Node server's last sync came from: the
+	// default for its nodes' connection address and its links' exit address.
+	Address                      string   `json:"address,omitempty"`
 	CoreEngine                   string   `json:"core_engine,omitempty"`
 	CoreVersion                  string   `json:"core_version,omitempty"`
 	DesiredCoreEngine            string   `json:"desired_core_engine,omitempty"`
@@ -1950,6 +1953,7 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 		dto.CoreVersion = p.XrayVersion
 		dto.NodeCompatibility = "unknown"
 		if agent != nil {
+			dto.Address = agent.ObservedAddress
 			dto.CoreEngine = string(agent.ObservedCoreEngine)
 			dto.DesiredCoreEngine = string(domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine))
 			dto.DesiredCoreVersion = agent.DesiredCoreVersion

@@ -60,6 +60,10 @@ import {
   updateInboundConfig,
   updateNodeMetadata,
   updateSeparator,
+  getTransitLink,
+  updateTransitLink,
+  type TransitLink,
+  type TransitLinkProtocol,
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
 import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
@@ -140,6 +144,8 @@ interface MetaForm {
   sort_order: number
   relays: RelayLine[]
   hide_direct: boolean
+  /** Exit server of the node's traffic; 0 is its own. Edit dialog only. */
+  egress_panel_id?: number
 }
 
 interface ImportForm extends MetaForm {
@@ -451,6 +457,18 @@ export function hostFromURL(raw: string): string {
     return ''
   }
 }
+// serverHost is the default connection address of a node on a server: the
+// host of a 3X-UI / S-UI panel URL, or, for a Passwall Node server (whose URL
+// names the agent, not a host), the address PSP last saw it sync from.
+export function serverHost(server?: Pick<Server, 'panel_type' | 'url' | 'address'>): string {
+  if (!server) return ''
+  if (server.panel_type === 'psp') return server.address ?? ''
+  return hostFromURL(server.url)
+}
+
+// Camouflage sites a REALITY tunnel draws from when the administrator does
+// not name one; the panel picks one at random for a new tunnel too.
+const TUNNEL_REALITY_SITES = ['www.asus.com', 'www.samsung.com', 'www.nvidia.com', 'www.amd.com', 'www.intel.com']
 const TCP_HEADER_TYPES = ['none', 'http']
 const TLS_VERSIONS = ['', '1.0', '1.1', '1.2', '1.3']
 const SS2022_METHODS: { value: SS2022Method; bytes: number }[] = [
@@ -1305,7 +1323,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                   // when the field is still untouched (empty, or equal to the
                   // previously-selected server's host). A manual edit wins.
                   setForm(prev => {
-                    const prevHost = hostFromURL(servers.find(s => s.id === prev.panel_id)?.url ?? '')
+                    const prevHost = serverHost(servers.find(s => s.id === prev.panel_id))
                     const next = { ...prev, panel_id: v.id }
                     if (v.panel_type !== '3xui') {
                       if (next.vless_network === 'xhttp') next.vless_network = 'tcp'
@@ -1334,7 +1352,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                       if (next.vless_network === 'http') next.vless_network = 'tcp'
                     }
                     if (!prev.server_address || prev.server_address === prevHost) {
-                      next.server_address = hostFromURL(v.url)
+                      next.server_address = serverHost(v)
                     }
                     return next
                   })
@@ -2403,6 +2421,25 @@ export default function NodesView() {
     () => servers.filter(s => s.panel_type === 'psp' && s.id !== editing?.panel_id),
     [servers, editing?.panel_id],
   )
+  // The tunnel of the node being edited, between its server and the chosen
+  // exit. Its settings are shared by every node of the pair.
+  const [linkForm, setLinkForm] = useState<TransitLink | null>(null)
+  const [linkDirty, setLinkDirty] = useState(false)
+  const [linkError, setLinkError] = useState(false)
+  const editEgress = editForm.egress_panel_id ?? 0
+  useEffect(() => {
+    if (!editOpen || !editing || editEgress <= 0) return
+    let cancelled = false
+    setLinkError(false)
+    getTransitLink(editing.panel_id, editEgress)
+      .then(link => { if (!cancelled) { setLinkForm(link); setLinkDirty(false) } })
+      .catch(() => { if (!cancelled) { setLinkForm(null); setLinkError(true) } })
+    return () => { cancelled = true }
+  }, [editOpen, editing, editEgress])
+  const patchLink = (patch: Partial<TransitLink>) => {
+    setLinkForm(prev => (prev ? { ...prev, ...patch } : prev))
+    setLinkDirty(true)
+  }
   const panelSupports = (panelID: number, capability: PanelCapability) =>
     !!servers.find(s => s.id === panelID)?.capabilities?.includes(capability)
   const [createOpen, setCreateOpen] = useState(false)
@@ -2512,7 +2549,10 @@ export default function NodesView() {
       sort_order: n.sort_order,
       relays: (n.relays ?? []).map(r => ({ ...r, only_line_name: !!r.only_line_name })),
       hide_direct: !!n.hide_direct,
+      egress_panel_id: n.egress_panel_id ?? 0,
     })
+    setLinkForm(null)
+    setLinkDirty(false)
     setEditMetaErr({})
     setEditOpen(true)
   }
@@ -2535,6 +2575,18 @@ export default function NodesView() {
     setEditBusy(true)
     let metadataSaved = false
     try {
+      const egress = editForm.egress_panel_id ?? 0
+      if (egress > 0 && linkForm && linkDirty) {
+        const reality = linkForm.protocol === 'vless_reality'
+        const link = await updateTransitLink(editing.panel_id, egress, {
+          protocol: linkForm.protocol,
+          exit_address: linkForm.exit_address.trim(),
+          reality_server_name: reality ? linkForm.reality_server_name.trim() : undefined,
+          reality_target: reality ? linkForm.reality_target.trim() : undefined,
+        })
+        setLinkForm(link)
+        setLinkDirty(false)
+      }
       const saved = await updateNodeMetadata(editing.id, {
         display_name: editForm.display_name,
         server_address: editForm.server_address,
@@ -2550,6 +2602,7 @@ export default function NodesView() {
           .map(({ managed_ready: _ready, ...r }) => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
+        egress_panel_id: egress,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       metadataSaved = true
@@ -2902,7 +2955,7 @@ export default function NodesView() {
       pushSnack(t('admin:nodes.create_dialog.no_writable_servers', { defaultValue: '当前没有支持创建 inbound 的可写面板，请先检查服务器配置与适配器能力。' }), 'warning')
       return
     }
-    setCreateForm({ ...EMPTY_INBOUND, panel_id: writableServers[0].id, server_address: hostFromURL(writableServers[0].url) })
+    setCreateForm({ ...EMPTY_INBOUND, panel_id: writableServers[0].id, server_address: serverHost(writableServers[0]) })
     setCreateAdvanced(false)
     setCreateOpen(true)
   }
@@ -3215,7 +3268,7 @@ export default function NodesView() {
       display_name: u.Remark || `${u.Protocol}:${u.Port}`,
       // Pre-fill Address with the source panel's host (editable default —
       // proxy host usually equals the 3X-UI host, but admins can override).
-      server_address: hostFromURL(servers.find(s => s.id === u.PanelID)?.url ?? ''),
+      server_address: serverHost(servers.find(s => s.id === u.PanelID)),
     })
     setImportErr({})
     setImportOpen(true)
@@ -3895,6 +3948,69 @@ export default function NodesView() {
             })()}
             {(editForm.relays.length > 0 || routeDraft.lines.length > 0 || (editing?.route_state?.lines ?? []).some(line => !line.deleted)) && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
+            )}
+
+            {editing && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && relayEntryServers.length > 0 && (
+              <Box data-testid="egress-section" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField select size="small" label={t('admin:nodes.egress.server')} value={editEgress}
+                  onChange={e => {
+                    const exit = Number(e.target.value) || 0
+                    setEditForm(f => ({ ...f, egress_panel_id: exit }))
+                    setLinkForm(null)
+                    setLinkDirty(false)
+                  }}
+                  helperText={editEgress > 0 ? t('admin:nodes.egress.tunnel_hint') : t('admin:nodes.egress.local_hint')}>
+                  <MenuItem value={0}>{t('admin:nodes.egress.local')}</MenuItem>
+                  {relayEntryServers.map(server => (
+                    <MenuItem key={server.id} value={server.id}>{server.name}</MenuItem>
+                  ))}
+                </TextField>
+                {editEgress > 0 && editEgress === (editing.egress_panel_id ?? 0) && (
+                  <Typography sx={{ fontSize: 12, color: editing.egress_ready ? md.primary : md.onSurfaceVariant }}>
+                    {editing.egress_ready ? t('admin:nodes.egress.ready') : t('admin:nodes.egress.pending')}
+                  </Typography>
+                )}
+                {editEgress > 0 && linkError && (
+                  <Typography sx={{ fontSize: 12, color: md.error }}>{t('admin:nodes.egress.load_failed')}</Typography>
+                )}
+                {editEgress > 0 && linkForm && (
+                  <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.egress.shared_hint')}</Typography>
+                    <TextField select size="small" label={t('admin:nodes.egress.protocol')} value={linkForm.protocol}
+                      onChange={e => {
+                        const protocol = e.target.value as TransitLinkProtocol
+                        // A REALITY tunnel needs a camouflage site; keep the
+                        // tunnel's own, or draw one from the defaults.
+                        const site = linkForm.reality_server_name || TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
+                        patchLink(protocol === 'vless_reality'
+                          ? { protocol, reality_server_name: site, reality_target: linkForm.reality_target || `${site}:443` }
+                          : { protocol })
+                      }}>
+                      <MenuItem value="ss2022">Shadowsocks 2022</MenuItem>
+                      <MenuItem value="vless_reality">VLESS + REALITY</MenuItem>
+                    </TextField>
+                    <TextField size="small" label={t('admin:nodes.egress.exit_address')} value={linkForm.exit_address}
+                      onChange={e => patchLink({ exit_address: e.target.value })}
+                      placeholder={linkForm.server_address}
+                      helperText={linkForm.server_address
+                        ? t('admin:nodes.egress.exit_address_default', { address: linkForm.server_address })
+                        : t('admin:nodes.egress.exit_address_unknown')} />
+                    {linkForm.protocol === 'vless_reality' && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                        <TextField size="small" label={t('admin:nodes.egress.reality_server_name')} value={linkForm.reality_server_name}
+                          onChange={e => {
+                            const name = e.target.value
+                            patchLink({ reality_server_name: name, reality_target: name.trim() ? `${name.trim()}:443` : '' })
+                          }} sx={{ flex: 1 }} />
+                        <Button size="small" sx={{ mt: 0.5 }} onClick={() => {
+                          const site = TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
+                          patchLink({ reality_server_name: site, reality_target: `${site}:443` })
+                        }}>{t('admin:nodes.egress.random_site')}</Button>
+                      </Box>
+                    )}
+                  </Box>
+                )}
+              </Box>
             )}
 
             {/* Transit / 中转 lines: the same landing offered through extra

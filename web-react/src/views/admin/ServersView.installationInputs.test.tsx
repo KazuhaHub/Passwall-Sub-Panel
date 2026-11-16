@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { releaseCatalog, nativeServer, provisioning, waiting, selectVersion, mountExpanded } from '@/test/installationHarness'
 import { api } from '@/test/adminSaveHarness'
 import { isNodeReleaseVersion, NativeInstallationDialog } from './ServersView'
-import { hostFromURL } from './NodesView'
+import { hostFromURL, serverHost } from './NodesView'
 
 // WHAT THIS FILE DRIVES: the dialog's own inputs, and the two flows that replace
 // what is already installed — an in-place upgrade and an identity replacement.
@@ -45,6 +45,13 @@ describe('native installation inputs', () => {
     expect(hostFromURL('PSP://agt_7')).toBe('')
     expect(hostFromURL('https://proxy.example.test:8443/admin')).toBe('proxy.example.test')
     expect(hostFromURL('proxy.example.test:8443')).toBe('proxy.example.test')
+  })
+
+  it('defaults a Passwall Node server to the address it syncs from', () => {
+    expect(serverHost({ panel_type: 'psp', url: 'psp://agt_7', address: '198.51.100.7' })).toBe('198.51.100.7')
+    expect(serverHost({ panel_type: 'psp', url: 'psp://agt_7' })).toBe('')
+    expect(serverHost({ panel_type: '3xui', url: 'https://proxy.example.test:8443/admin', address: '198.51.100.7' })).toBe('proxy.example.test')
+    expect(serverHost(undefined)).toBe('')
   })
 })
 

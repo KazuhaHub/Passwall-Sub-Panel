@@ -762,6 +762,9 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if err := s.validateManagedRelays(ctx, &landing); err != nil {
 		return err
 	}
+	if err := s.validateEgress(previous, n.EgressPanelID); err != nil {
+		return err
+	}
 	// Column-scoped: a full-row Update here would roll back the poll-owned
 	// columns (traffic counters / health / inbound-config snapshot) to the
 	// stale values the edit dialog loaded.
@@ -1817,6 +1820,39 @@ func (s *Service) ListClientsOfInbound(ctx context.Context, nodeID int64, owners
 // entry port must be free on it, both of the server's own inbounds and of
 // other managed relay lines. Disabled inbounds and lines count too: enabling
 // one later must not silently collide.
+// validateEgress checks a node's exit server: traffic of a node on one
+// Passwall Node server may leave from another, through a tunnel PSP runs
+// between the two. 0 leaves from the node's own server.
+func (s *Service) validateEgress(node *domain.Node, egress int64) error {
+	if egress == 0 {
+		return nil
+	}
+	if egress < 0 {
+		return fmt.Errorf("%w: invalid exit server", domain.ErrValidation)
+	}
+	if node.IsSeparator() {
+		return fmt.Errorf("%w: a separator has no exit server", domain.ErrValidation)
+	}
+	if egress == node.PanelID {
+		return fmt.Errorf("%w: the exit server must differ from the node's own server", domain.ErrValidation)
+	}
+	kinds := make(map[int64]domain.PanelKind)
+	if s.pool != nil {
+		for _, panel := range s.pool.List() {
+			if panel != nil {
+				kinds[panel.ID] = domain.NormalizePanelKind(panel.Kind)
+			}
+		}
+	}
+	if kinds[node.PanelID] != domain.PanelKindPSP {
+		return fmt.Errorf("%w: only a node on a Passwall Node server can leave from another server", domain.ErrValidation)
+	}
+	if kinds[egress] != domain.PanelKindPSP {
+		return fmt.Errorf("%w: the exit server must be a Passwall Node server", domain.ErrValidation)
+	}
+	return nil
+}
+
 func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Node) error {
 	managed := false
 	for _, line := range landing.Relays {

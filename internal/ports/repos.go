@@ -2273,6 +2273,7 @@ type Repos struct {
 	// Transit is the managed relay state store (one row per managed relay
 	// line: forward key, entry confirmation, relayed traffic).
 	Transit                 TransitRepo
+	TransitLinks            TransitLinkRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2321,4 +2322,15 @@ type TransitRepo interface {
 	SetApplied(ctx context.Context, id int64, applied domain.ManagedForward, at time.Time) (bool, error)
 	ClearApplied(ctx context.Context, id int64) (bool, error)
 	RecordCounters(ctx context.Context, id int64, up, down int64, epoch uint64) error
+}
+
+// TransitLinkRepo stores the tunnels between Passwall Node servers.
+type TransitLinkRepo interface {
+	EnsureLink(ctx context.Context, entry, exit int64, create func() (domain.TransitLink, error)) (domain.TransitLink, error)
+	GetLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error)
+	ListLinks(ctx context.Context) ([]domain.TransitLink, error)
+	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
+	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
+	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
+	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
 }

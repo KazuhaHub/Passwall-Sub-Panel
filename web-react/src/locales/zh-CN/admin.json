@@ -2048,6 +2048,22 @@
       "managed_ready": "中转服务器已生效，线路已发布",
       "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中"
     },
+    "egress": {
+      "server": "出口服务器",
+      "local": "本服务器（直接出站）",
+      "local_hint": "流量从本节点所在服务器直接出站",
+      "tunnel_hint": "流量经隧道从所选服务器出站，并按该服务器的目标规则处理。隧道在两台服务器都生效前，本节点不会出现在订阅中。",
+      "ready": "隧道已在两台服务器生效，节点已发布",
+      "pending": "等待隧道在两台服务器生效，生效前不会出现在订阅中",
+      "load_failed": "读取隧道设置失败",
+      "shared_hint": "隧道设置由这两台服务器之间的所有节点共用",
+      "protocol": "隧道协议",
+      "exit_address": "出口地址",
+      "exit_address_default": "留空则使用服务器地址 {{address}}",
+      "exit_address_unknown": "出口服务器尚未连接过面板，请填写入口服务器可达的地址",
+      "reality_server_name": "伪装站点 (SNI)",
+      "random_site": "随机"
+    },
     "line_labels": {
       "region": "Region",
       "tags": "Tags",

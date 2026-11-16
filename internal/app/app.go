@@ -372,7 +372,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
-	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit))
+	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent))
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)

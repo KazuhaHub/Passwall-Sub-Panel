@@ -47,7 +47,12 @@ type NodeAgent struct {
 	DesiredCoreVersion      string
 	AllowRestrictedReality  bool
 	ObservedCoreEngine      NodeCoreEngine
-	LastSeen                *time.Time
+	// ObservedAddress is where this server's last sync came from, as the
+	// panel's trusted-proxy setting resolves it. It is a default for the
+	// addresses an administrator would otherwise type (a node's connection
+	// address, a link's exit address), never used without being shown.
+	ObservedAddress string
+	LastSeen        *time.Time
 	// Refused* record the most recent authenticated report this panel REFUSED at
 	// the wire boundary, which is a different fact from an observation and is
 	// stored in different columns for that reason.

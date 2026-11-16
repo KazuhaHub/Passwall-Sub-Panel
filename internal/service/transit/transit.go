@@ -34,8 +34,10 @@ type Repo interface {
 }
 
 type Service struct {
-	nodes NodeLister
-	repo  Repo
+	nodes  NodeLister
+	repo   Repo
+	links  LinkRepo
+	agents AgentLister
 }
 
 func New(nodes NodeLister, repo Repo) *Service { return &Service{nodes: nodes, repo: repo} }

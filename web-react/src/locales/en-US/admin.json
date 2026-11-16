@@ -2051,6 +2051,22 @@
       "managed_ready": "Relay server applied it; the line is published",
       "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then"
     },
+    "egress": {
+      "server": "Exit server",
+      "local": "This server (direct)",
+      "local_hint": "Traffic leaves directly from the node's own server",
+      "tunnel_hint": "Traffic is tunnelled to the chosen server and leaves from there, under that server's destination rules. The node stays out of subscriptions until the tunnel runs on both servers.",
+      "ready": "The tunnel runs on both servers; the node is published",
+      "pending": "Waiting for the tunnel to run on both servers; the node stays out of subscriptions until then",
+      "load_failed": "Failed to load the tunnel settings",
+      "shared_hint": "Tunnel settings are shared by every node between these two servers",
+      "protocol": "Tunnel protocol",
+      "exit_address": "Exit address",
+      "exit_address_default": "Leave empty to use the server address {{address}}",
+      "exit_address_unknown": "The exit server has not connected yet; enter an address the entry server can reach",
+      "reality_server_name": "Camouflage site (SNI)",
+      "random_site": "Random"
+    },
     "line_labels": {
       "region": "Region",
       "tags": "Tags",

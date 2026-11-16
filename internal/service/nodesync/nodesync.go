@@ -23,9 +23,11 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sourceaddr"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
 const (
@@ -94,6 +96,9 @@ type TransitPublisher interface {
 	ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error)
 	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
+	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (transit.LinkPlan, error)
+	ConfirmLinks(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus) (bool, error)
+	RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.LinkCounters) error
 }
 
 // SetTransit binds the managed relay publisher. Left unbound, no forwards are
@@ -309,6 +314,55 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		}
 		policyIssues = append(policyIssues, issues...)
 	}
+	// MANAGED RELAYS AND TUNNELS. Sent only to a node that declared it can run
+	// them: one that cannot would ignore the field, open nothing, and report the
+	// config applied. They are worked out before the policy compile, which needs
+	// to know which listeners leave through a tunnel, and attached after it, so
+	// the policy sees exactly the config it always did.
+	var transitBody nodeprotocol.Transit
+	var egressExit map[int64]int64
+	if s.transit != nil {
+		// A forward or an incoming link on a port one of this server's own
+		// inbounds uses would make the node refuse the whole config, listener
+		// changes included. Such an object is withheld here instead; its
+		// save-time check normally stops it, but an inbound can move onto the
+		// port afterwards.
+		listening := make(map[int]bool, len(snapshot.Nodes))
+		for _, node := range snapshot.Nodes {
+			if node != nil && node.DesiredPort > 0 {
+				listening[node.DesiredPort] = true
+			}
+		}
+		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitForward) {
+			forwards, err := s.transit.ForwardsFor(ctx, agent.PanelID)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			for _, forward := range forwards {
+				// Two lines claiming one port (two saves that raced) would fail
+				// the same way; the older line keeps the port.
+				if listening[forward.Port] {
+					log.Warn("managed relay withheld: its entry port is already taken on the entry server",
+						"agent_id", agent.AgentID, "forward", string(forward.Key), "port", forward.Port)
+					continue
+				}
+				listening[forward.Port] = true
+				transitBody.Forwards = append(transitBody.Forwards, forward)
+			}
+		}
+		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitLink) {
+			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			transitBody.LinksIn, transitBody.LinksOut, transitBody.Egress = plan.In, plan.Out, plan.Egress
+			egressExit = plan.EgressExit
+			if plan.Changed && s.invalidateRender != nil {
+				// What is sent decides which bound nodes may be published.
+				s.invalidateRender()
+			}
+		}
+	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
@@ -321,7 +375,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
 			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion, AgentVersion: report.AgentVersion,
-			AuditCollect: choices.collect, DestResolve: choices.resolve,
+			AuditCollect: choices.collect, DestResolve: choices.resolve, Egress: egressExit,
 		})
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
@@ -329,40 +383,8 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		configBody.Policy, policyDigest = result.Policy, result.Digest
 		policyIssues = append(policyIssues, result.Issues...)
 	}
-	// MANAGED RELAYS. Sent only to a node that declared it can relay: one that
-	// cannot would ignore the field, open nothing, and report the config
-	// applied. Added after the policy compile so the policy sees exactly the
-	// config it always did.
-	if s.transit != nil && slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitForward) {
-		forwards, err := s.transit.ForwardsFor(ctx, agent.PanelID)
-		if err != nil {
-			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
-		}
-		// A forward on a port one of this server's own inbounds uses would make
-		// the node refuse the whole config, listener changes included. Such a
-		// line is withheld here instead; its save-time check normally stops it,
-		// but an inbound can move onto the port afterwards.
-		listening := make(map[int]bool, len(snapshot.Nodes))
-		for _, node := range snapshot.Nodes {
-			if node != nil && node.DesiredPort > 0 {
-				listening[node.DesiredPort] = true
-			}
-		}
-		kept := forwards[:0]
-		for _, forward := range forwards {
-			// Two lines claiming one port (two saves that raced) would fail
-			// the same way; the older line keeps the port.
-			if listening[forward.Port] {
-				log.Warn("managed relay withheld: its entry port is already taken on the entry server",
-					"agent_id", agent.AgentID, "forward", string(forward.Key), "port", forward.Port)
-				continue
-			}
-			listening[forward.Port] = true
-			kept = append(kept, forward)
-		}
-		if len(kept) > 0 {
-			configBody.Transit = &nodeprotocol.Transit{Forwards: kept}
-		}
+	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 {
+		configBody.Transit = &transitBody
 	}
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
@@ -725,6 +747,15 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
 		return fmt.Errorf("nodesync: record protocol observation: %w", err)
 	}
+	if recorder, ok := s.agents.(interface {
+		RecordObservedAddress(ctx context.Context, agentID, address string) error
+	}); ok {
+		if address := sourceaddr.From(ctx); address != "" && address != agent.ObservedAddress {
+			if err := recorder.RecordObservedAddress(ctx, agent.AgentID, address); err != nil {
+				return fmt.Errorf("nodesync: record server address: %w", err)
+			}
+		}
+	}
 	if s.allowlistResync != nil && allowlistCapabilitiesChanged(agent.ObservedCapabilities, report.Capabilities) {
 		// A node that newly declares the capabilities (a fresh install, an
 		// upgrade) must get its allowlist members' clients, and one that lost
@@ -915,14 +946,22 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		if err := s.transit.RecordCounters(ctx, sent.Transit, report.ForwardCounters); err != nil {
 			return fmt.Errorf("nodesync: %w", err)
 		}
+		if err := s.transit.RecordLinkCounters(ctx, sent.Transit, report.LinkCounters); err != nil {
+			return fmt.Errorf("nodesync: %w", err)
+		}
 		// Confirmations need the node to hold that config: only then do its
 		// object statuses describe these forwards.
 		if configHave.Applied.Epoch == agent.Epoch && string(configHave.ETag) == configCurrent.DesiredETag {
-			changed, err := s.transit.Confirm(ctx, agent.PanelID, sent.Transit, objectStatuses(report.Objects, nodeprotocol.StreamConfig), now)
+			statuses := objectStatuses(report.Objects, nodeprotocol.StreamConfig)
+			changed, err := s.transit.Confirm(ctx, agent.PanelID, sent.Transit, statuses, now)
 			if err != nil {
 				return fmt.Errorf("nodesync: %w", err)
 			}
-			renderCredentialsChanged = renderCredentialsChanged || changed
+			linksChanged, err := s.transit.ConfirmLinks(ctx, sent.Transit, statuses)
+			if err != nil {
+				return fmt.Errorf("nodesync: %w", err)
+			}
+			renderCredentialsChanged = renderCredentialsChanged || changed || linksChanged
 		}
 	}
 	if renderCredentialsChanged && s.invalidateRender != nil {

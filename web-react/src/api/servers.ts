@@ -54,6 +54,9 @@ export interface Server {
   capabilities: PanelCapability[]
   name: string
   url: string
+  /** Passwall Node servers: the address PSP last saw the server sync from.
+   *  The default for a node's connection address and a tunnel's exit address. */
+  address?: string
   username?: string
   remark?: string
   has_api_token: boolean

@@ -76,3 +76,41 @@ func TestUpdateMetadataChecksManagedRelayLines(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateMetadataChecksTheExitServer(t *testing.T) {
+	pool := panelListPool{panels: []*domain.Panel{
+		{ID: 1, Kind: domain.PanelKind3XUI}, {ID: 7, Kind: domain.PanelKindPSP}, {ID: 9, Kind: domain.PanelKindPSP},
+	}}
+	onPN := domain.Node{ID: 1, PanelID: 7, DisplayName: "entry node", DesiredPort: 443, Enabled: true}
+	on3XUI := domain.Node{ID: 2, PanelID: 1, DisplayName: "3x-ui node", DesiredPort: 443, Enabled: true}
+	for name, test := range map[string]struct {
+		node   domain.Node
+		egress int64
+		want   string
+	}{
+		"own server":               {node: onPN, egress: 0},
+		"another PN server":        {node: onPN, egress: 9},
+		"the node's own server":    {node: onPN, egress: 7, want: "differ"},
+		"a 3X-UI exit":             {node: onPN, egress: 1, want: "exit server must be a Passwall Node"},
+		"an unknown exit":          {node: onPN, egress: 5, want: "exit server must be a Passwall Node"},
+		"a node on a 3X-UI server": {node: on3XUI, egress: 9, want: "only a node on a Passwall Node server"},
+		"a negative exit":          {node: onPN, egress: -1, want: "invalid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &fleetNodeRepo{labelNodeRepo: labelNodeRepo{stored: test.node}, fleet: []*domain.Node{&test.node}}
+			svc := &Service{nodes: repo, pool: pool}
+			next := test.node
+			next.EgressPanelID = test.egress
+			err := svc.UpdateMetadata(context.Background(), &next)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, domain.ErrValidation) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("err = %v, want a validation error mentioning %q", err, test.want)
+			}
+		})
+	}
+}

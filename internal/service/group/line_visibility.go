@@ -107,7 +107,20 @@ func (s *Service) SubscriptionNodesFor(ctx context.Context, g *domain.Group) ([]
 	if err != nil {
 		return nil, err
 	}
-	return VisibleLines(g, nodes), nil
+	return VisibleLines(g, withoutUnreadyEgress(nodes)), nil
+}
+
+// withoutUnreadyEgress drops nodes whose traffic leaves through a tunnel that
+// is not yet running on both servers. Such a node is withheld, never shown
+// as working: its users' traffic would fail, and leaving from the entry
+// instead would replace the exit the administrator chose.
+func withoutUnreadyEgress(nodes []*domain.Node) []*domain.Node {
+	for _, n := range nodes {
+		if !n.EgressPublishable() {
+			return slices.DeleteFunc(slices.Clone(nodes), func(n *domain.Node) bool { return !n.EgressPublishable() })
+		}
+	}
+	return nodes
 }
 
 // LineVisibility answers the node editor's "who would see each line" for a
