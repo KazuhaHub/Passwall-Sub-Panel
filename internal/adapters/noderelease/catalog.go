@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,24 @@ const (
 
 //lint:ignore ST1005 "Node" is the product's name, not a capitalised sentence.
 var errUnavailable = errors.New("Node release source is unavailable")
+
+// unavailable says WHY the source was unavailable, in words this package
+// chooses: an HTTP status, or a fixed description of the failure class. It
+// never carries a URL, a header value it did not parse or any of the response,
+// so the reason is safe in logs and test output while the callers still match
+// errUnavailable. Without it a throttled runner and a broken listing read the
+// same, and a CI failure could not say which it was.
+func unavailable(reason string) error { return fmt.Errorf("%w (%s)", errUnavailable, reason) }
+
+// statusReason names a non-200 answer, and says when GitHub's own headers
+// report that the request budget is spent.
+func statusReason(resp *http.Response) string {
+	reason := fmt.Sprintf("HTTP %d", resp.StatusCode)
+	if remaining, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining"))); err == nil && remaining == 0 {
+		reason += ", rate limit exhausted"
+	}
+	return reason
+}
 
 type Options struct {
 	// HTTPClient is a test seam; requests and redirects remain restricted to
@@ -252,7 +271,7 @@ func (c *Catalog) listReleases(ctx context.Context) ([]githubRelease, error) {
 	url := fmt.Sprintf("%s?per_page=%d", releaseListBase, maxReleases)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, errUnavailable
+		return nil, unavailable("request could not be built")
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -262,19 +281,25 @@ func (c *Catalog) listReleases(ctx context.Context) ([]githubRelease, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, errUnavailable
+		if errors.Is(err, errUnavailable) {
+			return nil, unavailable("redirect refused")
+		}
+		return nil, unavailable("request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errUnavailable
+		return nil, unavailable(statusReason(resp))
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
-	if err != nil || len(body) > maxResponse {
-		return nil, errUnavailable
+	if err != nil {
+		return nil, unavailable("response read failed")
+	}
+	if len(body) > maxResponse {
+		return nil, unavailable("response too large")
 	}
 	var releases []githubRelease
 	if err := json.Unmarshal(body, &releases); err != nil {
-		return nil, errUnavailable
+		return nil, unavailable("response is not a release list")
 	}
 	return releases, nil
 }
@@ -376,7 +401,7 @@ func catalogEntry(candidate candidateRelease, release githubRelease, tag string)
 	assets := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {
 		if _, duplicate := assets[asset.Name]; duplicate {
-			return ports.NodeReleaseCatalogEntry{}, errUnavailable
+			return ports.NodeReleaseCatalogEntry{}, unavailable("a release lists one asset name twice")
 		}
 		assets[asset.Name] = asset
 	}

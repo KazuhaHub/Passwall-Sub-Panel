@@ -937,3 +937,46 @@ func TestReleaseNotesTruncateOnLineBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// A FAILURE SAYS WHICH ONE IT WAS. A throttled runner and a broken listing
+// used to read the same, so a CI failure of the live test could not say whether
+// anything was wrong. The reason is this package's own words, never the
+// response, and every failure still matches errUnavailable.
+func TestCatalogFailureNamesItsReason(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		transport roundTripFunc
+		want      string
+	}{
+		{"throttled", func(req *http.Request) (*http.Response, error) {
+			response := fixtureResponse(req, http.StatusForbidden, "PRIVATE_RESPONSE")
+			response.Header.Set("X-RateLimit-Remaining", "0")
+			return response, nil
+		}, "(HTTP 403, rate limit exhausted)"},
+		{"forbidden with budget left", func(req *http.Request) (*http.Response, error) {
+			response := fixtureResponse(req, http.StatusForbidden, "PRIVATE_RESPONSE")
+			response.Header.Set("X-RateLimit-Remaining", "12")
+			return response, nil
+		}, "(HTTP 403)"},
+		{"server error", func(req *http.Request) (*http.Response, error) {
+			return fixtureResponse(req, http.StatusBadGateway, "PRIVATE_RESPONSE"), nil
+		}, "(HTTP 502)"},
+		{"network", func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("PRIVATE_RESPONSE https://sensitive.invalid/token")
+		}, "(request failed)"},
+		{"not a list", func(req *http.Request) (*http.Response, error) {
+			return fixtureResponse(req, http.StatusOK, `{"PRIVATE_RESPONSE":`), nil
+		}, "(response is not a release list)"},
+		{"oversized", func(req *http.Request) (*http.Response, error) {
+			return fixtureResponse(req, http.StatusOK, strings.Repeat(" ", maxResponse+1)), nil
+		}, "(response too large)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list, err := fixtureCatalog(t, tc.transport, nil).List(context.Background())
+			assertUnavailable(t, list, err)
+			if !errors.Is(err, errUnavailable) || !strings.HasSuffix(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want errUnavailable ending in %q", err, tc.want)
+			}
+		})
+	}
+}
