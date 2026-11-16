@@ -511,6 +511,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel, d.Repos.PSPClient, d.Repos.Certificate)
+		if d.Group != nil {
+			nodes.WithLineVisibility(d.Group)
+		}
 		// A batch scan can fan out to hundreds of bounded TLS probes on the
 		// selected node. Keep it admin-only and rate-limit repeated launches per
 		// source IP; 3X-UI applies its own task/concurrency/SSRF caps downstream.
@@ -533,6 +536,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
+		// A read dressed as a POST (it carries the editor's draft); exempt from
+		// audit by exact path in middleware/audit.go.
+		adminGroup.POST("/nodes/:id/line-visibility", nodes.PreviewLineVisibility)
 		adminGroup.PUT("/nodes/:id/inbound", nodes.UpdateInboundConfig)
 		adminGroup.DELETE("/nodes/:id", nodes.Delete)
 		adminGroup.POST("/nodes/:id/detach", nodes.Detach)

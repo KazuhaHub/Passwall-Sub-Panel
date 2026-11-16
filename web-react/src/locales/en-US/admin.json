@@ -1983,7 +1983,11 @@
     "line_labels": {
       "region": "Region",
       "tags": "Tags",
-      "node_change_hint": "Changing the node's region or tags does not change existing lines. Review each line used by region: / tag: proxy groups."
+      "node_change_hint": "Changing the node's region or tags does not change existing lines. Whether a group receives a line is decided by the line's own values; this only shapes subscriptions and is not access control.",
+      "visible_groups": "Visible to: {{groups}}",
+      "group_separator": ", ",
+      "visible_none": "No group can see this line; it appears in no subscription",
+      "visibility_unknown": "Visible groups cannot be determined right now"
     },
     "import": "Import",
     "imported": "Imported",

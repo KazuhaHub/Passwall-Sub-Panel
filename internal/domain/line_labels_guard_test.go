@@ -22,17 +22,20 @@ import (
 const modulePath = "github.com/KazuhaHub/passwall-sub-panel"
 
 // lineLabelReaders lists the only production code allowed to touch a line's
-// own Region / Tags (ADR 0040 invariant 1): the domain model, subscription
-// rendering, line storage and backfill, the node API's line DTOs and the VLESS
-// route line editor. Authorization — group tag_filter, allowlist eligibility,
-// mounting and credentials, traffic, risk, 3X-UI routing rules and the
-// Passwall Node protocol — must keep reading the node's labels only.
+// own Region / Tags (ADR 0040 invariant 1, amended by ADR 0041): the domain
+// model, subscription rendering, line storage and backfill, the node API's line
+// DTOs, the VLESS route line editor, and the one file that narrows which lines
+// a group's subscriptions publish. Credentials and mounting, allowlist
+// eligibility, traffic, risk, 3X-UI routing rules and the Passwall Node
+// protocol must keep reading the node's labels only; so must the rest of the
+// group package, which is why only the line-visibility file is listed.
 var lineLabelReaders = []string{
 	"internal/domain/",
 	"internal/service/render/",
 	"internal/service/vlessroute/",
 	"internal/adapters/sqlstore/",
 	"internal/transport/http/handler/admin_node.go",
+	"internal/service/group/line_visibility.go",
 }
 
 type listedPackage struct {
@@ -151,7 +154,7 @@ func TestLineLabelsAreReadOnlyByDisplayCode(t *testing.T) {
 	sort.Strings(offenders)
 	offenders = compactStrings(offenders)
 	if len(offenders) > 0 {
-		t.Fatalf("line Region/Tags used outside display code (ADR 0040 invariant 1):\n  %s", strings.Join(offenders, "\n  "))
+		t.Fatalf("line Region/Tags used outside display code (ADR 0040 invariant 1, ADR 0041):\n  %s", strings.Join(offenders, "\n  "))
 	}
 }
 

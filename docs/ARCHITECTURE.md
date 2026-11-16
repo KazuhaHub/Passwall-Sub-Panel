@@ -1034,7 +1034,9 @@ VLESS 路由线路（V2）在原中转区域提供两个标签页，只读取已
 
 每条中转线路及 VLESS 路由线路的 `only_line_name` 选项默认 `false`，旧 JSON 缺省值保持原有“节点名称 + 线路名称”的代理命名；开启后只使用线路名称。开关不改变稳定线路 ID、入口或凭据；自动区域国旗仍沿用原有逻辑，按父节点 `region` 添加。两类线路的 JSON 存储无需新增数据库列或迁移。
 
-（2026-11-16 更正：上段“国旗按父节点 `region`”已由 [ADR 0040](adr/0040-line-region-and-tags.md) 取代。）中转线路与 VLESS 路由线路各自持有 `Region` / `Tags`，新建时复制节点当时的值，之后与节点互不影响，渲染不做运行时继承。线路值只进入订阅展示与选择：国旗、`region:` / `tag:` 节点集合、模板 `@region:` / `@tag:` 占位符，以及规则集成员预览的候选目录与“无匹配”校验；渲染层只通过 `renderItem.region()` / `tags()` 取值，直连条目返回节点值。分组 `tag_filter`、allowlist 资格、挂载与凭据、流量、风控、3X-UI 路由规则与 Passwall Node 协议仍只看节点，`internal/domain/line_labels_guard_test.go` 以类型信息扫描全仓，限制这两个字段只能出现在展示相关代码中。线路排序仍紧随父节点，不按线路 Region 排序。
+（2026-11-16 更正：上段“国旗按父节点 `region`”已由 [ADR 0040](adr/0040-line-region-and-tags.md) 取代。）中转线路与 VLESS 路由线路各自持有 `Region` / `Tags`，新建时复制节点当时的值，之后与节点互不影响，渲染不做运行时继承。线路值只进入订阅展示与选择：国旗、`region:` / `tag:` 节点集合、模板 `@region:` / `@tag:` 占位符，以及规则集成员预览的候选目录与“无匹配”校验；渲染层只通过 `renderItem.region()` / `tags()` 取值，直连条目返回节点值。挂载与凭据、allowlist 资格、流量、风控、3X-UI 路由规则与 Passwall Node 协议仍只看节点，`internal/domain/line_labels_guard_test.go` 以类型信息扫描全仓，限制这两个字段只能出现在展示相关代码与线路可见性判断中。线路排序仍紧随父节点，不按线路 Region 排序。
+
+（2026-11-16，[ADR 0041](adr/0041-line-visibility-by-group-filter.md)）线路还按分组的 `tag_filter` 决定订阅可见性，且只收窄：分组须先满足节点条件（`group.Service.Eligible`），再以线路自己的 Region / Tags 对同一 `tag_filter` 求值为真，`node:` 条件仍看节点地址；经由中转入口的 VLESS 路由线路还要求入口中转可见。`group.Service.SubscriptionNodesFor` 在 `NodesFor` 之后统一移除不可见线路（被移除线路的节点返回副本并重排中转健康快照下标），渲染接口 `render.GroupResolver` 只提供这一入口，Mihomo、sing-box、URI 链接订阅、分组预览、成员解析、模板占位符与用户状态页均消费同一结果；开通与挂载仍用 `NodesFor`。节点编辑器通过只读、免审计的 `POST /api/admin/nodes/:id/line-visibility` 按草稿实时显示每条线路的可见分组，无分组可见时提示但不阻止保存，读取失败显示“无法计算”。这只决定订阅内容，不是访问控制。
 
 接口中两字段可省略：已有线路省略即保留已存值，新线路省略取节点本次保存后的值，显式 `""` / `[]` 表示清空。“未提供”只是解析期标记（`RegionUnresolved` / `TagsUnresolved`，不序列化），由 `domain.ResolveRelayLabels` / `ResolveRouteLineLabels` 解析；存储层拒绝写入仍带标记的线路，并总是写出两个键。启动时 `backfillLineLabels` 按 JSON 键是否存在、以列内容比较交换补齐旧线路，回退后被旧版本重写的行在再次升级时也会补齐。VLESS 路由线路只改名称、仅显示线路名称、Region、Tags 时走本地路径（`vlessroute.saveDisplayOnly`），不连接 3X-UI，保留 `status` / `error` / `binding`；展示字段由 `domain.splitRouteLineDisplay` 唯一界定。
 

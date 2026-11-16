@@ -67,7 +67,7 @@ import type { PanelCapability, PanelType, Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
-import type { Separator } from '@/api/nodes'
+import type { LineVisibilityDraft, Separator } from '@/api/nodes'
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
@@ -79,6 +79,7 @@ import { lineLabelsInput, splitTagsText } from '@/api/vlessRoute'
 import VlessRouteLinesEditor from './VlessRouteLinesEditor'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
+import { lineVisibilityHint, useLineVisibility } from './useLineVisibility'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -2274,6 +2275,19 @@ export default function NodesView() {
   const [lineTab, setLineTab] = useState<'relay' | 'route'>('relay')
   const [lineSession, setLineSession] = useState(0)
   const routeDraft = useVlessRouteDraft(qScope, editing?.id || 0, lineSession, editOpen && lineTab === 'route')
+  // Which groups would see each line with the unsaved labels (ADR 0041). Rows
+  // keep editor order, including rows the save would drop for a blank address.
+  const lineVisibilityDraft = useMemo<LineVisibilityDraft | null>(() => {
+    if (!editOpen || !editing) return null
+    const labels = (line: { region?: string; tags?: string[] }) => ({ region: (line.region ?? '').trim(), tags: line.tags ?? [] })
+    return {
+      region: editForm.region,
+      tags: splitTagsText(editForm.tags_text),
+      relays: editForm.relays.map(r => ({ id: r.id, ...labels(r) })),
+      routes: routeDraft.lines.map(line => ({ id: line.id, entry_relay_id: line.entry_relay_id || '', ...labels(line) })),
+    }
+  }, [editOpen, editing, editForm.region, editForm.tags_text, editForm.relays, routeDraft.lines])
+  const lineVisibility = useLineVisibility(editing?.id || 0, lineVisibilityDraft)
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
 
@@ -3911,6 +3925,7 @@ export default function NodesView() {
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
                     <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
+                      visibility={lineVisibilityHint(lineVisibility, 'relays', i)}
                       onChange={patch => update(patch)} />
                     <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
                       control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
@@ -3921,7 +3936,8 @@ export default function NodesView() {
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
             </Box>
             {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays}
-              nodeRegion={editForm.region.trim()} nodeTags={splitTagsText(editForm.tags_text)} tagOptions={allTags} />}
+              nodeRegion={editForm.region.trim()} nodeTags={splitTagsText(editForm.tags_text)} tagOptions={allTags}
+              visibility={lineVisibility} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

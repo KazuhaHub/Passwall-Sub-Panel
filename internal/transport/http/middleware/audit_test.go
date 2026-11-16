@@ -252,3 +252,25 @@ func TestDestPreviewEndpointsAreNotAudited(t *testing.T) {
 		}
 	}
 }
+
+// The node editor's line-visibility preview (ADR 0041) is a read dressed as a
+// POST, exempt only in its exact shape; every other node write stays audited.
+func TestLineVisibilityPreviewIsNotAudited(t *testing.T) {
+	for _, path := range []string{"/api/admin/nodes/1/line-visibility", "/api/admin/nodes/12345/line-visibility"} {
+		if shouldAuditPath(path, http.MethodPost) {
+			t.Errorf("%s is a preview and must not be audited", path)
+		}
+	}
+	for _, path := range []string{
+		"/api/admin/nodes/1/metadata",
+		"/api/admin/nodes//line-visibility",
+		"/api/admin/nodes/x/line-visibility",
+		"/api/admin/nodes/1/line-visibility/apply",
+		"/api/admin/nodes/1/2/line-visibility",
+		"/api/admin/nodes/line-visibility",
+	} {
+		if !shouldAuditPath(path, http.MethodPost) {
+			t.Errorf("POST %s must still be audited", path)
+		}
+	}
+}

@@ -10,11 +10,14 @@ import type { VlessRouteLine } from '@/api/vlessRoute'
 import type { RelayLine } from '@/api/types'
 import VlessRouteMatchFields from './VlessRouteMatchFields'
 import LineLabelsFields from './LineLabelsFields'
+import { lineVisibilityHint, type LineVisibilityState } from './useLineVisibility'
 
-export default function VlessRouteLinesEditor({ draft, busy, relays, nodeRegion, nodeTags, tagOptions }: {
+export default function VlessRouteLinesEditor({ draft, busy, relays, nodeRegion, nodeTags, tagOptions, visibility }: {
   draft: VlessRouteDraft; busy: boolean; relays: RelayLine[]
   /** The node form's current labels: a new line starts from them (ADR 0040). */
   nodeRegion: string; nodeTags: string[]; tagOptions: string[]
+  /** Which groups would see each draft line (ADR 0041), in `draft.lines` order. */
+  visibility?: LineVisibilityState
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const md = useTheme().palette.md
@@ -85,6 +88,7 @@ export default function VlessRouteLinesEditor({ draft, busy, relays, nodeRegion,
           </TextField>
         </Box>
         <LineLabelsFields region={line.region ?? ''} tags={line.tags ?? []} tagOptions={tagOptions} disabled={disabled}
+          visibility={visibility ? lineVisibilityHint(visibility, 'routes', index) : undefined}
           onChange={patch => update(patch)} />
         <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
           control={<Switch size="small" checked={!!line.only_line_name} disabled={disabled} onChange={(_, checked) => update({ only_line_name: checked })} />} />

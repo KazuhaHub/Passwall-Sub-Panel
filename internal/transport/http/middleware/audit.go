@@ -113,6 +113,10 @@ func shouldAuditPath(path, method string) bool {
 	if _, preview := destPreviewPaths[path]; preview {
 		return false
 	}
+	// The node editor's line-visibility preview is a read as well.
+	if isLineVisibilityPreviewPath(path) {
+		return false
+	}
 	switch {
 	case strings.HasPrefix(path, "/api/admin/"):
 		// Every admin write (settings, users, nodes, …) was already
@@ -144,6 +148,27 @@ func shouldAuditPath(path, method string) bool {
 var destPreviewPaths = map[string]struct{}{
 	"/api/admin/dest/lists/preview":    {},
 	"/api/admin/dest/policies/preview": {},
+}
+
+// isLineVisibilityPreviewPath matches exactly /api/admin/nodes/<id>/line-visibility
+// with a decimal id. The node editor posts its unsaved line labels there and
+// gets back which groups would see each line (ADR 0041); nothing is written.
+// Anything longer, shorter or with another id shape stays audited.
+func isLineVisibilityPreviewPath(path string) bool {
+	const prefix, suffix = "/api/admin/nodes/", "/line-visibility"
+	// The length check comes first: prefix and suffix share a slash, so a path
+	// such as /api/admin/nodes/line-visibility satisfies both checks while
+	// leaving no room for an id between them.
+	if len(path) <= len(prefix)+len(suffix) || !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
+		return false
+	}
+	id := path[len(prefix) : len(path)-len(suffix)]
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveAuditActor picks the best identity string for the audit entry.

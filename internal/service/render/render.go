@@ -26,9 +26,11 @@ import (
 
 // GroupResolver is the subset of group.Service the renderer needs. Declared
 // here as an interface so the render package never imports group and stays
-// trivially testable.
+// trivially testable. It returns the group's nodes with the relay and VLESS
+// route lines the group may not see already removed (ADR 0041); the renderer
+// has no way to ask for the unnarrowed set.
 type GroupResolver interface {
-	NodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error)
+	SubscriptionNodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error)
 }
 
 type Service struct {
@@ -126,7 +128,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	if err != nil {
 		return nil, fmt.Errorf("load group: %w", err)
 	}
-	nodes, err := s.groupSvc.NodesFor(ctx, g)
+	nodes, err := s.groupSvc.SubscriptionNodesFor(ctx, g)
 	if err != nil {
 		return nil, fmt.Errorf("resolve nodes: %w", err)
 	}
@@ -147,9 +149,10 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	}
 
 	items := applyLayout(nodes, separators, g.Layout)
-	// Expand each relay-bearing node into its direct entry + one entry per
-	// enabled transit line BEFORE the flag prefix, so every variant inherits
-	// its node's region flag. relay-less nodes pass through unchanged.
+	// Expand each node into its direct entry + one entry per enabled relay and
+	// published VLESS route line BEFORE the flag prefix, so each entry is
+	// flagged by its own Region (ADR 0040). Lines the group may not see were
+	// already removed by SubscriptionNodesFor (ADR 0041).
 	items = expandNodeLines(items)
 	if ct == domain.ClientURIList {
 		applyLegacyLineNames(items)

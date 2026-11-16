@@ -27,7 +27,8 @@
 | [0037](0037-authcore-shareability-experiment.md) | authcore 共享收益实验的测量口径与退出判据 | 已接受（2026-09-18；判据在结果出现前冻结；三包结论见测量文档 §6、§8） |
 | [0038](0038-refused-node-report-is-recorded.md) | 被拒绝的节点上报是一个要记录、要判定、要显示的事实 | 已接受（2026-09-22） |
 | [0039](0039-vless-route-lines-v2.md) | 节点级 VLESS 路由线路与“按线路选择”引用 | 已接受，已实现并完成有界本地验收（2026-10-16） |
-| [0040](0040-line-region-and-tags.md) | 线路级 Region 与 Tags | 已接受，已实现（2026-11-16；自动化验证通过，已同步手测环境，浏览器检查未完成） |
+| [0040](0040-line-region-and-tags.md) | 线路级 Region 与 Tags | 已接受，已实现（2026-11-16；决策 2 与不变量 1 由 ADR 0041 修订；浏览器检查未完成） |
+| [0041](0041-line-visibility-by-group-filter.md) | 线路按分组筛选条件决定订阅可见性 | 已接受，已实现（2026-11-16；修订 ADR 0040 决策 2 与不变量 1；已同步手测环境，浏览器宽度检查未完成） |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 

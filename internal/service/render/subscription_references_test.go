@@ -13,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 )
 
 func TestPruneMihomoLinesUsesSemanticReferences(t *testing.T) {
@@ -197,8 +198,10 @@ func (referenceGroupRepo) GetByID(context.Context, int64) (*domain.Group, error)
 
 type referenceGroupResolver struct{ nodes []*domain.Node }
 
-func (r referenceGroupResolver) NodesFor(context.Context, *domain.Group) ([]*domain.Node, error) {
-	return r.nodes, nil
+// SubscriptionNodesFor applies the production line-visibility narrowing to the
+// fixture's nodes, so render tests see exactly what a real group would.
+func (r referenceGroupResolver) SubscriptionNodesFor(_ context.Context, g *domain.Group) ([]*domain.Node, error) {
+	return group.VisibleLines(g, r.nodes), nil
 }
 
 type referenceTemplateRepo struct {

@@ -1,6 +1,7 @@
 # ADR 0040：线路级 Region 与 Tags
 
 - 状态：已接受，已实现（2026-11-16，所有者批准实现）；自动化验证通过，已同步到重建的手测环境，真实浏览器检查未完成，见文末“实现与验证”
+- 修订：决策第 2 条中“线路值不参与分组 `tag_filter`”及不变量 1 已由 [ADR 0041](0041-line-visibility-by-group-filter.md) 修订（2026-11-16）：线路值开始以只收窄的方式影响订阅可见性，其余不变
 - 关联：[ADR 0039](0039-vless-route-lines-v2.md)、[VLESS 路由线路（V2）](../vlessroute-v2.md)
 
 ## 背景
@@ -127,7 +128,7 @@ revision，保留 `status` / `error` / `binding` 不变，写库并失效订阅�
 
 既有测试调整：`TestLocalSaveCoreFailureKeepsTargetButWithdraws` 原以仅改名称触发重新确认，按本 ADR 仅改名称不再连接 3X-UI，改为修改线路入站（规则相关、编译结果不变）继续覆盖“重新确认失败即撤下”。三个渲染测试原以内存构造、无标签的线路断言继承父节点，改为赋予创建/回填时会复制的值，并新增独立性用例。
 
-验证：gofmt、`go vet`（含 acceptance tag）、staticcheck v0.8.2 通过；全量 Go 100 个有测试包通过、9 个无测试文件；domain/render/vlessroute/node/sqlstore/handler 竞态检测通过。前端全量 2421 项通过、1 项既有跳过，类型检查与构建通过，lint 为 35 条既有告警、无新增。
+验证：gofmt、`go vet`（含 acceptance tag）、staticcheck v0.8.2 通过；全量 Go 94 个有测试包通过、9 个无测试文件（2026-11-16 更正：此前误将竞态检测的 6 行计入，写作 100）；domain/render/vlessroute/node/sqlstore/handler 竞态检测通过。前端全量 2421 项通过、1 项既有跳过，类型检查与构建通过，lint 为 35 条既有告警、无新增。
 
 手测环境：原 `/private/tmp/psp-manual-tqGJIe` 已丢失，经所有者确认后以全新数据重建（3X-UI 3.7.0），同步 `test-eb651b90-20261116-081205` 成功，3X-UI 未重启；只读确认节点保留及 VLESS 路由编辑器可读取出站。
 

@@ -281,3 +281,35 @@ export async function claimClient(req: {
 }) {
   await client.post('/admin/nodes/-/claim', req)
 }
+
+/** The node editor's unsaved labels, in editor row order (ADR 0041). */
+export interface LineVisibilityDraft {
+  region: string
+  tags: string[]
+  relays: { id?: string; region: string; tags: string[] }[]
+  routes: { id?: string; entry_relay_id?: string; region: string; tags: string[] }[]
+}
+
+/** Which groups would see each draft line; empty means none, never unknown. */
+export interface LineVisibilityView {
+  groups: { id: number; name: string }[]
+  node_groups: number[]
+  relays: number[][]
+  routes: number[][]
+}
+
+/** Read-only and unaudited: called as the editor's typing pauses. A reply
+ *  without one list per draft row is treated as unreadable, never as "none". */
+export async function previewLineVisibility(nodeId: number, draft: LineVisibilityDraft, signal?: AbortSignal): Promise<LineVisibilityView> {
+  const { data } = await client.post<LineVisibilityView>(`/admin/nodes/${nodeId}/line-visibility`, draft, { signal, _skipErrorToast: true })
+  const rows = (value: unknown, count: number) => {
+    if (!Array.isArray(value) || value.length !== count || !value.every(Array.isArray)) throw new Error('malformed line visibility')
+    return value as number[][]
+  }
+  return {
+    groups: Array.isArray(data?.groups) ? data.groups : [],
+    node_groups: Array.isArray(data?.node_groups) ? data.node_groups : [],
+    relays: rows(data?.relays, draft.relays.length),
+    routes: rows(data?.routes, draft.routes.length),
+  }
+}

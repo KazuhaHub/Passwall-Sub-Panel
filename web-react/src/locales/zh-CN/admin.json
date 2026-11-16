@@ -1980,7 +1980,11 @@
     "line_labels": {
       "region": "Region",
       "tags": "Tags",
-      "node_change_hint": "修改节点的 Region 或 Tags 不会改变已有线路的值。依赖 region: / tag: 的代理组请逐条核对线路。"
+      "node_change_hint": "修改节点的 Region 或 Tags 不会改变已有线路。线路是否下发给某分组按线路自己的值判断，只决定订阅内容，不是访问控制。",
+      "visible_groups": "可见分组：{{groups}}",
+      "group_separator": "、",
+      "visible_none": "没有分组能看到这条线路，它不会出现在任何订阅中",
+      "visibility_unknown": "可见分组暂时无法计算"
     },
     "import": "纳管",
     "imported": "已纳管",

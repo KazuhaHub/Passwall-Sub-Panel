@@ -269,7 +269,9 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	nodes, err := h.group.NodesFor(c.Request.Context(), g)
+	// The same narrowed set the subscription renders: lines this group may not
+	// see are never listed here either (ADR 0041).
+	nodes, err := h.group.SubscriptionNodesFor(c.Request.Context(), g)
 	if err != nil {
 		respondError(c, err)
 		return
