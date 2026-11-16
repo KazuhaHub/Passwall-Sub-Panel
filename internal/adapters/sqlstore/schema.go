@@ -1496,7 +1496,18 @@ func (j jsonRelays) Value() (driver.Value, error) {
 	if len(j) == 0 {
 		return "[]", nil
 	}
-	b, err := json.Marshal([]domain.RelayLine(j))
+	if err := domain.CheckRelayLabelsResolved(j); err != nil {
+		return nil, err
+	}
+	// Always write both label keys (ADR 0040): an empty value then means an
+	// explicit clear, which the startup backfill must not overwrite.
+	lines := append([]domain.RelayLine(nil), j...)
+	for i := range lines {
+		if lines[i].Tags == nil {
+			lines[i].Tags = []string{}
+		}
+	}
+	b, err := json.Marshal(lines)
 	return string(b), err
 }
 
@@ -1664,6 +1675,10 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	if err := repairTrafficCounterNulls(db); err != nil {
+		return err
+	}
+	// Assign labels before the ID migration serializes missing labels as empty keys.
+	if err := backfillLineLabels(db); err != nil {
 		return err
 	}
 	if err := backfillRelayLineIDs(db); err != nil {

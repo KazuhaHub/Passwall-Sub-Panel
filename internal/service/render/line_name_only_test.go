@@ -12,14 +12,17 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func TestLineOnlyNamesAcrossFormatsAndParentRegionFlags(t *testing.T) {
+// Each entry is flagged by its own Region (ADR 0040): the direct entry by the
+// node's, each relay / route line by the line's own value.
+func TestLineOnlyNamesAcrossFormatsAndLineRegionFlags(t *testing.T) {
 	for _, onlyName := range []bool{false, true} {
 		for _, flags := range []bool{false, true} {
 			s, n, user, _ := routeRenderFixture(t)
 			n.DisplayName, n.Region = "Parent", "HK"
-			n.Relays = []domain.RelayLine{{ID: "relay", Name: "JP relay", Address: "relay.example", Enabled: true, OnlyLineName: onlyName}}
+			n.Relays = []domain.RelayLine{{ID: "relay", Name: "JP relay", Address: "relay.example", Enabled: true, OnlyLineName: onlyName, Region: "JP"}}
 			n.RouteState.Lines[0].Name = "US route"
 			n.RouteState.Lines[0].OnlyLineName = onlyName
+			n.RouteState.Lines[0].Region = "US"
 			want := []string{"Parent", "Parent JP relay", "Parent US route"}
 			if onlyName {
 				want[1], want[2] = "JP relay", "US route"
@@ -33,8 +36,8 @@ func TestLineOnlyNamesAcrossFormatsAndParentRegionFlags(t *testing.T) {
 			items := s.filterRouteItems(context.Background(), user, expandNodeLines([]renderItem{{node: n, name: n.DisplayName}}))
 			if flags {
 				applyRegionFlagPrefix(items)
-				for i := range want {
-					want[i] = "🇭🇰 " + want[i]
+				for i, flag := range []string{"🇭🇰 ", "🇯🇵 ", "🇺🇸 "} {
+					want[i] = flag + want[i]
 				}
 			}
 			var names []string

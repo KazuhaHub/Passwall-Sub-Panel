@@ -17,7 +17,7 @@ func TestAllocationReservesEarlierRulesOnlyInMatchingScope(t *testing.T) {
 	if used[11] || !used[1] || !used[10] || !used[12] {
 		t.Fatal(used)
 	}
-	target, err := makeTarget(domain.NodeRouteState{}, []LineInput{{Name: "new", OutboundTag: "direct", Enabled: true}}, used, map[uint16]bool{0: true})
+	target, err := makeTarget(domain.NodeRouteState{}, []LineInput{{Name: "new", OutboundTag: "direct", Enabled: true}}, nodeLabels{}, used, map[uint16]bool{0: true})
 	if err != nil {
 		t.Fatal(err)
 	}

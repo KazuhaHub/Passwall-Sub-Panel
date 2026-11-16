@@ -89,8 +89,8 @@ func expandNodeRefs(body string, items []renderItem) string {
 		if it.node == nil {
 			continue
 		}
-		byRegion[it.node.Region] = append(byRegion[it.node.Region], it.name)
-		for _, t := range it.node.Tags {
+		byRegion[it.region()] = append(byRegion[it.region()], it.name)
+		for _, t := range it.tags() {
 			byTag[t] = append(byTag[t], it.name)
 		}
 	}

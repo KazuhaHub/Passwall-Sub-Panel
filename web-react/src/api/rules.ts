@@ -91,6 +91,9 @@ export interface ProxyGroupInspectLine {
   name: string
   display_name: string
   available: boolean
+  /** The entry's own subscription labels (ADR 0040). */
+  region?: string
+  tags?: string[]
 }
 
 export interface RuleSetListParams {

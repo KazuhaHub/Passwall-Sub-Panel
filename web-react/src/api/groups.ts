@@ -89,3 +89,23 @@ export async function updateGroupLayout(id: number, layout: Layout) {
 export async function deleteGroup(id: number) {
   await client.delete(`/admin/groups/${id}`)
 }
+
+/** What a draft tag_filter would include (ADR 0042 §1). */
+export interface GroupNodePreview {
+  nodes: { id: number; name: string; region: string; visible_lines: number; total_lines: number }[]
+  excluded: { id: number; name: string; reason: string }[]
+  added: number[]
+  removed: number[]
+  members: number
+}
+
+/** Read-only and unaudited; `groupId` null previews a group being created. A
+ *  reply missing any list is treated as unreadable, never as "no nodes". */
+export async function previewGroupNodes(groupId: number | null, tagFilter: TagFilter, signal?: AbortSignal): Promise<GroupNodePreview> {
+  const url = groupId ? `/admin/groups/${groupId}/node-preview` : '/admin/groups/node-preview'
+  const { data } = await client.post<GroupNodePreview>(url, { tag_filter: tagFilter }, { signal, _skipErrorToast: true })
+  if (!data || ![data.nodes, data.excluded, data.added, data.removed].every(Array.isArray) || typeof data.members !== 'number') {
+    throw new Error('malformed group node preview')
+  }
+  return data
+}

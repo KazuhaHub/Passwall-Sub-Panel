@@ -278,7 +278,7 @@ func TestInterveningExternalEditStopsBeforeWriting(t *testing.T) {
 
 func TestTargetRetiresWithoutReusingOrChangingLineIdentity(t *testing.T) {
 	previous := domain.NodeRouteState{Lines: []domain.VlessRouteLine{{ID: "old", Name: "old", Route: 1, OutboundTag: "direct", Enabled: true}}}
-	state, err := makeTarget(previous, []LineInput{{Name: "new", OutboundTag: "direct", Enabled: true}}, map[uint16]bool{0: true})
+	state, err := makeTarget(previous, []LineInput{{Name: "new", OutboundTag: "direct", Enabled: true}}, nodeLabels{}, map[uint16]bool{0: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestTargetRetiresWithoutReusingOrChangingLineIdentity(t *testing.T) {
 	if len(visible.Lines) != 1 {
 		t.Fatal("retired line surfaced in the editor")
 	}
-	renamed, err := makeTarget(state, []LineInput{{ID: visible.Lines[0].ID, Name: "renamed", OutboundTag: "direct", Enabled: true}}, map[uint16]bool{0: true})
+	renamed, err := makeTarget(state, []LineInput{{ID: visible.Lines[0].ID, Name: "renamed", OutboundTag: "direct", Enabled: true}}, nodeLabels{}, map[uint16]bool{0: true})
 	if err != nil {
 		t.Fatal(err)
 	}

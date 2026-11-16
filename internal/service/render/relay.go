@@ -9,9 +9,10 @@ import "github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 //
 // Runs after applyLayout (so relay variants inherit their node's sort
 // position, clustering right after their landing) and before the region-flag
-// prefix (so every variant of a node gets the same flag). Each variant shares
-// the node pointer; only `relay` and `name` differ — the emit dispatchers
-// read the dialed endpoint from `relay` and everything else from the node.
+// prefix (so each variant is flagged by its own line Region). Each variant
+// shares the node pointer; only `relay` and `name` differ — the emit
+// dispatchers read the dialed endpoint from `relay`, the display labels from
+// renderItem.region/tags, and everything else from the node.
 func expandRelays(items []renderItem) []renderItem {
 	out := make([]renderItem, 0, len(items))
 	for _, it := range items {

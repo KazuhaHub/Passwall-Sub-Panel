@@ -67,11 +67,13 @@ func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) 
 	u := &domain.User{ID: 1, UPN: "subscriber", Role: domain.RoleUser, Enabled: true, GroupID: 1}
 	users := routerReleaseUsers{users: map[int64]*domain.User{1: u}}
 	n := &domain.Node{ID: 1, PanelID: 1, InboundID: 11, Enabled: true, DisplayName: "Mine", Tags: []string{"mine"}, DesiredProtocol: "vless", DesiredPort: 443,
-		HealthState: domain.NodeHealthOK, Relays: []domain.RelayLine{{ID: "front", Name: "Front", Address: "private-relay.example", Enabled: true, OnlyLineName: true}},
+		HealthState: domain.NodeHealthOK, Relays: []domain.RelayLine{{ID: "front", Name: "Front", Address: "private-relay.example", Enabled: true, OnlyLineName: true, Tags: []string{"mine"}}},
 		RelayHealth: []domain.RelayHealth{{Index: 0, Address: "private-relay.example", Port: 443, State: domain.NodeHealthUnreachable}},
+		// Lines carry the labels copied from the node at creation (ADR 0040);
+		// the group's tag_filter holds on them too (ADR 0041).
 		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{
-			{ID: "direct-route", Name: "D", Route: 1001, Enabled: true},
-			{ID: "relay-route", OutboundTag: "warp", EntryRelayID: "front", Route: 1002, Enabled: true, OnlyLineName: true},
+			{ID: "direct-route", Name: "D", Route: 1001, Enabled: true, Tags: []string{"mine"}},
+			{ID: "relay-route", OutboundTag: "warp", EntryRelayID: "front", Route: 1002, Enabled: true, OnlyLineName: true, Tags: []string{"mine"}},
 		}},
 	}
 	n.RouteState.Binding = domain.RouteBinding("https://private-panel.example", n)
@@ -139,5 +141,19 @@ func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) 
 	clients.applied = false
 	if got = read(); len(got[0].Routes) != 0 {
 		t.Fatal("status routes bypassed applied-credential gate")
+	}
+	// ADR 0041: a relay whose own tags no longer satisfy the group is not
+	// listed, and neither is the route line entering through it, while the
+	// direct-inbound route stays. The status page shares the subscription's set.
+	clients.applied = true
+	n.Relays[0].Tags = []string{"elsewhere"}
+	got = read()
+	if len(got) != 1 || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
+		t.Fatalf("hidden relay or its route still listed: %+v", got)
+	}
+	n.Relays[0].Tags = []string{"mine"}
+	n.RouteState.Lines[0].Tags = []string{}
+	if got = read(); len(got) != 1 || len(got[0].Routes) != 1 || got[0].Routes[0].Status != "down" {
+		t.Fatalf("a route line with cleared tags is still listed: %+v", got)
 	}
 }

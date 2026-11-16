@@ -16,9 +16,21 @@ import (
 type jsonRouteState domain.NodeRouteState
 
 func (j jsonRouteState) Value() (driver.Value, error) {
-	b, err := json.Marshal(j)
+	if err := domain.CheckRouteLabelsResolved(j.Lines); err != nil {
+		return nil, err
+	}
+	// Always write both label keys; see jsonRelays.Value.
+	state := domain.NodeRouteState(j)
+	state.Lines = append([]domain.VlessRouteLine(nil), j.Lines...)
+	for i := range state.Lines {
+		if state.Lines[i].Tags == nil {
+			state.Lines[i].Tags = []string{}
+		}
+	}
+	b, err := json.Marshal(state)
 	return string(b), err
 }
+
 func (jsonRouteState) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
 	if db.Dialector.Name() == "mysql" {
 		return "longtext"

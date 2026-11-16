@@ -143,3 +143,72 @@ func TestMatches_TrimsSpaces(t *testing.T) {
 		}
 	}
 }
+
+// SameFilter decides whether a group save re-pushes every member to the
+// panels, so it must hold exactly where the matcher cannot tell two filters
+// apart and must not hold anywhere the selection can differ.
+func TestSameFilter(t *testing.T) {
+	and := func(tags ...string) domain.TagFilter { return domain.TagFilter{Tags: tags} }
+	withMode := func(mode string, tags ...string) domain.TagFilter { return domain.TagFilter{Mode: mode, Tags: tags} }
+	for _, tc := range []struct {
+		name string
+		a, b domain.TagFilter
+		same bool
+	}{
+		{"identical", and("region:JP", "tag:reality"), and("region:JP", "tag:reality"), true},
+		{"empty mode is all", withMode("", "tag:a"), withMode("all", "tag:a"), true},
+		{"unknown mode is all", withMode("both", "tag:a"), withMode("all", "tag:a"), true},
+		{"trimmed like matchOne", and("tag:a", "server:x", "plain"), and("  tag : a ", "server: x", " plain "), true},
+		{"order ignored", and("tag:a", "region:JP"), and("region:JP", "tag:a"), true},
+		{"repetition ignored", withMode("any", "tag:a"), withMode("any", "tag:a", " tag:a"), true},
+		{"nil and empty tags", and(), domain.TagFilter{Tags: []string{}}, true},
+		{"all ignores leftover tags", domain.TagFilter{All: true, Tags: []string{"tag:a"}}, domain.TagFilter{All: true, Mode: "any"}, true},
+
+		{"all to conditions", domain.TagFilter{All: true}, and("tag:a"), false},
+		{"conditions to all", and("tag:a"), domain.TagFilter{All: true, Tags: []string{"tag:a"}}, false},
+		{"all is not folded into empty AND", domain.TagFilter{All: true}, and(), false},
+		{"and to any", withMode("all", "tag:a", "tag:b"), withMode("any", "tag:a", "tag:b"), false},
+		{"empty mode to any", withMode("", "tag:a"), withMode("any", "tag:a"), false},
+		{"condition added", and("tag:a"), and("tag:a", "tag:b"), false},
+		{"condition removed", and("tag:a", "tag:b"), and("tag:a"), false},
+		{"value changed", and("region:JP"), and("region:US"), false},
+		{"case kept", and("tag:A"), and("tag:a"), false},
+		{"inner spaces kept", and("tag:a b"), and("tag:ab"), false},
+		{"leading colon is a bare tag", and(":a"), and("a"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SameFilter(tc.a, tc.b); got != tc.same {
+				t.Fatalf("SameFilter(%+v, %+v) = %v, want %v", tc.a, tc.b, got, tc.same)
+			}
+			if got := SameFilter(tc.b, tc.a); got != tc.same {
+				t.Fatalf("SameFilter is not symmetric for %+v / %+v", tc.a, tc.b)
+			}
+		})
+	}
+}
+
+// Every pair SameFilter calls equal must select the same nodes; checked
+// against a spread of nodes so the equivalence rests on the matcher itself.
+func TestSameFilterAgreesWithMatches(t *testing.T) {
+	nodes := []*domain.Node{
+		{Region: "JP", Tags: []string{"a", "server:x"}},
+		{Region: "US", Tags: []string{"a"}},
+		{Region: "JP", Tags: []string{"plain"}},
+		{Region: "SG"},
+	}
+	pairs := [][2]domain.TagFilter{
+		{{Tags: []string{"region:JP", "tag:a"}}, {Mode: "all", Tags: []string{" tag : a", "region:JP", "region: JP"}}},
+		{{Mode: "any", Tags: []string{"plain", "server:x"}}, {Mode: "any", Tags: []string{"server: x ", " plain"}}},
+		{{All: true}, {All: true, Mode: "any"}},
+	}
+	for i, p := range pairs {
+		if !SameFilter(p[0], p[1]) {
+			t.Fatalf("pair %d: SameFilter = false, want true", i)
+		}
+		for j, n := range nodes {
+			if Matches(n, p[0]) != Matches(n, p[1]) {
+				t.Errorf("pair %d node %d: filters SameFilter calls equal select differently", i, j)
+			}
+		}
+	}
+}

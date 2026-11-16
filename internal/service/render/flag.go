@@ -3,7 +3,8 @@ package render
 import "strings"
 
 // applyRegionFlagPrefix mutates items in place, prepending the Unicode flag
-// for each real node's Region (followed by a space). Separators and nodes
+// for each entry's own Region (renderItem.region: a line's value, or the
+// node's for the direct entry), followed by a space. Separators and entries
 // without a parseable Region are left untouched. Idempotent only against
 // already-flag-prefixed names if the source is identical — admins who pre-
 // flag their DisplayName manually should leave this toggle off.
@@ -13,7 +14,7 @@ func applyRegionFlagPrefix(items []renderItem) {
 		if it.isSeparator || it.node == nil {
 			continue
 		}
-		flag := regionFlagEmoji(it.node.Region)
+		flag := regionFlagEmoji(it.region())
 		if flag == "" {
 			continue
 		}

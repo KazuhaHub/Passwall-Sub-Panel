@@ -9,3 +9,13 @@ it('writes optional match fields directly on the line and preserves regex commas
   expect(input).not.toHaveProperty('advanced_rules')
   expect(routeLineInput({ name: 'B', enabled: true, outbound_tag: 'direct', network: '', protocols: [], ip: [''], domain: [], port: ' ' })).toEqual(routeLineInput({ name: 'B', enabled: true, outbound_tag: 'direct' }))
 })
+
+it('sends line labels only when the line carries them, normalized like the server', () => {
+  const legacy = routeLineInput({ id: 'line', name: 'B', enabled: true, outbound_tag: 'direct' })
+  expect(legacy).not.toHaveProperty('region')
+  expect(legacy).not.toHaveProperty('tags')
+  expect(routeLineInput({ id: 'line', name: 'B', enabled: true, outbound_tag: 'direct', region: ' jp ', tags: [' b ', 'a', 'b', ''] }))
+    .toMatchObject({ region: 'jp', tags: ['b', 'a'] })
+  expect(routeLineInput({ id: 'line', name: 'B', enabled: true, outbound_tag: 'direct', region: '', tags: [] }))
+    .toMatchObject({ region: '', tags: [] })
+})
