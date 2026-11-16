@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -84,5 +85,39 @@ func TestParseRelays_Empty(t *testing.T) {
 	got, err := parseRelays(nil)
 	if err != nil || got != nil {
 		t.Fatalf("empty input → (nil,nil), got (%#v, %v)", got, err)
+	}
+}
+
+// ADR 0040 §4: omitted label fields become request-only markers, explicit
+// values are normalized and bounded, and responses always carry both fields.
+func TestParseRelays_LineLabels(t *testing.T) {
+	var input []relayLineDTO
+	if err := json.Unmarshal([]byte(`[
+		{"address":"omitted.example"},
+		{"address":"explicit.example","region":" jp ","tags":[" b ","a","b",""]},
+		{"address":"cleared.example","region":"","tags":[]}
+	]`), &input); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := parseRelays(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lines[0].RegionUnresolved || !lines[0].TagsUnresolved {
+		t.Fatalf("omitted fields not marked: %+v", lines[0])
+	}
+	if lines[1].RegionUnresolved || lines[1].Region != "jp" || len(lines[1].Tags) != 2 || lines[1].Tags[0] != "b" || lines[1].Tags[1] != "a" {
+		t.Fatalf("explicit labels not normalized: %+v", lines[1])
+	}
+	if lines[2].RegionUnresolved || lines[2].TagsUnresolved || lines[2].Tags == nil {
+		t.Fatalf("explicit clear treated as omitted: %+v", lines[2])
+	}
+	out, _ := json.Marshal(relayDTOs([]domain.RelayLine{{ID: "x", Address: "a"}}))
+	if want := `"region":"","tags":[]`; !strings.Contains(string(out), want) {
+		t.Fatalf("response must always carry both labels: %s", out)
+	}
+	long := strings.Repeat("x", domain.MaxLineRegionBytes+1)
+	if _, err := parseRelays([]relayLineDTO{{Address: "a", Region: &long}}); err == nil {
+		t.Fatal("over-long region accepted")
 	}
 }

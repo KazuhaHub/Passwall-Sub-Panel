@@ -2044,6 +2044,20 @@
       "remove": "Remove this line",
       "hide_direct": "Hide direct line"
     },
+    "line_labels": {
+      "region": "Region",
+      "tags": "Tags",
+      "node_change_hint": "Changing the node's region or tags does not change existing lines. Whether a group receives a line is decided by the line's own values; this only shapes subscriptions and is not access control.",
+      "visible_groups": "Visible to: {{groups}}",
+      "group_separator": ", ",
+      "visible_none": "No group can see this line; it appears in no subscription",
+      "visibility_unknown": "Visible groups cannot be determined right now"
+    },
+    "node_groups": {
+      "visible": "In groups: {{groups}}",
+      "none": "This node is in no group: it appears in no subscription and is provisioned for no user",
+      "removed": "Saving removes it from: {{groups}}"
+    },
     "import": "Import",
     "imported": "Imported",
     "import_validate": "Address and Region are required",
@@ -2318,6 +2332,11 @@
       "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config, relink the node to the new inbound, then provision the members' clients onto it. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Safe to re-click: if the inbound already exists it is NOT re-created, only the clients are re-pushed (to push clients that didn't land).",
       "batch_delete_title": "Delete nodes",
       "batch_delete_message": "Delete {{count}} nodes?"
+    },
+    "separator_preview": {
+      "visible": "Shown in: {{groups}}",
+      "none": "No group currently shows this separator",
+      "unknown": "The groups showing it cannot be determined right now"
     }
   },
   "users": {
@@ -2624,7 +2643,12 @@
       "close": "Close"
     },
     "risk_lookup": "Risk lookup",
-    "risk_chip_hint": "Open risk details"
+    "risk_chip_hint": "Open risk details",
+    "group_preview": {
+      "change": "Moving gains {{added}} nodes ({{added_names}}) and loses {{removed}} nodes ({{removed_names}})",
+      "same": "Moving does not change the available nodes",
+      "unknown": "The effect of moving cannot be determined right now"
+    }
   },
   "groups": {
     "title": "Groups",
@@ -2785,6 +2809,14 @@
       "delete_message": "Delete group {{name}}?",
       "batch_delete_title": "Delete groups",
       "batch_delete_message": "Delete {{names}}{{suffix}}?"
+    },
+    "preview": {
+      "nodes": "Matched nodes ({{count}}): {{names}}",
+      "more": "{{names}} and {{count}} in total",
+      "none": "No node matches; members of this group will get empty subscriptions",
+      "unknown": "Matched nodes cannot be determined right now",
+      "excluded_allowlist": "Matched but excluded because the allowlist cannot be enforced: {{names}}",
+      "change": "After saving, {{members}} members gain {{added}} and lose {{removed}} nodes; the change is pushed to the upstream panels at once"
     },
     "destination": {
       "tab": "Destinations",

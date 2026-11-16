@@ -189,8 +189,8 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 		HideDirect:      true,
 		ShowRelayStatus: true,
 		Relays: []domain.RelayLine{
-			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true, OnlyLineName: true},
-			{Name: "CDN优选", Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: false},
+			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true, OnlyLineName: true, Region: "CN", Tags: []string{"cmcc"}},
+			{Name: "CDN优选", Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: false, Tags: []string{}},
 		},
 	}
 	if err := repo.Create(ctx, n); err != nil {
@@ -211,7 +211,7 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 	}
 
 	// Update path: drop one line, flip a toggle.
-	got.Relays = []domain.RelayLine{{Name: "上海电信", Address: "sh.relay.cn", Port: 30001, Enabled: true}}
+	got.Relays = []domain.RelayLine{{Name: "上海电信", Address: "sh.relay.cn", Port: 30001, Enabled: true, Tags: []string{}}}
 	got.HideDirect = false
 	got.ShowRelayStatus = false
 	if err := repo.Update(ctx, got); err != nil {

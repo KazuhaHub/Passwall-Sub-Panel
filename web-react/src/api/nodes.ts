@@ -281,3 +281,53 @@ export async function claimClient(req: {
 }) {
   await client.post('/admin/nodes/-/claim', req)
 }
+
+/** The node editor's unsaved labels, in editor row order (ADR 0041). */
+export interface LineVisibilityDraft {
+  server_address: string
+  region: string
+  tags: string[]
+  relays: { id?: string; region: string; tags: string[] }[]
+  routes: { id?: string; entry_relay_id?: string; region: string; tags: string[] }[]
+}
+
+/** Which groups would see each draft line; empty means none, never unknown. */
+export interface LineVisibilityView {
+  groups: { id: number; name: string }[]
+  node_groups: number[]
+  /** Groups the stored node passes; with node_groups, those a save removes. */
+  saved_node_groups: number[]
+  relays: number[][]
+  routes: number[][]
+}
+
+/** Read-only and unaudited: called as the editor's typing pauses. A reply
+ *  without one list per draft row is treated as unreadable, never as "none". */
+export async function previewLineVisibility(nodeId: number, draft: LineVisibilityDraft, signal?: AbortSignal): Promise<LineVisibilityView> {
+  const { data } = await client.post<LineVisibilityView>(`/admin/nodes/${nodeId}/line-visibility`, draft, { signal, _skipErrorToast: true })
+  const rows = (value: unknown, count: number) => {
+    if (!Array.isArray(value) || value.length !== count || !value.every(Array.isArray)) throw new Error('malformed line visibility')
+    return value as number[][]
+  }
+  if (!Array.isArray(data?.node_groups) || !Array.isArray(data?.saved_node_groups)) throw new Error('malformed line visibility')
+  return {
+    groups: Array.isArray(data?.groups) ? data.groups : [],
+    node_groups: data.node_groups,
+    saved_node_groups: data.saved_node_groups,
+    relays: rows(data?.relays, draft.relays.length),
+    routes: rows(data?.routes, draft.routes.length),
+  }
+}
+
+/** Which groups would show a separator with this rule (ADR 0042 §4). */
+export interface SeparatorGroupsPreview {
+  groups: { id: number; name: string }[]
+  visible: number[]
+}
+
+/** Read-only and unaudited; evaluated as if the separator were enabled. */
+export async function previewSeparatorGroups(mode: 'global' | 'node_bound', nodeIds: number[], signal?: AbortSignal): Promise<SeparatorGroupsPreview> {
+  const { data } = await client.post<SeparatorGroupsPreview>('/admin/nodes/separator/group-preview', { mode, node_ids: nodeIds }, { signal, _skipErrorToast: true })
+  if (!data || !Array.isArray(data.groups) || !Array.isArray(data.visible)) throw new Error('malformed separator preview')
+  return data
+}

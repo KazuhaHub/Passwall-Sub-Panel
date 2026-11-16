@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router'
 import {
   Autocomplete,
   Alert,
-  createFilterOptions,
   Box,
   Button,
   Card,
@@ -68,7 +67,7 @@ import type { PanelCapability, PanelType, Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
-import type { Separator } from '@/api/nodes'
+import { previewSeparatorGroups, type LineVisibilityDraft, type SeparatorGroupsPreview, type Separator } from '@/api/nodes'
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
@@ -76,7 +75,13 @@ import { useQueryScope } from '@/query/useQueryScope'
 import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { useVlessRouteDraft } from '@/query/vlessRoute'
+import { lineLabelsInput, splitTagsText } from '@/api/vlessRoute'
 import VlessRouteLinesEditor from './VlessRouteLinesEditor'
+import TagsAutocomplete from './TagsAutocomplete'
+import LineLabelsFields from './LineLabelsFields'
+import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
+import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
+import PreviewCaption from '@/components/PreviewCaption'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -124,74 +129,6 @@ const ALPN_TLS = 'h2,http/1.1'
 
 function defaultAlpn(p: CreateProtocol): string {
   return p === 'hysteria2' || p === 'tuic' ? ALPN_HY2 : ALPN_TLS
-}
-
-const tagFilter = createFilterOptions<string>()
-
-// TagsAutocomplete is the shared tag input used by the create/edit/import/
-// separator dialogs. Wraps a freeSolo multi-select Autocomplete around the
-// form's `tags_text` comma-joined string so admins pick from existing tags
-// (suggestion dropdown) AND introduce new ones. freeSolo alone only adds on
-// Enter (no affordance, dead on touch) — filterOptions surfaces the typed
-// value as a clickable "add this" row so a new tag can be SELECTED too, which
-// is what the dropdown-only bug was missing. Form state stays a comma-joined
-// string for backend compatibility — the split/join happens here.
-function TagsAutocomplete(props: {
-  label: string
-  value: string
-  options: string[]
-  onChange: (next: string) => void
-  helperText?: string
-}) {
-  const tags = props.value
-    ? props.value.split(',').map(s => s.trim()).filter(Boolean)
-    : []
-  return (
-    <Autocomplete
-      multiple
-      freeSolo
-      size="small"
-      selectOnFocus
-      clearOnBlur
-      handleHomeEndKeys
-      options={props.options}
-      value={tags}
-      filterOptions={(options, params) => {
-        const filtered = tagFilter(options, params)
-        const input = params.inputValue.trim()
-        // Offer the typed value as a selectable row when it isn't already a
-        // known option (case-insensitive) — so a brand-new tag can be clicked
-        // to add, not only committed via Enter.
-        if (input && !options.some(o => o.toLowerCase() === input.toLowerCase())) {
-          filtered.push(input)
-        }
-        return filtered
-      }}
-      onChange={(_, v) => {
-        // de-dup + drop empties so two passes through this onChange can't
-        // create "Premium,Premium" / trailing commas. Sort is NOT applied
-        // so user-controlled ordering survives.
-        const seen = new Set<string>()
-        const cleaned: string[] = []
-        for (const raw of v as string[]) {
-          const s = raw.trim()
-          if (!s || seen.has(s)) continue
-          seen.add(s)
-          cleaned.push(s)
-        }
-        props.onChange(cleaned.join(', '))
-      }}
-      renderValue={(value, getItemProps) =>
-        value.map((option, index) => {
-          const tagProps = getItemProps({ index })
-          return <Chip {...tagProps} key={option} label={option} size="small" />
-        })
-      }
-      renderInput={(params) => (
-        <TextField {...params} label={props.label} helperText={props.helperText} />
-      )}
-    />
-  );
 }
 
 interface MetaForm {
@@ -2340,6 +2277,20 @@ export default function NodesView() {
   const [lineTab, setLineTab] = useState<'relay' | 'route'>('relay')
   const [lineSession, setLineSession] = useState(0)
   const routeDraft = useVlessRouteDraft(qScope, editing?.id || 0, lineSession, editOpen && lineTab === 'route')
+  // Which groups would see each line with the unsaved labels (ADR 0041). Rows
+  // keep editor order, including rows the save would drop for a blank address.
+  const lineVisibilityDraft = useMemo<LineVisibilityDraft | null>(() => {
+    if (!editOpen || !editing) return null
+    const labels = (line: { region?: string; tags?: string[] }) => ({ region: (line.region ?? '').trim(), tags: line.tags ?? [] })
+    return {
+      server_address: editForm.server_address,
+      region: editForm.region,
+      tags: splitTagsText(editForm.tags_text),
+      relays: editForm.relays.map(r => ({ id: r.id, ...labels(r) })),
+      routes: routeDraft.lines.map(line => ({ id: line.id, entry_relay_id: line.entry_relay_id || '', ...labels(line) })),
+    }
+  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text, editForm.relays, routeDraft.lines])
+  const lineVisibility = useLineVisibility(editing?.id || 0, lineVisibilityDraft)
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
 
@@ -2369,6 +2320,10 @@ export default function NodesView() {
   const [separatorBusy, setSeparatorBusy] = useState(false)
   const [separatorEditingId, setSeparatorEditingId] = useState<number | null>(null)
   const [separatorForm, setSeparatorForm] = useState<SeparatorForm>(EMPTY_SEPARATOR_FORM)
+  // ADR 0042 §4: which groups would show this node-bound separator.
+  const separatorPreviewKey = separatorOpen && separatorForm.mode === 'node_bound' ? JSON.stringify(separatorForm.node_ids) : null
+  const separatorGroups = useDraftPreview<SeparatorGroupsPreview>(separatorPreviewKey,
+    signal => previewSeparatorGroups('node_bound', separatorForm.node_ids, signal))
   function openSeparatorCreate() {
     setSeparatorEditingId(null)
     setSeparatorForm(EMPTY_SEPARATOR_FORM)
@@ -2586,7 +2541,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
+          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
       })
@@ -3921,6 +3876,20 @@ export default function NodesView() {
               value={editForm.tags_text}
               options={allTags}
               onChange={v => setEditForm({ ...editForm, tags_text: v })} />
+            {(() => {
+              const nodeGroups = nodeGroupsHint(lineVisibility)
+              return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: -1.5 }}>
+                <PreviewCaption hint={nodeGroups.now} testId="node-groups"
+                  readyText={groups => t('admin:nodes.node_groups.visible', { groups: groups.join(t('admin:nodes.line_labels.group_separator')) })}
+                  noneText={t('admin:nodes.node_groups.none')} unknownText={t('admin:nodes.line_labels.visibility_unknown')} />
+                {nodeGroups.removed.length > 0 && <Typography data-testid="node-groups-removed" sx={{ fontSize: 12, color: md.error }}>
+                  {t('admin:nodes.node_groups.removed', { groups: nodeGroups.removed.join(t('admin:nodes.line_labels.group_separator')) })}
+                </Typography>}
+              </Box>
+            })()}
+            {(editForm.relays.length > 0 || routeDraft.lines.length > 0 || (editing?.route_state?.lines ?? []).some(line => !line.deleted)) && (
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
+            )}
 
             {/* Transit / 中转 lines: the same landing offered through extra
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
@@ -3934,7 +3903,7 @@ export default function NodesView() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true, region: f.region.trim(), tags: splitTagsText(f.tags_text) }] }))}>
                   {t('admin:nodes.relay.add')}
                 </Button>
               </Box>
@@ -3973,6 +3942,9 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
+                      visibility={lineVisibilityHint(lineVisibility, 'relays', i)}
+                      onChange={patch => update(patch)} />
                     <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
                       control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
                   </Box>
@@ -3981,7 +3953,9 @@ export default function NodesView() {
               <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
             </Box>
-            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays} />}
+            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays}
+              nodeRegion={editForm.region.trim()} nodeTags={splitTagsText(editForm.tags_text)} tagOptions={allTags}
+              visibility={lineVisibility} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
@@ -4046,6 +4020,13 @@ export default function NodesView() {
                 )}
               />
             )}
+            {separatorForm.mode === 'node_bound' && <PreviewCaption testId="separator-groups"
+              hint={previewHint(separatorGroups, d => {
+                const names = new Map(d.groups.map(g => [g.id, g.name]))
+                return d.visible.map(id => names.get(id) ?? `#${id}`)
+              })}
+              readyText={groups => t('admin:nodes.separator_preview.visible', { groups: groups.join(t('admin:nodes.line_labels.group_separator')) })}
+              noneText={t('admin:nodes.separator_preview.none')} unknownText={t('admin:nodes.separator_preview.unknown')} />}
             <FormControlLabel
               label={t('admin:nodes.field.enabled', { defaultValue: '启用' })}
               control={

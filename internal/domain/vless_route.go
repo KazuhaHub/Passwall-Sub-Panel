@@ -24,6 +24,13 @@ type VlessRouteLine struct {
 	Route        uint16   `json:"route"`
 	Enabled      bool     `json:"enabled"`
 	Deleted      bool     `json:"deleted,omitempty"`
+	// Region and Tags are display-only subscription labels (ADR 0040). Both
+	// keys are always written so an empty value reads as an explicit clear.
+	Region string   `json:"region"`
+	Tags   []string `json:"tags"`
+	// Request-only markers for omitted fields; see RelayLine.RegionUnresolved.
+	RegionUnresolved bool `json:"-"`
+	TagsUnresolved   bool `json:"-"`
 }
 
 // Label follows the selected outbound tag when no custom name is configured.

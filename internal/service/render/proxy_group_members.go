@@ -56,12 +56,14 @@ type ProxyGroupInspection struct {
 
 // ProxyGroupInspectLine is a credential-free catalog entry, not a proxy config.
 type ProxyGroupInspectLine struct {
-	NodeID      int64  `json:"node_id"`
-	LineID      string `json:"line_id"`
-	Kind        string `json:"kind"`
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Available   bool   `json:"available"`
+	NodeID      int64    `json:"node_id"`
+	LineID      string   `json:"line_id"`
+	Kind        string   `json:"kind"`
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name"`
+	Available   bool     `json:"available"`
+	Region      string   `json:"region"`
+	Tags        []string `json:"tags"`
 }
 
 func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
@@ -70,7 +72,7 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 		if n == nil || n.IsSeparator() {
 			continue
 		}
-		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Available: n.Enabled && !n.EffectiveHideDirect()})
+		lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: domain.DirectLineID, Kind: "direct", Name: n.DisplayName, DisplayName: n.DisplayName, Available: n.Enabled && !n.EffectiveHideDirect(), Region: n.Region, Tags: domain.CopyLineTags(n.Tags)})
 		for _, r := range n.Relays {
 			if r.ID == "" {
 				continue
@@ -79,13 +81,13 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 			if name == "" {
 				name = r.Address
 			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Enabled})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Enabled, Region: r.Region, Tags: domain.CopyLineTags(r.Tags)})
 		}
 		for _, line := range n.RouteState.Lines {
 			if line.Deleted {
 				continue
 			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Available: line.LocallyAvailable(n)})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Available: line.LocallyAvailable(n), Region: line.Region, Tags: domain.CopyLineTags(line.Tags)})
 		}
 	}
 	return lines
@@ -183,10 +185,12 @@ func InspectProxyGroupsWithMihomo(content string, members map[string][]domain.Pr
 			Tags: append([]string(nil), n.Tags...), Enabled: n.Enabled,
 		})
 		sortOrders[n.ID] = n.SortOrder
-		if n.Region != "" {
-			regionsSet[n.Region] = true
+	}
+	for _, labels := range lineLabelCatalog(nodes) {
+		if labels.region != "" {
+			regionsSet[labels.region] = true
 		}
-		for _, tag := range n.Tags {
+		for _, tag := range labels.tags {
 			if tag != "" {
 				tagsSet[tag] = true
 			}
@@ -400,16 +404,13 @@ func validateProxyGroupMembers(targets []string, configs map[string][]domain.Pro
 }
 
 func nodeSetHasMatch(selector string, nodes []*domain.Node) bool {
-	for _, n := range nodes {
-		if n == nil || n.IsSeparator() {
-			continue
-		}
+	for _, labels := range lineLabelCatalog(nodes) {
 		switch {
-		case strings.HasPrefix(selector, "region:") && n.Region == strings.TrimPrefix(selector, "region:"):
+		case strings.HasPrefix(selector, "region:") && labels.region == strings.TrimPrefix(selector, "region:"):
 			return true
 		case strings.HasPrefix(selector, "tag:"):
 			want := strings.TrimPrefix(selector, "tag:")
-			for _, tag := range n.Tags {
+			for _, tag := range labels.tags {
 				if tag == want {
 					return true
 				}
@@ -417,6 +418,34 @@ func nodeSetHasMatch(selector string, nodes []*domain.Node) bool {
 		}
 	}
 	return false
+}
+
+type lineLabels struct {
+	region string
+	tags   []string
+}
+
+// lineLabelCatalog lists the labels every potential subscription entry can
+// carry: the node's own values for its direct entry, plus each relay and
+// undeleted VLESS route line's own values. It feeds the candidate catalog and
+// the "no match" check, mirroring the entries expandNodeLines can produce.
+func lineLabelCatalog(nodes []*domain.Node) []lineLabels {
+	out := []lineLabels{}
+	for _, n := range nodes {
+		if n == nil || n.IsSeparator() {
+			continue
+		}
+		out = append(out, lineLabels{n.Region, n.Tags})
+		for _, relay := range n.Relays {
+			out = append(out, lineLabels{relay.Region, relay.Tags})
+		}
+		for _, line := range n.RouteState.Lines {
+			if !line.Deleted {
+				out = append(out, lineLabels{line.Region, line.Tags})
+			}
+		}
+	}
+	return out
 }
 
 // membersContainNonTestableExit reports members that cannot safely participate
@@ -526,14 +555,14 @@ func resolveConfiguredMembersForClient(members []domain.ProxyGroupMember, items 
 				addMatching(func(renderItem) bool { return true })
 			case strings.HasPrefix(member.Value, "region:"):
 				region := strings.TrimPrefix(member.Value, "region:")
-				addMatching(func(item renderItem) bool { return item.node != nil && item.node.Region == region })
+				addMatching(func(item renderItem) bool { return item.node != nil && item.region() == region })
 			case strings.HasPrefix(member.Value, "tag:"):
 				tag := strings.TrimPrefix(member.Value, "tag:")
 				addMatching(func(item renderItem) bool {
 					if item.node == nil {
 						return false
 					}
-					for _, t := range item.node.Tags {
+					for _, t := range item.tags() {
 						if t == tag {
 							return true
 						}

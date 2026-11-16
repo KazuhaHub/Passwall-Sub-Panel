@@ -687,6 +687,16 @@ type RelayLine struct {
 	// Enabled gates whether the line renders. A disabled line is kept in the
 	// DB (so the admin can toggle it back) but produces no subscription entry.
 	Enabled bool
+	// Region and Tags label this line in subscriptions only (flag, node sets,
+	// placeholders). They are copied from the node when the line is created and
+	// are independent afterwards; authorization never reads them (ADR 0040).
+	Region string
+	Tags   []string
+	// RegionUnresolved / TagsUnresolved mark a field the request omitted. They
+	// exist only between request parsing and ResolveRelayLabels; storage
+	// refuses a line that still carries either marker.
+	RegionUnresolved bool `json:"-"`
+	TagsUnresolved   bool `json:"-"`
 }
 
 // RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index

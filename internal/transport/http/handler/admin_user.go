@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
@@ -98,6 +99,22 @@ type AdminUserHandler struct {
 	// them. Both nil answers 503 rather than an empty list — see that handler.
 	shared LimitEnforcementReader
 	panels ports.XUIPanelRepo
+
+	// membership answers the group-change preview (ADR 0042 §3); late-bound,
+	// nil answers 503.
+	membership MembershipPreviewer
+}
+
+// MembershipPreviewer is group.Service's answer to "what would moving this
+// user to another group change".
+type MembershipPreviewer interface {
+	PreviewGroupChange(ctx context.Context, fromID, toID int64) (*group.MembershipPreview, error)
+}
+
+// WithMembershipPreview wires the user editor's group-change preview.
+func (h *AdminUserHandler) WithMembershipPreview(previewer MembershipPreviewer) *AdminUserHandler {
+	h.membership = previewer
+	return h
 }
 
 func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher, twofaSvc *twofa.Service, passkeySvc *passkey.Service) *AdminUserHandler {
@@ -1001,4 +1018,64 @@ func (h *AdminUserHandler) subURLFor(r *http.Request, token string) string {
 	base := strings.TrimRight(resolveSubBaseForRequest(r.Context(), h.settings, r), "/")
 	path := resolveSubPath(r.Context(), h.settings, token)
 	return joinSubURL(base, path)
+}
+
+type groupChangePreviewRequest struct {
+	GroupID int64 `json:"group_id"`
+}
+
+type groupChangeNodeDTO struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Region       string `json:"region"`
+	VisibleLines int    `json:"visible_lines"`
+	TotalLines   int    `json:"total_lines"`
+}
+
+type groupChangePreviewResponse struct {
+	Added   []groupChangeNodeDTO `json:"added"`
+	Removed []groupChangeNodeDTO `json:"removed"`
+	Kept    int                  `json:"kept"`
+}
+
+// PreviewGroupChange answers POST /admin/users/:id/group-preview (ADR 0042
+// §3): the nodes this user would gain and lose in the draft group. It applies
+// the same operator target guard as the write it previews and provisions
+// nothing; registered through previewPOST.
+func (h *AdminUserHandler) PreviewGroupChange(c *gin.Context) {
+	if h.membership == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "group change preview is unavailable", "code": "group_preview_unavailable"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	var req groupChangePreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_id is required"})
+		return
+	}
+	u, err := h.user.Get(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	result, err := h.membership.PreviewGroupChange(c.Request.Context(), u.GroupID, req.GroupID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	convert := func(nodes []group.GroupPreviewNode) []groupChangeNodeDTO {
+		out := make([]groupChangeNodeDTO, 0, len(nodes))
+		for _, n := range nodes {
+			out = append(out, groupChangeNodeDTO{ID: n.Node.ID, Name: n.Node.DisplayName, Region: n.Node.Region, VisibleLines: n.VisibleLines, TotalLines: n.TotalLines})
+		}
+		return out
+	}
+	c.JSON(http.StatusOK, groupChangePreviewResponse{Added: convert(result.Added), Removed: convert(result.Removed), Kept: result.Kept})
 }

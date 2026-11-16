@@ -452,6 +452,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if n.DisplayName == "" || n.Region == "" {
 		return fmt.Errorf("%w: display_name and region required", domain.ErrValidation)
 	}
+	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if existing, err := s.nodes.GetByPanelInbound(ctx, n.PanelID, n.InboundID); err == nil && existing != nil {
 		return domain.ErrAlreadyExists
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -512,6 +513,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if n.DisplayName == "" || n.Region == "" || n.PanelID == 0 {
 		return fmt.Errorf("%w: display_name, region and panel_id required", domain.ErrValidation)
 	}
+	// Resolve before any queued retry captures the node: the request-only
+	// markers are not serialized into the task payload.
+	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
 		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
@@ -742,6 +746,9 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if err := domain.ReconcileRelayIDs(previous.Relays, n.Relays); err != nil {
 		return err
 	}
+	// Omitted line labels keep their saved value; new lines take the node's
+	// value after this save. Lines never follow later node edits (ADR 0040).
+	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
 	// Column-scoped: a full-row Update here would roll back the poll-owned
 	// columns (traffic counters / health / inbound-config snapshot) to the
 	// stale values the edit dialog loaded.
@@ -1182,9 +1189,35 @@ type nodeCreateTaskPayload struct {
 	Spec ports.InboundSpec `json:"spec"`
 }
 
-func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) error {
+func decodeNodeCreateTask(payload string) (nodeCreateTaskPayload, error) {
 	var p nodeCreateTaskPayload
-	if err := json.Unmarshal([]byte(task.Payload), &p); err != nil {
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return p, err
+	}
+	// The persisted task uses the Node JSON shape. Keep key presence separate
+	// from decoded values so an explicit clear is not treated as an omission.
+	var wire struct {
+		Node struct {
+			Relays []struct {
+				Region json.RawMessage
+				Tags   json.RawMessage
+			}
+		} `json:"node"`
+	}
+	if err := json.Unmarshal([]byte(payload), &wire); err != nil {
+		return p, err
+	}
+	for i, relay := range wire.Node.Relays {
+		p.Node.Relays[i].RegionUnresolved = relay.Region == nil
+		p.Node.Relays[i].TagsUnresolved = relay.Tags == nil
+	}
+	domain.ResolveRelayLabels(nil, p.Node.Relays, p.Node.Region, p.Node.Tags)
+	return p, nil
+}
+
+func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) error {
+	p, err := decodeNodeCreateTask(task.Payload)
+	if err != nil {
 		return err
 	}
 	n := p.Node

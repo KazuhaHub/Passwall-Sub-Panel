@@ -13,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 )
 
 func TestPruneMihomoLinesUsesSemanticReferences(t *testing.T) {
@@ -197,8 +198,10 @@ func (referenceGroupRepo) GetByID(context.Context, int64) (*domain.Group, error)
 
 type referenceGroupResolver struct{ nodes []*domain.Node }
 
-func (r referenceGroupResolver) NodesFor(context.Context, *domain.Group) ([]*domain.Node, error) {
-	return r.nodes, nil
+// SubscriptionNodesFor applies the production line-visibility narrowing to the
+// fixture's nodes, so render tests see exactly what a real group would.
+func (r referenceGroupResolver) SubscriptionNodesFor(_ context.Context, g *domain.Group) ([]*domain.Node, error) {
+	return group.VisibleLines(g, r.nodes), nil
 }
 
 type referenceTemplateRepo struct {
@@ -473,7 +476,9 @@ func TestRenderDynamicAndTemplateReferences(t *testing.T) {
 			t.Run(string(ct)+"/"+member.Kind+member.Value, func(t *testing.T) {
 				s, n, u, rule := referenceRenderFixture(t)
 				n.Region, n.Tags = "US", []string{"edge"}
-				n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true}}
+				// Lines carry the labels copied at creation (ADR 0040).
+				n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "US", Tags: []string{"edge"}}}
+				n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
 				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{member}
 				output, err := s.RenderForUser(context.Background(), u, ct)
 				if err != nil {
@@ -494,6 +499,7 @@ func TestRenderDynamicAndTemplateReferences(t *testing.T) {
 		t.Run(ref, func(t *testing.T) {
 			s, n, u, _ := referenceRenderFixture(t)
 			n.Region, n.Tags = "US", []string{"edge"}
+			n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
 			s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: strings.Replace(referenceMihomoTemplate, "  {{ proxy_groups }}", "  {{ proxy_groups }}\n  - name: Template\n    type: select\n    proxies:\n      - "+ref, 1)}}
 			output, err := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
 			if err != nil {

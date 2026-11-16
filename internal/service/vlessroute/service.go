@@ -35,6 +35,10 @@ type LineInput struct {
 	Domain       []string `json:"domain,omitempty"`
 	Port         string   `json:"port,omitempty"`
 	Enabled      bool     `json:"enabled"`
+	// Region / Tags: omitted keeps the saved value (a new line takes the
+	// node's value); explicit "" / [] clears (ADR 0040).
+	Region *string   `json:"region,omitempty"`
+	Tags   *[]string `json:"tags,omitempty"`
 }
 type SaveRequest struct {
 	Revision int64       `json:"revision"`
@@ -118,6 +122,9 @@ func (s *Service) store(ctx context.Context, n *domain.Node, state *domain.NodeR
 func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	if view, handled, err := s.saveDisplayOnly(ctx, id, req); handled || err != nil {
+		return view, err
+	}
 	_, p, c, a, err := s.resources(ctx, id)
 	if err != nil {
 		return nil, err
@@ -176,7 +183,7 @@ func (s *Service) Save(ctx context.Context, id int64, req SaveRequest) (*View, e
 	if err := reserveExistingRoutes(template, n.ID, inbound.Tag, n.RouteState.Lines, used); err != nil {
 		return nil, err
 	}
-	target, err := makeTarget(n.RouteState, req.Lines, used, credentialRoutes)
+	target, err := makeTarget(n.RouteState, req.Lines, nodeLabels{n.Region, n.Tags}, used, credentialRoutes)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +275,137 @@ func (s *Service) unknown(n *domain.Node, reason string) (*View, error) {
 	return view, nil
 }
 
-func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint16]bool, originalRoutes ...map[uint16]bool) (domain.NodeRouteState, error) {
+// nodeLabels is the node's Region/Tags after this save: the value a new line
+// starts from when the request omits its own.
+type nodeLabels struct {
+	region string
+	tags   []string
+}
+
+// lineFromInput validates and normalizes one requested line. Route and the
+// omitted label fields are resolved by the caller against the saved state.
+func lineFromInput(request LineInput) (domain.VlessRouteLine, error) {
+	line := domain.VlessRouteLine{ID: request.ID, Name: strings.TrimSpace(request.Name), OnlyLineName: request.OnlyLineName, EntryRelayID: strings.TrimSpace(request.EntryRelayID), OutboundTag: strings.TrimSpace(request.OutboundTag), Enabled: request.Enabled}
+	if len(line.Name) > 128 || line.OutboundTag == "" || len(line.OutboundTag) > 255 || len(line.EntryRelayID) > 128 {
+		return line, fmt.Errorf("%w: outbound tag is required and line fields must be bounded", domain.ErrValidation)
+	}
+	var err error
+	if request.Region == nil {
+		line.RegionUnresolved = true
+	} else if line.Region, err = domain.NormalizeLineRegion(*request.Region); err != nil {
+		return line, err
+	}
+	if request.Tags == nil {
+		line.TagsUnresolved = true
+	} else if line.Tags, err = domain.NormalizeLineTags(*request.Tags); err != nil {
+		return line, err
+	}
+	line.Network, line.Protocols, line.IP, line.Domain, line.Port = request.Network, request.Protocols, request.IP, request.Domain, request.Port
+	return normalizeRouteMatch(line)
+}
+
+// displayOnlyTarget returns the next state when the request keeps every saved
+// visible line, in the same order, and changes only display fields
+// (domain.CompareRouteLineDisplay). Status, error and binding are kept, so an
+// applied line stays applied: the remote rule did not change. A request that
+// changes nothing is not display-only, keeping "save again to reconfirm".
+func displayOnlyTarget(previous domain.NodeRouteState, input []LineInput, labels nodeLabels) (domain.NodeRouteState, bool, error) {
+	visible := previous.Visible().Lines
+	if len(input) != len(visible) {
+		return domain.NodeRouteState{}, false, nil
+	}
+	next := make([]domain.VlessRouteLine, len(visible))
+	changed := false
+	for i, request := range input {
+		prior := visible[i]
+		if request.ID == "" || request.ID != prior.ID {
+			return domain.NodeRouteState{}, false, nil
+		}
+		line, err := lineFromInput(request)
+		if err != nil {
+			return domain.NodeRouteState{}, false, err
+		}
+		line.Route = prior.Route
+		domain.ResolveRouteLineLabels(&line, &prior, labels.region, labels.tags)
+		sameRule, displayChanged := domain.CompareRouteLineDisplay(prior, line)
+		if !sameRule {
+			return domain.NodeRouteState{}, false, nil
+		}
+		changed = changed || displayChanged
+		next[i] = line
+	}
+	if !changed {
+		return domain.NodeRouteState{}, false, nil
+	}
+	state := previous
+	state.Lines = make([]domain.VlessRouteLine, 0, len(previous.Lines))
+	k := 0
+	for _, line := range previous.Lines {
+		if !line.Deleted {
+			line = next[k]
+			k++
+		}
+		state.Lines = append(state.Lines, line)
+	}
+	return state, true, nil
+}
+
+// saveDisplayOnly is the local path for display-only edits (ADR 0040 §5). It
+// decides applicability from local records alone (3X-UI backend, VLESS node)
+// and never contacts 3X-UI. handled=false hands the request to the remote path.
+func (s *Service) saveDisplayOnly(ctx context.Context, id int64, req SaveRequest) (*View, bool, error) {
+	if s.repos.NodeRoute == nil {
+		return nil, false, nil
+	}
+	load := func() (*domain.Node, *domain.XUIPanel, bool, error) {
+		n, err := s.repos.Node.GetByID(ctx, id)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		p, err := s.repos.XUIPanel.GetByID(ctx, n.PanelID)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		local := domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI && strings.EqualFold(n.DesiredProtocol, "vless")
+		return n, p, local, nil
+	}
+	n, p, local, err := load()
+	if err != nil || !local {
+		return nil, false, err
+	}
+	if _, ok, err := displayOnlyTarget(n.RouteState, req.Lines, nodeLabels{n.Region, n.Tags}); err != nil || !ok {
+		return nil, false, err
+	}
+	release, _, err := s.acquireBackendLease(ctx, p.URL, true)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	// Re-read under the lease; the pre-lease read only avoided taking it.
+	n, current, local, err := load()
+	if err != nil {
+		return nil, false, err
+	}
+	if !local || n.PanelID != p.ID || strings.TrimRight(current.URL, "/") != strings.TrimRight(p.URL, "/") {
+		return nil, false, fmt.Errorf("%w: node backend changed; reload and retry", domain.ErrConflict)
+	}
+	if req.Revision != n.RouteState.Revision {
+		return nil, false, fmt.Errorf("%w: reload node lines before saving", domain.ErrConflict)
+	}
+	target, ok, err := displayOnlyTarget(n.RouteState, req.Lines, nodeLabels{n.Region, n.Tags})
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, fmt.Errorf("%w: node lines changed; reload and retry", domain.ErrConflict)
+	}
+	if err := s.store(ctx, n, &target); err != nil {
+		return nil, false, err
+	}
+	return s.nodeView(n, current), true, nil
+}
+
+func makeTarget(previous domain.NodeRouteState, input []LineInput, labels nodeLabels, used map[uint16]bool, originalRoutes ...map[uint16]bool) (domain.NodeRouteState, error) {
 	invalid := func(message string) (domain.NodeRouteState, error) {
 		return domain.NodeRouteState{}, fmt.Errorf("%w: %s", domain.ErrValidation, message)
 	}
@@ -290,16 +427,12 @@ func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint
 	seen := map[string]bool{}
 	state := domain.NodeRouteState{Revision: previous.Revision, Lines: []domain.VlessRouteLine{}}
 	for _, request := range input {
-		line := domain.VlessRouteLine{ID: request.ID, Name: strings.TrimSpace(request.Name), OnlyLineName: request.OnlyLineName, EntryRelayID: strings.TrimSpace(request.EntryRelayID), OutboundTag: strings.TrimSpace(request.OutboundTag), Enabled: request.Enabled}
-		if len(line.Name) > 128 || line.OutboundTag == "" || len(line.OutboundTag) > 255 || len(line.EntryRelayID) > 128 {
-			return invalid("outbound tag is required and line fields must be bounded")
-		}
-		line.Network, line.Protocols, line.IP, line.Domain, line.Port = request.Network, request.Protocols, request.IP, request.Domain, request.Port
-		line, err := normalizeRouteMatch(line)
+		line, err := lineFromInput(request)
 		if err != nil {
 			return domain.NodeRouteState{}, err
 		}
 		if line.ID == "" {
+			domain.ResolveRouteLineLabels(&line, nil, labels.region, labels.tags)
 			line.ID = uuid.NewString()
 			// Reserve the UUIDv4 route range for normal freshly generated
 			// credentials, preventing future PSP rotations from colliding.
@@ -322,6 +455,7 @@ func makeTarget(previous domain.NodeRouteState, input []LineInput, used map[uint
 			if !ok || prior.Deleted {
 				return invalid("unknown or deleted routing line")
 			}
+			domain.ResolveRouteLineLabels(&line, &prior, labels.region, labels.tags)
 			line.Route = prior.Route
 			if credentialRoutes[line.Route] && line.Enabled {
 				return invalid("route value conflicts with an original inbound credential")

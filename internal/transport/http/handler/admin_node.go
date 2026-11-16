@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	certsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
@@ -31,6 +32,23 @@ type AdminNodeHandler struct {
 	panels     ports.XUIPanelRepo
 	pspClients ports.PSPClientRepo
 	certs      ports.CertificateRepo
+	lines      NodeEditorPreviewer
+}
+
+// NodeEditorPreviewer is group.Service's answers for the node and separator
+// editors (ADR 0041, ADR 0042), injected so the node handler does not own
+// group semantics.
+type NodeEditorPreviewer interface {
+	PreviewLineVisibility(ctx context.Context, draft *domain.Node) (*group.LineVisibility, error)
+	GroupsForNode(ctx context.Context, n *domain.Node) ([]int64, error)
+	GroupsForSeparator(ctx context.Context, draft domain.SeparatorEntry) ([]int64, error)
+	List(ctx context.Context) ([]*domain.Group, error)
+}
+
+// WithLineVisibility wires the node and separator editors' previews.
+func (h *AdminNodeHandler) WithLineVisibility(previewer NodeEditorPreviewer) *AdminNodeHandler {
+	h.lines = previewer
+	return h
 }
 
 func NewAdminNodeHandler(nodeSvc *node.Service, syncSvc *syncsvc.Service, ownership ports.OwnershipRepo, users ports.UserRepo, panels ports.XUIPanelRepo, pspClients ports.PSPClientRepo, certs ports.CertificateRepo) *AdminNodeHandler {
@@ -128,6 +146,11 @@ type relayLineDTO struct {
 	SNI          string `json:"sni,omitempty"`
 	Host         string `json:"host,omitempty"`
 	Enabled      bool   `json:"enabled"`
+	// Region / Tags are line-only subscription labels (ADR 0040). Omitted in a
+	// request keeps the saved value (a new line takes the node's value);
+	// explicit "" / [] clears. Responses always carry both.
+	Region *string   `json:"region,omitempty"`
+	Tags   *[]string `json:"tags,omitempty"`
 }
 
 type inboundDTO struct {
@@ -958,6 +981,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		return nil, fmt.Errorf("too many relay lines (%d, max %d)", len(dtos), maxRelayLines)
 	}
 	out := make([]domain.RelayLine, 0, len(dtos))
+	var err error
 	for i, d := range dtos {
 		addr := strings.TrimSpace(d.Address)
 		if addr == "" {
@@ -966,7 +990,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		if d.Port < 0 || d.Port > 65535 {
 			return nil, fmt.Errorf("relay line %d: port %d out of range (0-65535; 0 reuses the inbound port)", i+1, d.Port)
 		}
-		out = append(out, domain.RelayLine{
+		line := domain.RelayLine{
 			ID:           d.ID,
 			Name:         strings.TrimSpace(d.Name),
 			OnlyLineName: d.OnlyLineName,
@@ -975,7 +999,18 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			SNI:          strings.TrimSpace(d.SNI),
 			Host:         strings.TrimSpace(d.Host),
 			Enabled:      d.Enabled,
-		})
+		}
+		if d.Region == nil {
+			line.RegionUnresolved = true
+		} else if line.Region, err = domain.NormalizeLineRegion(*d.Region); err != nil {
+			return nil, fmt.Errorf("relay line %d: region must be at most %d bytes", i+1, domain.MaxLineRegionBytes)
+		}
+		if d.Tags == nil {
+			line.TagsUnresolved = true
+		} else if line.Tags, err = domain.NormalizeLineTags(*d.Tags); err != nil {
+			return nil, fmt.Errorf("relay line %d: at most %d tags of at most %d bytes each", i+1, domain.MaxLineTags, domain.MaxLineTagBytes)
+		}
+		out = append(out, line)
 	}
 	return out, nil
 }
@@ -984,6 +1019,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
+		region, tags := r.Region, domain.CopyLineTags(r.Tags)
 		out = append(out, relayLineDTO{
 			ID:           r.ID,
 			Name:         r.Name,
@@ -993,6 +1029,8 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 			SNI:          r.SNI,
 			Host:         r.Host,
 			Enabled:      r.Enabled,
+			Region:       &region,
+			Tags:         &tags,
 		})
 	}
 	return out
@@ -1102,4 +1140,172 @@ func mapNodeServiceError(c *gin.Context, err error) {
 	default:
 		respondError(c, err)
 	}
+}
+
+// lineVisibilityRequest is the node editor's unsaved state: the node's own
+// labels and each line's labels in editor order. Only labels and the route
+// lines' entry relay matter for visibility; nothing here is stored.
+type lineVisibilityRequest struct {
+	ServerAddress string               `json:"server_address"`
+	Region        string               `json:"region"`
+	Tags          []string             `json:"tags"`
+	Relays        []lineVisibilityLine `json:"relays"`
+	Routes        []lineVisibilityLine `json:"routes"`
+}
+
+type lineVisibilityLine struct {
+	ID           string   `json:"id,omitempty"`
+	EntryRelayID string   `json:"entry_relay_id,omitempty"`
+	Region       string   `json:"region"`
+	Tags         []string `json:"tags"`
+}
+
+type lineVisibilityGroup struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// lineVisibilityResponse lists every group once; node_groups are the groups
+// that pass the node and relays[i] / routes[i] the groups that would see the
+// i-th draft line. An empty list means "no group", never "unknown": a failed
+// read is an error response instead.
+type lineVisibilityResponse struct {
+	Groups     []lineVisibilityGroup `json:"groups"`
+	NodeGroups []int64               `json:"node_groups"`
+	// SavedNodeGroups are the groups the stored node passes, so the editor can
+	// name the groups this save would remove the node from (ADR 0042 §2).
+	SavedNodeGroups []int64   `json:"saved_node_groups"`
+	Relays          [][]int64 `json:"relays"`
+	Routes          [][]int64 `json:"routes"`
+}
+
+// PreviewLineVisibility answers POST /admin/nodes/:id/line-visibility. It
+// reads only and is exempt from audit by exact path (middleware/audit.go).
+func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
+	if h.lines == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "line visibility is unavailable", "code": "line_visibility_unavailable"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	var req lineVisibilityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Relays) > maxRelayLines || len(req.Routes) > maxRelayLines {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("at most %d lines of each kind", maxRelayLines)})
+		return
+	}
+	stored, err := h.node.Get(c.Request.Context(), id)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	draft := *stored
+	if req.ServerAddress != "" {
+		draft.ServerAddress = req.ServerAddress
+	}
+	draft.Region = strings.TrimSpace(req.Region)
+	draft.Tags = []string{}
+	for _, tag := range req.Tags {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			draft.Tags = append(draft.Tags, tag)
+		}
+	}
+	draft.Relays = make([]domain.RelayLine, len(req.Relays))
+	for i, line := range req.Relays {
+		region, tags, err := normalizeLineLabels(line)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("relay line %d: %v", i+1, err)})
+			return
+		}
+		draft.Relays[i] = domain.RelayLine{ID: strings.TrimSpace(line.ID), Region: region, Tags: tags}
+	}
+	draft.RouteState.Lines = make([]domain.VlessRouteLine, len(req.Routes))
+	for i, line := range req.Routes {
+		region, tags, err := normalizeLineLabels(line)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("routing line %d: %v", i+1, err)})
+			return
+		}
+		draft.RouteState.Lines[i] = domain.VlessRouteLine{ID: strings.TrimSpace(line.ID), EntryRelayID: strings.TrimSpace(line.EntryRelayID), Region: region, Tags: tags}
+	}
+	result, err := h.lines.PreviewLineVisibility(c.Request.Context(), &draft)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	saved, err := h.lines.GroupsForNode(c.Request.Context(), stored)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := lineVisibilityResponse{Groups: make([]lineVisibilityGroup, 0, len(result.Groups)), NodeGroups: result.NodeGroups, SavedNodeGroups: saved, Relays: result.Relays, Routes: result.Routes}
+	for _, g := range result.Groups {
+		out.Groups = append(out.Groups, lineVisibilityGroup{ID: g.ID, Name: g.Name})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func normalizeLineLabels(line lineVisibilityLine) (string, []string, error) {
+	region, err := domain.NormalizeLineRegion(line.Region)
+	if err != nil {
+		return "", nil, err
+	}
+	tags, err := domain.NormalizeLineTags(line.Tags)
+	if err != nil {
+		return "", nil, err
+	}
+	return region, tags, nil
+}
+
+// separatorGroupsRequest is the separator editor's unsaved visibility rule.
+type separatorGroupsRequest struct {
+	Mode    string  `json:"mode"`
+	NodeIDs []int64 `json:"node_ids"`
+}
+
+// separatorGroupsResponse names every group once and lists those whose
+// subscriptions would show the separator.
+type separatorGroupsResponse struct {
+	Groups  []lineVisibilityGroup `json:"groups"`
+	Visible []int64               `json:"visible"`
+}
+
+// PreviewSeparatorGroups answers POST /admin/nodes/separator/group-preview
+// (ADR 0042 §4). Read-only; registered through previewPOST.
+func (h *AdminNodeHandler) PreviewSeparatorGroups(c *gin.Context) {
+	if h.lines == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "separator preview is unavailable", "code": "separator_preview_unavailable"})
+		return
+	}
+	var req separatorGroupsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	mode := domain.SeparatorMode(req.Mode)
+	if mode != domain.SeparatorModeGlobal && mode != domain.SeparatorModeNodeBound {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be global or node_bound"})
+		return
+	}
+	groups, err := h.lines.List(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	visible, err := h.lines.GroupsForSeparator(c.Request.Context(), domain.SeparatorEntry{Mode: mode, NodeIDs: req.NodeIDs})
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := separatorGroupsResponse{Groups: make([]lineVisibilityGroup, 0, len(groups)), Visible: visible}
+	for _, g := range groups {
+		out.Groups = append(out.Groups, lineVisibilityGroup{ID: g.ID, Name: g.Name})
+	}
+	c.JSON(http.StatusOK, out)
 }
