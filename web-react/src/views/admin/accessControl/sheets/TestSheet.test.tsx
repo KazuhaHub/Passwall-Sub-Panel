@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { renderAccess, whereIs } from '@/test/accessControlHarness'
+import { renderAccess, snack, whereIs } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import TestSheet from './TestSheet'
 
@@ -164,6 +164,91 @@ describe('TestSheet', () => {
     fireEvent.click(await screen.findByRole('button', { name: '加入' }))
     await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'site' }))
   })
+  describe('when an allowlist group refused it', () => {
+    const refused = () => blocked({ terminating_step: 'g4', steps: [
+      { step: 1, kind: 'group', rule_id: 'g4x1', group_id: 4, name: 'Guests', result: 'miss' },
+      { step: 2, kind: 'group', rule_id: 'g4', group_id: 4, name: 'Guests', result: 'hit' },
+    ] })
+    async function open() {
+      vi.mocked(api.testDestination).mockResolvedValue(refused())
+      vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
+      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
+      run()
+      fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
+    }
+
+    it('the default is the group\'s supplement list, not everyone', async () => {
+      await open()
+      expect((await screen.findByRole('radio', { name: /「Guests」的补充列表/ }) as HTMLInputElement).checked).toBe(true)
+      expect(screen.queryByText('会越过所有拦截策略')).toBeNull()
+      fireEvent.click(await screen.findByRole('button', { name: '加入' }))
+      await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site', group_id: 4 }))
+    })
+
+    it('says what it does for the choice made, and the snack names the group', async () => {
+      await open()
+      expect(await screen.findByText('只对「Guests」的成员放行这个目的地，写进它的补充列表。')).toBeTruthy()
+      expect(screen.queryByText('对所有人放行这个目的地，排在所有拦截之前。')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '加入' }))
+      await waitFor(() => expect(snack).toHaveBeenCalledWith('已加入「Guests」的补充列表「domain:figma.com」，将随下一次下发生效', 'success'))
+    })
+
+    it('the everyone choice is never sticky: closing and opening again is back on the group', async () => {
+      await open()
+      fireEvent.click(await screen.findByRole('radio', { name: /全局放行例外/ }))
+      expect(screen.getByText('对所有人放行这个目的地，排在所有拦截之前。')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(screen.queryByRole('radio', { name: /全局放行例外/ })).toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: '加入放行例外…' }))
+      expect((await screen.findByRole('radio', { name: /「Guests」的补充列表/ }) as HTMLInputElement).checked).toBe(true)
+    })
+
+    it('a group that is gone but still published has no default: it says so, and nothing is added until a choice', async () => {
+      vi.mocked(api.testDestination).mockResolvedValue(blocked({ terminating_step: 'g4', steps: [{ step: 1, kind: 'group', rule_id: 'g4', group_id: 4, name: '', result: 'hit' }] }))
+      vi.mocked(api.addDestException).mockResolvedValue({ entry: 'figma.com', created: null })
+      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
+      run()
+      fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
+      expect(await screen.findByText('拒绝它的分组已删除，请选择要放行的范围。')).toBeTruthy()
+      expect((screen.getByRole('button', { name: '加入' }) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.click(screen.getByRole('radio', { name: /全局放行例外/ }))
+      expect((screen.getByRole('button', { name: '加入' }) as HTMLButtonElement).disabled).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: '加入' }))
+      await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site' }))
+    })
+
+    it('a deleted group shows no global warning until the global choice is made', async () => {
+      vi.mocked(api.testDestination).mockResolvedValue(blocked({ terminating_step: 'g4', steps: [{ step: 1, kind: 'group', rule_id: 'g4', group_id: 4, name: '', result: 'hit' }] }))
+      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
+      run()
+      fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
+      expect(await screen.findByText('拒绝它的分组已删除，请选择要放行的范围。')).toBeTruthy()
+      expect(screen.queryByText('会越过所有拦截策略')).toBeNull()
+      fireEvent.click(screen.getByRole('radio', { name: /全局放行例外/ }))
+      expect(screen.getByText('会越过所有拦截策略')).toBeTruthy()
+    })
+
+    it('keeps its content on screen while the dialog fades out', async () => {
+      await open()
+      expect(await screen.findByRole('radio', { name: /「Guests」的补充列表/ })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '取消' }))
+      // Closing must not unmount the content before the exit transition ends.
+      expect(screen.queryByRole('radio', { name: /「Guests」的补充列表/ })).not.toBeNull()
+      await waitFor(() => expect(screen.queryByRole('radio', { name: /「Guests」的补充列表/ })).toBeNull())
+    })
+
+    it('everyone is a deliberate choice, with its warning, and sends no group', async () => {
+      await open()
+      fireEvent.click(await screen.findByRole('radio', { name: /全局放行例外/ }))
+      expect(screen.getByText('会越过所有拦截策略')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '加入' }))
+      await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site' }))
+    })
+  })
+
   it('sends resolved_ips only when filled, split on commas and spaces', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
     renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)

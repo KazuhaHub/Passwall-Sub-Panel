@@ -22,6 +22,7 @@ export const DEST_ERROR_CODES = [
   'dest_geosite_unavailable', 'dest_geoip_unavailable', 'dest_source_rule_not_native', 'dest_source_rule_stale', 'dest_source_rule_invalid',
   'dest_exemption_exists', 'dest_exemption_invalid', 'dest_exception_invalid', 'dest_test_invalid',
   'dest_settings_invalid', 'dest_template_unavailable', 'dest_template_exists', 'dest_hits_range', 'dest_hits_invalid',
+  'dest_group_not_found', 'dest_group_stale', 'dest_list_not_ready',
 ] as const
 
 export function destErrorText(t: T, err: unknown): string {

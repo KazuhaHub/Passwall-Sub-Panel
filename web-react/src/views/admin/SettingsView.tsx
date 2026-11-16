@@ -86,6 +86,8 @@ import {
 } from '@/utils/validators'
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
+import LegalTab from './legal/LegalTab'
+import { getAuthMethods } from '@/api/auth'
 import { listAllGroups } from '@/api/groups'
 import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -94,7 +96,7 @@ import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
 
-type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
+type TabKey = 'general' | 'security' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso' | 'legal'
 
 // COMMON_TIMEZONES is the option set in the Settings → 面板时区 picker.
 // Uses the browser's own IANA database via Intl.supportedValuesOf, which
@@ -165,7 +167,7 @@ export default function SettingsView() {
   const site = useSiteStore()
 
   const [tab, setTab] = useTabParam<TabKey>('tab', 'general',
-    ['general', 'security', 'brand', 'subscription', 'portal', 'mail', 'sso'])
+    ['general', 'security', 'brand', 'subscription', 'portal', 'mail', 'sso', 'legal'])
   const qScope = useQueryScope()
   const settingsQuery = useUISettings(qScope)
   // The DRAFT. Seeded once from the first successful read; a background
@@ -278,6 +280,9 @@ export default function SettingsView() {
       node_task_offline_reconcile_days: s.node_task_offline_reconcile_days ?? 30,
       node_task_backup_restore_days: s.node_task_backup_restore_days ?? 30,
       node_task_result_retention_days: s.node_task_result_retention_days ?? 90,
+      legal_enabled: s.legal_enabled ?? false,
+      legal_consent_version: s.legal_consent_version ?? 0,
+      legal_disclose_usage: s.legal_disclose_usage ?? false,
     }
   }
 
@@ -397,6 +402,10 @@ export default function SettingsView() {
         footerText: saved.footer_text || '© Kazuha Hub Passwall',
         themeColor: saved.theme_color || undefined,
       })
+      // Whether the links and the consent dialog are live is the server's call
+      // (the switch AND a published document), so it is asked, not read off the
+      // switch: a switch turned on before anything is published would link to a 404.
+      void getAuthMethods({ quiet: true }).then(m => site.update({ legalEnabled: !!m.legal?.enabled, legalConsentVersion: m.legal?.consent_version ?? 0 })).catch(() => {})
       setChangeGeoToken(false)
       setChangeCaptchaSecret(false)
       if (!opts.quiet) pushSnack(t('settings.saved'), 'success')
@@ -443,13 +452,14 @@ export default function SettingsView() {
     { key: 'portal', labelKey: 'settings.tab_portal' },
     { key: 'mail', labelKey: 'settings.tab_mail' },
     { key: 'sso', labelKey: 'settings.tab_sso' },
+    { key: 'legal', labelKey: 'settings.tab_legal' },
   ]
 
   // Workspace-style sticky bottom action bar shared by the global-form tabs.
   // save() reads component state directly, so the bar lives outside the <form>
   // and just calls it; Cancel re-fetches, discarding unsaved edits. Shown only
   // on tabs whose global form is mounted (see render).
-  const showFormBar = tab === 'brand' || tab === 'portal'
+  const showFormBar = tab === 'brand' || tab === 'portal' || tab === 'legal'
     || ((tab === 'general' || tab === 'security' || tab === 'subscription') && scopeGroupId === 0)
   const actionBar = (
     <Box sx={{
@@ -1370,6 +1380,11 @@ export default function SettingsView() {
       )}
       {tab === 'mail' && <MailTab />}
       {tab === 'sso' && <SsoTab />}
+      {tab === 'legal' && (
+        <LegalTab
+          enabled={settings.legal_enabled ?? false} onEnabledChange={v => patch('legal_enabled', v)}
+          discloseUsage={settings.legal_disclose_usage ?? false} onDiscloseUsageChange={v => patch('legal_disclose_usage', v)} />
+      )}
       {showFormBar && actionBar}
     </Box>
   );

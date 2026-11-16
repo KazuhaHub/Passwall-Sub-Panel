@@ -163,10 +163,10 @@ func requireFreeName(tx *gorm.DB, name string, exceptID int64) error {
 
 // inForcePoliciesTx reads the policies that are not off and the set of list
 // ids they reference, on tx.
-func inForcePoliciesTx(tx *gorm.DB) ([]*domain.DestPolicy, map[int64]bool, error) {
+func inForcePoliciesTx(tx *gorm.DB) ([]*domain.DestPolicy, map[int64]bool, []*domain.DestGroupMode, error) {
 	var rows []destPolicyRow
 	if err := tx.Where("state <> ?", string(domain.DestStateOff)).Order("id").Find(&rows).Error; err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	out := make([]*domain.DestPolicy, 0, len(rows))
 	inUse := map[int64]bool{}
@@ -181,17 +181,19 @@ func inForcePoliciesTx(tx *gorm.DB) ([]*domain.DestPolicy, map[int64]bool, error
 	var groups []groupRow
 	if err := tx.Select("id", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
 		Where("dest_allowlist_state IS NOT NULL AND dest_allowlist_state <> ?", string(domain.DestStateOff)).Find(&groups).Error; err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	var modes []*domain.DestGroupMode
 	for _, g := range groups {
 		a := g.destAllowlist()
+		modes = append(modes, &domain.DestGroupMode{GroupID: g.ID, State: a.State, ListIDs: a.ListIDs, BaseListID: a.BaseListID, ExtraListID: a.ExtraListID})
 		for _, id := range append([]int64{a.BaseListID, a.ExtraListID}, a.ListIDs...) {
 			if id > 0 {
 				inUse[id] = true
 			}
 		}
 	}
-	return out, inUse, nil
+	return out, inUse, modes, nil
 }
 
 // Create inserts a policy and fills in its id, priority and timestamps. A

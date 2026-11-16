@@ -79,6 +79,15 @@ afterEach(() => { useSiteStore.setState({ timezone: '' }) })
 
 const lastParams = () => vi.mocked(api.getDestHits).mock.calls.at(-1)![0]!
 
+describe('an allowlist group as the rule', () => {
+  it('is a filter by its name, and a link to its source is understood', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ sources: [{ source: 'g2', name: 'Guests' }, { source: 'g8', name: null }] }))
+    renderAccess(ui, { route: `${route}&rec_source=g2` })
+    expect(await screen.findByText('白名单 · Guests')).toBeTruthy()
+    expect(lastParams().source).toBe('g2')
+  })
+})
+
 describe('the metric tiles', () => {
   it('count the whole time / account / node selection; the first two filter by action, the third only counts', async () => {
     const { router } = renderAccess(ui, { route })
@@ -260,8 +269,15 @@ describe('filters', () => {
   it('the search term goes to the server and nowhere else: not in the URL, not in history', async () => {
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索目的地…' }), { target: { value: 'binance' } })
-    await waitFor(() => expect(lastParams().q).toBe('binance'), { timeout: 2000 })
+    // The debounce is a timer: it is run on a fake clock (only around the typing), not waited for.
+    vi.useFakeTimers()
+    try {
+      fireEvent.change(screen.getByRole('searchbox', { name: '搜索目的地…' }), { target: { value: 'binance' } })
+      act(() => { vi.advanceTimersByTime(399) })
+      expect(lastParams().q).toBeUndefined()
+      act(() => { vi.advanceTimersByTime(1) })
+    } finally { vi.useRealTimers() }
+    await waitFor(() => expect(lastParams().q).toBe('binance'))
     expect(whereIs(router)).not.toMatch(/binance|rec_q|q=/)
     expect(JSON.stringify(router.state.location.state ?? null)).not.toContain('binance')
   })
@@ -424,6 +440,35 @@ describe('the footer and the row menu', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
     await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'site' }))
     await waitFor(() => expect(snack).toHaveBeenCalledWith('已新建列表「放行例外」和一条放行策略，并加入「gmail.com」，将随下一次下发生效', 'success'))
+  })
+
+  it('on a row refused by an allowlist group the exception goes to that group\'s supplement list by default, and "everyone" stays a choice', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ source: 'g4', source_name: 'Guests', source_kind: 'group', dest: 'figma.com' })], sources: [{ source: 'g4', name: 'Guests' }] }))
+    vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
+    renderAccess(ui, { route })
+    const rows = await screen.findAllByTestId('hit-row')
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByRole('radio', { name: /补充列表/ }) as HTMLInputElement).checked).toBe(true)
+    expect(within(dialog).queryByText('会越过所有拦截策略')).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
+    await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'figma.com', match: 'site', group_id: 4 }))
+    expect(snack).toHaveBeenCalledWith('已加入「Guests」的补充列表「domain:figma.com」，将随下一次下发生效', 'success')
+  })
+
+  it('a row from a group that is gone selects nothing: it says so and does not default to everyone', async () => {
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ source: 'g8', source_name: null, source_kind: 'group', dest: 'figma.com' })], sources: [{ source: 'g8', name: null }] }))
+    renderAccess(ui, { route })
+    const rows = await screen.findAllByTestId('hit-row')
+    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('拒绝它的分组已删除，请选择要放行的范围。')).toBeTruthy()
+    for (const r of within(dialog).getAllByRole('radio')) expect((r as HTMLInputElement).checked).toBe(false)
+    expect((within(dialog).getByRole('button', { name: '放行' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(dialog).getByRole('radio', { name: /全局放行例外/ }))
+    expect((within(dialog).getByRole('button', { name: '放行' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('"exempt only this account" hands over to the exemption dialog for that account', async () => {

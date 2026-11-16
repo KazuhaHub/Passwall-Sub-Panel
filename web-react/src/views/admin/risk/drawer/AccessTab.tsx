@@ -9,6 +9,8 @@ import type { DestExemption, DestUserHit } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
+import { stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
 import ToneBadge from '@/components/ToneBadge'
 import { useDeleteDestExemption, useDestStatus, useDestUser } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -19,6 +21,7 @@ import { formatMsDualTz } from '@/utils/datetime'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { timeLeft } from '../../accessControl/timeLeft'
 import { removeExemptionConfirm } from '../../accessControl/confirmCopy'
+import UsageSection from './UsageSection'
 import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
 import { reportDestError } from '../../accessControl/destErrors'
 
@@ -40,7 +43,7 @@ function Row({ label, children, action, tinted }: { label: string; children: Rea
 
 /**
  * The drawer's access tab: the account's group, its exemption and the hits it
- * had in the window (per-site usage is a later phase's). Read only while the
+ * had in the window and, on request, its per-site usage. Read only while the
  * tab is open — the parent mounts it on selection — and the exemption can be
  * added or lifted in place, through the same mutations the exemptions sheet uses.
  */
@@ -95,7 +98,8 @@ export default function AccessTab({ userId }: { userId: number }) {
           ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <span>{group.name}</span>
-              {group.mode === 'open' && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${D}open`)} testId="group-mode" data="open" />}
+              {(group.state === 'report' || group.state === 'on') && <StateBadge scope="group" state={group.state} day={stateDay(group.state_changed_at ?? null, Date.now())} />}
+              {!(group.state === 'report' || group.state === 'on') && group.mode === 'open' && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${D}open`)} testId="group-mode" data="open" />}
             </Box>
           )
           : <Typography component="span" sx={{ color: md.onSurfaceVariant, fontSize: 14 }}>{t(`${D}no_group`)}</Typography>}
@@ -130,6 +134,7 @@ export default function AccessTab({ userId }: { userId: number }) {
           onViewAll={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since: q.data.recent_hits!.days <= 1 ? '24h' : `${q.data.recent_hits!.days}d` })}`)}
           onNodes={() => void navigate('/admin/access-control?sheet=nodes')} />
       )}
+      <UsageSection key={userId} userId={userId} available={q.data.usage_available} nodes={q.data.usage_nodes} />
       <AddExemptionDialog open={adding} onClose={() => setAdding(false)} lockedUserId={userId} />
     </Box>
   )

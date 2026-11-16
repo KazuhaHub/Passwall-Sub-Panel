@@ -8,9 +8,15 @@ import { afterEach, vi } from 'vitest'
 import zhAdmin from '@/locales/zh-CN/admin.json'
 import zhNav from '@/locales/zh-CN/nav.json'
 import zhCommon from '@/locales/zh-CN/common.json'
+import zhAuth from '@/locales/zh-CN/auth.json'
+import zhUser from '@/locales/zh-CN/user.json'
+import zhLanguage from '@/locales/zh-CN/language.json'
 import enAdmin from '@/locales/en-US/admin.json'
 import enNav from '@/locales/en-US/nav.json'
 import enCommon from '@/locales/en-US/common.json'
+import enAuth from '@/locales/en-US/auth.json'
+import enUser from '@/locales/en-US/user.json'
+import enLanguage from '@/locales/en-US/language.json'
 import { flatten, type Nested } from '@/i18n/options'
 import { createAppTheme } from '@/theme'
 import { useAuthStore } from '@/stores/auth'
@@ -31,9 +37,11 @@ type Dict = Record<string, string>
 const bundles: Record<string, Record<string, Dict>> = {
   'zh-CN': {
     admin: flatten(zhAdmin as Nested) as Dict, nav: flatten(zhNav as Nested) as Dict, common: flatten(zhCommon as Nested) as Dict,
+    auth: flatten(zhAuth as Nested) as Dict, user: flatten(zhUser as Nested) as Dict, language: flatten(zhLanguage as Nested) as Dict,
   },
   'en-US': {
     admin: flatten(enAdmin as Nested) as Dict, nav: flatten(enNav as Nested) as Dict, common: flatten(enCommon as Nested) as Dict,
+    auth: flatten(enAuth as Nested) as Dict, user: flatten(enUser as Nested) as Dict, language: flatten(enLanguage as Nested) as Dict,
   },
 }
 
@@ -65,7 +73,17 @@ vi.mock('react-i18next', () => ({
   }),
   Trans: ({ children }: { children: ReactElement }) => children,
 }))
-vi.mock('@/i18n', () => ({ default: { t: (key: string, opts?: Record<string, unknown>) => translate(key, opts), get language() { return lang.current } } }))
+const hoistedSetLanguage = vi.hoisted(() => vi.fn())
+vi.mock('@/i18n', () => ({
+  default: { t: (key: string, opts?: Record<string, unknown>) => translate(key, opts), get language() { return lang.current } },
+  SUPPORTED_LANGUAGES: ['zh-CN', 'zh-TW', 'en-US'],
+  isBuiltinLanguage: () => true,
+  serverLanguageMeta: () => undefined,
+  currentLanguage: () => lang.current,
+  setLanguage: hoistedSetLanguage,
+}))
+/** `setLanguage` of the i18n module. */
+export const setLanguageMock = hoistedSetLanguage
 
 const hoistedConfirm = vi.hoisted(() => vi.fn(() => Promise.resolve(true)))
 vi.mock('@/components/ConfirmHost', () => ({ confirm: hoistedConfirm, default: () => null }))
@@ -83,7 +101,8 @@ vi.mock('@/components/CodeEditor', async () => {
     default: forwardRef(function CodeEditorStub({ value, onChange, readOnly }: {
       value: string; onChange: (value: string) => void; readOnly?: boolean
     }, ref) {
-      useImperativeHandle(ref, () => ({ revealLine: vi.fn() }))
+      // insertLine puts the text on a line after the existing ones: the stub has no cursor.
+      useImperativeHandle(ref, () => ({ revealLine: vi.fn(), insertLine: (text: string) => onChange(value.trim() === '' ? text : `${value}\n${text}`) }))
       return <textarea aria-label="code" value={value} readOnly={readOnly} onChange={e => onChange(e.target.value)} />
     }),
   }
@@ -103,18 +122,22 @@ export interface RenderAccessOptions {
   role?: 'admin' | 'operator' | 'user'
   mode?: 'light' | 'dark'
   client?: QueryClient
+  /** The route pattern `ui` is mounted at, for a page that reads its params. */
+  path?: string
 }
 
 export function renderAccess(
   ui: ReactElement,
-  { route = '/admin/access-control', role = 'admin', mode = 'light', client = makeTestQueryClient() }: RenderAccessOptions = {},
+  { route = '/admin/access-control', role = 'admin', mode = 'light', client = makeTestQueryClient(), path }: RenderAccessOptions = {},
 ): RenderResult & { client: QueryClient; router: ReturnType<typeof createMemoryRouter> } {
   useAuthStore.setState({ role, userId: 1, authEpoch: 1 })
   const theme = createAppTheme({ mode, sourceColor: '#6750a4', language: lang.current })
   const router = createMemoryRouter(
     [
+      ...(path ? [{ path, element: ui }] : []),
       { path: '/admin/access-control', element: ui },
       { path: '/admin/dashboard', element: <p data-testid="dashboard">dashboard</p> },
+      { path: '/login', element: <p data-testid="login">login</p> },
       { path: '*', element: ui },
     ],
     { initialEntries: [route] },

@@ -214,5 +214,16 @@
   "announce": {
     "ack": "Got it",
     "mute": "Don't show again"
+  },
+  "legal": {
+    "consent_title": "Please review the Terms of Service and Privacy Policy",
+    "consent_body": "The Terms of Service and the Privacy Policy say what data this service records and for how long. Your subscription is not affected.",
+    "consent_terms": "Terms of Service",
+    "consent_privacy": "Privacy Policy",
+    "consent_later": "Later",
+    "consent_accept": "Agree",
+    "consent_accepted": "Your agreement was recorded",
+    "consent_failed": "Could not submit. Please try again.",
+    "consent_outdated": "The terms were just updated again. Please read them again."
   }
 }

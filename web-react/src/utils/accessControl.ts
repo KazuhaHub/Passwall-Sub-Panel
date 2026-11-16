@@ -372,10 +372,10 @@ export const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦'] as cons
 // ---------------------------------------------------------------------------
 
 export function needsFirstPublishConfirm(
-  current: { policiesOn: number; sourceRulesOn: number },
+  current: { policiesOn: number; sourceRulesOn: number; /** Allowlist groups whose state is not off. */ groupsOn?: number },
   change: { turnsOn: boolean },
 ): boolean {
-  return change.turnsOn && current.policiesOn === 0 && current.sourceRulesOn === 0
+  return change.turnsOn && current.policiesOn === 0 && current.sourceRulesOn === 0 && (current.groupsOn ?? 0) === 0
 }
 
 /** `ceil(apply_eta_ms / 60000)`; null when the server did not say (the copy then says "a few minutes"). */
@@ -491,7 +491,7 @@ export function collectingNodeCount(status: Pick<DestStatus, 'nodes'> | undefine
   return status ? status.nodes.filter(n => n.collecting).length : 0
 }
 
-export type NodeRecordingMode = 'off' | 'hits' | 'too_old' | 'exec_only'
+export type NodeRecordingMode = 'off' | 'hits' | 'hits_and_usage' | 'too_old' | 'exec_only'
 
 /**
  * A native node's recording line: what it is set to, or why it cannot record.
@@ -504,7 +504,9 @@ export function nodeRecording(node: Pick<DestNodeStatus, 'kind' | 'state' | 'eng
   if (!node.supports.hits) return { mode: 'too_old', hits24h: null }
   // What the node was told is what it does; the stored choice only stands in before anything was delivered.
   const set = node.collect_effective || node.collect
-  return { mode: set === 'off' ? 'off' : 'hits', hits24h: node.hits_24h }
+  if (set === 'off') return { mode: 'off', hits24h: node.hits_24h }
+  // The usage mode is shown only where the node declares it; one that cannot do it records hits.
+  return { mode: set === 'hits_and_usage' && node.supports.usage ? 'hits_and_usage' : 'hits', hits24h: node.hits_24h }
 }
 
 export type NodeResolveMode = 'as_is' | 'on_demand'

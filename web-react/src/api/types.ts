@@ -320,6 +320,8 @@ export interface Group {
   traffic_limit_gb?: number | null
   ip_limit?: number | null
   device_limit?: number | null
+  /** The group's allowlist state (read-only here; staff may read it, never the lists). Absent from an older server. */
+  dest_state?: 'off' | 'report' | 'on'
   members: number
 }
 
@@ -398,6 +400,9 @@ export interface AuthMethods {
   registration_enabled?: boolean
   registration_require_email_verification?: boolean
   registration_delivery?: 'link' | 'otp'
+  /** Privacy and terms: enabled only when a document can really be opened.
+   *  consent_version is the one a signup echoes back as accepted_consent_version. */
+  legal?: { enabled: boolean; consent_version: number }
   // Passkeys (v3.7.0). passkey_passwordless gates the login page's "Sign in with
   // a passkey" button (usernameless login); passkey_enabled alone only allows
   // enrollment as a second factor from the profile page.

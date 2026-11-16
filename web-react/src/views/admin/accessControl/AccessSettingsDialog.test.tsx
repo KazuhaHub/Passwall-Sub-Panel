@@ -14,8 +14,8 @@ vi.mock('@/api/accessControl', async importOriginal => {
 
 const view = (over: Partial<api.DestSettings> = {}): api.DestSettingsView => ({
   settings: { dest_policy_apply_min_seconds: 0, dest_list_refresh_hours: 0, dest_rules_update_mode: '', dest_hit_retention_days: 0, dest_trial_retention_days: 0, ...over },
-  defaults: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_hit_retention_days: 30, dest_trial_retention_days: 7 },
-  effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual', dest_hit_retention_days: 30, dest_trial_retention_days: 7 },
+  defaults: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7 },
+  effective: { dest_policy_apply_min_seconds: 60, dest_list_refresh_hours: 24, dest_rules_update_mode: 'manual', dest_hit_retention_days: 30, dest_trial_retention_days: 7, dest_usage_retention_days: 7 },
 })
 const meta = (tag: string): api.GeositeMeta => ({ tag, sha256: 'x', downloaded_at: '2026-11-01T00:00:00Z', bytes: 1 })
 const geo = (over: Partial<api.GeositeStatus> = {}): api.GeositeStatus => ({
@@ -97,8 +97,19 @@ describe('the hit-record retention (S18, the records tab\'s "change")', () => {
     expect(days.value).toBe('')
     expect(days.placeholder).toBe('30')
     expect(screen.getByText(/1–365/)).toBeTruthy()
-    // The trial retention belongs to the allowlist, which is a later phase: no field for it.
-    expect(screen.queryByLabelText(/试运行/)).toBeNull()
+  })
+
+  it('has the report-only data retention beside it, with its own range, and sends only that when only it changed', async () => {
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_trial_retention_days: 10 }))
+    open()
+    const days = (await screen.findByLabelText('仅报告数据保留（天）')) as HTMLInputElement
+    expect(days.value).toBe('')
+    expect(days.placeholder).toBe('7')
+    expect(screen.getAllByText(/1–30/).length).toBeGreaterThan(0)
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_trial_retention_days: 10 }))
   })
 
   it('sends only the retention when only it changed; lengthening asks nothing', async () => {
@@ -242,5 +253,41 @@ describe('rule data', () => {
     await screen.findByTestId('rule-data-panel')
     expect(document.body.textContent).not.toMatch(/secret-detail|sha256 mismatch|api\.github/)
     expect(screen.getByText('检查上游失败')).toBeTruthy()
+  })
+})
+
+describe('the per-site usage retention', () => {
+  it('is a field with the served default, never a 0, and says its range', async () => {
+    open()
+    const days = (await screen.findByLabelText('按网站用量保留（天）')) as HTMLInputElement
+    expect(days.value).toBe('')
+    expect(days.placeholder).toBe('7')
+    expect(screen.getByText(/1–30/, { selector: '[data-focus="usage"] *' })).toBeTruthy()
+  })
+
+  it('sends only that key when only it changed; lengthening asks nothing', async () => {
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_usage_retention_days: 14 }))
+    open()
+    const days = await screen.findByLabelText('按网站用量保留（天）')
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '14' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_usage_retention_days: 14 }))
+    expect(confirmMock).not.toHaveBeenCalledWith(expect.objectContaining({ title: '缩短保留期？' }))
+  })
+
+  it('shortening asks first (S20), naming the days that will be kept, and a "no" sends nothing', async () => {
+    vi.mocked(api.getDestSettings).mockResolvedValue(view({ dest_usage_retention_days: 14 }))
+    vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_usage_retention_days: 3 }))
+    open()
+    const days = await screen.findByLabelText('按网站用量保留（天）')
+    fireEvent.focus(days)
+    fireEvent.change(days, { target: { value: '3' } })
+    confirmMock.mockResolvedValueOnce(false)
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: '缩短保留期？', message: '超过 3 天的记录会在一小时内删除，无法恢复。', destructive: true,
+    })))
+    expect(api.putDestSettings).not.toHaveBeenCalled()
   })
 })

@@ -50,6 +50,36 @@ func githubBackedRouteIsOffline() bool {
 	return os.Getenv(offlineGitHubEnv) != ""
 }
 
+// githubLookupUnavailable asks GitHub itself whether a lookup from this host
+// would fail right now: unreachable, throttled (403/429), a server error, or an
+// exhausted rate-limit quota. CI runners share an address, so GitHub throttles
+// the panel's unauthenticated lookup from time to time; that is an environment
+// fact, told apart here from a regression in the panel's answer because GitHub
+// confirms it. Any other answer means GitHub would have answered the panel.
+func githubLookupUnavailable(apiBase string) (bool, string) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(strings.TrimRight(apiBase, "/") + "/rate_limit")
+	if err != nil {
+		return true, "api.github.com unreachable: " + err.Error()
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return true, fmt.Sprintf("api.github.com answered %d", resp.StatusCode)
+	}
+	var body struct {
+		Rate struct {
+			Remaining *int `json:"remaining"`
+		} `json:"rate"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&body) == nil && body.Rate.Remaining != nil && *body.Rate.Remaining == 0 {
+		return true, "api.github.com rate limit exhausted for this address"
+	}
+	return false, ""
+}
+
+// githubUnavailableNow is githubLookupUnavailable against the real GitHub API.
+func githubUnavailableNow() (bool, string) { return githubLookupUnavailable("https://api.github.com") }
+
 // TestLive_XUISurface is the 3X-UI counterpart of TestLive_SUISurface: it drives
 // EVERY endpoint this adapter calls against a REAL 3X-UI panel, so
 // docs/compat/v3.json's max_tested_xui can be raised from observed behaviour
@@ -99,6 +129,10 @@ func TestLive_XUISurface(t *testing.T) {
 	case err != nil && githubBackedRouteIsOffline():
 		t.Logf("GetPanelUpdateInfo: route answered; the panel's own GitHub lookup failed as declared by %s: %v", offlineGitHubEnv, err)
 	case err != nil:
+		if down, why := githubUnavailableNow(); down {
+			t.Logf("GetPanelUpdateInfo: route answered; the panel's own GitHub lookup failed and GitHub confirms it (%s): %v", why, err)
+			break
+		}
 		t.Fatalf("GetPanelUpdateInfo: %v (set %s=1 if this panel genuinely cannot reach api.github.com)", err, offlineGitHubEnv)
 	default:
 		t.Logf("updateInfo current=%q latest=%q available=%v", info.CurrentVersion, info.LatestVersion, info.UpdateAvailable)
@@ -114,6 +148,10 @@ func TestLive_XUISurface(t *testing.T) {
 	case err != nil && githubBackedRouteIsOffline():
 		t.Logf("GetXrayVersionList: route answered; the panel's own GitHub fetch failed as declared by %s: %v", offlineGitHubEnv, err)
 	case err != nil:
+		if down, why := githubUnavailableNow(); down {
+			t.Logf("GetXrayVersionList: route answered; the panel's own GitHub fetch failed and GitHub confirms it (%s): %v", why, err)
+			break
+		}
 		t.Fatalf("GetXrayVersionList: %v (set %s=1 if this panel genuinely cannot reach api.github.com)", err, offlineGitHubEnv)
 	default:
 		t.Logf("xray version list: %d entries", len(vers))

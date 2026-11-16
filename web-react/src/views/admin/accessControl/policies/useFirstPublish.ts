@@ -22,7 +22,8 @@ export function useFirstPublishGate() {
     // Report-only is deployed too (the nodes restart for it), so it is "something enforced" for this purpose.
     const policiesOn = enabledPolicies(policies.data).length
     const sourceRulesOn = (sources.data?.items ?? []).filter(r => r.state !== 'off').length
-    if (!needsFirstPublishConfirm({ policiesOn, sourceRulesOn }, { turnsOn })) return true
+    const groupsOn = policies.data?.allowlist_groups.length ?? 0
+    if (!needsFirstPublishConfirm({ policiesOn, sourceRulesOn, groupsOn }, { turnsOn })) return true
     const nodes = enforcingNodeCount(status.data)
     return confirm(firstPublishConfirm({
       t, minutes: applyMinutes(status.data), nodes,

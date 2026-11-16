@@ -46,7 +46,9 @@ func TestBuildStoresAReportedHitBatch(t *testing.T) {
 	digest := sha256.Sum256([]byte(credential))
 	agent := &domain.NodeAgent{AgentID: "agt_audit_wiring", Epoch: 7, CredentialSHA256: hex.EncodeToString(digest[:]),
 		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27"}
-	panel := &domain.XUIPanel{Name: "audit-native", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID}
+	panel := &domain.XUIPanel{Name: "audit-native", Kind: domain.PanelKindPSP, URL: "psp://" + agent.AgentID,
+		// Tier B, so the batch's usage rows are kept.
+		AuditCollect: domain.AuditCollectHitsAndUsage}
 	if err := a.repos.NativeAgentProvisioning.Create(ctx, panel, agent); err != nil {
 		t.Fatal(err)
 	}
@@ -71,11 +73,14 @@ func TestBuildStoresAReportedHitBatch(t *testing.T) {
 			"hour": hour, "rule_id": "p7x1", "action": "observe", "subject": fmt.Sprintf("usr_%d", user.ID),
 			"dest": "wired.example", "port": 443, "count": 4, "first_ms": hour + 10, "last_ms": hour + 20,
 		}},
+		"usage": []map[string]any{{
+			"hour": hour, "subject": fmt.Sprintf("usr_%d", user.ID), "site": "wired-usage.example", "count": 9,
+		}},
 		"dropped_hits": 0, "dropped_trial": 0, "dropped_usage": 0, "unmatched": 0,
 	}
 	report := nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1, CoreEngine: "xray",
-		Capabilities: []string{nodeprotocol.CapabilityAuditHits},
+		Capabilities: []string{nodeprotocol.CapabilityAuditHits, nodeprotocol.CapabilityAuditUsage},
 		Have: map[string]nodeprotocol.StreamState{
 			nodeprotocol.StreamConfig: {}, nodeprotocol.StreamRoster: {}, nodeprotocol.StreamDirectives: {},
 		},
@@ -116,6 +121,10 @@ func TestBuildStoresAReportedHitBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-runErr
+	usage, err := a.destRepos.Hits.UserUsage(ctx, user.ID, panel.ID, 0, 0, 10)
+	if err != nil || usage.Total != 9 || len(usage.Items) != 1 || usage.Items[0].Site != "wired-usage.example" {
+		t.Fatalf("usage = %+v, %v: is the tier lookup wired into the ingest?", usage, err)
+	}
 	if total != 1 || rows[0].Dest != "wired.example" || rows[0].Source != "p7" || rows[0].Action != "observe" ||
 		rows[0].UserID != user.ID || rows[0].PanelID != panel.ID || rows[0].Count != 4 {
 		t.Fatalf("stored = %+v (%d): is nativeSync.SetAudit called, and is dest-audit-ingest started by Run?", rows, total)

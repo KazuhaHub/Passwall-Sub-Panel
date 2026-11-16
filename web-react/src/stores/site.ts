@@ -18,10 +18,14 @@ interface SiteState {
   // panel timezone (IANA name). Empty = backend hasn't been configured, so
   // the frontend falls back to the browser tz for any display.
   timezone: string
+  // Privacy and terms: the footer links, the register checkbox and the consent
+  // dialog render off these. consent_version is the one a signup echoes back.
+  legalEnabled: boolean
+  legalConsentVersion: number
   loaded: boolean
   load: () => Promise<void>
   update: (patch: Partial<Pick<SiteState,
-    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone'
+    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone' | 'legalEnabled' | 'legalConsentVersion'
   >>) => void
 }
 
@@ -46,6 +50,8 @@ export const useSiteStore = create<SiteState>((set, get) => ({
   themeColor: undefined,
   themeDefaultMode: undefined,
   timezone: '',
+  legalEnabled: false,
+  legalConsentVersion: 0,
   loaded: false,
 
   async load() {
@@ -62,6 +68,8 @@ export const useSiteStore = create<SiteState>((set, get) => ({
         themeColor: m.theme_color,
         themeDefaultMode: m.theme_default_mode,
         timezone: m.timezone || '',
+        legalEnabled: !!m.legal?.enabled,
+        legalConsentVersion: m.legal?.consent_version ?? 0,
         loaded: true,
       })
     } catch {

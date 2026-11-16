@@ -162,6 +162,15 @@ export const logKeys = {
   email: (s: QueryScope, filter: EmailLogFilter) => [...logKeys.all(s), 'email', filter] as const,
 }
 
+/** The terms and privacy administration (Settings > Privacy and terms). One
+ *  publish moves the consent version both documents share, so a write
+ *  invalidates `all`. */
+export const legalKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'legal'] as const,
+  admin: (s: QueryScope, kind: string) => [...legalKeys.all(s), 'admin', kind] as const,
+  affected: (s: QueryScope) => [...legalKeys.all(s), 'affected'] as const,
+}
+
 /** The caller's own self-service reads (`/user/me/*`). */
 export const meKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'me'] as const,
@@ -245,4 +254,12 @@ export const accessControlKeys = {
   /** Every cached hit read (the prefix of `hits`). */
   hitsAll: (s: QueryScope) => [...accessControlKeys.all(s), 'hits'] as const,
   settings: (s: QueryScope) => [...accessControlKeys.all(s), 'settings'] as const,
+  /** Every allowlist-group read (the prefix of the four below). */
+  groupsAll: (s: QueryScope) => [...accessControlKeys.all(s), 'groups'] as const,
+  groups: (s: QueryScope) => [...accessControlKeys.groupsAll(s), 'list'] as const,
+  /** One group with its readiness. */
+  group: (s: QueryScope, id: number) => [...accessControlKeys.groupsAll(s), 'one', id] as const,
+  /** What a state and a choice of lists would do (read only). */
+  groupPreview: (s: QueryScope, id: number, state: string, listIds: readonly number[]) => [...accessControlKeys.groupsAll(s), 'preview', id, state, [...listIds].sort((a, b) => a - b)] as const,
+  groupReport: (s: QueryScope, id: number, days: number) => [...accessControlKeys.groupsAll(s), 'report', id, days] as const,
 }

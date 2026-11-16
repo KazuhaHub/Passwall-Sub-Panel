@@ -539,6 +539,13 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// risk.connection_retention_days.
 		intField("dest", "hit_retention_days", &s.DestHitRetentionDays),
 		intField("dest", "trial_retention_days", &s.DestTrialRetentionDays),
+		intField("dest", "usage_retention_days", &s.DestUsageRetentionDays),
+
+		// legal --- privacy and terms. legal.consent_version is written by the
+		// publish endpoint only (the system settings PUT keeps it as stored).
+		boolField("legal", "enabled", &s.LegalEnabled),
+		intField("legal", "consent_version", &s.LegalConsentVersion),
+		boolField("legal", "disclose_usage", &s.LegalDiscloseUsage),
 
 		// geo --- IP geolocation for access-log region display (offline .mmdb)
 		boolField("geo", "geo_ip_enabled", &s.GeoIPEnabled),

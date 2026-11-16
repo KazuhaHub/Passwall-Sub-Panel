@@ -2,8 +2,10 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -69,21 +71,43 @@ func destHitRowOf(r domain.DestHit) destHitRow {
 	}
 }
 
-// StoreBatch stores one reported batch: the batch marker and the rows.
+// StoreBatch stores a batch of hits (no usage): see StoreBatchWithUsage.
+func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, receivedAt time.Time, rows []domain.DestHit) (domain.DestBatchResult, error) {
+	return r.StoreBatchWithUsage(ctx, agentID, batchID, receivedAt, rows, nil)
+}
+
+// destUsageConflict adds the incoming count to the stored one. The incoming
+// value is spelled EXCLUDED.col on PostgreSQL and SQLite and VALUES(col) on MySQL.
+func destUsageConflict(dialect string) clause.OnConflict {
+	cols := []clause.Column{{Name: "hour_ms"}, {Name: "panel_id"}, {Name: "user_id"}, {Name: "site"}}
+	col := clause.Column{Name: "count"}
+	var add clause.Expr
+	if dialect == "mysql" {
+		add = clause.Expr{SQL: "? + VALUES(?)", Vars: []any{col, col}}
+	} else {
+		add = clause.Expr{SQL: "? + ?", Vars: []any{clause.Column{Table: "dest_usage_hourly", Name: "count"}, clause.Column{Table: "excluded", Name: "count"}}}
+	}
+	return clause.OnConflict{Columns: cols, DoUpdates: clause.Set{{Column: col, Value: add}}}
+}
+
+// StoreBatchWithUsage stores one reported batch: the batch marker, the hit rows
+// and the per-site usage rows, all under the one marker.
 //
 // The FIRST transaction inserts the marker with ON CONFLICT DO NOTHING and
 // reads RowsAffected: zero means the batch was stored before, and nothing else
-// is written. It deliberately does not rely on catching a duplicate-key error,
-// which on PostgreSQL aborts the whole transaction. The marker and the first
-// chunk of rows share that transaction, so a failure there leaves no marker
-// behind. A LATER chunk that fails leaves the earlier ones committed and
-// returns the error with Stored showing how far it got: a retry of the batch
-// would be refused as a duplicate, and that loss is accepted (the node keeps no
-// durable copy either).
+// is written (neither the hits nor the usage: the marker is the unit of
+// de-duplication for both). It deliberately does not rely on catching a
+// duplicate-key error, which on PostgreSQL aborts the whole transaction. The
+// marker and the first chunk of hits and of usage share that transaction, so a
+// failure there leaves no marker behind. A LATER chunk that fails leaves the
+// earlier ones committed and returns the error with Stored/UsageStored showing
+// how far it got: a retry of the batch would be refused as a duplicate, and
+// that loss is accepted (the node keeps no durable copy either).
 //
-// Rows are merged by aggregation key first (domain.MergeDestHits), then written 1000
-// to a transaction and 200 to a statement.
-func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, receivedAt time.Time, rows []domain.DestHit) (domain.DestBatchResult, error) {
+// Rows are merged by aggregation key first (domain.MergeDestHits,
+// domain.MergeDestUsage), then written 1000 of each to a transaction and 200 to
+// a statement; chunk i of the hits and chunk i of the usage share a transaction.
+func (r *DestHitRepo) StoreBatchWithUsage(ctx context.Context, agentID, batchID string, receivedAt time.Time, rows []domain.DestHit, usage []domain.DestUsage) (domain.DestBatchResult, error) {
 	if agentID == "" || len(agentID) > destAgentIDWidth || batchID == "" || len(batchID) > destBatchIDWidth {
 		return domain.DestBatchResult{}, fmt.Errorf("%w: a hit batch needs an agent id and a batch id", domain.ErrValidation)
 	}
@@ -92,16 +116,24 @@ func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, r
 			return domain.DestBatchResult{}, fmt.Errorf("%w: a hit row is wider than its column", domain.ErrValidation)
 		}
 	}
+	for _, u := range usage {
+		if u.Site == "" || len(u.Site) > destUsageSiteWidth {
+			return domain.DestBatchResult{}, fmt.Errorf("%w: a usage row's site is 1..%d bytes", domain.ErrValidation, destUsageSiteWidth)
+		}
+	}
 	rows = domain.MergeDestHits(rows)
+	usage = domain.MergeDestUsage(usage)
 	dialect := r.db.Dialector.Name()
+	chunks := max((len(rows)+destHitTxRows-1)/destHitTxRows, (len(usage)+destHitTxRows-1)/destHitTxRows, 1)
+	slice := func(n, i int) (int, int) { return min(i*destHitTxRows, n), min((i+1)*destHitTxRows, n) }
 	var res domain.DestBatchResult
-	first := true
-	for start := 0; first || start < len(rows); start += destHitTxRows {
-		end := min(start+destHitTxRows, len(rows))
-		chunk := rows[start:end]
+	for i := 0; i < chunks; i++ {
+		hs, he := slice(len(rows), i)
+		us, ue := slice(len(usage), i)
+		chunk, uchunk := rows[hs:he], usage[us:ue]
 		duplicate := false
 		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if first {
+			if i == 0 {
 				marker := destAuditBatchRow{AgentID: agentID, BatchID: batchID, ReceivedAt: receivedAt.UTC()}
 				ins := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&marker)
 				if ins.Error != nil {
@@ -112,21 +144,32 @@ func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, r
 					return nil
 				}
 			}
-			if len(chunk) == 0 {
-				return nil
+			if len(chunk) > 0 {
+				batch := make([]destHitRow, len(chunk))
+				for k, h := range chunk {
+					batch[k] = destHitRowOf(h)
+				}
+				// One statement per destHitStmtRows rows, written as plain Creates in
+				// this transaction: CreateInBatches would wrap them in savepoints,
+				// which buy nothing here (the transaction is the unit of failure)
+				// and which a wrapped dialector may not provide.
+				for k := 0; k < len(batch); k += destHitStmtRows {
+					j := min(k+destHitStmtRows, len(batch))
+					if err := tx.Clauses(destHitConflict(dialect)).Create(batch[k:j]).Error; err != nil {
+						return err
+					}
+				}
 			}
-			batch := make([]destHitRow, len(chunk))
-			for i, h := range chunk {
-				batch[i] = destHitRowOf(h)
-			}
-			// One statement per destHitStmtRows rows, written as plain Creates in
-			// this transaction: CreateInBatches would wrap them in savepoints,
-			// which buy nothing here (the transaction is the unit of failure)
-			// and which a wrapped dialector may not provide.
-			for i := 0; i < len(batch); i += destHitStmtRows {
-				j := min(i+destHitStmtRows, len(batch))
-				if err := tx.Clauses(destHitConflict(dialect)).Create(batch[i:j]).Error; err != nil {
-					return err
+			if len(uchunk) > 0 {
+				batch := make([]destUsageRow, len(uchunk))
+				for k, u := range uchunk {
+					batch[k] = destUsageRow{HourMS: u.HourMS, PanelID: u.PanelID, UserID: u.UserID, Site: u.Site, Count: u.Count}
+				}
+				for k := 0; k < len(batch); k += destHitStmtRows {
+					j := min(k+destHitStmtRows, len(batch))
+					if err := tx.Clauses(destUsageConflict(dialect)).Create(batch[k:j]).Error; err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -139,7 +182,7 @@ func (r *DestHitRepo) StoreBatch(ctx context.Context, agentID, batchID string, r
 			return res, nil
 		}
 		res.Stored += len(chunk)
-		first = false
+		res.UsageStored += len(uchunk)
 	}
 	return res, nil
 }
@@ -166,9 +209,10 @@ func (r *DestHitRepo) AddDrops(ctx context.Context, hourMS, panelID int64, kind 
 // DroppedInRange is how many reported rows are missing from [sinceMS, untilMS):
 // the node's own overflow of block-hit rows, the panel's budget and queue
 // drops and failed writes. The allowlist trial overflow is NOT included: it is
-// expected on a busy node and is not a gap in the record of what was blocked.
+// expected on a busy node and is not a gap in the record of what was blocked,
+// and neither are the usage kinds (see UsageDropped).
 func (r *DestHitRepo) DroppedInRange(ctx context.Context, sinceMS, untilMS int64) (int64, error) {
-	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind <> ?", domain.DestDropNodeTrial)
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind NOT IN ?", append([]string{domain.DestDropNodeTrial}, domain.DestUsageDropKinds()...))
 	if sinceMS > 0 {
 		q = q.Where("hour_ms >= ?", sinceMS)
 	}
@@ -540,6 +584,13 @@ func (r *DestHitRepo) PruneHits(ctx context.Context, cutoffMS int64) (int64, err
 	return res.RowsAffected, res.Error
 }
 
+// PruneUsage deletes per-site usage rows whose hour is before cutoffMS (aligned
+// to a whole UTC hour by the caller).
+func (r *DestHitRepo) PruneUsage(ctx context.Context, cutoffMS int64) (int64, error) {
+	res := r.db.WithContext(ctx).Where("hour_ms < ?", cutoffMS).Delete(&destUsageRow{})
+	return res.RowsAffected, res.Error
+}
+
 // PruneTrial deletes allowlist trial rows (a group's observe) before
 // cutoffMS: they have their own, shorter, retention.
 func (r *DestHitRepo) PruneTrial(ctx context.Context, cutoffMS int64) (int64, error) {
@@ -573,6 +624,8 @@ func (r *DestHitRepo) PruneOrphans(ctx context.Context) (int64, error) {
 		{&destHitRow{}, "user_id > 0 AND user_id NOT IN (SELECT id FROM users)"},
 		{&destHitRow{}, "panel_id NOT IN (SELECT id FROM xui_panels)"},
 		{&destAuditDropRow{}, "panel_id NOT IN (SELECT id FROM xui_panels)"},
+		{&destUsageRow{}, "user_id NOT IN (SELECT id FROM users)"},
+		{&destUsageRow{}, "panel_id NOT IN (SELECT id FROM xui_panels)"},
 		{&destAgentPolicyRow{}, "agent_id NOT IN (SELECT agent_id FROM node_agents)"},
 	} {
 		res := r.db.WithContext(ctx).Where(stmt.where).Delete(stmt.model)
@@ -582,4 +635,172 @@ func (r *DestHitRepo) PruneOrphans(ctx context.Context) (int64, error) {
 		total += res.RowsAffected
 	}
 	return total, nil
+}
+
+// TrialSites folds an allowlist group's report-only rows (the rows of source
+// that are observe and carry no account) from sinceMS on by destination, most
+// seen first and then by name. The destination is what the node recorded: the
+// main domain, or "(ip)".
+func (r *DestHitRepo) TrialSites(ctx context.Context, source string, sinceMS int64) ([]domain.DestTrialSite, error) {
+	var rows []struct {
+		Dest string
+		N    int64
+		Last int64
+	}
+	if err := r.db.WithContext(ctx).Model(&destHitRow{}).
+		Where("source = ? AND action = ? AND user_id = 0 AND hour_ms >= ?", source, domain.DestHitObserve, sinceMS).
+		Select("dest, SUM(count) AS n, MAX(last_ms) AS last").Group("dest").Order("n DESC, dest ASC").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("fold dest trial rows: %w", err)
+	}
+	out := make([]domain.DestTrialSite, len(rows))
+	for i, row := range rows {
+		out[i] = domain.DestTrialSite{Site: row.Dest, Count: row.N, LastMS: row.Last}
+	}
+	// Ties are ordered here, by bytes: the dialects' collations disagree on
+	// punctuation ("(ip)" sorts first in SQLite and after letters in PostgreSQL).
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Site < out[j].Site
+	})
+	return out, nil
+}
+
+// TrialDropped is how many allowlist trial rows the nodes dropped (their
+// aggregator was full) in [sinceMS, untilMS); zero bounds are open. It is the
+// overflow DroppedInRange leaves out: a report is missing these.
+func (r *DestHitRepo) TrialDropped(ctx context.Context, sinceMS, untilMS int64) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind = ?", domain.DestDropNodeTrial)
+	if sinceMS > 0 {
+		q = q.Where("hour_ms >= ?", sinceMS)
+	}
+	if untilMS > 0 {
+		q = q.Where("hour_ms < ?", untilMS)
+	}
+	var total *int64
+	if err := q.Select("SUM(count)").Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("sum dest trial drops: %w", err)
+	}
+	if total == nil {
+		return 0, nil
+	}
+	return *total, nil
+}
+
+// ---- per-site usage (tier B) ----
+
+// usageScope selects one account's usage rows in [sinceMS, untilMS) on one panel
+// (0: every panel). Zero bounds are open.
+func usageScope(q *gorm.DB, userID, panelID, sinceMS, untilMS int64) *gorm.DB {
+	q = q.Where("user_id = ?", userID)
+	if panelID > 0 {
+		q = q.Where("panel_id = ?", panelID)
+	}
+	if sinceMS > 0 {
+		q = q.Where("hour_ms >= ?", sinceMS)
+	}
+	if untilMS > 0 {
+		q = q.Where("hour_ms < ?", untilMS)
+	}
+	return q
+}
+
+// UserUsage is one account's usage in [sinceMS, untilMS) (a panel of 0 is every
+// panel): its limit most-used sites, then what the other sites add up to, so
+// the total is never short. Ties are ordered by site, by bytes, because the
+// dialects' collations disagree on punctuation ("(ip)").
+//
+// The database finds the cut and the totals; only the sites above it, and the
+// names of those tied exactly at it, come back, so an account with a long tail
+// of one-off sites is not loaded whole. The reads share one transaction, so the
+// total, the site count and the list cannot disagree the way separate
+// statements can when a batch lands between them.
+func (r *DestHitRepo) UserUsage(ctx context.Context, userID, panelID, sinceMS, untilMS int64, limit int) (domain.DestUsageSummary, error) {
+	out := domain.DestUsageSummary{Items: []domain.DestUsageSite{}}
+	if limit < 1 {
+		limit = 1
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		grouped := func() *gorm.DB {
+			return usageScope(tx.Model(&destUsageRow{}), userID, panelID, sinceMS, untilMS).Select("site, SUM(count) AS n").Group("site")
+		}
+		var totals struct {
+			Sites int64
+			Total int64
+		}
+		if err := tx.Table("(?) AS u", grouped()).Select("COUNT(*) AS sites, COALESCE(SUM(n), 0) AS total").Scan(&totals).Error; err != nil {
+			return fmt.Errorf("total dest usage: %w", err)
+		}
+		out.Total = totals.Total
+		if totals.Sites == 0 {
+			return nil
+		}
+		type siteCount struct {
+			Site string
+			N    int64
+		}
+		var top []siteCount
+		if totals.Sites <= int64(limit) {
+			if err := grouped().Scan(&top).Error; err != nil {
+				return fmt.Errorf("fold dest usage: %w", err)
+			}
+		} else {
+			// The count of the limit-th site: everything above it is in, and
+			// of the sites tied at it only as many as are needed are.
+			var cut int64
+			if err := tx.Table("(?) AS u", grouped()).Select("n").Order("n DESC").Limit(1).Offset(limit - 1).Scan(&cut).Error; err != nil {
+				return fmt.Errorf("find dest usage cut: %w", err)
+			}
+			// Sites tied exactly at the cut all come back (their order is decided
+			// in Go, in byte order). For an account with a long tail of one-off
+			// sites that is the tail: accepted, since it is one account's sites
+			// over at most the retention, read once per click by an administrator.
+			if err := grouped().Having("SUM(count) >= ?", cut).Scan(&top).Error; err != nil {
+				return fmt.Errorf("fold dest usage: %w", err)
+			}
+		}
+		sort.Slice(top, func(i, j int) bool {
+			if top[i].N != top[j].N {
+				return top[i].N > top[j].N
+			}
+			return top[i].Site < top[j].Site
+		})
+		if len(top) > limit {
+			top = top[:limit]
+		}
+		var shown int64
+		for _, row := range top {
+			out.Items = append(out.Items, domain.DestUsageSite{Site: row.Site, Count: row.N})
+			shown += row.N
+		}
+		out.OtherSites = totals.Sites - int64(len(top))
+		out.OtherCount = totals.Total - shown
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return out, err
+}
+
+// UsageDropped is how many usage rows are missing from [sinceMS, untilMS) on one
+// panel (0: every panel): what the nodes could not aggregate and what the
+// panel's hourly usage budget refused. Zero bounds are open.
+func (r *DestHitRepo) UsageDropped(ctx context.Context, sinceMS, untilMS, panelID int64) (int64, error) {
+	q := r.db.WithContext(ctx).Model(&destAuditDropRow{}).Where("kind IN ?", domain.DestUsageDropKinds())
+	if panelID > 0 {
+		q = q.Where("panel_id = ?", panelID)
+	}
+	if sinceMS > 0 {
+		q = q.Where("hour_ms >= ?", sinceMS)
+	}
+	if untilMS > 0 {
+		q = q.Where("hour_ms < ?", untilMS)
+	}
+	var total *int64
+	if err := q.Select("SUM(count)").Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("sum dest usage drops: %w", err)
+	}
+	if total == nil {
+		return 0, nil
+	}
+	return *total, nil
 }

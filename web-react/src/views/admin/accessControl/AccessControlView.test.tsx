@@ -15,6 +15,7 @@ vi.mock('@/api/accessControl', async importOriginal => {
 // The tabs and sheets are other tests' business; the page is tested for what it owns.
 vi.mock('./policies/PoliciesTab', () => ({ default: () => <p data-testid="policies-tab" /> }))
 vi.mock('./lists/ListsTab', () => ({ default: () => <p data-testid="lists-tab" /> }))
+vi.mock('./allowlist/AllowlistTab', () => ({ default: () => <p data-testid="allowlist-tab" /> }))
 vi.mock('./records/RecordsTab', () => ({
   default: (p: { onOpenUser: (id: number) => void; onTestDestination: (h: string) => void; onOpenSettings: (f?: string) => void; onOpenNodes: () => void; onGoToPolicies: () => void }) => (
     <div data-testid="records-tab">
@@ -81,20 +82,20 @@ describe('the page', () => {
     expect(screen.queryByTestId('lists-tab')).toBeNull()
   })
 
-  it('switching tabs REPLACES the tab param, and a later phase\'s tab reads as the policies tab without being rewritten', async () => {
-    const { router } = renderAccess(<AccessControlView />, { route: '/admin/access-control?tab=allowlist' })
+  it('switching tabs REPLACES the tab param, and an unknown tab reads as the policies tab without being rewritten', async () => {
+    const { router } = renderAccess(<AccessControlView />, { route: '/admin/access-control?tab=nonsense' })
     expect(await screen.findByTestId('policies-tab')).toBeTruthy()
-    expect(whereIs(router)).toBe('/admin/access-control?tab=allowlist')
+    expect(whereIs(router)).toBe('/admin/access-control?tab=nonsense')
     fireEvent.click(screen.getByRole('tab', { name: '列表' }))
     expect(await screen.findByTestId('lists-tab')).toBeTruthy()
     expect(whereIs(router)).toBe('/admin/access-control?tab=lists')
     expect(router.state.historyAction).toBe('REPLACE')
   })
 
-  it('offers policies, lists and records, no tab for a later phase, and names a tunable only through its setting', async () => {
+  it('offers policies, lists, the allowlist groups and records, and names a tunable only through its setting', async () => {
     renderAccess(<AccessControlView />)
     await screen.findByTestId('policies-tab')
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['策略', '列表', '记录'])
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['策略', '列表', '白名单分组', '记录'])
     fireEvent.click(screen.getByRole('button', { name: '说明' }))
     // The cap and the window are the ones the server reports, not literals.
     expect(await screen.findByText(/最多 256 条/)).toBeTruthy()
@@ -113,6 +114,14 @@ describe('the page', () => {
     fireEvent.click(screen.getByRole('button', { name: '说明' }))
     expect(await screen.findByText(/命中记录保留 30 天/)).toBeTruthy()
     expect(screen.getByText(/「本应拦截」是仅报告的策略命中的连接/)).toBeTruthy()
+  })
+
+  it('mounts the allowlist tab from its URL, and its help names the trial retention from the setting', async () => {
+    renderAccess(<AccessControlView />, { route: '/admin/access-control?tab=allowlist' })
+    expect(await screen.findByTestId('allowlist-tab')).toBeTruthy()
+    expect(screen.queryByTestId('policies-tab')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    expect(await screen.findByText(/仅报告的数据保留 7 天/)).toBeTruthy()
   })
 
   it('the records tab opens an account drawer, the test sheet with the destination in state and never the URL, the retention field, the node coverage and the policies tab', async () => {

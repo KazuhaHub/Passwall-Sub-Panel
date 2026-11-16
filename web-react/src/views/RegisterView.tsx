@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { Alert, Box, Button, Card, CircularProgress, Link as MuiLink, TextField, Typography, useTheme } from '@mui/material'
+import { Fragment, useEffect, useState, type FormEvent } from 'react'
+import { Alert, Box, Button, Card, Checkbox, CircularProgress, FormControlLabel, Link as MuiLink, TextField, Typography, useTheme } from '@mui/material'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
@@ -9,6 +9,7 @@ import type { AuthMethods, LoginCaptcha } from '@/api/types'
 import { useSiteStore } from '@/stores/site'
 import BrandLogo from '@/components/BrandLogo'
 import CaptchaWidget from '@/components/CaptchaWidget'
+import SiteFooter from '@/components/SiteFooter'
 
 function strongEnough(pw: string): boolean {
   return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw)
@@ -32,6 +33,10 @@ export default function RegisterView() {
   const [captcha, setCaptcha] = useState<LoginCaptcha>({})
   const [captchaRefresh, setCaptchaRefresh] = useState(0)
   const needCaptcha = !!methods?.captcha_register_required
+  // The terms are asked for only while a document can really be opened; the
+  // version offered is the one the form was loaded with.
+  const consentVersion = methods?.legal?.enabled ? methods.legal.consent_version : null
+  const [agreed, setAgreed] = useState(false)
 
   useEffect(() => { void site.load() }, [site])
   useEffect(() => { getAuthMethods().then(setMethods).catch(() => {}) }, [])
@@ -43,14 +48,22 @@ export default function RegisterView() {
     if (!strongEnough(pw)) { setError(t('auth:password_too_weak')); return }
     setBusy(true)
     try {
-      const res = await registerUser({ email: email.trim(), password: pw, display_name: displayName.trim() || undefined, ...captcha })
+      const res = await registerUser({ email: email.trim(), password: pw, display_name: displayName.trim() || undefined, ...captcha,
+        ...(consentVersion !== null ? { accepted_consent_version: consentVersion } : {}),
+      })
       setDoneMsg(res.requires_verification ? t('auth:register_check_email') : t('auth:register_success'))
     } catch (err) {
-      const e = err as AxiosError<{ error?: string; captcha_required?: boolean }>
+      const e = err as AxiosError<{ error?: string; code?: string; captcha_required?: boolean }>
       const status = e.response?.status
       const data = e.response?.data
       const msg = data?.error || ''
-      if (data?.captcha_required) {
+      if (status === 409 && data?.code === 'legal_consent_outdated') {
+        // The terms moved while the form was open: read them again, on the
+        // current version, before the box can be ticked.
+        setError(t('auth:legal.register_outdated'))
+        setAgreed(false)
+        getAuthMethods().then(setMethods).catch(() => {})
+      } else if (data?.captcha_required) {
         setError(t('auth:captcha_required', { defaultValue: '请完成验证码' }))
         setCaptcha({})
         setCaptchaRefresh(x => x + 1)
@@ -64,7 +77,8 @@ export default function RegisterView() {
   }
 
   return (
-    <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface, px: 2 }}>
+    <Box sx={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', bgcolor: md.surface }}>
+    <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', placeItems: 'center', px: 2, py: 2 }}>
       <Card sx={{ width: '100%', maxWidth: 400, bgcolor: md.surfaceContainerLow, p: 4 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
           <BrandLogo height={48} />
@@ -93,13 +107,34 @@ export default function RegisterView() {
               <CaptchaWidget provider={methods?.captcha_provider ?? 'image'}
                 siteKey={methods?.captcha_site_key} refreshKey={captchaRefresh} onChange={setCaptcha} />
             )}
+            {consentVersion !== null && (
+              <FormControlLabel
+                control={<Checkbox checked={agreed} onChange={(_, c) => setAgreed(c)} />}
+                label={<>
+                  {t('auth:legal.register_agree_prefix')}
+                  {(['terms', 'privacy'] as const).map((kind, i) => (
+                    <Fragment key={kind}>
+                      {i > 0 && t('auth:legal.register_agree_and')}
+                      {/* A link inside the label does not tick the box; it opens
+                          the document in another tab so the form is kept. */}
+                      <MuiLink component={RouterLink} to={`/legal/${kind}`} target="_blank" rel="noopener noreferrer"
+                        sx={{ display: 'inline-flex', alignItems: 'center', minHeight: { xs: 44, sm: 'auto' } }}>
+                        {t(`auth:legal.register_${kind}_link`)}
+                      </MuiLink>
+                    </Fragment>
+                  ))}
+                  {t('auth:legal.register_agree_suffix')}
+                </>}
+                sx={{ alignItems: 'flex-start', m: 0, '& .MuiCheckbox-root': { p: 0.75, mr: 0.5 }, '& .MuiFormControlLabel-label': { fontSize: 14, pt: 0.5 } }}
+              />
+            )}
             {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
             {methods?.registration_require_email_verification && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
                 {t('auth:register_verify_hint')}
               </Typography>
             )}
-            <Button type="submit" variant="contained" fullWidth size="large" disabled={busy || !email.trim() || !pw}
+            <Button type="submit" variant="contained" fullWidth size="large" disabled={busy || !email.trim() || !pw || (consentVersion !== null && !agreed)}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
               {t('auth:register_submit')}
             </Button>
@@ -115,6 +150,8 @@ export default function RegisterView() {
           </Box>
         )}
       </Card>
+    </Box>
+    <SiteFooter sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }} />
     </Box>
   )
 }

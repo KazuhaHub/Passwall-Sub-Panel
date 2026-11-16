@@ -191,15 +191,60 @@ type harness struct {
 	dir      string
 }
 
-func newHarness(t *testing.T) *harness {
+// schemaTemplate is a migrated SQLite file made once per test process. Under
+// -race the pure-Go SQLite engine is instrumented and EnsureSchema costs about
+// half a second per database, which made this package's 200-odd harnesses the
+// slowest package in its race shard (past the shard's 4-minute limit on a busy
+// runner). Every harness starts from a byte copy of the file a fresh
+// EnsureSchema leaves, so the database each test sees is the same.
+var schemaTemplate struct {
+	once sync.Once
+	raw  []byte
+	err  error
+}
+
+func migratedDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := sqlstore.OpenQuiet("sqlite", filepath.Join(t.TempDir(), "dest.db"))
+	schemaTemplate.once.Do(func() {
+		dir, err := os.MkdirTemp("", "psp-destpolicy-schema-")
+		if err != nil {
+			schemaTemplate.err = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		path := filepath.Join(dir, "template.db")
+		db, err := sqlstore.OpenQuiet("sqlite", path)
+		if err != nil {
+			schemaTemplate.err = err
+			return
+		}
+		err = sqlstore.EnsureSchema(db)
+		if sqlDB, derr := db.DB(); derr == nil {
+			_ = sqlDB.Close()
+		}
+		if err != nil {
+			schemaTemplate.err = err
+			return
+		}
+		schemaTemplate.raw, schemaTemplate.err = os.ReadFile(path)
+	})
+	if schemaTemplate.err != nil {
+		t.Fatal(schemaTemplate.err)
+	}
+	path := filepath.Join(t.TempDir(), "dest.db")
+	if err := os.WriteFile(path, schemaTemplate.raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlstore.OpenQuiet("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlstore.EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	return db
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	db := migratedDatabase(t)
 	h := &harness{
 		db: db, t: t, ctx: context.Background(), repos: sqlstore.NewDestRepos(db), counts: &counting{}, rec: &recorded{},
 		clock: &clock{}, settings: &fakeSettings{}, locator: &fakeLocator{}, dir: t.TempDir(),

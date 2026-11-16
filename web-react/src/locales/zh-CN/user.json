@@ -214,5 +214,16 @@
   "announce": {
     "ack": "我知道了",
     "mute": "不再提醒"
+  },
+  "legal": {
+    "consent_title": "请阅读服务条款和隐私政策",
+    "consent_body": "服务条款和隐私政策写明了本服务记录哪些数据、保留多久。你的订阅不受影响。",
+    "consent_terms": "《服务条款》",
+    "consent_privacy": "《隐私政策》",
+    "consent_later": "稍后",
+    "consent_accept": "同意",
+    "consent_accepted": "已记录你的同意",
+    "consent_failed": "提交失败，请重试",
+    "consent_outdated": "条款刚刚又更新了，请重新阅读"
   }
 }

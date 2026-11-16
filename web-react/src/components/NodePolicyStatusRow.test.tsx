@@ -142,6 +142,46 @@ describe('the recording line of a row (2c)', () => {
     renderAccess(<NodePolicyStatusRow node={rec()} variant="row" now={NOW} />)
     expect(line()).toBe('Rule matches only · 1,204 in 24 hours · reported just now')
   })
+
+  it('the usage mode is the third mode, with the same count and report time', () => {
+    renderAccess(<NodePolicyStatusRow node={rec({ supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: 'hits_and_usage', collecting_usage: true })} variant="row" now={NOW} />)
+    expect(line()).toBe('记录命中和按网站用量 · 24 小时 1,204 次 · 刚刚上报')
+  })
+})
+
+describe('a node that refused the usage setting (tier B)', () => {
+  const refused = node({
+    supports: { policy: true, hits: true, usage: true }, collect: 'hits_and_usage', collect_effective: '', collecting: false, usage_refused: true,
+  })
+
+  it('says so on the row with a retry that asks for the policy again', async () => {
+    const onRetry = vi.fn()
+    renderAccess(<NodePolicyStatusRow node={refused} variant="row" now={NOW} onRetry={onRetry} />)
+    expect(screen.getByTestId('node-usage-refused').textContent).toBe('节点拒绝了记录用量的设置，没有记录用量')
+    fireEvent.click(screen.getByRole('button', { name: '重新下发' }))
+    await waitFor(() => expect(onRetry).toHaveBeenCalledWith('a1'))
+  })
+
+  it('says it in the single-node block as a problem with its impact, and the same retry', async () => {
+    const onRetry = vi.fn()
+    renderAccess(<NodePolicyStatusRow node={refused} variant="block" now={NOW} onRetry={onRetry} />)
+    expect(screen.getByText('节点拒绝了按网站用量的设置')).toBeTruthy()
+    expect(screen.getByText(/这台节点没有记录用量；规则和命中不受影响/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '重新下发' }))
+    await waitFor(() => expect(onRetry).toHaveBeenCalledWith('a1'))
+  })
+
+  it('a node that refused nothing says nothing and offers no retry', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ usage_refused: false })} variant="row" now={NOW} onRetry={vi.fn()} />)
+    expect(screen.queryByTestId('node-usage-refused')).toBeNull()
+    expect(screen.queryByRole('button', { name: '重新下发' })).toBeNull()
+  })
+
+  it('in English', () => {
+    setTestLang('en-US')
+    renderAccess(<NodePolicyStatusRow node={refused} variant="row" now={NOW} onRetry={vi.fn()} />)
+    expect(screen.getByTestId('node-usage-refused').textContent).toBe('The node refused the usage setting, so no usage is recorded')
+  })
 })
 
 describe('report-only rules not deployed', () => {
@@ -159,5 +199,21 @@ describe('report-only rules not deployed', () => {
   it('is absent when every report-only rule was sent', () => {
     renderAccess(<NodePolicyStatusRow node={node({ report_only_not_deployed: null })} variant="row" now={NOW} />)
     expect(screen.queryByTestId('node-report-not-deployed')).toBeNull()
+  })
+})
+
+describe('NodePolicyStatusRow allowlist groups', () => {
+  it('names the groups the node applied', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ allowlist_groups: [{ id: 1, name: 'Guests' }, { id: 2, name: 'Dev' }] })} variant="row" now={NOW} />)
+    expect(screen.getByTestId('node-allowlist-groups').textContent).toBe('已下发的白名单分组：Guests、Dev')
+  })
+  it('says which groups were left out for weak sniffing, and that they apply on no inbound', () => {
+    renderAccess(<NodePolicyStatusRow node={node({ sniffing_groups_dropped: [{ id: 1, name: 'Guests' }] })} variant="block" now={NOW} />)
+    expect(screen.getByTestId('node-groups-dropped').textContent).toBe('因入站的嗅探识别不出域名，这些分组没有下发：Guests。它们在本节点的所有入站上都不生效。')
+  })
+  it('says nothing when there are none, and tolerates a status without the field', () => {
+    renderAccess(<NodePolicyStatusRow node={{ ...node(), sniffing_groups_dropped: undefined } as unknown as DestNodeStatus} variant="row" now={NOW} />)
+    expect(screen.queryByTestId('node-allowlist-groups')).toBeNull()
+    expect(screen.queryByTestId('node-groups-dropped')).toBeNull()
   })
 })

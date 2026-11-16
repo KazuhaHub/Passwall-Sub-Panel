@@ -1732,6 +1732,29 @@ type UISettings struct {
 	// would-deny, folded to group x site) are kept. Default 7, 1..30, and in
 	// effect never longer than DestHitRetentionDays.
 	DestTrialRetentionDays int `json:"dest_trial_retention_days"`
+	// DestUsageRetentionDays is how long per-site usage rows (tier B: how many
+	// connections an account made to which site, per hour) are kept. Default 7,
+	// 1..30; 0 is the default and never "for ever". Independent of the hit
+	// retention. Switching a node's recording off does not delete what it already
+	// recorded: the rows age out here.
+	DestUsageRetentionDays int `json:"dest_usage_retention_days"`
+
+	// ---- Privacy and terms ----
+	// LegalEnabled publishes the terms and privacy pages and turns on consent
+	// (the register checkbox, the signed-in prompt). Default off: everything
+	// behaves as before and the public API answers 404. Written by the system
+	// settings PUT.
+	LegalEnabled bool `json:"legal_enabled"`
+	// LegalConsentVersion is one panel-wide counter for both documents and every
+	// language. 0 until the first publication, which sets it to at least 1; a
+	// publication marked as a material change adds 1. ONLY the publish endpoint
+	// writes it: the system settings PUT keeps it exactly as stored.
+	LegalConsentVersion int `json:"legal_consent_version"`
+	// LegalDiscloseUsage lets the public page list per-site usage recording
+	// (the number of recording nodes). Default off: nothing about usage is
+	// disclosed unless an administrator turns this on. Written by the system
+	// settings PUT.
+	LegalDiscloseUsage bool `json:"legal_disclose_usage"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;

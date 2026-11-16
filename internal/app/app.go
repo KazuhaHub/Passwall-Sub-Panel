@@ -40,11 +40,13 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destaudit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destcatalog"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
+	legalsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
@@ -171,6 +173,13 @@ type App struct {
 	// account's row — an admin's note about somebody nobody can open — would
 	// otherwise stay for ever: TestBuildPrunesRiskReviewOrphans.
 	riskReviews riskReviewPruner
+	// legalConsents is the legal_consents store as the hourly cleanup sees it:
+	// the orphan purge only (a consent record has no retention and no foreign
+	// key, so a deleted account's row would stay for ever):
+	// TestBuildPrunesLegalConsentOrphans. legal is the privacy and terms
+	// service, kept so the tests can read what Build wired.
+	legalConsents legalConsentPruner
+	legal         *legalsvc.Service
 	// destRepos is the destination-policy store family (access control):
 	// lists, policies, exemptions, source rules, publish state, snapshots and
 	// per-agent delivery state. Concrete, like flagRecords: each consumer is
@@ -181,6 +190,8 @@ type App struct {
 	destLists   *destlist.Service
 	destCatalog *destcatalog.Service
 	destPolicy  *destpolicy.Service
+	// destGroups is the allowlist groups' admin side (TestBuildWiresTheAllowlistGroupAPI).
+	destGroups *destgroup.Service
 	// destAudit is the hit-ingest queue and its worker (the dest-audit-ingest
 	// loop). Without the worker nothing drains the queue and a node's hits are
 	// dropped with the batch: TestBuildStoresAReportedHitBatch.
@@ -729,9 +740,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Policies:    destRepos.Policies,
 		SourceRules: destRepos.SourceRules,
 		State:       destRepos.State,
-		Settings:    repos.Settings,
-		Locator:     geoSvc,
-		DataDir:     cfg.DataDir,
+		// The allowlist groups hold lists: a list one holds is in use, and an
+		// "on" group's list is not edited into one that is not ready.
+		Groups:   destRepos.GroupAllowlists,
+		Settings: repos.Settings,
+		Locator:  geoSvc,
+		DataDir:  cfg.DataDir,
 		ObserveRefresh: func(result string) {
 			metrics.DestListRefreshTotal.With(result).Inc()
 		},
@@ -769,12 +783,29 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 	destAdmin, err := destpolicy.NewAdmin(destpolicy.AdminDeps{
 		Service: destPolicy, Policies: destRepos.Policies, Lists: destRepos.Lists, Counter: destRepos,
-		Groups: repos.Group, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
+		Groups: repos.Group, GroupPanels: groupSvc, Panels: repos.XUIPanel, Nodes: repos.Node, Clients: repos.PSPClient,
 		Agents: repos.NodeAgent, Desired: repos.NativeDesired, Settings: repos.Settings,
 		Instantiate: destRepos.InstantiateTemplate, ExceptionEditor: destLists, Hits: destRepos.Hits,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("destination policy admin: %w", err)
+	}
+	// The allowlist groups' admin side. A save is measured against the limits by
+	// the policy admin, the members are re-derived by the user service after
+	// eligibility is dropped, and the rendered subscriptions (cached by the
+	// answer eligibility gave) are dropped with it. Each left out is silent,
+	// which TestBuildWiresTheAllowlistGroupAPI guards.
+	destGroups, err := destgroup.New(destgroup.Deps{
+		Allowlists: destRepos.GroupAllowlists, Groups: repos.Group, Lists: destRepos.Lists, Editor: destLists, Budget: destAdmin,
+		Eligibility: groupSvc, Resync: userSvc, Panels: repos.XUIPanel, Agents: repos.NodeAgent, Policies: destRepos.Agents,
+		Hits: destRepos.Hits, Settings: repos.Settings,
+		BaseHosts: func(ctx context.Context) ([]string, error) {
+			return defaultTemplateDNSHosts(ctx, repos.Template)
+		},
+		Changed: func(context.Context) { renderSvc.InvalidateAll() },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("destination allowlist groups: %w", err)
 	}
 	nativeSync.SetPolicies(destPolicy)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
@@ -783,6 +814,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// batch, which is why TestBuildStoresAReportedHitBatch drives one through.
 	destAudit := destaudit.New(destaudit.Deps{
 		Store: destRepos.Hits,
+		// Per-site usage is kept only for a panel set to tier B. The panel row's
+		// choice is the one question: a node that was told a lower level may still
+		// send a batch that was in flight, and that is dropped and counted.
+		UsageTier: func(ctx context.Context, panelID int64) (bool, error) {
+			panel, err := repos.XUIPanel.GetByID(ctx, panelID)
+			switch {
+			case errors.Is(err, domain.ErrNotFound):
+				return false, nil // a deleted panel has no tier
+			case err != nil:
+				return false, err
+			}
+			return domain.NormalizeAuditCollect(panel.AuditCollect) == domain.AuditCollectHitsAndUsage, nil
+		},
 		Metrics: destaudit.Metrics{
 			Report:        func(outcome string) { metrics.NodeAuditReportTotal.With(outcome).Inc() },
 			Rows:          func(outcome string, n int) { metrics.DestAuditRowsTotal.With(outcome).Add(int64(n)) },
@@ -801,6 +845,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Privacy and terms. The "what we collect" list reads the same node
+	// derivation the status page uses; a later feature that records something
+	// new registers a provider on the collector rather than editing the list.
+	legalRepo := sqlstore.NewLegalRepo(db)
+	legalCollector := legalsvc.NewCollector(legalDestRecording{admin: destAdmin, groups: destRepos.GroupAllowlists})
+	legalCollector.SetRiskOverrides(legalRepo)
+	legalSvc := legalsvc.New(legalRepo, repos.Settings, legalCollector)
+	a.legalConsents = legalRepo
+	a.legal = legalSvc
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		OperationGate: a.operationGate,
 		Async:         dispatcher,
@@ -850,14 +903,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile:  reconcileSvc,
 		Geo:        geoSvc,
 		NodeSync:   nativeSync,
+		Legal:      handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
 		Dest: handler.DestWiring{
-			Lists: destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
+			AllowlistGroups: destGroups,
+			Lists:           destLists, Catalog: destCatalog, Policy: destPolicy, Admin: destAdmin,
 			Policies: destRepos.Policies, Exemptions: destRepos.Exemptions, SourceRules: destRepos.SourceRules,
 			Users: repos.User, Groups: repos.Group, Nodes: repos.Node, Panels: repos.XUIPanel, Async: dispatcher,
-			Hits: destRepos.Hits,
+			Hits: destRepos.Hits, Usage: destRepos.Hits,
 		},
 		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
 		// side of the telemetry the server list already shows, and the field is
@@ -908,6 +963,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.destLists = destLists
 	a.destCatalog = destCatalog
 	a.destPolicy = destPolicy
+	a.destGroups = destGroups
 	a.destAudit = destAudit
 	a.nativeSync = nativeSync
 	// The observe-only risk signals. The worker is handed read-only views and
@@ -1596,6 +1652,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneConnectionHistory(ctx)
 		a.pruneFlagRecords(ctx)
 		a.pruneRiskReviews(ctx)
+		a.pruneLegalConsents(ctx)
 		a.pruneDestRows(ctx)
 		a.pruneCertEvents(ctx)
 		select {
@@ -1619,6 +1676,9 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 //     pruning at the default: an admin who keeps a year would lose most of it to
 //     one failed read, and the next hour retries. The orphan purge, which needs
 //     no setting, still runs.
+//   - Per-site usage goes at dest.usage_retention_days (7, 1..30; 0 is the
+//     default, never "for ever"). Switching a node's usage recording off does not
+//     delete what it recorded: the rows age out here.
 //   - Batch markers go at a day: they only exist to catch a re-sent batch.
 //
 // Nothing here logs a destination, an account or an address: only counts.
@@ -1650,12 +1710,17 @@ func (a *App) pruneDestRows(ctx context.Context) {
 	if settingsOK {
 		eff := ports.AccessControlEffectiveOf(set)
 		hitCutoff := now.Add(-eff.HitRetention()).Truncate(time.Hour).UnixMilli()
+		usageCutoff := now.Add(-eff.UsageRetention()).Truncate(time.Hour).UnixMilli()
 		trialCutoff := now.Add(-eff.TrialRetention()).Truncate(time.Hour).UnixMilli()
 		// The trial rows first: they are the subset with the shorter life.
 		n, err := hits.PruneTrial(ctx, trialCutoff)
 		count(metrics.DestPruneTrial, n, err)
 		n, err = hits.PruneHits(ctx, hitCutoff)
 		count(metrics.DestPruneHits, n, err)
+		// Per-site usage has its own retention (7 days by default, 1..30), which
+		// neither follows nor is capped by the hits'.
+		n, err = hits.PruneUsage(ctx, usageCutoff)
+		count(metrics.DestPruneUsage, n, err)
 		// The loss counters live as long as the hits they qualify.
 		if _, err := hits.PruneDrops(ctx, hitCutoff); err != nil {
 			log.Warn("destination hit cleanup", "table", "drops", "err", err)
@@ -1981,6 +2046,62 @@ func (a *App) pruneRiskReviews(ctx context.Context) {
 	case purged > 0:
 		log.Info("risk review orphan purge", "deleted", purged)
 	}
+}
+
+// legalConsentPruner is what the hourly cleanup needs of the legal_consents
+// store, and all it is handed.
+type legalConsentPruner interface {
+	PurgeConsentOrphans(ctx context.Context) (int64, error)
+}
+
+// pruneLegalConsents deletes the consent records of accounts that no longer
+// exist. No retention pass: a record is the proof an account accepted a
+// version, and it lives as long as the account. The reads need no JOIN (they
+// are by account id), so this is what makes a deleted account's record gone
+// within the hour. Counts only in the log.
+func (a *App) pruneLegalConsents(ctx context.Context) {
+	if a.legalConsents == nil {
+		return
+	}
+	purged, err := a.legalConsents.PurgeConsentOrphans(ctx)
+	switch {
+	case err != nil:
+		log.Warn("legal consent orphan purge", "err", err)
+	case purged > 0:
+		log.Info("legal consent orphan purge", "deleted", purged)
+	}
+}
+
+// legalDestRecording answers the privacy page's access-control questions from
+// the policy admin (which nodes record) and the allowlist groups (which are in
+// trial).
+type legalDestRecording struct {
+	admin  *destpolicy.Admin
+	groups interface {
+		List(ctx context.Context) ([]*domain.DestGroupAllowlistEntry, error)
+	}
+}
+
+func (d legalDestRecording) CollectingNodes(ctx context.Context) (int, error) {
+	return d.admin.CollectingNodes(ctx)
+}
+
+func (d legalDestRecording) CollectingUsageNodes(ctx context.Context) (int, error) {
+	return d.admin.CollectingUsageNodes(ctx)
+}
+
+func (d legalDestRecording) AllowlistTrialGroups(ctx context.Context) (int, error) {
+	entries, err := d.groups.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Allowlist.State == domain.DestStateReport {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // pruneCertEvents trims the cert issuance/renewal activity log. It's low-volume
@@ -2561,4 +2682,26 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 		"user_id", u.ID,
 		"group", g.Slug)
 	return nil
+}
+
+// defaultTemplateDNSHosts are the hosts a new allowlist group's base allowance is
+// suggested from: the encrypted-DNS servers the default subscription templates
+// resolve through the proxy. They are read from the templates as they are now
+// (an admin's edits included), never from a built-in list.
+func defaultTemplateDNSHosts(ctx context.Context, repo ports.TemplateRepo) ([]string, error) {
+	var templates []domain.Template
+	for _, client := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+		t, err := repo.GetDefault(ctx, client)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		templates = append(templates, *t)
+	}
+	if len(templates) == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return destgroup.ProxiedDNSHosts(templates...)
 }

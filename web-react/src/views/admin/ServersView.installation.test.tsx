@@ -312,13 +312,27 @@ describe('Passwall Node installation', () => {
   })
   it('disables copying after a generated command expires without rotating the fixed credential', async () => {
     reads()
+    // The clock is the test's: the wall clock stands still, so the response is never already expired when it
+    // lands, and the expiry timer (the one 500 ms timeout) is captured and fired by hand rather than waited for.
+    const t0 = Date.now()
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0)
+    const realSetTimeout = globalThis.setTimeout
+    let expire: (() => void) | undefined
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...args: unknown[]) => {
+      if (ms === 500) { expire = fn; return 0 as unknown as ReturnType<typeof setTimeout> }
+      return realSetTimeout(fn, ms, ...args)
+    }) as typeof setTimeout)
     api.post.mockImplementation(async () => ({ data: { server_id: 7, command: 'short-lived command',
-      expires_at: new Date(Date.now() + 500).toISOString() } }))
+      expires_at: new Date(t0 + 500).toISOString() } }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByLabelText('admin:servers.native.install_command')
-    await screen.findByText('admin:servers.native.command_expired')
+    expect(screen.queryByText('admin:servers.native.command_expired')).toBeNull()
+    expect(expire).toBeDefined()
+    timer.mockRestore(); now.mockRestore()
+    act(() => { expire!() })
+    expect(screen.getByText('admin:servers.native.command_expired')).toBeTruthy()
     const button = screen.getByRole('button', { name: 'admin:servers.native.copy_command' }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     fireEvent.click(button)

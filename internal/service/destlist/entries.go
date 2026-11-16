@@ -153,6 +153,10 @@ func (s *Service) UpdateRemote(ctx context.Context, id int64, name, rawURL strin
 	now := s.now().UTC()
 	l.SourceURL, l.Entries = u.String(), p.Entries
 	l.EntryCount, l.RegexpCount, l.ContentSHA256, l.LastFetchedAt, l.LastError = p.EntryCount, p.RegexpCount, p.SHA256, &now, ""
+	// D5: not an edit that leaves a list an "on" allowlist group holds not ready.
+	if err := s.requireReadyForOnGroups(ctx, l); err != nil {
+		return nil, nil, err
+	}
 	if err := s.lists.Update(ctx, l); err != nil {
 		return nil, nil, err
 	}
@@ -179,6 +183,24 @@ func (s *Service) UsedBy(ctx context.Context) (map[int64][]PolicyRef, error) {
 	for _, p := range policies {
 		for _, id := range p.ListIDs {
 			out[id] = append(out[id], PolicyRef{Kind: "policy", ID: p.ID, Name: p.Name})
+		}
+	}
+	// The allowlist groups, in any state (an off group keeps its lists), after
+	// the policies.
+	if s.groups != nil {
+		entries, err := s.groups.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			ids := slices.Clone(e.Allowlist.ListIDs)
+			ids = append(ids, e.Allowlist.BaseListID, e.Allowlist.ExtraListID)
+			slices.Sort(ids)
+			for _, id := range slices.Compact(ids) {
+				if id > 0 {
+					out[id] = append(out[id], PolicyRef{Kind: "group", ID: e.GroupID, Name: e.GroupName})
+				}
+			}
 		}
 	}
 	return out, nil

@@ -36,16 +36,17 @@ func (h *AdminDestHandler) hitsReady(c *gin.Context) bool {
 
 // sourceNames maps a stored source to the name an admin knows it by: a
 // policy's name, "the source rule of <inbound>", or nil for what no longer
-// exists (a deleted policy). An allowlist group's rows have no name here.
+// exists (a deleted policy, a deleted group): "the allowlist of <group>".
 type sourceNamer struct {
 	h        *AdminDestHandler
 	ctx      context.Context
 	policies map[string]string
 	nodes    map[int64]string
+	groups   map[int64]string
 }
 
 func (h *AdminDestHandler) namer(ctx context.Context) *sourceNamer {
-	n := &sourceNamer{h: h, ctx: ctx, policies: map[string]string{}, nodes: map[int64]string{}}
+	n := &sourceNamer{h: h, ctx: ctx, policies: map[string]string{}, nodes: map[int64]string{}, groups: map[int64]string{}}
 	if h.w.Policies != nil {
 		if list, err := h.w.Policies.List(ctx); err == nil {
 			for _, p := range list {
@@ -60,6 +61,19 @@ func (n *sourceNamer) name(source string) *string {
 	switch {
 	case strings.HasPrefix(source, "p"):
 		if v, ok := n.policies[source]; ok {
+			return &v
+		}
+	case strings.HasPrefix(source, "g"):
+		id, err := strconv.ParseInt(source[1:], 10, 64)
+		if err != nil || n.h.w.Groups == nil {
+			return nil
+		}
+		if v, ok := n.groups[id]; ok {
+			return &v
+		}
+		if g, err := n.h.w.Groups.GetByID(n.ctx, id); err == nil {
+			n.groups[id] = g.Name
+			v := g.Name
 			return &v
 		}
 	case strings.HasPrefix(source, "s"):

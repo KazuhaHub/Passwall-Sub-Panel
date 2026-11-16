@@ -258,6 +258,13 @@ export const policies = {
     refetchInterval: false,
     note: 'Paced by the observation window (15s, 5 min budget), not by this policy.',
   },
+  /** The published terms and privacy documents, their history, and how many users a material change would ask again. */
+  legalAdmin: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Edited by the admin on this page; a publish invalidates both documents. The affected-user count is re-read each time the publish dialog opens.',
+  },
   /**
    * The global UI settings blob. Slow to change and edited in forms, so it is
    * never polled and its cached copy is only a starting point for a draft.
@@ -327,6 +334,13 @@ export const policies = {
     gcTime: MINUTE,
     refetchInterval: 5 * SECOND,
     note: 'Waits for a refresh to end: polled only while a list is in the refreshing state (conditional in the hook).',
+  },
+  /** The allowlist groups: their state, nodes and what a report-only group would have denied. */
+  destGroups: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'The admin edits these here and every write invalidates them; the counts come from hit rows that arrive hourly, so a revisit after 30s re-reads them. Never polled.',
   },
   /** One account's group, exemption and recent hits, for the drawer's access tab. */
   destUser: {

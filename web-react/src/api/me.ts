@@ -80,6 +80,9 @@ export interface MeProfile {
   service_disabled_at?: string | null
   access?: UserAccess
   can_change_password: boolean
+  /** The account (role user) has not accepted the current terms and privacy
+   *  version, so the portal asks. Nothing is gated on it. */
+  legal_pending?: boolean
   can_edit_personal_rules: boolean
   /** totp_available: the admin has enabled 2FA panel-wide AND this account has a
    *  local password (SSO-only accounts can't enroll). totp_enabled: current state. */

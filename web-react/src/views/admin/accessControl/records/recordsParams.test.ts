@@ -51,9 +51,10 @@ describe('the records tab URL grammar', () => {
     expect(parseRecordsParams(P('rec_action=deny&rec_trial=1')).action).toBeUndefined()
   })
 
-  it('a source is a policy or an inbound id only (p12, s4); a group (g) is a later phase', () => {
+  it('a source is a policy, an inbound or an allowlist group id (p12, s4, g2); anything else is no filter', () => {
     expect(parseRecordsParams(P('rec_source=s4')).source).toBe('s4')
-    expect(parseRecordsParams(P('rec_source=g2')).source).toBeUndefined()
+    expect(parseRecordsParams(P('rec_source=g2')).source).toBe('g2')
+    expect(parseRecordsParams(P('rec_source=x2')).source).toBeUndefined()
   })
 
   it('there is no search param: nothing destination-like is ever written to the URL (R12)', () => {

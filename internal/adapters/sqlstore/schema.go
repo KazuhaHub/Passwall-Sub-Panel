@@ -1649,6 +1649,11 @@ var schemaModels = []any{
 	&destHitRow{},
 	&destAuditBatchRow{},
 	&destAuditDropRow{},
+	&destUsageRow{},
+	// Privacy and terms: the published documents and who accepted which
+	// consent version. See legal_repo.go.
+	&legalDocumentRow{},
+	&legalConsentRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

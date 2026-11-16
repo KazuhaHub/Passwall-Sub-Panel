@@ -84,12 +84,15 @@ export interface DestPolicy {
   counts_as_risk?: boolean
 }
 
+/** A group whose allowlist is in force (state is never `off` here), as the policies read lists it. */
+export interface DestPolicyGroup { group_id: number; name: string; state: DestState; state_days: number }
+
 export interface DestPolicies {
   allow: DestPolicy[]
   block: DestPolicy[]
   observe: DestPolicy[]
   exemptions: { count: number }
-  allowlist_groups: unknown[]
+  allowlist_groups: DestPolicyGroup[]
   hit_window_days: number
   budget: DestBudget
 }
@@ -312,7 +315,7 @@ export interface DestTestInput {
   resolved_ips?: string[]
 }
 
-export type DestTestStepKind = 'source' | 'allow' | 'block' | 'exempt' | 'builtin'
+export type DestTestStepKind = 'source' | 'allow' | 'block' | 'group' | 'exempt' | 'builtin'
 export type DestTestStepResult = 'hit' | 'miss' | 'untestable' | 'shadowed' | 'skipped'
 
 export interface DestTestStep {
@@ -323,6 +326,8 @@ export interface DestTestStep {
   /** The rule is report-only (a policy or a source rule): a hit on it records and does not block. */
   report_only?: boolean
   policy_id?: number
+  /** An allowlist group's step (g<gid>x1, g<gid>x2, g<gid>). */
+  group_id?: number
   node_id?: number
   name?: string
   result: DestTestStepResult
@@ -425,13 +430,33 @@ export interface DestUserView {
   user_id: number
   upn: string
   exemption: DestExemption | null
-  group: { id: number; name: string; mode: 'open' | string; stage: string | null } | null
+  /** `state` is the group's allowlist state; `mode` and `stage` are the old fields, kept by the server for older pages. */
+  group: { id: number; name: string; state?: DestState; state_changed_at?: number | null; mode?: 'open' | string; stage?: string | null } | null
   /** Whether any node of the account records hits; null when the server cannot tell. */
   hits_available: boolean | null
   /** Absent when the server has no hit store. `days` is the window, already clamped to the retention. */
   recent_hits: { days: number; items: DestUserHit[] } | null
+  /** Whether at least one node the account has a client on records per-site usage now; when false, "no usage" says nothing. */
   usage_available: boolean | null
-  usage_nodes: unknown
+  usage_nodes: DestUsageNode[] | null
+}
+
+/** A node that records an account's per-site usage. */
+export interface DestUsageNode { panel_id: number; name: string }
+
+/** One site's connection count in an account's usage. */
+export interface DestUsageSite { site: string; count: number }
+
+/** What POST /dest/users/:id/usage answers: the twenty most-used sites and the rest as one line. */
+export interface DestUsage {
+  /** The window that was read: the requested days held to the usage retention. */
+  effective_days: number
+  nodes: DestUsageNode[]
+  items: DestUsageSite[]
+  others: { sites: number; count: number }
+  total: number
+  /** Usage rows the nodes or the panel could not keep in the window; the counts are at least this much short. */
+  dropped_in_range: number
 }
 
 // ---- status ----
@@ -459,6 +484,10 @@ export interface DestNodeStatus {
   collect_effective: string
   /** Whether it records now (derived; a quiet node sends nothing). */
   collecting: boolean
+  /** Whether it records per-site usage now (derived like `collecting`). Absent from an older panel. */
+  collecting_usage?: boolean
+  /** The panel is set to per-site usage and the node refused the policy that records it: no usage is recorded until a retry, an upgrade or a capability change. */
+  usage_refused?: boolean
   /** How the panel is set to treat host names under IP rules. Absent from an older panel (read as as_is). */
   resolve?: DestResolve
   /** What the node was actually sent; '' is as_is. */
@@ -482,6 +511,8 @@ export interface DestNodeStatus {
   geoip_unavailable: boolean
   /** The allowlist groups in the policy this node last applied. */
   allowlist_groups: { id: number; name: string }[]
+  /** Groups left out of this node's policy because an inbound's sniffing cannot read domains: they do not apply on any inbound of the node. */
+  sniffing_groups_dropped?: { id: number; name: string }[]
   /** Hits it reported in the last 24 hours; null where the node cannot record. */
   hits_24h: number | null
 }
@@ -502,6 +533,90 @@ export interface DestStatus {
   policy_notes: Record<string, DestPolicyNote>
 }
 
+// ---- allowlist groups ----
+
+export type DestGroupListState = 'ready' | 'not_ready' | 'empty'
+export interface DestGroupList { id: number; name: string; entry_count: number; state: DestGroupListState }
+export interface DestRef { id: number; name: string }
+export interface DestPanelRef { panel_id: number; name: string }
+/** Why a node does not enforce a group's allowlist. */
+export type IneligibleReason = 'xui' | 'sui' | 'capability' | 'over_limit' | 'rejected' | 'sniffing'
+export interface DestIneligible { panel_id: number; name: string; reason: IneligibleReason }
+/** What the group's report-only rows say it would have denied. */
+export interface DestWouldDeny { days: number; sites: number; count: number }
+export interface DestSiteCount { site: string; count: number; added: boolean }
+
+/** A group as the list shows it: `off` for a group with no allowlist (its `updated_at` is then null). */
+export interface DestGroup {
+  group_id: number
+  group_name: string
+  members: number
+  state: DestState
+  state_changed_at: number | null
+  updated_at: number | null
+  list_ids: number[]
+  lists: DestGroupList[]
+  base_list_id: number
+  extra_list_id: number
+  base_count: number
+  eligible_nodes: number
+  total_nodes: number
+  ineligible: DestIneligible[]
+  applied_nodes: number
+  pending_nodes: DestPanelRef[]
+  not_ready_lists: DestRef[]
+  /** Null when the window has no report-only rows (not 0). */
+  would_deny_recent: DestWouldDeny | null
+  /** Null where nothing records. */
+  denied_24h: number | null
+}
+
+export interface DestGroupReadiness {
+  lists_ready: boolean
+  not_ready_lists: DestRef[]
+  unapplied_nodes: number
+  base_nonempty: boolean
+  remaining_sites_24h: number
+  top_sites: DestSiteCount[]
+}
+
+export interface DestGroupDetail extends DestGroup { readiness: DestGroupReadiness }
+
+export interface DestGroupPut {
+  state: DestState
+  list_ids: number[]
+  /** A group's first allowlist (may be empty); an existing one must not send it. */
+  base_hosts?: string[]
+  /** An existing allowlist's precondition. */
+  updated_at?: number
+}
+
+export interface DestGroupPreview {
+  members: number
+  eligible_nodes: number
+  total_nodes: number
+  ineligible: DestIneligible[]
+  /** Nodes the group can use now and would lose by saving this state. */
+  nodes_lost: DestIneligible[]
+  /** Eligible nodes that enforce but do not record (sing-box, recording off). */
+  non_recording_nodes: number
+  not_ready_lists: DestRef[]
+  base_hosts: string[]
+  base_hosts_source: 'template' | 'none'
+  would_deny_recent: (DestWouldDeny & { top: DestSiteCount[] }) | null
+}
+
+export interface DestGroupReportItem { site: string; count: number; last_at: number; added: boolean }
+
+export interface DestGroupReport {
+  effective_days: number
+  state: DestState
+  since_at: number | null
+  items: DestGroupReportItem[]
+  /** Reported rows lost on the nodes, summed over every group (a node counts drops by panel). */
+  dropped_in_range: number
+}
+
 // ---- settings ----
 
 export interface DestSettings {
@@ -511,6 +626,8 @@ export interface DestSettings {
   /** How long hit records are kept; 0 is unset (the default). */
   dest_hit_retention_days: number
   dest_trial_retention_days: number
+  /** How long per-site usage is kept; 0 is unset (the default). Absent from an older panel. */
+  dest_usage_retention_days?: number
 }
 
 export interface DestSettingsView {
@@ -547,7 +664,17 @@ function normRule(r: DestSourceRule): DestSourceRule {
   return { ...r, countries: arr(r.countries), cidrs: arr(r.cidrs) }
 }
 function normNode(n: DestNodeStatus): DestNodeStatus {
-  return { ...n, sniffing_insufficient: arr(n.sniffing_insufficient), allowlist_groups: arr(n.allowlist_groups) }
+  return { ...n, sniffing_insufficient: arr(n.sniffing_insufficient), allowlist_groups: arr(n.allowlist_groups), sniffing_groups_dropped: arr(n.sniffing_groups_dropped) }
+}
+function normGroup(g: DestGroup): DestGroup {
+  return {
+    ...g, list_ids: arr(g.list_ids), lists: arr(g.lists), ineligible: arr(g.ineligible), pending_nodes: arr(g.pending_nodes),
+    not_ready_lists: arr(g.not_ready_lists), would_deny_recent: g.would_deny_recent ?? null, denied_24h: g.denied_24h ?? null,
+  }
+}
+function normGroupDetail(g: DestGroupDetail): DestGroupDetail {
+  const r = g.readiness
+  return { ...normGroup(g), readiness: { ...r, not_ready_lists: arr(r?.not_ready_lists), top_sites: arr(r?.top_sites) } }
 }
 function normGeositeResult(r: GeositeUpdateResult): GeositeUpdateResult {
   return { ...r, categories: arr(r.categories) }
@@ -626,7 +753,18 @@ export async function getDestUser(id: number, opts: ReadOptions = {}): Promise<D
   return {
     ...data,
     recent_hits: hits ? { ...hits, items: arr(hits.items).map(h => ({ ...h, top_dests: arr(h.top_dests), panels: arr(h.panels) })) } : null,
+    usage_nodes: data.usage_nodes ? arr(data.usage_nodes) : null,
   }
+}
+
+/**
+ * One account's per-site usage over a range ("24h" or "<N>d"; the server holds N
+ * to the usage retention). A POST on purpose: every read is a row in the admin
+ * audit log, and nothing is cached.
+ */
+export async function postDestUserUsage(id: number, body: { range: string; panel_id?: number }, opts: ReadOptions = {}): Promise<DestUsage> {
+  const { data } = await client.post<DestUsage>(`${BASE}/users/${id}/usage`, body, { signal: opts.signal, _skipErrorToast: true })
+  return { ...data, nodes: arr(data.nodes), items: arr(data.items), others: data.others ?? { sites: 0, count: 0 } }
 }
 
 /**
@@ -642,6 +780,36 @@ export async function getDestHits(params: DestHitsParams = {}, opts: ReadOptions
   }
   const { data } = await client.get<DestHits>(`${BASE}/hits`, { params: query, signal: opts.signal, _skipErrorToast: true })
   return { ...data, items: arr(data.items), sources: arr(data.sources), summary: data.summary ?? { block: 0, deny: 0, observe: 0, users: 0 } }
+}
+
+export async function getDestGroups(opts: ReadOptions = {}): Promise<DestGroup[]> {
+  const { data } = await client.get<{ items: DestGroup[] }>(`${BASE}/groups`, { signal: opts.signal, _skipErrorToast: true })
+  return arr(data.items).map(normGroup)
+}
+
+export async function getDestGroup(id: number, opts: ReadOptions = {}): Promise<DestGroupDetail> {
+  const { data } = await client.get<DestGroupDetail>(`${BASE}/groups/${id}`, { signal: opts.signal, _skipErrorToast: true })
+  return normGroupDetail(data)
+}
+
+/** What a save would do, written nowhere. */
+export async function previewDestGroup(id: number, input: { state: DestState; list_ids: number[] }, opts: ReadOptions = {}): Promise<DestGroupPreview> {
+  const { data } = await client.get<DestGroupPreview>(`${BASE}/groups/${id}/preview`, {
+    params: { state: input.state, list_ids: input.list_ids.join(',') }, signal: opts.signal, _skipErrorToast: true,
+  })
+  const w = data.would_deny_recent
+  return {
+    ...data, ineligible: arr(data.ineligible), nodes_lost: arr(data.nodes_lost), not_ready_lists: arr(data.not_ready_lists), base_hosts: arr(data.base_hosts),
+    would_deny_recent: w ? { ...w, top: arr(w.top) } : null,
+  }
+}
+
+/** The destinations a report-only group would have denied. `days` is clamped by the server to the retention. */
+export async function getDestGroupReport(id: number, days?: number, opts: ReadOptions = {}): Promise<DestGroupReport> {
+  const { data } = await client.get<DestGroupReport>(`${BASE}/groups/${id}/report`, {
+    params: days ? { days } : {}, signal: opts.signal, _skipErrorToast: true,
+  })
+  return { ...data, items: arr(data.items) }
 }
 
 export async function getDestSettings(opts: ReadOptions = {}): Promise<DestSettingsView> {
@@ -752,6 +920,12 @@ export async function testDestination(input: DestTestInput): Promise<DestTestRes
   return { ...data, steps: data.steps ?? [], notes: data.notes ?? [], nodes: data.nodes ?? [] }
 }
 
+/** From any state to any other. A group's first allowlist carries `base_hosts`; an existing one the `updated_at` it was read at (409 dest_group_stale). */
+export async function putDestGroup(id: number, input: DestGroupPut): Promise<DestGroup> {
+  const { data } = await client.put<DestGroup>(`${BASE}/groups/${id}`, input, quiet)
+  return normGroup(data)
+}
+
 export async function publishDest(): Promise<{ published_generation: number; generation: number; unpublished: boolean }> {
   const { data } = await client.post<{ published_generation: number; generation: number; unpublished: boolean }>(`${BASE}/publish`, undefined, quiet)
   return data
@@ -772,7 +946,7 @@ export async function putDestSettings(changed: Partial<DestSettings>): Promise<D
   return { ...data, defaults: data.defaults ?? {} }
 }
 
-/** Allow a site (`site`: the domain and its subdomains) or one host everywhere. Global scope only in this build. */
+/** Allow a site (`site`: the domain and its subdomains) or one host, for everyone or for one allowlist group. */
 export interface DestExceptionResult {
   entry: string
   /** Set the first time: the exceptions list and the allow policy over it were created. */
@@ -781,12 +955,14 @@ export interface DestExceptionResult {
   policy_id?: number
 }
 
-export async function addDestException(input: { target: string; match: 'site' | 'host' }): Promise<DestExceptionResult> {
-  const { data } = await client.post<DestExceptionResult>(`${BASE}/exceptions`, { ...input, scope: 'global' }, quiet)
+export async function addDestException(input: { target: string; match: 'site' | 'host'; group_id?: number }): Promise<DestExceptionResult> {
+  // With a group the entry goes to that group's supplement list (only its members); without, it is allowed for everyone.
+  const scope = input.group_id ? { scope: 'group', group_id: input.group_id } : { scope: 'global' }
+  const { data } = await client.post<DestExceptionResult>(`${BASE}/exceptions`, { target: input.target, match: input.match, ...scope }, quiet)
   return data
 }
 
-/** What a Passwall Node server records of its destination rules. `hits_and_usage` is not offered yet. */
+/** What a Passwall Node server records of its destination rules. `hits_and_usage` adds per-site connection counts (Xray nodes that declare it). */
 export type AuditCollect = 'off' | 'hits' | 'hits_and_usage'
 
 /** The recording mode of one native server: PUT /servers/:id with this one key (the others are kept). */

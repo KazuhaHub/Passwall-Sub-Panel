@@ -111,6 +111,7 @@
     "tab_portal": "User portal",
     "tab_mail": "Mail",
     "tab_sso": "SSO",
+    "tab_legal": "Privacy and terms",
     "save": "Save",
     "cancel": "Cancel",
     "saved": "Saved",
@@ -678,6 +679,69 @@
         "format": "Format",
         "enabled": "Enabled"
       }
+    },
+    "legal": {
+      "title": "Privacy and terms page",
+      "enabled": "Enable the privacy and terms page",
+      "enabled_hint": "When on, the login and register pages show the links, and ordinary users see a consent dialog after a material change. Subscriptions are not interrupted.",
+      "consent_version": "Current consent version v{{version}}",
+      "disclose_usage": "Disclose per-site usage in the privacy policy",
+      "disclose_usage_hint": "Off by default. When on, \"What we collect\" lists per-site usage (how many nodes record it and for how long); when off, users do not see that line. Whether a node records it is set by its recording mode and is not affected by this switch.",
+      "load_failed": "Could not load this",
+      "empty_alert": "Enabled, but no document is published yet: the public page will say \"This page is not available\"",
+      "go_edit": "Edit",
+      "history": "Version history",
+      "edit": "Edit",
+      "published_label": "Published",
+      "locale_chip": "{{locale}} v{{version}} · {{date}}",
+      "not_published": "{{locale}} not published",
+      "not_published_fallback": "{{locale}} not published (falls back to {{fallback}})",
+      "nothing_published": "Not published",
+      "collect_note": "Generated automatically; this is what users see",
+      "editor": {
+        "title": "Edit {{doc}}",
+        "language": "Language",
+        "current": "Published v{{version}} ({{date}})",
+        "current_none": "Not published in this language",
+        "insert": "Insert \"What we collect\"",
+        "bytes": "{{used}} / {{max}} bytes",
+        "publish": "Publish…",
+        "close": "Close",
+        "tab_edit": "Edit",
+        "tab_preview": "Preview",
+        "preview_title": "Preview",
+        "preview_failed": "The preview could not be rendered",
+        "no_marker_summary": "The text has no \"What we collect\"; inserting it is recommended",
+        "no_marker_detail": "\"What we collect\" is generated from the settings in force and follows them when they change. Without it, users cannot see what data this service records or for how long.",
+        "discard_title": "Discard unsaved changes?",
+        "discard_message": "The draft is lost when you close.",
+        "discard_confirm": "Discard",
+        "switch_title": "Switch language?",
+        "switch_message": "This language has unsaved changes, which are lost when you switch.",
+        "usage_missing_summary": "The preview has no per-site usage line",
+        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings."
+      },
+      "publish": {
+        "title": "Publish {{doc}} ({{locale}}) version {{version}}?",
+        "diff": "{{added}} characters added, {{removed}} removed since the last version",
+        "first": "This is the first version in this language.",
+        "bump": "Material change: ask users to consent again",
+        "bump_hint": "When checked, about {{users}} ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
+        "bump_hint_loading": "When checked, ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
+        "cancel": "Cancel",
+        "confirm": "Publish",
+        "done": "Version {{version}} published",
+        "conflict": "Another administrator just published a new version; reloaded",
+        "too_large": "The text is over {{max}} bytes and cannot be published",
+        "failed": "Could not publish. Please try again."
+      },
+      "history_sheet": {
+        "title": "{{doc}} version history",
+        "empty": "Nothing has been published yet",
+        "row": "{{locale}} · v{{version}}",
+        "major": "Material change"
+      },
+      "retry": "Retry"
     }
   },
   "traffic": {
@@ -2689,7 +2753,8 @@
     "tabs": {
       "node_access": "Node access",
       "policies": "Policies",
-      "members": "Members"
+      "members": "Members",
+      "destination": "Destinations"
     },
     "members": {
       "count": "This group has {{count}} member(s)",
@@ -2752,6 +2817,36 @@
       "unknown": "Matched nodes cannot be determined right now",
       "excluded_allowlist": "Matched but excluded because the allowlist cannot be enforced: {{names}}",
       "change": "After saving, {{members}} members gain {{added}} and lose {{removed}} nodes; the change is pushed to the upstream panels at once"
+    },
+    "destination": {
+      "tab": "Destinations",
+      "mode": "Access mode",
+      "lists": "Lists",
+      "nodes": "Usable nodes",
+      "open": "Unrestricted",
+      "open_hint": "Members of this group can reach every destination; global access policies still apply.",
+      "open_kept": "Its lists are kept; you can turn it on again.",
+      "report": "Allowlist · report only · day {{days}}",
+      "report_nodays": "Allowlist · report only",
+      "on": "Allowlist · on",
+      "lists_line": "{{lists}} · base allow {{base}}",
+      "lists_none": "No list chosen",
+      "nodes_line": "{{ok}} / {{total}}",
+      "not_open_one": "{{count}} node is not open to this group",
+      "not_open_other": "{{count}} nodes are not open to this group",
+      "summary_note": "Only a summary is shown here; the lists and the state are changed on the access-control page.",
+      "edit": "Edit in access control ›",
+      "enable": "Enable an allowlist for this group… ›",
+      "save_first": "Save the group first, then set its access mode",
+      "read_failed": "Could not read the allowlist",
+      "retry": "Retry",
+      "badge": "Allowlist",
+      "badge_report": "Allowlist · report only",
+      "badge_on": "Allowlist · on",
+      "list_item": "{{name}} ({{entries}})",
+      "list_separator": ", ",
+      "not_open_item": "{{name}} · {{reason}}",
+      "detail_separator": "; "
     }
   },
   "certs": {
@@ -3374,7 +3469,9 @@
       "hits_24h": "Hits, 24 hours",
       "view_records": "View records",
       "hits_none_note": "This node has not started reporting hits yet; numbers appear once a policy is applied. The dash does not mean zero.",
-      "resolve": "Host name matching"
+      "resolve": "Host name matching",
+      "recording_hits_and_usage": "Rule matches and per-site usage",
+      "usage_retention": "usage kept {{days}} days"
     }
   },
   "diagnostics": {
@@ -4460,9 +4557,10 @@
     "tab_lists": "Lists",
     "help": {
       "label": "Help",
-      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match. Within one action, the order only decides which policy a hit is credited to.\n\nEach block policy can be Off, Report only or On: your choice. Report only blocks nothing and records the connections it would have blocked; it is checked after every rule that is in force, so it never changes the outcome of any connection. Turn it On once you have seen the hits. An allow policy has no Report only.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nIP ranges apply only to connections made to an IP; the IPs a domain resolves to are not matched. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
+      "policies": "Access control is enforced by the nodes: a connection that matches a block is cut. The rule library only decides how clients route, and users can change it themselves. Only PSP native nodes enforce these policies; routing on 3X-UI and S-UI is managed by their operators.\n\nRules are checked from top to bottom and checking stops at the first match. Within one action, the order only decides which policy a hit is credited to.\n\nEach block policy can be Off, Report only or On: your choice. Report only blocks nothing and records the connections it would have blocked; it is checked after every rule that is in force, so it never changes the outcome of any connection. Turn it On once you have seen the hits. An allow policy has no Report only.\n\nA node sees only the destination (a domain or an IP), never the URL path. It can be bypassed: ECH, resolving with DoH and then connecting to the IP directly, and a client's own encrypted tunnel.\n\nBy default, IP ranges apply only to connections made to an IP, and the IPs a domain resolves to are not matched; to judge hostnames by what they resolve to, set the server's \"How IP rules treat host names\" to on-demand resolution, per node. BitTorrent is recognised only by its plaintext handshake and uTP; encrypted BitTorrent and DHT are not.\n\nRegular expressions are matched against every connection one by one and are expensive: at most {{max_regexps}}.\n\nEach apply restarts the proxy on a node once and drops the connections in use once; the apply waits {{seconds}} seconds after the last change, and a run of changes is merged into one.",
       "lists": "Supported forms: plain domains, `domain:` / `full:` / `keyword:` / `regexp:`, `*.x`, hosts lines, AdGuard `||x^`, Clash rules, IPs and IP ranges; `#` starts a comment. On save everything is lowercased, trailing dots are removed, Chinese domains become punycode and IP ranges are aligned to the network address.\n\nRemote and category lists refresh every {{hours}} hours and are applied only when their content changed; if a refresh fails the old content stays in use.\n\nEntries that are too broad (a regular expression that matches nearly every domain, a keyword under 4 characters, a public suffix itself, an IP range that is too large) are ignored in a custom list; when a remote or category list used by an allow policy contains one, the refresh counts as failed and the old content stays in use.",
-      "records": "Each row is one account's hits on one destination within one hour. What is recorded is the domain the node recognised, never the URL path. sing-box nodes only enforce and do not record. \"Would be blocked\" is what report-only policies matched: those connections were let through and only noted. Hit records are kept {{days}} days."
+      "records": "Each row is one account's hits on one destination within one hour. What is recorded is the domain the node recognised, never the URL path. sing-box nodes only enforce and do not record. \"Would be blocked\" is what report-only policies matched: those connections were let through and only noted. Hit records are kept {{days}} days.",
+      "allowlist": "Members of an allowlist group can reach only the destinations in its lists; the node refuses the rest. The state is one of three: off, report only or on, and any can be changed to any other directly.\n\nReport only refuses nothing; it records the sites that would have been refused (only the registrable domain, never the full host name or the account). Add the ones that are wanted in the report, then decide whether to turn it on.\n\nOnly PSP native nodes enforce an allowlist, and an inbound must be able to read domains; a node that cannot (3X-UI, S-UI, an old version, too many rules) is no longer open to the group, so its members have fewer nodes.\n\nOnly a list that has not been downloaded stops turning it on. Every change of state restarts the proxy on the node once. Report-only data is kept {{days}} days."
     },
     "header": {
       "test": "Test a destination",
@@ -4608,6 +4706,33 @@
         "title": "Shorten the retention?",
         "message": "Records older than {{days}} days will be deleted within the hour and cannot be recovered.",
         "action": "Shorten"
+      },
+      "allowlist_report": {
+        "title": "Put “{{group}}” back to report only?",
+        "message": "Members are no longer refused destinations outside the lists; they are only recorded. It takes effect within {{minutes}}.",
+        "action": "Back to report only"
+      },
+      "allowlist_off": {
+        "title": "Turn off the allowlist of “{{group}}”?",
+        "on": "The members can reach every destination again (global policies still apply); it takes effect within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "on_nodes": "The members can reach every destination again (global policies still apply) and get back the {{n}} nodes that were not open to them, within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "report": "The members could already reach every destination; turning it off only stops recording what would be refused. It takes effect within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "report_nodes": "The members could already reach every destination; turning it off stops recording what would be refused and gives back the {{n}} nodes that were not open to them, within {{minutes}}. The lists are kept; you can turn it on again later.",
+        "action": "Turn off"
+      },
+      "allowlist_no_nodes": {
+        "title_on": "After this, will the members of “{{group}}” have no usable node?",
+        "title_report": "After starting report only, will the members of “{{group}}” have no usable node?",
+        "message_on": "The {{members}} members of this group would get no node: none of the {{n}} nodes can enforce an allowlist. Usually upgrade or fix the nodes first.",
+        "message_report": "The {{members}} members of this group would get no node (report only is not open to nodes that cannot enforce it either): none of the {{n}} nodes can enforce an allowlist. Usually upgrade or fix the nodes first.",
+        "action_on": "Turn on anyway",
+        "action_report": "Start anyway"
+      },
+      "allowlist_remove_lists": {
+        "title": "Take {{lists}} out of the lists of “{{group}}”?",
+        "separator": ", ",
+        "message": "Of what they covered, whatever is not in the other lists is refused.",
+        "action": "Take out"
       }
     },
     "errors": {
@@ -4643,7 +4768,10 @@
       "dest_settings_invalid": "A setting is out of range",
       "dest_template_unavailable": "This group has no generic category",
       "dest_template_exists": "This group was already added",
-      "dest_source_rule_invalid": "The source rule is not valid"
+      "dest_source_rule_invalid": "The source rule is not valid",
+      "dest_group_not_found": "That group does not exist",
+      "dest_group_stale": "The state was changed by someone else and has been reloaded",
+      "dest_list_not_ready": "A list is not ready, so this cannot go on: it has not been downloaded, or the change would leave a group whose allowlist is on with a list that is not ready or empty. Put that group back to report only first."
     },
     "node_state": {
       "applied": "In effect",
@@ -4680,7 +4808,11 @@
       "report_not_deployed_limit": "Over the rule budget: the report-only rules were not sent",
       "report_not_deployed_resolve": "Some inbounds have routeOnly sniffing that would substitute the resolved name, so report-only IP rules are not run on those inbounds",
       "paused": "Access control is paused; it resumes as it was.",
-      "not_enrolled": "This native node has not enrolled: no agent has reported."
+      "not_enrolled": "This native node has not enrolled: no agent has reported.",
+      "allowlist_groups": "Allowlist groups delivered: {{groups}}",
+      "groups_dropped": "These groups were not delivered because an inbound's sniffing cannot read domains: {{groups}}. They do not apply on any inbound of this node.",
+      "groups_separator": ", ",
+      "usage_refused": "The node refused the usage setting, so no usage is recorded"
     },
     "node_action": {
       "retry": "Apply again",
@@ -4699,7 +4831,9 @@
       "rejected_impact": "Impact: still running the previous version",
       "over_limit_title": "{{what}} {{used}} / {{limit}}, over the quota",
       "over_limit_impact": "Impact: still running the previous version",
-      "list_separator": ", "
+      "list_separator": ", ",
+      "usage_refused_title": "The node refused the per-site usage setting",
+      "usage_refused_impact": "Impact: this node records no usage; rules and hits are unaffected. It is tried again after Apply again, and after the node is upgraded."
     },
     "lists": {
       "new": "New list",
@@ -4737,7 +4871,9 @@
       "usage": {
         "policies_one": "{{count}} policy",
         "policies_other": "{{count}} policies",
-        "unused": "Not used"
+        "unused": "Not used",
+        "groups_one": "{{count}} allowlist group",
+        "groups_other": "{{count}} allowlist groups"
       },
       "menu": {
         "label": "Actions for {{name}}",
@@ -4930,7 +5066,31 @@
       "hits_deleted_policy": "A deleted policy",
       "hits_deleted_source_rule": "A deleted source rule",
       "hits_source_rule": "Source rule · {{name}}",
-      "hits_list_separator": ", "
+      "hits_list_separator": ", ",
+      "allowlist_report": "Allowlist · report only",
+      "allowlist_on": "Allowlist · on",
+      "usage_title": "Per-site usage",
+      "usage_help": "Connections per hour, not traffic, grouped by the site's registrable domain (such as google.com); direct IP connections are counted as \"(ip)\". No URL paths or source IPs. Only Xray nodes that record usage have data; the top 20 sites are listed and the rest are summed in one row. Counts are best effort.",
+      "usage_audit": "Only administrators can open this, and every view is written to the admin audit log.",
+      "usage_view": "View usage",
+      "usage_range_24h": "24 hours",
+      "usage_range_days_one": "{{count}} day",
+      "usage_range_days_other": "{{count}} days",
+      "usage_range_label": "Usage range",
+      "usage_node_all": "All nodes",
+      "usage_node_label": "Node",
+      "usage_col_site": "Site",
+      "usage_col_count": "Connections",
+      "usage_others": "{{sites}} other sites",
+      "usage_total": "{{n}} connections in all",
+      "usage_window": "Showing the past {{days}} days, the longest the usage is kept",
+      "usage_none": "No usage in this range",
+      "usage_dropped": "{{n}} usage rows were not saved because of node or panel limits, so the real counts may be higher.",
+      "usage_from": "From {{nodes}}",
+      "usage_not_recorded": "None of this account's nodes record per-site usage",
+      "usage_load_failed": "Could not read the usage",
+      "usage_nodes": "Recording settings",
+      "usage_help_label": "About per-site usage"
     },
     "sheet": {
       "close": "Close"
@@ -4954,7 +5114,11 @@
       "save": "Save",
       "group_retention": "Record retention",
       "hit_retention_days": "Hit-record retention (days)",
-      "hit_retention_days_hint": "How long hit records are kept; after shortening it, older records are deleted."
+      "hit_retention_days_hint": "How long hit records are kept; after shortening it, older records are deleted.",
+      "trial_retention_days": "Report-only data retention (days)",
+      "trial_retention_days_hint": "How long the sites recorded while an allowlist group is report only are kept; never longer than the hit-record retention.",
+      "usage_retention_days": "Per-site usage kept (days)",
+      "usage_retention_days_hint": "How long per-site usage is kept; shortening it deletes the older usage."
     },
     "rule_data": {
       "read_failed": "Could not read the rule data version",
@@ -5076,7 +5240,10 @@
       "recording_note_other": "{{count}} nodes record rule matches only (kept {{days}} days) · the raw access log never leaves the node",
       "recording_none": "No node is recording hits · the raw access log never leaves the node",
       "set_recording": "Set the recording…",
-      "set_resolve": "Set host name matching…"
+      "set_resolve": "Set host name matching…",
+      "usage_note_one": "{{count}} node records per-site usage, hits included (kept {{days}} days)",
+      "usage_note_other": "{{count}} nodes record per-site usage, hits included (kept {{days}} days)",
+      "recording_raw_log": "The raw access log never leaves the node"
     },
     "policies": {
       "read_failed": "Could not read the policies",
@@ -5140,7 +5307,12 @@
         "report": "Report only",
         "report_caption": "blocks nothing, only noting what it would have blocked; changes no outcome",
         "add_report": "Report-only policy",
-        "add_report_aria": "New report-only policy"
+        "add_report_aria": "New report-only policy",
+        "allowlist_count_one": "Allowlist groups · {{count}}",
+        "allowlist_count_other": "Allowlist groups · {{count}}",
+        "allowlist_none": "No group has an allowlist",
+        "allowlist_caption": "members reach only the destinations in their lists",
+        "allowlist_open": "Open allowlist groups"
       },
       "row": {
         "paused": "Paused",
@@ -5346,7 +5518,9 @@
         "builtin": "Blocked by the node's built-in rule: host names ending in a dot",
         "source": "Blocked by the inbound's source rule ({{entry}})",
         "observe": "Not blocked: a report-only policy matched it and would block it once turned on ({{entry}})",
-        "observe_source": "Not blocked: a report-only source rule matched it and would block it once turned on ({{entry}})"
+        "observe_source": "Not blocked: a report-only source rule matched it and would block it once turned on ({{entry}})",
+        "group": "Refused by the allowlist group “{{group}}”: the destination is not in its lists",
+        "observe_group": "Not refused: the allowlist group “{{group}}” is report only and only records; once on it would be refused"
       },
       "kind": {
         "source": "Source rule",
@@ -5354,7 +5528,8 @@
         "block": "Block",
         "exempt": "Exemption",
         "builtin": "Built in to the node: blocks host names ending in a dot",
-        "report": "Report only"
+        "report": "Report only",
+        "group": "Allowlist group"
       },
       "result": {
         "miss": "No match",
@@ -5382,14 +5557,16 @@
         "site": "The whole site (with subdomains)",
         "host": "This host only",
         "cancel": "Cancel",
-        "save": "Add"
+        "save": "Add",
+        "lead_group": "Allow this destination for the members of “{{group}}” only, in its supplement list."
       },
       "resolved_ips": "Resolved IPs (optional; PSP does no DNS)",
       "resolved_ips_hint": "The addresses the node would resolve the host name to, separated by commas or spaces. Used only when a node or inbound that runs on_demand is selected; ignored otherwise.",
       "resolved_failed": "Lookup failed (empty result)",
       "resolved_ips_bad": "At most 16, each a valid IP address",
       "note_hostname_needs_resolution": "The node resolves this host name and this test did not, so the result of IP range and private-address rules depends on the addresses it gets and is only conditional. Enter the addresses the node would see in \"Resolved IPs\" and test again.",
-      "note_resolution_failed": "With an empty (or failed) resolution, IP range and private-address rules do not match. The real outcome depends on the engine: Xray lets the connection through, sing-box fails it."
+      "note_resolution_failed": "With an empty (or failed) resolution, IP range and private-address rules do not match. The real outcome depends on the engine: Xray lets the connection through, sing-box fails it.",
+      "deleted_group": "a deleted group"
     },
     "tab_records": "Records",
     "convert": {
@@ -5425,7 +5602,8 @@
         "panel_all": "All nodes",
         "range": "Time range",
         "search": "Search destinations…",
-        "more": "Filters"
+        "more": "Filters",
+        "group_allowlists": "Allowlist groups"
       },
       "range": {
         "h1": "Past hour",
@@ -5464,7 +5642,9 @@
         "deleted_source_rule": "A deleted source rule",
         "deleted_user": "A deleted account #{{id}}",
         "source_rule": "Source rule · {{name}}",
-        "filter_by": "Only \"{{name}}\""
+        "filter_by": "Only \"{{name}}\"",
+        "group_rule": "Allowlist · {{name}}",
+        "deleted_group": "A deleted group"
       },
       "hover": {
         "first_last": "First {{first}} · last {{last}}"
@@ -5516,7 +5696,10 @@
         "eta_other": "Takes effect within about {{count}} minutes.",
         "eta_unknown": "Takes effect within a few minutes.",
         "saved": "Added the allow exception \"{{entry}}\"; it takes effect with the next apply",
-        "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply"
+        "saved_created": "Created the list \"Allow exceptions\" and an allow policy, and added \"{{entry}}\"; it takes effect with the next apply",
+        "group": "Add to the supplement list of “{{group}}” (allows it for its members only)",
+        "saved_group": "Added “{{entry}}” to the supplement list of “{{group}}”; it takes effect with the next delivery",
+        "group_gone": "The group that refused it is gone; choose what to allow it for."
       }
     },
     "audit_collect": {
@@ -5528,7 +5711,7 @@
         "hits_and_usage": "Rule matches and per-site usage"
       },
       "mode_help": {
-        "hits_and_usage": "This node was set to also record per-site usage; this version does not offer it, so it runs as \"Rule matches only\". Pick one of the modes above to change it.",
+        "hits_and_usage": "Besides rule matches, records how many connections each account makes to each site (registrable domain, such as google.com) per hour: no URL paths, byte counts or source IPs. Usage is kept {{usageDays}} days.",
         "off": "Only enforces the policies and keeps no record.",
         "hits": "Notes the connections that matched a block or a report-only rule: account, destination, count, summed by the hour and kept {{days}} days. The raw access log never leaves the node."
       },
@@ -5539,12 +5722,19 @@
       "save": "Save",
       "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
       "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
-      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes"
+      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
+      "usage_cost": "Cost: in the worst case measured, the Xray proxy process on a busy node uses 43% more CPU, and the node agent that receives the records uses some more on top. That is why it is an opt-in per node and off by default.",
+      "usage_too_old": "The node agent needs an upgrade to record usage",
+      "usage_privacy_summary": "The privacy page is not enabled",
+      "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",
+      "usage_off_note": "Turning it off stops new usage from being recorded; the usage already recorded is kept until its {{usageDays}} days are up, then deleted automatically.",
+      "restart_usage": "Saving restarts this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
     },
     "node_recording": {
       "mode": {
         "off": "Don't record",
-        "hits": "Rule matches only"
+        "hits": "Rule matches only",
+        "hits_and_usage": "Rule matches and per-site usage"
       },
       "hits_24h": "{{n}} in 24 hours",
       "reported": "reported {{ago}}",
@@ -5555,7 +5745,7 @@
       "label": "Matching",
       "option": {
         "as_is": "As is (default): no DNS. IP range and private-address rules apply only to connections made to an IP; a connection with a false SNI/Host is redirected to the address the SNI names, which the IP rules never see.",
-        "on_demand": "Resolve on demand: the host name is resolved once, when routing reaches the first IP rule, and a connection is blocked if any resolved address falls in a blocked range.",
+        "on_demand": "Resolve on demand: the host name is resolved once, when routing reaches the first IP rule, and a connection is blocked if any resolved address falls in a blocked range. Needs a node version that supports it; an older node keeps working as is.",
         "if_non_match": "Resolve if nothing matches (IPIfNonMatch): not offered, because it would let report-only and trial groups change the verdict."
       },
       "caveat": {
@@ -5587,6 +5777,194 @@
         "sniffing": "Inbound sniffing config could not be parsed: running as is",
         "no_ip_rules": "The policy has no IP range or private-address rules, so nothing needs resolving: running as is"
       }
+    },
+    "tab_allowlist": "Allowlist groups",
+    "allowlist": {
+      "intro": "Members of an allowlist group can reach only the destinations in its lists. It is enforced only on native nodes that support it and read domains; on any other node (3X-UI, S-UI, too old, over the limit, refused, or an inbound that cannot sniff) the members' accounts are removed rather than left unrestricted.",
+      "enable": {
+        "title": "Enable an allowlist",
+        "title_edit": "Edit the allowlist",
+        "step": {
+          "group": "Group",
+          "lists": "Lists",
+          "impact": "Effect"
+        },
+        "step_of": "Step {{n}} of {{total}}",
+        "step1_hint": "Only groups without an allowlist are listed",
+        "none_left": "Every group already has an allowlist",
+        "search": "Search groups",
+        "people_one": "{{count}} member",
+        "people_other": "{{count}} members",
+        "step2_title": "Members can reach only the destinations in these lists",
+        "pick_lists": "Choose lists…",
+        "list_chip": "{{name}} ({{entries}})",
+        "not_ready_summary": "Skipped in report only; must be ready before it is turned on",
+        "not_ready_detail": "This list has not been downloaded yet. While the group is report only it takes no part in the check, so the report also lists what it covers as would-be refused; turning on requires every list to be ready.",
+        "base": "Base allow",
+        "base_existing_one": "{{count}} entry, edited under Lists",
+        "base_existing_other": "{{count}} entries, edited under Lists",
+        "base_prefilled_one": "Prefilled {{count}} entry: {{hosts}}",
+        "base_prefilled_other": "Prefilled {{count}} entries: {{hosts}}",
+        "host_separator": ", ",
+        "base_edit": "Edit",
+        "base_none_summary": "No DNS host could be read from the subscription template; enter it by hand",
+        "base_none_detail": "The subscription template has no DNS host that goes through the proxy, or the template could not be read. Enter the DNS host names the clients use, one per line.",
+        "base_placeholder": "One host name per line",
+        "base_hint": "The DNS hosts the subscription template sends through the proxy; without them every site fails for the members",
+        "extra": "Supplement",
+        "extra_hint": "Created automatically; the entries added with “Add to allowlist” in the report go here",
+        "kpi_members": "Members",
+        "kpi_usable": "Usable nodes",
+        "kpi_of": "of {{total}}",
+        "kpi_lost": "No longer open",
+        "no_nodes": "After this the group's members will have no usable node",
+        "state_report": "Report only (recommended): access is not limited; only what would be refused is recorded",
+        "state_on": "On: destinations outside the lists are refused at once",
+        "lost_intro_one": "Whichever you choose, the members no longer get this {{count}} node:",
+        "lost_intro_other": "Whichever you choose, the members no longer get these {{count}} nodes:",
+        "lost_item": "{{name}} · {{reason}}",
+        "lost_none": "The members lose no node.",
+        "non_recording_one": "{{count}} node enforces but does not record, so the report has none of its traffic",
+        "non_recording_other": "{{count}} nodes enforce but do not record, so the report has none of their traffic",
+        "base_empty_summary": "Base allow is empty",
+        "base_empty_detail": "With no base allow the members cannot reach the DNS hosts of the subscription template, so every site may fail.",
+        "report_note": "While report only, access is not limited; only what would be refused is recorded.",
+        "cancel": "Cancel",
+        "back": "Back",
+        "next": "Next",
+        "start_report": "Start report only",
+        "turn_on": "Turn on the allowlist",
+        "save": "Save",
+        "saved_report": "“{{group}}” is report only; it takes effect within {{minutes}}",
+        "saved_on": "The allowlist of “{{group}}” is on; it takes effect within {{minutes}}",
+        "saved_edit": "The allowlist of “{{group}}” is saved; it takes effect within {{minutes}}",
+        "stale": "The state was changed by someone else and has been reloaded",
+        "back_to_lists": "Back to the lists",
+        "back_to_report": "Back to report only"
+      },
+      "read_failed": "Could not read the allowlist groups",
+      "empty": {
+        "title": "No group has an allowlist yet",
+        "body": "Members of an allowlist group can reach only the destinations in its lists. Start with report only to see what it would refuse, then turn it on."
+      },
+      "state": {
+        "report_day": "Report only · day {{days}}",
+        "report": "Report only",
+        "on": "On",
+        "off": "Off · lists kept"
+      },
+      "reason": {
+        "xui": "3X-UI",
+        "sui": "S-UI",
+        "capability": "node version too old",
+        "over_limit": "too many rules",
+        "rejected": "the node refused the new policy",
+        "sniffing": "an inbound does not read domains"
+      },
+      "snack": {
+        "report": "“{{group}}” is report only again; it takes effect within {{minutes}}",
+        "off": "The allowlist of “{{group}}” is off; its lists are kept",
+        "on": "The allowlist of “{{group}}” is on; it takes effect within {{minutes}}",
+        "stale": "The state was changed by someone else and has been reloaded"
+      },
+      "card": {
+        "list_separator": ", ",
+        "detail_separator": "; ",
+        "members": "Members {{members}}",
+        "lists_label": "Lists: ",
+        "lists_none": "No list chosen",
+        "list_item": "{{name}} ({{entries}})",
+        "extra_list": "Supplement",
+        "base_one": "Base allow {{count}} entry",
+        "base_other": "Base allow {{count}} entries",
+        "nodes": "Usable nodes {{ok}} / {{total}}",
+        "not_open_one": "{{count}} node is not open to this group",
+        "not_open_other": "{{count}} nodes are not open to this group",
+        "not_open_item": "{{name}} · {{reason}}",
+        "applying_one": "{{count}} node is receiving this group's rules",
+        "applying_other": "{{count}} nodes are receiving this group's rules",
+        "list_not_ready": "List “{{list}}” has not been downloaded",
+        "sniffing_dropped": "Not delivered on {{nodes}}: an inbound's sniffing cannot read domains, so this group does not apply on any inbound of those nodes; the members lose those nodes at the next sync",
+        "would_deny": "Past {{days}} days: {{sites}} sites would have been refused, {{times}} times in all",
+        "denied_24h": "Refused {{times}} times in the past 24 hours",
+        "no_nodes": "This group's members have no usable node right now",
+        "no_nodes_action": "See why",
+        "menu": "Actions for {{name}}",
+        "view_denied": "View refusals",
+        "view_report": "View report",
+        "turn_on": "Turn on…",
+        "back_to_report": "Back to report only…",
+        "reenable": "Turn on again…",
+        "edit_lists": "Edit lists",
+        "turn_off": "Turn off the allowlist…",
+        "open_group": "Open the group"
+      },
+      "turn_on": {
+        "title": "Turn on the allowlist of “{{group}}”?",
+        "reading": "Reading",
+        "read_failed": "Could not read the readiness",
+        "lists_ready": "Every list is ready",
+        "not_ready": "List “{{list}}” has not been downloaded, so it cannot be turned on",
+        "list_separator": ", ",
+        "unapplied_one": "{{count}} usable node does not have this group's rules yet",
+        "unapplied_other": "{{count}} usable nodes do not have this group's rules yet",
+        "view": "View",
+        "base_ok": "Base allow is not empty",
+        "base_empty": "Base allow is empty: DNS hosts not in the lists will be refused, so every site may fail",
+        "remaining_one": "In the past 24 hours {{count}} site would still be refused; the most visited is {{top}}",
+        "remaining_other": "In the past 24 hours {{count}} sites would still be refused; the most visited are {{top}}",
+        "remaining_none": "Nothing would have been refused in the past 24 hours",
+        "view_report": "See report",
+        "age": "Report only, day {{days}}",
+        "age_none": "No report-only data yet: you cannot see what it will refuse",
+        "consequence": "After this, the {{members}} members of this group are refused destinations outside the lists; it takes effect within {{minutes}}. You can go back to report only at any time.",
+        "cancel": "Cancel",
+        "confirm": "Turn on the allowlist",
+        "stale": "The state was changed by someone else and has been reloaded",
+        "lost_one": "Also, the members no longer get {{count}} node that cannot enforce an allowlist.",
+        "lost_other": "Also, the members no longer get {{count}} nodes that cannot enforce an allowlist."
+      },
+      "report": {
+        "crumb_label": "Location",
+        "crumb_root": "Allowlist groups",
+        "crumb_report": "Destinations that would be refused",
+        "title_on": "{{group}} · refused destinations",
+        "view_denied": "View refusals",
+        "turn_on": "Turn on…",
+        "on_note": "This group's allowlist is on. These are the destinations recorded while it was report only; no more are added. See the refusal records for what it refuses now.",
+        "range": "Range",
+        "day": "{{n}} days",
+        "range_note": "Limited by the retention, at most {{days}} days",
+        "edit_retention": "Change the retention",
+        "clamped": "The retention is only {{days}} days, so {{days}} days are shown",
+        "read_failed": "Could not read the report",
+        "kpi_sites": "Sites that would be refused",
+        "kpi_count": "Times",
+        "kpi_open": "Not yet handled",
+        "kpi_lost": "Not counted",
+        "lost_note": "Nodes report only so much; the report may miss some sites. This is the total over all groups",
+        "age_young": "Report only began {{hours}} hours ago; there is little data yet",
+        "age": "Report only, day {{days}}",
+        "never": "No report-only data for this group: you cannot see what it will refuse before turning it on",
+        "empty": "Nothing would have been refused in the past {{days}} days",
+        "col_site": "Site",
+        "site_help": "Report only records the registrable domain; the full host name and the account are not seen",
+        "site_help_label": "About the site column",
+        "col_count": "Times",
+        "col_last": "Latest",
+        "select": "Select {{site}}",
+        "add": "Add to allowlist",
+        "added": "Added · takes effect with the next delivery",
+        "ip_note": "The client connects by IP, which the node records as (ip); to allow it, write the IP range in a list",
+        "edit_extra": "Edit the supplement list",
+        "selected": "{{n}} selected",
+        "add_to": "Add to",
+        "add_n": "Add to allowlist ({{n}})",
+        "extra_name": "{{group}} · supplement",
+        "snack_added_one": "Added {{count}} site to “{{list}}”; it takes effect within {{minutes}}",
+        "snack_added_other": "Added {{count}} sites to “{{list}}”; it takes effect within {{minutes}}"
+      },
+      "enable_button": "Enable an allowlist…"
     }
   }
 }

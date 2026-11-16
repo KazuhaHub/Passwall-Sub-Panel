@@ -13,8 +13,8 @@ import type {
   LoginCaptcha,
 } from './types'
 
-export async function getAuthMethods() {
-  const { data } = await client.get<AuthMethods>('/auth/methods')
+export async function getAuthMethods(opts: { quiet?: boolean } = {}) {
+  const { data } = await client.get<AuthMethods>('/auth/methods', opts.quiet ? { _skipErrorToast: true } : undefined)
   return data
 }
 
@@ -169,6 +169,8 @@ export async function registerUser(input: {
   captcha_id?: string
   captcha_answer?: string
   captcha_token?: string
+  /** The consent_version the form showed; required while the terms are on. */
+  accepted_consent_version?: number
 }): Promise<{ ok: boolean; requires_verification: boolean }> {
   const { data } = await client.post('/auth/register', input, { _skipErrorToast: true })
   return data

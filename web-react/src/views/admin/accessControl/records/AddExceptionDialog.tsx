@@ -20,15 +20,19 @@ export interface ExceptionTarget {
   host: string
   /** The account that hit it; null when it is gone. */
   user: { id: number; upn: string } | null
+  /** The allowlist group that refused it (a `g<id>` source), when one did: the exception can go to that group alone. */
+  group?: { id: number; name: string } | null
+  /** A `g<id>` source whose group no longer exists: there is no group to add to, and nothing is chosen for the admin. */
+  groupGone?: boolean
 }
 
 /**
  * "Allow exception" from a hit (S12): let a destination through for everyone
  * (the GLOBAL exception: the server makes the exceptions list and the allow
  * policy over it the first time, in one transaction), or only exempt the
- * account that hit it. The allowlist branch ("the group's additions") is a
- * later phase and is not offered. The global choice is the default and says
- * what it overrides; the exemption choice hands over to the exemption dialog,
+ * account that hit it. On a hit refused by an allowlist group the default is
+ * that group's supplement list (only its members), never everyone. The global
+ * choice says what it overrides; the exemption choice hands over to the exemption dialog,
  * which owns the reason and the expiry (S5), instead of copying its form here.
  */
 export default function AddExceptionDialog({ target, onClose, onExempt }: {
@@ -45,19 +49,23 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
   const add = useAddDestException(scope)
   const status = useDestStatus(scope, { enabled: target !== null })
   const [match, setMatch] = useState<'site' | 'host'>('site')
-  const [where, setWhere] = useState<'global' | 'exempt'>('global')
+  const [choice, setChoice] = useState<'global' | 'exempt' | 'group' | null>(null)
+  const where: 'global' | 'exempt' | 'group' | 'none' = choice ?? (target?.group ? 'group' : target?.groupGone ? 'none' : 'global')
+  const setWhere = (v: 'global' | 'exempt' | 'group') => setChoice(v)
   const [error, setError] = useState<string | null>(null)
   const minutes = applyMinutes(status.data)
 
-  const close = () => { setError(null); setWhere('global'); setMatch('site'); onClose() }
+  const close = () => { setError(null); setChoice(null); setMatch('site'); onClose() }
 
   const save = async () => {
     if (!target) return
     if (where === 'exempt' && target.user) { onExempt(target.user.id); close(); return }
     setError(null)
     try {
-      const r = await add.mutateAsync({ target: target.host, match })
-      pushSnack(t(r.created ? `${E}saved_created` : `${E}saved`, { entry: r.entry }), 'success')
+      const r = await add.mutateAsync({ target: target.host, match, ...(where === 'group' && target.group ? { group_id: target.group.id } : {}) })
+      pushSnack(where === 'group' && target.group
+        ? t(`${E}saved_group`, { group: target.group.name, entry: r.entry })
+        : t(r.created ? `${E}saved_created` : `${E}saved`, { entry: r.entry }), 'success')
       close()
     } catch (err) {
       setError(destErrorOf(err)?.code === 'dest_exception_invalid' ? t(`${E}invalid`) : destErrorText(t, err))
@@ -71,7 +79,9 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
       <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
         <Box>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${E}where`)}</Typography>
-          <RadioGroup value={where} onChange={(_, v) => setWhere(v as 'global' | 'exempt')} aria-label={t(`${E}where`)}>
+          {where === 'none' && <Typography variant="body2" sx={{ color: md.error }}>{t(`${E}group_gone`)}</Typography>}
+          <RadioGroup value={where === 'none' ? '' : where} onChange={(_, v) => setWhere(v as 'global' | 'exempt' | 'group')} aria-label={t(`${E}where`)}>
+            {target?.group && <FormControlLabel value="group" control={<Radio />} label={t(`${E}group`, { group: target.group.name })} />}
             <FormControlLabel value="global" control={<Radio />} label={t(`${E}global`)} />
             {where === 'global' && (
               <Box sx={{ pl: 4, display: 'grid', gap: 1 }}>
@@ -89,7 +99,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
             )}
           </RadioGroup>
         </Box>
-        {where === 'global' && (
+        {(where === 'global' || where === 'group') && (
           <Box>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${E}match`)}</Typography>
             <RadioGroup row value={match} onChange={(_, v) => setMatch(v as 'site' | 'host')} aria-label={t(`${E}match`)}>
@@ -99,7 +109,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
           </Box>
         )}
         {error && <Typography variant="body2" role="alert" sx={{ color: md.error }}>{error}</Typography>}
-        {where === 'global' && (
+        {where !== 'exempt' && where !== 'none' && (
           <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
             {minutes === null ? t(`${E}eta_unknown`) : t(`${E}eta`, { count: minutes })}
           </Typography>
@@ -107,7 +117,7 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
       </DialogContent>
       <DialogActions>
         <Button onClick={close}>{t(`${E}cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
+        <AsyncButton variant="contained" disabled={where === 'none'} onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
       </DialogActions>
     </Dialog>
   )

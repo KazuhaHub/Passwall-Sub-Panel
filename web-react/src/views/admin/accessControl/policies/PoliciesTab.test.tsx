@@ -37,7 +37,7 @@ const status = (nodes = 1) => ({
   nodes: Array.from({ length: nodes }, (_, i) => ({ panel_id: i + 1, kind: 'psp', state: 'applied', supports: { policy: true }, engine: 'xray', sniffing_insufficient: [] })),
 }) as unknown as api.DestStatus
 
-const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn() }
+const props = { onOpenExemptions: vi.fn(), onOpenSettings: vi.fn(), onGoToLists: vi.fn(), onOpenAllowlist: vi.fn() }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -53,11 +53,11 @@ beforeEach(() => {
 })
 
 describe('the rail', () => {
-  it('draws allow, exempt, block, rest with computed numbers, quota with amber, and rows in two lines', async () => {
+  it('draws allow, exempt, block, allowlist, report-only, rest with computed numbers, quota with amber, and rows in two lines', async () => {
     renderAccess(<PoliciesTab {...props} />)
     expect(await screen.findByText('禁止发信')).toBeTruthy()
     const heads = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)
-    expect(heads).toEqual(['放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行'])
+    expect(heads).toEqual(['放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '没有分组启用白名单 · 成员只能访问名单里的目的地', '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行'])
     expect(screen.getByText(/额度/).textContent).toContain('正则 230 / 256')
     const rows = screen.getAllByTestId('policy-row')
     expect(rows).toHaveLength(4)
@@ -65,8 +65,23 @@ describe('the rail', () => {
     expect(within(rows[1]).getByText('端口 25,465,587 且 TCP · 所有人')).toBeTruthy()
     expect(within(rows[2]).getByText('已停用')).toBeTruthy()
     expect(within(rows[3]).getByText(/学生/)).toBeTruthy()
-    // No allowlist step and no "watch only" action: those are not part of this build.
-    expect(screen.queryByText(/仅观察|白名单/)).toBeNull()
+    // No "watch only" action: the report-only step is the only way to watch.
+    expect(screen.queryByText(/仅观察/)).toBeNull()
+  })
+
+  it('the allowlist step names the groups in force and opens that tab, on the group it was asked for', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ allowlist_groups: [
+      { group_id: 4, name: 'Guests', state: 'report', state_days: 2 }, { group_id: 5, name: 'Dev', state: 'on', state_days: 9 },
+    ] }))
+    renderAccess(<PoliciesTab {...props} />)
+    const head = await screen.findByRole('heading', { level: 2, name: /白名单分组 · 2 个/ })
+    const step = head.parentElement!.parentElement!
+    expect(within(step).getByRole('button', { name: /Guests/ }).textContent).toContain('仅报告 · 第 3 天')
+    expect(within(step).getByRole('button', { name: /Dev/ }).textContent).toContain('开启')
+    fireEvent.click(within(step).getByRole('button', { name: /Guests/ }))
+    expect(props.onOpenAllowlist).toHaveBeenCalledWith(4)
+    fireEvent.click(within(step).getByRole('button', { name: '打开白名单分组' }))
+    expect(props.onOpenAllowlist).toHaveBeenLastCalledWith()
   })
 
   it('the exemptions step opens the sheet', async () => {

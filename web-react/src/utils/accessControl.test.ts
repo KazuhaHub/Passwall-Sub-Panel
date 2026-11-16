@@ -219,6 +219,9 @@ describe('small decisions', () => {
     expect(needsFirstPublishConfirm({ policiesOn: 1, sourceRulesOn: 0 }, { turnsOn: true })).toBe(false)
     expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 1 }, { turnsOn: true })).toBe(false)
     expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0 }, { turnsOn: false })).toBe(false)
+    // An allowlist group in force is something enforced too: the fourth entry point is the enable dialog.
+    expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0, groupsOn: 1 }, { turnsOn: true })).toBe(false)
+    expect(needsFirstPublishConfirm({ policiesOn: 0, sourceRulesOn: 0, groupsOn: 0 }, { turnsOn: true })).toBe(true)
   })
 
   it('minutes come from the server, rounded up; unknown reads null', () => {
@@ -340,6 +343,18 @@ describe('recording', () => {
     expect(nodeRecording(node({ ...hitsNode, collect: 'off', collect_effective: 'hits' }))).toEqual({ mode: 'hits', hits24h: null })
     // Nothing delivered yet: the stored choice stands in.
     expect(nodeRecording(node({ ...hitsNode, collect: 'off', collect_effective: '' }))).toEqual({ mode: 'off', hits24h: null })
+  })
+
+  it('per-site usage is its own mode where the node declares it, and "hits" where it cannot do it', () => {
+    const usageNode = { supports: { policy: true, hits: true, usage: true }, hits_24h: 12 }
+    expect(nodeRecording(node({ ...usageNode, collect: 'hits_and_usage', collect_effective: 'hits_and_usage' }))).toEqual({ mode: 'hits_and_usage', hits24h: 12 })
+    // The node was told "hits" (it cannot do usage): that is what it does.
+    expect(nodeRecording(node({ ...usageNode, supports: { policy: true, hits: true, usage: false }, collect: 'hits_and_usage', collect_effective: 'hits' })))
+      .toEqual({ mode: 'hits', hits24h: 12 })
+    // Nothing delivered yet: the stored choice stands in, if the node can.
+    expect(nodeRecording(node({ ...usageNode, collect: 'hits_and_usage', collect_effective: '' }))).toEqual({ mode: 'hits_and_usage', hits24h: 12 })
+    expect(nodeRecording(node({ ...usageNode, supports: { policy: true, hits: true, usage: false }, collect: 'hits_and_usage', collect_effective: '' })))
+      .toEqual({ mode: 'hits', hits24h: 12 })
   })
 
   it('a node that was told to record but is not recording yet is "hits" with a null 24h, not 0', () => {

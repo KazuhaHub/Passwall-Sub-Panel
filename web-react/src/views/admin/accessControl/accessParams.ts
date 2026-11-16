@@ -7,14 +7,11 @@ import { parseNodeFilter, type NodeFilter } from '@/utils/accessControl'
 // destinations and search terms (R12): they ride in history state (a sheet's
 // `prefill`) or live in component state. Pure: parse and build, no router.
 
-/** Policies, lists and records. The allowlist tab arrives in a later phase
- *  and is not rendered, with no placeholder; a link to it falls back to the
- *  policies tab. */
-export const ACCESS_TABS = ['policies', 'lists', 'records'] as const
+/** Policies, lists, the allowlist groups and records. */
+export const ACCESS_TABS = ['policies', 'lists', 'allowlist', 'records'] as const
 export type AccessTab = (typeof ACCESS_TABS)[number]
 
-/** Anything else (a later batch's tab, a typo) reads as the policies tab and
- *  is not rewritten in the URL. */
+/** Anything else (a typo) reads as the policies tab and is not rewritten in the URL. */
 export function parseAccessTab(raw: string | null): AccessTab {
   return (ACCESS_TABS as readonly string[]).includes(raw ?? '') ? raw as AccessTab : 'policies'
 }
@@ -65,5 +62,41 @@ export interface AccessNavState {
   openList?: 'new_custom' | 'new_remote' | 'new_geosite' | number
 }
 
+/**
+ * The allowlist tab's params: `al_group` is the group a card is highlighted
+ * for (and, with `al_view=report`, the report of that group), `al_enable` opens
+ * the enable dialog on a group, `al_days` is the report's range. All ids and
+ * numbers; a destination or a search term is never here (R12).
+ */
+export interface AllowlistParams {
+  group: number | null
+  /** The report view of `group`; without a group there is nothing to report on. */
+  report: boolean
+  enable: number | null
+  days: number | null
+}
+
+export function parseAllowlistParams(params: URLSearchParams): AllowlistParams {
+  const group = parseUserId(params.get('al_group'))
+  const days = Number(params.get('al_days'))
+  return {
+    group,
+    report: group !== null && params.get('al_view') === 'report',
+    enable: parseUserId(params.get('al_enable')),
+    days: Number.isInteger(days) && days >= 1 ? days : null,
+  }
+}
+
+/** The query after a change to the allowlist params; anything left out keeps its value, null removes it. */
+export function allowlistSearch(current: URLSearchParams, patch: Partial<AllowlistParams>): URLSearchParams {
+  const out = new URLSearchParams(current)
+  const put = (key: string, value: string | null) => { if (value === null) out.delete(key); else out.set(key, value) }
+  if ('group' in patch) put('al_group', patch.group == null ? null : String(patch.group))
+  if ('report' in patch) put('al_view', patch.report ? 'report' : null)
+  if ('enable' in patch) put('al_enable', patch.enable == null ? null : String(patch.enable))
+  if ('days' in patch) put('al_days', patch.days == null ? null : String(patch.days))
+  return out
+}
+
 /** Where the settings dialog is asked to put the focus. */
-export type SettingsFocus = 'apply' | 'refresh' | 'rules' | 'retention'
+export type SettingsFocus = 'apply' | 'refresh' | 'rules' | 'retention' | 'trial' | 'usage'

@@ -73,6 +73,18 @@ func TestBuildPrunesDestRows(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Per-site usage goes at dest.usage_retention_days (7 by default), whatever
+	// the hit retention is, and with its account.
+	uRow := func(ago time.Duration, user int64, site string) domain.DestUsage {
+		return domain.DestUsage{HourMS: hour(ago), PanelID: panel.ID, UserID: user, Site: site, Count: 1}
+	}
+	if _, err := hits.StoreBatchWithUsage(ctx, "agt_x", "usage-seed", time.Now().Add(-96*time.Hour), nil, []domain.DestUsage{
+		uRow(8*24*time.Hour, kept.ID, "old-usage.example"),
+		uRow(24*time.Hour, kept.ID, "fresh-usage.example"),
+		uRow(time.Hour, gone.ID, "gone-usage.example"),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.repos.User.Delete(ctx, gone.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +123,13 @@ func TestBuildPrunesDestRows(t *testing.T) {
 	}
 	if after := metrics.DestPrunedRowsTotal.With(metrics.DestPruneHits).Value(); after-before != 1 {
 		t.Errorf("the pruned-rows counter moved by %d, want 1 (the 31-day-old hit)", after-before)
+	}
+	usage, err := hits.UserUsage(ctx, kept.ID, 0, 0, 0, 10)
+	if err != nil || usage.Total != 1 || len(usage.Items) != 1 || usage.Items[0].Site != "fresh-usage.example" {
+		t.Errorf("usage left = %+v, %v; want only the fresh row (is PruneUsage in pruneDestRows?)", usage, err)
+	}
+	if gu, _ := hits.UserUsage(ctx, gone.ID, 0, 0, 0, 10); gu.Total != 0 {
+		t.Errorf("a deleted account's usage survived: %+v", gu)
 	}
 	// A marker is kept past the accepted past window (48h) plus a margin (72h in
 	// all): the seed marker (96h) goes; the recent and the 60h one stay.

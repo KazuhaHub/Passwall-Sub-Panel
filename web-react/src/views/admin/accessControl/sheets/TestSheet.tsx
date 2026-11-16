@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import {
-  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Skeleton, TextField, ToggleButton,
+  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Skeleton, TextField, ToggleButton,
   ToggleButtonGroup, Typography, useTheme,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+
+import FieldHint from '@/components/FieldHint'
 
 import { destErrorOf, type DestTestResult } from '@/api/accessControl'
 import { AsyncButton } from '@/components/AsyncButton'
@@ -178,27 +180,40 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
           </Box>
         )}
       </Box>
-      <ExceptionDialog open={exception} host={result?.host ?? ''} onClose={() => setException(false)} />
+      <ExceptionDialog key={`${hit?.group_id ?? 0}:${result?.host ?? ''}`} open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
     </Box>
   )
 }
 
-/** A global allow exception for the tested destination: the site (and its subdomains) or just that host. */
-function ExceptionDialog({ open, host, onClose }: { open: boolean; host: string; onClose: () => void }) {
+/**
+ * An allow exception for the tested destination: the site (and its subdomains) or just that host. When an
+ * allowlist group refused it, the default is that group's supplement list (only its members); everyone is a
+ * deliberate choice and carries the warning the records dialog gives.
+ */
+function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: string; group: { id: number; name: string } | null; onClose: () => void }) {
   const { t } = useTranslation(['admin'])
+  const md = useTheme().palette.md
   const scope = useQueryScope()
   const add = useAddDestException(scope)
   const [entry, setEntry] = useState(host)
   const [match, setMatch] = useState<'site' | 'host'>('site')
   const [error, setError] = useState(false)
-  const [seen, setSeen] = useState(host)
-  if (open && seen !== host) { setSeen(host); setEntry(host) }
+  // The parent keys this by group and host, so a new destination starts fresh; the choice is reset once the
+  // close transition has finished, so the content stays on screen while the dialog fades out.
+  const [everyone, setEveryone] = useState(false)
+  const reset = () => { setEntry(host); setMatch('site'); setEveryone(false); setError(false) }
+  // A group step with no name is a group that was deleted while its rule is still published: nothing to add to, and no default.
+  const gone = group !== null && !group.name
+  const toGroup = group !== null && !gone && !everyone
+  const none = gone && !everyone
 
   const save = async () => {
     setError(false)
     try {
-      const r = await add.mutateAsync({ target: entry.trim(), match })
-      pushSnack(t(`${T}exception_saved`, { entry: r.entry }), 'success')
+      const r = await add.mutateAsync({ target: entry.trim(), match, ...(toGroup && group ? { group_id: group.id } : {}) })
+      pushSnack(toGroup && group
+        ? t('admin:access_control.records.exception.saved_group', { group: group.name, entry: r.entry })
+        : t(`${T}exception_saved`, { entry: r.entry }), 'success')
       onClose()
     } catch (err) {
       if (destErrorOf(err)?.code === 'dest_exception_invalid') setError(true)
@@ -206,10 +221,22 @@ function ExceptionDialog({ open, host, onClose }: { open: boolean; host: string;
     }
   }
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" slotProps={{ transition: { onExited: reset } }}>
       <DialogTitle>{t(`${T}exception.title`)}</DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
-        <Typography variant="body2">{t(`${T}exception.lead`)}</Typography>
+        {!none && <Typography variant="body2">{toGroup && group ? t(`${T}exception.lead_group`, { group: group.name }) : t(`${T}exception.lead`)}</Typography>}
+        {none && <Typography variant="body2" sx={{ color: md.error }}>{t('admin:access_control.records.exception.group_gone')}</Typography>}
+        {group && (
+          <RadioGroup value={none ? '' : toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
+            {!gone && <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />}
+            <FormControlLabel value="global" control={<Radio />} label={t('admin:access_control.records.exception.global')} />
+            {everyone && (
+              <Box sx={{ pl: 4 }}>
+                <FieldHint tone="amber" summary={t('admin:access_control.records.exception.global_hint.summary')} detail={t('admin:access_control.records.exception.global_hint.detail')} />
+              </Box>
+            )}
+          </RadioGroup>
+        )}
         <TextField label={t(`${T}target`)} value={entry} onChange={e => setEntry(e.target.value)} size="small" error={error}
           helperText={error ? t(`${T}exception.invalid`) : undefined} />
         <ToggleButtonGroup exclusive size="small" value={match} onChange={(_, v: 'site' | 'host' | null) => { if (v) setMatch(v) }} aria-label={t(`${T}exception.match`)}>
@@ -219,7 +246,7 @@ function ExceptionDialog({ open, host, onClose }: { open: boolean; host: string;
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t(`${T}exception.cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
+        <AsyncButton variant="contained" disabled={none} onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
       </DialogActions>
     </Dialog>
   )

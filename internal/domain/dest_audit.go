@@ -78,8 +78,10 @@ const (
 type DestBatchResult struct {
 	// Duplicate: the batch id was already stored, nothing was written.
 	Duplicate bool
-	// Stored is how many rows were written before any failure.
+	// Stored is how many hit rows were written before any failure.
 	Stored int
+	// UsageStored is the same for usage rows.
+	UsageStored int
 }
 
 // Drop kinds: why rows that were reported are not in the table. Stored per
@@ -90,7 +92,21 @@ const (
 	DestDropOverBudget = "over_budget"
 	DestDropQueueFull  = "queue_full"
 	DestDropIngest     = "ingest_error"
+	// The usage side's own kinds: what a node could not aggregate, and what the
+	// panel's per-agent hourly usage budget refused. Kept apart from the hit
+	// kinds so a gap in the usage record is never read as a gap in the hits.
+	DestDropNodeUsage       = "node_usage"
+	DestDropUsageOverBudget = "usage_over_budget"
+	// Usage rows lost with a batch the panel could not queue or store.
+	DestDropUsageQueueFull = "usage_queue_full"
+	DestDropUsageIngest    = "usage_ingest_error"
 )
+
+// DestUsageDropKinds are the drop kinds that count lost usage rows, as opposed
+// to lost hits.
+func DestUsageDropKinds() []string {
+	return []string{DestDropNodeUsage, DestDropUsageOverBudget, DestDropUsageQueueFull, DestDropUsageIngest}
+}
 
 // DestHitFilter selects hit rows. Zero fields select everything; times are
 // UTC milliseconds on the hour grid the rows are stored on.
@@ -204,4 +220,56 @@ func MergeDestHits(rows []DestHit) []DestHit {
 		m.LastMS = max(m.LastMS, r.LastMS)
 	}
 	return out
+}
+
+// DestUsage is one hourly row of per-site usage (tier B): how many connections
+// one account made to one site through one node in the hour. Site is the main
+// domain (eTLD+1), or "(ip)" where the client asked for an address; the address
+// itself is never recorded, and neither are paths, bytes or source addresses.
+type DestUsage struct {
+	HourMS  int64
+	PanelID int64
+	UserID  int64
+	Site    string
+	Count   int64
+}
+
+type destUsageKey struct {
+	hour, panel, user int64
+	site              string
+}
+
+// MergeDestUsage folds rows that share the primary key into one (counts add),
+// keeping the order of first appearance. A multi-row upsert that names one key
+// twice is an error on PostgreSQL, so the write path merges first.
+func MergeDestUsage(rows []DestUsage) []DestUsage {
+	index := make(map[destUsageKey]int, len(rows))
+	out := make([]DestUsage, 0, len(rows))
+	for _, r := range rows {
+		k := destUsageKey{r.HourMS, r.PanelID, r.UserID, r.Site}
+		if i, seen := index[k]; seen {
+			out[i].Count += r.Count
+			continue
+		}
+		index[k] = len(out)
+		out = append(out, r)
+	}
+	return out
+}
+
+// DestUsageSite is one site and its connection count in a read.
+type DestUsageSite struct {
+	Site  string
+	Count int64
+}
+
+// DestUsageSummary is an account's usage over a range: the most-used sites, and
+// what the rest of them add up to (so nothing is dropped from the total).
+type DestUsageSummary struct {
+	Items []DestUsageSite
+	// OtherSites and OtherCount are the sites beyond Items and their connections.
+	OtherSites int64
+	OtherCount int64
+	// Total is every connection in the range.
+	Total int64
 }

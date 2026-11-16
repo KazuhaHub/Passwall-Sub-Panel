@@ -147,7 +147,7 @@ func newSnapshotDoc(defs *domain.DestDefinitions, state *domain.DestPolicyState,
 		slices.Sort(g.Lists)
 		g.Lists = slices.Compact(g.Lists)
 		for _, id := range append([]int64{g.Base, g.Extra}, g.Lists...) {
-			if id > 0 {
+			if id != 0 { // 0 is "none yet"; a negative id is a list a save has not stored (Admin's hypothesis)
 				used[id] = true
 			}
 		}

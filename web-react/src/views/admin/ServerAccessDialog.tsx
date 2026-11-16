@@ -41,6 +41,8 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
   const rec = node ? nodeRecording(node) : null
   const res = node ? nodeResolve(node) : null
   const days = settings.data?.effective.dest_hit_retention_days
+  const usageDays = settings.data?.effective.dest_usage_retention_days
+  const recordsHits = rec?.mode === 'hits' || rec?.mode === 'hits_and_usage'
   const num = new Intl.NumberFormat()
   const R = 'admin:servers.access.'
 
@@ -62,7 +64,8 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
                     value={rec.mode === 'exec_only' ? t(`${R}recording_exec_only`) : rec.mode === 'too_old' ? t(`${R}recording_too_old`) : t(`${R}recording_${rec.mode}`)}
                     caption={(
                       <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-                        {rec.mode === 'hits' && days !== undefined && <span>{t(`${R}retention`, { days })}</span>}
+                        {recordsHits && days !== undefined && <span>{t(`${R}retention`, { days })}</span>}
+                        {rec.mode === 'hits_and_usage' && usageDays !== undefined && <span>{t(`${R}usage_retention`, { days: usageDays })}</span>}
                         <Button size="small" onClick={() => setRecordingFor(node)}>{t(`${R}change`)}</Button>
                       </Box>
                     )} />
@@ -78,7 +81,7 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
                       )} />
                   </Box>
                 )}
-                {rec && rec.mode === 'hits' && (
+                {rec && recordsHits && (
                   <Box data-testid="server-hits">
                     <KpiTile label={t(`${R}hits_24h`)} value={rec.hits24h === null ? '—' : num.format(rec.hits24h)}
                       caption={<Button size="small" endIcon={<ChevronRightIcon />} onClick={() => { onClose(); void navigate(`/admin/access-control${recordsHref({ panel_id: node.panel_id })}`) }}>{t(`${R}view_records`)}</Button>} />
@@ -86,7 +89,7 @@ export default function ServerAccessDialog({ node, serverName, onClose }: {
                 )}
               </KpiGrid>
             )}
-            {rec && rec.mode === 'hits' && rec.hits24h === null && (
+            {rec && recordsHits && rec.hits24h === null && (
               <Typography variant="caption" sx={{ color: theme.palette.md.onSurfaceVariant }}>{t(`${R}hits_none_note`)}</Typography>
             )}
           </Box>

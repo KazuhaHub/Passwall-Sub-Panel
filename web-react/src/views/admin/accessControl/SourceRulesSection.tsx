@@ -140,7 +140,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
     // Report-only is deployed too: the node restarts for it.
     const policiesOn = enabledPolicies(policies.data).length
     const sourceRulesOn = (all.data?.items ?? []).filter(r => r.state !== 'off' && r.node_id !== nodeId).length
-    if (needsFirstPublishConfirm({ policiesOn, sourceRulesOn }, { turnsOn: state !== 'off' && (countries.length > 0 || parsed.cidrs.length > 0) })) {
+    if (needsFirstPublishConfirm({ policiesOn, sourceRulesOn, groupsOn: policies.data?.allowlist_groups.length ?? 0 }, { turnsOn: state !== 'off' && (countries.length > 0 || parsed.cidrs.length > 0) })) {
       const nodes = enforcingNodeCount(status.data)
       const ok = await confirm(firstPublishConfirm({
         t, minutes, nodes, seconds: null,

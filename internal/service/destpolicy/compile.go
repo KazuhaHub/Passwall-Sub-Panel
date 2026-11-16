@@ -58,6 +58,10 @@ type CompileInput struct {
 	// as_is). The mode the node is told to run is EffectiveResolve of it and the
 	// node's capabilities, held at as_is by an inbound that cannot run on_demand.
 	DestResolve domain.DestResolve
+	// AgentVersion is the release of the Passwall Node agent that reported. A
+	// refusal of the tier-B collect-only policy is held against it: a node that
+	// upgraded is offered the policy again.
+	AgentVersion string
 }
 
 // Result is a compile's answer.
@@ -121,7 +125,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	var cb *cachedBase
 	for attempt := 0; ; attempt++ {
 		if st.Paused || st.PublishedGeneration == 0 {
-			return s.noPolicy(ctx, in, meta, "", "", now)
+			return s.noPolicy(ctx, in, meta, "", "", "", now)
 		}
 		if cb, err = s.baseFor(ctx, st.PublishedGeneration); errors.Is(err, domain.ErrNotFound) && attempt == 0 {
 			// The generation this compile read was superseded and its snapshot
@@ -138,7 +142,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return Result{}, err
 	}
 	if cb.doc.empty() {
-		return s.noPolicy(ctx, in, meta, "", "", now)
+		return s.noPolicy(ctx, in, meta, "", "", "", now)
 	}
 
 	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups)}
@@ -190,13 +194,17 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 	if engine == "" {
 		engine = xrayEngine
 	}
-	collect := EffectiveCollect(in.AuditCollect, in.Capabilities)
+	collect := effectiveCollectFor(in)
 	resolve := EffectiveResolve(in.DestResolve, in.Capabilities)
 	// An empty observed core version (a report that left it out) is not a
 	// change: the last non-empty one stands.
 	in.CoreVersion = s.observedCore(in.AgentID, in.CoreVersion)
 	key := compileKey(st.PublishedGeneration, in.Capabilities, engine, collect, resolve, view, nodes, meta, refusalContext(engine, in.Config.Core.Version, in.CoreVersion, resolve, nodes))
 
+	// A refusal of the collect-only policy does not outlive the release that
+	// refused it; the cached answer was decided under that refusal, so it goes
+	// with it (the key does not know the release).
+	s.liftStaleCollectRefusal(in.AgentID, in.AgentVersion)
 	s.mu.Lock()
 	cached := s.compiled[in.AgentID]
 	s.mu.Unlock()
@@ -238,15 +246,33 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 // inbounds whose sniffing could not supply a rule that was dropped for it ("" for
 // none): with every rule dropped the node gets nothing, and the status still says
 // which inbounds to fix.
-func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed, precheck string, now time.Time) (Result, error) {
+func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.DestAgentPolicy, shed, precheck, dropped string, now time.Time) (Result, error) {
 	var patch domain.DestAgentPolicyPatch
 	empty := ""
-	if meta.DesiredSHA256 != "" || meta.MintedSHA256 != "" {
-		patch.DesiredSHA256, patch.MintedSHA256 = &empty, &empty
+	// A tier-B node still has something to be told: to collect usage. It gets
+	// the collect-only policy, minted like any other (so the status can say it
+	// applied) but never made the last known good.
+	var out *protocol.DestinationPolicy
+	outDigest := ""
+	if effectiveCollectFor(in) == protocol.CollectHitsAndUsage && !s.collectOnlyRefused(in.AgentID, in.Capabilities, in.AgentVersion) {
+		out, outDigest = collectOnlyPolicy(), collectOnlyDigest
 	}
-	if meta.CollectEffective != "" {
-		// Nothing is minted, so nothing is being recorded.
-		patch.CollectEffective = &empty
+	if meta.DesiredSHA256 != "" {
+		patch.DesiredSHA256 = &empty
+	}
+	if meta.MintedSHA256 != outDigest {
+		patch.MintedSHA256 = &outDigest
+		if out != nil {
+			patch.MintedAt = &now
+		}
+	}
+	wantCollect := ""
+	if out != nil {
+		wantCollect = string(out.Collect)
+	}
+	if meta.CollectEffective != wantCollect {
+		// Nothing is minted below tier B, so nothing is being recorded.
+		patch.CollectEffective = &wantCollect
 	}
 	if meta.ResolveEffective != "" {
 		patch.ResolveEffective = &empty
@@ -270,6 +296,9 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	if meta.PrecheckListeners != precheck {
 		patch.PrecheckListeners = &precheck
 	}
+	if meta.SniffingGroupsDropped != dropped {
+		patch.SniffingGroupsDropped = &dropped
+	}
 	if err := s.patchMeta(ctx, in.AgentID, patch); err != nil {
 		return Result{}, err
 	}
@@ -277,7 +306,7 @@ func (s *Service) noPolicy(ctx context.Context, in CompileInput, meta *domain.De
 	delete(s.compiled, in.AgentID)
 	s.mu.Unlock()
 	s.countCompile(ResultCacheHit)
-	return Result{}, nil
+	return Result{Policy: out, Digest: outDigest}, nil
 }
 
 // compileFresh is a compile that missed the cache.
@@ -311,8 +340,17 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	}
 	// Whether the unrestricted policy was inside the limits: restricting adds
 	// explicit inbounds, and an over-limit it causes says so.
-	unrestrictedOver := desired != nil && usageOf(desired).over() != nil
+	// The members the panel's tags select count against the limit the same way
+	// before and after restricting (groupSubjectSlack), or a node over the limit
+	// on their account alone would be told restricting did it.
+	unrestrictedOver := false
+	if desired != nil {
+		u := usageOf(desired)
+		u.Subjects += groupSubjectSlack(desired, cb.base.groups, view.tagMatched)
+		unrestrictedOver = u.over() != nil
+	}
 	desired, restricted := restrictForSniffing(desired, nodes, engine)
+	desiredDropped := groupIDsJSON(restricted.groupsDropped)
 	if restricted.observe {
 		desiredShed = shedSniffing
 		shedNote = []domain.NodeAgentIssue{{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)}}
@@ -348,7 +386,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		precheckJSON = string(b)
 	}
 	if desired == nil {
-		res, err := s.noPolicy(ctx, in, meta, desiredShed, precheckJSON, now)
+		res, err := s.noPolicy(ctx, in, meta, desiredShed, precheckJSON, desiredDropped, now)
 		res.Issues = append(res.Issues, sniffIssues(findings)...)
 		res.Issues = append(res.Issues, shedNote...)
 		return res, &compiledEntry{res: res}, err
@@ -442,7 +480,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 			output = desired
 		}
 	}
-	fallbackShed := ""
+	fallbackShed, fallbackDropped := "", ""
 	if reason != domain.DestFallbackNone {
 		// The desired policy is not what goes out, so its shedding note is not
 		// true of this node; only what the fallback itself sheds is.
@@ -472,6 +510,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		if output != nil && engine == xrayEngine {
 			var info sniffRestriction
 			output, info = restrictForSniffing(output, nodes, engine)
+			fallbackDropped = groupIDsJSON(info.groupsDropped)
 			if info.observe {
 				fallbackShed = shedSniffing
 				shedNote = append(shedNote, domain.NodeAgentIssue{Code: IssueReportOnlyNotDeployed, Detail: reportOnlyNote(shedSniffing)})
@@ -492,7 +531,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 				case verr != nil:
 					log.Warn("destpolicy: the restricted fallback does not validate; sending none", "agent_id", in.AgentID, "err", verr)
 					output, fallbackShed = nil, ""
-				case usageOf(output).over() != nil:
+				case fallbackUsage(output, cb.base.groups, view.tagMatched).over() != nil:
 					log.Warn("destpolicy: the restricted fallback is over a limit; sending none", "agent_id", in.AgentID)
 					output, fallbackShed = nil, ""
 				case len(perListenerSniffFindings(output, nodes)) > 0:
@@ -533,6 +572,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		// Nothing is sent because of the refusal, not because report-only rules
 		// were left out of it.
 		fallbackShed, desiredShed, shedNote = "", "", nil
+		fallbackDropped, desiredDropped = "", ""
 		if result != ResultInvalid {
 			result = ResultFallbackNil
 		}
@@ -586,6 +626,15 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	}
 	if sentShed != meta.ReportOnlyShed {
 		patch.ReportOnlyShed = &sentShed
+	}
+	// Likewise the allowlist groups left out for weak sniffing: what this node
+	// is sent, not what was desired.
+	sentDropped := fallbackDropped
+	if reason == domain.DestFallbackNone {
+		sentDropped = desiredDropped
+	}
+	if sentDropped != meta.SniffingGroupsDropped {
+		patch.SniffingGroupsDropped = &sentDropped
 	}
 	if desiredDigest != meta.DesiredSHA256 {
 		patch.DesiredSHA256 = &desiredDigest
@@ -742,6 +791,39 @@ func groupSubjectSlack(p *protocol.DestinationPolicy, groups []baseGroup, tagMat
 		slack += (tm - held[g.id]) * rules
 	}
 	return slack
+}
+
+// groupIDsJSON is a list of group ids as stored ("" for none).
+func groupIDsJSON(ids []int64) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(ids)
+	return string(b)
+}
+
+// fallbackUsage measures a fallback the way the desired policy is measured:
+// plus the members its groups' tags select that the policy does not carry. A
+// group the fallback does not hold adds nothing (it is not on the node).
+func fallbackUsage(p *protocol.DestinationPolicy, groups []baseGroup, tagMatched map[int64]int) Usage {
+	u := usageOf(p)
+	if len(tagMatched) == 0 {
+		return u
+	}
+	present := map[int64]bool{}
+	for _, r := range p.Rules {
+		if kind, n, ok := ruleOrigin(r.ID); ok && kind == 'g' && r.CatchAll {
+			present[n] = true
+		}
+	}
+	held := make([]baseGroup, 0, len(present))
+	for _, g := range groups {
+		if present[g.id] {
+			held = append(held, g)
+		}
+	}
+	u.Subjects += groupSubjectSlack(p, held, tagMatched)
+	return u
 }
 
 // enforcedOnly is p without its observe rules (nil when nothing else is left,
@@ -1119,6 +1201,9 @@ func (s *Service) patchMeta(ctx context.Context, agentID string, p domain.DestAg
 	}
 	if p.ReportOnlyShed != nil {
 		next.ReportOnlyShed = *p.ReportOnlyShed
+	}
+	if p.SniffingGroupsDropped != nil {
+		next.SniffingGroupsDropped = *p.SniffingGroupsDropped
 	}
 	if p.AppliedSHA256 != nil {
 		next.AppliedSHA256 = *p.AppliedSHA256

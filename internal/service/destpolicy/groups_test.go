@@ -584,3 +584,71 @@ func TestOverLimit_StaysOverWithNoGroupMemberOnTheRoster(t *testing.T) {
 		t.Fatalf("fallback = %q, want over_limit held", m.FallbackReason)
 	}
 }
+
+// A node that now runs no policy shows no allowlist groups and no applied
+// rules, even though the record of what it last applied (the fallback) still
+// names them: the status describes what the node runs.
+func TestStatus_ANodeWithNoPolicyShowsNoAllowlistGroups(t *testing.T) {
+	ah := newAdminHarness(t)
+	ah.admin.Groups = fakeGroupNames{5: "Guests"}
+	ah.setGroups(map[int64]int64{10: 5})
+	a := ah.list("a", "DOMAIN-SUFFIX,a.example.com")
+	ah.allowGroup(5, domain.DestStateOn, []*domain.DestList{a}, "", "")
+	ah.publishNow()
+	res := ah.compile(base1(), policyCap, groupsCap)
+	ah.observe(applied(res.Digest), policyCap, groupsCap)
+
+	ah.allowGroup(5, domain.DestStateOff, []*domain.DestList{a}, "", "")
+	ah.publishNow()
+	if res := ah.compile(base1(), policyCap, groupsCap); res.Policy != nil {
+		t.Fatalf("a node with nothing in force was sent %+v", res.Policy)
+	}
+	ah.observe(applied(""), policyCap, groupsCap)
+
+	v, err := ah.admin.Status(ah.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := nodeOf(t, v, 9)
+	if n.State != "none" {
+		t.Fatalf("state = %q, want none", n.State)
+	}
+	if len(n.AllowlistGroups) != 0 || n.AppliedRules != 0 {
+		t.Fatalf("allowlist_groups = %+v, applied_rules = %d: a node running no policy runs neither", n.AllowlistGroups, n.AppliedRules)
+	}
+}
+
+// A pause reaches a node only at its next sync: until the node reports that it
+// runs nothing, it still runs its groups and its rules, and the status says so.
+func TestStatus_APausedNodeShowsItsGroupsUntilItReportsRunningNothing(t *testing.T) {
+	ah := newAdminHarness(t)
+	ah.admin.Groups = fakeGroupNames{5: "Guests"}
+	ah.setGroups(map[int64]int64{10: 5})
+	a := ah.list("a", "DOMAIN-SUFFIX,a.example.com")
+	ah.allowGroup(5, domain.DestStateOn, []*domain.DestList{a}, "", "")
+	ah.publishNow()
+	res := ah.compile(base1(), policyCap, groupsCap)
+	ah.observe(applied(res.Digest), policyCap, groupsCap)
+
+	if err := ah.svc.SetPaused(ah.ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	node := func() NodeState {
+		t.Helper()
+		v, err := ah.admin.Status(ah.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return nodeOf(t, v, 9)
+	}
+	// Not synced since the pause: still running the policy.
+	if n := node(); n.State != "paused" || len(n.AllowlistGroups) != 1 || n.AppliedRules == 0 {
+		t.Fatalf("before the node syncs: state %q, groups %+v, rules %d; want paused with its groups and rules", n.State, n.AllowlistGroups, n.AppliedRules)
+	}
+	// It syncs, is sent nothing and reports running nothing.
+	ah.compile(base1(), policyCap, groupsCap)
+	ah.observe(applied(""), policyCap, groupsCap)
+	if n := node(); n.State != "paused" || len(n.AllowlistGroups) != 0 || n.AppliedRules != 0 {
+		t.Fatalf("after the node reports running nothing: state %q, groups %+v, rules %d; want paused with none", n.State, n.AllowlistGroups, n.AppliedRules)
+	}
+}

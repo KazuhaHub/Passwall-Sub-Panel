@@ -305,7 +305,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		// enforcing one the node is running.
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
-			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion,
+			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion, AgentVersion: report.AgentVersion,
 			AuditCollect: choices.collect, DestResolve: choices.resolve,
 		})
 		if err != nil {

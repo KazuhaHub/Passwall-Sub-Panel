@@ -141,6 +141,9 @@ func (r *DestListRepo) Update(ctx context.Context, l *domain.DestList) error {
 		if res.RowsAffected == 0 {
 			return domain.ErrNotFound
 		}
+		if err := requireHeldListUsableTx(tx, l); err != nil {
+			return err
+		}
 		row := destListToRow(l)
 		if err := tx.Model(&destListRow{}).Where("id = ?", l.ID).
 			Select("Name", "Kind", "Side", "SourceURL", "GeositeCategory", "GeositeAttrs", "Entries", "SourceText",
@@ -153,6 +156,33 @@ func (r *DestListRepo) Update(ctx context.Context, l *domain.DestList) error {
 		}
 		return nil
 	})
+}
+
+// requireHeldListUsableTx refuses, under the state lock, a write that would leave
+// a list an "on" allowlist group holds not ready (or, for a custom list the group
+// names, empty): an allowlist built on it would deny everything the list names.
+// A group's own base and extra lists may be empty.
+func requireHeldListUsableTx(tx *gorm.DB, l *domain.DestList) error {
+	emptied := l.Kind == domain.DestListCustom && l.OwnerGroupID == 0 && l.EntryCount == 0
+	if l.Ready() && !emptied {
+		return nil
+	}
+	var rows []groupRow
+	if err := tx.Select("id", "dest_allowlist_state", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+		Where("dest_allowlist_state = ?", string(domain.DestStateOn)).Order("id").Find(&rows).Error; err != nil {
+		return err
+	}
+	var holders []int64
+	for _, g := range rows {
+		a := g.destAllowlist()
+		if slices.Contains(a.ListIDs, l.ID) || (!emptied && (a.BaseListID == l.ID || a.ExtraListID == l.ID)) {
+			holders = append(holders, g.ID)
+		}
+	}
+	if len(holders) > 0 {
+		return &domain.DestListNotReadyError{ListIDs: []int64{l.ID}, GroupIDs: holders}
+	}
+	return nil
 }
 
 // UpdateContent stores what a refresh derived. It always records that the
@@ -180,8 +210,18 @@ func (r *DestListRepo) UpdateContent(ctx context.Context, id int64, c domain.Des
 			return domain.ErrNotFound
 		}
 		fetched := c.FetchedAt.UTC()
-		set := map[string]any{"last_fetched_at": fetched, "last_error": ""}
 		changed = cur.ContentSHA256 != c.ContentSHA256
+		if changed && c.EntryCount == 0 {
+			// A feed that went empty must not blank the list an on group is made of.
+			var kind destListRow
+			if err := tx.Select("id", "kind", "owner_group_id").Where("id = ?", id).Take(&kind).Error; err != nil {
+				return err
+			}
+			if err := requireHeldListUsableTx(tx, &domain.DestList{ID: id, Kind: domain.DestListKind(kind.Kind), OwnerGroupID: kind.OwnerGroupID, LastFetchedAt: &fetched}); err != nil {
+				return err
+			}
+		}
+		set := map[string]any{"last_fetched_at": fetched, "last_error": ""}
 		if changed {
 			set["entries"] = c.Entries
 			set["entry_count"] = c.EntryCount
@@ -196,7 +236,7 @@ func (r *DestListRepo) UpdateContent(ctx context.Context, id int64, c domain.Des
 		}
 		// Only a list a non-off policy references is something the compiler
 		// can see; a refresh of any other restarts nothing.
-		_, inUse, err := inForcePoliciesTx(tx)
+		_, inUse, _, err := inForcePoliciesTx(tx)
 		if err != nil {
 			return err
 		}
@@ -230,14 +270,14 @@ func (r *DestListRepo) ApplyBatch(ctx context.Context, batch domain.DestListBatc
 		if err := lockDestState(tx); err != nil {
 			return err
 		}
-		inForce, inUse, err := inForcePoliciesTx(tx)
+		inForce, inUse, modes, err := inForcePoliciesTx(tx)
 		if err != nil {
 			return err
 		}
 		var notes map[int64]string
 		force := false
 		if batch.Decide != nil {
-			if notes, force, err = batch.Decide(inUse, inForce); err != nil {
+			if notes, force, err = batch.Decide(inUse, inForce, modes); err != nil {
 				return err
 			}
 		}
@@ -357,9 +397,9 @@ func (r *DestListRepo) Delete(ctx context.Context, id int64) error {
 // deleting in ONE transaction under the state-row lock that policy writes also
 // take, so a policy cannot pick the list up between the check and the delete.
 // When policies hold it, they are returned and nothing is deleted.
-func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using []int64, err error) {
+func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using domain.DestListUse, err error) {
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		using = nil
+		using = domain.DestListUse{}
 		if err := lockDestState(tx); err != nil {
 			return err
 		}
@@ -372,16 +412,29 @@ func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using []int6
 		}
 		for _, row := range rows {
 			if slices.Contains([]int64(row.ListIDs), id) {
-				using = append(using, row.ID)
+				using.PolicyIDs = append(using.PolicyIDs, row.ID)
 			}
 		}
-		if len(using) > 0 {
+		// The allowlist groups hold lists too, in any state: an off group keeps
+		// its lists for when it is switched on again.
+		var groups []groupRow
+		if err := tx.Select("id", "dest_allowlist_list_ids", "dest_allowlist_base_list_id", "dest_allowlist_extra_list_id").
+			Where("dest_allowlist_state IS NOT NULL").Order("id").Find(&groups).Error; err != nil {
+			return err
+		}
+		for _, g := range groups {
+			a := g.destAllowlist()
+			if a.BaseListID == id || a.ExtraListID == id || slices.Contains(a.ListIDs, id) {
+				using.GroupIDs = append(using.GroupIDs, g.ID)
+			}
+		}
+		if using.Any() {
 			return nil
 		}
 		return tx.Delete(&destListRow{}, id).Error
 	})
 	if err != nil {
-		return nil, err
+		return domain.DestListUse{}, err
 	}
 	return using, nil
 }

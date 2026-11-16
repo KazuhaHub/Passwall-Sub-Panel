@@ -117,3 +117,13 @@ func (r *cachingSettingsRepo) Save(ctx context.Context, s ports.UISettings) erro
 	r.mu.Unlock()
 	return nil
 }
+
+// Invalidate drops the cached record, for a writer that changed a settings row
+// without going through Save (the legal publication moves its consent version in
+// its own transaction). The next Load reads the database.
+func (r *cachingSettingsRepo) Invalidate() {
+	r.mu.Lock()
+	r.cached = nil
+	r.gen++
+	r.mu.Unlock()
+}
