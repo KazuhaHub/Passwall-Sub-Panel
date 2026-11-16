@@ -1,13 +1,19 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 )
 
 // captureBodyFor builds a test gin.Context around a request with the given
@@ -224,53 +230,51 @@ func TestIsSensitiveKey(t *testing.T) {
 	}
 }
 
-// THE TWO PREVIEWS ARE READS DRESSED AS POSTS. The access-control page calls
-// them whenever typing pauses, and a list preview carries the whole pasted
-// text; audited, each pause would write a row with up to that text in it. They
-// are exempt by EXACT path (a prefix would exempt a route added later by
-// accident), and the test tool next to them is a real action — who tested what
-// for whom — and stays audited.
-func TestDestPreviewEndpointsAreNotAudited(t *testing.T) {
-	for _, path := range []string{"/api/admin/dest/lists/preview", "/api/admin/dest/policies/preview"} {
-		if shouldAuditPath(path, http.MethodPost) {
-			t.Errorf("%s is a preview and must not be audited", path)
-		}
-	}
-	for _, c := range []struct{ path, method string }{
-		{"/api/admin/dest/test", http.MethodPost},
-		{"/api/admin/dest/lists", http.MethodPost},
-		{"/api/admin/dest/lists/12", http.MethodPut},
-		{"/api/admin/dest/policies", http.MethodPost},
-		{"/api/admin/dest/policies/order", http.MethodPut},
-		{"/api/admin/dest/exemptions", http.MethodPost},
-		{"/api/admin/dest/publish", http.MethodPost},
-		{"/api/admin/dest/lists/preview/other", http.MethodPost}, // exact, not a prefix
-		{"/api/admin/dest/lists/previews", http.MethodPost},
-	} {
-		if !shouldAuditPath(c.path, c.method) {
-			t.Errorf("%s %s must still be audited", c.method, c.path)
-		}
-	}
+type recordingAuditRepo struct {
+	ports.AuditRepo
+	entries []*domain.AuditEntry
 }
 
-// The node editor's line-visibility preview (ADR 0041) is a read dressed as a
-// POST, exempt only in its exact shape; every other node write stays audited.
-func TestLineVisibilityPreviewIsNotAudited(t *testing.T) {
-	for _, path := range []string{"/api/admin/nodes/1/line-visibility", "/api/admin/nodes/12345/line-visibility"} {
-		if shouldAuditPath(path, http.MethodPost) {
-			t.Errorf("%s is a preview and must not be audited", path)
+func (r *recordingAuditRepo) Insert(_ context.Context, e *domain.AuditEntry) error {
+	r.entries = append(r.entries, e)
+	return nil
+}
+
+// ADR 0042 §5: a preview is exempt because its route is marked, not because
+// its path looks like one. The same path without the marker is audited, and
+// the body is still read before the handler runs either way.
+func TestAuditReadOnlyMarkerSkipsTheEntry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &recordingAuditRepo{}
+	r := gin.New()
+	r.Use(AuditWrites(audit.New(repo), nil))
+	var seenBody string
+	read := func(c *gin.Context) {
+		body, _ := io.ReadAll(c.Request.Body)
+		seenBody = string(body)
+		c.Status(http.StatusOK)
+	}
+	r.POST("/api/admin/nodes/:id/line-visibility", AuditReadOnly(), read)
+	r.POST("/api/admin/nodes/:id/metadata", read)
+	post := func(path string) {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"region":"HK"}`)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d", path, w.Code)
 		}
 	}
-	for _, path := range []string{
-		"/api/admin/nodes/1/metadata",
-		"/api/admin/nodes//line-visibility",
-		"/api/admin/nodes/x/line-visibility",
-		"/api/admin/nodes/1/line-visibility/apply",
-		"/api/admin/nodes/1/2/line-visibility",
-		"/api/admin/nodes/line-visibility",
-	} {
+	post("/api/admin/nodes/1/line-visibility")
+	if len(repo.entries) != 0 || seenBody != `{"region":"HK"}` {
+		t.Fatalf("marked preview: entries=%d body=%q", len(repo.entries), seenBody)
+	}
+	post("/api/admin/nodes/1/metadata")
+	if len(repo.entries) != 1 {
+		t.Fatalf("an unmarked write was not audited: %d", len(repo.entries))
+	}
+	// No path is exempt by its shape any more.
+	for _, path := range []string{"/api/admin/dest/lists/preview", "/api/admin/dest/policies/preview", "/api/admin/nodes/1/line-visibility"} {
 		if !shouldAuditPath(path, http.MethodPost) {
-			t.Errorf("POST %s must still be audited", path)
+			t.Errorf("%s is exempt by path; only the route marker may exempt it", path)
 		}
 	}
 }

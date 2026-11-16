@@ -178,6 +178,15 @@ type Deps struct {
 
 // NewRouter returns the configured HTTP handler, including the runtime panel
 // prefix dispatcher in front of the Gin route tree.
+// previewPOST registers a read-only preview: a POST only because it carries an
+// editor's draft, computing and writing nothing (ADR 0042 §5). The route is
+// marked with middleware.AuditReadOnly so no audit row is written. Every call
+// site is named in TestReadOnlyPreviewRoutesAreNamed; adding one is a reviewed
+// decision, never a side effect of a path that happens to look like a preview.
+func previewPOST(g *gin.RouterGroup, relativePath string, handlers ...gin.HandlerFunc) {
+	g.POST(relativePath, append([]gin.HandlerFunc{middleware.AuditReadOnly()}, handlers...)...)
+}
+
 func NewRouter(d Deps) stdhttp.Handler {
 	paths := d.Paths
 	if paths == nil {
@@ -477,6 +486,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc).
 			WithLimitEnforcement(d.SharedClients, d.Repos.XUIPanel)
+		if d.Group != nil {
+			users.WithMembershipPreview(d.Group)
+		}
 		// User CRUD is the operator's bread and butter. Handler-level guard
 		// in users.Update prevents operators from creating/promoting other
 		// admins or modifying an existing admin's role.
@@ -484,6 +496,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.POST("/users", users.Create)
 		staffGroup.GET("/users/:id", users.Get)
 		staffGroup.PUT("/users/:id", users.Update)
+		previewPOST(staffGroup, "/users/:id/group-preview", users.PreviewGroupChange)
 		staffGroup.DELETE("/users/:id", users.Delete)
 		staffGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
 		staffGroup.POST("/users/:id/reset-password", users.ResetPassword)
@@ -530,15 +543,15 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// router doesn't need to learn a new top-level prefix.
 		staffGroup.GET("/nodes/separator", nodes.ListSeparators)
 		adminGroup.POST("/nodes/separator", nodes.CreateSeparator)
+		previewPOST(adminGroup, "/nodes/separator/group-preview", nodes.PreviewSeparatorGroups)
 		adminGroup.PUT("/nodes/separator/reorder", nodes.ReorderSeparators)
 		adminGroup.PUT("/nodes/separator/:id", nodes.UpdateSeparator)
 		adminGroup.DELETE("/nodes/separator/:id", nodes.DeleteSeparator)
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
-		// A read dressed as a POST (it carries the editor's draft); exempt from
-		// audit by exact path in middleware/audit.go.
-		adminGroup.POST("/nodes/:id/line-visibility", nodes.PreviewLineVisibility)
+		// A read dressed as a POST (it carries the editor's draft): see previewPOST.
+		previewPOST(adminGroup, "/nodes/:id/line-visibility", nodes.PreviewLineVisibility)
 		adminGroup.PUT("/nodes/:id/inbound", nodes.UpdateInboundConfig)
 		adminGroup.DELETE("/nodes/:id", nodes.Delete)
 		adminGroup.POST("/nodes/:id/detach", nodes.Detach)
@@ -577,6 +590,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/groups", groups.List)
 		staffGroup.GET("/groups/:id", groups.Get)
 		adminGroup.POST("/groups", groups.Create)
+		previewPOST(adminGroup, "/groups/node-preview", groups.PreviewNodes)
+		previewPOST(adminGroup, "/groups/:id/node-preview", groups.PreviewNodes)
 		adminGroup.PUT("/groups/:id", groups.Update)
 		adminGroup.PUT("/groups/:id/layout", groups.UpdateLayout)
 		adminGroup.DELETE("/groups/:id", groups.Delete)
@@ -1030,13 +1045,13 @@ func (c *settingsIntCache) get() int {
 // writes carry list text and exemption reasons that only administrators read
 // back (adminOnlyAuditTargets).
 //
-// Two routes are not audited: the previews (middleware.shouldAuditPath, by
-// exact path). The test route is a POST like any other and IS audited.
+// Two routes are not audited: the previews, registered through previewPOST.
+// The test route is a POST like any other and IS audited.
 func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
 	// Lists. /lists/preview is registered before /lists/:id; gin gives a static
 	// segment priority over a parameter either way.
 	g.GET("/dest/lists", h.ListLists)
-	g.POST("/dest/lists/preview", h.PreviewList)
+	previewPOST(g, "/dest/lists/preview", h.PreviewList)
 	g.POST("/dest/lists", h.CreateList)
 	g.GET("/dest/lists/:id", h.GetList)
 	g.PUT("/dest/lists/:id", h.UpdateList)
@@ -1053,7 +1068,7 @@ func registerDestRoutes(g *gin.RouterGroup, h *handler.AdminDestHandler) {
 	g.POST("/dest/catalog/:key/instantiate", h.InstantiateCatalog)
 	// Policies.
 	g.GET("/dest/policies", h.ListPolicies)
-	g.POST("/dest/policies/preview", h.PreviewPolicy)
+	previewPOST(g, "/dest/policies/preview", h.PreviewPolicy)
 	g.PUT("/dest/policies/order", h.ReorderPolicies)
 	g.POST("/dest/policies", h.CreatePolicy)
 	g.PUT("/dest/policies/:id", h.UpdatePolicy)

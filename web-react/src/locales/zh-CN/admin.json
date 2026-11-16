@@ -1986,6 +1986,11 @@
       "visible_none": "没有分组能看到这条线路，它不会出现在任何订阅中",
       "visibility_unknown": "可见分组暂时无法计算"
     },
+    "node_groups": {
+      "visible": "可见分组：{{groups}}",
+      "none": "该节点不属于任何分组：不会出现在任何订阅中，也不会为任何用户开通",
+      "removed": "保存后将从这些分组移出：{{groups}}"
+    },
     "import": "纳管",
     "imported": "已纳管",
     "import_validate": "请填写连接地址和 Region",
@@ -2260,6 +2265,11 @@
       "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。",
       "batch_delete_title": "批量删除节点",
       "batch_delete_message": "确定删除 {{count}} 个节点？"
+    },
+    "separator_preview": {
+      "visible": "会出现在：{{groups}}",
+      "none": "当前没有分组会显示这个分隔标题",
+      "unknown": "出现的分组暂时无法计算"
     }
   },
   "users": {
@@ -2566,7 +2576,12 @@
       "close": "关闭"
     },
     "risk_lookup": "风控查询",
-    "risk_chip_hint": "打开风控详情"
+    "risk_chip_hint": "打开风控详情",
+    "group_preview": {
+      "change": "改组后新增 {{added}} 个节点（{{added_names}}），移出 {{removed}} 个节点（{{removed_names}}）",
+      "same": "改组后可用节点不变",
+      "unknown": "改组影响暂时无法计算"
+    }
   },
   "groups": {
     "title": "分组管理",
@@ -2726,6 +2741,14 @@
       "delete_message": "确定删除分组 {{name}}？",
       "batch_delete_title": "批量删除分组",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？"
+    },
+    "preview": {
+      "nodes": "匹配节点（{{count}}）：{{names}}",
+      "more": "{{names}} 等 {{count}} 个",
+      "none": "没有匹配的节点，本组成员的订阅将为空",
+      "unknown": "匹配节点暂时无法计算",
+      "excluded_allowlist": "条件匹配但因 allowlist 无法执行而排除：{{names}}",
+      "change": "保存后 {{members}} 名成员将新增 {{added}} 个、移出 {{removed}} 个节点，并立即同步到上游面板"
     }
   },
   "certs": {

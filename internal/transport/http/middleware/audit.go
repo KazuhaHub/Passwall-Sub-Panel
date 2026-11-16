@@ -49,6 +49,11 @@ func AuditWrites(auditSvc *audit.Service, dispatch AsyncDispatch) gin.HandlerFun
 		start := time.Now()
 		reqBody := captureRequestBody(c)
 		c.Next()
+		// A route marked read-only (AuditReadOnly) is a preview that carries a
+		// body: it computes and writes nothing, so nothing is recorded.
+		if readOnly, _ := c.Get(auditReadOnlyKey); readOnly == true {
+			return
+		}
 		path := c.FullPath()
 		if path == "" {
 			path = c.Request.URL.Path
@@ -109,14 +114,6 @@ func shouldAuditPath(path, method string) bool {
 	default:
 		return false
 	}
-	// The access-control previews are reads: see destPreviewPaths.
-	if _, preview := destPreviewPaths[path]; preview {
-		return false
-	}
-	// The node editor's line-visibility preview is a read as well.
-	if isLineVisibilityPreviewPath(path) {
-		return false
-	}
 	switch {
 	case strings.HasPrefix(path, "/api/admin/"):
 		// Every admin write (settings, users, nodes, …) was already
@@ -138,37 +135,20 @@ func shouldAuditPath(path, method string) bool {
 	return false
 }
 
-// destPreviewPaths are the two access-control routes that are POSTs only
-// because they carry a body: a list or a policy preview computes and writes
-// nothing. The page calls them whenever typing pauses, and a list preview
-// carries the pasted text, so auditing them would write a row per pause. They
-// are matched by EXACT path, never by prefix: a route added under /dest/ later
-// is audited unless somebody decides it should not be, in a test that names it.
-// The test tool (POST /dest/test) is a real action and is audited.
-var destPreviewPaths = map[string]struct{}{
-	"/api/admin/dest/lists/preview":    {},
-	"/api/admin/dest/policies/preview": {},
-}
+// auditReadOnlyKey marks a request whose route was registered as a read-only
+// preview (ADR 0042 §5).
+const auditReadOnlyKey = "psp.audit.read_only"
 
-// isLineVisibilityPreviewPath matches exactly /api/admin/nodes/<id>/line-visibility
-// with a decimal id. The node editor posts its unsaved line labels there and
-// gets back which groups would see each line (ADR 0041); nothing is written.
-// Anything longer, shorter or with another id shape stays audited.
-func isLineVisibilityPreviewPath(path string) bool {
-	const prefix, suffix = "/api/admin/nodes/", "/line-visibility"
-	// The length check comes first: prefix and suffix share a slash, so a path
-	// such as /api/admin/nodes/line-visibility satisfies both checks while
-	// leaving no room for an id between them.
-	if len(path) <= len(prefix)+len(suffix) || !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		return false
+// AuditReadOnly marks a route as a read-only preview: a POST only because it
+// carries the editor's draft, computing and writing nothing. AuditWrites still
+// captures the body before the handler runs, then drops the entry. Routes get
+// it only through the router's previewPOST helper, whose call sites a test
+// names one by one, so an exemption is always an explicit, reviewed decision.
+func AuditReadOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(auditReadOnlyKey, true)
+		c.Next()
 	}
-	id := path[len(prefix) : len(path)-len(suffix)]
-	for _, r := range id {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 // resolveAuditActor picks the best identity string for the audit entry.

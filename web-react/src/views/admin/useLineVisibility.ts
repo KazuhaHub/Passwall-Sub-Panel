@@ -1,46 +1,33 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { previewLineVisibility, type LineVisibilityDraft, type LineVisibilityView } from '@/api/nodes'
+import { previewHint, useDraftPreview, type DraftPreviewState, type PreviewHint } from '@/hooks/useDraftPreview'
 
-const DEBOUNCE_MS = 400
+export type LineVisibilityState = DraftPreviewState<LineVisibilityView>
 
-export type LineVisibilityState =
-  | { status: 'idle' }
-  | { status: 'loading'; data?: LineVisibilityView }
-  | { status: 'ready'; data: LineVisibilityView }
-  | { status: 'error' }
-
-/**
- * Asks the server which groups would see each draft line (ADR 0041) as the
- * editor's typing pauses. A failed read is reported as `error`, never as an
- * empty answer, so the editor can tell "no group" from "unknown".
- */
+/** Which groups would see each draft line (ADR 0041), via the shared preview hook. */
 export function useLineVisibility(nodeId: number, draft: LineVisibilityDraft | null): LineVisibilityState {
-  const key = useMemo(() => (draft ? JSON.stringify(draft) : ''), [draft])
-  const [state, setState] = useState<LineVisibilityState>({ status: 'idle' })
-  useEffect(() => {
-    if (!nodeId || !key) { setState({ status: 'idle' }); return }
-    const ctl = new AbortController()
-    setState(previous => ({ status: 'loading', data: previous.status === 'ready' || previous.status === 'loading' ? previous.data : undefined }))
-    const timer = setTimeout(() => {
-      previewLineVisibility(nodeId, JSON.parse(key) as LineVisibilityDraft, ctl.signal)
-        .then(data => { if (!ctl.signal.aborted) setState({ status: 'ready', data }) })
-        .catch(() => { if (!ctl.signal.aborted) setState({ status: 'error' }) })
-    }, DEBOUNCE_MS)
-    return () => { clearTimeout(timer); ctl.abort() }
-  }, [nodeId, key])
-  return state
+  const key = useMemo(() => (nodeId && draft ? JSON.stringify([nodeId, draft]) : null), [nodeId, draft])
+  return useDraftPreview(key, signal => previewLineVisibility(nodeId, draft as LineVisibilityDraft, signal))
 }
 
-/** One line's visibility, resolved to group names for display. */
-export type LineVisibilityHint = { state: 'loading' } | { state: 'error' } | { state: 'ready'; groups: string[] }
+/** The group names that would see one draft line. */
+export function lineVisibilityHint(state: LineVisibilityState, kind: 'relays' | 'routes', index: number): PreviewHint | undefined {
+  return previewHint(state, data => {
+    const ids = data[kind][index]
+    if (!ids) return undefined
+    const names = new Map(data.groups.map(group => [group.id, group.name]))
+    return ids.map(id => names.get(id) ?? `#${id}`)
+  })
+}
 
-export function lineVisibilityHint(state: LineVisibilityState, kind: 'relays' | 'routes', index: number): LineVisibilityHint | undefined {
-  if (state.status === 'idle') return undefined
-  if (state.status === 'error') return { state: 'error' }
-  const data = state.data
-  if (!data) return { state: 'loading' }
-  const ids = data[kind][index]
-  if (!ids) return { state: 'loading' }
-  const names = new Map(data.groups.map(group => [group.id, group.name]))
-  return { state: 'ready', groups: ids.map(id => names.get(id) ?? `#${id}`) }
+/** The groups that would see the node itself, and those this save removes it from. */
+export function nodeGroupsHint(state: LineVisibilityState): { now?: PreviewHint; removed: string[] } {
+  const now = previewHint(state, data => {
+    const names = new Map(data.groups.map(group => [group.id, group.name]))
+    return data.node_groups.map(id => names.get(id) ?? `#${id}`)
+  })
+  if (state.status !== 'ready') return { now, removed: [] }
+  const names = new Map(state.data.groups.map(group => [group.id, group.name]))
+  const kept = new Set(state.data.node_groups)
+  return { now, removed: state.data.saved_node_groups.filter(id => !kept.has(id)).map(id => names.get(id) ?? `#${id}`) }
 }

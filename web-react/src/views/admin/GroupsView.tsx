@@ -40,7 +40,7 @@ import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 import { AsyncIconButton } from '@/components/AsyncButton'
 
-import { createGroup, deleteGroup, updateGroup } from '@/api/groups'
+import { createGroup, deleteGroup, previewGroupNodes, updateGroup, type GroupNodePreview } from '@/api/groups'
 import type { ListResponse } from '@/api/types'
 import { groupKeys } from '@/query/keys'
 import { useGroupsList } from '@/query/groups'
@@ -49,6 +49,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { listNodes } from '@/api/nodes'
 import type { Group, Node } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
+import PreviewCaption from '@/components/PreviewCaption'
+import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
@@ -225,6 +227,15 @@ export default function GroupsView() {
   const [scope, setScope] = useState<ScopeState | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [busy, setBusy] = useState(false)
+
+  // The draft tag_filter exactly as submit() sends it, previewed as typing
+  // pauses (ADR 0042 §1): which nodes it includes and what a save changes.
+  const draftTagFilter = useMemo(() => ({
+    all: form.all, mode: form.mode, tags: form.all ? [] : buildTagConditions(form),
+  }), [form])
+  const nodePreviewKey = dialogOpen ? JSON.stringify([editing?.id ?? null, draftTagFilter]) : null
+  const nodePreview = useDraftPreview<GroupNodePreview>(nodePreviewKey,
+    signal => previewGroupNodes(editing?.id ?? null, draftTagFilter, signal))
 
   // Tag filter conditions accept "region:XX" / "tag:YY" / a bare tag. Build
   // the dropdown suggestions by scanning every managed node — regions get a
@@ -765,6 +776,7 @@ export default function GroupsView() {
                     />
                   </>
                 )}
+                <GroupNodePreviewCaptions state={nodePreview} editing={!!editing} />
                 <TextField
                   fullWidth
                   label={t('admin:groups.field.remark')}
@@ -883,3 +895,28 @@ export default function GroupsView() {
     </Box>
   );
 }
+
+const PREVIEW_NAME_LIMIT = 8
+
+/** The group editor's preview lines (ADR 0042 §1). */
+function GroupNodePreviewCaptions({ state, editing }: { state: ReturnType<typeof useDraftPreview<GroupNodePreview>>; editing: boolean }) {
+  const { t } = useTranslation(['admin'])
+  const md = useTheme().palette.md
+  const separator = t('admin:nodes.line_labels.group_separator')
+  const names = (items: string[]) => items.length > PREVIEW_NAME_LIMIT
+    ? t('admin:groups.preview.more', { names: items.slice(0, PREVIEW_NAME_LIMIT).join(separator), count: items.length })
+    : items.join(separator)
+  const data = state.status === 'ready' ? state.data : undefined
+  return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: -1 }}>
+    <PreviewCaption testId="group-node-preview" hint={previewHint(state, d => d.nodes.map(n => n.name))}
+      readyText={items => t('admin:groups.preview.nodes', { count: items.length, names: names(items) })}
+      noneText={t('admin:groups.preview.none')} unknownText={t('admin:groups.preview.unknown')} />
+    {data && data.excluded.length > 0 && <Typography data-testid="group-node-excluded" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+      {t('admin:groups.preview.excluded_allowlist', { names: names(data.excluded.map(n => n.name)) })}
+    </Typography>}
+    {data && editing && data.members > 0 && (data.added.length > 0 || data.removed.length > 0) && <Typography data-testid="group-node-change" sx={{ fontSize: 12, color: md.error }}>
+      {t('admin:groups.preview.change', { members: data.members, added: data.added.length, removed: data.removed.length })}
+    </Typography>}
+  </Box>
+}
+

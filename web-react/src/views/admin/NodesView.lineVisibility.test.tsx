@@ -20,13 +20,16 @@ it('previews each line\'s visible groups from the unsaved draft and flags a line
   ] }
   installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-editor': editor() })
   api.post.mockImplementation(async (url: string) => String(url).endsWith('/line-visibility')
-    ? { data: { groups: [{ id: 1, name: 'VIP' }], node_groups: [1], relays: [[], [1]], routes: [] } }
+    ? { data: { groups: [{ id: 1, name: 'VIP' }, { id: 2, name: 'Staff' }], node_groups: [1], saved_node_groups: [1, 2], relays: [[], [1]], routes: [] } }
     : { data: {} })
   mount(<NodesView />)
   const dialog = await editRow()
   await waitFor(() => expect(within(dialog).getAllByTestId('line-visibility')).toHaveLength(2))
   const captions = within(dialog).getAllByTestId('line-visibility').map(el => el.textContent)
   expect(captions).toEqual(['admin:nodes.line_labels.visible_none', 'admin:nodes.line_labels.visible_groups'])
+  // ADR 0042 §2: the node's own groups, and the one this draft would leave.
+  expect(within(dialog).getByTestId('node-groups').textContent).toBe('admin:nodes.node_groups.visible')
+  expect(within(dialog).getByTestId('node-groups-removed').textContent).toBe('admin:nodes.node_groups.removed')
   const body = visibilityCalls().at(-1)![1]
   expect(body).toEqual({ region: 'HK', tags: ['edge'], relays: [{ id: 'gz', region: 'CN', tags: ['cmcc'] }, { id: 'sh', region: 'HK', tags: ['edge'] }], routes: [] })
 
@@ -45,12 +48,14 @@ it('shows "unknown" rather than "no group" when the preview cannot be read', asy
   mount(<NodesView />)
   const dialog = await editRow()
   await waitFor(() => expect(within(dialog).getByTestId('line-visibility').textContent).toBe('admin:nodes.line_labels.visibility_unknown'))
+  expect(within(dialog).getByTestId('node-groups').textContent).toBe('admin:nodes.line_labels.visibility_unknown')
+  expect(within(dialog).queryByTestId('node-groups-removed')).toBeNull()
 })
 
 it('previews route lines with their entry relay once the routing tab is open', async () => {
   const configured = { ...node, relays: [{ id: 'gz', name: 'GZ', address: 'gz.example', port: 0, enabled: true, region: 'US', tags: [] }] }
   installReads({ '/admin/nodes': list([configured]), '/admin/nodes/1/vless-route-editor': editor([{ id: 'line', route: 1, name: 'B', outbound_tag: 'direct', entry_relay_id: 'gz', enabled: true, region: 'US', tags: ['stream'] }]) })
-  api.post.mockImplementation(async () => ({ data: { groups: [{ id: 1, name: 'VIP' }], node_groups: [1], relays: [[1]], routes: [[]] } }))
+  api.post.mockImplementation(async () => ({ data: { groups: [{ id: 1, name: 'VIP' }], node_groups: [1], saved_node_groups: [1], relays: [[1]], routes: [[]] } }))
   mount(<NodesView />)
   const dialog = await editRow()
   fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))

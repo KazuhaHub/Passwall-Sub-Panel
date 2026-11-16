@@ -378,3 +378,76 @@ func sameIntPtr(a, b *int) bool {
 	}
 	return *a == *b
 }
+
+// groupNodePreviewRequest is the group editor's unsaved tag_filter.
+type groupNodePreviewRequest struct {
+	TagFilter tagFilterDTO `json:"tag_filter"`
+}
+
+type groupPreviewNodeDTO struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Region       string `json:"region"`
+	VisibleLines int    `json:"visible_lines"`
+	TotalLines   int    `json:"total_lines"`
+}
+
+type groupPreviewExcludedDTO struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// groupNodePreviewResponse: nodes the draft includes, nodes it matches but
+// leaves out, and, for an existing group, the change against the saved node
+// set and the members a save would resync.
+type groupNodePreviewResponse struct {
+	Nodes    []groupPreviewNodeDTO     `json:"nodes"`
+	Excluded []groupPreviewExcludedDTO `json:"excluded"`
+	Added    []int64                   `json:"added"`
+	Removed  []int64                   `json:"removed"`
+	Members  int64                     `json:"members"`
+}
+
+// PreviewNodes answers POST /admin/groups/node-preview (new group) and
+// /admin/groups/:id/node-preview (ADR 0042 §1). Read-only; registered through
+// previewPOST so it is not audited.
+func (h *AdminGroupHandler) PreviewNodes(c *gin.Context) {
+	var req groupNodePreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	filter := domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode}
+	// A new group has no allowlist yet; an existing one keeps everything but
+	// the draft filter, exactly as the save would.
+	draft := &domain.Group{TagFilter: filter}
+	var saved *domain.Group
+	if raw := c.Param("id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+			return
+		}
+		if saved, err = h.group.Get(c.Request.Context(), id); err != nil {
+			mapGroupServiceError(c, err)
+			return
+		}
+		copied := *saved
+		copied.TagFilter = filter
+		draft = &copied
+	}
+	result, err := h.group.PreviewGroupNodes(c.Request.Context(), draft, saved)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := groupNodePreviewResponse{Nodes: make([]groupPreviewNodeDTO, 0, len(result.Nodes)), Excluded: make([]groupPreviewExcludedDTO, 0, len(result.Excluded)), Added: result.Added, Removed: result.Removed, Members: result.Members}
+	for _, n := range result.Nodes {
+		out.Nodes = append(out.Nodes, groupPreviewNodeDTO{ID: n.Node.ID, Name: n.Node.DisplayName, Region: n.Node.Region, VisibleLines: n.VisibleLines, TotalLines: n.TotalLines})
+	}
+	for _, n := range result.Excluded {
+		out.Excluded = append(out.Excluded, groupPreviewExcludedDTO{ID: n.Node.ID, Name: n.Node.DisplayName, Reason: n.Reason})
+	}
+	c.JSON(http.StatusOK, out)
+}

@@ -43,7 +43,20 @@ type recordingPreviewer struct {
 	draft  *domain.Node
 	result *group.LineVisibility
 	err    error
+	saved  []int64
+	stored *domain.Node
 }
+
+func (p *recordingPreviewer) GroupsForNode(_ context.Context, n *domain.Node) ([]int64, error) {
+	p.stored = n
+	return p.saved, p.err
+}
+
+func (p *recordingPreviewer) GroupsForSeparator(context.Context, domain.SeparatorEntry) ([]int64, error) {
+	return nil, p.err
+}
+
+func (p *recordingPreviewer) List(context.Context) ([]*domain.Group, error) { return nil, p.err }
 
 func (p *recordingPreviewer) PreviewLineVisibility(_ context.Context, draft *domain.Node) (*group.LineVisibility, error) {
 	p.draft = draft
@@ -68,7 +81,7 @@ func storedVisibilityNode() *domain.Node {
 // The draft replaces only labels and lines; everything else is the stored
 // node, and the line labels are normalized exactly as a save would.
 func TestPreviewLineVisibilityBuildsDraftFromStoredNode(t *testing.T) {
-	previewer := &recordingPreviewer{result: &group.LineVisibility{Groups: []*domain.Group{{ID: 4, Name: "VIP"}}, NodeGroups: []int64{4}, Relays: [][]int64{{4}}, Routes: [][]int64{{}}}}
+	previewer := &recordingPreviewer{result: &group.LineVisibility{Groups: []*domain.Group{{ID: 4, Name: "VIP"}}, NodeGroups: []int64{4}, Relays: [][]int64{{4}}, Routes: [][]int64{{}}}, saved: []int64{4, 9}}
 	h := NewAdminNodeHandler(node.New(visibilityNodes{node: storedVisibilityNode()}, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil, nil, nil).WithLineVisibility(previewer)
 	w := postLineVisibility(t, h, `{"region":" JP ","tags":[" edge ",""],"relays":[{"id":"gz","region":" cn ","tags":["b","a","b"]}],"routes":[{"id":"r","entry_relay_id":"gz","region":"US","tags":[]}]}`)
 	if w.Code != http.StatusOK {
@@ -91,6 +104,11 @@ func TestPreviewLineVisibilityBuildsDraftFromStoredNode(t *testing.T) {
 	if !reflect.DeepEqual(body.Groups, []lineVisibilityGroup{{ID: 4, Name: "VIP"}}) || !reflect.DeepEqual(body.Relays, [][]int64{{4}}) || body.Routes[0] == nil {
 		t.Fatalf("response %s", w.Body.String())
 	}
+	// ADR 0042 §2: the groups the STORED node passes, so the editor can name
+	// those the save would remove it from.
+	if !reflect.DeepEqual(body.SavedNodeGroups, []int64{4, 9}) || previewer.stored == nil || previewer.stored.Region != "HK" {
+		t.Fatalf("saved node groups %v from %+v", body.SavedNodeGroups, previewer.stored)
+	}
 }
 
 // End to end with the real group service: a group the node passes but the
@@ -112,11 +130,19 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 	if !reflect.DeepEqual(body.NodeGroups, []int64{1, 2}) || !reflect.DeepEqual(body.Relays, [][]int64{{2}, {1, 2}}) || !reflect.DeepEqual(body.Routes, [][]int64{}) {
 		t.Fatalf("response %s", w.Body.String())
 	}
+	// Moving the draft to JP drops the HK group; the saved answer still has it.
+	w = postLineVisibility(t, h, `{"region":"JP","tags":[],"relays":[],"routes":[]}`)
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(body.NodeGroups, []int64{2}) || !reflect.DeepEqual(body.SavedNodeGroups, []int64{1, 2}) {
+		t.Fatalf("draft %v saved %v", body.NodeGroups, body.SavedNodeGroups)
+	}
 }
 
 func TestPreviewLineVisibilityFailuresAreNotAnswers(t *testing.T) {
 	stored := storedVisibilityNode()
-	newHandler := func(p LineVisibilityPreviewer, n *domain.Node) *AdminNodeHandler {
+	newHandler := func(p NodeEditorPreviewer, n *domain.Node) *AdminNodeHandler {
 		h := NewAdminNodeHandler(node.New(visibilityNodes{node: n}, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil, nil, nil)
 		if p != nil {
 			h.WithLineVisibility(p)

@@ -32,17 +32,21 @@ type AdminNodeHandler struct {
 	panels     ports.XUIPanelRepo
 	pspClients ports.PSPClientRepo
 	certs      ports.CertificateRepo
-	lines      LineVisibilityPreviewer
+	lines      NodeEditorPreviewer
 }
 
-// LineVisibilityPreviewer is group.Service's draft line-visibility answer
-// (ADR 0041), injected so the node handler does not own group semantics.
-type LineVisibilityPreviewer interface {
+// NodeEditorPreviewer is group.Service's answers for the node and separator
+// editors (ADR 0041, ADR 0042), injected so the node handler does not own
+// group semantics.
+type NodeEditorPreviewer interface {
 	PreviewLineVisibility(ctx context.Context, draft *domain.Node) (*group.LineVisibility, error)
+	GroupsForNode(ctx context.Context, n *domain.Node) ([]int64, error)
+	GroupsForSeparator(ctx context.Context, draft domain.SeparatorEntry) ([]int64, error)
+	List(ctx context.Context) ([]*domain.Group, error)
 }
 
-// WithLineVisibility wires the node editor's visibility preview.
-func (h *AdminNodeHandler) WithLineVisibility(previewer LineVisibilityPreviewer) *AdminNodeHandler {
+// WithLineVisibility wires the node and separator editors' previews.
+func (h *AdminNodeHandler) WithLineVisibility(previewer NodeEditorPreviewer) *AdminNodeHandler {
 	h.lines = previewer
 	return h
 }
@@ -1167,8 +1171,11 @@ type lineVisibilityGroup struct {
 type lineVisibilityResponse struct {
 	Groups     []lineVisibilityGroup `json:"groups"`
 	NodeGroups []int64               `json:"node_groups"`
-	Relays     [][]int64             `json:"relays"`
-	Routes     [][]int64             `json:"routes"`
+	// SavedNodeGroups are the groups the stored node passes, so the editor can
+	// name the groups this save would remove the node from (ADR 0042 §2).
+	SavedNodeGroups []int64   `json:"saved_node_groups"`
+	Relays          [][]int64 `json:"relays"`
+	Routes          [][]int64 `json:"routes"`
 }
 
 // PreviewLineVisibility answers POST /admin/nodes/:id/line-visibility. It
@@ -1230,7 +1237,12 @@ func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	out := lineVisibilityResponse{Groups: make([]lineVisibilityGroup, 0, len(result.Groups)), NodeGroups: result.NodeGroups, Relays: result.Relays, Routes: result.Routes}
+	saved, err := h.lines.GroupsForNode(c.Request.Context(), stored)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := lineVisibilityResponse{Groups: make([]lineVisibilityGroup, 0, len(result.Groups)), NodeGroups: result.NodeGroups, SavedNodeGroups: saved, Relays: result.Relays, Routes: result.Routes}
 	for _, g := range result.Groups {
 		out.Groups = append(out.Groups, lineVisibilityGroup{ID: g.ID, Name: g.Name})
 	}
@@ -1247,4 +1259,51 @@ func normalizeLineLabels(line lineVisibilityLine) (string, []string, error) {
 		return "", nil, err
 	}
 	return region, tags, nil
+}
+
+// separatorGroupsRequest is the separator editor's unsaved visibility rule.
+type separatorGroupsRequest struct {
+	Mode    string  `json:"mode"`
+	NodeIDs []int64 `json:"node_ids"`
+}
+
+// separatorGroupsResponse names every group once and lists those whose
+// subscriptions would show the separator.
+type separatorGroupsResponse struct {
+	Groups  []lineVisibilityGroup `json:"groups"`
+	Visible []int64               `json:"visible"`
+}
+
+// PreviewSeparatorGroups answers POST /admin/nodes/separator/group-preview
+// (ADR 0042 §4). Read-only; registered through previewPOST.
+func (h *AdminNodeHandler) PreviewSeparatorGroups(c *gin.Context) {
+	if h.lines == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "separator preview is unavailable", "code": "separator_preview_unavailable"})
+		return
+	}
+	var req separatorGroupsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	mode := domain.SeparatorMode(req.Mode)
+	if mode != domain.SeparatorModeGlobal && mode != domain.SeparatorModeNodeBound {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be global or node_bound"})
+		return
+	}
+	groups, err := h.lines.List(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	visible, err := h.lines.GroupsForSeparator(c.Request.Context(), domain.SeparatorEntry{Mode: mode, NodeIDs: req.NodeIDs})
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := separatorGroupsResponse{Groups: make([]lineVisibilityGroup, 0, len(groups)), Visible: visible}
+	for _, g := range groups {
+		out.Groups = append(out.Groups, lineVisibilityGroup{ID: g.ID, Name: g.Name})
+	}
+	c.JSON(http.StatusOK, out)
 }

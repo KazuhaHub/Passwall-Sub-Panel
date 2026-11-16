@@ -165,3 +165,18 @@ export async function getUserRules(id: number) {
 export async function updateUserRules(id: number, personalRules: string) {
   await client.put(`/admin/users/${id}/rules`, { personal_rules: personalRules })
 }
+
+/** What moving a user to another group would change (ADR 0042 §3). */
+export interface GroupChangePreview {
+  added: { id: number; name: string; region: string; visible_lines: number; total_lines: number }[]
+  removed: { id: number; name: string; region: string; visible_lines: number; total_lines: number }[]
+  kept: number
+}
+
+/** Read-only and unaudited; provisions nothing. A reply missing a list is
+ *  treated as unreadable, never as "no change". */
+export async function previewGroupChange(userId: number, groupId: number, signal?: AbortSignal): Promise<GroupChangePreview> {
+  const { data } = await client.post<GroupChangePreview>(`/admin/users/${userId}/group-preview`, { group_id: groupId }, { signal, _skipErrorToast: true })
+  if (!data || !Array.isArray(data.added) || !Array.isArray(data.removed) || typeof data.kept !== 'number') throw new Error('malformed group change preview')
+  return data
+}

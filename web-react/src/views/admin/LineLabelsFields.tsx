@@ -1,7 +1,8 @@
-import { Box, TextField, Typography, useTheme } from '@mui/material'
+import { Box, TextField } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import TagsAutocomplete from './TagsAutocomplete'
-import type { LineVisibilityHint } from './useLineVisibility'
+import PreviewCaption from '@/components/PreviewCaption'
+import type { PreviewHint } from '@/hooks/useDraftPreview'
 
 /**
  * A relay or VLESS route line's own Region and Tags (ADR 0040). They only
@@ -14,11 +15,10 @@ export default function LineLabelsFields({ region, tags, tagOptions, disabled, v
   tagOptions: string[]
   disabled?: boolean
   /** Which groups would see this line with the current draft (ADR 0041). */
-  visibility?: LineVisibilityHint
+  visibility?: PreviewHint
   onChange: (patch: { region?: string; tags?: string[] }) => void
 }) {
   const { t } = useTranslation('admin')
-  const md = useTheme().palette.md
   // A single row of tags matches the Region field's height; wrapped rows grow.
   return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: '120px minmax(0, 1fr)' }, gap: 1, alignItems: 'start' }}>
@@ -30,15 +30,8 @@ export default function LineLabelsFields({ region, tags, tagOptions, disabled, v
         : <TagsAutocomplete dense label={t('nodes.line_labels.tags')} value={tags.join(', ')} options={tagOptions}
           onChange={next => onChange({ tags: next ? next.split(',').map(tag => tag.trim()).filter(Boolean) : [] })} />}
     </Box>
-    {visibility && visibility.state !== 'loading' && <Typography data-testid="line-visibility" sx={{
-      fontSize: 12,
-      color: visibility.state === 'ready' && visibility.groups.length === 0 ? md.error : md.onSurfaceVariant,
-    }}>
-      {visibility.state === 'error'
-        ? t('nodes.line_labels.visibility_unknown')
-        : visibility.groups.length === 0
-          ? t('nodes.line_labels.visible_none')
-          : t('nodes.line_labels.visible_groups', { groups: visibility.groups.join(t('nodes.line_labels.group_separator')) })}
-    </Typography>}
+    <PreviewCaption hint={visibility} testId="line-visibility"
+      readyText={groups => t('nodes.line_labels.visible_groups', { groups: groups.join(t('nodes.line_labels.group_separator')) })}
+      noneText={t('nodes.line_labels.visible_none')} unknownText={t('nodes.line_labels.visibility_unknown')} />
   </Box>
 }

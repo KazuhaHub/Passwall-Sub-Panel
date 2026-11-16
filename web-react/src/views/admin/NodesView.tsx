@@ -67,7 +67,7 @@ import type { PanelCapability, PanelType, Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
-import type { LineVisibilityDraft, Separator } from '@/api/nodes'
+import { previewSeparatorGroups, type LineVisibilityDraft, type SeparatorGroupsPreview, type Separator } from '@/api/nodes'
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
@@ -79,7 +79,9 @@ import { lineLabelsInput, splitTagsText } from '@/api/vlessRoute'
 import VlessRouteLinesEditor from './VlessRouteLinesEditor'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
-import { lineVisibilityHint, useLineVisibility } from './useLineVisibility'
+import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
+import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
+import PreviewCaption from '@/components/PreviewCaption'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -2317,6 +2319,10 @@ export default function NodesView() {
   const [separatorBusy, setSeparatorBusy] = useState(false)
   const [separatorEditingId, setSeparatorEditingId] = useState<number | null>(null)
   const [separatorForm, setSeparatorForm] = useState<SeparatorForm>(EMPTY_SEPARATOR_FORM)
+  // ADR 0042 §4: which groups would show this node-bound separator.
+  const separatorPreviewKey = separatorOpen && separatorForm.mode === 'node_bound' ? JSON.stringify(separatorForm.node_ids) : null
+  const separatorGroups = useDraftPreview<SeparatorGroupsPreview>(separatorPreviewKey,
+    signal => previewSeparatorGroups('node_bound', separatorForm.node_ids, signal))
   function openSeparatorCreate() {
     setSeparatorEditingId(null)
     setSeparatorForm(EMPTY_SEPARATOR_FORM)
@@ -3869,6 +3875,17 @@ export default function NodesView() {
               value={editForm.tags_text}
               options={allTags}
               onChange={v => setEditForm({ ...editForm, tags_text: v })} />
+            {(() => {
+              const nodeGroups = nodeGroupsHint(lineVisibility)
+              return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: -1.5 }}>
+                <PreviewCaption hint={nodeGroups.now} testId="node-groups"
+                  readyText={groups => t('admin:nodes.node_groups.visible', { groups: groups.join(t('admin:nodes.line_labels.group_separator')) })}
+                  noneText={t('admin:nodes.node_groups.none')} unknownText={t('admin:nodes.line_labels.visibility_unknown')} />
+                {nodeGroups.removed.length > 0 && <Typography data-testid="node-groups-removed" sx={{ fontSize: 12, color: md.error }}>
+                  {t('admin:nodes.node_groups.removed', { groups: nodeGroups.removed.join(t('admin:nodes.line_labels.group_separator')) })}
+                </Typography>}
+              </Box>
+            })()}
             {(editForm.relays.length > 0 || routeDraft.lines.length > 0 || (editing?.route_state?.lines ?? []).some(line => !line.deleted)) && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
@@ -4002,6 +4019,13 @@ export default function NodesView() {
                 )}
               />
             )}
+            {separatorForm.mode === 'node_bound' && <PreviewCaption testId="separator-groups"
+              hint={previewHint(separatorGroups, d => {
+                const names = new Map(d.groups.map(g => [g.id, g.name]))
+                return d.visible.map(id => names.get(id) ?? `#${id}`)
+              })}
+              readyText={groups => t('admin:nodes.separator_preview.visible', { groups: groups.join(t('admin:nodes.line_labels.group_separator')) })}
+              noneText={t('admin:nodes.separator_preview.none')} unknownText={t('admin:nodes.separator_preview.unknown')} />}
             <FormControlLabel
               label={t('admin:nodes.field.enabled', { defaultValue: '启用' })}
               control={

@@ -70,11 +70,13 @@ import {
   updateUser,
   updateUserRules,
 } from '@/api/users'
-import type { UpdateUserRequest, UserListParams } from '@/api/users'
+import { previewGroupChange, type GroupChangePreview, type UpdateUserRequest, type UserListParams } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { getLimitEnforcement, type LimitEnforcement, type LimitPanel } from '@/api/limitEnforcement'
 import { assessDeviceLimit, assessIPLimit, isMisleading, type CapAssessment } from '@/utils/limitEnforcement'
 import FieldHint from '@/components/FieldHint'
+import PreviewCaption from '@/components/PreviewCaption'
+import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import { listServers, type Server } from '@/api/servers'
 import { deviceCapIsInert, ipCapUnenforcedPanels, unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
@@ -351,6 +353,11 @@ export default function UsersView() {
   // acted on: the admin's draft survives until they choose to reload it.
   const editRowChanged = !!editing && editBaseline !== null && rowFingerprint(editing) !== editBaseline
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
+  // ADR 0042 §3: what moving this user to the drafted group would change.
+  const groupChangeKey = editOpen && editing && typeof editForm.group_id === 'number' && editForm.group_id !== editing.group_id
+    ? JSON.stringify([editing.id, editForm.group_id]) : null
+  const groupChange = useDraftPreview<GroupChangePreview>(groupChangeKey,
+    signal => previewGroupChange(editing!.id, editForm.group_id as number, signal))
   type EditField = 'upn' | 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb' | 'ip_limit' | 'device_limit'
   const [editErr, setEditErr] = useState<FieldErrors<EditField>>({})
 
@@ -1979,6 +1986,15 @@ export default function UsersView() {
                   error={!!editErr.group_id}
                   helperText={editErr.group_id ? t(`admin:${editErr.group_id}`) : ''} />
               )} />
+            {groupChangeKey && <PreviewCaption testId="group-change-preview" noneTone="neutral"
+              hint={previewHint(groupChange, d => [...d.added.map(n => `+${n.name}`), ...d.removed.map(n => `-${n.name}`)])}
+              readyText={() => groupChange.status === 'ready'
+                ? t('admin:users.group_preview.change', {
+                  added: groupChange.data.added.length, removed: groupChange.data.removed.length,
+                  added_names: groupChange.data.added.map(n => n.name).join(t('admin:nodes.line_labels.group_separator')) || '—',
+                  removed_names: groupChange.data.removed.map(n => n.name).join(t('admin:nodes.line_labels.group_separator')) || '—',
+                }) : ''}
+              noneText={t('admin:users.group_preview.same')} unknownText={t('admin:users.group_preview.unknown')} />}
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
               <TextField select size="small" fullWidth label={t('admin:users.field.role')}
                 value={editForm.role}
