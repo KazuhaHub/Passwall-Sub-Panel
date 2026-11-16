@@ -1035,6 +1035,8 @@ user.ResyncMembership(ctx, userID)：
 现有其他用户的 client 原封不动；该用户已挂载但仍在组内的 inbound 不受影响。
 ```
 
+编辑已有分组（`PUT /api/admin/groups/:id`）只在 `tag_filter` 或分组额度**真正变化**时才对全部组员调 `ResyncGroupMembersInBackground`（逐个 `ResyncMembership`，会推送到上游面板）。分组编辑器每次保存都会带上 `tag_filter`，所以“请求里有这个字段”不算变化，判定交给 `group.SameFilter`，按匹配器语义比较新旧过滤：`All` 两边都为真即相同、一真一假即变化；`Mode` 的 `""`、`"all"` 与未识别值都按 AND 处理而视为相同，`"any"` 与之不同；条件先按 `matchOne` 的方式修剪（整条及冒号两侧），再排序去重后比较——AND / OR 都与顺序、重复无关，所以只改顺序不算变化。除此之外判定保持字面、宁可多推：大小写不折叠（`tag:` 区分大小写），`tag:x` 与 `x` 不视为相同，`All` 也不与“无条件的 AND”合并。多判一次变化只是多一轮重推，少判则会让组员挂载停留在旧定义上。请求中的过滤写法仍原样保存。额度沿用 `sameGroupLimits`（`nil` 与任何值都不同）。只改名称、备注或 2FA 要求的保存不触发重推。
+
 ### 7.6 节点编辑
 
 VLESS 路由线路（V2）在原中转区域提供两个标签页，只读取已有出站并管理 PSP 自有的末尾规则。“按节点选择”仍是动态线路集合，新增“按线路选择”稳定引用用于精确选择。历史中转补充 ID，不转换旧代理组引用；详细边界与验收进度见 [ADR 0039](adr/0039-vless-route-lines-v2.md) 和 [专题说明](vlessroute-v2.md)。

@@ -163,9 +163,11 @@ func (h *AdminGroupHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, toGroupDTO(g))
 }
 
-// Update applies partial changes. If tag_filter changed, every member is
-// re-synced against the new definition. Resync errors are surfaced but
-// don't block the response — leftover drift is healed by reconciliation.
+// Update applies partial changes. If tag_filter changed (group.SameFilter,
+// not merely present in the request) or the limits changed, every member is
+// re-synced against the new definition in the background; a save that changes
+// neither, e.g. a rename, pushes nothing to the panels. Leftover drift is
+// healed by reconciliation.
 func (h *AdminGroupHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -188,8 +190,12 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 		g.Name = *req.Name
 	}
 	if req.TagFilter != nil {
-		g.TagFilter = domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode}
-		filterChanged = true
+		next := domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode}
+		// The group editor sends tag_filter on every save, so its presence
+		// says nothing. Only a filter that selects differently counts; the
+		// request's spelling is still stored as sent.
+		filterChanged = !group.SameFilter(g.TagFilter, next)
+		g.TagFilter = next
 	}
 	if req.Remark != nil {
 		g.Remark = *req.Remark

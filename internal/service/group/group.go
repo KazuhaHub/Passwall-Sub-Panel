@@ -4,6 +4,7 @@ package group
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -155,7 +156,7 @@ func Matches(n *domain.Node, filter domain.TagFilter) bool {
 // the original behavior); under OR it matches nothing (no condition can be
 // satisfied) — explicit, less surprising than the AND default.
 func matchFilter(n *domain.Node, f domain.TagFilter) bool {
-	switch f.Mode {
+	switch filterMode(f.Mode) {
 	case "any":
 		return matchAny(n, f.Tags)
 	default:
@@ -194,10 +195,8 @@ func matchOne(n *domain.Node, cond string) bool {
 	// commonly type "tag: reality" with a space after the colon — without
 	// trimming, val would be " reality" and HasTag(" reality") wouldn't
 	// match the stored tag "reality".
-	cond = strings.TrimSpace(cond)
-	if i := strings.IndexByte(cond, ':'); i > 0 {
-		key := strings.TrimSpace(cond[:i])
-		val := strings.TrimSpace(cond[i+1:])
+	key, val, keyed := splitCond(cond)
+	if keyed {
 		switch key {
 		case "region":
 			return strings.EqualFold(n.Region, val)
@@ -220,5 +219,60 @@ func matchOne(n *domain.Node, cond string) bool {
 		}
 	}
 	// no colon: treat the whole condition as a tag
-	return n.HasTag(cond)
+	return n.HasTag(val)
+}
+
+// filterMode folds TagFilter.Mode onto the two conjunctions the matcher
+// knows: "any" is OR, everything else ("", "all", anything unrecognised) is
+// AND. matchFilter and SameFilter both go through it so they cannot disagree.
+func filterMode(mode string) string {
+	if mode == "any" {
+		return "any"
+	}
+	return "all"
+}
+
+// splitCond applies matchOne's trimming: the whole condition, then each side
+// of the first colon. A colon only separates a key when something precedes it
+// (i > 0 after trimming); otherwise the trimmed condition is a bare tag.
+func splitCond(cond string) (key, val string, keyed bool) {
+	cond = strings.TrimSpace(cond)
+	if i := strings.IndexByte(cond, ':'); i > 0 {
+		return strings.TrimSpace(cond[:i]), strings.TrimSpace(cond[i+1:]), true
+	}
+	return "", cond, false
+}
+
+// canonicalConds returns the conditions as matchOne sees them, sorted and
+// without duplicates. Neither AND nor OR depends on order or repetition, so
+// two lists with the same canonical form select the same nodes.
+func canonicalConds(conds []string) []string {
+	out := make([]string, 0, len(conds))
+	for _, c := range conds {
+		if key, val, keyed := splitCond(c); keyed {
+			out = append(out, key+":"+val)
+		} else {
+			out = append(out, val)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// SameFilter reports whether two tag filters are the same under the matcher's
+// semantics, so a save that only restates the stored filter is not treated as
+// a change: Mode "" and "all" are equal, conditions are compared after
+// matchOne's trimming, and their order and repetition are ignored.
+//
+// It is deliberately syntactic beyond that and errs towards "changed": case
+// is kept (tag: is case-sensitive), "tag:x" and "x" stay distinct although
+// both test the tag x, and All is never folded into an AND filter with no
+// conditions although both select every node. A false "changed" costs one
+// redundant member resync; a false "same" would leave memberships stale.
+func SameFilter(a, b domain.TagFilter) bool {
+	if a.All || b.All {
+		return a.All == b.All
+	}
+	return filterMode(a.Mode) == filterMode(b.Mode) &&
+		slices.Equal(canonicalConds(a.Tags), canonicalConds(b.Tags))
 }

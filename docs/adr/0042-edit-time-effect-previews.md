@@ -136,7 +136,7 @@ ADR 0041 的实现也暴露两个需要先统一的问题：预览接口是“�
 
 发现但未处理：分组编辑器每次保存都提交 `tag_filter`，`AdminGroupHandler.Update` 只要请求中带有该字段即视为条件已变，
 从而在条件未改时也为全体成员触发 `ResyncGroupMembersInBackground`。分组预览中“成员将新增 / 移出”的提示只在节点集合
-实际变化时显示，本 ADR 未改变保存流程，该行为另行评估。
+实际变化时显示，本 ADR 未改变保存流程，该行为另行评估。（2026-11-16 更新：已另行修复，`AdminGroupHandler.Update` 改用 `group.SameFilter` 按匹配语义比较新旧条件，只有条件或额度真正变化时才重新同步成员，见 ARCHITECTURE §7.5 附近说明。）
 
 验证：
 - Go：gofmt、`go vet`（含 acceptance tag）、staticcheck v0.8.2 通过；全量 94 个有测试包通过、9 个无测试文件；
