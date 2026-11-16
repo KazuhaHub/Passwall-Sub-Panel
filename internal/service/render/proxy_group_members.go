@@ -81,7 +81,7 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 			if name == "" {
 				name = r.Address
 			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Enabled, Region: r.Region, Tags: domain.CopyLineTags(r.Tags)})
+			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Publishable(), Region: r.Region, Tags: domain.CopyLineTags(r.Tags)})
 		}
 		for _, line := range n.RouteState.Lines {
 			if line.Deleted {

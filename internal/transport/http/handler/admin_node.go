@@ -151,6 +151,12 @@ type relayLineDTO struct {
 	// explicit "" / [] clears. Responses always carry both.
 	Region *string   `json:"region,omitempty"`
 	Tags   *[]string `json:"tags,omitempty"`
+	// EntryPanelID selects a Passwall Node server that runs this line's
+	// forwarding; 0 or absent is an external entry configured outside PSP.
+	EntryPanelID int64 `json:"entry_panel_id,omitempty"`
+	// ManagedReady is response-only: the entry server confirmed the forward
+	// this managed line asks for, so the line is published.
+	ManagedReady bool `json:"managed_ready,omitempty"`
 }
 
 type inboundDTO struct {
@@ -999,6 +1005,13 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			SNI:          strings.TrimSpace(d.SNI),
 			Host:         strings.TrimSpace(d.Host),
 			Enabled:      d.Enabled,
+			EntryPanelID: d.EntryPanelID,
+		}
+		if d.EntryPanelID < 0 {
+			return nil, fmt.Errorf("relay line %d: invalid entry server", i+1)
+		}
+		if d.EntryPanelID > 0 && d.Port == 0 {
+			return nil, fmt.Errorf("relay line %d: a managed relay needs an entry port between 1 and 65535", i+1)
 		}
 		if d.Region == nil {
 			line.RegionUnresolved = true
@@ -1031,6 +1044,8 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 			Enabled:      r.Enabled,
 			Region:       &region,
 			Tags:         &tags,
+			EntryPanelID: r.EntryPanelID,
+			ManagedReady: r.Managed() && r.ManagedReady,
 		})
 	}
 	return out

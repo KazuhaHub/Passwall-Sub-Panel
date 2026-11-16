@@ -44,7 +44,7 @@ func enabledRelays(relays []domain.RelayLine) []domain.RelayLine {
 	}
 	out := make([]domain.RelayLine, 0, len(relays))
 	for _, r := range relays {
-		if r.Enabled {
+		if r.Publishable() {
 			out = append(out, r)
 		}
 	}

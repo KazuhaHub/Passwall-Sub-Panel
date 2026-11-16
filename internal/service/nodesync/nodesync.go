@@ -83,7 +83,22 @@ type Service struct {
 	// is up to several MiB and re-encoding it on every thirty-second sync of
 	// every node is the cost this avoids.
 	configCache map[string]configCacheEntry
+	// transit publishes managed relay lines to the servers that run them and
+	// records what they confirm. NIL MEANS THIS BUILD HAS NO MANAGED RELAYS:
+	// no config carries Transit, so every config is what it was before.
+	transit TransitPublisher
 }
+
+// TransitPublisher is the managed relay collaborator (service/transit.Service).
+type TransitPublisher interface {
+	ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error)
+	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
+	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
+}
+
+// SetTransit binds the managed relay publisher. Left unbound, no forwards are
+// published and managed relay lines stay withheld from subscriptions.
+func (s *Service) SetTransit(t TransitPublisher) { s.transit = t }
 
 // AuditSink is the hit-recording collaborator (service/destaudit.Service).
 type AuditSink interface {
@@ -313,6 +328,41 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		}
 		configBody.Policy, policyDigest = result.Policy, result.Digest
 		policyIssues = append(policyIssues, result.Issues...)
+	}
+	// MANAGED RELAYS. Sent only to a node that declared it can relay: one that
+	// cannot would ignore the field, open nothing, and report the config
+	// applied. Added after the policy compile so the policy sees exactly the
+	// config it always did.
+	if s.transit != nil && slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitForward) {
+		forwards, err := s.transit.ForwardsFor(ctx, agent.PanelID)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		// A forward on a port one of this server's own inbounds uses would make
+		// the node refuse the whole config, listener changes included. Such a
+		// line is withheld here instead; its save-time check normally stops it,
+		// but an inbound can move onto the port afterwards.
+		listening := make(map[int]bool, len(snapshot.Nodes))
+		for _, node := range snapshot.Nodes {
+			if node != nil && node.DesiredPort > 0 {
+				listening[node.DesiredPort] = true
+			}
+		}
+		kept := forwards[:0]
+		for _, forward := range forwards {
+			// Two lines claiming one port (two saves that raced) would fail
+			// the same way; the older line keeps the port.
+			if listening[forward.Port] {
+				log.Warn("managed relay withheld: its entry port is already taken on the entry server",
+					"agent_id", agent.AgentID, "forward", string(forward.Key), "port", forward.Port)
+				continue
+			}
+			listening[forward.Port] = true
+			kept = append(kept, forward)
+		}
+		if len(kept) > 0 {
+			configBody.Transit = &nodeprotocol.Transit{Forwards: kept}
+		}
 	}
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
@@ -853,6 +903,26 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			if changed {
 				renderCredentialsChanged = true
 			}
+		}
+	}
+	if s.transit != nil && configCurrent != nil && len(configCurrent.DesiredBody) > 0 {
+		var sent nodeprotocol.ConfigBody
+		if err := json.Unmarshal(configCurrent.DesiredBody, &sent); err != nil {
+			return fmt.Errorf("nodesync: decode sent config: %w", err)
+		}
+		// Counters are booked against the config the panel sent, which decides
+		// which forward keys this node may report at all.
+		if err := s.transit.RecordCounters(ctx, sent.Transit, report.ForwardCounters); err != nil {
+			return fmt.Errorf("nodesync: %w", err)
+		}
+		// Confirmations need the node to hold that config: only then do its
+		// object statuses describe these forwards.
+		if configHave.Applied.Epoch == agent.Epoch && string(configHave.ETag) == configCurrent.DesiredETag {
+			changed, err := s.transit.Confirm(ctx, agent.PanelID, sent.Transit, objectStatuses(report.Objects, nodeprotocol.StreamConfig), now)
+			if err != nil {
+				return fmt.Errorf("nodesync: %w", err)
+			}
+			renderCredentialsChanged = renderCredentialsChanged || changed
 		}
 	}
 	if renderCredentialsChanged && s.invalidateRender != nil {

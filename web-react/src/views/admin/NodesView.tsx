@@ -2397,6 +2397,12 @@ export default function NodesView() {
     () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
   )
+  // Entry servers a managed relay line may name: every Passwall Node server
+  // except the landing's own (a relay through the landing itself is refused).
+  const relayEntryServers = useMemo(
+    () => servers.filter(s => s.panel_type === 'psp' && s.id !== editing?.panel_id),
+    [servers, editing?.panel_id],
+  )
   const panelSupports = (panelID: number, capability: PanelCapability) =>
     !!servers.find(s => s.id === panelID)?.capabilities?.includes(capability)
   const [createOpen, setCreateOpen] = useState(false)
@@ -2541,7 +2547,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, ...lineLabelsInput(r) }))
+          .map(({ managed_ready: _ready, ...r }) => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
       })
@@ -3927,13 +3933,32 @@ export default function NodesView() {
                         </IconButton>
                       </Tooltip>
                     </Box>
+                    <TextField select size="small" label={t('admin:nodes.relay.entry')} value={r.entry_panel_id ?? 0}
+                      onChange={e => {
+                        const entry = Number(e.target.value) || 0
+                        // A managed entry forwards unchanged: no SNI/Host override.
+                        update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0 })
+                      }}
+                      helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
+                      <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
+                      {relayEntryServers.map(server => (
+                        <MenuItem key={server.id} value={server.id}>{server.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    {(r.entry_panel_id ?? 0) > 0 && r.id && (
+                      <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
+                        {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
+                      </Typography>
+                    )}
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
                         onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
                       <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
+                        required={(r.entry_panel_id ?? 0) > 0}
                         onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
-                        helperText={t('admin:nodes.relay.port_hint')} />
+                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />
                     </Box>
+                    {!((r.entry_panel_id ?? 0) > 0) && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" label={t('admin:nodes.relay.sni')} value={r.sni ?? ''}
                         onChange={e => update({ sni: e.target.value })} sx={{ flex: 1 }}
@@ -3942,6 +3967,7 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    )}
                     <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
                       visibility={lineVisibilityHint(lineVisibility, 'relays', i)}
                       onChange={patch => update(patch)} />

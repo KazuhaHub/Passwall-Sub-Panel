@@ -453,6 +453,9 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 		return fmt.Errorf("%w: display_name and region required", domain.ErrValidation)
 	}
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
+	if err := s.validateManagedRelays(ctx, n); err != nil {
+		return err
+	}
 	if existing, err := s.nodes.GetByPanelInbound(ctx, n.PanelID, n.InboundID); err == nil && existing != nil {
 		return domain.ErrAlreadyExists
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -516,6 +519,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	// Resolve before any queued retry captures the node: the request-only
 	// markers are not serialized into the task payload.
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
+	if err := s.validateManagedRelays(ctx, n); err != nil {
+		return err
+	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
 		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
@@ -749,6 +755,13 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
+	// The landing's own panel and port decide collisions, and metadata edits
+	// do not change them, so check against the stored node.
+	landing := *previous
+	landing.Relays = n.Relays
+	if err := s.validateManagedRelays(ctx, &landing); err != nil {
+		return err
+	}
 	// Column-scoped: a full-row Update here would roll back the poll-owned
 	// columns (traffic counters / health / inbound-config snapshot) to the
 	// stale values the edit dialog loaded.
@@ -1797,4 +1810,66 @@ func (s *Service) ListClientsOfInbound(ctx context.Context, nodeID int64, owners
 		out = append(out, view)
 	}
 	return out, nil
+}
+
+// validateManagedRelays checks a landing node's managed relay lines against
+// the rest of the fleet: the entry must be a Passwall Node server, and the
+// entry port must be free on it, both of the server's own inbounds and of
+// other managed relay lines. Disabled inbounds and lines count too: enabling
+// one later must not silently collide.
+func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Node) error {
+	managed := false
+	for _, line := range landing.Relays {
+		managed = managed || line.Managed()
+	}
+	if !managed {
+		return nil
+	}
+	if err := domain.ValidateManagedRelays(landing, landing.Relays); err != nil {
+		return err
+	}
+	kinds := make(map[int64]domain.PanelKind)
+	if s.pool != nil {
+		for _, panel := range s.pool.List() {
+			if panel != nil {
+				kinds[panel.ID] = domain.NormalizePanelKind(panel.Kind)
+			}
+		}
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return err
+	}
+	type bind struct {
+		panel int64
+		port  int
+	}
+	taken := make(map[bind]string)
+	for _, other := range nodes {
+		if other == nil || other.IsSeparator() || (landing.ID != 0 && other.ID == landing.ID) {
+			continue
+		}
+		if other.DesiredPort > 0 {
+			taken[bind{other.PanelID, other.DesiredPort}] = fmt.Sprintf("inbound of node %q", other.DisplayName)
+		}
+		for _, line := range other.Relays {
+			if line.Managed() {
+				taken[bind{line.EntryPanelID, line.Port}] = fmt.Sprintf("relay line of node %q", other.DisplayName)
+			}
+		}
+	}
+	for i, line := range landing.Relays {
+		if !line.Managed() {
+			continue
+		}
+		if kinds[line.EntryPanelID] != domain.PanelKindPSP {
+			return fmt.Errorf("%w: relay line %d: the entry server must be a Passwall Node server", domain.ErrValidation, i+1)
+		}
+		key := bind{line.EntryPanelID, line.Port}
+		if owner, exists := taken[key]; exists {
+			return fmt.Errorf("%w: relay line %d: port %d on the entry server is already used by the %s", domain.ErrValidation, i+1, line.Port, owner)
+		}
+		taken[key] = fmt.Sprintf("relay line %d of this node", i+1)
+	}
+	return nil
 }

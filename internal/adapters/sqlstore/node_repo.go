@@ -388,7 +388,8 @@ func (r *nodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, error) 
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain()
+	node, err := row.toDomain()
+	return r.withTransit(ctx, node, err)
 }
 
 func (r *nodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error) {
@@ -399,7 +400,8 @@ func (r *nodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inbound
 	if err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain()
+	node, err := row.toDomain()
+	return r.withTransit(ctx, node, err)
 }
 
 func (r *nodeRepo) UpdateCertBinding(ctx context.Context, nodeID int64, source domain.CertSource, certID int64) error {
@@ -430,6 +432,9 @@ func (r *nodeRepo) ListByCertID(ctx context.Context, certID int64) ([]*domain.No
 		}
 		out[i] = n
 	}
+	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -445,6 +450,9 @@ func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 			return nil, err
 		}
 		out[i] = n
+	}
+	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -484,6 +492,9 @@ func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain
 		}
 		out[i] = n
 	}
+	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+		return nil, 0, err
+	}
 	return out, total, nil
 }
 
@@ -504,5 +515,19 @@ func (r *nodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 		}
 		out[i] = n
 	}
+	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// withTransit attaches managed relay readiness to one loaded node.
+func (r *nodeRepo) withTransit(ctx context.Context, node *domain.Node, err error) (*domain.Node, error) {
+	if err != nil {
+		return nil, err
+	}
+	if err := attachTransitState(ctx, r.db.WithContext(ctx), []*domain.Node{node}); err != nil {
+		return nil, err
+	}
+	return node, nil
 }

@@ -2029,7 +2029,7 @@
     "relay": {
       "title": "Transit lines",
       "add": "Add transit",
-      "hint": "Offer the same landing through extra transit fronts in addition to the direct entry. The relay's port forwarding (realm/gost/iptables) is configured outside the panel; here you only record each front's address and port — the landing's credentials/protocol/TLS are reused verbatim.",
+      "hint": "Offer the same landing through relay entries in addition to the direct line. An entry is either external (you configure realm/gost/iptables outside the panel) or a Passwall Node server whose forwarding PSP manages; credentials, protocol and TLS are the landing's.",
       "empty": "No transit lines (direct only).",
       "name": "Line name",
       "name_ph": "e.g. GZ Mobile relay",
@@ -2042,7 +2042,14 @@
       "cdn_optional": "Only for CDN fronting",
       "enabled": "Enabled",
       "remove": "Remove this line",
-      "hide_direct": "Hide direct line"
+      "hide_direct": "Hide direct line",
+      "entry": "Entry",
+      "entry_external": "External entry (forwarding configured outside the panel)",
+      "entry_external_hint": "You configure the relay machine's port forwarding outside the panel.",
+      "entry_managed_hint": "The selected Passwall Node server relays the entry port to this node unchanged, published by PSP. The landing sees the relay server as the source address, so IP-based limits do not apply to connections through this line.",
+      "port_managed_hint": "Port the relay server listens on",
+      "managed_ready": "Relay server applied it; the line is published",
+      "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then"
     },
     "line_labels": {
       "region": "Region",
