@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router'
 import {
   Autocomplete,
   Alert,
-  createFilterOptions,
   Box,
   Button,
   Card,
@@ -76,7 +75,10 @@ import { useQueryScope } from '@/query/useQueryScope'
 import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { useVlessRouteDraft } from '@/query/vlessRoute'
+import { lineLabelsInput, splitTagsText } from '@/api/vlessRoute'
 import VlessRouteLinesEditor from './VlessRouteLinesEditor'
+import TagsAutocomplete from './TagsAutocomplete'
+import LineLabelsFields from './LineLabelsFields'
 import { useQueryClient } from '@tanstack/react-query'
 import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
@@ -124,74 +126,6 @@ const ALPN_TLS = 'h2,http/1.1'
 
 function defaultAlpn(p: CreateProtocol): string {
   return p === 'hysteria2' || p === 'tuic' ? ALPN_HY2 : ALPN_TLS
-}
-
-const tagFilter = createFilterOptions<string>()
-
-// TagsAutocomplete is the shared tag input used by the create/edit/import/
-// separator dialogs. Wraps a freeSolo multi-select Autocomplete around the
-// form's `tags_text` comma-joined string so admins pick from existing tags
-// (suggestion dropdown) AND introduce new ones. freeSolo alone only adds on
-// Enter (no affordance, dead on touch) — filterOptions surfaces the typed
-// value as a clickable "add this" row so a new tag can be SELECTED too, which
-// is what the dropdown-only bug was missing. Form state stays a comma-joined
-// string for backend compatibility — the split/join happens here.
-function TagsAutocomplete(props: {
-  label: string
-  value: string
-  options: string[]
-  onChange: (next: string) => void
-  helperText?: string
-}) {
-  const tags = props.value
-    ? props.value.split(',').map(s => s.trim()).filter(Boolean)
-    : []
-  return (
-    <Autocomplete
-      multiple
-      freeSolo
-      size="small"
-      selectOnFocus
-      clearOnBlur
-      handleHomeEndKeys
-      options={props.options}
-      value={tags}
-      filterOptions={(options, params) => {
-        const filtered = tagFilter(options, params)
-        const input = params.inputValue.trim()
-        // Offer the typed value as a selectable row when it isn't already a
-        // known option (case-insensitive) — so a brand-new tag can be clicked
-        // to add, not only committed via Enter.
-        if (input && !options.some(o => o.toLowerCase() === input.toLowerCase())) {
-          filtered.push(input)
-        }
-        return filtered
-      }}
-      onChange={(_, v) => {
-        // de-dup + drop empties so two passes through this onChange can't
-        // create "Premium,Premium" / trailing commas. Sort is NOT applied
-        // so user-controlled ordering survives.
-        const seen = new Set<string>()
-        const cleaned: string[] = []
-        for (const raw of v as string[]) {
-          const s = raw.trim()
-          if (!s || seen.has(s)) continue
-          seen.add(s)
-          cleaned.push(s)
-        }
-        props.onChange(cleaned.join(', '))
-      }}
-      renderValue={(value, getItemProps) =>
-        value.map((option, index) => {
-          const tagProps = getItemProps({ index })
-          return <Chip {...tagProps} key={option} label={option} size="small" />
-        })
-      }
-      renderInput={(params) => (
-        <TextField {...params} label={props.label} helperText={props.helperText} />
-      )}
-    />
-  );
 }
 
 interface MetaForm {
@@ -2586,7 +2520,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
+          .map(r => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
       })
@@ -3921,6 +3855,9 @@ export default function NodesView() {
               value={editForm.tags_text}
               options={allTags}
               onChange={v => setEditForm({ ...editForm, tags_text: v })} />
+            {(editForm.relays.length > 0 || routeDraft.lines.length > 0 || (editing?.route_state?.lines ?? []).some(line => !line.deleted)) && (
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
+            )}
 
             {/* Transit / 中转 lines: the same landing offered through extra
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
@@ -3934,7 +3871,7 @@ export default function NodesView() {
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true, region: f.region.trim(), tags: splitTagsText(f.tags_text) }] }))}>
                   {t('admin:nodes.relay.add')}
                 </Button>
               </Box>
@@ -3973,6 +3910,8 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
+                      onChange={patch => update(patch)} />
                     <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
                       control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
                   </Box>
@@ -3981,7 +3920,8 @@ export default function NodesView() {
               <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
             </Box>
-            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays} />}
+            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays}
+              nodeRegion={editForm.region.trim()} nodeTags={splitTagsText(editForm.tags_text)} tagOptions={allTags} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

@@ -1977,6 +1977,11 @@
       "remove": "删除该线路",
       "hide_direct": "隐藏直连线路"
     },
+    "line_labels": {
+      "region": "Region",
+      "tags": "Tags",
+      "node_change_hint": "修改节点的 Region 或 Tags 不会改变已有线路的值。依赖 region: / tag: 的代理组请逐条核对线路。"
+    },
     "import": "纳管",
     "imported": "已纳管",
     "import_validate": "请填写连接地址和 Region",

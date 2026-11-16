@@ -87,7 +87,7 @@ it('clears all five saved optional conditions without changing the route identit
 
 it('creates and reopens a direct-inbound route while the standalone direct line is hidden', async () => {
   const view = initial()
-  const configured = { ...node, hide_direct: true }
+  const configured = { ...node, hide_direct: true, tags: ['edge'] }
   installReads({
     '/admin/nodes': list([configured]),
     '/admin/nodes/1/vless-route-editor': Object.assign(view, { outbounds: [{ tag: 'direct', protocol: 'freedom' }, { tag: 'remote', protocol: '' }] }),
@@ -122,7 +122,8 @@ it('creates and reopens a direct-inbound route while the standalone direct line 
   expect(confirmation).not.toHaveBeenCalled()
   const routeWrites = api.put.mock.calls.filter(([url]) => String(url).endsWith('/vless-route-lines'))
   expect(routeWrites).toHaveLength(1)
-  expect(routeWrites[0][1]).toEqual({ revision: 0, lines: [{ name: 'B', only_line_name: true, entry_relay_id: '', outbound_tag: 'direct', enabled: true }] })
+  // A new line starts from the node's current labels (ADR 0040).
+  expect(routeWrites[0][1]).toEqual({ revision: 0, lines: [{ name: 'B', only_line_name: true, entry_relay_id: '', outbound_tag: 'direct', enabled: true, region: 'US', tags: ['edge'] }] })
   const reopened = await editRow()
   fireEvent.click(within(reopened).getByRole('tab', { name: 'admin:nodes.vless_route.title' }))
   expect(await within(reopened).findByDisplayValue('B')).toBeTruthy()

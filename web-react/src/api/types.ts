@@ -204,6 +204,10 @@ export interface RelayLine {
   host?: string
   /** Whether this line renders. Disabled lines are kept but produce no entry. */
   enabled: boolean
+  /** Line-only subscription labels (ADR 0040). Copied from the node when the
+   *  line is created, independent afterwards. Omitted keeps the saved value. */
+  region?: string
+  tags?: string[]
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'

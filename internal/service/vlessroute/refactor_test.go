@@ -39,15 +39,20 @@ func TestLocalTargetOnlySaveAndNoOpSkipRemoteWrites(t *testing.T) {
 	}
 }
 
+// A connection-path change keeps the compiled rule but is rule-relevant, so it
+// still reconfirms the core; a failed confirmation keeps the target and
+// withdraws publication. (A display-only rename no longer reaches this path,
+// see TestDisplayOnlySaveStaysLocalAndKeepsApplied.)
 func TestLocalSaveCoreFailureKeepsTargetButWithdraws(t *testing.T) {
 	s, n, c := serviceFixture(t)
+	n.node.Relays = []domain.RelayLine{{ID: "front", Address: "relay.example", Enabled: true}}
 	view, err := s.Save(context.Background(), 1, SaveRequest{Lines: []LineInput{{Name: "B", OutboundTag: "direct", Enabled: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.statusFailureAt = c.statusReads + 2
-	view, err = s.Save(context.Background(), 1, SaveRequest{Revision: view.State.Revision, Lines: []LineInput{{ID: view.State.Lines[0].ID, Name: "new", OutboundTag: "direct", Enabled: true}}})
-	if err != nil || c.writes != 1 || view.State.Status != "unknown" || n.node.RouteState.Lines[0].Name != "new" {
+	view, err = s.Save(context.Background(), 1, SaveRequest{Revision: view.State.Revision, Lines: []LineInput{{ID: view.State.Lines[0].ID, Name: "B", OutboundTag: "direct", EntryRelayID: "front", Enabled: true}}})
+	if err != nil || c.writes != 1 || view.State.Status != "unknown" || n.node.RouteState.Lines[0].EntryRelayID != "front" {
 		t.Fatalf("failed confirmation lost the draft or wrote remotely: %+v %v", view, err)
 	}
 }

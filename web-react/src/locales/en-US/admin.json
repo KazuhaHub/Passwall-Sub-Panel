@@ -1980,6 +1980,11 @@
       "remove": "Remove this line",
       "hide_direct": "Hide direct line"
     },
+    "line_labels": {
+      "region": "Region",
+      "tags": "Tags",
+      "node_change_hint": "Changing the node's region or tags does not change existing lines. Review each line used by region: / tag: proxy groups."
+    },
     "import": "Import",
     "imported": "Imported",
     "import_validate": "Address and Region are required",

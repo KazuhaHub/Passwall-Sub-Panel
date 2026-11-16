@@ -25,6 +25,8 @@ func TestHiddenDirectInboundRouteRemainsPublishedForAllMemberSelections(t *testi
 				s, n, user, rule := referenceRenderFixture(t)
 				user.GroupID = 1
 				n.HideDirect, n.Region, n.Tags = true, "US", []string{"edge"}
+				// The line carries the labels copied at creation (ADR 0040).
+				n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
 				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{member}
 				before, _ := json.Marshal(n)
 				output, err := s.RenderForUser(context.Background(), user, ct)

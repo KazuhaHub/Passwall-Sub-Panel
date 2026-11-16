@@ -128,6 +128,11 @@ type relayLineDTO struct {
 	SNI          string `json:"sni,omitempty"`
 	Host         string `json:"host,omitempty"`
 	Enabled      bool   `json:"enabled"`
+	// Region / Tags are line-only subscription labels (ADR 0040). Omitted in a
+	// request keeps the saved value (a new line takes the node's value);
+	// explicit "" / [] clears. Responses always carry both.
+	Region *string   `json:"region,omitempty"`
+	Tags   *[]string `json:"tags,omitempty"`
 }
 
 type inboundDTO struct {
@@ -958,6 +963,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		return nil, fmt.Errorf("too many relay lines (%d, max %d)", len(dtos), maxRelayLines)
 	}
 	out := make([]domain.RelayLine, 0, len(dtos))
+	var err error
 	for i, d := range dtos {
 		addr := strings.TrimSpace(d.Address)
 		if addr == "" {
@@ -966,7 +972,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		if d.Port < 0 || d.Port > 65535 {
 			return nil, fmt.Errorf("relay line %d: port %d out of range (0-65535; 0 reuses the inbound port)", i+1, d.Port)
 		}
-		out = append(out, domain.RelayLine{
+		line := domain.RelayLine{
 			ID:           d.ID,
 			Name:         strings.TrimSpace(d.Name),
 			OnlyLineName: d.OnlyLineName,
@@ -975,7 +981,18 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			SNI:          strings.TrimSpace(d.SNI),
 			Host:         strings.TrimSpace(d.Host),
 			Enabled:      d.Enabled,
-		})
+		}
+		if d.Region == nil {
+			line.RegionUnresolved = true
+		} else if line.Region, err = domain.NormalizeLineRegion(*d.Region); err != nil {
+			return nil, fmt.Errorf("relay line %d: region must be at most %d bytes", i+1, domain.MaxLineRegionBytes)
+		}
+		if d.Tags == nil {
+			line.TagsUnresolved = true
+		} else if line.Tags, err = domain.NormalizeLineTags(*d.Tags); err != nil {
+			return nil, fmt.Errorf("relay line %d: at most %d tags of at most %d bytes each", i+1, domain.MaxLineTags, domain.MaxLineTagBytes)
+		}
+		out = append(out, line)
 	}
 	return out, nil
 }
@@ -984,6 +1001,7 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
+		region, tags := r.Region, domain.CopyLineTags(r.Tags)
 		out = append(out, relayLineDTO{
 			ID:           r.ID,
 			Name:         r.Name,
@@ -993,6 +1011,8 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 			SNI:          r.SNI,
 			Host:         r.Host,
 			Enabled:      r.Enabled,
+			Region:       &region,
+			Tags:         &tags,
 		})
 	}
 	return out
