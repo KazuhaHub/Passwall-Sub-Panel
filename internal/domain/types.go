@@ -642,7 +642,7 @@ func (n *Node) HasEnabledRelays() bool {
 		return false
 	}
 	for _, relay := range n.Relays {
-		if relay.Enabled {
+		if relay.Publishable() {
 			return true
 		}
 	}
@@ -697,6 +697,15 @@ type RelayLine struct {
 	// refuses a line that still carries either marker.
 	RegionUnresolved bool `json:"-"`
 	TagsUnresolved   bool `json:"-"`
+	// EntryPanelID selects who runs the forwarding. 0 is an external entry:
+	// the administrator forwards Address:Port to the landing outside the panel
+	// (a relay machine, a CDN front). Non-zero is a managed entry: that
+	// Passwall Node server relays Port to this node, and PSP publishes the
+	// forward and gates the line on the server confirming it.
+	EntryPanelID int64 `json:",omitempty"`
+	// ManagedReady is loaded state, never stored: the entry server has applied
+	// exactly the forward this line now asks for. Read it through Publishable.
+	ManagedReady bool `json:"-"`
 }
 
 // RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index

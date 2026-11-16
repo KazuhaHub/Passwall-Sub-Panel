@@ -2270,6 +2270,9 @@ type OIDCConfigRepo interface {
 
 // Repos aggregates all repository ports for dependency injection.
 type Repos struct {
+	// Transit is the managed relay state store (one row per managed relay
+	// line: forward key, entry confirmation, relayed traffic).
+	Transit                 TransitRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2309,4 +2312,13 @@ type Repos struct {
 	DNSCredential DNSCredentialRepo
 	ACMEAccount   ACMEAccountRepo
 	CertEvent     CertEventRepo
+}
+
+// TransitRepo stores the sync-owned state of managed relay lines.
+type TransitRepo interface {
+	Ensure(ctx context.Context, nodeID int64, relayID string) (domain.TransitForward, error)
+	ListByNodes(ctx context.Context, nodeIDs []int64) ([]domain.TransitForward, error)
+	SetApplied(ctx context.Context, id int64, applied domain.ManagedForward, at time.Time) (bool, error)
+	ClearApplied(ctx context.Context, id int64) (bool, error)
+	RecordCounters(ctx context.Context, id int64, up, down int64, epoch uint64) error
 }

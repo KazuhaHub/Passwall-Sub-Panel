@@ -258,7 +258,7 @@ func userStatusForNode(n *domain.Node) userNodeStatus {
 		ShowDirect: !n.EffectiveHideDirect(),
 	}
 	for relayIndex, relay := range n.Relays {
-		if !relay.Enabled {
+		if !relay.Publishable() {
 			continue
 		}
 		status := relayStatusForNode(n, relayIndex)

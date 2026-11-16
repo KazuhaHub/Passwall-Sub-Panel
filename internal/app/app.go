@@ -63,6 +63,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
@@ -371,6 +372,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
+	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit))
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)

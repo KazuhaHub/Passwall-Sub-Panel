@@ -208,6 +208,12 @@ export interface RelayLine {
    *  line is created, independent afterwards. Omitted keeps the saved value. */
   region?: string
   tags?: string[]
+  /** Passwall Node server that runs this line's forwarding. 0 / absent is an
+   *  external entry whose forwarding is configured outside PSP. */
+  entry_panel_id?: number
+  /** Response-only: the entry server confirmed this managed line's forward,
+   *  so the line is published. */
+  managed_ready?: boolean
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'

@@ -50,7 +50,7 @@ func (line VlessRouteLine) ResolveEntry(n *Node) (*RelayLine, bool) {
 	}
 	if n != nil {
 		for i := range n.Relays {
-			if n.Relays[i].ID == line.EntryRelayID && n.Relays[i].Enabled {
+			if n.Relays[i].ID == line.EntryRelayID && n.Relays[i].Publishable() {
 				return &n.Relays[i], true
 			}
 		}

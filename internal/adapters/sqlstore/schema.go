@@ -1654,6 +1654,7 @@ var schemaModels = []any{
 	// consent version. See legal_repo.go.
 	&legalDocumentRow{},
 	&legalConsentRow{},
+	&transitForwardRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

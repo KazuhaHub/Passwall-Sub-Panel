@@ -2026,7 +2026,7 @@
     "relay": {
       "title": "中转线路",
       "add": "添加中转",
-      "hint": "在直连之外，把同一落地再通过中转入口暴露出来。中转机的端口转发（realm/gost/iptables）需你在面板外配置；这里只记录每条线路的入口地址和端口，凭证/协议/TLS 全部复用落地。",
+      "hint": "在直连之外，把同一落地再通过中转入口暴露出来。入口可以是外部转发（在面板外配置 realm/gost/iptables），也可以选一台 Passwall Node 服务器，由 PSP 托管转发；凭证、协议、TLS 全部复用落地。",
       "empty": "暂无中转线路（仅直连）。",
       "name": "线路名称",
       "name_ph": "如：广州移动中转",
@@ -2039,7 +2039,14 @@
       "cdn_optional": "CDN 优选才需填",
       "enabled": "启用",
       "remove": "删除该线路",
-      "hide_direct": "隐藏直连线路"
+      "hide_direct": "隐藏直连线路",
+      "entry": "入口",
+      "entry_external": "外部入口（转发在面板外配置）",
+      "entry_external_hint": "中转机的端口转发由你在面板外配置。",
+      "entry_managed_hint": "由所选 Passwall Node 服务器把入口端口原样转发到本节点，PSP 自动下发。落地看到的来源地址是这台中转服务器，基于 IP 的限制对经此线路的连接不生效。",
+      "port_managed_hint": "中转服务器上监听的端口",
+      "managed_ready": "中转服务器已生效，线路已发布",
+      "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中"
     },
     "line_labels": {
       "region": "Region",

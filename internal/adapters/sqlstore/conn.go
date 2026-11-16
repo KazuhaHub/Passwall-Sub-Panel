@@ -193,6 +193,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		User:                    &userRepo{db: db, groupLimits: groupLimits},
 		Group:                   &groupRepo{db: db, limitsCache: groupLimits},
 		Node:                    &nodeRepo{db: db},
+		Transit:                 &transitRepo{db: db},
 		NodeRoute:               &nodeRepo{db: db},
 		Separator:               &separatorRepo{db: db},
 		Ownership:               newOwnershipRepo(db),
