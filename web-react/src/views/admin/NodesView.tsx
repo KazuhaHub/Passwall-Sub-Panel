@@ -2283,12 +2283,13 @@ export default function NodesView() {
     if (!editOpen || !editing) return null
     const labels = (line: { region?: string; tags?: string[] }) => ({ region: (line.region ?? '').trim(), tags: line.tags ?? [] })
     return {
+      server_address: editForm.server_address,
       region: editForm.region,
       tags: splitTagsText(editForm.tags_text),
       relays: editForm.relays.map(r => ({ id: r.id, ...labels(r) })),
       routes: routeDraft.lines.map(line => ({ id: line.id, entry_relay_id: line.entry_relay_id || '', ...labels(line) })),
     }
-  }, [editOpen, editing, editForm.region, editForm.tags_text, editForm.relays, routeDraft.lines])
+  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text, editForm.relays, routeDraft.lines])
   const lineVisibility = useLineVisibility(editing?.id || 0, lineVisibilityDraft)
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})

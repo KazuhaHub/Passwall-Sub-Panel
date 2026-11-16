@@ -1189,9 +1189,35 @@ type nodeCreateTaskPayload struct {
 	Spec ports.InboundSpec `json:"spec"`
 }
 
-func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) error {
+func decodeNodeCreateTask(payload string) (nodeCreateTaskPayload, error) {
 	var p nodeCreateTaskPayload
-	if err := json.Unmarshal([]byte(task.Payload), &p); err != nil {
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		return p, err
+	}
+	// The persisted task uses the Node JSON shape. Keep key presence separate
+	// from decoded values so an explicit clear is not treated as an omission.
+	var wire struct {
+		Node struct {
+			Relays []struct {
+				Region json.RawMessage
+				Tags   json.RawMessage
+			}
+		} `json:"node"`
+	}
+	if err := json.Unmarshal([]byte(payload), &wire); err != nil {
+		return p, err
+	}
+	for i, relay := range wire.Node.Relays {
+		p.Node.Relays[i].RegionUnresolved = relay.Region == nil
+		p.Node.Relays[i].TagsUnresolved = relay.Tags == nil
+	}
+	domain.ResolveRelayLabels(nil, p.Node.Relays, p.Node.Region, p.Node.Tags)
+	return p, nil
+}
+
+func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) error {
+	p, err := decodeNodeCreateTask(task.Payload)
+	if err != nil {
 		return err
 	}
 	n := p.Node

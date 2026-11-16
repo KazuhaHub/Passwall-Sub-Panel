@@ -31,13 +31,15 @@ it('previews each line\'s visible groups from the unsaved draft and flags a line
   expect(within(dialog).getByTestId('node-groups').textContent).toBe('admin:nodes.node_groups.visible')
   expect(within(dialog).getByTestId('node-groups-removed').textContent).toBe('admin:nodes.node_groups.removed')
   const body = visibilityCalls().at(-1)![1]
-  expect(body).toEqual({ region: 'HK', tags: ['edge'], relays: [{ id: 'gz', region: 'CN', tags: ['cmcc'] }, { id: 'sh', region: 'HK', tags: ['edge'] }], routes: [] })
+  expect(body).toEqual({ server_address: configured.server_address, region: 'HK', tags: ['edge'], relays: [{ id: 'gz', region: 'CN', tags: ['cmcc'] }, { id: 'sh', region: 'HK', tags: ['edge'] }], routes: [] })
 
   // Editing a label re-asks with the draft value, without saving anything.
   const before = visibilityCalls().length
   fireEvent.change(within(dialog).getAllByLabelText('admin:nodes.line_labels.region')[0], { target: { value: 'HK' } })
   await waitFor(() => expect(visibilityCalls().length).toBeGreaterThan(before))
   expect(visibilityCalls().at(-1)![1].relays[0]).toEqual({ id: 'gz', region: 'HK', tags: ['cmcc'] })
+  fireEvent.change(within(dialog).getByDisplayValue(configured.server_address), { target: { value: 'new.example' } })
+  await waitFor(() => expect(visibilityCalls().at(-1)![1].server_address).toBe('new.example'))
   expect(api.put).not.toHaveBeenCalled()
 })
 

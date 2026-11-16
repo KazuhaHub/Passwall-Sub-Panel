@@ -114,6 +114,8 @@ ADR 0041 的实现也暴露两个需要先统一的问题：预览接口是“�
 
 实现位置：
 
+- 节点分组与线路可见性预览读取草稿的 `server_address`；`node:` 条件用编辑后的地址求值，已保存分组仍按原地址比较。
+
 - 审计：`middleware.AuditReadOnly`；`AuditWrites` 在 `c.Next()` 之后检查标记。`router.go` 的 `previewPOST` 是唯一挂载入口，
   `preview_routes_test.go` 读取源码，逐项点名全部 7 个预览路由，并禁止在 `previewPOST` 之外直接使用标记。
   `destPreviewPaths` 与 `isLineVisibilityPreviewPath` 已删除；原有的端到端测试（`dest_route_test.go`）继续证明访问控制预览不入审计。

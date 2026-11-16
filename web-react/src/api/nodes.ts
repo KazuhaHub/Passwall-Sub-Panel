@@ -284,6 +284,7 @@ export async function claimClient(req: {
 
 /** The node editor's unsaved labels, in editor row order (ADR 0041). */
 export interface LineVisibilityDraft {
+  server_address: string
   region: string
   tags: string[]
   relays: { id?: string; region: string; tags: string[] }[]

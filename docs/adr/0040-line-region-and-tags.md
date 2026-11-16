@@ -115,6 +115,7 @@ revision，保留 `status` / `error` / `binding` 不变，写库并失效订阅�
 
 - domain：`internal/domain/line_labels.go`（规范化与上限、省略字段解析、存储前检查、展示字段的唯一界定 `splitRouteLineDisplay` / `CompareRouteLineDisplay`）；`RelayLine` / `VlessRouteLine` 新增 `Region`、`Tags` 及不序列化的 `RegionUnresolved` / `TagsUnresolved` 标记。
 - 存储：`jsonRelays` / `jsonRouteState` 写入前拒绝未解析标记并总是写出两个键；`backfillLineLabels`（`internal/adapters/sqlstore/node_lines_migration.go`）按键存在性做幂等回填，逐列比较交换。
+  启动时先回填标签，再补中转线路 ID，避免 ID 迁移写出的空键掩盖旧数据缺失。升级前排队的 `node_create` 任务在重放时也按键存在性回填，保留显式清空。
 - 接口：节点元数据接口的 `relays[].region/tags` 为可省略字段，由 `node.Service` 在中转 ID 对齐之后解析（新建、纳管路径在入队前解析）；VLESS 路由线路 `LineInput.region/tags` 同理，在 `makeTarget` 中解析。
 - 离线路径：`vlessroute.saveDisplayOnly` 先用本地记录判断适用性，再持本地租约、校验 revision 后写库并失效订阅缓存；不满足条件时交回原远端流程。
 - 渲染：`renderItem.region()` / `tags()`，国旗、占位符、`node_set` 成员、候选目录与“无匹配”校验均经此读取；候选目录的线路条目附带各自的 Region / Tags。

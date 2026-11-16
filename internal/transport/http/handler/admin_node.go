@@ -1146,10 +1146,11 @@ func mapNodeServiceError(c *gin.Context, err error) {
 // labels and each line's labels in editor order. Only labels and the route
 // lines' entry relay matter for visibility; nothing here is stored.
 type lineVisibilityRequest struct {
-	Region string               `json:"region"`
-	Tags   []string             `json:"tags"`
-	Relays []lineVisibilityLine `json:"relays"`
-	Routes []lineVisibilityLine `json:"routes"`
+	ServerAddress string               `json:"server_address"`
+	Region        string               `json:"region"`
+	Tags          []string             `json:"tags"`
+	Relays        []lineVisibilityLine `json:"relays"`
+	Routes        []lineVisibilityLine `json:"routes"`
 }
 
 type lineVisibilityLine struct {
@@ -1204,9 +1205,10 @@ func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	// The draft replaces only labels and lines; panel, address and the rest
-	// come from the stored node, exactly as the save would keep them.
 	draft := *stored
+	if req.ServerAddress != "" {
+		draft.ServerAddress = req.ServerAddress
+	}
 	draft.Region = strings.TrimSpace(req.Region)
 	draft.Tags = []string{}
 	for _, tag := range req.Tags {

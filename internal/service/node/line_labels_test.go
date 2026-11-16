@@ -8,6 +8,21 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
+func TestDecodeNodeCreateTaskPreservesRelayLabelPresence(t *testing.T) {
+	p, err := decodeNodeCreateTask(`{"node":{"PanelID":3,"Region":"HK","Tags":["edge"],"Relays":[{"Address":"legacy.example"},{"Address":"clear.example","Region":"","Tags":[]},{"Address":"partial.example","Region":"JP"}]},"spec":{"Port":443}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.RelayLine{
+		{Address: "legacy.example", Region: "HK", Tags: []string{"edge"}},
+		{Address: "clear.example", Tags: []string{}},
+		{Address: "partial.example", Region: "JP", Tags: []string{"edge"}},
+	}
+	if p.Node.PanelID != 3 || p.Spec.Port != 443 || !reflect.DeepEqual(p.Node.Relays, want) {
+		t.Fatalf("decoded task: %+v, relays: %+v", p, p.Node.Relays)
+	}
+}
+
 type labelNodeRepo struct {
 	fakeNodeRepo
 	stored  domain.Node

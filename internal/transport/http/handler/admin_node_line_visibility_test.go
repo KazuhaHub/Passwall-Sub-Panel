@@ -117,9 +117,11 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 	groups := group.New(visibilityGroups{groups: []*domain.Group{
 		{ID: 1, Name: "HK", TagFilter: domain.TagFilter{Tags: []string{"region:HK"}}},
 		{ID: 2, Name: "Any", TagFilter: domain.TagFilter{All: true}},
+		{ID: 3, Name: "Old address", TagFilter: domain.TagFilter{Tags: []string{"node:land.example"}}},
+		{ID: 4, Name: "New address", TagFilter: domain.TagFilter{Tags: []string{"node:new.example"}}},
 	}}, nil, nil)
 	h := NewAdminNodeHandler(node.New(visibilityNodes{node: storedVisibilityNode()}, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil, nil, nil).WithLineVisibility(groups)
-	w := postLineVisibility(t, h, `{"region":"HK","tags":[],"relays":[{"region":"CN","tags":[]},{"region":"hk","tags":[]}],"routes":[]}`)
+	w := postLineVisibility(t, h, `{"server_address":"new.example","region":"HK","tags":[],"relays":[{"region":"CN","tags":[]},{"region":"hk","tags":[]}],"routes":[]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -127,7 +129,8 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(body.NodeGroups, []int64{1, 2}) || !reflect.DeepEqual(body.Relays, [][]int64{{2}, {1, 2}}) || !reflect.DeepEqual(body.Routes, [][]int64{}) {
+	if !reflect.DeepEqual(body.NodeGroups, []int64{1, 2, 4}) || !reflect.DeepEqual(body.SavedNodeGroups, []int64{1, 2, 3}) ||
+		!reflect.DeepEqual(body.Relays, [][]int64{{2, 4}, {1, 2, 4}}) || !reflect.DeepEqual(body.Routes, [][]int64{}) {
 		t.Fatalf("response %s", w.Body.String())
 	}
 	// Moving the draft to JP drops the HK group; the saved answer still has it.
@@ -135,7 +138,7 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(body.NodeGroups, []int64{2}) || !reflect.DeepEqual(body.SavedNodeGroups, []int64{1, 2}) {
+	if !reflect.DeepEqual(body.NodeGroups, []int64{2, 3}) || !reflect.DeepEqual(body.SavedNodeGroups, []int64{1, 2, 3}) {
 		t.Fatalf("draft %v saved %v", body.NodeGroups, body.SavedNodeGroups)
 	}
 }
