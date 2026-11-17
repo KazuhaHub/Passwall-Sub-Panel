@@ -15,6 +15,8 @@ export default function UsedByPopover({ usedBy, onOpenPolicy, onOpenAllowlist }:
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const policies = usedBy.filter(u => u.kind === 'policy')
   const groups = usedBy.filter(u => u.kind === 'group')
+  // A node's route has no page of its own here: it is named, not linked.
+  const routes = usedBy.filter(u => u.kind === 'route')
   if (usedBy.length === 0) return <span>{t('admin:access_control.lists.usage.unused')}</span>
   return (
     <>
@@ -23,6 +25,7 @@ export default function UsedByPopover({ usedBy, onOpenPolicy, onOpenAllowlist }:
         {[
           policies.length > 0 ? t('admin:access_control.lists.usage.policies', { count: policies.length }) : null,
           groups.length > 0 ? t('admin:access_control.lists.usage.groups', { count: groups.length }) : null,
+          routes.length > 0 ? t('admin:access_control.lists.usage.routes', { count: routes.length }) : null,
         ].filter(Boolean).join(' · ')}
       </Link>
       <Popover open={anchor !== null} anchorEl={anchor} onClose={() => setAnchor(null)}
@@ -43,6 +46,9 @@ export default function UsedByPopover({ usedBy, onOpenPolicy, onOpenAllowlist }:
                 {u.name || String(u.id)}
               </Link>
             </li>
+          ))}
+          {routes.map(u => (
+            <li key={`${u.kind}:${u.id}`} data-testid="used-by-route">{u.name || String(u.id)}</li>
           ))}
         </Box>
       </Popover>

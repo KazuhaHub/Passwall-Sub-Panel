@@ -1822,6 +1822,28 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 			return
 		}
 	}
+	// Refuse if any node's routes by destination leave through this server: the
+	// destinations they take would otherwise have nowhere to go, and the node
+	// could not be sent.
+	var users []gin.H
+	for _, n := range all {
+		var routes []string
+		for _, r := range n.DestRoutes {
+			if r.Target.Kind == domain.DestRouteServer && r.Target.PanelID == id {
+				routes = append(routes, r.ID)
+			}
+		}
+		if len(routes) > 0 {
+			users = append(users, gin.H{"node_id": n.ID, "node": n.DisplayName, "routes": routes})
+		}
+	}
+	if len(users) > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Routes by destination still leave through this server; change or remove them first",
+			"code":  "server_used_by_routes", "used_by": users,
+		})
+		return
+	}
 	panel, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
 		mapServerError(c, err)

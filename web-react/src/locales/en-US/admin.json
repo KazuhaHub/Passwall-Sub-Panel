@@ -1047,7 +1047,12 @@
       "task_identity_conflict": "Task identity conflict",
       "task_replay_fenced": "Task replay was prevented",
       "legacy_task_result_quarantined": "Legacy task result isolated",
-      "front_withheld": "Shared port not sent"
+      "front_withheld": "Shared port not sent",
+      "routes_not_sent": "Routes not sent",
+      "route_listener_withheld": "Routes withheld from a listener",
+      "route_skipped": "Route not sent",
+      "route_regexp_skipped": "Route regexp entries skipped",
+      "route_policy_approximate": "Policy approximated on a route"
     },
     "code_summaries": {
       "core_telemetry_failed": "The node could not read core state or traffic counters.",
@@ -1065,7 +1070,12 @@
       "task_identity_conflict": "One task ID was used with different operation inputs.",
       "task_replay_fenced": "The node could not prove a safe fresh task start.",
       "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity.",
-      "front_withheld": "A saved SNI shared port was not sent to this server (see the detail for why); the listeners behind it keep their own ports."
+      "front_withheld": "A saved SNI shared port was not sent to this server (see the detail for why); the listeners behind it keep their own ports.",
+      "routes_not_sent": "A node's saved routes by destination were not sent to this server (see the detail for why); its traffic leaves through the default exit.",
+      "route_listener_withheld": "A listener was sent without its routes because they could not be sent (see the detail for why); its traffic leaves through the default exit.",
+      "route_skipped": "A route has no destination it can send and was left out of the config.",
+      "route_regexp_skipped": "Regexp entries of a list were skipped in a route: routes take no regexp.",
+      "route_policy_approximate": "On Xray, a destination-policy rule with a regexp or keyword cannot be combined exactly with a route and was approximated."
     },
     "filter": {
       "all": "All review states",
@@ -2056,6 +2066,144 @@
       "exit_address_unknown": "The exit server has not connected yet; enter an address the entry server can reach",
       "reality_server_name": "Camouflage site (SNI)",
       "random_site": "Random"
+    },
+    "routes": {
+      "tunnel": {
+        "confirm_title": "Change the tunnel to {{name}}?",
+        "confirm_nodes": "These nodes use this tunnel as their default exit, so all their traffic goes through it: {{nodes}}.",
+        "confirm_protocol": "Changing the protocol makes the tunnel re-handshake: the nodes that use it as their default exit are taken off subscriptions until both servers have applied it again.",
+        "default_users": "Default exit of: {{nodes}}",
+        "title": "Tunnel settings: {{name}}",
+        "save": "Save tunnel",
+        "saved": "Tunnel saved"
+      },
+      "title": "Route by destination",
+      "hint": "Send some destinations out through another server. Routes are checked from top to bottom and the first match wins; everything no route matches leaves through the default exit.",
+      "help": {
+        "what": "Route by destination sends some destinations out through another server instead of this node's default exit. A node holds an ordered list of routes and the first route a connection matches decides where it leaves. A route matches by destination lists (including geosite lists), typed domain entries, CIDRs, ports and TCP/UDP, and sends the matching traffic through the tunnel to another Passwall Node server, or keeps it on this node's own server.",
+        "default_exit": "The default exit is where this node's traffic leaves when no route matches: its own server, or the single tunnel to the server chosen as the exit server above. A route overrides it only for the destinations it matches.\nA routed exit that is down fails those destinations (they do not fall back to the default exit) and only produces a warning. The node is taken off subscriptions only when the default exit's tunnel is not ready.",
+        "local": "Local means leave from this node's own server, ignoring the default exit. It is a real choice, not \"no route\": use it to keep some destinations here while the rest goes out through another server.",
+        "xray": "Xray limits: a destination-policy rule that uses a regexp or a keyword cannot be combined exactly with a route. Its copy is left out of that route's segment when the rule allows or only observes, and widened when the rule blocks, so a blocked destination stays blocked. Typed regexp entries are refused in routes, and the regexp entries of a list are skipped (shown on the route).",
+        "unsupported": "Routes can be edited only for a node on a Passwall Node server whose Node agent supports routing by destination and the tunnels it needs. Saved routes stay visible, and you can still clear them."
+      },
+      "load_failed": "Could not load this node's routes",
+      "saved": "Routes saved",
+      "unsaved": "Unsaved changes",
+      "add": "Add route",
+      "empty": "No routes: everything leaves through the default exit.",
+      "name": "Name (optional)",
+      "move_up": "Move up",
+      "move_down": "Move down",
+      "remove": "Remove route",
+      "lists": "Destination lists",
+      "lists_hint": "Custom, remote and geosite lists; manage them under Access control > Lists.",
+      "list_option": "{{name}} · {{kind}} · {{entries}} entries",
+      "domains": "Typed domains",
+      "domains_hint": "One per line: domain:example.com (the domain and its subdomains), full:www.example.com (exactly this name), keyword:ads. No regexp.",
+      "cidrs": "CIDRs",
+      "ports": "Ports",
+      "ports_hint": "25,465,587 or 6881-6889; empty means any port",
+      "network": "Network",
+      "network_any": "TCP and UDP",
+      "target": {
+        "label": "Leaves through",
+        "local": "Leave from this server (local)",
+        "local_hint": "Leaves from this node's own server, whatever the default exit is"
+      },
+      "entries_one": "{{count}} compiled entry",
+      "entries_other": "{{count}} compiled entries",
+      "sent": {
+        "sent": "In the config sent to the server",
+        "not_sent": "Not sent to the server",
+        "unsaved": "Unsaved"
+      },
+      "link": {
+        "gone": "This server no longer exists: the node is not sent until the route is changed or removed",
+        "missing": "No tunnel to this server yet",
+        "not_ready": "Tunnel not ready",
+        "ready": "Tunnel ready",
+        "in_end": "Exit end",
+        "out_end": "Entry end",
+        "applied": "applied",
+        "waiting": "waiting"
+      },
+      "default_exit": "Default exit: {{name}}",
+      "default_exit_pending": "The exit server above was changed and is not saved yet; routes are checked against the saved default exit.",
+      "exit": {
+        "local": "this server"
+      },
+      "applied": {
+        "not_sent": "Routes not sent to the server yet",
+        "waiting": "Sent, waiting for the server to apply",
+        "running": "Running: the server confirmed the routes",
+        "sent_at": "sent {{time}}",
+        "applied_at": "applied {{time}}"
+      },
+      "budget": {
+        "title": "Budget on {{engine}}",
+        "entries": "Destination entries: {{used}} / {{max}}",
+        "rules": "Rules: {{used}} / {{max}}",
+        "bytes": "Size: {{used}} / {{max}} bytes"
+      },
+      "limit": {
+        "entries": "entries",
+        "rules": "rules",
+        "bytes": "size"
+      },
+      "clear": "Clear all routes",
+      "clear_title": "Clear all routes?",
+      "clear_message": "All {{count}} saved routes of this node are removed and all its traffic leaves through the default exit again.",
+      "revert": "Discard changes",
+      "save": "Save routes",
+      "reason": {
+        "not_node": "This node is not on a Passwall Node server, so it cannot route by destination.",
+        "no_agent": "The Node agent on this server has not connected yet.",
+        "no_capability": "The Node agent on this server is too old for routing by destination (transit.route.v1); update it.",
+        "no_link_capability": "The Node agent on this server cannot build the tunnels routes need; update it.",
+        "unknown": "Routing by destination is not available for this node."
+      },
+      "note": {
+        "list_last_good": "List {{list}} gives nothing right now; this route keeps using its last good content.",
+        "list_not_ready": "List {{list}} has no content yet, so it matches nothing for now.",
+        "list_empty": "List {{list}} is empty and matches nothing.",
+        "list_regexp_skipped": "{{count}} regexp entries of list {{list}} are skipped: routes take no regexp.",
+        "route_skipped": "This route is not in the config sent to the server: it has no destination it can send."
+      },
+      "issue": {
+        "target": "Route {{route}}: choose where it leaves through.",
+        "name_long": "Route {{route}}: the name is longer than 64 bytes.",
+        "no_match": "Route {{route}}: pick at least one list, entry, CIDR, port or network to match.",
+        "regexp": "Route {{route}}: {{entry}} is a regexp, which routes do not take; use domain:, full: or keyword:.",
+        "entry": "Route {{route}}: {{entry}} must start with domain:, full: or keyword:.",
+        "ports": "Route {{route}}: ports must look like 25,465,587 or 6881-6889 (1-65535)."
+      },
+      "error": {
+        "not_node": "This node is not on a Passwall Node server.",
+        "no_agent": "The Node agent on this server has not connected yet.",
+        "no_capability": "The Node agent on this server is too old for routing by destination.",
+        "no_link_capability": "The Node agent on this server cannot build the tunnels routes need.",
+        "separator": "A separator has no routes.",
+        "bad_route": "Route {{route}} is not valid.",
+        "bad_target": "Route {{route}} has no valid target (another Passwall Node server, or local).",
+        "bad_list": "Route {{route}} uses a list that does not exist or is not a destination list.",
+        "bad_entry": "Route {{route}} has a typed entry that cannot be used; use domain:, full: or keyword:.",
+        "regexp_in_route": "Route {{route}}: {{entry}} is a regexp, which routes do not take; use domain:, full: or keyword:.",
+        "exit_no_address": "Route {{route}} goes out through {{server}}, but there is no address to reach it at: the server has not connected to the panel yet and the tunnel has no exit address. Set the exit address on the tunnel first.",
+        "too_many_entries": "Too many entries: {{routes}} / {{max_routes}} routes, {{domains}} / {{max_domains}} typed domains, {{cidrs}} / {{max_cidrs}} CIDRs.",
+        "over_budget": "Listener {{listener}} of node {{node}} would exceed the {{limit}} budget ({{used}} of {{max}}). Remove routes or use smaller lists."
+      },
+      "warning": {
+        "policy_approximate": "On Xray, {{count}} destination-policy rule(s) on {{node}} use a regexp or a keyword and cannot be combined exactly with a route ({{items}}). Allow and report-only copies are left out of the route's segment; blocking copies are widened.",
+        "budget_near_limit": "Listener {{listener}} of node {{node}} is close to its {{limit}} budget: {{used}} of {{max}}.",
+        "list_last_good": "{{route}}: list {{list}} gives nothing right now; the route keeps using its last good content.",
+        "list_not_ready": "{{route}}: list {{list}} has no content yet, so it matches nothing for now.",
+        "list_regexp_skipped": "{{route}}: {{count}} regexp entries of list {{list}} are skipped (routes take no regexp).",
+        "route_skipped": "{{route}} is left out of the config sent to the server: it has no destination it can send.",
+        "exit_not_ready": "The tunnel to {{server}} is not ready on both servers. Destinations routed there fail until it is (they do not fall back to the default exit); the node stays on subscriptions.",
+        "exit_no_link_capability": "The Node agent on {{server}} cannot take the tunnel, so destinations routed there fail.",
+        "redundant_route": "{{route}} sends its destinations the same way the default exit already does, so it changes nothing.",
+        "routes_not_sent": "The saved routes are not being sent to the server: {{reason}}"
+      }
     },
     "line_labels": {
       "region": "Region",
@@ -4949,6 +5097,11 @@
         "message": "This list is not used, so deleting it does not affect the nodes.",
         "action": "Delete"
       },
+      "route_impact": {
+        "title": "This leaves some routes with nothing",
+        "message": "After this edit the list gives these nodes' routes nothing: {{nodes}}. The destinations those routes took will leave through each node's default exit instead.",
+        "action": "Edit anyway"
+      },
       "list_in_use": {
         "title": "This list is in use",
         "message": "Remove it from these first:",
@@ -5147,6 +5300,8 @@
         "pending_used": "Never downloaded; the parts that use it are not enforced"
       },
       "usage": {
+        "routes_one": "{{count}} node route",
+        "routes_other": "{{count}} node routes",
         "policies_one": "{{count}} policy",
         "policies_other": "{{count}} policies",
         "unused": "Not used",

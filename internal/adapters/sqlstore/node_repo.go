@@ -381,6 +381,9 @@ func (r *nodeRepo) Delete(ctx context.Context, id int64) error {
 		if err := tx.Delete(&nodeRow{}, id).Error; err != nil {
 			return err
 		}
+		if err := deleteNodeRoutesTx(tx, id); err != nil {
+			return err
+		}
 		return deleteDestSourceRuleTx(tx, id)
 	})
 }

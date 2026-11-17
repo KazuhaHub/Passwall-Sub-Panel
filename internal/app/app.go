@@ -61,6 +61,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
@@ -372,12 +373,19 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
-	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent))
+	transitSvc := transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent).
+		WithPanelCheck(func(ctx context.Context, panelID int64) bool {
+			// Only a server that is known not to exist: a failed read is not that.
+			_, err := repos.XUIPanel.GetByID(ctx, panelID)
+			return errors.Is(err, domain.ErrNotFound)
+		})
+	nativeSync.SetTransit(transitSvc)
 	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
 	// ONE front service for the sync, the node saves and the HTTP handlers: it
 	// owns the per-server lock that serializes everything touching a server's
 	// shared ports.
 	frontSvc := front.New(repos.TransitFronts, repos.Node, repos.XUIPanel, repos.NodeAgent, repos.Transit, repos.TransitLinks, nil)
+	transitSvc.WithServerLock(frontSvc.Lock)
 	nativeSync.SetFronts(frontSvc)
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
@@ -815,6 +823,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("destination allowlist groups: %w", err)
 	}
 	nativeSync.SetPolicies(destPolicy)
+	// Routing by destination (transit.route.v1). Left unbound, no config carries
+	// routes and a list is deleted from under a route.
+	routeSvc := route.New(route.Deps{
+		Routes: repos.TransitRoutes, Nodes: repos.Node, Panels: repos.XUIPanel, Agents: repos.NodeAgent,
+		Links: transitSvc, Lists: destLists, Policies: destPolicy, Desired: repos.NativeDesired,
+		Data: destRepos.State, Probes: repos.TransitProbe, ServerLock: frontSvc.Lock,
+	})
+	nativeSync.SetRoutes(routeSvc)
+	nodeSvc.SetRouteLinks(routeSvc.NodeDeleted, routeSvc.Lock)
+	destLists.SetRouteUses(routeSvc)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
 	// response is built, and the dest-audit-ingest worker (started in Run,
 	// drained on Shutdown) stores them. An unbound sink silently drops every
@@ -913,6 +931,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Geo:       geoSvc,
 		NodeSync:  nativeSync,
 		Fronts:    frontSvc,
+		Routes:    routeSvc,
 		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails

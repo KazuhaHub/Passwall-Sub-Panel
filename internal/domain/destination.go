@@ -273,10 +273,12 @@ type DestGroupAllowlistEntry struct {
 type DestListUse struct {
 	PolicyIDs []int64
 	GroupIDs  []int64
+	// NodeIDs are the nodes whose routes by destination name the list.
+	NodeIDs []int64
 }
 
 // Any reports whether anything holds the list.
-func (u DestListUse) Any() bool { return len(u.PolicyIDs)+len(u.GroupIDs) > 0 }
+func (u DestListUse) Any() bool { return len(u.PolicyIDs)+len(u.GroupIDs)+len(u.NodeIDs) > 0 }
 
 // DestTrialSite is one destination of an allowlist group's report-only rows,
 // folded over hours, panels and users.

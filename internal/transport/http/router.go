@@ -41,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/registration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
@@ -126,6 +127,8 @@ type Deps struct {
 	NodeSync     handler.NodeSyncService
 	// Fronts is the SNI front service shared with the node saves and the sync.
 	Fronts *front.Service
+	// Routes is the routing-by-destination service shared with the sync.
+	Routes *route.Service
 	// Dest is the access-control API's wiring. Its routes are always
 	// registered, so that "admin only" is provable with nothing wired; a
 	// field left out makes the routes that need it answer 503.
@@ -605,6 +608,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 			adminGroup.PUT("/servers/:id/fronts/:fid", fronts.Update)
 			adminGroup.DELETE("/servers/:id/fronts/:fid", fronts.Delete)
 			adminGroup.GET("/servers/:id/ports", fronts.Ports)
+		}
+		if d.Routes != nil {
+			routes := handler.NewAdminRouteHandler(d.Routes, d.Repos.Audit)
+			adminGroup.GET("/nodes/:id/routes", routes.Get)
+			adminGroup.PUT("/nodes/:id/routes", routes.Put)
+			// A read dressed as a POST: it carries the editor's draft and writes nothing.
+			previewPOST(adminGroup, "/nodes/:id/routes/check", routes.Check)
 		}
 		if d.Repos.TransitLinks != nil {
 			links := handler.NewAdminTransitHandler(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))

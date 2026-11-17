@@ -30,6 +30,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
@@ -98,6 +99,7 @@ type Service struct {
 	// fronts plans the SNI-shared ports of a server (transit.sni.v1). NIL
 	// MEANS THIS BUILD DOES NOT SHARE PORTS: no config carries Fronts.
 	fronts FrontPublisher
+	routes RoutePlanner
 }
 
 // FrontPublisher is the SNI front collaborator (service/front.Service).
@@ -114,6 +116,22 @@ type FrontPublisher interface {
 // IssueFrontWithheld is the issue recorded for a saved front that is not being
 // sent; its key is the front's key and its detail says why.
 const IssueFrontWithheld = "front_withheld"
+
+// withoutNodes is the snapshot without the nodes of the listeners left out.
+func withoutNodes(snapshot *ports.NativeDesiredSnapshot, left []route.Withheld) *ports.NativeDesiredSnapshot {
+	drop := make(map[int64]bool, len(left))
+	for _, w := range left {
+		drop[w.NodeID] = true
+	}
+	clone := *snapshot
+	clone.Nodes = nil
+	for _, node := range snapshot.Nodes {
+		if node != nil && !drop[node.ID] {
+			clone.Nodes = append(clone.Nodes, node)
+		}
+	}
+	return &clone
+}
 
 // presentNodes are the nodes in a server's desired config.
 func presentNodes(snapshot *ports.NativeDesiredSnapshot) []int64 {
@@ -199,10 +217,27 @@ type TransitPublisher interface {
 	ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error)
 	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
-	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (transit.LinkPlan, error)
+	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (transit.LinkPlan, error)
 	ConfirmLinks(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus) (bool, error)
 	RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.LinkCounters) error
 }
+
+// RoutePlanner is the routing-by-destination collaborator (service/route.Service).
+type RoutePlanner interface {
+	// PlanFor compiles the routes of the nodes a server is sent: empty unless
+	// the agent declared transit.route.v1 and transit.link.v1.
+	PlanFor(ctx context.Context, in route.PlanInput) (route.Plan, error)
+	// RecordSent stores what the config holds of each node's routes.
+	RecordSent(ctx context.Context, nodes []*domain.Node, sent []nodeprotocol.ListenerRoutes, withheld map[int64]string) (bool, error)
+	// Early decides which listeners cannot be sent with their routes before
+	// shared ports and links are planned.
+	Early(ctx context.Context, panelID int64, caps []string, nodes []*domain.Node) (route.Plan, error)
+	// Confirm records which routes the server confirmed holding.
+	Confirm(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
+}
+
+// SetRoutes binds the routing planner. Left unbound, no config carries routes.
+func (s *Service) SetRoutes(r RoutePlanner) { s.routes = r }
 
 // ProbeCoordinator is the link-probe collaborator (service/linkprobe.Service).
 type ProbeCoordinator interface {
@@ -438,10 +473,32 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// the policy sees exactly the config it always did.
 	var transitBody nodeprotocol.Transit
 	var egressExit map[int64]int64
+	var linkPlan transit.LinkPlan
+	var routeExits map[int64][]destpolicy.RouteExit
+	var routeIssues []domain.NodeAgentIssue
+	var routeWithheld, late []route.Withheld
+	// routedNodes are the nodes the server is configured for, before any is left
+	// out of this config: what the routes of each is recorded against.
+	routedNodes := snapshot.Nodes
 	var forwardMethods map[nodeprotocol.ForwardKey]string
 	var frontIssues []domain.NodeAgentIssue
 	var frontPlan front.Plan
 	if s.transit != nil {
+		// LISTENERS WHOSE ROUTES CANNOT BE SENT ARE DECIDED FIRST, before the
+		// shared ports and the links are planned from the config: one left out is
+		// then simply not there, and drops out of a shared port with its routes
+		// instead of being named by a front the server would refuse whole.
+		if s.routes != nil {
+			early, err := s.routes.Early(ctx, agent.PanelID, report.Capabilities, snapshot.Nodes)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			if len(early.Withheld) > 0 {
+				routeWithheld = append(routeWithheld, early.Withheld...)
+				routeIssues = append(routeIssues, early.Issues...)
+				snapshot = withoutNodes(snapshot, early.Withheld)
+			}
+		}
 		// A forward or an incoming link on a port one of this server's own
 		// inbounds uses would make the node refuse the whole config, listener
 		// changes included. Such an object is withheld here instead; its
@@ -497,16 +554,36 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 			}
 		}
 		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitLink) {
-			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening)
+			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening, slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitRoute))
 			if err != nil {
 				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 			}
+			linkPlan = plan
 			transitBody.LinksIn, transitBody.LinksOut, transitBody.Egress = plan.In, plan.Out, plan.Egress
 			egressExit = plan.EgressExit
 			if plan.Changed && s.invalidateRender != nil {
 				// What is sent decides which bound nodes may be published.
 				s.invalidateRender()
 			}
+		}
+		// ROUTES BY DESTINATION go only to an agent that declared transit.route.v1:
+		// one that did not would ignore them and send every destination through
+		// the default exit with no error anywhere. A listener whose routes cannot
+		// be sent is left out of the config instead (below), so its destinations
+		// never go through the default exit by omission.
+		if s.routes != nil {
+			routePlan, err := s.routes.PlanFor(ctx, route.PlanInput{
+				PanelID: agent.PanelID, Capabilities: report.Capabilities, Nodes: snapshot.Nodes,
+				RouteOut: linkPlan.RouteOut, RouteKeys: linkPlan.RouteKeys, Out: linkPlan.Out,
+				Egress: linkPlan.Egress, EgressExit: linkPlan.EgressExit,
+			})
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			transitBody.Routes, routeExits = routePlan.Routes, routePlan.Exits
+			routeIssues = append(routeIssues, routePlan.Issues...)
+			late = routePlan.Withheld
+			routeWithheld = append(routeWithheld, late...)
 		}
 		if len(frontPlan.Fronts) > 0 {
 			transitBody.Forwards = append(transitBody.Forwards, frontPlan.Forwards...)
@@ -594,6 +671,46 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 			snapshot = &clone
 		}
 	}
+	// A listener whose routes cannot be sent is not sent either: its routed
+	// destinations would otherwise leave through its default exit.
+	for _, w := range routeWithheld {
+		log.Warn("listener withheld: its routes cannot be sent", "agent_id", agent.AgentID, "node_id", w.NodeID, "reason", w.Reason, "detail", w.Detail)
+	}
+	if len(late) > 0 {
+		snapshot = withoutNodes(snapshot, late)
+	}
+	// Routes name listeners of this config only: one a front left out is not sent.
+	if len(transitBody.Routes) > 0 {
+		present := make(map[nodeprotocol.ListenerKey]bool, len(snapshot.Nodes))
+		for _, node := range snapshot.Nodes {
+			if node != nil {
+				present[nodeprotocol.NewListenerKey(node.ID)] = true
+			}
+		}
+		kept := transitBody.Routes[:0:0]
+		for _, lr := range transitBody.Routes {
+			if present[lr.Listener] {
+				kept = append(kept, lr)
+			} else if id, err := lr.Listener.RowID(); err == nil {
+				delete(routeExits, id)
+			}
+		}
+		transitBody.Routes = kept
+	}
+	if s.routes != nil {
+		reasons := make(map[int64]string, len(routeWithheld))
+		for _, w := range routeWithheld {
+			reasons[w.NodeID] = w.Reason
+		}
+		moved, err := s.routes.RecordSent(ctx, routedNodes, transitBody.Routes, reasons)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		if moved && s.invalidateRender != nil {
+			// A node that is withheld is not published, and one that is sent again is.
+			s.invalidateRender()
+		}
+	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
@@ -606,7 +723,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
 			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion, AgentVersion: report.AgentVersion,
-			AuditCollect: choices.collect, DestResolve: choices.resolve, Egress: egressExit,
+			AuditCollect: choices.collect, DestResolve: choices.resolve, Egress: egressExit, RouteExits: routeExits,
 		})
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
@@ -614,10 +731,11 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		configBody.Policy, policyDigest = result.Policy, result.Digest
 		policyIssues = append(policyIssues, result.Issues...)
 	}
-	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 {
+	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 {
 		configBody.Transit = &transitBody
 	}
 	policyIssues = append(policyIssues, frontIssues...)
+	policyIssues = append(policyIssues, routeIssues...)
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
 			policyIssues[i].AgentID = agent.AgentID
@@ -1203,6 +1321,14 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 				return fmt.Errorf("nodesync: %w", err)
 			}
 			renderCredentialsChanged = renderCredentialsChanged || changed || linksChanged
+			if s.routes != nil {
+				// The routes of a listener run when the listener is applied; they
+				// do not decide whether a node is published, so nothing is
+				// refreshed for them.
+				if _, err := s.routes.Confirm(ctx, sent.Transit, statuses, now); err != nil {
+					return fmt.Errorf("nodesync: %w", err)
+				}
+			}
 		}
 	}
 	if renderCredentialsChanged && s.invalidateRender != nil {

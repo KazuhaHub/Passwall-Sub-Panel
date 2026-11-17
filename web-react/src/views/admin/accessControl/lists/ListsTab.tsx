@@ -239,7 +239,9 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
           <Box component="ul" sx={{ m: 0, pl: 2 }}>
             {(inUse?.usedBy ?? []).map(u => (
               <li key={`${u.kind}:${u.id}`}>
-                <Link component="button" type="button" onClick={() => { setInUse(null); if (u.kind === 'group') onOpenAllowlist(u.id); else onOpenPolicy(u.id) }}>{u.name || String(u.id)}</Link>
+                {u.kind === 'route'
+                  ? <span data-testid="in-use-route">{u.name || String(u.id)}</span>
+                  : <Link component="button" type="button" onClick={() => { setInUse(null); if (u.kind === 'group') onOpenAllowlist(u.id); else onOpenPolicy(u.id) }}>{u.name || String(u.id)}</Link>}
               </li>
             ))}
           </Box>

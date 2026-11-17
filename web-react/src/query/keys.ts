@@ -80,6 +80,12 @@ export const probeKeys = {
   panel: (s: QueryScope, panelId: number) => [...probeKeys.all(s), panelId] as const,
 }
 
+/** Routing by destination: one node's ordered routes. */
+export const routeKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'node-routes'] as const,
+  list: (s: QueryScope, nodeId: number) => [...routeKeys.all(s), 'list', nodeId] as const,
+}
+
 /** SNI-shared ports (fronts) and the port-usage view, per server. */
 export const frontKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'fronts'] as const,

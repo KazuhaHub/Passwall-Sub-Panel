@@ -65,6 +65,11 @@ type CompileInput struct {
 	// Egress maps each of the node's listeners that leaves through a tunnel to
 	// its exit server. Panel-scoped policies follow the exit (nodeView.egress).
 	Egress map[int64]int64
+	// RouteExits maps each of the node's listeners that routes by destination
+	// (transit.route.v1) to the exits its traffic can leave through, its default
+	// included. It is set only for a node that is being sent routes, so a node
+	// without any compiles exactly as it always did.
+	RouteExits map[int64][]RouteExit
 }
 
 // Result is a compile's answer.
@@ -148,50 +153,9 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return s.noPolicy(ctx, in, meta, "", "", "", now)
 	}
 
-	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups), egress: in.Egress}
-	var nodes []*domain.Node
-	if in.Snapshot != nil {
-		for _, n := range in.Snapshot.Nodes {
-			if n != nil {
-				view.nodeIDs[n.ID] = true
-				nodes = append(nodes, n)
-			}
-		}
-		seen := map[int64]bool{}
-		for _, c := range in.Snapshot.Clients {
-			if c.Client != nil && !seen[c.Client.UserID] {
-				seen[c.Client.UserID] = true
-				view.users = append(view.users, c.Client.UserID)
-			}
-		}
-	}
-	slices.Sort(view.users)
-	if cb.base.needsGroups(view.groupCap) {
-		if view.groupOf, err = s.defs.GroupIDsByUserIDs(ctx, view.users); err != nil {
-			return Result{}, fmt.Errorf("destpolicy: read the roster's groups: %w", err)
-		}
-	}
-	if view.groupCap && s.members != nil {
-		// The per-node limit counts the members the panel's tags select, not the
-		// roster (which shrinks when members are made ineligible): see
-		// groupSubjectSlack.
-		// Every allowlist group, with or without a member on the roster: when
-		// the limit itself makes the panel ineligible all the members leave the
-		// roster, and a count that needed one would then see the limit satisfied
-		// and let them back in, on every sync.
-		for _, g := range cb.base.groups {
-			n, err := s.members.TagMatchedMembers(ctx, in.PanelID, g.id)
-			if err != nil {
-				return Result{}, fmt.Errorf("destpolicy: count the members of group %d: %w", g.id, err)
-			}
-			if n == 0 {
-				continue // the panel's tags select none of its members
-			}
-			if view.tagMatched == nil {
-				view.tagMatched = map[int64]int{}
-			}
-			view.tagMatched[g.id] = n
-		}
+	view, nodes, err := s.viewFor(ctx, in, cb)
+	if err != nil {
+		return Result{}, err
 	}
 	engine := strings.ToLower(strings.TrimSpace(in.Config.Core.Engine))
 	if engine == "" {
@@ -238,6 +202,59 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		s.metrics.CompileDuration(time.Since(started))
 	}
 	return res, nil
+}
+
+// viewFor is what a policy is specialised for: the node's listeners, its roster
+// and the groups of the roster's users, the members its tags select, and its
+// exits. Compile and PlanPolicy read the same view.
+func (s *Service) viewFor(ctx context.Context, in CompileInput, cb *cachedBase) (nodeView, []*domain.Node, error) {
+	var err error
+	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups), egress: in.Egress, routes: in.RouteExits}
+	var nodes []*domain.Node
+	if in.Snapshot != nil {
+		for _, n := range in.Snapshot.Nodes {
+			if n != nil {
+				view.nodeIDs[n.ID] = true
+				nodes = append(nodes, n)
+			}
+		}
+		seen := map[int64]bool{}
+		for _, c := range in.Snapshot.Clients {
+			if c.Client != nil && !seen[c.Client.UserID] {
+				seen[c.Client.UserID] = true
+				view.users = append(view.users, c.Client.UserID)
+			}
+		}
+	}
+	slices.Sort(view.users)
+	if cb.base.needsGroups(view.groupCap) {
+		if view.groupOf, err = s.defs.GroupIDsByUserIDs(ctx, view.users); err != nil {
+			return nodeView{}, nil, fmt.Errorf("destpolicy: read the roster's groups: %w", err)
+		}
+	}
+	if view.groupCap && s.members != nil {
+		// The per-node limit counts the members the panel's tags select, not the
+		// roster (which shrinks when members are made ineligible): see
+		// groupSubjectSlack.
+		// Every allowlist group, with or without a member on the roster: when
+		// the limit itself makes the panel ineligible all the members leave the
+		// roster, and a count that needed one would then see the limit satisfied
+		// and let them back in, on every sync.
+		for _, g := range cb.base.groups {
+			n, err := s.members.TagMatchedMembers(ctx, in.PanelID, g.id)
+			if err != nil {
+				return nodeView{}, nil, fmt.Errorf("destpolicy: count the members of group %d: %w", g.id, err)
+			}
+			if n == 0 {
+				continue // the panel's tags select none of its members
+			}
+			if view.tagMatched == nil {
+				view.tagMatched = map[int64]int{}
+			}
+			view.tagMatched[g.id] = n
+		}
+	}
+	return view, nodes, nil
 }
 
 // noPolicy is the nil answer for a node that is paused or has nothing in
@@ -932,6 +949,19 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 	for _, id := range egress {
 		fmt.Fprintf(h, "e%d:%d;", id, v.egress[id])
 	}
+	// Written only for a routed listener, so a node without routes keeps its key.
+	routed := make([]int64, 0, len(v.routes))
+	for id := range v.routes {
+		routed = append(routed, id)
+	}
+	slices.Sort(routed)
+	for _, id := range routed {
+		fmt.Fprintf(h, "rt%d:", id)
+		for _, exit := range v.routes[id] {
+			fmt.Fprintf(h, "%s@%d,", exit.Key, exit.PanelID)
+		}
+		fmt.Fprint(h, ";")
+	}
 	tm := make([]int64, 0, len(v.tagMatched))
 	for gid := range v.tagMatched {
 		tm = append(tm, gid)
@@ -1027,7 +1057,16 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 			if p == nil {
 				continue
 			}
-			if p.Scope == string(domain.DestScopePanels) {
+			if p.Scope == string(domain.DestScopePanels) && (len(v.routes) > 0 || len(r.Exits) > 0) {
+				// Exits are in play, now or when the policy was last applied: keep the
+				// rule only on the listeners whose traffic the policy still covers
+				// through every exit the rule takes.
+				kept := v.covered(p.Panels, r)
+				if len(kept) == 0 {
+					continue
+				}
+				r.Inbounds = kept
+			} else if p.Scope == string(domain.DestScopePanels) {
 				all, inbounds := v.panelScope(p.Panels)
 				if !all {
 					// Narrowed to the inbounds whose traffic the policy now

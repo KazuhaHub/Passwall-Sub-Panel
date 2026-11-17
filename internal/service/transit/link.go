@@ -28,6 +28,7 @@ type LinkRepo interface {
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
 	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
+	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
 }
 
@@ -63,6 +64,15 @@ type LinkPlan struct {
 	Out        []nodeprotocol.LinkOut
 	Egress     []nodeprotocol.EgressBinding
 	EgressExit map[int64]int64
+	// RouteKeys is, on an entry server asked for routes, the link from it to
+	// each exit server its nodes' routes name: the key exists as soon as the
+	// link row does, sent or not. RouteOut holds the ones whose outgoing half
+	// is in Out. A route whose exit is in RouteKeys but not RouteOut cannot be
+	// sent: its listener is withheld instead, because sending the route
+	// without the link would be refused and dropping it would leave the
+	// destinations through the default exit.
+	RouteKeys map[int64]nodeprotocol.LinkKey
+	RouteOut  map[int64]nodeprotocol.LinkKey
 	// Changed reports that what is sent differs from the last sync, which
 	// changes which nodes are publishable.
 	Changed bool
@@ -78,7 +88,12 @@ type LinkPlan struct {
 // than leaving from the entry, and the node is withheld from subscriptions by
 // readiness. Leaving locally in the meantime would quietly replace the exit the
 // administrator chose.
-func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (LinkPlan, error) {
+//
+// routes says the server asked declared transit.route.v1: only then are the
+// links its nodes' routes leave through part of its outgoing half. The exit of
+// such a link takes its incoming half whatever the entry declared, so the link
+// is ready as soon as the entry can use it.
+func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (LinkPlan, error) {
 	if s.links == nil {
 		return LinkPlan{}, nil
 	}
@@ -88,21 +103,42 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 	}
 	type pair struct{ entry, exit int64 }
 	bound := map[pair][]*domain.Node{}
+	// viaRoute are the pairs some route of an enabled node leaves through.
+	viaRoute := map[pair]bool{}
 	for _, node := range nodes {
-		if node == nil || node.EgressPanelID == 0 || !node.Enabled || node.IsSeparator() || node.EgressPanelID == node.PanelID {
+		if node == nil || !node.Enabled || node.IsSeparator() {
 			continue
 		}
-		if node.PanelID != panelID && node.EgressPanelID != panelID {
-			continue
+		if node.EgressPanelID != 0 && node.EgressPanelID != node.PanelID && (node.PanelID == panelID || node.EgressPanelID == panelID) {
+			key := pair{node.PanelID, node.EgressPanelID}
+			bound[key] = append(bound[key], node)
 		}
-		key := pair{node.PanelID, node.EgressPanelID}
-		bound[key] = append(bound[key], node)
+		for _, route := range node.DestRoutes {
+			if route.Target.Kind != domain.DestRouteServer || route.Target.PanelID <= 0 || route.Target.PanelID == node.PanelID {
+				continue
+			}
+			if (node.PanelID == panelID && routes) || route.Target.PanelID == panelID {
+				if s.panelGone != nil && s.panelGone(ctx, route.Target.PanelID) {
+					// A route to a deleted server has no tunnel: its listener is
+					// withheld by the routing plan, and none is made or kept for it.
+					continue
+				}
+				viaRoute[pair{node.PanelID, route.Target.PanelID}] = true
+			}
+		}
 	}
-	if len(bound) == 0 {
+	if len(bound) == 0 && len(viaRoute) == 0 {
 		return LinkPlan{}, nil
 	}
-	pairs := make([]pair, 0, len(bound))
+	pairSet := make(map[pair]bool, len(bound)+len(viaRoute))
 	for key := range bound {
+		pairSet[key] = true
+	}
+	for key := range viaRoute {
+		pairSet[key] = true
+	}
+	pairs := make([]pair, 0, len(pairSet))
+	for key := range pairSet {
 		pairs = append(pairs, key)
 	}
 	sort.Slice(pairs, func(i, j int) bool {
@@ -121,11 +157,20 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 	}
 	plan := LinkPlan{EgressExit: map[int64]int64{}}
 	for _, key := range pairs {
-		link, err := s.links.EnsureLink(ctx, key.entry, key.exit, func() (domain.TransitLink, error) {
-			return s.newLink(ctx, nodes, key.entry, key.exit)
-		})
+		link, ok, err := s.ensurePairLink(ctx, nodes, key.entry, key.exit)
 		if err != nil {
 			return LinkPlan{}, fmt.Errorf("transit: link %d→%d: %w", key.entry, key.exit, err)
+		}
+		if !ok {
+			// Nothing uses the pair any more: it was dropped after the nodes were
+			// read, and is not made again.
+			continue
+		}
+		if key.entry == panelID && viaRoute[key] {
+			if plan.RouteKeys == nil {
+				plan.RouteKeys = map[int64]nodeprotocol.LinkKey{}
+			}
+			plan.RouteKeys[key.exit] = nodeprotocol.NewLinkKey(link.ID)
 		}
 		if key.exit == panelID {
 			in := link.LinkIn()
@@ -176,8 +221,54 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 			plan.EgressExit[node.ID] = key.exit
 		}
 		plan.Out = append(plan.Out, out)
+		if viaRoute[key] {
+			if plan.RouteOut == nil {
+				plan.RouteOut = map[int64]nodeprotocol.LinkKey{}
+			}
+			plan.RouteOut[key.exit] = out.Key
+		}
 	}
 	return plan, nil
+}
+
+// ensurePairLink returns the link of a pair, making it when it does not exist.
+// Making one happens under the locks of both servers, and only if a node of the
+// entry still uses the pair at that moment: a save that has just dropped the
+// tunnel (it removes it under the same locks) must not see it come back because
+// this sync read the nodes a moment earlier.
+func (s *Service) ensurePairLink(ctx context.Context, nodes []*domain.Node, entry, exit int64) (domain.TransitLink, bool, error) {
+	if link, err := s.links.GetLink(ctx, entry, exit); err == nil {
+		return link, true, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.TransitLink{}, false, err
+	}
+	defer s.lockPair(entry, exit)()
+	if s.serverLock != nil {
+		fresh, err := s.nodes.List(ctx)
+		if err != nil {
+			return domain.TransitLink{}, false, err
+		}
+		nodes = fresh
+		used := false
+		for _, node := range nodes {
+			if node == nil || node.PanelID != entry || !node.Enabled || node.IsSeparator() {
+				continue
+			}
+			if node.EgressPanelID == exit {
+				used = true
+			}
+			for _, route := range node.DestRoutes {
+				used = used || (route.Target.Kind == domain.DestRouteServer && route.Target.PanelID == exit)
+			}
+		}
+		if !used {
+			return domain.TransitLink{}, false, nil
+		}
+	}
+	link, err := s.links.EnsureLink(ctx, entry, exit, func() (domain.TransitLink, error) {
+		return s.newLink(ctx, nodes, entry, exit)
+	})
+	return link, err == nil, err
 }
 
 // sent records what one side of a link is being sent; "" records that it is
@@ -256,6 +347,70 @@ func (s *Service) RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Tra
 		}
 	}
 	return nil
+}
+
+// EnsureLink makes sure the tunnel from entry to exit exists, with fresh
+// credentials and a port on the exit when it does not, and returns it. A route
+// that leaves through another server asks for it when it is saved, so the
+// administrator sees the link before the first sync; the sync creates it the
+// same way when it is missing.
+func (s *Service) EnsureLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, errors.New("transit: tunnels are not enabled")
+	}
+	if entry <= 0 || exit <= 0 || entry == exit {
+		return domain.TransitLink{}, fmt.Errorf("%w: a tunnel joins two different servers", domain.ErrValidation)
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return domain.TransitLink{}, fmt.Errorf("transit: list nodes: %w", err)
+	}
+	return s.links.EnsureLink(ctx, entry, exit, func() (domain.TransitLink, error) {
+		return s.newLink(ctx, nodes, entry, exit)
+	})
+}
+
+// OutUsable says whether the entry's half of the link to exit can be sent: an
+// address to dial exists (the link's own, else the one the exit's sync came
+// from) and the half passes the wire contract. A link that does not exist yet is
+// judged with the credentials it would be made with.
+func (s *Service) OutUsable(ctx context.Context, entry, exit int64) (bool, error) {
+	if s.links == nil {
+		return false, nil
+	}
+	link, err := s.links.GetLink(ctx, entry, exit)
+	if errors.Is(err, domain.ErrNotFound) {
+		link = domain.TransitLink{ID: 1, Protocol: nodeprotocol.LinkProtocolSS2022, Port: 20000,
+			SSMethod: "2022-blake3-aes-128-gcm", SSKey: "AAAAAAAAAAAAAAAAAAAAAA=="}
+	} else if err != nil {
+		return false, err
+	}
+	addresses, err := s.serverAddresses(ctx, []int64{exit})
+	if err != nil {
+		return false, err
+	}
+	out := link.LinkOut(domain.TransitLinkAddress(link, addresses[exit]))
+	return nodeprotocol.ValidateLinkOut(out) == nil, nil
+}
+
+// RemoveLink deletes the tunnel from entry to exit and frees its port. The
+// caller has checked that nothing uses the pair any more: a node's default exit
+// and every route leaving through it.
+func (s *Service) RemoveLink(ctx context.Context, entry, exit int64) error {
+	if s.links == nil {
+		return nil
+	}
+	_, err := s.links.DeleteLink(ctx, entry, exit)
+	return err
+}
+
+// LinkRow returns the link from entry to exit as stored, domain.ErrNotFound
+// when none exists.
+func (s *Service) LinkRow(ctx context.Context, entry, exit int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, domain.ErrNotFound
+	}
+	return s.links.GetLink(ctx, entry, exit)
 }
 
 // ServerAddress is the address PSP last saw a server's sync come from, or "".

@@ -138,6 +138,7 @@ func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) 
 		large    *destlist.TooLargeError
 		broad    *destlist.BroadEntryError
 		inUse    *destlist.ListInUseError
+		impact   *destlist.RouteImpactError
 		notReady *destlist.ListNotReadyError
 		reject   *destlist.UpdateRejectedError
 		pub      *destpolicy.PublishRefusedError
@@ -176,6 +177,14 @@ func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) 
 		body(http.StatusBadRequest, "dest_list_insecure_url", "a list URL must be https", nil)
 	case errors.As(err, &notReady):
 		body(http.StatusConflict, codeListNotReady, "a list is not ready: an allowlist that is on cannot use it", h.listNotReadyBody(c, notReady.ListIDs))
+	case errors.As(err, &impact):
+		used := make([]any, 0, len(impact.Routes))
+		for _, r := range impact.Routes {
+			used = append(used, destlist.PolicyRef{Kind: "route", ID: r.NodeID, Name: r.Name})
+		}
+		body(http.StatusConflict, "dest_list_route_impact",
+			"the edit leaves routes by destination with nothing from this list; their destinations would go through each node's default exit. Repeat with confirm_routes=true to make it",
+			gin.H{"used_by": used})
 	case errors.As(err, &inUse):
 		used := make([]any, 0, len(inUse.PolicyIDs)+len(inUse.GroupIDs))
 		for _, r := range h.policyRefs(c.Request.Context(), inUse.PolicyIDs) {
@@ -184,7 +193,10 @@ func (h *AdminDestHandler) destError(c *gin.Context, err error, codes errCodes) 
 		for _, r := range h.groupRefs(c, inUse.GroupIDs) {
 			used = append(used, r)
 		}
-		body(http.StatusConflict, "dest_list_in_use", "a policy or an allowlist group uses this list", gin.H{"used_by": used})
+		for _, r := range inUse.Routes {
+			used = append(used, destlist.PolicyRef{Kind: "route", ID: r.NodeID, Name: r.Name})
+		}
+		body(http.StatusConflict, "dest_list_in_use", "a policy, an allowlist group or a node's routes use this list", gin.H{"used_by": used})
 	case errors.As(err, &reject):
 		body(http.StatusConflict, "dest_geosite_update_rejected", "the update would break a policy in force", gin.H{"rejection": reject.UpdateRejection})
 	case errors.Is(err, destlist.ErrGeositeBusy):

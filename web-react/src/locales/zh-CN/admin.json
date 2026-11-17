@@ -1045,7 +1045,12 @@
       "task_identity_conflict": "任务身份冲突",
       "task_replay_fenced": "任务重放已阻止",
       "legacy_task_result_quarantined": "旧任务结果已隔离",
-      "front_withheld": "共用端口未下发"
+      "front_withheld": "共用端口未下发",
+      "routes_not_sent": "路由未下发",
+      "route_listener_withheld": "入站的路由未下发",
+      "route_skipped": "路由未下发",
+      "route_regexp_skipped": "路由跳过了正则条目",
+      "route_policy_approximate": "路由上的策略为近似处理"
     },
     "code_summaries": {
       "core_telemetry_failed": "节点未能读取内核运行状态或流量计数。",
@@ -1063,7 +1068,12 @@
       "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
       "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
       "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。",
-      "front_withheld": "一个已保存的 SNI 共用端口没有发给这台服务器（原因见详情），它后面的监听器保持自己的端口。"
+      "front_withheld": "一个已保存的 SNI 共用端口没有发给这台服务器（原因见详情），它后面的监听器保持自己的端口。",
+      "routes_not_sent": "某个节点已保存的按目标分流路由没有发给这台服务器（原因见详情），它的流量走默认出口。",
+      "route_listener_withheld": "某个入站因路由无法下发而不带路由发送（原因见详情），它的流量走默认出口。",
+      "route_skipped": "有一条路由没有可下发的目标，已从配置中省略。",
+      "route_regexp_skipped": "路由跳过了列表中的正则条目：路由不接受正则。",
+      "route_policy_approximate": "在 Xray 上，使用正则或关键字的目标策略规则无法与路由精确组合，已做近似处理。"
     },
     "filter": {
       "all": "全部查看状态",
@@ -2053,6 +2063,143 @@
       "exit_address_unknown": "出口服务器尚未连接过面板，请填写入口服务器可达的地址",
       "reality_server_name": "伪装站点 (SNI)",
       "random_site": "随机"
+    },
+    "routes": {
+      "tunnel": {
+        "confirm_title": "修改到 {{name}} 的隧道？",
+        "confirm_nodes": "以下节点把这条隧道作为默认出口，它们的全部流量都经过它：{{nodes}}。",
+        "confirm_protocol": "更换协议会让隧道重新握手：以这条隧道为默认出口的节点，在两台服务器都重新生效前会从订阅中撤下。",
+        "default_users": "默认出口为此隧道的节点：{{nodes}}",
+        "title": "隧道设置：{{name}}",
+        "save": "保存隧道",
+        "saved": "隧道已保存"
+      },
+      "title": "按目标分流",
+      "hint": "让部分目标地址改走另一台服务器出站。路由从上到下依次匹配，命中第一条即生效；没有命中任何路由的流量走默认出口。",
+      "help": {
+        "what": "按目标分流：让部分目标地址不走本节点的默认出口，而从另一台服务器出站。每个节点有一份有序的路由列表，连接命中的第一条路由决定它从哪里出站。路由可按目标列表（含 geosite 列表）、带前缀的域名条目、CIDR、端口和 TCP/UDP 匹配，命中的流量经隧道交给另一台 Passwall Node 服务器，或留在本节点所在服务器直出。",
+        "default_exit": "默认出口是没有命中任何路由的流量的去向：本节点所在服务器直出，或经上方「出口服务器」所选的那条隧道出站。路由只对它命中的目标覆盖默认出口。\n路由指向的出口不可用时，这些目标会连接失败（不会回退到默认出口），面板只给出警告。只有默认出口的隧道未就绪时，节点才会从订阅中撤下。",
+        "local": "本机直出：无视默认出口，从本节点所在服务器直接出站。这是一个明确的选择，不是「没有路由」：用它让部分目标留在本机，其余流量走另一台服务器。",
+        "xray": "Xray 的限制：使用正则或关键字的目标策略规则无法与路由精确组合。放行或仅报告的规则，其副本会在该路由的分段中省略；拦截规则的副本会被放宽，被拦截的目标仍然被拦截。路由中不接受带 regexp: 的条目；列表里的正则条目会被跳过（在对应路由上显示）。",
+        "unsupported": "只有位于 Passwall Node 服务器、且该服务器的 Node 代理支持按目标分流及所需隧道的节点才能编辑路由。已保存的路由仍会显示，也仍可全部清除。"
+      },
+      "load_failed": "读取该节点的路由失败",
+      "saved": "路由已保存",
+      "unsaved": "有未保存的更改",
+      "add": "添加路由",
+      "empty": "没有路由：所有流量走默认出口。",
+      "name": "名称（可选）",
+      "move_up": "上移",
+      "move_down": "下移",
+      "remove": "删除路由",
+      "lists": "目标列表",
+      "lists_hint": "自定义、远程和 geosite 列表；在访问控制 > 列表中管理。",
+      "list_option": "{{name}} · {{kind}} · {{entries}} 条",
+      "domains": "带前缀的域名",
+      "domains_hint": "每行一条：domain:example.com（该域名及其子域名）、full:www.example.com（仅此域名）、keyword:ads。不支持 regexp。",
+      "cidrs": "CIDR",
+      "ports": "端口",
+      "ports_hint": "25,465,587 或 6881-6889；留空表示任意端口",
+      "network": "网络",
+      "network_any": "TCP 和 UDP",
+      "target": {
+        "label": "出站位置",
+        "local": "本机直出（从本服务器出站）",
+        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站"
+      },
+      "entries_other": "已编译 {{count}} 条目标",
+      "sent": {
+        "sent": "已在发给服务器的配置中",
+        "not_sent": "未发给服务器",
+        "unsaved": "未保存"
+      },
+      "link": {
+        "gone": "该服务器已不存在：在修改或删除这条规则之前，该节点不会下发",
+        "missing": "尚无到该服务器的隧道",
+        "not_ready": "隧道未就绪",
+        "ready": "隧道已就绪",
+        "in_end": "出口端",
+        "out_end": "入口端",
+        "applied": "已生效",
+        "waiting": "等待中"
+      },
+      "default_exit": "默认出口：{{name}}",
+      "default_exit_pending": "上方的出口服务器已修改但尚未保存；路由按已保存的默认出口检查。",
+      "exit": {
+        "local": "本服务器"
+      },
+      "applied": {
+        "not_sent": "路由尚未发给服务器",
+        "waiting": "已发送，等待服务器生效",
+        "running": "运行中：服务器已确认这些路由",
+        "sent_at": "发送于 {{time}}",
+        "applied_at": "生效于 {{time}}"
+      },
+      "budget": {
+        "title": "{{engine}} 上的预算",
+        "entries": "目标条目：{{used}} / {{max}}",
+        "rules": "规则：{{used}} / {{max}}",
+        "bytes": "体积：{{used}} / {{max}} 字节"
+      },
+      "limit": {
+        "entries": "条目",
+        "rules": "规则",
+        "bytes": "体积"
+      },
+      "clear": "清除全部路由",
+      "clear_title": "清除全部路由？",
+      "clear_message": "将删除该节点已保存的全部 {{count}} 条路由，所有流量重新走默认出口。",
+      "revert": "放弃更改",
+      "save": "保存路由",
+      "reason": {
+        "not_node": "该节点不在 Passwall Node 服务器上，不能按目标分流。",
+        "no_agent": "这台服务器上的 Node 代理尚未连接。",
+        "no_capability": "这台服务器上的 Node 代理版本过旧，不支持按目标分流（transit.route.v1），请先升级。",
+        "no_link_capability": "这台服务器上的 Node 代理无法建立路由所需的隧道，请先升级。",
+        "unknown": "该节点暂时不能按目标分流。"
+      },
+      "note": {
+        "list_last_good": "列表 {{list}} 目前没有可用内容；这条规则继续使用它上一次的内容。",
+        "list_not_ready": "列表 {{list}} 还没有内容，暂时匹配不到任何目标。",
+        "list_empty": "列表 {{list}} 为空，匹配不到任何目标。",
+        "list_regexp_skipped": "列表 {{list}} 中有 {{count}} 条正则条目被跳过：路由不接受正则。",
+        "route_skipped": "这条路由不在发给服务器的配置中：它没有可下发的目标。"
+      },
+      "issue": {
+        "target": "第 {{route}} 条路由：请选择出站位置。",
+        "name_long": "第 {{route}} 条路由：名称超过 64 字节。",
+        "no_match": "第 {{route}} 条路由：至少选择一个列表、条目、CIDR、端口或网络作为匹配条件。",
+        "regexp": "第 {{route}} 条路由：{{entry}} 是正则，路由不接受；请用 domain:、full: 或 keyword:。",
+        "entry": "第 {{route}} 条路由：{{entry}} 必须以 domain:、full: 或 keyword: 开头。",
+        "ports": "第 {{route}} 条路由：端口格式应为 25,465,587 或 6881-6889（1-65535）。"
+      },
+      "error": {
+        "not_node": "该节点不在 Passwall Node 服务器上。",
+        "no_agent": "这台服务器上的 Node 代理尚未连接。",
+        "no_capability": "这台服务器上的 Node 代理版本过旧，不支持按目标分流。",
+        "no_link_capability": "这台服务器上的 Node 代理无法建立路由所需的隧道。",
+        "separator": "分隔标题没有路由。",
+        "bad_route": "路由 {{route}} 无效。",
+        "bad_target": "路由 {{route}} 没有有效的出站位置（另一台 Passwall Node 服务器，或本机直出）。",
+        "bad_list": "路由 {{route}} 使用了不存在的列表，或该列表不是目标列表。",
+        "bad_entry": "路由 {{route}} 含有无法使用的条目；请用 domain:、full: 或 keyword:。",
+        "regexp_in_route": "路由 {{route}}：{{entry}} 是正则，路由不接受；请用 domain:、full: 或 keyword:。",
+        "exit_no_address": "路由 {{route}} 要从 {{server}} 出站，但没有可用的地址：该服务器还没连接过面板，隧道也没有填写出口地址。请先在隧道上填写出口地址。",
+        "too_many_entries": "条目过多：路由 {{routes}} / {{max_routes}}，带前缀的域名 {{domains}} / {{max_domains}}，CIDR {{cidrs}} / {{max_cidrs}}。",
+        "over_budget": "节点 {{node}} 的入站 {{listener}} 会超出{{limit}}预算（{{used}} / {{max}}）。请减少路由或改用更小的列表。"
+      },
+      "warning": {
+        "policy_approximate": "在 Xray 上，{{node}} 有 {{count}} 条目标策略规则使用了正则或关键字，无法与路由精确组合（{{items}}）。放行和仅报告规则的副本会在该路由的分段中省略；拦截规则的副本会被放宽。",
+        "budget_near_limit": "节点 {{node}} 的入站 {{listener}} 接近{{limit}}预算：{{used}} / {{max}}。",
+        "list_last_good": "{{route}}：列表 {{list}} 目前没有可用内容；规则继续使用它上一次的内容。",
+        "list_not_ready": "{{route}}：列表 {{list}} 还没有内容，暂时匹配不到任何目标。",
+        "list_regexp_skipped": "{{route}}：列表 {{list}} 中有 {{count}} 条正则条目被跳过（路由不接受正则）。",
+        "route_skipped": "{{route}} 不在发给服务器的配置中：它没有可下发的目标。",
+        "exit_not_ready": "到 {{server}} 的隧道在两台服务器上尚未都就绪。在此之前，指向它的目标会连接失败（不会回退到默认出口）；节点仍保留在订阅中。",
+        "exit_no_link_capability": "{{server}} 上的 Node 代理无法承载这条隧道，指向它的目标会连接失败。",
+        "redundant_route": "{{route}} 的出站方式与默认出口相同，没有任何效果。",
+        "routes_not_sent": "已保存的路由没有发给服务器：{{reason}}"
+      }
     },
     "line_labels": {
       "region": "Region",
@@ -4927,6 +5074,11 @@
         "message": "这个列表没有被使用，删除不会影响节点。",
         "action": "删除"
       },
+      "route_impact": {
+        "title": "这会让某些路由失去匹配内容",
+        "message": "修改后，该列表将不再为这些节点的路由提供任何目标：{{nodes}}。这些路由原本接管的目标会改走各节点的默认出口。",
+        "action": "仍然修改"
+      },
       "list_in_use": {
         "title": "列表正在被使用",
         "message": "先从这些地方移除它：",
@@ -5125,6 +5277,7 @@
         "pending_used": "从未下载，引用它的部分暂不生效"
       },
       "usage": {
+        "routes_other": "{{count}} 个节点路由",
         "policies_other": "{{count}} 条策略",
         "unused": "未使用",
         "groups_other": "{{count}} 个白名单分组"

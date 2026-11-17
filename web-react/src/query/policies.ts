@@ -55,6 +55,13 @@ export const policies = {
     refetchInterval: false,
     note: 'An admin editor, read fresh each time it opens; writes invalidate it, so no polling.',
   },
+  /** A node's routes: read when the node editor opens; the poll below is conditional (see query/routes.ts). */
+  routes: {
+    staleTime: 0,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'An admin editor, read fresh each time it opens; polled only while the server has not yet confirmed what was sent.',
+  },
   /** Slow-moving dropdown dictionaries; invalidated on write, never polled. */
   dictionaries: {
     staleTime: 5 * MINUTE,

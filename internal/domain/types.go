@@ -640,14 +640,35 @@ type Node struct {
 	// for display, nil when it is not probed.
 	EgressWithheld bool
 	EgressProbe    *ProbeQuality
+	// DestRoutes are the node's routes by destination (transit.route.v1) and
+	// RoutesSent / RoutesApplied the digests of what the panel last sent its
+	// server and what the server confirmed. All three are loaded state, never
+	// written through the node row: the routes have their own store.
+	DestRoutes    []DestRoute
+	RoutesSent    string
+	RoutesApplied string
+	// RoutesWithheld is why the panel is not sending this node: its routes
+	// cannot be sent, and the node without them would send their destinations
+	// through its default exit. "" while it is sent.
+	RoutesWithheld string
+}
+
+// RoutesRunning reports whether the server confirmed the routes the panel last
+// sent for this node.
+func (n *Node) RoutesRunning() bool {
+	return n != nil && n.RoutesSent != "" && n.RoutesSent == n.RoutesApplied
 }
 
 // EgressPublishable reports whether the node may appear in subscriptions as
 // far as its exit is concerned. A node that leaves from its own server always
 // may; one that leaves through another server only once the link is ready, so
 // a subscriber is never handed a node whose traffic has nowhere to go.
+//
+// A node whose routes are being withheld is not published either: it is not
+// running on its server, and handing out a node whose routed destinations have
+// nowhere to go would be the leak the withholding exists to prevent.
 func (n *Node) EgressPublishable() bool {
-	return n != nil && (n.EgressPanelID == 0 || n.EgressReady)
+	return n != nil && (n.EgressPanelID == 0 || n.EgressReady) && n.RoutesWithheld == ""
 }
 
 // NodeObservedEndpoint is the only payload accepted by the observed endpoint

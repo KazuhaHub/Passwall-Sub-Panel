@@ -82,6 +82,7 @@ import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
 import LinkQualityCell from './LinkQualityCell'
+import RoutesSection from './routes/RoutesSection'
 import ProbeQualityChip from './ProbeQualityChip'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
@@ -4063,6 +4064,19 @@ export default function NodesView() {
                   </Box>
                 )}
               </Box>
+            )}
+
+            {/* Routing by destination: ordered routes that send some destinations
+                out through another server, or keep them here, while the rest
+                leaves through the default exit above. Saved on its own. */}
+            {editing && editing.kind !== 'separator' && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && (
+              <RoutesSection nodeId={editing.id} entryPanelId={editing.panel_id} servers={relayEntryServers.map(s => ({ id: s.id, name: s.name }))} pendingExit={editEgress}
+                defaultExitNodesOf={exit => {
+                  const names = managed.filter(n => n.panel_id === editing.panel_id && (n.egress_panel_id ?? 0) === exit).map(n => n.display_name)
+                  // The node being edited counts even when the list's copy is older.
+                  if ((editing.egress_panel_id ?? 0) === exit && !managed.some(n => n.id === editing.id)) names.push(editing.display_name)
+                  return names
+                }} />
             )}
 
             {/* Transit / 中转 lines: the same landing offered through extra

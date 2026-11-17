@@ -50,8 +50,12 @@ type TransitLink struct {
 	RealityServerName string
 	RealityTarget     string
 
-	// InApplied / OutApplied are the digests of what each side last
-	// confirmed (TransitLinkDigest); empty when it confirmed nothing.
+	// InSent / OutSent are the digests of what PSP last put in each side's
+	// config ("" while that half is withheld); InApplied / OutApplied are the
+	// digests of what each side last confirmed (TransitLinkDigest), empty when
+	// it confirmed nothing.
+	InSent     string
+	OutSent    string
 	InApplied  string
 	OutApplied string
 
@@ -64,6 +68,13 @@ type TransitLink struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Ready reports whether both ends hold exactly what was last sent them. It is
+// the state of the tunnel itself; whether a node is published also needs the
+// node to be bound to it (see attachEgressState).
+func (l TransitLink) Ready() bool {
+	return l.InSent != "" && l.InApplied == l.InSent && l.OutSent != "" && l.OutApplied == l.OutSent
 }
 
 // TransitLinkSettings is what an administrator may change on a link. The

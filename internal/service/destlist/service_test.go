@@ -303,6 +303,86 @@ func TestDeleteList_RefusesWhileAPolicyUsesIt(t *testing.T) {
 	}
 }
 
+type fakeRouteUses map[int64][]RouteRef
+
+func (f fakeRouteUses) ListUses(context.Context) (map[int64][]RouteRef, error) { return f, nil }
+
+var forgotten []int64
+
+func (f fakeRouteUses) Forget(_ context.Context, id int64) error {
+	forgotten = append(forgotten, id)
+	return nil
+}
+
+// A node's routes hold a list like a policy does: it is not deleted from under
+// them, and it is listed as used by them.
+func TestDeleteList_RefusesWhileARouteUsesIt(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	l, _, _ := h.svc.CreateCustom(ctx, "mine", "", []byte("example.com"))
+	h.svc.SetRouteUses(fakeRouteUses{l.ID: {{NodeID: 7, Name: "hk-main"}}})
+
+	err := h.svc.DeleteList(ctx, l.ID)
+	var inUse *ListInUseError
+	if !errors.As(err, &inUse) || !errors.Is(err, ErrListInUse) || len(inUse.Routes) != 1 || inUse.Routes[0].NodeID != 7 {
+		t.Fatalf("err = %v, want it to name node 7", err)
+	}
+	used, err := h.svc.UsedBy(ctx)
+	if err != nil || len(used[l.ID]) != 1 || used[l.ID][0].Kind != "route" || used[l.ID][0].ID != 7 || used[l.ID][0].Name != "hk-main" {
+		t.Fatalf("used by = %+v %v", used, err)
+	}
+	h.svc.SetRouteUses(fakeRouteUses{})
+	if err := h.svc.DeleteList(ctx, l.ID); err != nil {
+		t.Fatalf("after the route let go: %v", err)
+	}
+}
+
+// An edit that leaves a list a route names with nothing a route can use (empty,
+// regexp entries only) is refused until it is confirmed, and says which nodes'
+// destinations would then go through their default exit. An edit that keeps
+// something usable is not asked about.
+func TestEditingAListARouteUsesAsksBeforeLeavingItWithNothing(t *testing.T) {
+	forgotten = nil
+	h := newHarness(t)
+	ctx := context.Background()
+	l, _, _ := h.svc.CreateCustom(ctx, "mine", "", []byte("example.com"))
+	h.svc.SetRouteUses(fakeRouteUses{l.ID: {{NodeID: 7, Name: "hk-main"}}})
+
+	if _, _, err := h.svc.UpdateCustom(ctx, l.ID, "mine", []byte("example.org\nregexp:^a")); err != nil {
+		t.Fatalf("an edit that keeps a usable entry: %v", err)
+	}
+	var impact *RouteImpactError
+	_, _, err := h.svc.UpdateCustom(ctx, l.ID, "mine", []byte("regexp:^a"))
+	if !errors.As(err, &impact) || !errors.Is(err, ErrListRouteImpact) || !errors.Is(err, domain.ErrConflict) || len(impact.Routes) != 1 || impact.Routes[0].NodeID != 7 {
+		t.Fatalf("regexp only: %v", err)
+	}
+	if _, _, err := h.svc.UpdateCustom(ctx, l.ID, "mine", []byte("# nothing")); !errors.As(err, &impact) {
+		t.Fatalf("an empty list: %v", err)
+	}
+	if _, _, err := h.svc.AddEntries(ctx, l.ID, nil, []string{"example.org"}); !errors.As(err, &impact) {
+		t.Fatalf("removing the last usable entry: %v", err)
+	}
+	if got, _ := h.svc.GetList(ctx, l.ID); string(got.Entries) == "" || !strings.Contains(string(got.Entries), "example.org") {
+		t.Fatalf("a refused edit changed the list: %q", got.Entries)
+	}
+	confirmed := WithRouteConfirmation(ctx)
+	if len(forgotten) != 0 {
+		t.Fatalf("a refused edit made the routes forget the list: %v", forgotten)
+	}
+	if _, _, err := h.svc.UpdateCustom(confirmed, l.ID, "mine", []byte("regexp:^a")); err != nil {
+		t.Fatalf("confirmed: %v", err)
+	}
+	// The confirmed edit also makes the routes forget the list's last good content.
+	if len(forgotten) != 1 || forgotten[0] != l.ID {
+		t.Fatalf("forgotten = %v", forgotten)
+	}
+	// A list no route names is edited freely.
+	h.svc.SetRouteUses(fakeRouteUses{})
+	if _, _, err := h.svc.UpdateCustom(ctx, l.ID, "mine", []byte("# nothing")); err != nil {
+		t.Fatalf("a list no route names: %v", err)
+	}
+}
+
 // ---- expansion and the GeoIP database ----
 
 func TestExpand_ResolvesGeositeAndGeoIPReferences(t *testing.T) {

@@ -59,8 +59,14 @@ type MemberResyncer interface {
 type Service struct {
 	nodes ports.NodeRepo
 	// fronts holds the SNI fronts a save is checked against (SetFronts).
-	fronts     ports.TransitFrontRepo
-	frontSvc   *front.Service
+	fronts   ports.TransitFrontRepo
+	frontSvc *front.Service
+	// afterDelete removes the tunnels only a deleted node's routes used.
+	afterDelete func(ctx context.Context, node *domain.Node) error
+	// routeLock is the routing service's lock of a server: a save of routes holds
+	// it, and so does a delete of a node, so that the cleanup of the tunnels only
+	// the node's routes used cannot miss an exit a concurrent save just added.
+	routeLock  func(panelID int64) func()
 	separators ports.SeparatorRepo
 	pool       ports.XUIPool
 	cleaner    InboundCleaner
@@ -1160,7 +1166,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	if n.IsSeparator() {
 		// Layout-only row: no 3X-UI inbound to delete, no clients to
 		// reclaim, no sync task to enqueue. Drop the panel-side record.
-		return s.nodes.Delete(ctx, id)
+		return s.deleteNode(ctx, id)
 	}
 	defer s.lockFronts(n.PanelID)()
 	change, err := s.checkRemovalAgainstFronts(ctx, n)
@@ -1199,24 +1205,41 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 		return err
 	}
 	if n.IsSeparator() {
-		return s.nodes.Delete(ctx, id)
+		return s.deleteNode(ctx, id)
 	}
-	defer s.lockFronts(n.PanelID)()
-	change, err := s.checkRemovalAgainstFronts(ctx, n)
+	// The routing lock first (before any server lock), held until the cleanup of
+	// the tunnels only the node's routes used is done. That cleanup takes the same
+	// server locks the detach holds, which are not reentrant: it runs after the
+	// detach has let go of them.
+	defer s.lockRoutes(n.PanelID)()
+	routed, err := s.detachLocked(ctx, n)
 	if err != nil {
 		return err
 	}
+	s.afterRemove(ctx, routed)
+	return nil
+}
+
+// detachLocked is the part of DetachAndSync that holds the node's server lock.
+// It returns the deleted node when it had routes, for afterRemove.
+func (s *Service) detachLocked(ctx context.Context, n *domain.Node) (*domain.Node, error) {
+	defer s.lockFronts(n.PanelID)()
+	change, err := s.checkRemovalAgainstFronts(ctx, n)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
-		return fmt.Errorf("unclaim owned clients: %w", err)
+		return nil, fmt.Errorf("unclaim owned clients: %w", err)
 	}
 	if err := s.finishFront(ctx, n, change); err != nil {
-		return err
+		return nil, err
 	}
-	if err := s.nodes.Delete(ctx, n.ID); err != nil {
-		return err
+	routed, err := s.removeNode(ctx, n.ID)
+	if err != nil {
+		return nil, err
 	}
 	s.inboundsChanged(ctx, n.PanelID)
-	return nil
+	return routed, nil
 }
 
 // ProcessDueTasks runs pending node-scoped 3X-UI write tasks.
@@ -1331,7 +1354,7 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 			if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 				return fmt.Errorf("unclaim owned clients: %w", err)
 			}
-			return s.nodes.Delete(ctx, n.ID)
+			return s.deleteNode(ctx, n.ID)
 		}
 		// If the inbound is already gone upstream (operator deleted it directly
 		// in 3X-UI — the common orphan case), the clients went with it: skip the
@@ -1344,7 +1367,7 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 				if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 					return fmt.Errorf("unclaim owned clients: %w", err)
 				}
-				return s.nodes.Delete(ctx, n.ID)
+				return s.deleteNode(ctx, n.ID)
 			}
 			return err
 		}
@@ -1358,11 +1381,11 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 			// Lost the race: inbound disappeared between our GetInbound and the
 			// delete. Treat as done rather than retrying forever.
 			if isInboundGoneError(err) {
-				return s.nodes.Delete(ctx, n.ID)
+				return s.deleteNode(ctx, n.ID)
 			}
 			return err
 		}
-		return s.nodes.Delete(ctx, n.ID)
+		return s.deleteNode(ctx, n.ID)
 	case domain.SyncTaskNodeSetEnabled:
 		if err := c.SetInboundEnable(ctx, n.InboundID, n.Enabled); err != nil {
 			return fmt.Errorf("xui setEnable: %w", err)
@@ -2130,4 +2153,65 @@ func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Nod
 		taken[key] = fmt.Sprintf("relay line %d of this node", i+1)
 	}
 	return nil
+}
+
+// SetRouteLinks binds what runs after a node is deleted to clean up the tunnels
+// only its routes by destination used. Left unbound, none is cleaned up.
+//
+// lock is the routing service's per-server lock. A delete takes it before any
+// other lock (the order is: agent lock, routing lock, server locks, the state
+// lock of the store), around reading the node's routes and deleting it.
+func (s *Service) SetRouteLinks(after func(ctx context.Context, node *domain.Node) error, lock func(panelID int64) func()) {
+	s.afterDelete, s.routeLock = after, lock
+}
+
+// lockRoutes takes the routing lock of a server; without one it takes none.
+func (s *Service) lockRoutes(panelID int64) func() {
+	if s.routeLock == nil {
+		return func() {}
+	}
+	return s.routeLock(panelID)
+}
+
+// deleteNode deletes a node, and then the tunnels only its routes used. A caller
+// that holds a server lock must not use it: see removeNode.
+func (s *Service) deleteNode(ctx context.Context, id int64) error {
+	if s.routeLock != nil {
+		if n, err := s.nodes.GetByID(ctx, id); err == nil {
+			defer s.lockRoutes(n.PanelID)()
+		}
+	}
+	routed, err := s.removeNode(ctx, id)
+	if err != nil {
+		return err
+	}
+	s.afterRemove(ctx, routed)
+	return nil
+}
+
+// removeNode deletes a node and returns it when it had routes, so that the
+// cleanup of their tunnels (afterRemove), which takes server locks, can run once
+// the caller holds none: those locks are not reentrant.
+func (s *Service) removeNode(ctx context.Context, id int64) (*domain.Node, error) {
+	var routed *domain.Node
+	if s.afterDelete != nil {
+		if n, err := s.nodes.GetByID(ctx, id); err == nil && len(n.DestRoutes) > 0 {
+			routed = n
+		}
+	}
+	if err := s.nodes.Delete(ctx, id); err != nil {
+		return nil, err
+	}
+	return routed, nil
+}
+
+// afterRemove removes the tunnels only a deleted node's routes used. A failure
+// is logged: the node is gone, and an unused tunnel is harmless.
+func (s *Service) afterRemove(ctx context.Context, routed *domain.Node) {
+	if routed == nil || s.afterDelete == nil {
+		return
+	}
+	if err := s.afterDelete(ctx, routed); err != nil {
+		log.Warn("node deleted, but the tunnels only its routes used were not removed", "node_id", routed.ID, "err", err)
+	}
 }

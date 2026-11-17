@@ -25,6 +25,13 @@ import (
 // is no data to carry over, so they need no step here. The upgrade test for it
 // lives in transit_front_repo_test.go.
 //
+// Routing by destination (transit.route.v1) likewise adds only the
+// transit_routes table (and the transit_route_lists table beside it): a node has
+// no routes before 4.3, nothing is carried over, and the nodes table is untouched (the routes are deliberately not a
+// column of it, see transitRouteRow). Its upgrade test is in
+// transit_route_repo_test.go. The one exception is a database a 4.3 BETA made
+// the routes table in with a TEXT column; widenRouteSpec carries it over.
+//
 // Delete this file, its test file and the migrateV4_3 call once upgrades from
 // releases before 4.3.0 are no longer supported. Nothing outside this file may
 // depend on a helper defined here, so that deletion stays a deletion.
@@ -47,6 +54,7 @@ func migrateV4_3(db *gorm.DB) error {
 		backfillRawLifetime,
 		dropVLESSRouteState,
 		convertClientsToLines,
+		widenRouteSpec,
 	} {
 		if err := step(db); err != nil {
 			return err
@@ -224,4 +232,51 @@ func convertClientsToLines(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+// retiredRouteSpec names the TEXT column transit_routes.spec of the routes table
+// as the 4.3 betas created it, for the Migrator (SQLite needs a parsed model for
+// column operations). It is not part of the schema and is never migrated.
+type retiredRouteSpec struct {
+	NodeID int64  `gorm:"primaryKey;autoIncrement:false"`
+	Spec   string `gorm:"column:spec"`
+}
+
+func (retiredRouteSpec) TableName() string { return "transit_routes" }
+
+// widenRouteSpec carries a routes table made by a 4.3 beta over to the shape it
+// has now. The beta stored the routes in a TEXT column (spec), which is 64 KiB on
+// MySQL and refuses a node with a few thousand typed entries; they are stored in
+// body, a byte column. Each row's spec is copied to body (where body is still
+// empty) and the old column is dropped. It is a plain copy in Go, because a type
+// change in place needs a cast PostgreSQL will not infer, and it is repeatable: a
+// table without the old column is left alone. A release after the betas has no
+// such table, so this goes with the rest of the file.
+func widenRouteSpec(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable("transit_routes") || !m.HasColumn(&retiredRouteSpec{}, "spec") {
+		return nil
+	}
+	var rows []retiredRouteSpec
+	if err := db.Table("transit_routes").Select("node_id", "spec").Find(&rows).Error; err != nil {
+		return fmt.Errorf("read the beta routes: %w", err)
+	}
+	for _, row := range rows {
+		if row.Spec == "" {
+			continue
+		}
+		if err := db.Table("transit_routes").Where("node_id = ? AND body IS NULL", row.NodeID).Update("body", []byte(row.Spec)).Error; err != nil {
+			return fmt.Errorf("carry the routes of node %d over: %w", row.NodeID, err)
+		}
+	}
+	if err := m.DropColumn(&retiredRouteSpec{}, "spec"); err != nil {
+		return fmt.Errorf("drop transit_routes.spec: %w", err)
+	}
+	// gorm's SQLite DropColumn can silently do nothing (see dropVLESSRouteState).
+	if m.HasColumn(&retiredRouteSpec{}, "spec") {
+		if err := db.Exec("ALTER TABLE transit_routes DROP COLUMN spec").Error; err != nil {
+			return fmt.Errorf("drop transit_routes.spec: %w", err)
+		}
+	}
+	return nil
 }

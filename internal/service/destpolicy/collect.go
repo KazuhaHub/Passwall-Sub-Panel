@@ -198,7 +198,7 @@ func CollectingForRisk(m *domain.DestAgentPolicy, caps []string, engine domain.N
 // there is nothing to tell apart). Recording not being off is the fourth, and is
 // decided on the final policy by withAuditEgress.
 func auditEgressFor(in CompileInput, engine string) bool {
-	return engine == xrayEngine && len(in.Egress) > 0 && slices.Contains(in.Capabilities, capabilityAuditHitsEgress)
+	return engine == xrayEngine && (len(in.Egress) > 0 || routesLeave(in.RouteExits)) && slices.Contains(in.Capabilities, capabilityAuditHitsEgress)
 }
 
 // withAuditEgress sets the policy's flag where it is wanted and leaves it empty
@@ -210,4 +210,17 @@ func withAuditEgress(p *protocol.DestinationPolicy, on bool) {
 		return
 	}
 	p.AuditEgress = on && p.Collect != protocol.CollectOff
+}
+
+// routesLeave reports whether any routed listener has an exit through a link:
+// only then is there more than one exit to tell apart.
+func routesLeave(routes map[int64][]RouteExit) bool {
+	for _, exits := range routes {
+		for _, exit := range exits {
+			if exit.Key != protocol.LocalExit {
+				return true
+			}
+		}
+	}
+	return false
 }

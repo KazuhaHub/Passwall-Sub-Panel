@@ -1,6 +1,7 @@
 import { destErrorOf, isDestUnavailable } from '@/api/accessControl'
 import { pushSnack } from '@/components/SnackbarHost'
 import { limitKindKey } from '@/utils/accessControl'
+import { isRouteImpactCancelled } from '@/utils/destRouteImpact'
 
 // WHAT A REFUSED REQUEST SAYS. The server's 400 and 409 answers carry a `code`
 // (the API's contract with the page); this turns one into a sentence from the
@@ -44,6 +45,8 @@ export function destErrorText(t: T, err: unknown): string {
 
 /** A snack for a write the page has no better place to explain. */
 export function reportDestError(t: T, err: unknown) {
+  // A declined confirmation changed nothing: there is nothing to report.
+  if (isRouteImpactCancelled(err)) return
   pushSnack(destErrorText(t, err), 'error')
 }
 

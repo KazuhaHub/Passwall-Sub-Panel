@@ -174,6 +174,9 @@ func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) 
 	if err := attachEgressState(ctx, db, nodes); err != nil {
 		return err
 	}
+	if err := attachRouteState(ctx, db, nodes); err != nil {
+		return err
+	}
 	var ids []int64
 	for _, node := range nodes {
 		if node == nil {

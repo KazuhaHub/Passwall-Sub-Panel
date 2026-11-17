@@ -39,6 +39,43 @@ type Service struct {
 	repo   Repo
 	links  LinkRepo
 	agents AgentLister
+	// panelGone says a server no longer exists; nil knows of none that do not.
+	panelGone func(ctx context.Context, panelID int64) bool
+	// serverLock is the fronts' per-server lock, which a save that drops or binds
+	// a tunnel holds; nil takes none.
+	serverLock func(panelID int64) func()
+}
+
+// WithServerLock gives the service the lock of a server that node saves and the
+// routes' cleanup hold, so that a sync does not make a tunnel that was dropped
+// a moment ago (LinksFor).
+func (s *Service) WithServerLock(lock func(panelID int64) func()) *Service {
+	s.serverLock = lock
+	return s
+}
+
+// lockPair takes the lock of both servers of a tunnel, lower id first (the order
+// everything else takes them in).
+func (s *Service) lockPair(a, b int64) func() {
+	if s.serverLock == nil {
+		return func() {}
+	}
+	if a > b {
+		a, b = b, a
+	}
+	first := s.serverLock(a)
+	if a == b {
+		return first
+	}
+	second := s.serverLock(b)
+	return func() { second(); first() }
+}
+
+// WithPanelCheck lets the service know which servers have been deleted, so that
+// no tunnel is ever made to one.
+func (s *Service) WithPanelCheck(gone func(ctx context.Context, panelID int64) bool) *Service {
+	s.panelGone = gone
+	return s
 }
 
 func New(nodes NodeLister, repo Repo) *Service { return &Service{nodes: nodes, repo: repo} }

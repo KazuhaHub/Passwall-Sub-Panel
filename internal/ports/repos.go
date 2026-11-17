@@ -2320,6 +2320,7 @@ type Repos struct {
 	TransitLinks            TransitLinkRepo
 	TransitProbe            TransitProbeRepo
 	TransitFronts           TransitFrontRepo
+	TransitRoutes           TransitRouteRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2398,6 +2399,33 @@ type TransitFrontRepo interface {
 	Delete(ctx context.Context, panelID, id int64) (bool, error)
 }
 
+// TransitRouteRepo stores the routes by destination (transit.route.v1) of
+// nodes, and the digests of what was sent and confirmed.
+type TransitRouteRepo interface {
+	// Get returns a node's routes; a node without any is an empty value.
+	Get(ctx context.Context, nodeID int64) (domain.NodeRoutes, error)
+	// List returns every node that has routes, by node id.
+	List(ctx context.Context) ([]domain.NodeRoutes, error)
+	// Replace stores the node's routes whole and keeps its delivery digests. It
+	// takes the destination state lock first, and routes for a node that no
+	// longer exists are refused (domain.ErrNotFound; clearing is always allowed): the lists the routes name must
+	// exist (domain.ErrNotFound otherwise) and cannot be deleted until the routes
+	// let go of them, and the kept content of lists no route names any more is
+	// dropped in the same transaction.
+	Replace(ctx context.Context, nodeID int64, routes []domain.DestRoute) error
+	// RecordSent stores the digest of the routes put in the node's config ("":
+	// none) and the reason the node is withheld ("": it is sent); SetApplied the digest its server confirmed. Both write only on a
+	// change and report whether they did.
+	RecordSent(ctx context.Context, nodeID int64, digest, withheld string, at time.Time) (bool, error)
+	SetApplied(ctx context.Context, nodeID int64, digest string, at time.Time) (bool, error)
+	// GoodList, SaveGoodList and ForgetGoodList keep the last expansion of a list
+	// that gave a route something to match by, which a route compiles from while
+	// an automatic refresh leaves the list empty or unavailable.
+	GoodList(ctx context.Context, listID int64) (domains, cidrs []string, found bool, err error)
+	SaveGoodList(ctx context.Context, listID int64, digest string, domains, cidrs []string) error
+	ForgetGoodList(ctx context.Context, listID int64) error
+}
+
 // TransitLinkRepo stores the tunnels between Passwall Node servers.
 type TransitLinkRepo interface {
 	EnsureLink(ctx context.Context, entry, exit int64, create func() (domain.TransitLink, error)) (domain.TransitLink, error)
@@ -2406,9 +2434,16 @@ type TransitLinkRepo interface {
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
 	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
+	// DeleteLink removes the link of a pair, which frees its port on the exit
+	// server. It reports whether one existed.
+	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
 	// LinkEnds resolves link ids to their two servers in one read. An unknown
-	// id is absent from the result. Links are never deleted and a link's pair
-	// never changes, so an answer stays true.
+	// id is absent from the result. A link's pair never changes, so an answer
+	// stays true for as long as the link exists. A link IS deleted when nothing
+	// uses its pair any more (routes by destination stop using an exit, and no
+	// node leaves through it by default); audit hits still buffered that name a
+	// deleted link are then dropped as egress_unknown (the receiver cannot tell
+	// which servers they left through), and counted, never mis-attributed.
 	LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error)
 }
