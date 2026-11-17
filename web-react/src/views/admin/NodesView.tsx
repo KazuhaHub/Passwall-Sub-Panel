@@ -469,6 +469,9 @@ export function serverHost(server?: Pick<Server, 'panel_type' | 'url' | 'address
 // Camouflage sites a REALITY tunnel draws from when the administrator does
 // not name one; the panel picks one at random for a new tunnel too.
 const TUNNEL_REALITY_SITES = ['www.asus.com', 'www.samsung.com', 'www.nvidia.com', 'www.amd.com', 'www.intel.com']
+// How often the node editor asks whether a pending tunnel now runs on both
+// servers.
+const EGRESS_READY_POLL_MS = 5000
 const TCP_HEADER_TYPES = ['none', 'http']
 const TLS_VERSIONS = ['', '1.0', '1.1', '1.2', '1.3']
 const SS2022_METHODS: { value: SS2022Method; bytes: number }[] = [
@@ -2436,6 +2439,37 @@ export default function NodesView() {
       .catch(() => { if (!cancelled) { setLinkForm(null); setLinkError(true) } })
     return () => { cancelled = true }
   }, [editOpen, editing, editEgress])
+  // The editor opens on the list's copy of the node, which says whether the
+  // tunnel ran on both servers when the list was loaded. While it is pending,
+  // ask again, so the status turns to ready without reopening the page. The
+  // answer is kept apart from `editing`: replacing that would reload the
+  // tunnel settings above and drop unsaved changes to them.
+  const [egressReadyFor, setEgressReadyFor] = useState<Node | null>(null)
+  const egressReady = !!editing?.egress_ready || (editing !== null && egressReadyFor === editing)
+  useEffect(() => {
+    const node = editing
+    const exit = node?.egress_panel_id ?? 0
+    if (!editOpen || !node || exit <= 0 || egressReady) return
+    const controller = new AbortController()
+    let inFlight = false
+    const timer = setInterval(() => {
+      if (inFlight) return
+      inFlight = true
+      getNode(node.id, { signal: controller.signal, quiet: true })
+        .then(({ node: fresh }) => {
+          if (controller.signal.aborted || !fresh.egress_ready || fresh.egress_panel_id !== exit) return
+          setEgressReadyFor(node)
+          // Only the row this answer was asked for: a row replaced since
+          // (a save, a refetch) already holds something newer.
+          mutateManaged(prev => prev.map(x => x === node ? { ...x, egress_ready: true } : x))
+        })
+        .catch(() => {})
+        .finally(() => { inFlight = false })
+    }, EGRESS_READY_POLL_MS)
+    return () => { controller.abort(); clearInterval(timer) }
+  // mutateManaged only writes the query cache; it is not a reason to restart.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOpen, editing, egressReady])
   const patchLink = (patch: Partial<TransitLink>) => {
     setLinkForm(prev => (prev ? { ...prev, ...patch } : prev))
     setLinkDirty(true)
@@ -3966,8 +4000,8 @@ export default function NodesView() {
                   ))}
                 </TextField>
                 {editEgress > 0 && editEgress === (editing.egress_panel_id ?? 0) && (
-                  <Typography sx={{ fontSize: 12, color: editing.egress_ready ? md.primary : md.onSurfaceVariant }}>
-                    {editing.egress_ready ? t('admin:nodes.egress.ready') : t('admin:nodes.egress.pending')}
+                  <Typography data-testid="egress-status" sx={{ fontSize: 12, color: egressReady ? md.primary : md.onSurfaceVariant }}>
+                    {egressReady ? t('admin:nodes.egress.ready') : t('admin:nodes.egress.pending')}
                   </Typography>
                 )}
                 {editEgress > 0 && linkError && (

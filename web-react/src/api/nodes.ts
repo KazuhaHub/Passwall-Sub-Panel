@@ -155,14 +155,14 @@ export async function listNodes(params: NodeListParams = {}, signal?: AbortSigna
   return data
 }
 
-export async function getNode(id: number) {
+export async function getNode(id: number, opts: { signal?: AbortSignal; quiet?: boolean } = {}) {
   const { data } = await client.get<{
     node: Node
     inbound?: AdminInbound
     clients: unknown[]
     inbound_error?: string
     clients_error?: string
-  }>(`/admin/nodes/${id}`)
+  }>(`/admin/nodes/${id}`, { signal: opts.signal, _skipErrorToast: opts.quiet })
   return data
 }
 
