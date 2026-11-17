@@ -613,6 +613,24 @@ type Node struct {
 	// is automatic for enabled lines. RelayHealth remains health-worker-owned.
 	ShowRelayStatus bool
 	RelayHealth     []RelayHealth
+	// EgressPanelID sends this node's users out through another Passwall Node
+	// server: the node (on its own server, the entry) authenticates them and a
+	// tunnel carries their traffic to that server (the exit), which connects to
+	// the destination under the exit's own destination policy. 0 leaves from
+	// the node's own server, as every node did before.
+	EgressPanelID int64
+	// EgressReady is loaded state, never stored: both servers have applied the
+	// link this node leaves through, with this node bound to it. A node whose
+	// egress is not ready is withheld from subscriptions (see EgressPublishable).
+	EgressReady bool
+}
+
+// EgressPublishable reports whether the node may appear in subscriptions as
+// far as its exit is concerned. A node that leaves from its own server always
+// may; one that leaves through another server only once the link is ready, so
+// a subscriber is never handed a node whose traffic has nowhere to go.
+func (n *Node) EgressPublishable() bool {
+	return n != nil && (n.EgressPanelID == 0 || n.EgressReady)
 }
 
 // NodeObservedEndpoint is the only payload accepted by the observed endpoint

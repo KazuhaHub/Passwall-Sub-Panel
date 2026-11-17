@@ -35,6 +35,7 @@ type nodeAgentRow struct {
 	DesiredCoreVersion      string `gorm:"size:32;not null;default:''"`
 	AllowRestrictedReality  bool   `gorm:"not null;default:false"`
 	ObservedCoreEngine      string `gorm:"size:16;not null;default:''"`
+	ObservedAddress         string `gorm:"size:64;not null;default:''"`
 	LastSeen                *time.Time
 	// Refusal columns are separate from the observation columns on purpose; see
 	// domain.NodeAgent. Nullable so "never refused" is distinguishable from
@@ -184,6 +185,7 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 		DesiredCoreVersion:      row.DesiredCoreVersion,
 		AllowRestrictedReality:  row.AllowRestrictedReality,
 		ObservedCoreEngine:      domain.NodeCoreEngine(row.ObservedCoreEngine),
+		ObservedAddress:         row.ObservedAddress,
 		LastSeen:                row.LastSeen,
 		RefusedProtocolVersion:  row.RefusedProtocolVersion,
 		RefusedReason:           row.RefusedReason,
@@ -530,3 +532,14 @@ func lockNodeAgentByAgentID(tx *gorm.DB, agentID string) (*nodeAgentRow, error) 
 }
 
 var _ ports.NodeAgentRepo = (*nodeAgentRepo)(nil)
+
+// RecordObservedAddress stores where an agent's sync came from. It writes only
+// on a change, so a steady server costs no write per poll.
+func (r *nodeAgentRepo) RecordObservedAddress(ctx context.Context, agentID, address string) error {
+	if agentID == "" || len(address) > 64 {
+		return errors.New("record node agent address: valid agent ID and address required")
+	}
+	return r.db.WithContext(ctx).Model(&nodeAgentRow{}).
+		Where("agent_id = ? AND observed_address <> ?", agentID, address).
+		Update("observed_address", address).Error
+}

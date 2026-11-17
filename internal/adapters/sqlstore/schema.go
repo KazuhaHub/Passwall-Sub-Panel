@@ -401,13 +401,16 @@ type nodeRow struct {
 	// additionally offered through. HideDirect drops the direct entry when at
 	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
 	// rows, no backfill.
-	Relays          jsonRelays      `gorm:"column:relays"`
-	RouteState      jsonRouteState  `gorm:"column:route_state"`
-	RouteRevision   int64           `gorm:"not null;default:0"`
-	HideDirect      bool            `gorm:"default:false"`
-	ShowRelayStatus bool            `gorm:"default:false"`
-	RelayHealth     jsonRelayHealth `gorm:"column:relay_health"`
-	CreatedAt       time.Time
+	Relays          jsonRelays     `gorm:"column:relays"`
+	RouteState      jsonRouteState `gorm:"column:route_state"`
+	RouteRevision   int64          `gorm:"not null;default:0"`
+	HideDirect      bool           `gorm:"default:false"`
+	ShowRelayStatus bool           `gorm:"default:false"`
+	// EgressPanelID: the Passwall Node server this node's users leave through
+	// (0 = its own server). See domain.Node.EgressPanelID.
+	EgressPanelID int64           `gorm:"not null;default:0;index"`
+	RelayHealth   jsonRelayHealth `gorm:"column:relay_health"`
+	CreatedAt     time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -476,6 +479,7 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		RouteState:              domain.NodeRouteState(r.RouteState),
 		HideDirect:              r.HideDirect,
 		ShowRelayStatus:         r.ShowRelayStatus,
+		EgressPanelID:           r.EgressPanelID,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
 		CreatedAt:               r.CreatedAt,
 	}, nil
@@ -541,6 +545,7 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		RouteRevision:           n.RouteState.Revision,
 		HideDirect:              n.HideDirect,
 		ShowRelayStatus:         n.ShowRelayStatus,
+		EgressPanelID:           n.EgressPanelID,
 		RelayHealth:             jsonRelayHealth(n.RelayHealth),
 		CreatedAt:               n.CreatedAt,
 	}, nil
@@ -1655,6 +1660,7 @@ var schemaModels = []any{
 	&legalDocumentRow{},
 	&legalConsentRow{},
 	&transitForwardRow{},
+	&transitLinkRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

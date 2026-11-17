@@ -40,6 +40,43 @@ export interface UpdateNodeMetadataRequest {
    *  untouched; send [] to clear. */
   relays?: RelayLine[]
   hide_direct?: boolean
+  /** Exit server (0: the node's own). Omit to leave it unchanged. */
+  egress_panel_id?: number
+}
+
+export type TransitLinkProtocol = 'ss2022' | 'vless_reality'
+
+/** The tunnel between two Passwall Node servers. Credentials never leave PSP. */
+export interface TransitLink {
+  /** False for a pair no node uses yet: the fields are the defaults. */
+  exists: boolean
+  protocol: TransitLinkProtocol
+  /** Address the entry dials; empty uses server_address. */
+  exit_address: string
+  reality_server_name: string
+  reality_target: string
+  port?: number
+  /** Where PSP last saw the exit server sync from. */
+  server_address: string
+  up_bytes: number
+  down_bytes: number
+}
+
+export interface UpdateTransitLinkRequest {
+  protocol: TransitLinkProtocol
+  exit_address: string
+  reality_server_name?: string
+  reality_target?: string
+}
+
+export async function getTransitLink(entry: number, exit: number) {
+  const { data } = await client.get<TransitLink>(`/admin/transit/links/${entry}/${exit}`)
+  return data
+}
+
+export async function updateTransitLink(entry: number, exit: number, req: UpdateTransitLinkRequest) {
+  const { data } = await client.put<TransitLink>(`/admin/transit/links/${entry}/${exit}`, req)
+  return data
 }
 
 export interface InboundSpec {
@@ -118,14 +155,14 @@ export async function listNodes(params: NodeListParams = {}, signal?: AbortSigna
   return data
 }
 
-export async function getNode(id: number) {
+export async function getNode(id: number, opts: { signal?: AbortSignal; quiet?: boolean } = {}) {
   const { data } = await client.get<{
     node: Node
     inbound?: AdminInbound
     clients: unknown[]
     inbound_error?: string
     clients_error?: string
-  }>(`/admin/nodes/${id}`)
+  }>(`/admin/nodes/${id}`, { signal: opts.signal, _skipErrorToast: opts.quiet })
   return data
 }
 

@@ -62,6 +62,9 @@ type CompileInput struct {
 	// refusal of the tier-B collect-only policy is held against it: a node that
 	// upgraded is offered the policy again.
 	AgentVersion string
+	// Egress maps each of the node's listeners that leaves through a tunnel to
+	// its exit server. Panel-scoped policies follow the exit (nodeView.egress).
+	Egress map[int64]int64
 }
 
 // Result is a compile's answer.
@@ -145,7 +148,7 @@ func (s *Service) Compile(ctx context.Context, in CompileInput) (Result, error) 
 		return s.noPolicy(ctx, in, meta, "", "", "", now)
 	}
 
-	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups)}
+	view := nodeView{panelID: in.PanelID, nodeIDs: map[int64]bool{}, groupOf: nil, groupCap: slices.Contains(in.Capabilities, capabilityDestinationGroups), egress: in.Egress}
 	var nodes []*domain.Node
 	if in.Snapshot != nil {
 		for _, n := range in.Snapshot.Nodes {
@@ -915,6 +918,15 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 	for _, u := range v.users {
 		fmt.Fprintf(h, "u%d:%d;", u, v.groupOf[u])
 	}
+	// Written only when there are tunnels, so a node without any keeps its key.
+	egress := make([]int64, 0, len(v.egress))
+	for id := range v.egress {
+		egress = append(egress, id)
+	}
+	slices.Sort(egress)
+	for _, id := range egress {
+		fmt.Fprintf(h, "e%d:%d;", id, v.egress[id])
+	}
 	tm := make([]int64, 0, len(v.tagMatched))
 	for gid := range v.tagMatched {
 		tm = append(tm, gid)
@@ -1007,8 +1019,22 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 		switch kind {
 		case 'p':
 			p := policies[n]
-			if p == nil || (p.Scope == string(domain.DestScopePanels) && !slices.Contains(p.Panels, v.panelID)) {
+			if p == nil {
 				continue
+			}
+			if p.Scope == string(domain.DestScopePanels) {
+				all, inbounds := v.panelScope(p.Panels)
+				if !all {
+					// Narrowed to the inbounds whose traffic the policy now
+					// covers: a narrower rule only ever loosens.
+					if len(r.Inbounds) > 0 {
+						inbounds = slices.DeleteFunc(inbounds, func(k protocol.ListenerKey) bool { return !slices.Contains(r.Inbounds, k) })
+					}
+					if len(inbounds) == 0 {
+						continue
+					}
+					r.Inbounds = inbounds
+				}
 			}
 			// A policy that has changed action, or moved between enforced and
 			// report-only, is a different rule now.

@@ -155,6 +155,9 @@ func (r *transitRepo) RecordCounters(ctx context.Context, id int64, up, down int
 // line is ready when its entry confirmed exactly the forward the line now asks
 // for. Nodes without managed lines cost nothing.
 func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	if err := attachEgressState(ctx, db, nodes); err != nil {
+		return err
+	}
 	var ids []int64
 	for _, node := range nodes {
 		if node == nil {
