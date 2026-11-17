@@ -22,7 +22,8 @@ vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () =>
 // t over the REAL zh-CN bundles, so a key the tab asks for but the bundle
 // lacks shows up as its raw key instead of passing on a defaultValue.
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({
     t: (k: string, o?: Record<string, unknown>) => {
       const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k
