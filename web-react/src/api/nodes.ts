@@ -135,6 +135,7 @@ export interface NodeSetupEntry {
 export interface NodeSetupOptions {
   loopbacks: Record<number, number>
   tunnels: Record<number, NodeSetupEntry>
+  link_ports?: Record<string, number>
   routes?: RouteInput[]
   confirm?: string
 }

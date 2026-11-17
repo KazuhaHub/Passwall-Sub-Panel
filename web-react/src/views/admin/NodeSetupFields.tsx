@@ -183,10 +183,12 @@ interface ReviewProps {
   routeCount: number
   editingLoopbacks: Record<number, number>
   onLoopback: (server: number, port: number) => void
+  editingLinkPorts: Record<string, number>
+  onLinkPort: (link: string, port: number) => void
   changed: boolean
 }
 
-export function SetupReview({ plan, entries, direct, peers, landingPort, routeCount, editingLoopbacks, onLoopback, changed }: ReviewProps) {
+export function SetupReview({ plan, entries, direct, peers, landingPort, routeCount, editingLoopbacks, onLoopback, editingLinkPorts, onLinkPort, changed }: ReviewProps) {
   const { t } = useTranslation(['admin'])
   const peer = (id: number) => peers.find(p => p.id === id)?.name ?? `#${id}`
   return (
@@ -202,25 +204,31 @@ export function SetupReview({ plan, entries, direct, peers, landingPort, routeCo
           <TableCell>{t('admin:nodes.setup.sni')}</TableCell>
         </TableRow></TableHead>
         <TableBody>
-          {[...plan.bindings].sort((a, b) => a.panel_id - b.panel_id).map((b, i) => (
-            <TableRow key={i}>
-              <TableCell>{peer(b.panel_id)}</TableCell>
-              <TableCell>
-                {t(`admin:nodes.setup.kind.${b.kind}`)}{b.name && ` · ${b.name}`}{b.peer_id ? ` · ${peer(b.peer_id)}` : ''}
-                <Typography variant="body2" component="div" color="text.secondary">
-                  {b.address && `${b.address} · `}{b.listen || t('admin:nodes.setup.all_addresses')} · {b.port}
-                  {b.reused && ` · ${t('admin:nodes.setup.reused')}`}
-                </Typography>
-                {b.front_id && <Typography variant="body2" color="text.secondary">{t('admin:nodes.setup.shared')}</Typography>}
-                {b.loopback ? (
-                  <TextField size="small" type="number" sx={{ mt: 1 }} label={t('admin:nodes.setup.loopback')}
-                    value={editingLoopbacks[b.panel_id] ?? b.loopback}
-                    onChange={e => onLoopback(b.panel_id, Number(e.target.value) || 0)} />
-                ) : null}
-              </TableCell>
-              <TableCell>{b.sni?.join(', ') || '—'}{b.target && <Box color="text.secondary">{b.target}</Box>}</TableCell>
-            </TableRow>
-          ))}
+          {[...plan.bindings].sort((a, b) => a.panel_id - b.panel_id).map((b, i) => {
+            const link = b.kind === 'link' && !b.reused ? `${b.peer_id}/${b.panel_id}` : null
+            return (
+              <TableRow key={i}>
+                <TableCell>{peer(b.panel_id)}</TableCell>
+                <TableCell>
+                  {t(`admin:nodes.setup.kind.${b.kind}`)}{b.name && ` · ${b.name}`}{b.peer_id ? ` · ${peer(b.peer_id)}` : ''}
+                  <Typography variant="body2" component="div" color="text.secondary">
+                    {b.address && `${b.address} · `}{b.listen || t('admin:nodes.setup.all_addresses')} · {b.port}
+                    {b.reused && ` · ${t('admin:nodes.setup.reused')}`}
+                  </Typography>
+                  {b.front_id && <Typography variant="body2" color="text.secondary">{t('admin:nodes.setup.shared')}</Typography>}
+                  {b.loopback ? (
+                    <TextField size="small" type="number" sx={{ mt: 1 }} label={t('admin:nodes.setup.loopback')}
+                      value={editingLoopbacks[b.panel_id] ?? b.loopback}
+                      onChange={e => onLoopback(b.panel_id, Number(e.target.value) || 0)} />
+                  ) : null}
+                  {link && <TextField size="small" type="number" sx={{ mt: 1 }} label={t('admin:nodes.setup.link_port')}
+                    value={editingLinkPorts[link] ?? b.port}
+                    onChange={e => onLinkPort(link, Number(e.target.value) || 0)} />}
+                </TableCell>
+                <TableCell>{b.sni?.join(', ') || '—'}{b.target && <Box color="text.secondary">{b.target}</Box>}</TableCell>
+              </TableRow>
+            )
+          })}
           {entries.filter(e => !e.line.entry_panel_id).map(({ key, line }) => (
             <TableRow key={key}>
               <TableCell>{t(line.mode === 'cdn' ? 'admin:nodes.relay.entry_cdn' : 'admin:nodes.relay.entry_external')}</TableCell>

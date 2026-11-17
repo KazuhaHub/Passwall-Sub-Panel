@@ -89,6 +89,7 @@ type TunnelLinker interface {
 	// existing link's, or the one a new link will be made with (reserved by this
 	// call, so what a confirmation lists is what is then created).
 	PlanLink(ctx context.Context, entry, exit int64) (port int, exists bool, err error)
+	PlanLinkPort(ctx context.Context, entry, exit int64, requested int, occupied ...int) (port int, exists bool, err error)
 	// RemoveLink deletes a tunnel that nothing uses.
 	RemoveLink(ctx context.Context, entry, exit int64) error
 }

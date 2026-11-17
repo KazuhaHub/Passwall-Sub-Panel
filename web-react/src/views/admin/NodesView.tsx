@@ -1103,6 +1103,7 @@ interface FieldsProps {
   servers?: Server[]
   server?: Server
   onGenKeys: () => void | Promise<void>
+  onRandomRealitySite?: () => void
   onGenSSPassword: () => void
   genKeysBusy: boolean
   protocolReadonly?: boolean
@@ -1123,7 +1124,7 @@ interface FieldsProps {
   allowRealityScan?: boolean
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, server, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, server, onGenKeys, onRandomRealitySite, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1715,6 +1716,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                     <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.reality_dest')}
                       value={form.reality_dest}
                       onChange={e => update('reality_dest', e.target.value)} />
+                    {onRandomRealitySite && <Button type="button" size="small" variant="outlined"
+                      onClick={onRandomRealitySite} sx={{ whiteSpace: 'nowrap' }}>
+                      {t('admin:nodes.egress.random_site')}
+                    </Button>}
                     <Button type="button" size="small" variant="outlined"
                       disabled={!form.panel_id || !canScanReality}
                       onClick={() => setRealityScannerOpen(true)}
@@ -2531,6 +2536,8 @@ export default function NodesView() {
   const [setupEgress, setSetupEgress] = useState(0)
   const [setupPlan, setSetupPlan] = useState<NodeSetupPlan | null>(null)
   const [setupLoopbacks, setSetupLoopbacks] = useState<Record<number, number>>({})
+  const [setupLinkPorts, setSetupLinkPorts] = useState<Record<string, number>>({})
+  const setupPortsChanged = Object.keys(setupLoopbacks).length > 0 || Object.keys(setupLinkPorts).length > 0
   const [setupError, setSetupError] = useState('')
   const [setupRoutes, setSetupRoutes] = useState<DraftRoute[]>([])
   const [recentSetupEntries, setRecentSetupEntries] = useState<number[]>([])
@@ -3123,14 +3130,24 @@ export default function NodesView() {
     setSetupEgress(0)
     setSetupPlan(null)
     setSetupLoopbacks({})
+    setSetupLinkPorts({})
     setSetupError('')
     setSetupRoutes([])
     setCreateOpen(true)
     void genKeys()
   }
 
-  function randomSetupSite() {
-    return TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
+  function randomSetupSite(exclude: string[] = []) {
+    const candidates = TUNNEL_REALITY_SITES.filter(site => !exclude.includes(site))
+    const sites = candidates.length ? candidates : TUNNEL_REALITY_SITES
+    return sites[Math.floor(Math.random() * sites.length)]
+  }
+
+  function randomizeLandingSite() {
+    setCreateForm(previous => {
+      const site = randomSetupSite(splitList(previous.reality_server_names_text))
+      return { ...previous, reality_dest: `${site}:443`, reality_server_names_text: site }
+    })
   }
 
   function closeCreate() {
@@ -3260,17 +3277,21 @@ export default function NodesView() {
       ? [[e.line.entry_panel_id, e.tunnel]] : []))
     const shown = Object.fromEntries((setupPlan?.bindings ?? []).flatMap(b => b.loopback ? [[b.panel_id, b.loopback]] : []))
     const loopbacks = { ...shown, ...setupLoopbacks }
+    const shownLinkPorts = Object.fromEntries((setupPlan?.bindings ?? []).flatMap(b => b.kind === 'link' && !b.reused
+      ? [[`${b.peer_id}/${b.panel_id}`, b.port]] : []))
+    const link_ports = { ...shownLinkPorts, ...setupLinkPorts }
     if (draftIssues(setupRoutes).length > 0) {
       setSetupError(t('admin:nodes.setup.invalid_routes'))
       return
     }
-    const options = { loopbacks, tunnels, routes: inputOf(setupRoutes) }
+    const options = { loopbacks, tunnels, link_ports, routes: inputOf(setupRoutes) }
     setCreateBusy(true)
     try {
-      if (setupStep === 2 || !setupPlan || Object.keys(setupLoopbacks).length > 0) {
+      if (setupStep === 2 || !setupPlan || setupPortsChanged) {
         const plan = await previewNodeSetup(setupRequest(options))
         setSetupPlan(plan)
         setSetupLoopbacks({})
+        setSetupLinkPorts({})
         setSetupStep(3)
         return
       }
@@ -3284,7 +3305,11 @@ export default function NodesView() {
     } catch (error) {
       const response = (error as { response?: { status?: number; data?: { error?: string } } }).response
       setSetupError(response?.data?.error ?? t('admin:nodes.setup.request_failed'))
-      if (response?.status === 409 && setupStep === 3) setSetupPlan(null)
+      if (response?.status === 409 && setupStep === 3) {
+        setSetupPlan(null)
+        setSetupLoopbacks({})
+        setSetupLinkPorts({})
+      }
     } finally { setCreateBusy(false) }
   }
 
@@ -3969,6 +3994,7 @@ export default function NodesView() {
             {setupStep === 0 && <InboundFormFields form={createForm} setForm={setCreateForm}
               showMetadata servers={writableServers}
               onGenKeys={genKeys} onGenSSPassword={genSSPasswordCreate} genKeysBusy={genKeysBusy}
+              onRandomRealitySite={randomizeLandingSite}
               advanced={createAdvanced} onSetAdvanced={setCreateAdvanced} allTags={allTags}
               panelType={servers.find(s => s.id === createForm.panel_id)?.panel_type}
               allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')} />}
@@ -3997,7 +4023,8 @@ export default function NodesView() {
             )}
             {setupStep === 3 && setupPlan && <SetupReview plan={setupPlan} entries={setupEntries} direct={setupDirect}
               routeCount={setupRoutes.length} peers={servers} landingPort={createForm.port} editingLoopbacks={setupLoopbacks}
-              changed={Object.keys(setupLoopbacks).length > 0}
+              changed={setupPortsChanged} editingLinkPorts={setupLinkPorts}
+              onLinkPort={(link, port) => setSetupLinkPorts(previous => ({ ...previous, [link]: port }))}
               onLoopback={(server, port) => setSetupLoopbacks(previous => ({ ...previous, [server]: port }))} />}
           </Box>
         </DialogContent>
@@ -4007,12 +4034,13 @@ export default function NodesView() {
               setSetupStep(step => step - 1)
               setSetupPlan(null)
               setSetupLoopbacks({})
+              setSetupLinkPorts({})
               setSetupError('')
             }} disabled={createBusy || setupEntriesBusy}>{t('admin:nodes.setup.back')}</Button>}
             <Button type="submit" form="create-form" variant="contained" disabled={createBusy || genKeysBusy || setupEntriesBusy}
               startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
               {t(setupStep < 2 ? 'admin:nodes.setup.next'
-                : setupStep === 2 || !setupPlan || Object.keys(setupLoopbacks).length > 0
+                : setupStep === 2 || !setupPlan || setupPortsChanged
                   ? 'admin:nodes.setup.review' : 'admin:nodes.setup.confirm')}
             </Button>
         </DialogActions>

@@ -213,6 +213,13 @@ func (l *linkRecorder) PlanLink(context.Context, int64, int64) (int, bool, error
 	return port, false, nil
 }
 
+func (l *linkRecorder) PlanLinkPort(ctx context.Context, entry, exit int64, requested int, _ ...int) (int, bool, error) {
+	if requested != 0 {
+		return requested, false, nil
+	}
+	return l.PlanLink(ctx, entry, exit)
+}
+
 func (l *linkRecorder) EnsureLink(_ context.Context, entry, exit int64) (domain.TransitLink, error) {
 	l.pairs = append(l.pairs, [2]int64{entry, exit})
 	return domain.TransitLink{}, nil

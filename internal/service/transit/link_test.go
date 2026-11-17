@@ -548,3 +548,40 @@ func TestPlanLinkReservationsExpireAreHonouredAndNeverMovedQuietly(t *testing.T)
 		t.Fatalf("made on %d (%v), planned %d", made.Port, err, planned)
 	}
 }
+
+func TestPlanLinkPortReservesTheChosenPort(t *testing.T) {
+	ctx := context.Background()
+	repos := linkStore(t)
+	service := New(fakeNodes{landing(1, 3, "exit.example", 443)}, newFakeRepo()).
+		WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"})
+	const chosen = 18443
+	port, exists, err := service.PlanLinkPort(ctx, 9, 3, chosen)
+	if err != nil || exists || port != chosen {
+		t.Fatalf("chosen port: got %d, exists %v, error %v", port, exists, err)
+	}
+	for _, unavailable := range []int{-1, 443, 10085, 65536} {
+		if _, _, err := service.PlanLinkPort(ctx, 9, 3, unavailable); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("port %d: got %v, want validation error", unavailable, err)
+		}
+	}
+	if _, _, err := service.PlanLinkPort(ctx, 10, 3, chosen); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("second link reserved the same port: %v", err)
+	}
+	link, err := service.EnsureLink(ctx, 9, 3)
+	if err != nil || link.Port != chosen {
+		t.Fatalf("created on %d, error %v, want %d", link.Port, err, chosen)
+	}
+	if _, _, err := service.PlanLinkPort(ctx, 9, 3, chosen+1); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("requested a different port for a reused link: %v", err)
+	}
+	if port, exists, err := service.PlanLink(ctx, 9, 3); err != nil || !exists || port != chosen {
+		t.Fatalf("reused port: got %d, exists %v, error %v", port, exists, err)
+	}
+	automatic, _, err := service.PlanLink(ctx, 10, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port, _, err := service.PlanLinkPort(ctx, 10, 3, 0, automatic); err != nil || port == automatic {
+		t.Fatalf("planned port %d overlaps a staged listener on %d, error %v", port, automatic, err)
+	}
+}

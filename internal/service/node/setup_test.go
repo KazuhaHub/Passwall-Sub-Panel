@@ -49,6 +49,23 @@ func TestSetupInboundChecksConfirmedPortsBeforeWriting(t *testing.T) {
 		t.Fatalf("tunnel binding = %+v", p)
 	}
 	n, spec, opts = setupDraft()
+	opts.LinkPorts = map[string]int{"9/7": spec.Port}
+	if _, err = env.svc.SetupInbound(ctx, n, spec, opts, true); !errors.Is(err, domain.ErrValidation) || !strings.Contains(err.Error(), n.DisplayName) {
+		t.Fatalf("staged listener collision: err = %v", err)
+	}
+	n, spec, opts = setupDraft()
+	opts.LinkPorts = map[string]int{"9/7": 31888}
+	opts.Confirm = plan.Token
+	if _, err = env.svc.SetupInbound(ctx, n, spec, opts, false); !errors.Is(err, domain.ErrConflict) || n.ID != 0 {
+		t.Fatalf("unreviewed transit port: id %d, err = %v", n.ID, err)
+	}
+	n, spec, opts = setupDraft()
+	opts.LinkPorts = map[string]int{"9/7": 31888}
+	revised, err := env.svc.SetupInbound(ctx, n, spec, opts, true)
+	if err != nil || revised.Token == plan.Token || revised.Bindings[2].Port != 31888 {
+		t.Fatalf("changed transit port: plan %+v, err %v", revised, err)
+	}
+	n, spec, opts = setupDraft()
 	opts.Confirm = plan.Token
 	spec.Port++
 	if _, err = env.svc.SetupInbound(ctx, n, spec, opts, false); !errors.Is(err, domain.ErrConflict) || n.ID != 0 {

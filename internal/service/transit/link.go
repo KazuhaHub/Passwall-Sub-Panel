@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -511,13 +512,29 @@ func (s *Service) putReservation(key [2]int64, r reservation) {
 // other link's allocation. The caller holds the exit server's lock (a node save
 // does), which makes the choice and the use of the port one critical section.
 func (s *Service) PlanLink(ctx context.Context, entry, exit int64) (int, bool, error) {
+	return s.PlanLinkPort(ctx, entry, exit, 0)
+}
+
+// PlanLinkPort reserves the requested port for a new link, or chooses one
+// when requested is zero. Occupied ports may include other listeners in the
+// same setup that have yet to be saved. Existing links keep their port.
+func (s *Service) PlanLinkPort(ctx context.Context, entry, exit int64, requested int, occupied ...int) (int, bool, error) {
 	if s.links == nil {
 		return 0, false, errors.New("transit: tunnels are not enabled")
 	}
 	if link, err := s.links.GetLink(ctx, entry, exit); err == nil {
+		if requested != 0 && link.Port != requested {
+			return 0, true, fmt.Errorf("%w: the transit tunnel from server %d to server %d already uses port %d", domain.ErrConflict, entry, exit, link.Port)
+		}
 		return link.Port, true, nil
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return 0, false, err
+	}
+	if requested < 0 || requested > 65535 {
+		return 0, false, fmt.Errorf("%w: port %d is out of range", domain.ErrValidation, requested)
+	}
+	if owner, reserved := domain.NodeReservedPort(requested); reserved {
+		return 0, false, fmt.Errorf("%w: port %d is reserved for the %s on server %d", domain.ErrValidation, requested, owner, exit)
 	}
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
@@ -527,12 +544,22 @@ func (s *Service) PlanLink(ctx context.Context, entry, exit int64) (int, bool, e
 	defer s.allocMu.Unlock()
 	key := [2]int64{entry, exit}
 	r, had := s.takeReservation(key) // so that its own promise does not count against it
-	if had && r.expires.After(s.clock()) && s.portFree(ctx, nodes, exit, r.port) {
+	if requested != 0 {
+		if slices.Contains(occupied, requested) || !s.portFree(ctx, nodes, exit, requested) {
+			if had {
+				s.putReservation(key, r)
+			}
+			return 0, false, fmt.Errorf("%w: transit port %d is unavailable on server %d", domain.ErrValidation, requested, exit)
+		}
+		s.putReservation(key, reservation{port: requested, expires: s.clock().Add(reservationTTL)})
+		return requested, false, nil
+	}
+	if had && r.expires.After(s.clock()) && !slices.Contains(occupied, r.port) && s.portFree(ctx, nodes, exit, r.port) {
 		// Seen again, the same promise is kept (and its ten minutes begin anew).
 		s.putReservation(key, reservation{port: r.port, expires: s.clock().Add(reservationTTL)})
 		return r.port, false, nil
 	}
-	port, err := s.freeExitPortLocked(ctx, nodes, exit)
+	port, err := s.freeExitPortLocked(ctx, nodes, exit, occupied...)
 	if err != nil {
 		return 0, false, err
 	}
@@ -639,8 +666,11 @@ func (s *Service) freeExitPort(ctx context.Context, nodes []*domain.Node, exit i
 // freeExitPortLocked is freeExitPort for a caller holding allocMu. The live
 // reservations of other links on the server count as used, and so does anything
 // the port check names (shared ports, loopbacks).
-func (s *Service) freeExitPortLocked(ctx context.Context, nodes []*domain.Node, exit int64) (int, error) {
+func (s *Service) freeExitPortLocked(ctx context.Context, nodes []*domain.Node, exit int64, occupied ...int) (int, error) {
 	used := s.liveReservations(exit)
+	for _, port := range occupied {
+		used[port] = true
+	}
 	for _, node := range nodes {
 		if node == nil {
 			continue

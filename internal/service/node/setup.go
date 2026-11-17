@@ -24,6 +24,7 @@ import (
 type SetupOptions struct {
 	Loopbacks map[int64]int        `json:"loopbacks"`
 	Tunnels   map[int64]SetupEntry `json:"tunnels"`
+	LinkPorts map[string]int       `json:"link_ports"` // keyed by "<entry>/<exit>"
 	Confirm   string               `json:"confirm"`
 	Routes    []domain.DestRoute   `json:"routes"`
 }
@@ -188,12 +189,14 @@ func (s *Service) planSetup(ctx context.Context, n *domain.Node, spec ports.Inbo
 		listener.index = i
 		work.listeners = append(work.listeners, listener)
 		work.Bindings = append(work.Bindings, listener.binding)
-		if err := s.planSetupLink(ctx, work, child.PanelID, n.PanelID); err != nil {
+	}
+	for _, listener := range work.listeners[1:] {
+		if err := s.planSetupLink(ctx, work, listener.node.PanelID, n.PanelID, opts.LinkPorts); err != nil {
 			return nil, err
 		}
 	}
 	if n.EgressPanelID != 0 {
-		if err := s.planSetupLink(ctx, work, n.PanelID, n.EgressPanelID); err != nil {
+		if err := s.planSetupLink(ctx, work, n.PanelID, n.EgressPanelID, opts.LinkPorts); err != nil {
 			return nil, err
 		}
 	}
@@ -211,7 +214,7 @@ func (s *Service) planSetup(ctx context.Context, n *domain.Node, spec ports.Inbo
 		}
 		for _, r := range checked.Routes {
 			if r.Target.Kind == domain.DestRouteServer {
-				if err := s.planSetupLink(ctx, work, n.PanelID, r.Target.PanelID); err != nil {
+				if err := s.planSetupLink(ctx, work, n.PanelID, r.Target.PanelID, opts.LinkPorts); err != nil {
 					return nil, err
 				}
 			}
@@ -232,7 +235,7 @@ func (s *Service) planSetup(ctx context.Context, n *domain.Node, spec ports.Inbo
 	return work, nil
 }
 
-func (s *Service) planSetupLink(ctx context.Context, work *setupWork, entry, exit int64) error {
+func (s *Service) planSetupLink(ctx context.Context, work *setupWork, entry, exit int64, linkPorts map[string]int) error {
 	for _, link := range work.links {
 		if link.PeerID == entry && link.PanelID == exit {
 			return nil
@@ -241,19 +244,40 @@ func (s *Service) planSetupLink(ctx context.Context, work *setupWork, entry, exi
 	if s.tunnelLinks == nil {
 		return fmt.Errorf("%w: transit tunnels are unavailable", domain.ErrValidation)
 	}
-	port, exists, err := s.tunnelLinks.PlanLink(ctx, entry, exit)
+	requested := linkPorts[fmt.Sprintf("%d/%d", entry, exit)]
+	var occupied []int
+	for _, b := range work.Bindings {
+		if b.PanelID != exit {
+			continue
+		}
+		if requested != 0 && (b.Port == requested || b.Loopback == requested) {
+			return setupLinkConflict(b, requested)
+		}
+		occupied = append(occupied, b.Port, b.Loopback)
+	}
+	port, exists, err := s.tunnelLinks.PlanLinkPort(ctx, entry, exit, requested, occupied...)
 	if err != nil {
 		return err
 	}
-	for _, b := range work.Bindings {
-		if b.PanelID == exit && (b.Port == port || b.Loopback == port) {
-			return fmt.Errorf("%w: on server %d, %q and a transit tunnel both use port %d; choose another listener port", domain.ErrValidation, exit, b.Name, port)
+	if exists {
+		for _, b := range work.Bindings {
+			if b.PanelID == exit && (b.Port == port || b.Loopback == port) {
+				return setupLinkConflict(b, port)
+			}
 		}
 	}
 	b := SetupBinding{PanelID: exit, PeerID: entry, Kind: "link", Port: port, Reused: exists}
 	work.links = append(work.links, b)
 	work.Bindings = append(work.Bindings, b)
 	return nil
+}
+
+func setupLinkConflict(binding SetupBinding, port int) error {
+	owner := binding.Name
+	if binding.Kind == "link" {
+		owner = fmt.Sprintf("transit tunnel from server %d", binding.PeerID)
+	}
+	return fmt.Errorf("%w: port %d on server %d conflicts with %q", domain.ErrValidation, port, binding.PanelID, owner)
 }
 
 func (s *Service) planSetupListener(ctx context.Context, n *domain.Node, spec ports.InboundSpec, loopback int, kind string) (setupListener, error) {
