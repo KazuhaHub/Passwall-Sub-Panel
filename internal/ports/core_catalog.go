@@ -139,6 +139,11 @@ type CoreReleaseAsset struct {
 	SHA256  string `json:"sha256"`
 	Archive string `json:"archive"`
 	Binary  string `json:"binary"`
+	// Libc is the C library the binary is built for ("musl" or "glibc"). It is part
+	// of an asset's identity: a target can have a glibc and a musl asset that
+	// differ only here. Absent means the asset runs on every host of its target
+	// (a static build), as the publisher defines it.
+	Libc string `json:"libc,omitempty"`
 }
 
 // List returns the engine's selectable releases.

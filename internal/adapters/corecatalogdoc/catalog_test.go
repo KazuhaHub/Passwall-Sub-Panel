@@ -32,7 +32,7 @@ import (
 
 const documentFixture = `{
   "schema_version": 1,
-  "updated_at": "2026-09-20T00:00:00Z",
+  "updated_at": "2027-01-01T00:00:00Z",
   "releases": [
     {
       "engine": "xray",
