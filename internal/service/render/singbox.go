@@ -950,7 +950,7 @@ func marshalJSONString(v string) (string, error) {
 }
 
 func mergePlaceholders(base map[string]string, extra map[string]string) map[string]string {
-	out := make(map[string]string, len(base)+len(extra))
+	out := make(map[string]string, len(base))
 	for k, v := range base {
 		out[k] = v
 	}
