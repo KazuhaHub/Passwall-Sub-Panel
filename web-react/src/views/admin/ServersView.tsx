@@ -160,6 +160,8 @@ interface FormState {
   username: string
   password: string
   remark: string
+  region: string
+  tags: string
   auth_method: XUIAuthMethod
   insecure_https: boolean
   change_api_token: boolean
@@ -169,7 +171,7 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = {
-  name: '', url: '', api_token: '', username: '', password: '', remark: '',
+  name: '', url: '', api_token: '', username: '', password: '', remark: '', region: '', tags: '',
   panel_type: 'psp',
   update_channel: 'stable',
   auth_method: 'token', insecure_https: false,
@@ -736,6 +738,8 @@ export default function ServersView() {
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
+      region: s.region ?? '',
+      tags: s.tags?.join(', ') ?? '',
       auth_method: s.auth_method ?? 'token',
       insecure_https: !!s.insecure_https,
     })
@@ -770,6 +774,12 @@ export default function ServersView() {
     setFieldErr(errs)
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
+    const region = form.region.trim()
+    const tags = form.tags.split(',').map(tag => tag.trim()).filter(Boolean)
+    const labels = {
+      ...((editing?.region ?? '') !== region ? { region } : {}),
+      ...(JSON.stringify(editing?.tags ?? []) !== JSON.stringify(tags) ? { tags } : {}),
+    }
     setBusy(true)
     try {
 		let continueInstallation = false
@@ -787,13 +797,14 @@ export default function ServersView() {
 				}
 			if (editing.panel_type !== 'psp' && form.change_api_token) req.api_token = form.api_token
 			if (editing.panel_type !== 'psp' && form.change_password) req.password = form.password
-        const saved = await updateServer(editing.id, req)
+        const saved = await updateServer(editing.id, { ...req, ...labels })
         mutateItems(prev => prev.map(server => server.id === saved.id ? saved : server))
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
 			const created = await createServer(form.panel_type === 'psp'
-				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined, update_channel: form.update_channel }
+				? { ...labels, name: form.name, panel_type: 'psp', remark: form.remark || undefined, update_channel: form.update_channel }
 				: {
+					...labels,
 					name: form.name, url: form.url,
 					panel_type: form.panel_type,
 					api_token: form.api_token || undefined,
@@ -1930,6 +1941,13 @@ export default function ServersView() {
               error={!!fieldErr.name}
               helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : form.panel_type === 'psp' ? undefined : t('admin:servers.hint.name')}
             />
+
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <TextField fullWidth label={t('admin:servers.field.region')} value={form.region}
+                slotProps={{ htmlInput: { maxLength: 32 } }} onChange={e => setForm({ ...form, region: e.target.value })} />
+              <TextField fullWidth label={t('admin:servers.field.tags')} value={form.tags}
+                onChange={e => setForm({ ...form, tags: e.target.value })} />
+            </Box>
 
             {form.panel_type === 'psp' ? (
               <>

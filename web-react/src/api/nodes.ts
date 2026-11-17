@@ -1,6 +1,7 @@
 import { withFrontConfirm } from '@/utils/frontConfirm'
 import { withTunnelConfirm, type TunnelConfirmation } from '@/utils/tunnelConfirm'
 import { client } from './client'
+import type { RouteInput } from './routes'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound } from './types'
 
 export interface AdminInbound {
@@ -118,7 +119,50 @@ export interface CreateInboundRequest {
   cert_id?: number
   /** Direct line multiplier in thousandths; omit for 1000. */
   traffic_factor_milli?: number
+  relays?: RelayLine[]
+  hide_direct?: boolean
+  egress_panel_id?: number
+  setup?: NodeSetupOptions
   inbound: InboundSpec
+}
+
+export interface NodeSetupEntry {
+  listen: string
+  sni: string
+  target: string
+}
+
+export interface NodeSetupOptions {
+  loopbacks: Record<number, number>
+  tunnels: Record<number, NodeSetupEntry>
+  routes?: RouteInput[]
+  confirm?: string
+}
+
+export interface NodeSetupBinding {
+  panel_id: number
+  peer_id?: number
+  kind: 'landing' | 'forward' | 'tunnel' | 'link'
+  name: string
+  address?: string
+  listen?: string
+  port: number
+  loopback?: number
+  front_id?: number
+  sni?: string[]
+  target?: string
+  reused?: boolean
+}
+
+export interface NodeSetupPlan {
+  bindings: NodeSetupBinding[]
+  token: string
+  warnings?: string[]
+}
+
+export async function previewNodeSetup(req: CreateInboundRequest) {
+  const { data } = await client.post<NodeSetupPlan>('/admin/nodes/setup-preview', req, { _skipErrorToast: true })
+  return data
 }
 
 export interface RealityKeypair {

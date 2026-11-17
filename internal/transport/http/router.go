@@ -575,6 +575,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/nodes/separator/:id", nodes.UpdateSeparator)
 		adminGroup.DELETE("/nodes/separator/:id", nodes.DeleteSeparator)
 		adminGroup.POST("/nodes", nodes.CreateInbound)
+		previewPOST(adminGroup, "/nodes/setup-preview", nodes.PreviewSetup)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
 		// Tunnel-mode relay lines: the confirmed mode switch, the listener's own

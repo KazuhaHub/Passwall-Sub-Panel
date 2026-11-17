@@ -79,62 +79,15 @@ func (s *Service) save(ctx context.Context, nodeID int64, in []domain.DestRoute,
 		}
 		return Saved{Routes: []domain.DestRoute{}}, nil
 	}
-	support, err := s.SupportOf(ctx, node.PanelID)
+	checked, exits, err := s.check(ctx, node, in)
 	if err != nil {
 		return Saved{}, err
-	}
-	if !support.Supported {
-		return Saved{}, supportRefusal(support.Reason)
-	}
-	routes, err := s.normalise(in, node.DestRoutes)
-	if err != nil {
-		return Saved{}, err
-	}
-	var warnings []Warning
-	exits, err := s.checkTargets(ctx, node, routes, &warnings)
-	if err != nil {
-		return Saved{}, err
-	}
-	index, err := s.listIndex(ctx)
-	if err != nil {
-		return Saved{}, err
-	}
-	if err := checkLists(routes, index); err != nil {
-		return Saved{}, err
-	}
-	keys, err := s.keysFor(ctx, node.PanelID, exits)
-	if err != nil {
-		return Saved{}, err
-	}
-	data := s.dataKey(ctx)
-	out, err := s.compileNode(ctx, node, routes, func(panel int64) (nodeprotocol.LinkKey, bool) {
-		key, ok := keys[panel]
-		return key, ok
-	}, index, data, false, false)
-	if err != nil {
-		return Saved{}, err
-	}
-	for _, note := range out.Notes {
-		warnings = append(warnings, noteWarning(node, note))
-	}
-	if err := s.checkWire(ctx, node, out, keys, index, data); err != nil {
-		return Saved{}, err
-	}
-	warnings = append(warnings, redundancy(node, routes)...)
-	var budget *BudgetView
-	if s.Policies != nil && s.Desired != nil {
-		var analysisWarnings []Warning
-		budget, analysisWarnings, err = s.budget(ctx, node, routes, keys, index, data)
-		if err != nil {
-			return Saved{}, err
-		}
-		warnings = append(warnings, analysisWarnings...)
 	}
 	if write {
 		// The routes first, then their tunnels: a route that cannot be stored
 		// leaves no tunnel behind. The tunnels are made under the lock of their
 		// exit server (the one fronts take), which is where their port is picked.
-		if err := s.Routes.Replace(ctx, node.ID, routes); err != nil {
+		if err := s.Routes.Replace(ctx, node.ID, checked.Routes); err != nil {
 			return Saved{}, err
 		}
 		for _, panel := range sortedPanels(exits) {
@@ -142,11 +95,82 @@ func (s *Service) save(ctx context.Context, nodeID int64, in []domain.DestRoute,
 				return Saved{}, fmt.Errorf("route: make the tunnel to server %d: %w", panel, err)
 			}
 		}
-		if err := s.dropUnusedLinks(ctx, node, node.DestRoutes, routes); err != nil {
+		if err := s.dropUnusedLinks(ctx, node, node.DestRoutes, checked.Routes); err != nil {
 			return Saved{}, err
 		}
 	}
-	return Saved{Routes: routes, Warnings: warnings, Budget: budget}, nil
+	return checked, nil
+}
+
+// CheckSetup holds a draft listener to the same route constraints as an existing
+// listener. The caller already holds the route lock for its server.
+func (s *Service) CheckSetup(ctx context.Context, node *domain.Node, in []domain.DestRoute) (Saved, error) {
+	draft := *node
+	draft.ID = stubLinkBase - 1
+	draft.DestRoutes = nil
+	checked, _, err := s.check(ctx, &draft, in)
+	return checked, err
+}
+
+// StoreSetup writes previously checked routes. Node setup makes the confirmed
+// links before publishing the listener, under the relevant server locks.
+func (s *Service) StoreSetup(ctx context.Context, nodeID int64, routes []domain.DestRoute) error {
+	return s.Routes.Replace(ctx, nodeID, routes)
+}
+
+func (s *Service) check(ctx context.Context, node *domain.Node, in []domain.DestRoute) (Saved, map[int64]bool, error) {
+	support, err := s.SupportOf(ctx, node.PanelID)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	if !support.Supported {
+		return Saved{}, nil, supportRefusal(support.Reason)
+	}
+	routes, err := s.normalise(in, node.DestRoutes)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	var warnings []Warning
+	exits, err := s.checkTargets(ctx, node, routes, &warnings)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	index, err := s.listIndex(ctx)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	if err := checkLists(routes, index); err != nil {
+		return Saved{}, nil, err
+	}
+	keys, err := s.keysFor(ctx, node.PanelID, exits)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	data := s.dataKey(ctx)
+	out, err := s.compileNode(ctx, node, routes, func(panel int64) (nodeprotocol.LinkKey, bool) {
+		key, ok := keys[panel]
+		return key, ok
+	}, index, data, false, false)
+	if err != nil {
+		return Saved{}, nil, err
+	}
+	for _, note := range out.Notes {
+		warnings = append(warnings, noteWarning(node, note))
+	}
+	if err := s.checkWire(ctx, node, out, keys, index, data); err != nil {
+		return Saved{}, nil, err
+	}
+	warnings = append(warnings, redundancy(node, routes)...)
+	var budget *BudgetView
+	if s.Policies != nil && s.Desired != nil {
+		var analysisWarnings []Warning
+		budget, analysisWarnings, err = s.budget(ctx, node, routes, keys, index, data)
+		if err != nil {
+			return Saved{}, nil, err
+		}
+		warnings = append(warnings, analysisWarnings...)
+	}
+	return Saved{Routes: routes, Warnings: warnings, Budget: budget}, exits, nil
 }
 
 // normalise gives every route its id and writes the typed fields in the one
@@ -615,7 +639,12 @@ func (s *Service) analyseServer(ctx context.Context, node *domain.Node, draft []
 	present := map[nodeprotocol.ListenerKey]bool{}
 	routeExits := map[int64][]destpolicy.RouteExit{}
 	egress := map[int64]int64{}
-	for _, n := range snapshot.Nodes {
+	candidates := snapshot.Nodes
+	if _, present := byID[node.ID]; !present {
+		candidates = append(slices.Clone(candidates), node)
+		byID[node.ID] = node
+	}
+	for _, n := range candidates {
 		if n == nil {
 			continue
 		}

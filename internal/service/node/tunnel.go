@@ -491,7 +491,7 @@ const defaultTunnelSniffing = `{"enabled":true,"destOverride":["http","tls","qui
 // newTunnelSettings builds the spec of a new tunnel listener: the landing's
 // protocol with fresh REALITY secrets and names, or the default listener. All of
 // it is stored on the listener, visible and editable; nothing is derived later.
-func newTunnelSettings(landing *domain.Node, name string, port int) (tunnelSettings, error) {
+func newTunnelSettings(landing *domain.Node, name string, port int, sni, target string) (tunnelSettings, error) {
 	priv, pub, err := realitykey.GenerateKeypair()
 	if err != nil {
 		return tunnelSettings{}, err
@@ -500,11 +500,16 @@ func newTunnelSettings(landing *domain.Node, name string, port int) (tunnelSetti
 	if err != nil {
 		return tunnelSettings{}, err
 	}
-	sni := transit.RealityCamouflageSites[rand.IntN(len(transit.RealityCamouflageSites))]
+	if sni == "" {
+		sni = transit.RealityCamouflageSites[rand.IntN(len(transit.RealityCamouflageSites))]
+	}
+	if target == "" {
+		target = sni + ":443"
+	}
 	// What the landing's REALITY listener keeps when it is copied is its options;
 	// the names and every secret are the entry's own and are made new.
 	own := func(reality map[string]any) map[string]any {
-		reality["target"] = sni + ":443"
+		reality["target"] = target
 		reality["serverNames"] = []string{sni}
 		reality["privateKey"] = priv
 		reality["shortIds"] = []string{shortID}
@@ -793,7 +798,7 @@ func (s *Service) makeTunnel(ctx context.Context, landing *domain.Node, line dom
 		return nil, fmt.Errorf("relay line %q: %w", firstText(line.Name, line.Address), err)
 	}
 	name := domain.TunnelLineLabel(landing.DisplayName, firstText(line.Name, line.Address))
-	settings, err := newTunnelSettings(landing, name, port)
+	settings, err := newTunnelSettings(landing, name, port, "", "")
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,30 @@ func TestPanelUpdateChannelStorageRoundTripKeepsRawLegacyAndFutureValues(t *test
 	}
 }
 
+func TestServerLabelsSurviveIndependentNativeMetadataUpdates(t *testing.T) {
+	r := newPanelRepo(t)
+	p := &domain.Panel{Kind: domain.PanelKindPSP, Name: "entry", URL: "psp://agt_labels", Region: "HK", Tags: []string{"relay"}}
+	if err := r.Save(t.Context(), p); err != nil {
+		t.Fatal(err)
+	}
+	remark := "metadata only"
+	if err := r.UpdateNativeMetadata(t.Context(), p.ID, nil, &remark, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.GetByID(t.Context(), p.ID)
+	if err != nil || got.Region != "HK" || !reflect.DeepEqual(got.Tags, []string{"relay"}) {
+		t.Fatalf("labels after update = %+v, err = %v", got, err)
+	}
+	tags := []string{}
+	if err := r.UpdateNativeMetadataAndLabels(t.Context(), p.ID, nil, nil, nil, nil, nil, nil, &tags); err != nil {
+		t.Fatal(err)
+	}
+	got, err = r.GetByID(t.Context(), p.ID)
+	if err != nil || got.Region != "HK" || len(got.Tags) != 0 {
+		t.Fatalf("labels after clearing tags = %+v, err = %v", got, err)
+	}
+}
+
 func TestNativeMetadataPreferenceDoesNotRewriteIdentitySecretsCoreStreamsOrProbes(t *testing.T) {
 	repos, db := newNativeCredentialTestRepos(t)
 	raw := "pspn_" + strings.Repeat("a", 43)

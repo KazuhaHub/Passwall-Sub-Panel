@@ -82,6 +82,19 @@ func TestCheckWritesNothing(t *testing.T) {
 	}
 }
 
+func TestCheckSetupValidatesRoutesForAnUnsavedListener(t *testing.T) {
+	w, s := routedWorld()
+	n := &domain.Node{PanelID: 1, DisplayName: "draft", Enabled: true}
+	input := []domain.DestRoute{serverRoute("", 2, "domain:a.com")}
+	saved, err := s.CheckSetup(t.Context(), n, input)
+	if err != nil || len(saved.Routes) != 1 || saved.Routes[0].ID != "r1" {
+		t.Fatalf("check setup = %+v, %v", saved, err)
+	}
+	if n.ID != 0 || len(w.routes) != 0 || len(w.links) != 0 {
+		t.Fatalf("setup preview wrote data: id %d, routes %v, links %v", n.ID, w.routes, w.links)
+	}
+}
+
 // A preview writes nothing, the last good content of the lists of the server's
 // other nodes included: only a sync keeps that.
 func TestCheckKeepsNoListContentForOtherNodes(t *testing.T) {

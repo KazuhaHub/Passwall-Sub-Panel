@@ -192,6 +192,8 @@ type serverDTO struct {
 	URL                  string                  `json:"url"`
 	Username             string                  `json:"username,omitempty"`
 	Remark               string                  `json:"remark,omitempty"`
+	Region               string                  `json:"region,omitempty"`
+	Tags                 []string                `json:"tags,omitempty"`
 	UpdateChannel        string                  `json:"update_channel,omitempty"`
 	// AuditCollect is how much a Passwall Node server records of its
 	// destination rules (off, hits, hits_and_usage); absent for other panels.
@@ -293,16 +295,18 @@ func (h *AdminServersHandler) WithClientIdentityCounts(counter ClientIdentityCou
 }
 
 type serverCreateRequest struct {
-	Kind          string  `json:"panel_type"`
-	Name          string  `json:"name" binding:"required"`
-	URL           string  `json:"url"`
-	APIToken      string  `json:"api_token"`
-	Username      string  `json:"username"`
-	Password      string  `json:"password"`
-	Remark        string  `json:"remark"`
-	AuthMethod    string  `json:"auth_method"` // "" (auto) | "token" | "password"
-	InsecureHTTPS bool    `json:"insecure_https"`
-	UpdateChannel *string `json:"update_channel,omitempty"`
+	Kind          string   `json:"panel_type"`
+	Name          string   `json:"name" binding:"required"`
+	URL           string   `json:"url"`
+	APIToken      string   `json:"api_token"`
+	Username      string   `json:"username"`
+	Password      string   `json:"password"`
+	Remark        string   `json:"remark"`
+	Region        string   `json:"region" binding:"max=32"`
+	Tags          []string `json:"tags"`
+	AuthMethod    string   `json:"auth_method"` // "" (auto) | "token" | "password"
+	InsecureHTTPS bool     `json:"insecure_https"`
+	UpdateChannel *string  `json:"update_channel,omitempty"`
 }
 
 type nativeServerCreateResponse struct {
@@ -325,16 +329,18 @@ func newNativeCredential() (raw, digest string, err error) {
 // serverUpdateRequest uses pointers so omitted fields preserve existing
 // values; admin only re-enters secrets when actually changing them.
 type serverUpdateRequest struct {
-	Kind          *string `json:"panel_type,omitempty"`
-	Name          *string `json:"name,omitempty"`
-	URL           *string `json:"url,omitempty"`
-	APIToken      *string `json:"api_token,omitempty"`
-	Username      *string `json:"username,omitempty"`
-	Password      *string `json:"password,omitempty"`
-	Remark        *string `json:"remark,omitempty"`
-	AuthMethod    *string `json:"auth_method,omitempty"`
-	InsecureHTTPS *bool   `json:"insecure_https,omitempty"`
-	UpdateChannel *string `json:"update_channel,omitempty"`
+	Kind          *string   `json:"panel_type,omitempty"`
+	Name          *string   `json:"name,omitempty"`
+	URL           *string   `json:"url,omitempty"`
+	APIToken      *string   `json:"api_token,omitempty"`
+	Username      *string   `json:"username,omitempty"`
+	Password      *string   `json:"password,omitempty"`
+	Remark        *string   `json:"remark,omitempty"`
+	Region        *string   `json:"region" binding:"omitempty,max=32"`
+	Tags          *[]string `json:"tags"`
+	AuthMethod    *string   `json:"auth_method,omitempty"`
+	InsecureHTTPS *bool     `json:"insecure_https,omitempty"`
+	UpdateChannel *string   `json:"update_channel,omitempty"`
 	// AuditCollect is a Passwall Node server's recording level; omitted keeps it.
 	AuditCollect *string `json:"audit_collect,omitempty"`
 	// DestResolve is a Passwall Node server's hostname-against-IP-rules mode;
@@ -553,6 +559,12 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	tags, err := domain.NormalizeLineTags(req.Tags)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	req.Region, req.Tags = strings.TrimSpace(req.Region), tags
 	if kind == domain.PanelKindPSP {
 		h.createNative(c, req)
 		return
@@ -565,6 +577,8 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		Username:           req.Username,
 		Password:           req.Password,
 		Remark:             req.Remark,
+		Region:             req.Region,
+		Tags:               req.Tags,
 		AuthMethod:         domain.XUIAuthMethod(req.AuthMethod),
 		InsecureSkipVerify: req.InsecureHTTPS,
 	}
@@ -617,7 +631,7 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 	}
 	panel := &domain.XUIPanel{
 		Kind: domain.PanelKindPSP, Name: req.Name, URL: "psp://" + agentID,
-		Remark: req.Remark, UpdateChannel: domain.PanelUpdateStable,
+		Remark: req.Remark, Region: req.Region, Tags: req.Tags, UpdateChannel: domain.PanelUpdateStable,
 	}
 	if req.UpdateChannel != nil {
 		panel.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)
@@ -727,7 +741,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
 		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, region, tags, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
 		return
 	}
 	if req.AuditCollect != nil {
@@ -782,6 +796,17 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	if req.Remark != nil {
 		existing.Remark = *req.Remark
 	}
+	if req.Region != nil {
+		existing.Region = strings.TrimSpace(*req.Region)
+	}
+	if req.Tags != nil {
+		tags, err := domain.NormalizeLineTags(*req.Tags)
+		if err != nil {
+			mapServerError(c, err)
+			return
+		}
+		existing.Tags = tags
+	}
 	if req.AuthMethod != nil {
 		if !validAuthMethod(*req.AuthMethod) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
@@ -822,6 +847,19 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			}
 			if req.DestResolve != nil {
 				resolve = &panel.DestResolve
+			}
+			if labels, ok := h.repo.(interface {
+				UpdateNativeMetadataAndLabels(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect, *domain.DestResolve, *string, *[]string) error
+			}); ok && (req.Region != nil || req.Tags != nil) {
+				var region *string
+				var tags *[]string
+				if req.Region != nil {
+					region = &panel.Region
+				}
+				if req.Tags != nil {
+					tags = &panel.Tags
+				}
+				return labels.UpdateNativeMetadataAndLabels(c.Request.Context(), id, name, remark, channel, collect, resolve, region, tags)
 			}
 			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel, collect, resolve)
 		}
@@ -1963,6 +2001,8 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		URL:              p.URL,
 		Username:         p.Username,
 		Remark:           p.Remark,
+		Region:           p.Region,
+		Tags:             p.Tags,
 		HasAPIToken:      p.APIToken != "",
 		HasPassword:      p.Password != "",
 		AuthMethod:       string(effectiveAuthMethod(p)),

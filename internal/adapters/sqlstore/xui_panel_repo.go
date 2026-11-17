@@ -120,6 +120,10 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 // Input channel validation belongs to the HTTP boundary: rollback must be able
 // to restore the exact empty/unknown preference read from an existing row.
 func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, auditCollect *domain.AuditCollect, destResolve *domain.DestResolve) error {
+	return r.UpdateNativeMetadataAndLabels(ctx, id, name, remark, channel, auditCollect, destResolve, nil, nil)
+}
+
+func (r *xuiPanelRepo) UpdateNativeMetadataAndLabels(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel, auditCollect *domain.AuditCollect, destResolve *domain.DestResolve, region *string, tags *[]string) error {
 	if id <= 0 || (name != nil && *name == "") {
 		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
 	}
@@ -129,6 +133,12 @@ func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name,
 	}
 	if remark != nil {
 		updates["remark"] = *remark
+	}
+	if region != nil {
+		updates["region"] = *region
+	}
+	if tags != nil {
+		updates["tags"] = jsonStrings(*tags)
 	}
 	if channel != nil {
 		updates["update_channel"] = string(*channel)

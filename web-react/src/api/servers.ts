@@ -66,6 +66,8 @@ export interface Server {
   address?: string
   username?: string
   remark?: string
+  region?: string
+  tags?: string[]
   has_api_token: boolean
   has_password: boolean
   /** Effective auth mode (server resolves "" → token/password by inference). */
@@ -162,6 +164,8 @@ export interface CreateServerRequest {
   username?: string
   password?: string
   remark?: string
+  region?: string
+  tags?: string[]
   auth_method?: XUIAuthMethod
   insecure_https?: boolean
 }
@@ -219,6 +223,8 @@ export interface UpdateServerRequest {
   username?: string
   password?: string
   remark?: string
+  region?: string
+  tags?: string[]
   auth_method?: XUIAuthMethod
   insecure_https?: boolean
 }

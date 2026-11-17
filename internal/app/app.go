@@ -848,6 +848,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	})
 	nativeSync.SetRoutes(routeSvc)
 	nodeSvc.SetRouteLinks(routeSvc.NodeDeleted, routeSvc.Lock)
+	nodeSvc.SetSetupRouter(routeSvc)
 	destLists.SetRouteUses(routeSvc)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
 	// response is built, and the dest-audit-ingest worker (started in Run,

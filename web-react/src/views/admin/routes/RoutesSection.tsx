@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Alert, Autocomplete, Box, Button, Chip, IconButton, LinearProgress, MenuItem, TextField, Tooltip, Typography, useTheme,
 } from '@mui/material'
@@ -42,7 +42,7 @@ const sameRoutes = (a: readonly RouteView[], b: readonly RouteView[]) =>
  * exit, which is edited elsewhere in the node editor and shown here for
  * context. The section has its own Save: the routes are a separate write.
  */
-export default function RoutesSection({ nodeId, entryPanelId, servers, pendingExit = 0, defaultExitNodesOf }: {
+export default function RoutesSection({ nodeId, entryPanelId, servers, pendingExit = 0, defaultExitNodesOf, setup }: {
   nodeId: number
   /** The node's own server: the entry end of every tunnel. */
   entryPanelId: number
@@ -52,22 +52,30 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
   pendingExit?: number
   /** Names of the nodes on the entry server that use this exit server as their default exit. */
   defaultExitNodesOf?: (exitPanelId: number) => string[]
+  setup?: { rows: DraftRoute[]; setRows: Dispatch<SetStateAction<DraftRoute[]>> }
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const panelTz = useSiteStore(s => s.timezone)
   const md = useTheme().palette.md
   const scope = useQueryScope()
-  const q = useNodeRoutes(scope, nodeId)
+  const q = useNodeRoutes(scope, nodeId, !setup)
   const lists = useDestLists(scope)
   const save = useSaveRoutes(scope, nodeId)
-  const data = q.data
+  const data: RoutesView | undefined = setup ? {
+    supported: true, routes: [], sent: false, running: false, warnings: [],
+    default_exit: pendingExit ? { kind: 'server', panel_id: pendingExit } : { kind: 'local' },
+  } : q.data
 
-  const [draft, setDraft] = useState<DraftRoute[] | null>(null)
+  const [savedDraft, setSavedDraft] = useState<DraftRoute[] | null>(null)
+  const draft = setup?.rows ?? savedDraft
+  const setDraft: typeof setSavedDraft = setup
+    ? update => setup.setRows(previous => (typeof update === 'function' ? update(previous) : update) ?? [])
+    : setSavedDraft
   const base = useRef<RouteView[]>([])
   // Adopt what the server holds when the editor opens and whenever it changes
   // while the admin has no edits of their own; edits are never overwritten.
   useEffect(() => {
-    if (!data) return
+    if (setup || !data) return
     if (draft === null || (!isDirty(draft, base.current) && !sameRoutes(data.routes, base.current))) setDraft(draftOf(data.routes))
     base.current = data.routes
   // The draft is read, not a trigger: only a new server answer re-adopts.
@@ -75,7 +83,7 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
   }, [data])
 
   const rows = draft ?? NO_ROWS
-  const dirty = !!data && draft !== null && isDirty(draft, data.routes)
+  const dirty = !setup && !!data && draft !== null && isDirty(draft, data.routes)
   const issues = useMemo(() => draftIssues(rows), [rows])
   const supported = data?.supported ?? false
 
@@ -157,8 +165,8 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
     </Box>
   )
 
-  if (q.isPending) return <Box data-testid="routes-section"><Box sx={{ mb: 1 }}>{header}</Box><LinearProgress /></Box>
-  if (q.isError || !data) {
+  if (!setup && q.isPending) return <Box data-testid="routes-section"><Box sx={{ mb: 1 }}>{header}</Box><LinearProgress /></Box>
+  if ((!setup && q.isError) || !data) {
     return (
       <Box data-testid="routes-section" sx={{ display: 'grid', gap: 1 }}>
         {header}
@@ -203,7 +211,7 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
         </Alert>
       )}
 
-      <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'grid', gap: 0.75 }}>
+      {!setup && <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'grid', gap: 0.75 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
           <Typography data-testid="routes-default-exit" sx={{ fontSize: 13, fontWeight: 600 }}>
             {t(`${K}default_exit`, { name: defaultName })}
@@ -219,7 +227,7 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
           {appliedState === 'waiting' && data.sent_at ? ` · ${t(`${K}applied.sent_at`, { time: at(data.sent_at) })}` : ''}
           {appliedState === 'running' && data.applied_at ? ` · ${t(`${K}applied.applied_at`, { time: at(data.applied_at) })}` : ''}
         </Typography>
-      </Box>
+      </Box>}
 
       {rows.length === 0 && (
         <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t(`${K}empty`)}</Typography>
@@ -343,12 +351,12 @@ export default function RoutesSection({ nodeId, entryPanelId, servers, pendingEx
       ))}
       {saveError && <Alert severity="error" data-testid="routes-save-error">{saveError}</Alert>}
 
-      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      {!setup && <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <Button size="small" color="error" data-testid="routes-clear" disabled={save.isPending || (data.routes.length === 0 && rows.length === 0)}
           onClick={() => void clearAll()}>{t(`${K}clear`)}</Button>
         <Button size="small" disabled={!dirty || save.isPending} onClick={() => setDraft(draftOf(data.routes))}>{t(`${K}revert`)}</Button>
         <Button size="small" variant="contained" data-testid="routes-save" disabled={!canSave} onClick={() => void doSave(rows)}>{t(`${K}save`)}</Button>
-      </Box>
+      </Box>}
     </Box>
   )
 }

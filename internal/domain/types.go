@@ -1410,6 +1410,8 @@ type Panel struct {
 	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+	Region   string
+	Tags     []string
 	// UpdateChannel is a Passwall Node-only release preference, not an automatic
 	// update policy. Empty legacy values resolve to stable via Effective().
 	UpdateChannel PanelUpdateChannel

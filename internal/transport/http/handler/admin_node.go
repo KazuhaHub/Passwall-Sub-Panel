@@ -268,7 +268,9 @@ type createNodeRequest struct {
 	CertID        int64          `json:"cert_id"`
 	Inbound       inboundSpecDTO `json:"inbound" binding:"required"`
 	// TrafficFactorMilli is the direct line's multiplier; omitted is 1000.
-	TrafficFactorMilli *int `json:"traffic_factor_milli"`
+	TrafficFactorMilli *int               `json:"traffic_factor_milli"`
+	EgressPanelID      int64              `json:"egress_panel_id"`
+	Setup              *node.SetupOptions `json:"setup"`
 }
 
 type inboundSpecDTO struct {
@@ -662,7 +664,15 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
 }
 
+func (h *AdminNodeHandler) PreviewSetup(c *gin.Context) {
+	h.createInbound(c, true)
+}
+
 func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
+	h.createInbound(c, false)
+}
+
+func (h *AdminNodeHandler) createInbound(c *gin.Context, preview bool) {
 	var req createNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -723,6 +733,25 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 	}
 	if err := h.normalizeRealityFingerprint(c.Request.Context(), n.PanelID, &spec); err != nil {
 		mapNodeServiceError(c, err)
+		return
+	}
+	if preview || req.Setup != nil {
+		if req.Setup == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "node setup settings are required"})
+			return
+		}
+		n.EgressPanelID = req.EgressPanelID
+		plan, err := h.node.SetupInbound(c.Request.Context(), n, spec, *req.Setup, preview)
+		if err != nil {
+			mapNodeServiceError(c, err)
+		} else if preview {
+			c.JSON(http.StatusOK, plan)
+		} else {
+			h.auditTunnel(c, "create_node_setup", fmt.Sprintf("node:%d", n.ID), nil, plan.Bindings)
+			dto := h.toNodeDTO(n, h.loadPanelNames(c.Request.Context()))
+			dto.Relays = relayDTOsOn(n, n.Relays, callerIsAdmin(c))
+			c.JSON(http.StatusCreated, dto)
+		}
 		return
 	}
 	ctx, conf := frontContext(c, req.Inbound.FrontConfirm, false)
@@ -1465,7 +1494,7 @@ func mapNodeServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": "link_port_taken"})
 	case errors.Is(err, domain.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

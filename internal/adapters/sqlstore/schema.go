@@ -994,6 +994,8 @@ type xuiPanelRow struct {
 	Username string `gorm:"size:255"`
 	Password string `gorm:"type:text"`
 	Remark   string `gorm:"size:255"`
+	Region   string `gorm:"size:32"`
+	Tags     jsonStrings
 	// Additive preference; empty legacy values are effectively stable. Keep raw
 	// values so omitted edits cannot erase preferences written by newer builds.
 	UpdateChannel string `gorm:"size:16;not null;default:''"`
@@ -1144,6 +1146,8 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		Username:           r.Username,
 		Password:           password,
 		Remark:             r.Remark,
+		Region:             r.Region,
+		Tags:               []string(r.Tags),
 		UpdateChannel:      domain.PanelUpdateChannel(r.UpdateChannel),
 		AuthMethod:         domain.XUIAuthMethod(r.AuthMethod),
 		InsecureSkipVerify: r.InsecureSkipVerify,
@@ -1178,6 +1182,8 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		Username:           p.Username,
 		Password:           password,
 		Remark:             p.Remark,
+		Region:             p.Region,
+		Tags:               jsonStrings(p.Tags),
 		UpdateChannel:      string(p.UpdateChannel),
 		AuthMethod:         string(p.AuthMethod),
 		InsecureSkipVerify: p.InsecureSkipVerify,

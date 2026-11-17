@@ -65,6 +65,7 @@ type Service struct {
 	// afterDelete removes the tunnels only a deleted node's routes used.
 	afterDelete func(ctx context.Context, node *domain.Node) error
 	// routeLock is the routing service's lock of a server: a save of routes holds
+	setupRouter SetupRouter
 	// it, and so does a delete of a node, so that the cleanup of the tunnels only
 	// the node's routes used cannot miss an exit a concurrent save just added.
 	routeLock  func(panelID int64) func()
@@ -586,41 +587,7 @@ func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec 
 	if err != nil {
 		return err
 	}
-	// A tunnel listener is never queued: a queued create would leave the line
-	// pointing at a listener that does not exist (id 0), so the error is returned
-	// and the save that asked for it is undone, with nothing stored.
-	c, err := s.pool.Get(n.PanelID)
-	if err != nil {
-		if offer != nil || n.IsTunnelChild() {
-			return fmt.Errorf("xui panel: %w", err) // a join is never queued: the admin retries
-		}
-		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
-	}
-	inboundID, err := c.AddInbound(ctx, spec)
-	if err != nil {
-		if permanentErr := permanentInboundCreateError(err); permanentErr != nil {
-			return permanentErr
-		}
-		if n.IsTunnelChild() {
-			return fmt.Errorf("xui addInbound: %w", err)
-		}
-		if offer != nil {
-			// A queued create would run later with no join: the node would land on
-			// the shared port beside the front. Return the error instead.
-			return fmt.Errorf("xui addInbound: %w", err)
-		}
-		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui addInbound: %w", err))
-	}
-	n.InboundID = inboundID
-	n.Enabled = true
-	// v3.5 write-through: persist the just-pushed config into the local snapshot
-	// so the node renders without a live fetch from its first subscription.
-	inboundcfg.ApplySpec(n, spec)
-	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
-		n.SetConfigSyncState(domain.ConfigSyncPending, time.Now())
-	}
-	if err := s.nodes.Create(ctx, n); err != nil {
-		_ = c.DelInbound(context.Background(), inboundID)
+	if err := s.persistInbound(ctx, n, spec, offer == nil && !n.IsTunnelChild(), true); err != nil || n.ID == 0 {
 		return err
 	}
 	if err := s.finishFront(ctx, n, offer); err != nil {
@@ -631,6 +598,43 @@ func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec 
 		// A tunnel listener belongs to no group: its users are its landing's, and
 		// the save of the line re-plans them.
 		s.syncExistingUsersToNodeInBackground(n)
+	}
+	return nil
+}
+
+// persistInbound writes an inbound and its snapshot. The caller does the port
+// checks and applies any front changes before notifying provisioners.
+func (s *Service) persistInbound(ctx context.Context, n *domain.Node, spec ports.InboundSpec, allowQueue, enabled bool) error {
+	c, err := s.pool.Get(n.PanelID)
+	if err != nil {
+		if !allowQueue {
+			return fmt.Errorf("xui panel: %w", err) // a join is never queued: the admin retries
+		}
+		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
+	}
+	inboundID, err := c.AddInbound(ctx, spec)
+	if err != nil {
+		if permanentErr := permanentInboundCreateError(err); permanentErr != nil {
+			return permanentErr
+		}
+		if !allowQueue {
+			// A queued create would run later with no join: the node would land on
+			// the shared port beside the front. Return the error instead.
+			return fmt.Errorf("xui addInbound: %w", err)
+		}
+		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui addInbound: %w", err))
+	}
+	n.InboundID = inboundID
+	n.Enabled = enabled
+	// v3.5 write-through: persist the just-pushed config into the local snapshot
+	// so the node renders without a live fetch from its first subscription.
+	inboundcfg.ApplySpec(n, spec)
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		n.SetConfigSyncState(domain.ConfigSyncPending, time.Now())
+	}
+	if err := s.nodes.Create(ctx, n); err != nil {
+		_ = c.DelInbound(context.Background(), inboundID)
+		return err
 	}
 	return nil
 }

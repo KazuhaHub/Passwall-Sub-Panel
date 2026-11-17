@@ -15,6 +15,9 @@ import {
   DialogTitle,
   IconButton,
   Switch,
+  Step,
+  StepLabel,
+  Stepper,
   Tab,
   Table,
   TableBody,
@@ -50,6 +53,10 @@ import {
   deleteSeparator,
   detachNode,
   generateRealityKeypair,
+  previewNodeSetup,
+  type CreateInboundRequest,
+  type NodeSetupOptions,
+  type NodeSetupPlan,
   getNode,
   importNode,
   recreateNodeInbound,
@@ -84,9 +91,12 @@ import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
 import LinkQualityCell from './LinkQualityCell'
 import RoutesSection from './routes/RoutesSection'
+import { draftIssues, inputOf, type DraftRoute } from './routes/routeDraft'
 import ProbeQualityChip from './ProbeQualityChip'
 import TunnelLineEditor, { mergeServerLine } from './TunnelLineEditor'
 import CdnLineFields, { CDN_DEFAULT_PORT } from './CdnLineFields'
+import { SetupEntries, SetupReview, type SetupRelay } from './NodeSetupFields'
+import NodeLinesTable from './NodeLinesTable'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
@@ -1350,8 +1360,13 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                   // when the field is still untouched (empty, or equal to the
                   // previously-selected server's host). A manual edit wins.
                   setForm(prev => {
-                    const prevHost = serverHost(servers.find(s => s.id === prev.panel_id))
+                    const previousServer = servers.find(s => s.id === prev.panel_id)
+                    const prevHost = serverHost(previousServer)
                     const next = { ...prev, panel_id: v.id }
+                    if (!prev.display_name || prev.display_name === previousServer?.name) {
+                      next.display_name = v.name
+                    }
+                    if (!prev.region || prev.region === previousServer?.region) next.region = v.region ?? ''
                     if (v.panel_type !== '3xui') {
                       if (next.vless_network === 'xhttp') next.vless_network = 'tcp'
                       next.enable = true
@@ -2110,7 +2125,7 @@ export default function NodesView() {
   // tz disclosed when they differ), consistent with the other admin pages.
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'managed' | 'unmanaged'>('tab', 'managed', ['managed', 'unmanaged'])
+  const [tab, setTab] = useTabParam<'managed' | 'unmanaged' | 'lines'>('tab', 'managed', ['managed', 'unmanaged', 'lines'])
   const qScope = useQueryScope()
   const queryClient = useQueryClient()
   // Drag-to-reorder spans the full set, so the query fetches everything; the
@@ -2508,6 +2523,19 @@ export default function NodesView() {
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<InboundFormState>(EMPTY_INBOUND)
   const [genKeysBusy, setGenKeysBusy] = useState(false)
+  const createKeyIntent = useRef(0)
+  const [setupStep, setSetupStep] = useState(0)
+  const [setupEntriesBusy, setSetupEntriesBusy] = useState(false)
+  const [setupDirect, setSetupDirect] = useState(true)
+  const [setupEntries, setSetupEntries] = useState<SetupRelay[]>([])
+  const [setupEgress, setSetupEgress] = useState(0)
+  const [setupPlan, setSetupPlan] = useState<NodeSetupPlan | null>(null)
+  const [setupLoopbacks, setSetupLoopbacks] = useState<Record<number, number>>({})
+  const [setupError, setSetupError] = useState('')
+  const [setupRoutes, setSetupRoutes] = useState<DraftRoute[]>([])
+  const [recentSetupEntries, setRecentSetupEntries] = useState<number[]>([])
+  const editLineTarget = useRef<string | null>(null)
+
 
   const [editInboundOpen, setEditInboundOpen] = useState(false)
   const [editInboundBusy, setEditInboundBusy] = useState(false)
@@ -2651,11 +2679,20 @@ export default function NodesView() {
     }
   }
 
-  function openEdit(n: Node) {
+  function openEdit(n: Node, lineId?: string, addLine = false) {
+    editLineTarget.current = lineId ?? null
     setEditing(n)
     const form = editFormOf(n)
     editBaseline.current = form
-    setEditForm(form)
+    if (addLine) {
+      editLineTarget.current = newRelayKey()
+      setEditForm({
+        ...form,
+        relays: [...form.relays, { _key: editLineTarget.current, name: '', address: '', port: 0, enabled: true }],
+      })
+    } else {
+      setEditForm(form)
+    }
     setLinkForm(null)
     setLinkDirty(false)
     setEditMetaErr({})
@@ -3072,22 +3109,53 @@ export default function NodesView() {
       pushSnack(t('admin:nodes.create_dialog.no_writable_servers', { defaultValue: '当前没有支持创建 inbound 的可写面板，请先检查服务器配置与适配器能力。' }), 'warning')
       return
     }
-    setCreateForm({ ...EMPTY_INBOUND, panel_id: writableServers[0].id, server_address: serverHost(writableServers[0]) })
+    const landing = writableServers[0]
+    const site = randomSetupSite()
+    setCreateForm({
+      ...EMPTY_INBOUND, panel_id: landing.id, server_address: serverHost(landing), display_name: landing.name,
+      region: landing.region ?? '', reality_dest: `${site}:443`, reality_server_names_text: site,
+    })
     setCreateAdvanced(false)
+    setSetupStep(0)
+    setSetupEntriesBusy(false)
+    setSetupEntries([])
+    setSetupDirect(true)
+    setSetupEgress(0)
+    setSetupPlan(null)
+    setSetupLoopbacks({})
+    setSetupError('')
+    setSetupRoutes([])
     setCreateOpen(true)
+    void genKeys()
+  }
+
+  function randomSetupSite() {
+    return TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
+  }
+
+  function closeCreate() {
+    createKeyIntent.current += 1
+    setGenKeysBusy(false)
+    setCreateOpen(false)
   }
 
   async function genKeys() {
+    const intent = ++createKeyIntent.current
     setGenKeysBusy(true)
     try {
       const kp = await generateRealityKeypair()
+      if (intent !== createKeyIntent.current) return
       setCreateForm(f => ({
         ...f,
         private_key: kp.private_key,
         public_key: kp.public_key,
         short_ids_text: kp.short_id,
       }))
-    } finally { setGenKeysBusy(false) }
+    } catch {
+      // The request layer already surfaced the failure.
+    } finally {
+      if (intent === createKeyIntent.current) setGenKeysBusy(false)
+    }
   }
 
   function genSSPasswordCreate() {
@@ -3095,8 +3163,7 @@ export default function NodesView() {
     setCreateForm(f => ({ ...f, ss_password: randomBase64(method?.bytes ?? 32) }))
   }
 
-  async function submitCreate(e: FormEvent) {
-    e.preventDefault()
+  function validateSetupLanding() {
     const f = createForm
     const panelType = servers.find(s => s.id === f.panel_id)?.panel_type ?? '3xui'
     if (createAdvanced) {
@@ -3104,17 +3171,23 @@ export default function NodesView() {
       // fields like reality_dest that the raw JSON path doesn't care
       // about). We only require the metadata + JSON parses below.
       if (!f.display_name || !f.server_address || !f.region) {
-        pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning'); return
+        pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning'); return false
       }
       for (const [label, raw] of [['settings', f.raw_settings], ['streamSettings', f.raw_stream_settings], ['sniffing', f.raw_sniffing]] as const) {
         try { JSON.parse(raw || '{}') }
-        catch { pushSnack(t('admin:nodes.create_dialog.advanced_invalid_json', { field: label, defaultValue: `${label} 不是合法的 JSON` }), 'warning'); return }
+        catch { pushSnack(t('admin:nodes.create_dialog.advanced_invalid_json', { field: label, defaultValue: `${label} 不是合法的 JSON` }), 'warning'); return false }
       }
     } else {
       const err = validateInboundForm(f, panelType, t)
-      if (err) { pushSnack(err, 'warning'); return }
+      if (err) { pushSnack(err, 'warning'); return false }
     }
 
+    return true
+  }
+
+  function setupRequest(options: NodeSetupOptions): CreateInboundRequest {
+    const f = createForm
+    const panelType = servers.find(s => s.id === f.panel_id)?.panel_type ?? '3xui'
     const settings = createAdvanced
       ? (f.raw_settings || '{}')
       : JSON.stringify(settingsBuilderFor(f.protocol)(f))
@@ -3125,40 +3198,93 @@ export default function NodesView() {
       ? (f.raw_sniffing || '{}')
       : panelType === '3xui' ? JSON.stringify(buildSniffing(f)) : '{}'
 
+    return {
+      panel_id: f.panel_id,
+      display_name: f.display_name,
+      server_address: f.server_address,
+      flow: f.protocol === 'vless' ? f.vless_flow.trim() : '',
+      region: f.region,
+      tags: f.tags_text ? f.tags_text.split(',').map(s => s.trim()).filter(Boolean) : [],
+      sort_order: f.sort_order,
+      cert_source: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? 'psp_managed' : undefined,
+      cert_id: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? f.cert_id : undefined,
+      relays: setupEntries.map(({ line }) => ({
+        ...line, name: line.name.trim(), address: line.address.trim(), domain: line.domain?.trim(),
+      })),
+      hide_direct: !setupDirect,
+      egress_panel_id: setupEgress,
+      setup: options,
+      inbound: {
+        remark: f.display_name,
+        enable: panelType === '3xui' ? f.enable : true,
+        listen: f.listen,
+        port: f.port,
+        protocol: canonicalProtocolName(f.protocol),
+        settings,
+        stream_settings: streamSettings,
+        sniffing,
+        allocate: '',
+        expiry_time: 0,
+      },
+    }
+  }
+
+  async function submitCreate(e: FormEvent) {
+    e.preventDefault()
+    if (createBusy || genKeysBusy || setupEntriesBusy) return
+    setSetupError('')
+    if (setupStep === 0) {
+      if (validateSetupLanding()) {
+        setSetupEntries(entries => entries.filter(entry => entry.line.entry_panel_id !== createForm.panel_id))
+        if (setupEgress === createForm.panel_id || servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp') {
+          setSetupEgress(0)
+        }
+        if (servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp') setSetupRoutes([])
+        setSetupStep(1)
+      }
+      return
+    }
+    if (setupStep === 1) {
+      if (!setupDirect && setupEntries.length === 0) {
+        setSetupError(t('admin:nodes.setup.needs_entry'))
+        return
+      }
+      if (servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp' && setupEntries.some(e => e.line.mode === 'tunnel')) {
+        setSetupError(t('admin:nodes.setup.tunnel_landing'))
+        return
+      }
+      setSetupStep(2)
+      return
+    }
+    const tunnels = Object.fromEntries(setupEntries.flatMap(e => e.line.mode === 'tunnel' && e.line.entry_panel_id && e.tunnel
+      ? [[e.line.entry_panel_id, e.tunnel]] : []))
+    const shown = Object.fromEntries((setupPlan?.bindings ?? []).flatMap(b => b.loopback ? [[b.panel_id, b.loopback]] : []))
+    const loopbacks = { ...shown, ...setupLoopbacks }
+    if (draftIssues(setupRoutes).length > 0) {
+      setSetupError(t('admin:nodes.setup.invalid_routes'))
+      return
+    }
+    const options = { loopbacks, tunnels, routes: inputOf(setupRoutes) }
     setCreateBusy(true)
     try {
-      const res = await createInbound({
-        panel_id: f.panel_id,
-        display_name: f.display_name,
-        server_address: f.server_address,
-        flow: f.protocol === 'vless' ? f.vless_flow.trim() : '',
-        region: f.region,
-        tags: f.tags_text ? f.tags_text.split(',').map(s => s.trim()).filter(Boolean) : [],
-        sort_order: f.sort_order,
-        cert_source: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? 'psp_managed' : undefined,
-        cert_id: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? f.cert_id : undefined,
-        inbound: {
-          remark: f.display_name,
-          enable: panelType === '3xui' ? f.enable : true,
-          listen: f.listen,
-          port: f.port,
-          protocol: canonicalProtocolName(f.protocol),
-          settings,
-          stream_settings: streamSettings,
-          sniffing,
-          allocate: '',
-          expiry_time: 0,
-        },
-      })
-      pushSnack(
-        'queued' in res
-          ? t('admin:nodes.create_dialog.queued')
-          : t('admin:nodes.create_dialog.created'),
-        'success',
-      )
-      setCreateOpen(false)
+      if (setupStep === 2 || !setupPlan || Object.keys(setupLoopbacks).length > 0) {
+        const plan = await previewNodeSetup(setupRequest(options))
+        setSetupPlan(plan)
+        setSetupLoopbacks({})
+        setSetupStep(3)
+        return
+      }
+      await createInbound(setupRequest({ ...options, confirm: setupPlan.token }))
+      const selected = setupEntries.flatMap(e => e.line.entry_panel_id ? [e.line.entry_panel_id] : [])
+      setRecentSetupEntries(previous => [...new Set([...selected, ...previous])])
+      pushSnack(t('admin:nodes.create_dialog.created'), 'success')
       setTab('managed')
-      await load()
+      closeCreate()
+      void load()
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: { error?: string } } }).response
+      setSetupError(response?.data?.error ?? t('admin:nodes.setup.request_failed'))
+      if (response?.status === 409 && setupStep === 3) setSetupPlan(null)
     } finally { setCreateBusy(false) }
   }
 
@@ -3444,7 +3570,7 @@ export default function NodesView() {
           <Button variant="outlined" startIcon={<AddIcon />} onClick={openSeparatorCreate}>
             {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate} disabled={serversQuery.isPending}>
             {t('admin:nodes.create')}
           </Button>
         </>}
@@ -3452,6 +3578,7 @@ export default function NodesView() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="managed" label={t('admin:nodes.tab_managed')} />
         <Tab value="unmanaged" label={t('admin:nodes.tab_unmanaged')} />
+        <Tab value="lines" label={t('admin:nodes.lines.title')} />
       </Tabs>
       {tab === 'managed' && selected.size > 0 && (
         <Box sx={{
@@ -3704,6 +3831,9 @@ export default function NodesView() {
           </>
         )}
 
+        {tab === 'lines' && (loading ? <CircularProgress size={24} /> :
+          <NodeLinesTable nodes={managed} servers={servers} canEdit={canConfig}
+            onEdit={(node, line) => openEdit(node, line)} onAdd={node => openEdit(node, undefined, true)} />)}
         {tab === 'unmanaged' && (
           <>
             <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: `1px solid ${md.outlineVariant}`, flexWrap: 'wrap' }}>
@@ -3825,38 +3955,66 @@ export default function NodesView() {
           </>
         )}
       </Card>
-      {/* Create inbound dialog (multi-protocol) */}
-      <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
-        }}>
-        <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
-          {t('admin:nodes.create_dialog.title_dynamic', {
-            protocol: PROTOCOL_OPTIONS.find(o => o.value === createForm.protocol)?.label ?? createForm.protocol,
-          })}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 1 }}>
+      <Dialog open={createOpen} onClose={() => !createBusy && !setupEntriesBusy && closeCreate()}
+        slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 880, maxWidth: '95vw' } } }}>
+        <DialogTitle>{t('admin:nodes.create')}</DialogTitle>
+        <DialogContent dividers>
+          <Stepper activeStep={setupStep} alternativeLabel sx={{ mb: 2 }}>
+            {['landing', 'entries', 'exit', 'review'].map(step => (
+              <Step key={step}><StepLabel>{t(`admin:nodes.setup.${step}`)}</StepLabel></Step>
+            ))}
+          </Stepper>
+          {setupError && <Alert severity="error" sx={{ mb: 2 }}>{setupError}</Alert>}
           <Box component="form" id="create-form" onSubmit={submitCreate}>
-            <InboundFormFields form={createForm} setForm={setCreateForm}
-              showMetadata
-              servers={writableServers}
-              onGenKeys={genKeys}
-              onGenSSPassword={genSSPasswordCreate}
-              genKeysBusy={genKeysBusy}
-              advanced={createAdvanced}
-              onSetAdvanced={setCreateAdvanced}
-              allTags={allTags}
+            {setupStep === 0 && <InboundFormFields form={createForm} setForm={setCreateForm}
+              showMetadata servers={writableServers}
+              onGenKeys={genKeys} onGenSSPassword={genSSPasswordCreate} genKeysBusy={genKeysBusy}
+              advanced={createAdvanced} onSetAdvanced={setCreateAdvanced} allTags={allTags}
               panelType={servers.find(s => s.id === createForm.panel_id)?.panel_type}
-              allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')}
-            />
+              allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')} />}
+            {setupStep === 1 && <SetupEntries
+              servers={relayEntryServers.filter(s => s.id !== createForm.panel_id)} recent={recentSetupEntries}
+              canTunnel={servers.find(s => s.id === createForm.panel_id)?.panel_type === 'psp'}
+              entries={setupEntries} onChange={setSetupEntries} useDirect={setupDirect} onDirectChange={setSetupDirect}
+              hostOf={serverHost} newKey={newRelayKey} randomSite={randomSetupSite} onBusyChange={setSetupEntriesBusy}
+              tcpTLS={createForm.vless_network === 'tcp' && createForm.vless_security !== 'none'} />}
+            {setupStep === 2 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField select fullWidth label={t('admin:nodes.setup.exit')} value={setupEgress}
+                  disabled={servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp'}
+                  onChange={e => setSetupEgress(Number(e.target.value))}>
+                  <MenuItem value={0}>{t('admin:nodes.setup.exit_local')}</MenuItem>
+                  {relayEntryServers.filter(s => s.id !== createForm.panel_id).map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+                </TextField>
+                {servers.find(s => s.id === createForm.panel_id)?.panel_type === 'psp' &&
+                  <Box component="details" sx={{ py: 1 }}>
+                    <Box component="summary" sx={{ cursor: 'pointer', mb: 1 }}>{t('admin:nodes.routes.title')}</Box>
+                    <RoutesSection nodeId={0} entryPanelId={createForm.panel_id} pendingExit={setupEgress}
+                      setup={{ rows: setupRoutes, setRows: setSetupRoutes }}
+                      servers={relayEntryServers.filter(s => s.id !== createForm.panel_id).map(s => ({ id: s.id, name: s.name }))} />
+                  </Box>}
+              </Box>
+            )}
+            {setupStep === 3 && setupPlan && <SetupReview plan={setupPlan} entries={setupEntries} direct={setupDirect}
+              routeCount={setupRoutes.length} peers={servers} landingPort={createForm.port} editingLoopbacks={setupLoopbacks}
+              changed={Object.keys(setupLoopbacks).length > 0}
+              onLoopback={(server, port) => setSetupLoopbacks(previous => ({ ...previous, [server]: port }))} />}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateOpen(false)} disabled={createBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="create-form" variant="contained" disabled={createBusy}
-            startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('common:actions.ok')}
-          </Button>
+            <Button onClick={closeCreate} disabled={createBusy || setupEntriesBusy}>{t('common:actions.cancel')}</Button>
+            {setupStep > 0 && <Button onClick={() => {
+              setSetupStep(step => step - 1)
+              setSetupPlan(null)
+              setSetupLoopbacks({})
+              setSetupError('')
+            }} disabled={createBusy || setupEntriesBusy}>{t('admin:nodes.setup.back')}</Button>}
+            <Button type="submit" form="create-form" variant="contained" disabled={createBusy || genKeysBusy || setupEntriesBusy}
+              startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              {t(setupStep < 2 ? 'admin:nodes.setup.next'
+                : setupStep === 2 || !setupPlan || Object.keys(setupLoopbacks).length > 0
+                  ? 'admin:nodes.setup.review' : 'admin:nodes.setup.confirm')}
+            </Button>
         </DialogActions>
       </Dialog>
       {/* Edit Inbound config dialog (multi-protocol) */}
@@ -4021,6 +4179,10 @@ export default function NodesView() {
       {/* Metadata edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
         slotProps={{
+          transition: { onEntered: () => {
+            const target = editLineTarget.current
+            if (target) document.getElementById(`node-line-${target}`)?.scrollIntoView?.({ block: 'start' })
+          } },
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
         }}>
         <DialogTitle>
@@ -4075,7 +4237,7 @@ export default function NodesView() {
                 </Typography>}
               </Box>
             })()}
-            {!isListener && editForm.relays.length > 0 && (
+            {!isListener && (editForm.relays.length > 0 || editLineTarget.current === 'direct') && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
 
@@ -4178,13 +4340,13 @@ export default function NodesView() {
                 const update = (patch: Partial<RelayDraft>) =>
                   setEditForm(f => ({ ...f, relays: f.relays.map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
                 return (
-                  <Box key={r._key ?? i} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box key={r._key ?? i} id={`node-line-${r.id || r._key}`} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                       <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
                         onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.name_ph')}
                         helperText={t('admin:nodes.relay.name_factor_hint', { placeholder: '{{ factor }}' })} />
-                      <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
+                      <FormControlLabel id="node-line-direct" sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
                         control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
                       <Tooltip title={t('admin:nodes.relay.remove')}>
                         <IconButton size="small" onClick={() => setEditForm(f => ({ ...f, relays: f.relays.filter((_, j) => j !== i) }))}>
