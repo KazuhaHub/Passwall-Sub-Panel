@@ -1755,6 +1755,34 @@ type UISettings struct {
 	// recorded: the rows age out here.
 	DestUsageRetentionDays int `json:"dest_usage_retention_days"`
 
+	// ---- Link probes (transit.probe.v1) ----
+	// Owned by /api/admin/transit/probe-settings, not the system settings page:
+	// UISettings.TransitProbeSettings is the exact set (every transit_probe_
+	// field), and the system settings PUT writes them back as loaded. 0 and ""
+	// are "not configured" and run as the shipped default
+	// (TransitProbeEffectiveOf).
+	//
+	// TransitProbeOff turns probing off; it is stored inverted so that a panel
+	// that never saw the key probes. TransitProbeIntervalSeconds is the time
+	// between rounds (default 60, 30..3600), TransitProbeTimeoutMS one attempt's
+	// timeout (default 5000, 500..10000), TransitProbeURL what each link
+	// fetches (default https://www.gstatic.com/generate_204; http or https, port
+	// 1..65535; empty means transport-only). TransitProbeWithhold lets a line or node whose probes are down
+	// be taken out of subscriptions (default off): after
+	// TransitProbeWithholdAfter consecutive down windows (default 3) and back
+	// after TransitProbeRestoreAfter consecutive ok ones (default 3), both 1..20.
+	TransitProbeOff             bool   `json:"transit_probe_off"`
+	TransitProbeIntervalSeconds int    `json:"transit_probe_interval_seconds"`
+	TransitProbeTimeoutMS       int    `json:"transit_probe_timeout_ms"`
+	TransitProbeURL             string `json:"transit_probe_url"`
+	// TransitProbeURLOff is an explicitly empty URL: links are then probed
+	// transport-only (no end-to-end fetch). Stored apart from the URL so that a
+	// panel that never configured one still gets the default.
+	TransitProbeURLOff        bool `json:"transit_probe_url_off"`
+	TransitProbeWithhold      bool `json:"transit_probe_withhold"`
+	TransitProbeWithholdAfter int  `json:"transit_probe_withhold_after"`
+	TransitProbeRestoreAfter  int  `json:"transit_probe_restore_after"`
+
 	// ---- Privacy and terms ----
 	// LegalEnabled publishes the terms and privacy pages and turns on consent
 	// (the register checkbox, the signed-in prompt). Default off: everything
@@ -2290,6 +2318,7 @@ type Repos struct {
 	// line: forward key, entry confirmation, relayed traffic).
 	Transit                 TransitRepo
 	TransitLinks            TransitLinkRepo
+	TransitProbe            TransitProbeRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2334,9 +2363,25 @@ type Repos struct {
 type TransitRepo interface {
 	Ensure(ctx context.Context, nodeID int64, relayID string) (domain.TransitForward, error)
 	ListByNodes(ctx context.Context, nodeIDs []int64) ([]domain.TransitForward, error)
+	ListByIDs(ctx context.Context, ids []int64) ([]domain.TransitForward, error)
 	SetApplied(ctx context.Context, id int64, applied domain.ManagedForward, at time.Time) (bool, error)
 	ClearApplied(ctx context.Context, id int64) (bool, error)
 	RecordCounters(ctx context.Context, id int64, up, down int64, epoch uint64) error
+}
+
+// TransitProbeRepo stores the probe windows entry servers report for their
+// links and forwards, with the hysteresis state that decides withholding.
+type TransitProbeRepo interface {
+	// Apply reads one object's row under a lock, passes it (nil when new) to
+	// update and stores the result; update may decline with write=false. It
+	// returns the row before and after.
+	Apply(ctx context.Context, panelID int64, key, kind string,
+		update func(prev *domain.ProbeState) (next domain.ProbeState, write bool, err error)) (prev *domain.ProbeState, next domain.ProbeState, err error)
+	List(ctx context.Context) ([]domain.ProbeState, error)
+	// PruneExcept deletes the rows of a server whose object is not in keep.
+	PruneExcept(ctx context.Context, panelID int64, keep []string) (int64, error)
+	// ClearWithheld clears every withheld flag and reports how many changed.
+	ClearWithheld(ctx context.Context) (int64, error)
 }
 
 // TransitLinkRepo stores the tunnels between Passwall Node servers.

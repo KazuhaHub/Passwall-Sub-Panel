@@ -18,6 +18,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 )
 
 // NodeLister is the slice of ports.NodeRepo this service reads.
@@ -47,11 +48,19 @@ func New(nodes NodeLister, repo Repo) *Service { return &Service{nodes: nodes, r
 // inbound port) is left out, and so is a forward the wire contract would
 // refuse; one bad line never costs the server its other forwards.
 func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error) {
+	forwards, _, err := s.ForwardsWithProbeMethods(ctx, entryPanelID)
+	return forwards, err
+}
+
+// ForwardsWithProbeMethods is ForwardsFor together with the method each
+// forward is probed with (transit.probe.v1), decided from its landing node.
+func (s *Service) ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error) {
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("transit: list nodes: %w", err)
+		return nil, nil, fmt.Errorf("transit: list nodes: %w", err)
 	}
 	var forwards []nodeprotocol.Forward
+	methods := map[nodeprotocol.ForwardKey]string{}
 	for _, node := range nodes {
 		if node == nil {
 			continue
@@ -66,7 +75,7 @@ func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodepr
 			}
 			row, err := s.repo.Ensure(ctx, node.ID, line.ID)
 			if err != nil {
-				return nil, fmt.Errorf("transit: record line %s of node %d: %w", line.ID, node.ID, err)
+				return nil, nil, fmt.Errorf("transit: record line %s of node %d: %w", line.ID, node.ID, err)
 			}
 			forward := nodeprotocol.Forward{
 				Key: nodeprotocol.NewForwardKey(row.ID), Port: desired.Port,
@@ -81,10 +90,13 @@ func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodepr
 				continue
 			}
 			forwards = append(forwards, forward)
+			// No SNI front targets a forward yet (fronts come with the
+			// front editor); when they do, the front route decides here.
+			methods[forward.Key] = linkprobe.Method(linkprobe.UDPOnlyProtocol(node.DesiredProtocol), false)
 		}
 	}
 	sort.Slice(forwards, func(i, j int) bool { return forwards[i].Key < forwards[j].Key })
-	return forwards, nil
+	return forwards, methods, nil
 }
 
 // Confirm records, for every forward in the config the entry now holds, what

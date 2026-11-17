@@ -57,6 +57,7 @@ import {
   useEmergencyAccess,
   type MeProfile,
   type MyNodeStatus,
+  type MyRelayStatus,
   type QuickLink,
 } from '@/api/me'
 import { useTabParam } from '@/hooks/useTabParam'
@@ -121,6 +122,28 @@ function maskUrl(url: string): string {
   }
 }
 
+// RelayQuality is the coarse link quality of a relay line with its round trip
+// time. No loss figure and nothing withheld; absent fields mean not probed and
+// render nothing.
+function RelayQuality({ quality, rttMs, md }: { quality?: MyRelayStatus['quality']; rttMs?: number; md: M3Tokens }) {
+  const { t } = useTranslation('user')
+  const q = quality === 'ok' ? { color: md.primary, label: t('status.quality_ok', { defaultValue: '良好' }) }
+    : quality === 'degraded' ? { color: md.tertiary, label: t('status.quality_degraded', { defaultValue: '较差' }) }
+    : quality === 'down' ? { color: md.error, label: t('status.quality_down', { defaultValue: '不可用' }) }
+    : null
+  const rtt = typeof rttMs === 'number' && rttMs >= 0 ? Math.round(rttMs) : null
+  if (!q && rtt === null) return null
+  return (
+    <Box data-testid="relay-quality" data-quality={quality}
+      aria-label={q ? t('status.quality_label', { state: q.label, defaultValue: '中转质量：{{state}}' }) : undefined}
+      sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
+      {q && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: q.color }} />}
+      {q && <Typography variant="caption" sx={{ color: q.color, fontWeight: 500 }}>{q.label}</Typography>}
+      {rtt !== null && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t('status.rtt', { ms: rtt, defaultValue: '{{ms}} ms' })}</Typography>}
+    </Box>
+  )
+}
+
 // ServerStatusPanel renders the caller's own nodes' availability (the "服务器
 // 状态" tab). Data is sanitized server-side — names, region, and coarse status
 // only. Status dot: ok=primary, down=error, unknown=muted.
@@ -142,11 +165,11 @@ function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNode
   // health checks or a claim that the selected outbound works end to end.
   const rows = (nodes ?? []).flatMap(n => {
     const direct = n.show_direct !== false
-      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at, factor: n.traffic_factor_milli }]
+      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at, factor: n.traffic_factor_milli, quality: undefined, rttMs: undefined }]
       : []
     const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => {
       const label = relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })
-      return { name: relay.only_line_name ? label : `${relay.node_name ?? n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at, factor: relay.traffic_factor_milli }
+      return { name: relay.only_line_name ? label : `${relay.node_name ?? n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at, factor: relay.traffic_factor_milli, quality: relay.quality, rttMs: relay.rtt_ms }
     })
     return [...direct, ...relays]
   })
@@ -183,6 +206,7 @@ function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNode
                 {row.region && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{row.region}</Typography>}
               </Box>
               <Typography variant="body2" sx={{ color: m.color, fontWeight: 500, flexShrink: 0 }}>{m.label}</Typography>
+              <RelayQuality quality={row.quality} rttMs={row.rttMs} md={md} />
             </Box>
           )
         })}

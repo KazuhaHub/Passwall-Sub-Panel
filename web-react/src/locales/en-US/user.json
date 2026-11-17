@@ -15,6 +15,11 @@
     "unknown": "Unknown",
     "empty": "No nodes to show",
     "relay_fallback": "Relay {{index}}",
+    "quality_ok": "Good",
+    "quality_degraded": "Poor",
+    "quality_down": "Unavailable",
+    "quality_label": "Relay quality: {{state}}",
+    "rtt": "{{ms}} ms",
     "relay_hint": "Relay status only reflects whether the relay entry is reachable, not that the full relay path works.",
     "checked_at": "Last checked: {{time}}"
   },

@@ -28,6 +28,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
@@ -276,7 +277,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// authentication; the recorder reuses it through a one-method interface so
 		// the sync handler cannot reach the rest of it.
 		nodeSync, err := handler.NewNodeSyncHandler(d.NodeSync, nodeAuth,
-			handler.WithNodeRefusalRecorder(d.Repos.NodeAgent))
+			handler.WithNodeRefusalRecorder(d.Repos.NodeAgent),
+			// Compressed request bodies are taken only from an agent whose
+			// stored declaration includes sync.gzip.v1.
+			handler.WithNodeCapabilityReader(d.Repos.NodeAgent))
 		if err != nil {
 			panic("configure native node sync: " + err.Error())
 		}
@@ -566,6 +570,22 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
+		if d.Repos.TransitProbe != nil && d.Repos.TransitLinks != nil {
+			var invalidateSubscriptions func()
+			if d.Render != nil {
+				invalidateSubscriptions = func() {
+					if d.Group != nil {
+						d.Group.InvalidateNodeCache()
+					}
+					d.Render.InvalidateAll()
+				}
+			}
+			probes := handler.NewAdminTransitProbeHandler(d.Repos.Settings, linkprobe.New(d.Repos.ScopedSettings, d.Repos.TransitProbe, nil),
+				d.Repos.TransitProbe, d.Repos.TransitLinks, d.Repos.Transit, invalidateSubscriptions)
+			adminGroup.GET("/transit/probe-settings", probes.GetSettings)
+			adminGroup.PUT("/transit/probe-settings", probes.PutSettings)
+			adminGroup.GET("/transit/probes", probes.ListProbes)
+		}
 		if d.Repos.TransitLinks != nil {
 			links := handler.NewAdminTransitHandler(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))
 			adminGroup.GET("/transit/links/:entry/:exit", links.GetLink)

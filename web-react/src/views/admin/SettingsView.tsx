@@ -71,6 +71,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import AppsIcon from '@mui/icons-material/Apps'
 import type { LoginMode } from '@/api/types'
+import LinkProbeSettings from './LinkProbeSettings'
 import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { confirm } from '@/components/ConfirmHost'
@@ -1195,6 +1196,7 @@ export default function SettingsView() {
 
         </Box>
       ))}
+      {tab === 'general' && scopeGroupId === 0 && <LinkProbeSettings />}
       {tab === 'brand' && (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.brand.section_text')} md={md}>
             <Pair>

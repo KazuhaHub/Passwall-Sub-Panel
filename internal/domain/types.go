@@ -633,6 +633,13 @@ type Node struct {
 	// link this node leaves through, with this node bound to it. A node whose
 	// egress is not ready is withheld from subscriptions (see EgressPublishable).
 	EgressReady bool
+	// EgressWithheld is loaded state, never stored: the probes of the tunnel
+	// this node leaves through have been down long enough that, with
+	// withholding on, the node is taken out of subscriptions (transit.probe.v1).
+	// It is the default exit's link only. EgressProbe is that link's quality
+	// for display, nil when it is not probed.
+	EgressWithheld bool
+	EgressProbe    *ProbeQuality
 }
 
 // EgressPublishable reports whether the node may appear in subscriptions as
@@ -738,6 +745,12 @@ type RelayLine struct {
 	// ManagedReady is loaded state, never stored: the entry server has applied
 	// exactly the forward this line now asks for. Read it through Publishable.
 	ManagedReady bool `json:"-"`
+	// ProbeWithheld is loaded state, never stored: the entry server's probes of
+	// this managed line's forward have been down long enough that, with
+	// withholding on, the line is taken out of subscriptions. Probe is the
+	// forward's quality for display, nil when it is not probed.
+	ProbeWithheld bool          `json:"-"`
+	Probe         *ProbeQuality `json:"-"`
 }
 
 // RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index

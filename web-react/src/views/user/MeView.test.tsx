@@ -116,11 +116,29 @@ describe('MeView server status lines', () => {
     await screen.findByText('暂无可显示的节点')
     expect(screen.queryByText('Hidden')).toBeNull()
   })
+  it('shows coarse quality and rtt on relay lines only when present', async () => {
+    serveStatus([{ name: 'P', region: 'JP', status: 'ok', show_direct: true,
+      relay_statuses: [
+        { name: 'Good', only_line_name: true, status: 'ok', quality: 'ok', rtt_ms: 42.4 },
+        { name: 'Poor', only_line_name: true, status: 'ok', quality: 'degraded', rtt_ms: 180 },
+        { name: 'Dead', only_line_name: true, status: 'ok', quality: 'down' },
+        { name: 'Unknown', only_line_name: true, status: 'ok' },
+      ] }])
+    mount('/?tab=status')
+    await screen.findByText('Good')
+    const chips = screen.getAllByTestId('relay-quality')
+    expect(chips.map(c => c.dataset.quality)).toEqual(['ok', 'degraded', 'down'])
+    // The test translator returns the default text uninterpolated.
+    expect(chips[0].textContent).toBe('良好{{ms}} ms')
+    expect(chips[1].textContent).toBe('较差{{ms}} ms')
+    expect(chips[2].textContent).toBe('不可用')
+  })
   it('keeps legacy direct and relay responses working without the new fields', async () => {
     serveStatus([{ name: 'Old', region: 'JP', status: 'unknown', relay_statuses: [{ name: 'Relay', status: 'unknown' }] }])
     mount('/?tab=status')
     await screen.findByText('Old Relay')
     expect(screen.getByText('Old')).toBeTruthy()
+    expect(screen.queryByTestId('relay-quality')).toBeNull()
   })
 })
 afterEach(cleanup)

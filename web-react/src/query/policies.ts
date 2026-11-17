@@ -41,6 +41,13 @@ export const policies = {
     refetchInterval: 60 * SECOND,
     note: 'One read/minute per visible list instance; hidden tabs paused by refetchIntervalInBackground=false.',
   },
+  /** Link probe results: renewed every probe window (a minute or more). */
+  probes: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Read when a link editor opens; the probe window is a minute or more, so no polling.',
+  },
   /** Slow-moving dropdown dictionaries; invalidated on write, never polled. */
   dictionaries: {
     staleTime: 5 * MINUTE,

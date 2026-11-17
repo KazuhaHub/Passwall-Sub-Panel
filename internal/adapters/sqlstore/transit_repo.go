@@ -95,6 +95,22 @@ func (r *transitRepo) ListByNodes(ctx context.Context, nodeIDs []int64) ([]domai
 	return out, nil
 }
 
+// ListByIDs returns the rows with the given ids (unknown ids are absent).
+func (r *transitRepo) ListByIDs(ctx context.Context, ids []int64) ([]domain.TransitForward, error) {
+	out := make([]domain.TransitForward, 0, len(ids))
+	const chunk = 500
+	for start := 0; start < len(ids); start += chunk {
+		var rows []transitForwardRow
+		if err := r.db.WithContext(ctx).Where("id IN ?", ids[start:min(start+chunk, len(ids))]).Order("id ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out = append(out, row.toDomain())
+		}
+	}
+	return out, nil
+}
+
 // SetApplied records what the entry confirmed. It reports whether the stored
 // confirmation changed, so the caller refreshes rendering only on a
 // transition and not on every replayed receipt.
@@ -170,35 +186,32 @@ func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) 
 			}
 		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	forwards, err := (&transitRepo{db: db}).ListByNodes(ctx, ids)
-	if err != nil {
-		return fmt.Errorf("load managed relay state: %w", err)
-	}
-	type lineKey struct {
-		node  int64
-		relay string
-	}
-	byLine := make(map[lineKey]domain.TransitForward, len(forwards))
-	for _, forward := range forwards {
-		byLine[lineKey{forward.NodeID, forward.RelayID}] = forward
-	}
-	for _, node := range nodes {
-		if node == nil {
-			continue
+	forwardIDs := map[probeLineRef]int64{}
+	if len(ids) > 0 {
+		forwards, err := (&transitRepo{db: db}).ListByNodes(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("load managed relay state: %w", err)
 		}
-		for i := range node.Relays {
-			relay := &node.Relays[i]
-			relay.ManagedReady = false
-			if !relay.Managed() {
+		byLine := make(map[probeLineRef]domain.TransitForward, len(forwards))
+		for _, forward := range forwards {
+			byLine[probeLineRef{forward.NodeID, forward.RelayID}] = forward
+			forwardIDs[probeLineRef{forward.NodeID, forward.RelayID}] = forward.ID
+		}
+		for _, node := range nodes {
+			if node == nil {
 				continue
 			}
-			state, exists := byLine[lineKey{node.ID, relay.ID}]
-			desired, publishable := domain.DesiredManagedForward(node, *relay)
-			relay.ManagedReady = exists && publishable && state.AppliedAt != nil && state.Applied == desired
+			for i := range node.Relays {
+				relay := &node.Relays[i]
+				relay.ManagedReady = false
+				if !relay.Managed() {
+					continue
+				}
+				state, exists := byLine[probeLineRef{node.ID, relay.ID}]
+				desired, publishable := domain.DesiredManagedForward(node, *relay)
+				relay.ManagedReady = exists && publishable && state.AppliedAt != nil && state.Applied == desired
+			}
 		}
 	}
-	return nil
+	return attachProbeState(ctx, db, nodes, forwardIDs)
 }

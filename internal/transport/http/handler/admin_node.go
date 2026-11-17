@@ -142,6 +142,10 @@ type nodeDTO struct {
 	// is when the node is published.
 	EgressPanelID int64 `json:"egress_panel_id,omitempty"`
 	EgressReady   bool  `json:"egress_ready,omitempty"`
+	// EgressProbe is the tunnel's link quality (transit.probe.v1) and
+	// EgressWithheld says its probes have taken the node out of subscriptions.
+	EgressProbe    *probeQualityDTO `json:"egress_probe,omitempty"`
+	EgressWithheld bool             `json:"egress_withheld,omitempty"`
 }
 
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
@@ -166,6 +170,10 @@ type relayLineDTO struct {
 	// ManagedReady is response-only: the entry server confirmed the forward
 	// this managed line asks for, so the line is published.
 	ManagedReady bool `json:"managed_ready,omitempty"`
+	// Probe is the forward's quality (transit.probe.v1), response-only, and
+	// ProbeWithheld says its probes have taken the line out of subscriptions.
+	Probe         *probeQualityDTO `json:"probe,omitempty"`
+	ProbeWithheld bool             `json:"probe_withheld,omitempty"`
 	// TrafficFactorMilli is this line's traffic multiplier (0..100000). In a
 	// request, omitted keeps the saved value (a new line is one-for-one);
 	// responses always carry it.
@@ -1169,6 +1177,8 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 			Tags:               &tags,
 			EntryPanelID:       r.EntryPanelID,
 			ManagedReady:       r.Managed() && r.ManagedReady,
+			Probe:              probeQualityOf(r.Probe),
+			ProbeWithheld:      r.ProbeWithheld,
 			TrafficFactorMilli: ptrInt(r.EffectiveTrafficFactor()),
 		})
 	}
@@ -1214,6 +1224,8 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 		EgressPanelID:      n.EgressPanelID,
 		EgressReady:        n.EgressPanelID != 0 && n.EgressReady,
+		EgressProbe:        probeQualityOf(n.EgressProbe),
+		EgressWithheld:     n.EgressPanelID != 0 && n.EgressWithheld,
 	}
 }
 

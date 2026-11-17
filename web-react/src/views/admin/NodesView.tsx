@@ -81,6 +81,8 @@ import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
+import LinkQualityCell from './LinkQualityCell'
+import ProbeQualityChip from './ProbeQualityChip'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
@@ -2649,7 +2651,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
         // Direct factor only when changed; relay lines carry their own value above.
@@ -4016,12 +4018,16 @@ export default function NodesView() {
                     {egressReady ? t('admin:nodes.egress.ready') : t('admin:nodes.egress.pending')}
                   </Typography>
                 )}
+                {editEgress > 0 && editEgress === (editing.egress_panel_id ?? 0) && (
+                  <ProbeQualityChip probe={editing.egress_probe} withheld={editing.egress_withheld} testId="egress-probe" />
+                )}
                 {editEgress > 0 && linkError && (
                   <Typography sx={{ fontSize: 12, color: md.error }}>{t('admin:nodes.egress.load_failed')}</Typography>
                 )}
                 {editEgress > 0 && linkForm && (
                   <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.egress.shared_hint')}</Typography>
+                    <LinkQualityCell entry={editing.panel_id} exit={editEgress} />
                     <TextField select size="small" label={t('admin:nodes.egress.protocol')} value={linkForm.protocol}
                       onChange={e => {
                         const protocol = e.target.value as TransitLinkProtocol
@@ -4108,6 +4114,9 @@ export default function NodesView() {
                       <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
                         {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
                       </Typography>
+                    )}
+                    {(r.entry_panel_id ?? 0) > 0 && r.id && (
+                      <ProbeQualityChip probe={r.probe} withheld={r.probe_withheld} testId="relay-probe" />
                     )}
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}

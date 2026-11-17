@@ -101,13 +101,16 @@ func (s *Service) ClientLinesFor(ctx context.Context, g *domain.Group) ([]*domai
 }
 
 // withoutUnreadyEgress drops nodes whose traffic leaves through a tunnel that
-// is not yet running on both servers. Such a node is withheld, never shown
+// is not yet running on both servers, or whose tunnel's probes have been down
+// long enough to be withheld (EgressWithheld, set only while withholding is on
+// and only for the node's default exit). Such a node is withheld, never shown
 // as working: its users' traffic would fail, and leaving from the entry
 // instead would replace the exit the administrator chose.
 func withoutUnreadyEgress(nodes []*domain.Node) []*domain.Node {
+	shown := func(n *domain.Node) bool { return n.EgressPublishable() && !n.EgressWithheld }
 	for _, n := range nodes {
-		if !n.EgressPublishable() {
-			return slices.DeleteFunc(slices.Clone(nodes), func(n *domain.Node) bool { return !n.EgressPublishable() })
+		if !shown(n) {
+			return slices.DeleteFunc(slices.Clone(nodes), func(n *domain.Node) bool { return !shown(n) })
 		}
 	}
 	return nodes

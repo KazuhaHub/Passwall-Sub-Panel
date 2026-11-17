@@ -742,6 +742,35 @@
         "major": "重大变更"
       },
       "retry": "重试"
+    },
+    "probe": {
+      "section": "链路探测",
+      "intro": "入口服务器会探测每条隧道和托管中转线路，并上报延迟与丢包，结果显示在节点列表中。",
+      "load_failed": "加载链路探测设置失败",
+      "save": "保存链路探测",
+      "saved": "链路探测设置已保存",
+      "save_failed": "保存链路探测设置失败",
+      "default_hint": "留空或填 0 使用默认值（{{value}}）",
+      "enabled": "启用链路探测",
+      "enabled_help": "开启或关闭链路探测。关闭后会立即解除所有撤下，线路和节点恢复出现在订阅中。",
+      "interval": "探测间隔（秒）",
+      "interval_help": "每条链路的探测频率，同时也是一个探测窗口的长度。范围 30 到 3600；留空或 0 使用默认值。",
+      "timeout": "探测超时（毫秒）",
+      "timeout_help": "单次探测等待响应的时长，超时记为丢包。范围 500 到 10000；留空或 0 使用默认值。",
+      "url": "探测地址",
+      "url_help": "通过每条链路访问、用于端到端测量的地址。必须以 http:// 或 https:// 开头；如带端口，范围 1 到 65535。留空表示仅测传输：不会通过隧道请求任何地址，只测试传输连接，因此没有端到端结果，也没有端到端延迟和丢包；质量标签此时显示传输层数据。",
+      "url_default_hint": "默认：{{value}}。留空 = 仅测传输（无端到端结果）",
+      "url_reset": "恢复默认",
+      "withhold": "撤下中断的链路",
+      "withhold_help": "开启后，链路连续中断达到设定窗口数的线路或节点会从订阅中撤下，且不会回退为直连。“暂无数据”不会触发撤下。关闭此项会立即解除撤下。",
+      "withhold_after": "连续中断 N 个窗口后撤下",
+      "withhold_after_help": "链路被撤下前需连续中断的窗口数。范围 1 到 20；留空或 0 使用默认值。",
+      "restore_after": "连续良好 N 个窗口后恢复",
+      "restore_after_help": "被撤下的链路恢复到订阅前需连续良好的窗口数。范围 1 到 20；留空或 0 使用默认值。",
+      "err_range": "请输入 {{min}} 到 {{max}} 的整数（留空或 0 使用默认值）",
+      "err_url": "请输入以 http:// 或 https:// 开头、端口有效（1 到 65535）的地址",
+      "err_server": "{{message}}",
+      "info": "说明"
     }
   },
   "traffic": {
@@ -2323,6 +2352,22 @@
     },
     "hint": {
       "traffic_factor": "无论经过哪些服务器，此线路的流量都按该倍率计费。1 = 按实际用量计费，0 = 免费。仅对保存之后产生的流量生效。"
+    },
+    "probe": {
+      "title": "链路质量",
+      "state_ok": "良好",
+      "state_degraded": "降级",
+      "state_down": "中断",
+      "state_unknown": "暂无数据",
+      "quality": "质量",
+      "no_link_data": "此隧道暂无质量数据",
+      "rtt": "{{ms}} ms",
+      "loss": "丢包 {{percent}}%",
+      "withheld": "已撤下",
+      "withheld_hint": "链路持续中断，已从订阅中撤下；链路恢复后自动回到订阅。不会回退为直连。",
+      "tip_measured": "由入口服务器测得的链路质量",
+      "tip_unknown": "尚未收到探测结果。暂无数据不会导致撤下。",
+      "tip_reported": "上报于 {{time}}"
     }
   },
   "users": {
@@ -4146,6 +4191,18 @@
         "label": "节点同步上报被拒",
         "desc": "已通过认证、但被面板拒收的原生节点同步上报。「版本不兼容」意味着该节点实际处于离线状态。"
       },
+      "psp_node_sync_gzip_refused_total": {
+        "label": "压缩同步被拒",
+        "desc": "因 Content-Encoding 被以 415 拒绝的同步请求：agent 从未声明 sync.gzip.v1，或使用了 gzip 以外的编码。"
+      },
+      "psp_node_sync_decode_busy_total": {
+        "label": "压缩同步繁忙",
+        "desc": "因解压槽全部占用而返回 503 的压缩同步请求；agent 下次轮询会重发。持续增长说明解压成为瓶颈。"
+      },
+      "psp_node_sync_gzip_bytes_total": {
+        "label": "压缩同步字节数",
+        "desc": "压缩同步正文的字节数。对比请求线上字节与解压后字节（响应同理）即可看出节省。"
+      },
       "psp_dest_list_refresh_total": {
         "label": "访问控制列表刷新",
         "desc": "刷新访问控制策略所用列表（远程列表与 geosite 更新）的结果分布。「失败」持续出现，说明有列表仍在使用旧条目；出现「因过宽被拒」需要管理员查看该列表。"
@@ -4285,6 +4342,16 @@
       "node_refused": {
         "protocol_generation": "版本不兼容",
         "report_invalid": "内容无效"
+      },
+      "node_gzip_refused": {
+        "not_negotiated": "未协商",
+        "unknown_coding": "未知编码"
+      },
+      "node_gzip_bytes": {
+        "request_wire": "请求（线上）",
+        "request_decoded": "请求（解压后）",
+        "response_plain": "响应（原文）",
+        "response_wire": "响应（线上）"
       },
       "dest_list_refresh": {
         "unchanged": "无变化",

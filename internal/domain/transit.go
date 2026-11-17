@@ -13,9 +13,12 @@ func (r RelayLine) Managed() bool { return r.EntryPanelID != 0 }
 // Publishable reports whether the line may appear in subscriptions, status
 // pages and line references. An external line follows Enabled alone. A managed
 // line also needs ManagedReady, so a line whose entry has not confirmed the
-// forward (or whose state was never loaded) is withheld: it fails closed.
+// forward (or whose state was never loaded) is withheld: it fails closed. A
+// line whose probes have been down long enough to be withheld (ProbeWithheld,
+// only ever set while withholding is on) is left out too, and never replaced
+// by a direct line.
 func (r RelayLine) Publishable() bool {
-	return r.Enabled && (!r.Managed() || r.ManagedReady)
+	return r.Enabled && !r.ProbeWithheld && (!r.Managed() || r.ManagedReady)
 }
 
 // ManagedForward is what an entry server must relay for one managed line. It

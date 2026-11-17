@@ -541,6 +541,19 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("dest", "trial_retention_days", &s.DestTrialRetentionDays),
 		intField("dest", "usage_retention_days", &s.DestUsageRetentionDays),
 
+		// transit_probe --- link probes (transit.probe.v1). Owned by
+		// /api/admin/transit/probe-settings. 0 and "" are "never configured";
+		// ports.TransitProbeEffectiveOf owns the defaults, so none is
+		// defaulted in Load. Probing is stored inverted: absent = on.
+		boolField("transit_probe", "off", &s.TransitProbeOff),
+		intField("transit_probe", "interval_seconds", &s.TransitProbeIntervalSeconds),
+		intField("transit_probe", "timeout_ms", &s.TransitProbeTimeoutMS),
+		strField("transit_probe", "url", &s.TransitProbeURL),
+		boolField("transit_probe", "url_off", &s.TransitProbeURLOff),
+		boolField("transit_probe", "withhold", &s.TransitProbeWithhold),
+		intField("transit_probe", "withhold_after", &s.TransitProbeWithholdAfter),
+		intField("transit_probe", "restore_after", &s.TransitProbeRestoreAfter),
+
 		// legal --- privacy and terms. legal.consent_version is written by the
 		// publish endpoint only (the system settings PUT keeps it as stored).
 		boolField("legal", "enabled", &s.LegalEnabled),

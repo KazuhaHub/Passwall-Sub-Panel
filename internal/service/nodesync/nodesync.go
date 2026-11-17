@@ -89,17 +89,34 @@ type Service struct {
 	// records what they confirm. NIL MEANS THIS BUILD HAS NO MANAGED RELAYS:
 	// no config carries Transit, so every config is what it was before.
 	transit TransitPublisher
+	// probes decides what an entry server probes and takes what it measured.
+	// NIL MEANS THIS BUILD DOES NOT PROBE: no config carries a probe block.
+	probes ProbeCoordinator
 }
 
 // TransitPublisher is the managed relay collaborator (service/transit.Service).
 type TransitPublisher interface {
-	ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error)
+	ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error)
 	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
 	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (transit.LinkPlan, error)
 	ConfirmLinks(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus) (bool, error)
 	RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.LinkCounters) error
 }
+
+// ProbeCoordinator is the link-probe collaborator (service/linkprobe.Service).
+type ProbeCoordinator interface {
+	// Config is the probe block for a server's transit body, nil when it must
+	// not be sent (no capability, probing off, nothing to probe).
+	Config(ctx context.Context, capabilities []string, transit *nodeprotocol.Transit, methods map[nodeprotocol.ForwardKey]string) (*nodeprotocol.ProbeSettings, error)
+	// Ingest books the probe results of a full report against the config that
+	// was sent, and reports whether a withheld flag changed.
+	Ingest(ctx context.Context, panelID int64, capabilities []string, sent *nodeprotocol.Transit, results []nodeprotocol.ProbeResult, agentReportedMS int64) (bool, error)
+}
+
+// SetProbes binds the link-probe coordinator. Left unbound, no probe block is
+// sent and no result is read.
+func (s *Service) SetProbes(p ProbeCoordinator) { s.probes = p }
 
 // SetTransit binds the managed relay publisher. Left unbound, no forwards are
 // published and managed relay lines stay withheld from subscriptions.
@@ -321,6 +338,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// the policy sees exactly the config it always did.
 	var transitBody nodeprotocol.Transit
 	var egressExit map[int64]int64
+	var forwardMethods map[nodeprotocol.ForwardKey]string
 	if s.transit != nil {
 		// A forward or an incoming link on a port one of this server's own
 		// inbounds uses would make the node refuse the whole config, listener
@@ -334,7 +352,8 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 			}
 		}
 		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitForward) {
-			forwards, err := s.transit.ForwardsFor(ctx, agent.PanelID)
+			forwards, methods, err := s.transit.ForwardsWithProbeMethods(ctx, agent.PanelID)
+			forwardMethods = methods
 			if err != nil {
 				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 			}
@@ -361,6 +380,16 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 				// What is sent decides which bound nodes may be published.
 				s.invalidateRender()
 			}
+		}
+		// The probe block comes last: it names what the config above holds.
+		// Only an agent that declared transit.probe.v1 gets it, so everyone
+		// else receives the bytes they always did.
+		if s.probes != nil {
+			probe, err := s.probes.Config(ctx, report.Capabilities, &transitBody, forwardMethods)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			transitBody.Probe = probe
 		}
 	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
@@ -948,6 +977,15 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		}
 		if err := s.transit.RecordLinkCounters(ctx, sent.Transit, report.LinkCounters); err != nil {
 			return fmt.Errorf("nodesync: %w", err)
+		}
+		// Probe results are booked against the same sent config: only its own
+		// links and forwards, on the side that probes them.
+		if s.probes != nil {
+			moved, err := s.probes.Ingest(ctx, agent.PanelID, report.Capabilities, sent.Transit, report.Probes, report.ReportedAtMS)
+			if err != nil {
+				return fmt.Errorf("nodesync: %w", err)
+			}
+			renderCredentialsChanged = renderCredentialsChanged || moved
 		}
 		// Confirmations need the node to hold that config: only then do its
 		// object statuses describe these forwards.

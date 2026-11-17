@@ -742,6 +742,35 @@
         "major": "Material change"
       },
       "retry": "Retry"
+    },
+    "probe": {
+      "section": "Link probes",
+      "intro": "Entry servers probe each tunnel and managed transit line and report its latency and loss. The result is shown on the node list.",
+      "load_failed": "Failed to load link probe settings",
+      "save": "Save link probes",
+      "saved": "Link probe settings saved",
+      "save_failed": "Failed to save link probe settings",
+      "default_hint": "Leave empty or 0 for the default ({{value}})",
+      "enabled": "Probe links",
+      "enabled_help": "Turns link probing on or off. Turning it off also lifts any withholding immediately; lines and nodes return to subscriptions.",
+      "interval": "Probe interval (seconds)",
+      "interval_help": "How often each link is probed, and the length of one probe window. 30 to 3600; empty or 0 uses the default.",
+      "timeout": "Probe timeout (ms)",
+      "timeout_help": "How long one probe waits for a reply before it counts as lost. 500 to 10000; empty or 0 uses the default.",
+      "url": "Probe URL",
+      "url_help": "The address fetched through each link to measure it end to end. Must start with http:// or https://; a port, if given, is 1 to 65535. Leave it empty for transport-only: nothing is fetched through the tunnel, only the transport connect is tested, so there is no end-to-end result and no end-to-end latency or loss; the quality chip then shows the transport figures.",
+      "url_default_hint": "Default: {{value}}. Empty = transport-only (no end-to-end result)",
+      "url_reset": "Reset to default",
+      "withhold": "Withhold down links",
+      "withhold_help": "When on, a line or node whose link is down for the configured number of consecutive windows is taken out of subscriptions. It never falls back to a direct line. \"No data\" never withholds. Turning this off lifts withholding immediately.",
+      "withhold_after": "Withhold after N down windows",
+      "withhold_after_help": "Consecutive down windows before a link is withheld. 1 to 20; empty or 0 uses the default.",
+      "restore_after": "Restore after N good windows",
+      "restore_after_help": "Consecutive good windows before a withheld link returns to subscriptions. 1 to 20; empty or 0 uses the default.",
+      "err_range": "Enter a whole number from {{min}} to {{max}} (empty or 0 for the default)",
+      "err_url": "Enter an http:// or https:// address with a valid port (1 to 65535)",
+      "err_server": "{{message}}",
+      "info": "Help"
     }
   },
   "traffic": {
@@ -2326,6 +2355,22 @@
     },
     "hint": {
       "traffic_factor": "This line's traffic is charged at this multiplier whatever servers it passes through. 1 = one-for-one, 0 = free. Only traffic after saving is affected."
+    },
+    "probe": {
+      "title": "Link quality",
+      "state_ok": "Good",
+      "state_degraded": "Degraded",
+      "state_down": "Down",
+      "state_unknown": "No data",
+      "quality": "Quality",
+      "no_link_data": "No quality data for this tunnel",
+      "rtt": "{{ms}} ms",
+      "loss": "{{percent}}% loss",
+      "withheld": "Withheld",
+      "withheld_hint": "Taken out of subscriptions because the link stayed down; it returns once the link recovers. Never falls back to a direct line.",
+      "tip_measured": "Link quality measured by the entry server",
+      "tip_unknown": "No measurement has been reported yet. No data never withholds a line.",
+      "tip_reported": "Reported {{time}}"
     }
   },
   "users": {
@@ -4152,6 +4197,18 @@
         "label": "Node sync reports refused",
         "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
       },
+      "psp_node_sync_gzip_refused_total": {
+        "label": "Compressed sync refused",
+        "desc": "Sync requests refused with 415 because of their Content-Encoding: the agent never declared sync.gzip.v1, or used a coding other than gzip."
+      },
+      "psp_node_sync_decode_busy_total": {
+        "label": "Compressed sync busy",
+        "desc": "Compressed sync requests answered 503 because every decode slot was busy; the agent resends on its next poll. Steady growth means decoding is a bottleneck."
+      },
+      "psp_node_sync_gzip_bytes_total": {
+        "label": "Compressed sync bytes",
+        "desc": "Bytes of compressed sync bodies. Compare request wire with request decoded (and response wire with response plain) to see the saving."
+      },
       "psp_dest_list_refresh_total": {
         "label": "Access-control list refreshes",
         "desc": "Results of refreshing the lists the access-control policy matches against (remote lists and geosite updates). Repeated \"Failed\" means a list is serving old entries; any \"Refused: too broad\" needs an admin to look at the list."
@@ -4291,6 +4348,16 @@
       "node_refused": {
         "protocol_generation": "Incompatible version",
         "report_invalid": "Invalid report"
+      },
+      "node_gzip_refused": {
+        "not_negotiated": "Not negotiated",
+        "unknown_coding": "Unknown coding"
+      },
+      "node_gzip_bytes": {
+        "request_wire": "Request on the wire",
+        "request_decoded": "Request decoded",
+        "response_plain": "Response plain",
+        "response_wire": "Response on the wire"
       },
       "dest_list_refresh": {
         "unchanged": "Unchanged",

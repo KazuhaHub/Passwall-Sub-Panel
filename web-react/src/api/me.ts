@@ -189,6 +189,10 @@ export interface MyRelayStatus {
   node_name?: string
   /** This relay line's multiplier in thousandths. */
   traffic_factor_milli?: number
+  /** Coarse link quality; absent = unknown or not probed. */
+  quality?: 'ok' | 'degraded' | 'down'
+  /** Round-trip time in ms; absent = unknown or not probed. */
+  rtt_ms?: number
 }
 
 export async function getMyServerStatus() {

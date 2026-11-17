@@ -148,3 +148,20 @@
 5. 链路质量自测、按目标分流、多跳、按线路设流量倍率。
 
 发布顺序：Protocol 打标签 → Node 换正式依赖并发布 → PSP 换正式依赖。
+
+## 12. 链路质量自测与压缩同步（4.3，开发分支）
+
+**自测（`transit.probe.v1`）**
+
+- 只向声明了该能力、且持有出口链路（`LinksOut`）或转发的服务器下发 `Transit.Probe`；没有声明的 agent 收到的配置与以前逐字节相同。
+- 设置（管理员，`GET/PUT /api/admin/transit/probe-settings`）：开关（默认开）、间隔（60 秒，30–3600）、超时（5000 毫秒，500–10000）、探测地址（默认 `https://www.gstatic.com/generate_204`，http/https，端口 1–65535；**留空表示只测传输**：不经隧道抓取，不下发 `link_url`，没有 e2e 结果，芯片显示传输的数字）、撤下开关（默认关）、连续失败 N 次撤下（3）、连续正常 N 次恢复（3）。越界一律拒绝，不静默修正。
+- 转发探测方法：默认 `tcp`；落地监听是纯 UDP（Hysteria2、TUIC）时用 `quic`；转发是 SNI 前置路由的目标时用 `tls`（前置功能到位后接入，入口在 `linkprobe.Method`）。
+- 入库只收下发配置里的对象，且只收对的一侧：`LinksOut` 的 `e2e`／`transport`、转发的 `forward`；其余丢弃。状态表 `transit_probe_state`。
+- 一个窗口：全部失败（且至少 3 次尝试）为 `down`，失败率不低于 20% 为 `degraded`，其余 `ok`；没有尝试或结果过期（超过 3 个上报间隔，取探测间隔与全量上报周期中较大者）为 `unknown`。
+- 撤下：只在撤下开关打开时，连续 N 个 `down` 窗口置位、连续 M 个 `ok` 窗口清除。只数**新**窗口：内容（尝试、失败、RTT、最近成功、最近错误）变了算新窗口；内容不变（一直中断的链路每次都一样）则隔一个探测间隔才算一个。重复上报（同一 agent 时间戳且内容相同）整条忽略，agent 时钟回拨或跳到未来不会卡住状态。结果过期后整段历史作废，从新窗口重新判断；`unknown` 永不撤下并清除标记。关掉探测或撤下开关会立即清除所有撤下标记，读取时也只在开关打开时才认标记。被撤下的托管线路（`RelayLine.Publishable()`）或隧道节点（默认出口的链路，`withoutUnreadyEgress`）从订阅中去掉，永不回退直连。`health.go` 不变。
+- 用户页 `relay_statuses` 只带粗略质量（ok／degraded／down）和中位 RTT。
+
+**压缩同步（`sync.gzip.v1`）**
+
+- `/v1/node/sync` 只接受声明过该能力的 agent 的 gzip 请求（其余带 `Content-Encoding` 的请求为 415）；线上 16 MiB、解压后 64 MiB，先读完线上字节（受 16 MiB 限制），再取解压槽，只在解压时占用；解压并发由信号量限制为 4，同一 agent 同时只解一份；等不到槽返回 503（带 `Retry-After`，agent 保持状态、下次轮询重发）。对声明了该能力的 agent，所有响应带 `Vary: Accept-Encoding`。指标：`psp_node_sync_gzip_refused_total`（415）、`psp_node_sync_decode_busy_total`（503）、`psp_node_sync_gzip_bytes_total`。
+- 对声明了该能力的 agent，每个 2xx 响应带 `Accept-Encoding: gzip`；请求带 `Accept-Encoding: gzip` 时响应也压缩。没有该能力的 agent 行为不变。

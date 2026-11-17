@@ -195,6 +195,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		Node:                    &nodeRepo{db: db},
 		Transit:                 &transitRepo{db: db},
 		TransitLinks:            &transitLinkRepo{db: db},
+		TransitProbe:            &transitProbeRepo{db: db},
 		Separator:               &separatorRepo{db: db},
 		Ownership:               newOwnershipRepo(db),
 		PSPClient:               &pspClientRepo{db: db},

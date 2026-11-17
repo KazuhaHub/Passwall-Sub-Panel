@@ -74,6 +74,12 @@ export const nodeKeys = {
   unmanaged: (s: QueryScope, panelId: number) => [...nodeKeys.all(s), 'unmanaged', panelId] as const,
 }
 
+/** Link probe measurements, per entry server. */
+export const probeKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'transit-probes'] as const,
+  panel: (s: QueryScope, panelId: number) => [...probeKeys.all(s), panelId] as const,
+}
+
 /** Certificate issuance/renewal activity (the Logs page's Certificates tab). */
 export const certKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'certs'] as const,

@@ -47,6 +47,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
 	legalsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
@@ -371,6 +372,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
 	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent))
+	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)
