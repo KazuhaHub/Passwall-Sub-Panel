@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -52,6 +54,10 @@ type AdminServersHandler struct {
 	coreCatalog       ports.CoreCatalog
 	serverMigration   ServerMigrationPreviewer
 	nodeMetrics       ports.NodeHostMetricRepo
+	// fronts and frontSvc are the SNI fronts: a server's go with it, and
+	// leaving Xray with some saved asks first.
+	fronts   ports.TransitFrontRepo
+	frontSvc *front.Service
 
 	// startedAt is when THIS PSP process began listening. It exists because a
 	// node's silence during the panel's own downtime is not evidence about the
@@ -60,6 +66,12 @@ type AdminServersHandler struct {
 	// reads as "up long enough", which keeps the pre-existing verdict for any
 	// handler built without the constructor.
 	startedAt time.Time
+}
+
+// WithFronts binds the SNI front store and service.
+func (h *AdminServersHandler) WithFronts(fronts ports.TransitFrontRepo, svc *front.Service) *AdminServersHandler {
+	h.fronts, h.frontSvc = fronts, svc
+	return h
 }
 
 // RealityFingerprintNormalizer converges PSP-owned inbound snapshots after a
@@ -257,6 +269,9 @@ type serverDTO struct {
 	// Passwall Node server approaching what one sync exchange can carry.
 	ClientIdentities        *int64 `json:"client_identities,omitempty"`
 	ClientIdentitiesWarning bool   `json:"client_identities_warning,omitempty"`
+	// FrontsInactive is how many saved shared ports (SNI fronts) are not being
+	// sent to this server right now: all of them when it cannot run fronts.
+	FrontsInactive int `json:"fronts_inactive,omitempty"`
 }
 
 // ClientIdentityWarnAt is where a Passwall Node server's client count starts
@@ -418,6 +433,7 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 			out[i].ClientIdentities = &n
 			out[i].ClientIdentitiesWarning = domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP && n >= ClientIdentityWarnAt
 		}
+		out[i].FrontsInactive = h.frontsInactive(ctx, panel)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -1336,6 +1352,9 @@ type selectCoreRequest struct {
 	Engine            string `json:"engine"`
 	Version           string `json:"version"`
 	ConfirmRestricted bool   `json:"confirm_restricted"`
+	// ConfirmFronts is the go-ahead for leaving Xray while shared ports are
+	// saved: they stay saved but stop being sent.
+	ConfirmFronts bool `json:"confirm_fronts"`
 }
 
 // SelectCore records one exact, catalog-audited deployment identity. The
@@ -1385,6 +1404,17 @@ func (h *AdminServersHandler) SelectCore(c *gin.Context) {
 	if !release.RequiresConfirmation && req.ConfirmRestricted {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
 		return
+	}
+	if engine != domain.NodeCoreXray && h.frontSvc != nil && !req.ConfirmFronts {
+		refusal, err := h.frontSvc.EngineChangeRefusal(c.Request.Context(), id)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		if refusal != nil {
+			respondFrontError(c, refusal)
+			return
+		}
 	}
 	client, err := h.pool.Get(id)
 	if err != nil {
@@ -1811,7 +1841,58 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		return
 	}
 	_ = h.pool.Remove(id)
+	h.deleteFrontsOf(c, id)
 	c.Status(http.StatusNoContent)
+}
+
+// frontsInactive counts a Passwall Node server's saved shared ports that are
+// not being sent, for the server row. A failure shows nothing rather than fail
+// the list.
+func (h *AdminServersHandler) frontsInactive(ctx context.Context, panel *domain.XUIPanel) int {
+	if h.frontSvc == nil || h.fronts == nil || panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		return 0
+	}
+	fronts, err := h.fronts.ListByPanel(ctx, panel.ID)
+	if err != nil || len(fronts) == 0 {
+		return 0
+	}
+	diagnosis, err := h.frontSvc.Diagnose(ctx, panel.ID)
+	if err != nil {
+		return 0
+	}
+	if diagnosis.Inactive != "" {
+		return len(fronts)
+	}
+	return len(diagnosis.Withheld)
+}
+
+// deleteFrontsOf removes the shared ports of a server that is gone, each with
+// its own audit entry. A failure here leaves orphans, which no guard counts
+// (they belong to no server), so it is logged and never fails the delete.
+func (h *AdminServersHandler) deleteFrontsOf(c *gin.Context, panelID int64) {
+	if h.fronts == nil {
+		return
+	}
+	fronts, err := h.fronts.ListByPanel(c.Request.Context(), panelID)
+	if err != nil {
+		log.Warn("list fronts of a deleted server failed", "panel_id", panelID, "err", err)
+		return
+	}
+	for _, f := range fronts {
+		if _, err := h.fronts.Delete(c.Request.Context(), panelID, f.ID); err != nil {
+			log.Warn("delete front of a deleted server failed", "panel_id", panelID, "front", f.ID, "err", err)
+			continue
+		}
+		if h.audit == nil {
+			continue
+		}
+		before, _ := json.Marshal(frontDTOOf(f))
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor: actorFromGin(c), Action: "transit_front_deleted",
+			Target:     "server=" + strconv.FormatInt(panelID, 10) + " port=" + strconv.Itoa(f.Port) + " (server deleted)",
+			BeforeJSON: string(before), IP: c.ClientIP(), At: time.Now(),
+		})
+	}
 }
 
 // ---- helpers ----

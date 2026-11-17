@@ -48,6 +48,13 @@ export const policies = {
     refetchInterval: false,
     note: 'Read when a link editor opens; the probe window is a minute or more, so no polling.',
   },
+  /** Shared ports and the port-usage view: read when their dialog opens, refreshed by every write. */
+  fronts: {
+    staleTime: 0,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'An admin editor, read fresh each time it opens; writes invalidate it, so no polling.',
+  },
   /** Slow-moving dropdown dictionaries; invalidated on write, never polled. */
   dictionaries: {
     staleTime: 5 * MINUTE,

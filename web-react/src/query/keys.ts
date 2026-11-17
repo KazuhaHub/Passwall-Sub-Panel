@@ -80,6 +80,14 @@ export const probeKeys = {
   panel: (s: QueryScope, panelId: number) => [...probeKeys.all(s), panelId] as const,
 }
 
+/** SNI-shared ports (fronts) and the port-usage view, per server. */
+export const frontKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'fronts'] as const,
+  list: (s: QueryScope, panelId: number) => [...frontKeys.all(s), 'list', panelId] as const,
+  options: (s: QueryScope, panelId: number) => [...frontKeys.all(s), 'options', panelId] as const,
+  ports: (s: QueryScope, panelId: number) => [...frontKeys.all(s), 'ports', panelId] as const,
+}
+
 /** Certificate issuance/renewal activity (the Logs page's Certificates tab). */
 export const certKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'certs'] as const,

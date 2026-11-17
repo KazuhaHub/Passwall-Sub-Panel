@@ -19,6 +19,7 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
+  Badge,
   Box,
   ButtonBase,
   Button,
@@ -72,7 +73,9 @@ import UpgradeIcon from '@mui/icons-material/UploadOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import TroubleshootIcon from '@mui/icons-material/Troubleshoot'
 import PercentIcon from '@mui/icons-material/Percent'
+import CallSplitIcon from '@mui/icons-material/CallSplit'
 import { LineMultipliersDialog } from './LineMultipliersDialog'
+import SharedPortsDialog from './fronts/SharedPortsDialog'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -240,6 +243,7 @@ export default function ServersView() {
   const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
   const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
   const [lineFactorsTarget, setLineFactorsTarget] = useState<Server | null>(null)
+  const [sharedPortsTarget, setSharedPortsTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1622,6 +1626,15 @@ export default function ServersView() {
                         <PercentIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
+                    {s.panel_type === 'psp' && (
+                      <Tooltip title={s.fronts_inactive ? t('admin:servers.fronts.row_inactive', { count: s.fronts_inactive }) : t('admin:servers.action.shared_ports')}>
+                        <IconButton size="small" onClick={() => setSharedPortsTarget(s)} aria-label={t('admin:servers.action.shared_ports')}>
+                          <Badge color="warning" variant="dot" invisible={!s.fronts_inactive}>
+                            <CallSplitIcon fontSize="small" />
+                          </Badge>
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <IconButton size="small" onClick={() => openEdit(s)} aria-label={t('admin:servers.action.edit')}>
                       <EditIcon fontSize="small" />
                     </IconButton>
@@ -2039,6 +2052,7 @@ export default function ServersView() {
       />
       <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
+      {sharedPortsTarget && <SharedPortsDialog key={`sharedports-${sharedPortsTarget.id}`} server={sharedPortsTarget} onClose={() => setSharedPortsTarget(null)} />}
       {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
         onClose={() => setReinstallTarget(null)}

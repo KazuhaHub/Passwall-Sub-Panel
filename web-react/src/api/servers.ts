@@ -1,3 +1,4 @@
+import { frontErrorOf, frontErrorWording } from './fronts'
 import { client } from './client'
 
 /** Shared stable-release metadata; never issues a credential or upgrade. */
@@ -55,6 +56,8 @@ export interface Server {
   client_identities?: number
   /** A Passwall Node server approaching the one-sync budget (>= 20000). */
   client_identities_warning?: boolean
+  /** Saved shared ports (SNI fronts) not being sent to this server right now. */
+  fronts_inactive?: number
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -698,6 +701,24 @@ export async function selectCore(
 		version,
 		...(options?.confirmRestricted ? { confirm_restricted: true } : {}),
 	}
-	const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/select-core`, body, { _skipErrorToast: true })
-	return data
+	try {
+		const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/select-core`, body, { _skipErrorToast: true })
+		return data
+	} catch (err) {
+		// Leaving Xray while shared ports are saved: they stay saved but stop being
+		// sent. The server asks first, naming what stops; the same request goes
+		// again once the admin agrees.
+		const e = frontErrorOf(err)
+		if (!e || e.status !== 409 || e.code !== 'confirm_required' || e.params.action !== 'engine') throw err
+		// Loaded here: only this rare path needs the dialog and the translations.
+		const [{ confirm }, { default: i18n }] = await Promise.all([import('@/components/ConfirmHost'), import('@/i18n')])
+		const ok = await confirm({
+			title: i18n.t('admin:servers.fronts.confirm.engine_title') as string,
+			message: i18n.t(frontErrorWording(e).key, frontErrorWording(e).values) as string,
+			destructive: true,
+		})
+		if (!ok) throw err
+		const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/select-core`, { ...body, confirm_fronts: true }, { _skipErrorToast: true })
+		return data
+	}
 }

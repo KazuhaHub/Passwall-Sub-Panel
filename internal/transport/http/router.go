@@ -26,6 +26,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
@@ -123,6 +124,8 @@ type Deps struct {
 	Reconcile    *reconcile.Service
 	Geo          *geo.Service
 	NodeSync     handler.NodeSyncService
+	// Fronts is the SNI front service shared with the node saves and the sync.
+	Fronts *front.Service
 	// Dest is the access-control API's wiring. Its routes are always
 	// registered, so that "admin only" is provable with nothing wired; a
 	// field left out makes the routes that need it answer 503.
@@ -542,6 +545,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 
+		var frontsForServers *front.Service
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel, d.Repos.PSPClient, d.Repos.Certificate)
 		if d.Group != nil {
 			nodes.WithLineVisibility(d.Group)
@@ -585,6 +589,22 @@ func NewRouter(d Deps) stdhttp.Handler {
 			adminGroup.GET("/transit/probe-settings", probes.GetSettings)
 			adminGroup.PUT("/transit/probe-settings", probes.PutSettings)
 			adminGroup.GET("/transit/probes", probes.ListProbes)
+		}
+		if d.Repos.TransitFronts != nil && d.Repos.XUIPanel != nil && d.Repos.NodeAgent != nil {
+			frontSvc := d.Fronts
+			if frontSvc == nil {
+				frontSvc = front.New(d.Repos.TransitFronts, d.Repos.Node, d.Repos.XUIPanel,
+					d.Repos.NodeAgent, d.Repos.Transit, d.Repos.TransitLinks, nil)
+			}
+			frontsForServers = frontSvc
+			fronts := handler.NewAdminFrontHandler(frontSvc, d.Repos.Audit)
+			adminGroup.GET("/servers/:id/fronts", fronts.List)
+			adminGroup.GET("/servers/:id/fronts/options", fronts.Options)
+			adminGroup.GET("/servers/:id/fronts/suggest", fronts.Suggest)
+			adminGroup.POST("/servers/:id/fronts", fronts.Create)
+			adminGroup.PUT("/servers/:id/fronts/:fid", fronts.Update)
+			adminGroup.DELETE("/servers/:id/fronts/:fid", fronts.Delete)
+			adminGroup.GET("/servers/:id/ports", fronts.Ports)
 		}
 		if d.Repos.TransitLinks != nil {
 			links := handler.NewAdminTransitHandler(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))
@@ -830,7 +850,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNodeReleaseCatalog(d.NodeReleases).
 			WithNodeInstallTemplate(d.NodeInstallTemplate).
 			WithCoreCatalog(d.CoreCatalog).
-			WithServerMigrationPreviewer(d.ServerMigration)
+			WithServerMigrationPreviewer(d.ServerMigration).
+			WithFronts(d.Repos.TransitFronts, frontsForServers)
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)

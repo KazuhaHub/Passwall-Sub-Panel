@@ -43,6 +43,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -373,6 +374,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent))
 	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
+	// ONE front service for the sync, the node saves and the HTTP handlers: it
+	// owns the per-server lock that serializes everything touching a server's
+	// shared ports.
+	frontSvc := front.New(repos.TransitFronts, repos.Node, repos.XUIPanel, repos.NodeAgent, repos.Transit, repos.TransitLinks, nil)
+	nativeSync.SetFronts(frontSvc)
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)
@@ -493,6 +499,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	syncSvc.SetNodeRepo(repos.Node) // legacy per-node clients are priced at their direct line
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
+	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each
@@ -905,6 +912,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile: reconcileSvc,
 		Geo:       geoSvc,
 		NodeSync:  nativeSync,
+		Fronts:    frontSvc,
 		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails

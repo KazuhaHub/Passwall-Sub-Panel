@@ -13,6 +13,7 @@ const categories: Readonly<Record<string, NodeIssueCategory>> = {
   directives_ahead_of_roster: 'sync',
   directive_unknown_client: 'sync',
   report_missing_object: 'sync',
+  front_withheld: 'sync',
   destination_policy_report_only_not_deployed: 'sync',
   destination_policy_resolve_not_deployed: 'sync',
   task_identity_conflict: 'tasks',

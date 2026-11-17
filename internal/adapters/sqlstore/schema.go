@@ -1680,6 +1680,7 @@ var schemaModels = []any{
 	&transitForwardRow{},
 	&transitLinkRow{},
 	&transitProbeRow{},
+	&transitFrontRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

@@ -622,6 +622,15 @@ var (
 		"Sync requests refused with 415 for their Content-Encoding, by reason.",
 		"reason",
 	)
+	// FrontsWithheldTotal counts saved SNI fronts left out of a server's config
+	// at sync time, by reason (no_routes, listener_unfit, listener_port,
+	// listener_not_behind, contract): each is a shared port that is not being
+	// served, with an issue recorded for the server.
+	FrontsWithheldTotal = NewCounterVec(
+		"psp_fronts_withheld_total",
+		"Saved SNI fronts not sent to a server at sync time, by reason.",
+		"reason",
+	)
 	// NodeSyncDecodeBusyTotal counts compressed requests answered 503 because no
 	// decode slot (or the agent's own) became free in time.
 	NodeSyncDecodeBusyTotal = NewCounter(

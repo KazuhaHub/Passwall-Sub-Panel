@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	certsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
@@ -195,11 +196,12 @@ type inboundDTO struct {
 }
 
 type importNodeRequest struct {
-	PanelID       int64  `json:"panel_id" binding:"required"`
-	InboundID     int    `json:"inbound_id" binding:"required"`
-	DisplayName   string `json:"display_name" binding:"required"`
-	ServerAddress string `json:"server_address" binding:"required"`
-	Flow          string `json:"flow"`
+	FrontConfirm  *frontConfirmDTO `json:"front_confirm,omitempty"`
+	PanelID       int64            `json:"panel_id" binding:"required"`
+	InboundID     int              `json:"inbound_id" binding:"required"`
+	DisplayName   string           `json:"display_name" binding:"required"`
+	ServerAddress string           `json:"server_address" binding:"required"`
+	Flow          string           `json:"flow"`
 	// Protocol of the source inbound (lowercased), cached on the node so the
 	// UI can gate protocol-specific fields. Optional for backward compat.
 	Protocol   string         `json:"protocol"`
@@ -247,6 +249,8 @@ type inboundSpecDTO struct {
 	ExpiryTime     int64  `json:"expiry_time"`
 	CertSource     string `json:"cert_source"`
 	CertID         int64  `json:"cert_id"`
+	// FrontConfirm confirms joining the shared port this inbound lands on.
+	FrontConfirm *frontConfirmDTO `json:"front_confirm,omitempty"`
 }
 
 type updateMetadataRequest struct {
@@ -271,6 +275,50 @@ type updateMetadataRequest struct {
 
 type setNodeEnabledRequest struct {
 	Enabled bool `json:"enabled"`
+	// ConfirmFront is the go-ahead for disabling a listener that is behind a
+	// shared port: the names routed to it fall to the default site.
+	ConfirmFront bool `json:"confirm_front"`
+}
+
+// frontConfirmDTO is the administrator's go-ahead for a listener joining a
+// shared port. Its presence is the confirmation; LoopbackPort is the one the
+// 409 offered (0 takes the suggestion).
+type frontConfirmDTO struct {
+	LoopbackPort int `json:"loopback_port"`
+}
+
+// frontContext puts a request's confirmation, if it carries one, in the
+// context the node service reads, and returns what the service reports back.
+func frontContext(c *gin.Context, confirm *frontConfirmDTO, extra bool) (context.Context, *front.Confirmation) {
+	conf := &front.Confirmation{Confirmed: extra}
+	if confirm != nil {
+		conf.Confirmed, conf.LoopbackPort = true, confirm.LoopbackPort
+	}
+	return front.WithConfirmation(c.Request.Context(), conf), conf
+}
+
+// auditFrontJoin records that a save took a listener off a shared port, added it
+// to one, or both (a move), with the front and the SNI it is routed by.
+func (h *AdminNodeHandler) auditFrontJoin(c *gin.Context, conf *front.Confirmation) {
+	if h.audit == nil || conf == nil {
+		return
+	}
+	// A move leaves one front, then joins another: record them in that order.
+	for _, step := range []struct {
+		action string
+		change *front.Joined
+	}{{"transit_front_listener_left", conf.Left}, {"transit_front_listener_joined", conf.Joined}} {
+		action, change := step.action, step.change
+		if change == nil {
+			continue
+		}
+		after, _ := json.Marshal(change)
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor: actorFromGin(c), Action: action,
+			Target:    "server=" + strconv.FormatInt(change.PanelID, 10) + " port=" + strconv.Itoa(change.Port) + " node=" + strconv.FormatInt(change.NodeID, 10),
+			AfterJSON: string(after), IP: c.ClientIP(), At: time.Now(),
+		})
+	}
 }
 
 type reorderRequestItem struct {
@@ -555,7 +603,11 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
 		return
 	}
-	if err := h.node.ImportExisting(c.Request.Context(), n); err != nil {
+	ctx, conf := frontContext(c, req.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.ImportExisting(ctx, n)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -626,7 +678,11 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	if err := h.node.CreateInbound(c.Request.Context(), n, spec); err != nil {
+	ctx, conf := frontContext(c, req.Inbound.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.CreateInbound(ctx, n, spec)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -820,7 +876,11 @@ func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	if err := h.node.UpdateInboundConfig(c.Request.Context(), id, spec); err != nil {
+	ctx, conf := frontContext(c, req.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.UpdateInboundConfig(ctx, id, spec)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -838,7 +898,8 @@ func (h *AdminNodeHandler) SetEnabled(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.node.SetEnabled(c.Request.Context(), id, req.Enabled); err != nil {
+	ctx, _ := frontContext(c, nil, req.ConfirmFront)
+	if err := h.node.SetEnabled(ctx, id, req.Enabled); err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -887,7 +948,11 @@ func (h *AdminNodeHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	if err := h.node.DeleteAndSync(c.Request.Context(), id); err != nil {
+	ctx, conf := frontContext(c, nil, c.Query("confirm_front") == "true")
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.DeleteAndSync(ctx, id)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -904,7 +969,11 @@ func (h *AdminNodeHandler) Detach(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	if err := h.node.DetachAndSync(c.Request.Context(), id); err != nil {
+	ctx, conf := frontContext(c, nil, c.Query("confirm_front") == "true")
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.DetachAndSync(ctx, id)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -1269,7 +1338,10 @@ func callerIsAdmin(c *gin.Context) bool {
 }
 
 func mapNodeServiceError(c *gin.Context, err error) {
+	var refusal *front.Refusal
 	switch {
+	case errors.As(err, &refusal):
+		respondFrontError(c, err)
 	case errors.Is(err, domain.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAlreadyExists):

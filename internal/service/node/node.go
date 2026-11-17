@@ -29,6 +29,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/inboundcfg"
 )
@@ -56,7 +57,10 @@ type MemberResyncer interface {
 }
 
 type Service struct {
-	nodes      ports.NodeRepo
+	nodes ports.NodeRepo
+	// fronts holds the SNI fronts a save is checked against (SetFronts).
+	fronts     ports.TransitFrontRepo
+	frontSvc   *front.Service
 	separators ports.SeparatorRepo
 	pool       ports.XUIPool
 	cleaner    InboundCleaner
@@ -450,6 +454,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if n.DisplayName == "" || n.Region == "" {
 		return fmt.Errorf("%w: display_name and region required", domain.ErrValidation)
 	}
+	defer s.lockFronts(relayPanels(n)...)()
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if err := s.validateManagedRelays(ctx, n); err != nil {
 		return err
@@ -499,7 +504,14 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	// Import = take ownership: capture the live inbound's config into the local
 	// snapshot so render reads it without a live fetch and reconcile can keep
 	// 3X-UI aligned to PSP. clients[] is stripped (ownership-managed).
+	offer, err := s.checkInboundAgainstFronts(ctx, n)
+	if err != nil {
+		return err
+	}
 	if err := s.nodes.Create(ctx, n); err != nil {
+		return err
+	}
+	if err := s.finishFront(ctx, n, offer); err != nil {
 		return err
 	}
 	s.inboundsChanged(ctx, n.PanelID)
@@ -516,18 +528,37 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	}
 	// Resolve before any queued retry captures the node: the request-only
 	// markers are not serialized into the task payload.
+	// The server's lock comes before anything reads fronts, relay lines included;
+	// the keys are taken in sorted order everywhere, so locks never cross.
+	defer s.lockFronts(relayPanels(n)...)()
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if err := s.validateManagedRelays(ctx, n); err != nil {
 		return err
 	}
+	// The node is checked as the spec will make it: its port and transport are
+	// the spec's.
+	probe := *n
+	inboundcfg.ApplySpec(&probe, spec)
+	offer, err := s.checkInboundAgainstFronts(ctx, &probe)
+	if err != nil {
+		return err
+	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
+		if offer != nil {
+			return fmt.Errorf("xui panel: %w", err) // a join is never queued: the admin retries
+		}
 		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
 	}
 	inboundID, err := c.AddInbound(ctx, spec)
 	if err != nil {
 		if permanentErr := permanentInboundCreateError(err); permanentErr != nil {
 			return permanentErr
+		}
+		if offer != nil {
+			// A queued create would run later with no join: the node would land on
+			// the shared port beside the front. Return the error instead.
+			return fmt.Errorf("xui addInbound: %w", err)
 		}
 		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui addInbound: %w", err))
 	}
@@ -541,6 +572,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	}
 	if err := s.nodes.Create(ctx, n); err != nil {
 		_ = c.DelInbound(context.Background(), inboundID)
+		return err
+	}
+	if err := s.finishFront(ctx, n, offer); err != nil {
 		return err
 	}
 	s.inboundsChanged(ctx, n.PanelID)
@@ -742,6 +776,11 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if err != nil {
 		return err
 	}
+	lockPanels := []int64{previous.PanelID}
+	for _, line := range append(append([]domain.RelayLine(nil), previous.Relays...), n.Relays...) {
+		lockPanels = append(lockPanels, line.EntryPanelID)
+	}
+	defer s.lockFronts(lockPanels...)()
 	if err := domain.ReconcileRelayIDs(previous.Relays, n.Relays); err != nil {
 		return err
 	}
@@ -927,8 +966,18 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	// then aligns 3X-UI. Use the column-scoped writer so a concurrent health
 	// pass doesn't clobber our snapshot — and we don't clobber its writes.
 	sniffingBefore := n.Sniffing
+	defer s.lockFronts(n.PanelID)()
+	next := *n
+	inboundcfg.ApplySpec(&next, spec)
+	offer, err := s.checkInboundAgainstFronts(ctx, &next)
+	if err != nil {
+		return err
+	}
 	inboundcfg.ApplySpec(n, spec)
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
+		return err
+	}
+	if err := s.finishFront(ctx, n, offer); err != nil {
 		return err
 	}
 	if n.Sniffing != sniffingBefore {
@@ -1046,6 +1095,25 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err != nil {
 		return err
 	}
+	defer s.lockFronts(n.PanelID)()
+	// Disabling a listener that is behind a shared port sends the names routed
+	// to it to the default site: it is allowed, and asks first.
+	if !enabled && n.Enabled && s.frontSvc != nil && s.fronts != nil && !front.ConfirmationFrom(ctx).Confirmed {
+		if refusal, err := s.frontSvc.DisableImpact(ctx, n); err != nil {
+			return err
+		} else if refusal != nil {
+			return refusal
+		}
+	}
+	// Enabling a member of a front that is not being sent, next to another
+	// listener on its port, would leave both down: it asks first.
+	if enabled && !n.Enabled && s.frontSvc != nil && s.fronts != nil && !front.ConfirmationFrom(ctx).Confirmed {
+		if refusal, err := s.frontSvc.EnableRefusal(ctx, n); err != nil {
+			return err
+		} else if refusal != nil {
+			return refusal
+		}
+	}
 	c, clientErr := s.pool.Get(n.PanelID)
 	if clientErr == nil && !ports.SupportsCapability(c, ports.CapabilityInboundEnable) {
 		return fmt.Errorf("%w: selected panel cannot enable or disable individual inbounds", ports.ErrPanelCapabilityUnsupported)
@@ -1094,6 +1162,11 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 		// reclaim, no sync task to enqueue. Drop the panel-side record.
 		return s.nodes.Delete(ctx, id)
 	}
+	defer s.lockFronts(n.PanelID)()
+	change, err := s.checkRemovalAgainstFronts(ctx, n)
+	if err != nil {
+		return err
+	}
 	if err := s.cleaner.EnsureInboundDeletable(ctx, n.PanelID, n.InboundID); err != nil {
 		if errors.Is(err, domain.ErrInboundHasUnmanagedClients) {
 			return err
@@ -1101,6 +1174,9 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 		// Remote reachability problems are left to the queued task. The task
 		// will run the same guard before deleting any managed clients.
 		log.Warn("node delete preflight failed; queueing guarded delete", "node_id", n.ID, "err", err)
+	}
+	if err := s.finishFront(ctx, n, change); err != nil {
+		return err
 	}
 	n.Enabled = false
 	// Column-scoped write (see SetEnabled): don't clobber concurrent
@@ -1125,8 +1201,16 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	if n.IsSeparator() {
 		return s.nodes.Delete(ctx, id)
 	}
+	defer s.lockFronts(n.PanelID)()
+	change, err := s.checkRemovalAgainstFronts(ctx, n)
+	if err != nil {
+		return err
+	}
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 		return fmt.Errorf("unclaim owned clients: %w", err)
+	}
+	if err := s.finishFront(ctx, n, change); err != nil {
+		return err
 	}
 	if err := s.nodes.Delete(ctx, n.ID); err != nil {
 		return err
@@ -1979,6 +2063,9 @@ func (s *Service) validateEgress(node *domain.Node, egress int64) error {
 }
 
 func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Node) error {
+	if err := s.checkRelaysAgainstFronts(ctx, landing); err != nil {
+		return err
+	}
 	managed := false
 	for _, line := range landing.Relays {
 		managed = managed || line.Managed()
@@ -2001,20 +2088,27 @@ func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Nod
 	if err != nil {
 		return err
 	}
-	type bind struct {
-		panel int64
-		port  int
+	type bind = bindKey
+	// A shared port (SNI front) holds the listeners behind it and any number of
+	// relay lines, told apart by name, so neither collides there; the loopback
+	// ports of fronted listeners are plain taken ports.
+	shared, loopback, err := s.frontedBinds(ctx)
+	if err != nil {
+		return err
 	}
 	taken := make(map[bind]string)
+	for key, owner := range loopback {
+		taken[key] = owner
+	}
 	for _, other := range nodes {
 		if other == nil || other.IsSeparator() || (landing.ID != 0 && other.ID == landing.ID) {
 			continue
 		}
-		if other.DesiredPort > 0 {
+		if other.DesiredPort > 0 && !shared[bind{other.PanelID, other.DesiredPort}] {
 			taken[bind{other.PanelID, other.DesiredPort}] = fmt.Sprintf("inbound of node %q", other.DisplayName)
 		}
 		for _, line := range other.Relays {
-			if line.Managed() {
+			if line.Managed() && !shared[bind{line.EntryPanelID, line.Port}] {
 				taken[bind{line.EntryPanelID, line.Port}] = fmt.Sprintf("relay line of node %q", other.DisplayName)
 			}
 		}
@@ -2029,6 +2123,9 @@ func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Nod
 		key := bind{line.EntryPanelID, line.Port}
 		if owner, exists := taken[key]; exists {
 			return fmt.Errorf("%w: relay line %d: port %d on the entry server is already used by the %s", domain.ErrValidation, i+1, line.Port, owner)
+		}
+		if shared[key] {
+			continue
 		}
 		taken[key] = fmt.Sprintf("relay line %d of this node", i+1)
 	}

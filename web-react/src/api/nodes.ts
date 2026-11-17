@@ -1,3 +1,4 @@
+import { withFrontConfirm } from '@/utils/frontConfirm'
 import { client } from './client'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound } from './types'
 
@@ -16,6 +17,8 @@ export interface AdminInbound {
 }
 
 export interface ImportNodeRequest {
+  /** The admin's go-ahead for joining a shared port this inbound lands on. */
+  front_confirm?: { loopback_port: number }
   panel_id: number
   inbound_id: number
   display_name: string
@@ -98,6 +101,8 @@ export interface InboundSpec {
    * writes a TLS inbound. Kept on the same DTO for API compatibility. */
   cert_source?: 'psp_managed'
   cert_id?: number
+  /** The admin's go-ahead for joining a shared port this inbound lands on. */
+  front_confirm?: { loopback_port: number }
 }
 
 export interface CreateInboundRequest {
@@ -173,6 +178,10 @@ export async function getNode(id: number, opts: { signal?: AbortSignal; quiet?: 
 }
 
 export async function importNode(req: ImportNodeRequest) {
+  return withFrontConfirm(async c => importNodeOnce(c ? { ...req, front_confirm: { loopback_port: c.loopback_port ?? 0 } } : req))
+}
+
+async function importNodeOnce(req: ImportNodeRequest) {
   const { data } = await client.post<Node>('/admin/nodes/import', req)
   return data
 }
@@ -239,6 +248,10 @@ export async function reorderSeparators(items: SeparatorReorderItem[]) {
 }
 
 export async function createInbound(req: CreateInboundRequest) {
+  return withFrontConfirm(c => createInboundOnce(c ? { ...req, inbound: { ...req.inbound, front_confirm: { loopback_port: c.loopback_port ?? 0 } } } : req))
+}
+
+async function createInboundOnce(req: CreateInboundRequest) {
   const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req)
   return data
 }
@@ -269,15 +282,17 @@ export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequ
 }
 
 export async function updateInboundConfig(id: number, req: InboundSpec) {
-  await client.put(`/admin/nodes/${id}/inbound`, req)
+  await withFrontConfirm(c => client.put(`/admin/nodes/${id}/inbound`,
+    c ? { ...req, front_confirm: { loopback_port: c.loopback_port ?? 0 } } : req))
 }
 
 export async function setNodeEnabled(id: number, enabled: boolean) {
-  await client.post(`/admin/nodes/${id}/set-enabled`, { enabled })
+  await withFrontConfirm(c => client.post(`/admin/nodes/${id}/set-enabled`, c?.confirm_front ? { enabled, confirm_front: true } : { enabled }))
 }
 
 export async function deleteNode(id: number) {
-  await client.delete(`/admin/nodes/${id}`)
+  // A listener behind a shared port leaves it when deleted: the server asks first.
+  await withFrontConfirm(c => client.delete(`/admin/nodes/${id}`, c ? { params: { confirm_front: 'true' } } : undefined))
 }
 
 // recreateNodeInbound rebuilds the node's inbound on its (repointed/empty) server
@@ -292,7 +307,7 @@ export async function recreateNodeInbound(id: number) {
 // burn retries against a dead panel; any clients PSP previously created
 // stay on 3X-UI for the admin to clean up there.
 export async function detachNode(id: number) {
-  await client.post(`/admin/nodes/${id}/detach`)
+  await withFrontConfirm(c => client.post(`/admin/nodes/${id}/detach`, undefined, c ? { params: { confirm_front: 'true' } } : undefined))
 }
 
 export interface NodeReorderItem {

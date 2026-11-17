@@ -20,6 +20,11 @@ import (
 // migrateV4_2. A later release line gets its own file and dispatcher beside
 // this one instead of adding another call to EnsureSchema.
 //
+// The SNI-shared ports (transit.sni.v1) add only the transit_fronts table,
+// which autoMigrateCurrentSchema creates on any database that lacks it: there
+// is no data to carry over, so they need no step here. The upgrade test for it
+// lives in transit_front_repo_test.go.
+//
 // Delete this file, its test file and the migrateV4_3 call once upgrades from
 // releases before 4.3.0 are no longer supported. Nothing outside this file may
 // depend on a helper defined here, so that deletion stays a deletion.

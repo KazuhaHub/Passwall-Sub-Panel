@@ -2319,6 +2319,7 @@ type Repos struct {
 	Transit                 TransitRepo
 	TransitLinks            TransitLinkRepo
 	TransitProbe            TransitProbeRepo
+	TransitFronts           TransitFrontRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2382,6 +2383,19 @@ type TransitProbeRepo interface {
 	PruneExcept(ctx context.Context, panelID int64, keep []string) (int64, error)
 	// ClearWithheld clears every withheld flag and reports how many changed.
 	ClearWithheld(ctx context.Context) (int64, error)
+}
+
+// TransitFrontRepo stores the SNI fronts (transit.sni.v1) of Passwall Node
+// servers: one row per shared port.
+type TransitFrontRepo interface {
+	ListByPanel(ctx context.Context, panelID int64) ([]domain.TransitFront, error)
+	List(ctx context.Context) ([]domain.TransitFront, error)
+	Get(ctx context.Context, id int64) (domain.TransitFront, error)
+	// Create stores a front; a second one on the same (server, port) is
+	// domain.ErrAlreadyExists.
+	Create(ctx context.Context, front domain.TransitFront) (domain.TransitFront, error)
+	Update(ctx context.Context, front domain.TransitFront) (domain.TransitFront, error)
+	Delete(ctx context.Context, panelID, id int64) (bool, error)
 }
 
 // TransitLinkRepo stores the tunnels between Passwall Node servers.

@@ -227,7 +227,12 @@ client.interceptors.response.use(
       return Promise.reject(err)
     }
     // --- everything else: categorised + de-duped toast.
-    if (!cfg?._skipErrorToast) {
+    // A 409 `confirm_required` is the server asking before it acts (a shared
+    // port is about to move a listener), not a failure: the caller asks the
+    // admin and sends the request again, so no error toast.
+    const isPrompt = err.response?.status === 409
+      && (err.response?.data as { code?: string } | undefined)?.code === 'confirm_required'
+    if (!cfg?._skipErrorToast && !isPrompt) {
       const status = err.response?.status ?? 0
       const level: 'error' | 'warning' = status === 429 ? 'warning' : 'error'
       const { key, msg } = categoriseError(err)
