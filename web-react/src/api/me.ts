@@ -172,6 +172,8 @@ export interface MyNodeStatus {
   checked_at?: string
   /** False when this node hides its landing/direct endpoint. */
   show_direct: boolean
+  /** Server traffic multiplier in thousandths (1000 = one-for-one, 0 = free). */
+  traffic_factor_milli?: number
   /** Enabled relay endpoints selected for user-visible health display. */
   relay_statuses?: MyRelayStatus[]
   /** Published VLESS routing lines, reusing their entry's reachability. */

@@ -46,6 +46,10 @@ type pspClientRow struct {
 	PeriodBaselineUpBytes    int64 `gorm:"default:0"`
 	PeriodBaselineDownBytes  int64 `gorm:"default:0"`
 	PeriodBaselineTotalBytes int64 `gorm:"default:0"`
+
+	// ChargedLifetimeBytes: lifetime_total_bytes weighted by the server's
+	// traffic factor, delta by delta. The other counters stay raw.
+	ChargedLifetimeBytes int64 `gorm:"not null;default:0"`
 }
 
 func (pspClientRow) TableName() string { return "psp_clients" }
@@ -93,6 +97,7 @@ func pspClientToRow(c *domain.PSPClient) pspClientRow {
 		PeriodBaselineUpBytes:    c.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  c.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: c.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     c.ChargedLifetimeBytes,
 	}
 }
 
@@ -122,6 +127,7 @@ func rowToPSPClient(r *pspClientRow) *domain.PSPClient {
 		PeriodBaselineUpBytes:    r.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  r.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: r.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     r.ChargedLifetimeBytes,
 	}
 }
 
@@ -400,6 +406,7 @@ func pspClientCounterMap(c *domain.PSPClient) map[string]any {
 		"period_baseline_up_bytes":    c.PeriodBaselineUpBytes,
 		"period_baseline_down_bytes":  c.PeriodBaselineDownBytes,
 		"period_baseline_total_bytes": c.PeriodBaselineTotalBytes,
+		"charged_lifetime_bytes":      c.ChargedLifetimeBytes,
 	}
 }
 

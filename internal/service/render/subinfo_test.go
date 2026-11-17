@@ -78,3 +78,14 @@ func TestBuildSubInfo_Expiry(t *testing.T) {
 		})
 	}
 }
+
+// The header reports the CHARGED period usage — the same figure quota
+// enforcement uses — not the raw bytes moved.
+func TestBuildSubInfo_ReportsChargedUsage(t *testing.T) {
+	svc := &Service{repos: ports.Repos{Traffic: subInfoTrafficRepo{}}}
+	u := &domain.User{ID: 1, TrafficLimitBytes: 5000,
+		LifetimeTotalBytes: 1500, RawLifetimeTotalBytes: 1000}
+	if got, want := svc.buildSubInfo(context.Background(), u), "upload=0; download=1500; total=5000"; got != want {
+		t.Fatalf("Subscription-Userinfo = %q, want %q", got, want)
+	}
+}

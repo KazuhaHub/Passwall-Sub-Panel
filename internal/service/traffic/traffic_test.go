@@ -33,6 +33,9 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 		cp.LifetimeUpBytes = prev.LifetimeUpBytes
 		cp.LifetimeDownBytes = prev.LifetimeDownBytes
 		cp.LifetimeTotalBytes = prev.LifetimeTotalBytes
+		cp.RawLifetimeUpBytes = prev.RawLifetimeUpBytes
+		cp.RawLifetimeDownBytes = prev.RawLifetimeDownBytes
+		cp.RawLifetimeTotalBytes = prev.RawLifetimeTotalBytes
 		cp.PeriodBaselineBytes = prev.PeriodBaselineBytes
 		cp.LifetimeBaselineAt = prev.LifetimeBaselineAt
 		cp.TrafficPeriodStart = prev.TrafficPeriodStart
@@ -168,6 +171,9 @@ func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) e
 	cur.LifetimeUpBytes = u.LifetimeUpBytes
 	cur.LifetimeDownBytes = u.LifetimeDownBytes
 	cur.LifetimeTotalBytes = u.LifetimeTotalBytes
+	cur.RawLifetimeUpBytes = u.RawLifetimeUpBytes
+	cur.RawLifetimeDownBytes = u.RawLifetimeDownBytes
+	cur.RawLifetimeTotalBytes = u.RawLifetimeTotalBytes
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart

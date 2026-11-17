@@ -1191,7 +1191,15 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			clientByID[client.ID] = client
 		}
 	}
-	pendingByUser := s.pendingUsage(clientByID, agents)
+	// Traffic factors, read once. The user ledger and pending usage are in
+	// CHARGED bytes; a node gates on its own RAW counter, so every grant below
+	// is converted through this agent's server factor.
+	factors, err := s.trafficFactors(ctx)
+	if err != nil {
+		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: read traffic factors: %w", err)
+	}
+	factor := domain.TrafficFactorOf(factors, agent.PanelID)
+	pendingByUser := s.pendingUsage(clientByID, agents, factors)
 	counters := make(map[int64]nodeprotocol.ClientCounters)
 	if hasFull {
 		for _, counter := range report.Clients {
@@ -1246,16 +1254,13 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 				emergencyQuotaGBByUser[user.ID] = quotaGB
 			}
 			if quotaGB > 0 {
-				remaining := int64(0)
-				if hasFull && counterKnown {
-					quotaBytes := int64(quotaGB * float64(int64(1)<<30))
-					used := user.LifetimeTotalBytes - user.EmergencyBaselineBytes
-					if used < 0 {
-						used = 0
-					}
-					remaining = saturatingSub(quotaBytes, saturatingAdd(used, pendingByUser[user.ID]))
+				quotaBytes := int64(quotaGB * float64(int64(1)<<30))
+				used := user.LifetimeTotalBytes - user.EmergencyBaselineBytes
+				if used < 0 {
+					used = 0
 				}
-				entry.HeadroomBytes = int64Pointer(remaining)
+				remaining := saturatingSub(quotaBytes, saturatingAdd(used, pendingByUser[user.ID]))
+				entry.HeadroomBytes = nativeHeadroom(remaining, factor, hasFull && counterKnown)
 			}
 		} else if user.TrafficLimitBytes > 0 {
 			// A limited client whose current cumulative counter is absent from a
@@ -1266,19 +1271,21 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			// headroom while the counter is initially unknown, the node closes the
 			// client, then every subsequent report says Present=false and PSP never
 			// sends the non-zero grant that could open it.
-			remaining := int64(0)
-			if hasFull && counterKnown {
-				remaining = saturatingSub(user.TrafficLimitBytes, saturatingAdd(user.PeriodUsed(), pendingByUser[user.ID]))
-			}
-			entry.HeadroomBytes = int64Pointer(remaining)
+			remaining := saturatingSub(user.TrafficLimitBytes, saturatingAdd(user.PeriodUsed(), pendingByUser[user.ID]))
+			entry.HeadroomBytes = nativeHeadroom(remaining, factor, hasFull && counterKnown)
 		}
 		// The emergency window changes the current grant, not the next regular
 		// period. Keep the advance rollover authorization so an offline panel does
 		// not leave the user closed when a new paid period begins.
-		if user.TrafficLimitBytes > 0 {
+		//
+		// A free server (factor 0) gets no advance grant: its gate is open
+		// while the user has quota left, and an exhausted user stays closed
+		// until PSP is back, which is the side a missed refresh is meant to
+		// fail on. The protocol has no way to schedule "open" anyway.
+		if next, ok := domain.RawBytesFor(user.TrafficLimitBytes, factor); user.TrafficLimitBytes > 0 && ok {
 			if periodEnd := nextPeriodEnd(periodNow, user.TrafficResetPeriod); !periodEnd.IsZero() {
 				entry.PeriodEndsAtMS = periodEnd.UnixMilli()
-				entry.NextPeriodHeadroomBytes = int64Pointer(user.TrafficLimitBytes)
+				entry.NextPeriodHeadroomBytes = int64Pointer(next)
 			}
 		}
 		body.Quota = append(body.Quota, entry)
@@ -1429,7 +1436,43 @@ func fullReportStale(receivedAtMS int64, now time.Time, freshnessSeconds int) bo
 	return nowMS < receivedAtMS || nowMS-receivedAtMS > int64(freshnessSeconds)*1000
 }
 
-func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent) map[int64]int64 {
+// nativeHeadroom converts a user's remaining quota, in CHARGED bytes, into
+// the headroom a node with this server factor gates its RAW counter on.
+//
+//   - factor > 0: floor(remaining × 1000 / factor). Rounding down closes the
+//     gate no later than the charged ledger would (fail-closed). A counter the
+//     node has not reported yet is closed (0), exactly as before.
+//   - factor 0: the server is free. No gate (nil) while the user has quota
+//     left, whether or not the counter is known — no amount of traffic here
+//     can use it up — and closed (0) once it is exhausted elsewhere.
+func nativeHeadroom(remainingCharged int64, factor int, counterKnown bool) *int64 {
+	raw, ok := domain.RawBytesFor(remainingCharged, factor)
+	if !ok {
+		if remainingCharged > 0 {
+			return nil
+		}
+		return int64Pointer(0)
+	}
+	if !counterKnown {
+		return int64Pointer(0)
+	}
+	return int64Pointer(raw)
+}
+
+// trafficFactors reads every server's traffic factor when the panel repo can;
+// a repo without the reader (test doubles) leaves every server one-for-one.
+func (s *Service) trafficFactors(ctx context.Context) (map[int64]int, error) {
+	reader, ok := s.panels.(ports.TrafficFactorReader)
+	if !ok || s.panels == nil {
+		return nil, nil
+	}
+	return reader.TrafficFactors(ctx)
+}
+
+// pendingUsage is each user's usage observed by agents but not yet folded into
+// the user row, in CHARGED bytes: each client's raw pending delta weighted by
+// its server's factor, like the poll will book it.
+func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent, factors map[int64]int) map[int64]int64 {
 	panelByAgent := make(map[string]int64, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
@@ -1461,7 +1504,8 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 			if client == nil || client.PanelID != panelID {
 				continue
 			}
-			result[client.UserID] = saturatingAdd(result[client.UserID], s.pendingCounterDelta(client, counter))
+			pending := domain.ChargeBytes(s.pendingCounterDelta(client, counter), domain.TrafficFactorOf(factors, client.PanelID))
+			result[client.UserID] = saturatingAdd(result[client.UserID], pending)
 		}
 	}
 	return result

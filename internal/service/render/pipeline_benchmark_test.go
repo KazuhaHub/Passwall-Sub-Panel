@@ -19,7 +19,7 @@ func BenchmarkSubscriptionLinePipeline(b *testing.B) {
 				for i := range items {
 					items[i] = renderItem{node: &domain.Node{ID: int64(i + 1)}, name: fmt.Sprintf("line-%d", i)}
 				}
-				catalog, items := newLineNameCatalog(items, false)
+				catalog, items := newLineNameCatalog(items, false, nil)
 				definitions := make([]map[string]any, len(items))
 				members := []string{}
 				key := "name"

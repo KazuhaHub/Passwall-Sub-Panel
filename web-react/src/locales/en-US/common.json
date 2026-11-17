@@ -66,5 +66,10 @@
   "release.unknown": "Channel unknown",
   "release.rc": "RC",
   "release.beta": "Beta",
-  "release.pending": "Awaiting promotion"
+  "release.pending": "Awaiting promotion",
+  "traffic_factor": {
+    "free": "Free",
+    "badge_title": "Traffic multiplier ×{{factor}}",
+    "free_title": "Traffic on this server is not counted toward quota"
+  }
 }

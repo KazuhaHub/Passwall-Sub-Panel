@@ -247,6 +247,24 @@ type userNodeStatus struct {
 	ShowDirect    bool              `json:"show_direct"`
 	RelayStatuses []userRelayStatus `json:"relay_statuses,omitempty"`
 	RouteStatuses []userRelayStatus `json:"route_statuses,omitempty"`
+	// TrafficFactorMilli is how much this node's server charges per byte, in
+	// thousandths (1000 = one-for-one): the portal shows a badge otherwise.
+	TrafficFactorMilli int `json:"traffic_factor_milli"`
+}
+
+// withTrafficFactor attaches the node's server factor and resolves the
+// opt-in "{{ factor }}" name placeholder, so the portal lists the names the
+// subscription carries.
+func withTrafficFactor(status userNodeStatus, milli int) userNodeStatus {
+	status.TrafficFactorMilli = milli
+	status.Name = render.ReplaceFactorPlaceholder(status.Name, milli)
+	for i := range status.RelayStatuses {
+		status.RelayStatuses[i].Name = render.ReplaceFactorPlaceholder(status.RelayStatuses[i].Name, milli)
+	}
+	for i := range status.RouteStatuses {
+		status.RouteStatuses[i].Name = render.ReplaceFactorPlaceholder(status.RouteStatuses[i].Name, milli)
+	}
+	return status
 }
 
 // userStatusForNode produces the sanitized presentation model. Relay endpoint
@@ -346,7 +364,7 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		}
 		visible := *n
 		visible.RouteState.Lines = routes[n.ID]
-		status := userStatusForNode(&visible)
+		status := withTrafficFactor(userStatusForNode(&visible), h.render.TrafficFactorOf(n.PanelID))
 		if status.ShowDirect || len(status.RelayStatuses) > 0 || len(status.RouteStatuses) > 0 {
 			out = append(out, status)
 		}

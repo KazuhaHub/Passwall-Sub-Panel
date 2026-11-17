@@ -68,6 +68,28 @@ describe('MeView server status lines', () => {
     expect(screen.getAllByText('正常')).toHaveLength(2)
     expect(screen.getByText(/VLESS 路由线路复用所选入口/)).toBeTruthy()
   })
+  it('badges only nodes whose factor differs from 1000 and labels used traffic as charged', async () => {
+    serveStatus([
+      { name: 'Plain', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000 },
+      { name: 'Pricey', region: 'US', status: 'ok', show_direct: true, traffic_factor_milli: 1500 },
+      { name: 'Gratis', region: 'DE', status: 'ok', show_direct: true, traffic_factor_milli: 0 },
+    ])
+    mount('/?tab=status')
+    await screen.findByText('Pricey')
+    expect(screen.getAllByTestId('traffic-factor-badge').map(b => b.textContent)).toEqual(['×1.5', '不计流量'])
+  })
+  it('uses the plain used-traffic label when every factor is default', async () => {
+    serveStatus([{ name: 'Plain', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000 }])
+    mount('/')
+    await screen.findByText('profile.traffic_used')
+    expect(screen.queryByText('profile.traffic_used_charged')).toBeNull()
+  })
+  it('labels used traffic as charged when a visible node has a custom factor', async () => {
+    serveStatus([{ name: 'Pricey', region: 'US', status: 'ok', show_direct: true, traffic_factor_milli: 1500 }])
+    mount('/')
+    await screen.findByText('profile.traffic_used_charged')
+    expect(screen.queryByText('profile.traffic_used')).toBeNull()
+  })
   it('shows the empty state when every entry is hidden or inactive', async () => {
     serveStatus([{ name: 'Hidden', region: 'JP', status: 'ok', show_direct: false }])
     mount('/?tab=status')

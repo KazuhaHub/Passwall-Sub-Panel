@@ -84,6 +84,7 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 var pollOwnedColumns = []string{
 	// BatchUpdateTrafficState / UpdateTrafficState
 	"lifetime_up_bytes", "lifetime_down_bytes", "lifetime_total_bytes",
+	"raw_lifetime_up_bytes", "raw_lifetime_down_bytes", "raw_lifetime_total_bytes",
 	"period_baseline_bytes", "lifetime_baseline_at", "traffic_period_start",
 	// BatchUpdateLastOnline
 	"last_online_at",
@@ -412,12 +413,15 @@ func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error
 		Model(&userRow{}).
 		Where("id = ?", u.ID).
 		Updates(map[string]any{
-			"lifetime_up_bytes":     u.LifetimeUpBytes,
-			"lifetime_down_bytes":   u.LifetimeDownBytes,
-			"lifetime_total_bytes":  u.LifetimeTotalBytes,
-			"period_baseline_bytes": u.PeriodBaselineBytes,
-			"lifetime_baseline_at":  u.LifetimeBaselineAt,
-			"traffic_period_start":  u.TrafficPeriodStart,
+			"lifetime_up_bytes":        u.LifetimeUpBytes,
+			"lifetime_down_bytes":      u.LifetimeDownBytes,
+			"lifetime_total_bytes":     u.LifetimeTotalBytes,
+			"raw_lifetime_up_bytes":    u.RawLifetimeUpBytes,
+			"raw_lifetime_down_bytes":  u.RawLifetimeDownBytes,
+			"raw_lifetime_total_bytes": u.RawLifetimeTotalBytes,
+			"period_baseline_bytes":    u.PeriodBaselineBytes,
+			"lifetime_baseline_at":     u.LifetimeBaselineAt,
+			"traffic_period_start":     u.TrafficPeriodStart,
 		}).Error
 }
 
@@ -444,12 +448,15 @@ func (r *userRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.
 			err := tx.Model(&userRow{}).
 				Where("id = ?", u.ID).
 				Updates(map[string]any{
-					"lifetime_up_bytes":     u.LifetimeUpBytes,
-					"lifetime_down_bytes":   u.LifetimeDownBytes,
-					"lifetime_total_bytes":  u.LifetimeTotalBytes,
-					"period_baseline_bytes": u.PeriodBaselineBytes,
-					"lifetime_baseline_at":  u.LifetimeBaselineAt,
-					"traffic_period_start":  u.TrafficPeriodStart,
+					"lifetime_up_bytes":        u.LifetimeUpBytes,
+					"lifetime_down_bytes":      u.LifetimeDownBytes,
+					"lifetime_total_bytes":     u.LifetimeTotalBytes,
+					"raw_lifetime_up_bytes":    u.RawLifetimeUpBytes,
+					"raw_lifetime_down_bytes":  u.RawLifetimeDownBytes,
+					"raw_lifetime_total_bytes": u.RawLifetimeTotalBytes,
+					"period_baseline_bytes":    u.PeriodBaselineBytes,
+					"lifetime_baseline_at":     u.LifetimeBaselineAt,
+					"traffic_period_start":     u.TrafficPeriodStart,
 				}).Error
 			if err != nil {
 				return err

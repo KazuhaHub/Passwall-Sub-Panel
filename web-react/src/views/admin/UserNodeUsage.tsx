@@ -8,6 +8,8 @@ import SearchIcon from '@mui/icons-material/Search'
 import { useTranslation } from 'react-i18next'
 
 import type { UserNodeUsageRow } from '@/api/traffic'
+import { TrafficFactorBadge } from '@/components/TrafficFactorBadge'
+import { UsageBasisToggle, type UsageBasis } from './UsageBasisToggle'
 import { useUserNodeUsage } from '@/query/traffic'
 import { useQueryScope } from '@/query/useQueryScope'
 
@@ -39,6 +41,8 @@ export function UserNodeUsage({ userId }: { userId: number }) {
   const [keyword, setKeyword] = useState('')
   const [orderBy, setOrderBy] = useState<SortKey>('period')
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
+  const [basis, setBasis] = useState<UsageBasis>('charged')
+  const charged = basis === 'charged'
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
 
@@ -52,8 +56,9 @@ export function UserNodeUsage({ userId }: { userId: number }) {
   const grand = useMemo(() => (rows ?? []).reduce((a, r) => ({
     lifetime: a.lifetime + r.lifetime_total_bytes, lifeUp: a.lifeUp + r.lifetime_up_bytes, lifeDown: a.lifeDown + r.lifetime_down_bytes,
     period: a.period + r.period_total_bytes, periodUp: a.periodUp + r.period_up_bytes, periodDown: a.periodDown + r.period_down_bytes,
+    chargedLifetime: a.chargedLifetime + (r.charged_lifetime_bytes ?? 0), chargedPeriod: a.chargedPeriod + (r.charged_period_bytes ?? 0),
     today: a.today + r.today_total_bytes, todayUp: a.todayUp + r.today_up_bytes, todayDown: a.todayDown + r.today_down_bytes,
-  }), { lifetime: 0, lifeUp: 0, lifeDown: 0, period: 0, periodUp: 0, periodDown: 0, today: 0, todayUp: 0, todayDown: 0 }), [rows])
+  }), { lifetime: 0, lifeUp: 0, lifeDown: 0, period: 0, periodUp: 0, periodDown: 0, chargedLifetime: 0, chargedPeriod: 0, today: 0, todayUp: 0, todayDown: 0 }), [rows])
 
   const filtered = useMemo(() => {
     const all = rows ?? []
@@ -65,11 +70,11 @@ export function UserNodeUsage({ userId }: { userId: number }) {
           (r.client_email || '').toLowerCase().includes(kw))
       : all
     const metric = (r: UserNodeUsageRow) =>
-      orderBy === 'lifetime' ? r.lifetime_total_bytes
+      orderBy === 'lifetime' ? (charged ? r.charged_lifetime_bytes : r.lifetime_total_bytes)
         : orderBy === 'today' ? r.today_total_bytes
-          : r.period_total_bytes
+          : (charged ? r.charged_period_bytes : r.period_total_bytes)
     return [...f].sort((a, b) => orderDir === 'desc' ? metric(b) - metric(a) : metric(a) - metric(b))
-  }, [rows, keyword, orderBy, orderDir])
+  }, [rows, keyword, orderBy, orderDir, charged])
 
   const paged = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
 
@@ -119,6 +124,17 @@ export function UserNodeUsage({ userId }: { userId: number }) {
     </Box>
   )
 
+  // Charged mode: the charged total over the raw amount. The charged figure has
+  // no up/down split, so the subline says what the raw bytes were instead.
+  const chargedCell = (chargedTotal: number, rawTotal: number) => (
+    <Box sx={{ fontVariantNumeric: 'tabular-nums' }}>
+      <Box sx={{ fontSize: 13, fontWeight: 500 }}>{fmt(chargedTotal)}</Box>
+      <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, whiteSpace: 'nowrap' }}>
+        {t('users.nodeusage.raw_amount', { amount: fmt(rawTotal), defaultValue: '原始 {{amount}}' })}
+      </Box>
+    </Box>
+  )
+
   const headCell = (k: SortKey, label: string) => (
     <TableCell align="right" sortDirection={orderBy === k ? orderDir : false} sx={{ fontWeight: 600 }}>
       <TableSortLabel active={orderBy === k} direction={orderBy === k ? orderDir : 'desc'} onClick={() => setSort(k)}>
@@ -131,6 +147,7 @@ export function UserNodeUsage({ userId }: { userId: number }) {
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1, flexWrap: 'wrap' }}>
         {title}
+        <UsageBasisToggle value={basis} onChange={v => setBasis(v)} />
         <TextField
           size="small"
           value={keyword}
@@ -142,6 +159,11 @@ export function UserNodeUsage({ userId }: { userId: number }) {
           }}
         />
       </Box>
+      {charged && (
+        <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mb: 1 }}>
+          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各服务器倍率换算；上行/下行拆分与今日为原始字节。' })}
+        </Typography>
+      )}
       <TableContainer>
         <Table size="small">
           <TableHead>
@@ -149,7 +171,7 @@ export function UserNodeUsage({ userId }: { userId: number }) {
               <TableCell sx={{ fontWeight: 600 }}>{t('users.nodeusage.node', { defaultValue: '节点' })}</TableCell>
               {headCell('lifetime', t('users.nodeusage.lifetime', { defaultValue: '累计' }))}
               {headCell('period', t('users.nodeusage.period', { defaultValue: '本周期' }))}
-              {headCell('today', t('users.nodeusage.today', { defaultValue: '今日' }))}
+              {headCell('today', charged ? t('users.nodeusage.today_raw', { defaultValue: '今日（原始）' }) : t('users.nodeusage.today', { defaultValue: '今日' }))}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -165,11 +187,12 @@ export function UserNodeUsage({ userId }: { userId: number }) {
                 <TableCell>
                   <Typography noWrap sx={{ fontSize: 13, fontWeight: 500 }}>
                     {r.display_name || r.client_email || `#${r.node_id}`}
+                    <TrafficFactorBadge milli={r.traffic_factor_milli} sx={{ ml: 0.75 }} />
                   </Typography>
                   {r.region && <Typography noWrap sx={{ fontSize: 11, color: md.onSurfaceVariant }}>{r.region}</Typography>}
                 </TableCell>
-                <TableCell align="right">{cell(r.lifetime_total_bytes, r.lifetime_up_bytes, r.lifetime_down_bytes)}</TableCell>
-                <TableCell align="right">{cell(r.period_total_bytes, r.period_up_bytes, r.period_down_bytes)}</TableCell>
+                <TableCell align="right">{charged ? chargedCell(r.charged_lifetime_bytes, r.lifetime_total_bytes) : cell(r.lifetime_total_bytes, r.lifetime_up_bytes, r.lifetime_down_bytes)}</TableCell>
+                <TableCell align="right">{charged ? chargedCell(r.charged_period_bytes, r.period_total_bytes) : cell(r.period_total_bytes, r.period_up_bytes, r.period_down_bytes)}</TableCell>
                 <TableCell align="right">{cell(r.today_total_bytes, r.today_up_bytes, r.today_down_bytes)}</TableCell>
               </TableRow>
             ))}
@@ -180,8 +203,8 @@ export function UserNodeUsage({ userId }: { userId: number }) {
               <TableCell sx={{ fontWeight: 700, color: md.onSurface, borderTop: `2px solid ${md.outlineVariant}` }}>
                 {t('users.nodeusage.total', { defaultValue: '合计' })}
               </TableCell>
-              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{cell(grand.lifetime, grand.lifeUp, grand.lifeDown)}</TableCell>
-              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{cell(grand.period, grand.periodUp, grand.periodDown)}</TableCell>
+              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{charged ? chargedCell(grand.chargedLifetime, grand.lifetime) : cell(grand.lifetime, grand.lifeUp, grand.lifeDown)}</TableCell>
+              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{charged ? chargedCell(grand.chargedPeriod, grand.period) : cell(grand.period, grand.periodUp, grand.periodDown)}</TableCell>
               <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{cell(grand.today, grand.todayUp, grand.todayDown)}</TableCell>
             </TableRow>
           </TableFooter>

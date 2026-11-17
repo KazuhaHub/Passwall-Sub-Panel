@@ -40,6 +40,17 @@ func New(pool ports.XUIPool, ownership ports.OwnershipRepo) *Service {
 
 // SetPSPClientRepo late-binds the v3.9.0 shared-client repo. Until set, the
 // inbound-deletable guard falls back to ownership-only (pre-migration behaviour).
+// panelWant converts the lifecycle's period headroom, in CHARGED bytes, into
+// the RAW bytes this panel's own counter should allow (domain.RawHeadroom),
+// so the cap and the no-op deadband are both measured against the counter the
+// panel compares.
+func (s *Service) panelWant(panelID int64, want domain.UserLifecycle) domain.UserLifecycle {
+	if s.pool != nil {
+		want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, ports.PanelTrafficFactor(s.pool, panelID))
+	}
+	return want
+}
+
 func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClients = r }
 
 // ensureClientOwned returns nil only when (panelID, inboundID, email) is
@@ -140,6 +151,7 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(panelID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	if err := c.AddClient(ctx, inboundID, spec); err != nil {
 		// A duplicate-email error means the client already exists in 3X-UI. If
@@ -198,6 +210,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(panelID, want)
 	spec := buildClientSpec(protocol, ssMethod, newUUID, email, flow, want, panelLifetime)
 	if err := c.UpdateClient(ctx, spec); err != nil {
 		return fmt.Errorf("xui rotate uuid: %w", err)
@@ -221,6 +234,7 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(panelID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	return c.UpdateClient(ctx, spec)
 }
@@ -245,6 +259,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(panelID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	// No-op skip: if the inbound we already hold shows this client matching the
 	// spec on every PSP-controlled field, UpdateClient would push byte-identical

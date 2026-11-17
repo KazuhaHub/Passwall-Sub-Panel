@@ -78,7 +78,11 @@ type ProvisionResult struct {
 // UUID, matching what render emits) — and 3X-UI projects only the relevant field
 // into each inbound. Flow is the partition's single effective flow. Lifecycle
 // and credentials come only from the persisted desired row.
-func buildSharedClientSpec(c *domain.PSPClient, flow string) ports.ClientSpec {
+//
+// factorMilli is the server's traffic factor: the desired headroom is in
+// CHARGED bytes and the panel gates its RAW counter, so it is converted before
+// the rebase onto that counter.
+func buildSharedClientSpec(c *domain.PSPClient, flow string, factorMilli int) ports.ClientSpec {
 	doc := clientdoc.Mint(c, nil)
 	return ports.ClientSpec{
 		ID:         doc.UUID,
@@ -89,7 +93,7 @@ func buildSharedClientSpec(c *domain.PSPClient, flow string) ports.ClientSpec {
 		Auth:       doc.UUID,
 		LimitIP:    doc.IPLimit,
 		LimitHwid:  doc.DeviceLimit,
-		TotalGB:    c.PanelQuotaCap(doc.QuotaHeadroom),
+		TotalGB:    c.PanelQuotaCap(domain.RawHeadroom(doc.QuotaHeadroom, factorMilli)),
 		ExpiryTime: doc.ExpiryTime,
 	}
 }
@@ -186,7 +190,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 
 	if cur == nil {
 		// Brand-new client: create it attached to every desired inbound in one POST.
-		if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow)); err != nil {
+		if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow, s.trafficFactor(c.PanelID))); err != nil {
 			return res, fmt.Errorf("create shared client %s: %w", c.Email, err)
 		}
 	} else {
@@ -377,13 +381,17 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		return stage, err
 	}
 	want := clientdoc.Mint(c, atts).Lifecycle()
+	// From here on the headroom is this server's RAW bytes, so the cap and the
+	// deadband below are measured against the counter the panel compares.
+	factor := s.trafficFactor(c.PanelID)
+	want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, factor)
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
 		return fail(metrics.LifecycleErrorStagePoolGet, fmt.Errorf("xui pool get %d: %w", c.PanelID, err))
 	}
 	s.reportCapabilityGaps(cli, c.PanelID, want)
 
-	spec := buildSharedClientSpec(c, flow)
+	spec := buildSharedClientSpec(c, flow, factor)
 	// No-op-skip: if 3X-UI already holds this exact lifecycle AND creds, skip the
 	// UpdateClient. ResyncMembership calls this on every resync and the traffic poll
 	// calls it every cycle for active users; without the skip an unchanged user
@@ -482,6 +490,14 @@ func (s *Service) countLifecycleFailure(panelID int64, stage string) {
 // the path every poll takes. A pool that cannot name kinds, or an id it does
 // not hold (exactly the pool_get failure), reads as unknown rather than as a
 // guess.
+// trafficFactor is a server's traffic factor as registered in the pool.
+func (s *Service) trafficFactor(panelID int64) int {
+	if s.pool == nil {
+		return domain.TrafficFactorDefault
+	}
+	return ports.PanelTrafficFactor(s.pool, panelID)
+}
+
 func (s *Service) panelKindLabel(panelID int64) string {
 	if resolver, ok := s.pool.(ports.PanelKindResolver); ok {
 		if kind, ok := resolver.KindOf(panelID); ok {
@@ -948,7 +964,7 @@ func (s *Service) BulkProvisionNodeInbound(ctx context.Context, n *domain.Node, 
 				attachEmails = append(attachEmails, c.Email)
 			} else {
 				createItems = append(createItems, ports.BulkCreateClientItem{
-					Spec:       buildSharedClientSpec(c, atts[0].FlowOverride), // partition flow is uniform
+					Spec:       buildSharedClientSpec(c, atts[0].FlowOverride, s.trafficFactor(c.PanelID)), // partition flow is uniform
 					InboundIDs: []int{n.InboundID},
 				})
 			}

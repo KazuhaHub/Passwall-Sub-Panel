@@ -154,6 +154,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	// flagged by its own Region (ADR 0040). Lines the group may not see were
 	// already removed by SubscriptionNodesFor (ADR 0041).
 	items = expandNodeLines(items)
+	applyFactorPlaceholder(items, s.trafficFactorOf)
 	if ct == domain.ClientURIList {
 		applyLegacyLineNames(items)
 	}
@@ -196,7 +197,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	if len(bundle.ProxyGroupOrder) == 0 {
 		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
 	}
-	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
+	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, s.trafficFactorOf, nodes)
 	items = internalItems
 	if ct == domain.ClientSingBox {
 		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)

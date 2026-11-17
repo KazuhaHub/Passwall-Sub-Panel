@@ -52,7 +52,8 @@
       "monthly": "每月",
       "quarterly": "每季",
       "yearly": "每年"
-    }
+    },
+    "traffic_used_charged": "本周期已用（计费）"
   },
   "sub": {
     "title": "订阅 URL",

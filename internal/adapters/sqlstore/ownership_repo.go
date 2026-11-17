@@ -298,6 +298,7 @@ func ownershipCounterColumns(e *domain.XUIClientEntry) map[string]any {
 		"period_baseline_up_bytes":    e.PeriodBaselineUpBytes,
 		"period_baseline_down_bytes":  e.PeriodBaselineDownBytes,
 		"period_baseline_total_bytes": e.PeriodBaselineTotalBytes,
+		"charged_lifetime_bytes":      e.ChargedLifetimeBytes,
 	}
 }
 

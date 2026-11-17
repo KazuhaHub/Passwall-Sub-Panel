@@ -69,6 +69,10 @@ type PSPClient struct {
 	LifetimeUpBytes    int64
 	LifetimeDownBytes  int64
 	LifetimeTotalBytes int64
+	// ChargedLifetimeBytes is LifetimeTotalBytes weighted by the server's
+	// traffic factor delta by delta. The Lifetime / PeriodBaseline fields stay
+	// RAW.
+	ChargedLifetimeBytes int64
 
 	LastRawUpBytes    int64
 	LastRawDownBytes  int64

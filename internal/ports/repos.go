@@ -1055,6 +1055,18 @@ type XUIPanelRepo interface {
 	UpdateIPLimitEnforcement(ctx context.Context, panelID int64, state domain.IPLimitEnforcement, probedAt time.Time) error
 }
 
+// TrafficFactorReader reads every server's traffic factor (thousandths) in one
+// query. Implemented by the XUIPanelRepo adapter; optional so test doubles of
+// that repo need not grow it — a missing reader is one-for-one everywhere.
+type TrafficFactorReader interface {
+	TrafficFactors(ctx context.Context) (map[int64]int, error)
+}
+
+// TrafficFactorWriter is the only writer of a server's traffic factor.
+type TrafficFactorWriter interface {
+	UpdateTrafficFactor(ctx context.Context, panelID int64, milli int) error
+}
+
 // CertificateRepo persists PSP-managed ACME certificates (cert_source=psp_managed).
 type CertificateRepo interface {
 	Create(ctx context.Context, c *domain.TLSCertificate) error

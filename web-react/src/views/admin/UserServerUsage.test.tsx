@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -45,5 +45,26 @@ describe('UserServerUsage', () => {
 
     await waitFor(() => expect(screen.getByText('该用户暂无服务器')).toBeTruthy())
     expect(screen.queryByText('暂时无法获取服务器用量')).toBeNull()
+  })
+
+  const row = { panel_id: 1, server_name: 'srv-a', node_count: 2, lifetime_up_bytes: 1024, lifetime_down_bytes: 1024, lifetime_total_bytes: 2048, period_up_bytes: 512, period_down_bytes: 512, period_total_bytes: 1024, today_up_bytes: 0, today_down_bytes: 0, today_total_bytes: 0, traffic_factor_milli: 1500, charged_lifetime_bytes: 3072, charged_period_bytes: 1536 }
+
+  it('defaults to charged totals, shows the factor badge, and toggles to raw', async () => {
+    api.get.mockResolvedValue({ data: { items: [row, { ...row, panel_id: 2, server_name: 'srv-b', traffic_factor_milli: 1000, charged_lifetime_bytes: 2048, charged_period_bytes: 1024 }] } })
+    mount()
+
+    await waitFor(() => expect(screen.getByText('srv-a')).toBeTruthy())
+    // One badge: only the ×1.5 server, not the 1000 one.
+    expect(screen.getAllByTestId('traffic-factor-badge').map(b => b.textContent)).toEqual(['×1.5'])
+    // Charged mode: srv-a lifetime shows 3.0K charged (grand total 5.0K) with the raw amount beneath.
+    expect(screen.getByText('3.0K')).toBeTruthy()
+    expect(screen.getByText('5.0K')).toBeTruthy()
+    expect(screen.queryByText('↑1.0K ↓1.0K')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '原始' }))
+    // Raw mode: unchanged behaviour, up/down splits are back and the charged figure is gone.
+    expect(screen.getAllByText('↑1.0K ↓1.0K').length).toBeGreaterThan(0)
+    expect(screen.queryByText('3.0K')).toBeNull()
+    expect(screen.getAllByText('2.0K').length).toBeGreaterThan(0)
   })
 })

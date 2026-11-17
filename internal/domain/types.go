@@ -83,9 +83,18 @@ type User struct {
 	// deltas against the previous snapshot and treats negative deltas (counter
 	// reset on Xray restart) as "delta = current value", so these counters
 	// never go backwards.
+	//
+	// They are CHARGED bytes: each server's delta is weighted by its traffic
+	// factor before it is added, so every quota reader agrees on one figure.
+	// At the default factor charged and raw are the same.
 	LifetimeUpBytes    int64
 	LifetimeDownBytes  int64
 	LifetimeTotalBytes int64
+	// RawLifetimeXxx accumulate the same deltas unweighted, for display only.
+	// Nothing enforces against them.
+	RawLifetimeUpBytes    int64
+	RawLifetimeDownBytes  int64
+	RawLifetimeTotalBytes int64
 	// PeriodBaselineBytes is LifetimeTotalBytes at the moment TrafficPeriodStart
 	// last advanced. Subtracting it from current LifetimeTotalBytes gives the
 	// bytes used this period — O(1) memory math, no DB lookup. Pre-v3 this
@@ -914,6 +923,10 @@ type XUIClientEntry struct {
 	PeriodBaselineUpBytes    int64
 	PeriodBaselineDownBytes  int64
 	PeriodBaselineTotalBytes int64
+	// ChargedLifetimeBytes is LifetimeTotalBytes weighted by the server's
+	// traffic factor delta by delta. The Lifetime / PeriodBaseline fields above
+	// stay RAW.
+	ChargedLifetimeBytes int64
 }
 
 // TrafficSnapshot captures the monotonic lifetime traffic of a panel user at
@@ -1367,6 +1380,12 @@ type Panel struct {
 	// against IP rules (as_is or on_demand). Only meaningful for Kind == psp,
 	// and written ONLY through the native-metadata writer, like AuditCollect.
 	DestResolve DestResolve
+
+	// TrafficFactorMilli is how many bytes a user is charged per byte through
+	// this server, in thousandths (see traffic_factor.go). nil is one-for-one;
+	// read it through EffectiveTrafficFactor. Written ONLY through the narrow
+	// factor writer: a whole-row Save never touches it.
+	TrafficFactorMilli *int
 }
 
 // XUIPanel is a compatibility alias. New code should use Panel; retaining the

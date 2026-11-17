@@ -3949,7 +3949,7 @@ export default function NodesView() {
               value={editForm.display_name}
               onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editMetaErr.display_name}
-              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : ''} />
+              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />
             <TextField required fullWidth label={t('admin:nodes.field.server_address')}
               value={editForm.server_address}
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}

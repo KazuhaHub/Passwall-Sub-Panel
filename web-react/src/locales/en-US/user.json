@@ -52,7 +52,8 @@
       "monthly": "Monthly",
       "quarterly": "Quarterly",
       "yearly": "Yearly"
-    }
+    },
+    "traffic_used_charged": "Period used (charged)"
   },
   "sub": {
     "title": "Subscription URL",

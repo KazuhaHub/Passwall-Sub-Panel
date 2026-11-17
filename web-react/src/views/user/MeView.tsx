@@ -60,6 +60,8 @@ import {
   type QuickLink,
 } from '@/api/me'
 import { useTabParam } from '@/hooks/useTabParam'
+import { TrafficFactorBadge } from '@/components/TrafficFactorBadge'
+import { hasCustomFactor } from '@/utils/trafficFactor'
 import { useQueryClient } from '@tanstack/react-query'
 import { meKeys } from '@/query/keys'
 import { useMyProfile, useMyUsage } from '@/query/me'
@@ -122,19 +124,8 @@ function maskUrl(url: string): string {
 // ServerStatusPanel renders the caller's own nodes' availability (the "服务器
 // 状态" tab). Data is sanitized server-side — names, region, and coarse status
 // only. Status dot: ok=primary, down=error, unknown=muted.
-function ServerStatusPanel({ md }: { md: M3Tokens }) {
+function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNodeStatus[] | null; loading: boolean }) {
   const { t } = useTranslation('user')
-  const [nodes, setNodes] = useState<MyNodeStatus[] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const seq = useRef(0)
-  useEffect(() => {
-    const my = ++seq.current
-    setLoading(true)
-    getMyServerStatus()
-      .then(list => { if (my === seq.current) setNodes(list) })
-      .catch(() => { if (my === seq.current) setNodes([]) })
-      .finally(() => { if (my === seq.current) setLoading(false) })
-  }, [])
 
   const meta = (s: MyNodeStatus['status']) => {
     switch (s) {
@@ -151,15 +142,15 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
   // health checks or a claim that the selected outbound works end to end.
   const rows = (nodes ?? []).flatMap(n => {
     const direct = n.show_direct !== false
-      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at }]
+      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at, factor: n.traffic_factor_milli }]
       : []
     const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => {
       const label = relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })
-      return { name: relay.only_line_name ? label : `${n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at }
+      return { name: relay.only_line_name ? label : `${n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at, factor: n.traffic_factor_milli }
     })
     const routes = (n.route_statuses ?? []).map(route => ({
       name: route.only_line_name ? route.name : `${n.name} ${route.name}`,
-      region: n.region, status: route.status, checked_at: route.checked_at,
+      region: n.region, status: route.status, checked_at: route.checked_at, factor: n.traffic_factor_milli,
     }))
     return [...direct, ...relays, ...routes]
   })
@@ -190,7 +181,10 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
             <Box key={`${row.name}-${i}`} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: i < rows.length - 1 ? `1px solid ${md.outlineVariant}` : 'none' }}>
               <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: m.color, flexShrink: 0 }} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</Typography>
+                <Typography sx={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {row.name}
+                  <TrafficFactorBadge milli={row.factor} sx={{ ml: 0.75 }} />
+                </Typography>
                 {row.region && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{row.region}</Typography>}
               </Box>
               <Typography variant="body2" sx={{ color: m.color, fontWeight: 500, flexShrink: 0 }}>{m.label}</Typography>
@@ -282,6 +276,25 @@ export default function MeView() {
   const usageQuery = useMyUsage(scope)
   const profile = profileQuery.data
   const usage = usageQuery.data ?? null
+  // Node status is read here (not in the status tab) because the overview's
+  // usage card needs to know whether any server has a non-default multiplier.
+  const [statusNodes, setStatusNodes] = useState<MyNodeStatus[] | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
+  // Read once on load, and again whenever the status tab is opened, so the
+  // tab never shows a status older than the visit to it.
+  const statusTabOpen = tab === 'status'
+  const statusRead = useRef(false)
+  useEffect(() => {
+    if (statusRead.current && !statusTabOpen) return
+    statusRead.current = true
+    let live = true
+    getMyServerStatus()
+      .then(list => { if (live) setStatusNodes(list) })
+      .catch(() => { if (live) setStatusNodes([]) })
+      .finally(() => { if (live) setStatusLoading(false) })
+    return () => { live = false }
+  }, [statusTabOpen])
+  const showCharged = (statusNodes ?? []).some(n => hasCustomFactor(n.traffic_factor_milli))
   const loading = profileQuery.isPending
   // Announcement popup: starts hidden, opens after the profile loads
   // unless the visitor has previously chosen "don't remind again" for
@@ -904,7 +917,7 @@ export default function MeView() {
         <Tab value="clients" label={t('tabs.clients', { defaultValue: '客户端' })} sx={{ minHeight: 40 }} />
         <Tab value="status" label={t('tabs.server_status', { defaultValue: '服务器状态' })} sx={{ minHeight: 40 }} />
       </Tabs>
-      {tab === 'status' && <ServerStatusPanel md={md} />}
+      {tab === 'status' && <ServerStatusPanel md={md} nodes={statusNodes} loading={statusLoading} />}
       {/* Pick the client recommended for the visitor's platform. The same card
           leads both the overview and client tabs; only the overview adds the
           small shortcut that switches to the complete client list. */}
@@ -1219,6 +1232,7 @@ export default function MeView() {
         usageLoading={usageQuery.isPending}
         expireAt={profile.expire_at ?? null}
         resetPeriod={profile.traffic_reset_period}
+        charged={showCharged}
         md={md}
       />
       </Box>{/* end usage order wrapper */}
@@ -1483,10 +1497,12 @@ interface UsagePanelProps {
   // beside "本周期已用" so the user understands when the counter rolls back —
   // without it, "Period used" alone is ambiguous (which period?).
   resetPeriod: string
+  /** True when any visible server has a non-default multiplier, so used traffic is the charged amount. */
+  charged?: boolean
   md: M3Tokens
 }
 
-function UsagePanel({ limitBytes, usage, usageLoading, expireAt, resetPeriod, md }: UsagePanelProps) {
+function UsagePanel({ limitBytes, usage, usageLoading, expireAt, resetPeriod, charged, md }: UsagePanelProps) {
   const { t } = useTranslation('user')
   // The expiry shown here is in the viewer's local timezone, while the panel
   // sets cutoffs against its own zone. Surface that only when they differ, so
@@ -1533,7 +1549,7 @@ function UsagePanel({ limitBytes, usage, usageLoading, expireAt, resetPeriod, md
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
           <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
-            {t('profile.traffic_used')}
+            {charged ? t('profile.traffic_used_charged') : t('profile.traffic_used')}
             {resetPeriod && resetPeriod !== 'never' && (
               <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant, opacity: 0.7, ml: 0.75 }}>
                 · {t(`profile.reset_period.${resetPeriod}`)}

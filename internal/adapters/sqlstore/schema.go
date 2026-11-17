@@ -61,6 +61,11 @@ type userRow struct {
 	LifetimeUpBytes    int64 `gorm:"default:0"`
 	LifetimeDownBytes  int64 `gorm:"default:0"`
 	LifetimeTotalBytes int64 `gorm:"default:0"`
+	// RawLifetime*: the same deltas before the per-server traffic factor; the
+	// Lifetime* columns above are the charged ledger. Display only.
+	RawLifetimeUpBytes    int64 `gorm:"not null;default:0"`
+	RawLifetimeDownBytes  int64 `gorm:"not null;default:0"`
+	RawLifetimeTotalBytes int64 `gorm:"not null;default:0"`
 	// PeriodBaselineBytes: LifetimeTotalBytes at the start of the current
 	// period. periodUsage simplifies to lifetime - baseline (O(1)). Pre-v3
 	// derived from a LastBefore(period_start) snapshot query on every read.
@@ -149,6 +154,9 @@ func (r *userRow) toDomain() *domain.User {
 		LifetimeUpBytes:        r.LifetimeUpBytes,
 		LifetimeDownBytes:      r.LifetimeDownBytes,
 		LifetimeTotalBytes:     r.LifetimeTotalBytes,
+		RawLifetimeUpBytes:     r.RawLifetimeUpBytes,
+		RawLifetimeDownBytes:   r.RawLifetimeDownBytes,
+		RawLifetimeTotalBytes:  r.RawLifetimeTotalBytes,
 		LifetimeBaselineAt:     r.LifetimeBaselineAt,
 		PeriodBaselineBytes:    r.PeriodBaselineBytes,
 		DisplayName:            r.DisplayName,
@@ -200,6 +208,9 @@ func userFromDomain(u *domain.User) *userRow {
 		LifetimeUpBytes:        u.LifetimeUpBytes,
 		LifetimeDownBytes:      u.LifetimeDownBytes,
 		LifetimeTotalBytes:     u.LifetimeTotalBytes,
+		RawLifetimeUpBytes:     u.RawLifetimeUpBytes,
+		RawLifetimeDownBytes:   u.RawLifetimeDownBytes,
+		RawLifetimeTotalBytes:  u.RawLifetimeTotalBytes,
 		LifetimeBaselineAt:     u.LifetimeBaselineAt,
 		PeriodBaselineBytes:    u.PeriodBaselineBytes,
 		DisplayName:            u.DisplayName,
@@ -582,6 +593,9 @@ type ownershipRow struct {
 	PeriodBaselineUpBytes    int64 `gorm:"default:0"`
 	PeriodBaselineDownBytes  int64 `gorm:"default:0"`
 	PeriodBaselineTotalBytes int64 `gorm:"default:0"`
+	// ChargedLifetimeBytes: lifetime_total_bytes weighted by the server's
+	// traffic factor, delta by delta. The other counters stay raw.
+	ChargedLifetimeBytes int64 `gorm:"not null;default:0"`
 }
 
 // user_xui_clients (renamed from xui_clients in v3): per-local-user ownership
@@ -609,6 +623,7 @@ func (r *ownershipRow) toDomain() *domain.XUIClientEntry {
 		PeriodBaselineUpBytes:    r.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  r.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: r.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     r.ChargedLifetimeBytes,
 	}
 }
 
@@ -631,6 +646,7 @@ func ownershipFromDomain(e *domain.XUIClientEntry) *ownershipRow {
 		PeriodBaselineUpBytes:    e.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  e.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: e.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     e.ChargedLifetimeBytes,
 	}
 }
 
@@ -999,8 +1015,14 @@ type xuiPanelRow struct {
 	// sized varchar with a default, written ONLY by UpdateNativeMetadata (Save
 	// omits it on update).
 	DestResolve string `gorm:"column:dest_resolve;size:16;not null;default:'as_is'"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// TrafficFactorMilli is the per-server traffic multiplier in thousandths
+	// (1000 = one-for-one, 0 = free). A pointer so 0 is storable at all: GORM
+	// replaces a zero value with the column default on INSERT. Written ONLY by
+	// UpdateTrafficFactor; Save omits it on update and leaves it to the
+	// default on create.
+	TrafficFactorMilli *int `gorm:"column:traffic_factor_milli;not null;default:1000"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type mailSettingsRow struct {
@@ -1130,6 +1152,7 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		IPLimitProbedAt:    r.IPLimitProbedAt,
 		AuditCollect:       domain.NormalizeAuditCollect(domain.AuditCollect(r.AuditCollect)),
 		DestResolve:        domain.NormalizeDestResolve(domain.DestResolve(r.DestResolve)),
+		TrafficFactorMilli: r.TrafficFactorMilli,
 	}, nil
 }
 
@@ -1161,6 +1184,9 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		IPLimitProbedAt:    p.IPLimitProbedAt,
 		AuditCollect:       string(domain.NormalizeAuditCollect(p.AuditCollect)),
 		DestResolve:        string(domain.NormalizeDestResolve(p.DestResolve)),
+		// Honoured on INSERT only (nil takes the column default); an update
+		// omits the column and goes through UpdateTrafficFactor.
+		TrafficFactorMilli: p.TrafficFactorMilli,
 	}, nil
 }
 
@@ -1685,6 +1711,9 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	if err := migrateV4_2(db); err != nil {
+		return err
+	}
+	if err := migrateV4_3(db); err != nil {
 		return err
 	}
 	return seedBuiltinRoles(db)

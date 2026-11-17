@@ -2318,7 +2318,8 @@
       "separator_mode_hint_global": "Visible in every group.",
       "separator_mode_hint_node_bound": "Only visible when the rendered group contains at least one of the linked nodes. Position is still set by drag-to-reorder.",
       "separator_node_ids": "Linked nodes",
-      "separator_node_ids_hint": "On subscription render, any group whose user can see at least one of these nodes shows the separator. Leave empty to hide it everywhere."
+      "separator_node_ids_hint": "On subscription render, any group whose user can see at least one of these nodes shows the separator. Leave empty to hide it everywhere.",
+      "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the server's traffic multiplier (e.g. ×1.5) when set."
     },
     "action": {
       "edit": "Edit",
@@ -2387,7 +2388,14 @@
       "total": "Total",
       "node": "Node",
       "search": "Search node / region",
-      "no_match": "No matching node"
+      "no_match": "No matching node",
+      "mode_label": "Traffic basis",
+      "mode_charged": "Charged",
+      "mode_raw": "Raw",
+      "charged_hint": "Charged totals apply each server's multiplier. Up/down split and today are raw bytes.",
+      "charged_total_note": "charged",
+      "raw_amount": "raw {{amount}}",
+      "today_raw": "Today (raw)"
     },
     "serverusage": {
       "title": "Usage by server",
@@ -3132,7 +3140,8 @@
       "core_evidence_yes": "complete",
       "core_evidence_no": "not complete",
       "core_handshake_title": "Tested matrix:",
-      "core_pending": "Pending → {{engine}} {{version}}"
+      "core_pending": "Pending → {{engine}} {{version}}",
+      "traffic_factor": "Traffic multiplier"
     },
     "auth_method": {
       "token": "API Token",
@@ -3153,7 +3162,8 @@
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
       "change": "Change",
-      "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
+      "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected.",
+      "traffic_factor": "1 = charged one-for-one, 0 = free (not counted toward quota). Changes only affect traffic booked after saving."
     },
     "native": {
       "compatibility": {
@@ -3426,7 +3436,8 @@
     "validate": {
       "url_required": "URL is required",
       "name_required": "Server name is required",
-      "credentials_required": "Please configure an API token or username/password first."
+      "credentials_required": "Please configure an API token or username/password first.",
+      "traffic_factor": "Enter a multiplier between 0 and 100"
     },
     "toast": {
       "saved": "Saved",

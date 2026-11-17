@@ -92,6 +92,7 @@ func (s *ServerMigrationSnapshot) Fingerprint(coreVersion string, allowRestricte
 				c.LifetimeUpBytes, c.LifetimeDownBytes, c.LifetimeTotalBytes = 0, 0, 0
 				c.LastRawUpBytes, c.LastRawDownBytes, c.LastRawTotalBytes = 0, 0, 0
 				c.PeriodBaselineUpBytes, c.PeriodBaselineDownBytes, c.PeriodBaselineTotalBytes = 0, 0, 0
+				c.ChargedLifetimeBytes = 0
 				c.LastCounterEpoch = 0
 				// This traffic-derived floor is a legacy upstream projection;
 				// native directives are minted independently after conversion.

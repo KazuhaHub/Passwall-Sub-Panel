@@ -494,6 +494,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
+	// The per-server traffic factors are read from the database once per poll,
+	// never from the pool: a factor is a price, and every replica must charge
+	// the same one.
+	if factors, ok := repos.XUIPanel.(ports.TrafficFactorReader); ok {
+		trafficSvc.SetTrafficFactors(factors)
+	}
 	// traffic needs user to push the per-client floor into 3X-UI after each
 	// poll. The reverse edge is gone: user used to take a late-wired usage
 	// reader back from traffic, but that reader only ever subtracted two

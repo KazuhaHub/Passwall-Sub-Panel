@@ -116,6 +116,17 @@ func (p *Pool) KindOf(panelID int64) (domain.PanelKind, bool) {
 	return def.Kind, true
 }
 
+// TrafficFactorOf reports the traffic factor of a registered panel.
+func (p *Pool) TrafficFactorOf(panelID int64) (int, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	def, ok := p.panels[panelID]
+	if !ok {
+		return 0, false
+	}
+	return def.EffectiveTrafficFactor(), true
+}
+
 func (p *Pool) SupportsKind(kind domain.PanelKind) bool {
 	return p.registry.Has(kind)
 }
@@ -137,6 +148,7 @@ func (p *Pool) Replace(def *domain.Panel) error {
 }
 
 var (
-	_ ports.PanelPool         = (*Pool)(nil)
-	_ ports.PanelKindResolver = (*Pool)(nil)
+	_ ports.PanelTrafficFactorResolver = (*Pool)(nil)
+	_ ports.PanelPool                  = (*Pool)(nil)
+	_ ports.PanelKindResolver          = (*Pool)(nil)
 )

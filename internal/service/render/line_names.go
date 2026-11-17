@@ -31,7 +31,10 @@ type lineNameCatalog struct {
 	origin  string
 }
 
-func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node) (*lineNameCatalog, []renderItem) {
+// factorOf resolves the opt-in "{{ factor }}" name placeholder for the
+// unavailable-line aliases below, exactly as the live items already were; nil
+// leaves names as written.
+func newLineNameCatalog(items []renderItem, flags bool, factorOf func(int64) int, nodes ...[]*domain.Node) (*lineNameCatalog, []renderItem) {
 	catalog := &lineNameCatalog{lines: map[string]subscriptionLineName{}, aliases: map[string][]string{}}
 	internal := append([]renderItem(nil), items...)
 	prefix := "psp-line-" + uuid.NewString() + "-"
@@ -58,6 +61,9 @@ func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node)
 			}
 			for i := range node.RouteState.Lines {
 				definitions = append(definitions, renderItem{node: node, route: &node.RouteState.Lines[i], name: routeEntryName(node.DisplayName, node.RouteState.Lines[i])})
+			}
+			if factorOf != nil {
+				applyFactorPlaceholder(definitions, factorOf)
 			}
 			if flags {
 				applyRegionFlagPrefix(definitions)

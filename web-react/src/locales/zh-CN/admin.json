@@ -2315,7 +2315,8 @@
       "separator_mode_hint_global": "所有分组都显示此分隔符。",
       "separator_mode_hint_node_bound": "仅当该分组包含下方关联的任意节点时才显示。位置仍由拖拽排序决定。",
       "separator_node_ids": "关联节点",
-      "separator_node_ids_hint": "订阅渲染时，凡是用户能看到这里任一节点的分组都会显示此分隔符；不填则永远不出现。"
+      "separator_node_ids_hint": "订阅渲染时，凡是用户能看到这里任一节点的分组都会显示此分隔符；不填则永远不出现。",
+      "display_name_factor_hint": "提示：可使用 {{placeholder}}，会替换为服务器的流量倍率（如 ×1.5）。"
     },
     "action": {
       "edit": "编辑",
@@ -2384,7 +2385,14 @@
       "total": "合计",
       "node": "节点",
       "search": "搜索节点 / 地区",
-      "no_match": "无匹配节点"
+      "no_match": "无匹配节点",
+      "mode_label": "流量口径",
+      "mode_charged": "计费",
+      "mode_raw": "原始",
+      "charged_hint": "计费合计已按各服务器倍率换算；上行/下行拆分与今日为原始字节。",
+      "charged_total_note": "计费",
+      "raw_amount": "原始 {{amount}}",
+      "today_raw": "今日（原始）"
     },
     "serverusage": {
       "title": "按服务器用量",
@@ -3128,7 +3136,8 @@
       "core_evidence_yes": "已完成",
       "core_evidence_no": "未完成",
       "core_handshake_title": "实测矩阵：",
-      "core_pending": "待切换 → {{engine}} {{version}}"
+      "core_pending": "待切换 → {{engine}} {{version}}",
+      "traffic_factor": "流量倍率"
     },
     "auth_method": {
       "token": "API Token",
@@ -3149,7 +3158,8 @@
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
       "change": "修改",
-      "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
+      "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。",
+      "traffic_factor": "1 = 按实际用量计费，0 = 免费（不计入配额）。修改仅对保存之后产生的流量生效。"
     },
     "native": {
       "compatibility": {
@@ -3422,7 +3432,8 @@
     "validate": {
       "url_required": "URL 必填",
       "name_required": "服务器名称必填",
-      "credentials_required": "请先配置 API Token 或用户名密码"
+      "credentials_required": "请先配置 API Token 或用户名密码",
+      "traffic_factor": "请输入 0 到 100 之间的倍率"
     },
     "toast": {
       "saved": "已保存",

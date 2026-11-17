@@ -51,6 +51,8 @@ export interface Server {
   audit_collect?: 'off' | 'hits' | 'hits_and_usage'
   /** How a Passwall Node server's IP rules meet host names (as_is: no DNS; on_demand: resolve once); absent for other panels. */
   dest_resolve?: 'as_is' | 'on_demand'
+  /** Traffic multiplier in thousandths (1000 = charged one-for-one, 0 = free). Always sent by the backend; optional here only so fixtures may omit it (absent = 1000). */
+  traffic_factor_milli?: number
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -149,6 +151,7 @@ export type IPLimitEnforcement =
 export interface CreateServerRequest {
 	panel_type?: PanelType
 	update_channel?: NodeUpdateChannel
+	traffic_factor_milli?: number
 	name: string
 	url?: string
   api_token?: string
@@ -206,6 +209,7 @@ export interface UpdateServerRequest {
   update_channel?: NodeUpdateChannel
   audit_collect?: 'off' | 'hits' | 'hits_and_usage'
   dest_resolve?: 'as_is' | 'on_demand'
+  traffic_factor_milli?: number
   name?: string
   url?: string
   api_token?: string
