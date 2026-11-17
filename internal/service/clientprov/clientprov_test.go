@@ -34,6 +34,9 @@ func (r *fakePSPClientRepo) UpdateDefinition(ctx context.Context, c *domain.PSPC
 		return domain.ErrNotFound
 	}
 	ex.Email, ex.CredClass, ex.UUID, ex.Password = c.Email, c.CredClass, c.UUID, c.Password
+	if c.NodeID != 0 {
+		ex.NodeID, ex.LineID = c.NodeID, c.LineID
+	}
 	return nil
 }
 func (r *fakePSPClientRepo) UpdateDesiredLifecycleByUser(_ context.Context, userID int64, lifecycle domain.UserLifecycle) error {
@@ -124,285 +127,175 @@ func (r *fakePSPClientRepo) BatchUpdateCounters(ctx context.Context, items []*do
 
 var rules = domain.EmailRules{Domain: "psp.local"}
 
-func TestSync_CreatesSharedClientAndAttachments(t *testing.T) {
-	repo := newFakeRepo()
-	svc := New(repo)
-	// Both default-class (no flow), so they share ONE client with two
-	// attachments. (Flow-based splitting is covered in clientplan's tests.)
-	nodes := []clientplan.NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS},
-		{NodeID: 2, Protocol: domain.ProtoTrojan},
+func lineRow(t *testing.T, repo *fakePSPClientRepo, line domain.LineKey) *domain.PSPClient {
+	t.Helper()
+	for _, c := range repo.clients {
+		if c.NodeID == line.NodeID && c.LineID == line.LineID {
+			return c
+		}
 	}
-	if _, err := svc.Sync(context.Background(), 42, "uuid-x", 10, rules, nodes); err != nil {
+	t.Fatalf("no row for line %+v", line)
+	return nil
+}
+
+func attached(repo *fakePSPClientRepo, c *domain.PSPClient) []int64 {
+	var out []int64
+	for _, in := range repo.inbounds[c.ID] {
+		out = append(out, in.NodeID)
+	}
+	return out
+}
+
+// One row per line, each attached only to its line's listener.
+func TestSyncUser_CreatesOneRowPerLine(t *testing.T) {
+	repo := newFakeRepo()
+	ctx := context.Background()
+	nodes := []*domain.Node{
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless", Relays: []domain.RelayLine{{ID: "a", Enabled: true}, {ID: "off"}}},
+		{ID: 2, PanelID: 10, DesiredProtocol: "trojan"},
+		{ID: 3, PanelID: 10, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"},
+	}
+	if _, err := New(repo).SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
 	}
-	c, err := repo.GetByEmail(context.Background(), 10, "u42@psp.local")
-	if err != nil {
-		t.Fatalf("shared client not created: %v", err)
+	if len(repo.clients) != 3 {
+		t.Fatalf("rows = %d, want direct 1, relay 1/a, direct 2", len(repo.clients))
 	}
-	inbs, _ := repo.ListInbounds(context.Background(), c.ID)
-	if len(inbs) != 2 {
-		t.Fatalf("attachments = %d, want 2", len(inbs))
+	d1 := lineRow(t, repo, domain.DirectLine(1))
+	r1 := lineRow(t, repo, domain.LineKey{NodeID: 1, LineID: "a"})
+	d2 := lineRow(t, repo, domain.DirectLine(2))
+	if d1.UUID != "uuid-x" || d2.UUID != "uuid-x" || r1.UUID == "uuid-x" {
+		t.Fatalf("direct lines keep the user UUID, relay lines get their own: %s %s %s", d1.UUID, d2.UUID, r1.UUID)
+	}
+	for _, c := range []*domain.PSPClient{d1, r1, d2} {
+		if got := attached(repo, c); len(got) != 1 || got[0] != c.NodeID {
+			t.Fatalf("row %+v attached to %v", c, got)
+		}
 	}
 }
 
-func TestSyncUser_EmptyIntersectionPreservesCountersAndRetiresProjection(t *testing.T) {
+// A line the user loses is detached (counters kept, upstream projection
+// retired), and comes back on the same row when the line returns.
+func TestSyncUser_DroppedLineIsDetachedAndKeepsItsRow(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	nodes := []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless"}}
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+	withRelay := []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless", Relays: []domain.RelayLine{{ID: "a", Enabled: true}}}}
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, withRelay); err != nil {
 		t.Fatal(err)
 	}
-	before, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &domain.PSPClient{
-		ID:              before.ID,
-		LifetimeUpBytes: 900, LifetimeDownBytes: 1100, LifetimeTotalBytes: 2000,
+	relay := lineRow(t, repo, domain.LineKey{NodeID: 1, LineID: "a"})
+	want := &domain.PSPClient{ID: relay.ID, LifetimeUpBytes: 900, LifetimeDownBytes: 1100, LifetimeTotalBytes: 2000,
 		LastRawUpBytes: 90, LastRawDownBytes: 110, LastRawTotalBytes: 200,
-		PeriodBaselineUpBytes: 400, PeriodBaselineDownBytes: 500, PeriodBaselineTotalBytes: 900,
-		LastCounterEpoch: 7,
-	}
+		PeriodBaselineUpBytes: 400, PeriodBaselineDownBytes: 500, PeriodBaselineTotalBytes: 900, LastCounterEpoch: 7}
 	if err := repo.UpdateCounters(ctx, want); err != nil {
 		t.Fatal(err)
 	}
-
-	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nil)
+	got, err := svc.SyncUserRetirements(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := retired[10]; len(got) != 1 || got[0] != before.Email {
-		t.Fatalf("upstream retirement signal = %v, want %q", got, before.Email)
+	if len(got.Regrouped[10]) != 1 || got.Regrouped[10][0] != relay.Email {
+		t.Fatalf("regrouped = %v, want the relay row's email", got.Regrouped)
 	}
-	detached, err := repo.GetByID(ctx, before.ID)
+	kept, err := repo.GetByID(ctx, relay.ID)
 	if err != nil {
-		t.Fatalf("empty intersection deleted stable row %d: %v", before.ID, err)
+		t.Fatalf("dropped line's row deleted before its counters were booked: %v", err)
 	}
-	assertClientBaselines(t, detached, want)
-	if inbounds, _ := repo.ListInbounds(ctx, before.ID); len(inbounds) != 0 {
-		t.Fatalf("retired client kept local attachments: %+v", inbounds)
+	assertClientBaselines(t, kept, want)
+	if len(attached(repo, kept)) != 0 {
+		t.Fatal("dropped line's row still attached")
 	}
-
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, withRelay); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restored.ID != before.ID {
-		t.Fatalf("re-add replaced stable row %d with %d", before.ID, restored.ID)
-	}
-	assertClientBaselines(t, restored, want)
-}
-
-func TestSync_DoesNotTouchOtherPanels(t *testing.T) {
-	repo := newFakeRepo()
-	svc := New(repo)
-	ctx := context.Background()
-	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
-	_, _ = svc.Sync(ctx, 42, "uuid-x", 11, rules, []clientplan.NodeCred{{NodeID: 9, Protocol: domain.ProtoVLESS}})
-	// Re-syncing panel 10 must not disturb the panel-11 client.
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.GetByEmail(ctx, 11, "u42@psp.local"); err != nil {
-		t.Fatalf("panel-11 client must survive a panel-10 sync: %v", err)
-	}
-	list, _ := repo.ListByUser(ctx, 42)
-	if len(list) != 2 {
-		t.Fatalf("want 2 clients (one per panel), got %d", len(list))
+	if back := lineRow(t, repo, domain.LineKey{NodeID: 1, LineID: "a"}); back.ID != relay.ID || len(attached(repo, back)) != 1 {
+		t.Fatalf("returning line did not reuse its row: %+v", back)
 	}
 }
 
-func TestSyncUser_AcrossPanelsAndRetiresLostServer(t *testing.T) {
+// Losing a whole server detaches its rows and reports them as removed with
+// the panel, not regrouped.
+func TestSyncUserRetirements_PanelRemovedVersusRegrouped(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-
-	// User reachable on two servers (panels 10 and 11).
-	nodes := []*domain.Node{
+	both := []*domain.Node{
 		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
-		{ID: 2, PanelID: 10, DesiredProtocol: "trojan"},
+		{ID: 2, PanelID: 10, DesiredProtocol: "vless"},
 		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
 	}
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, both); err != nil {
 		t.Fatal(err)
 	}
-	if list, _ := repo.ListByUser(ctx, 42); len(list) != 2 {
-		t.Fatalf("want 2 clients (one per server), got %d", len(list))
-	}
-
-	// User loses all access to panel 11 → its live projection must be retired
-	// even though no node references panel 11 anymore, while the counter row stays.
-	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
-		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
-	})
+	got, err := svc.SyncUserRetirements(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 2, PanelID: 10, DesiredProtocol: "vless"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	panel11, err := repo.GetByEmail(ctx, 11, "u42@psp.local")
-	if err != nil {
-		t.Fatalf("panel-11 counter row must survive lost access: %v", err)
+	if len(got.PanelRemoved[11]) != 1 || len(got.PanelRemoved[10]) != 0 {
+		t.Fatalf("PanelRemoved = %v, want exactly panel 11's client", got.PanelRemoved)
 	}
-	if got := retired[11]; len(got) != 1 || got[0] != panel11.Email {
-		t.Fatalf("panel-11 upstream retirement signal = %v", got)
+	if len(got.Regrouped[10]) != 1 || len(got.Regrouped[11]) != 0 {
+		t.Fatalf("Regrouped = %v, want node 1's direct row on panel 10", got.Regrouped)
 	}
-	if inbounds, _ := repo.ListInbounds(ctx, panel11.ID); len(inbounds) != 0 {
-		t.Fatalf("panel-11 retired attachments = %+v", inbounds)
-	}
-	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err != nil {
-		t.Fatalf("panel-10 client should remain: %v", err)
+	if len(repo.clients) != 3 {
+		t.Fatalf("rows = %d, want all three kept until booked", len(repo.clients))
 	}
 }
 
-func TestSyncUser_SkipsSeparators(t *testing.T) {
-	repo := newFakeRepo()
-	svc := New(repo)
-	ctx := context.Background()
-	nodes := []*domain.Node{
-		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
-		{ID: 2, PanelID: 10, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"},
-	}
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
-		t.Fatal(err)
-	}
-	c, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	inbs, _ := repo.ListInbounds(ctx, c.ID)
-	if len(inbs) != 1 || inbs[0].NodeID != 1 {
-		t.Fatalf("separator must be excluded from attachments: %+v", inbs)
-	}
-}
-
+// A re-sync never resets usage.
 func TestSync_PreservesCountersAcrossResync(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
-	c, _ := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	// Simulate the poll advancing the counter.
+	one := []clientplan.LineCred{{Line: domain.DirectLine(1), ListenerNodeID: 1, Protocol: domain.ProtoVLESS}}
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, one)
+	c := lineRow(t, repo, domain.DirectLine(1))
 	_ = repo.UpdateCounters(ctx, &domain.PSPClient{ID: c.ID, LifetimeTotalBytes: 5_000})
-	// A re-sync (e.g. group membership change) must NOT reset usage.
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS}, {NodeID: 2, Protocol: domain.ProtoTrojan},
-	}); err != nil {
+	two := append(one, clientplan.LineCred{Line: domain.DirectLine(2), ListenerNodeID: 2, Protocol: domain.ProtoTrojan})
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, two); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if got.LifetimeTotalBytes != 5_000 {
-		t.Fatalf("re-sync clobbered usage: got %d, want preserved 5000", got.LifetimeTotalBytes)
+	if got := lineRow(t, repo, domain.DirectLine(1)); got.ID != c.ID || got.LifetimeTotalBytes != 5_000 {
+		t.Fatalf("re-sync clobbered usage: %+v", got)
 	}
 }
 
-func TestSync_PreservesStableRowAndBaselinesAcrossPartitionBoundary(t *testing.T) {
+// Re-syncing one panel never touches another's rows.
+func TestSync_DoesNotTouchOtherPanels(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	ss2022 := clientplan.NodeCred{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}
-	plainSS := clientplan.NodeCred{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"}
-
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022}); err != nil {
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.LineCred{{Line: domain.DirectLine(1), Protocol: domain.ProtoVLESS}})
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 11, rules, []clientplan.LineCred{{Line: domain.DirectLine(9), Protocol: domain.ProtoVLESS}})
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.LineCred{{Line: domain.DirectLine(1), Protocol: domain.ProtoVLESS}}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if err != nil {
-		t.Fatal(err)
+	if c := lineRow(t, repo, domain.DirectLine(9)); len(attached(repo, c)) != 1 {
+		t.Fatal("panel-11 row disturbed by a panel-10 sync")
 	}
-	wantID := before.ID
-	wantCounters := &domain.PSPClient{
-		ID:              wantID,
-		LifetimeUpBytes: 900, LifetimeDownBytes: 1100, LifetimeTotalBytes: 2000,
-		LastRawUpBytes: 90, LastRawDownBytes: 110, LastRawTotalBytes: 200,
-		PeriodBaselineUpBytes: 400, PeriodBaselineDownBytes: 500, PeriodBaselineTotalBytes: 900,
-	}
-	if err := repo.UpdateCounters(ctx, wantCounters); err != nil {
-		t.Fatal(err)
-	}
-
-	// 1→2: the SS-2022 row's email gains a partition suffix, but the stable
-	// ID and every counter baseline stay on the row that still serves node 1.
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022, plainSS}); err != nil {
-		t.Fatal(err)
-	}
-	afterSplit, err := repo.GetByID(ctx, wantID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterSplit.Email == "u42@psp.local" {
-		t.Fatalf("test did not cross 1→2 email boundary: %+v", afterSplit)
-	}
-	assertClientBaselines(t, afterSplit, wantCounters)
-	inbounds, _ := repo.ListInbounds(ctx, wantID)
-	if len(inbounds) != 1 || inbounds[0].NodeID != 1 {
-		t.Fatalf("stable row followed the wrong partition: %+v", inbounds)
-	}
-
-	// 2→1: removing the conflicting node returns the same row to the bare
-	// email; it must not delete/recreate it on the reverse boundary either.
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022}); err != nil {
-		t.Fatal(err)
-	}
-	afterMerge, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterMerge.ID != wantID {
-		t.Fatalf("2→1 replaced client row %d with %d", wantID, afterMerge.ID)
-	}
-	assertClientBaselines(t, afterMerge, wantCounters)
 }
 
-func TestSync_PreservesStableRowAndBaselinesAcrossDomainChange(t *testing.T) {
+// A legacy shared row (written before 4.3) is adopted as the direct line of
+// the lowest-ID node and keeps its ID, email and counters.
+func TestSyncUser_AdoptsLegacyRowAsLowestDirectLine(t *testing.T) {
 	repo := newFakeRepo()
-	svc := New(repo)
 	ctx := context.Background()
-	nodes := []clientplan.NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
-		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
-	}
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, nodes); err != nil {
+	legacyID, _ := repo.Create(ctx, &domain.PSPClient{UserID: 42, PanelID: 10, Email: "u42@psp.local", UUID: "uuid-x", LifetimeTotalBytes: 777})
+	_ = repo.SetInbounds(ctx, legacyID, []domain.PSPClientInbound{{ClientID: legacyID, NodeID: 5}, {ClientID: legacyID, NodeID: 3}})
+	nodes := []*domain.Node{{ID: 5, PanelID: 10, DesiredProtocol: "vless"}, {ID: 3, PanelID: 10, DesiredProtocol: "vless"}}
+	if _, err := New(repo).SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := repo.ListByUser(ctx, 42)
-	if len(before) != 2 {
-		t.Fatalf("precondition: want two clients, got %+v", before)
+	adopted := lineRow(t, repo, domain.DirectLine(3))
+	if adopted.ID != legacyID || adopted.Email != "u42@psp.local" || adopted.LifetimeTotalBytes != 777 {
+		t.Fatalf("legacy row not adopted by node 3's direct line: %+v", adopted)
 	}
-	wantByID := make(map[int64]*domain.PSPClient, len(before))
-	for i, c := range before {
-		n := int64(i + 1)
-		want := &domain.PSPClient{
-			ID:              c.ID,
-			LifetimeUpBytes: 10 * n, LifetimeDownBytes: 20 * n, LifetimeTotalBytes: 30 * n,
-			LastRawUpBytes: 4 * n, LastRawDownBytes: 5 * n, LastRawTotalBytes: 9 * n,
-			PeriodBaselineUpBytes: n, PeriodBaselineDownBytes: 2 * n, PeriodBaselineTotalBytes: 3 * n,
-		}
-		if err := repo.UpdateCounters(ctx, want); err != nil {
-			t.Fatal(err)
-		}
-		wantByID[c.ID] = want
+	if got := attached(repo, adopted); len(got) != 1 || got[0] != 3 {
+		t.Fatalf("adopted row attachments = %v", got)
 	}
-
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, domain.EmailRules{Domain: "new.example"}, nodes); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := repo.ListByUser(ctx, 42)
-	if len(after) != 2 {
-		t.Fatalf("domain change replaced the two-row plan: %+v", after)
-	}
-	for _, c := range after {
-		want, ok := wantByID[c.ID]
-		if !ok {
-			t.Fatalf("domain change minted an unexpected client ID %d", c.ID)
-		}
-		if c.Email[len(c.Email)-len("new.example"):] != "new.example" {
-			t.Fatalf("client %d email did not change domains: %q", c.ID, c.Email)
-		}
-		assertClientBaselines(t, c, want)
+	if other := lineRow(t, repo, domain.DirectLine(5)); other.ID == legacyID {
+		t.Fatal("two lines share the legacy row")
 	}
 }
 
@@ -413,61 +306,5 @@ func assertClientBaselines(t *testing.T, got, want *domain.PSPClient) {
 		got.PeriodBaselineUpBytes != want.PeriodBaselineUpBytes || got.PeriodBaselineDownBytes != want.PeriodBaselineDownBytes || got.PeriodBaselineTotalBytes != want.PeriodBaselineTotalBytes ||
 		got.LastCounterEpoch != want.LastCounterEpoch {
 		t.Fatalf("counter baselines changed:\n got  %+v\n want %+v", got, want)
-	}
-}
-
-// A client retired because the user lost every node on its panel is a
-// different thing from one replaced by another client on the same panel: the
-// first only ever tightens access, the second must wait for its replacement to
-// be live. SyncUserRetirements tells the two apart; SyncUser still reports both.
-func TestSyncUserRetirements_PanelRemovedVersusRegrouped(t *testing.T) {
-	repo := newFakeRepo()
-	svc := New(repo)
-	ctx := context.Background()
-
-	both := []*domain.Node{
-		{ID: 1, PanelID: 10, DesiredProtocol: "vless", Flow: "xtls-rprx-vision"}, // its own flow client
-		{ID: 2, PanelID: 10, DesiredProtocol: "vless"},
-		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
-	}
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, both); err != nil {
-		t.Fatal(err)
-	}
-	visionBefore, _ := repo.ListByUser(ctx, 42)
-	if len(visionBefore) != 3 {
-		t.Fatalf("setup: want 3 clients (2 on panel 10, 1 on panel 11), got %d", len(visionBefore))
-	}
-
-	// Panel 11 is gone entirely; on panel 10 the flow client is merged away.
-	got, err := svc.SyncUserRetirements(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 2, PanelID: 10, DesiredProtocol: "vless"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.PanelRemoved[11]) != 1 || len(got.PanelRemoved[10]) != 0 {
-		t.Fatalf("PanelRemoved = %v, want exactly panel 11's client", got.PanelRemoved)
-	}
-	if len(got.Regrouped[10]) != 1 || len(got.Regrouped[11]) != 0 {
-		t.Fatalf("Regrouped = %v, want exactly panel 10's replaced client", got.Regrouped)
-	}
-}
-
-func TestSyncUser_StillReportsBothKindsInOneMap(t *testing.T) {
-	repo := newFakeRepo()
-	svc := New(repo)
-	ctx := context.Background()
-	both := []*domain.Node{
-		{ID: 1, PanelID: 10, DesiredProtocol: "vless", Flow: "xtls-rprx-vision"},
-		{ID: 2, PanelID: 10, DesiredProtocol: "vless"},
-		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
-	}
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, both); err != nil {
-		t.Fatal(err)
-	}
-	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 2, PanelID: 10, DesiredProtocol: "vless"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(retired[10]) != 1 || len(retired[11]) != 1 {
-		t.Fatalf("SyncUser retired = %v, want one email on each panel", retired)
 	}
 }

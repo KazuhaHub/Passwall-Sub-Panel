@@ -65,7 +65,7 @@ func TestSubscriptionOfAnAllowlistMemberExcludesNodesThatCannotEnforce(t *testin
 		t.Run("state="+string(tc.state), func(t *testing.T) {
 			s, native, u, _ := referenceRenderFixture(t)
 			native.DisplayName = "native-node"
-			native.RouteState = domain.NodeRouteState{}
+			native.Relays = nil
 			legacy := *native
 			legacy.ID, legacy.PanelID, legacy.InboundID, legacy.DisplayName = 8, 2, 4, "legacy-3xui-node"
 

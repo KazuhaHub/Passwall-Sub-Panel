@@ -90,7 +90,7 @@ func backfillRelayLineIDs(db *gorm.DB) error {
 	return nil
 }
 
-// backfillLineLabels gives relay and VLESS route lines written before ADR 0040
+// backfillLineLabels gives relay lines written before ADR 0040
 // the node's Region and Tags. It decides per line by key presence, not by a
 // completion marker: a row an older binary rewrote after a downgrade loses the
 // keys again and is completed on the next start, while a key present with an
@@ -100,13 +100,12 @@ func backfillRelayLineIDs(db *gorm.DB) error {
 // concurrently starting replica makes this start fail and retry.
 func backfillLineLabels(db *gorm.DB) error {
 	var rows []struct {
-		ID         int64
-		Region     string
-		Tags       jsonStrings
-		Relays     *string
-		RouteState *string
+		ID     int64
+		Region string
+		Tags   jsonStrings
+		Relays *string
 	}
-	if err := db.Table("nodes").Select("id, region, tags, relays, route_state").Find(&rows).Error; err != nil {
+	if err := db.Table("nodes").Select("id, region, tags, relays").Find(&rows).Error; err != nil {
 		return err
 	}
 	for _, row := range rows {
@@ -115,15 +114,6 @@ func backfillLineLabels(db *gorm.DB) error {
 				return fmt.Errorf("line labels for node %d: %w", row.ID, err)
 			} else if changed {
 				if err := casNodeColumn(db, row.ID, "relays", *row.Relays, relays); err != nil {
-					return err
-				}
-			}
-		}
-		if row.RouteState != nil {
-			if state, changed, err := routeStateWithLabels(*row.RouteState, row.Region, row.Tags); err != nil {
-				return fmt.Errorf("line labels for node %d: %w", row.ID, err)
-			} else if changed {
-				if err := casNodeColumn(db, row.ID, "route_state", *row.RouteState, state); err != nil {
 					return err
 				}
 			}
@@ -184,42 +174,6 @@ func relaysWithLabels(raw, region string, tags []string) (jsonRelays, bool, erro
 		}
 	}
 	return lines, changed, nil
-}
-
-func routeStateWithLabels(raw, region string, tags []string) (jsonRouteState, bool, error) {
-	if raw == "" {
-		return jsonRouteState{}, false, nil
-	}
-	var envelope struct {
-		Lines json.RawMessage `json:"lines"`
-	}
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		return jsonRouteState{}, false, err
-	}
-	if len(envelope.Lines) == 0 || string(envelope.Lines) == "null" {
-		return jsonRouteState{}, false, nil
-	}
-	missing, err := missingLabelKeys(envelope.Lines, "region", "tags")
-	if err != nil {
-		return jsonRouteState{}, false, err
-	}
-	var state jsonRouteState
-	if err := state.Scan(raw); err != nil {
-		return jsonRouteState{}, false, err
-	}
-	if len(state.Lines) != len(missing) {
-		return jsonRouteState{}, false, fmt.Errorf("route line count mismatch")
-	}
-	changed := false
-	for i := range state.Lines {
-		if missing[i][0] {
-			state.Lines[i].Region, changed = region, true
-		}
-		if missing[i][1] {
-			state.Lines[i].Tags, changed = domain.CopyLineTags(tags), true
-		}
-	}
-	return state, changed, nil
 }
 
 // ---- dest_hits: the exit server joins the primary key ----

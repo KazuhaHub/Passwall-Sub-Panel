@@ -31,10 +31,7 @@ type lineNameCatalog struct {
 	origin  string
 }
 
-// factorOf resolves the opt-in "{{ factor }}" name placeholder for the
-// unavailable-line aliases below, exactly as the live items already were; nil
-// leaves names as written.
-func newLineNameCatalog(items []renderItem, flags bool, factorOf func(int64) int, nodes ...[]*domain.Node) (*lineNameCatalog, []renderItem) {
+func newLineNameCatalog(items []renderItem, flags bool, nodes ...[]*domain.Node) (*lineNameCatalog, []renderItem) {
 	catalog := &lineNameCatalog{lines: map[string]subscriptionLineName{}, aliases: map[string][]string{}}
 	internal := append([]renderItem(nil), items...)
 	prefix := "psp-line-" + uuid.NewString() + "-"
@@ -49,7 +46,7 @@ func newLineNameCatalog(items []renderItem, flags bool, factorOf func(int64) int
 		internal[i].name = token
 	}
 	// Register current but unavailable definitions as tombstone aliases. An
-	// explicit reference to a stopped/deleted route must never select a sibling.
+	// explicit reference to a stopped/deleted line must never select a sibling.
 	if len(nodes) > 0 {
 		for _, node := range nodes[0] {
 			if node == nil || node.IsSeparator() {
@@ -59,12 +56,9 @@ func newLineNameCatalog(items []renderItem, flags bool, factorOf func(int64) int
 			for i := range node.Relays {
 				definitions = append(definitions, renderItem{node: node, relay: &node.Relays[i], name: relayEntryName(node.DisplayName, node.Relays[i])})
 			}
-			for i := range node.RouteState.Lines {
-				definitions = append(definitions, renderItem{node: node, route: &node.RouteState.Lines[i], name: routeEntryName(node.DisplayName, node.RouteState.Lines[i])})
-			}
-			if factorOf != nil {
-				applyFactorPlaceholder(definitions, factorOf)
-			}
+			// The unavailable-line aliases resolve "{{ factor }}" exactly as
+			// the live items already did.
+			applyFactorPlaceholder(definitions)
 			if flags {
 				applyRegionFlagPrefix(definitions)
 			}
@@ -82,9 +76,6 @@ func newLineNameCatalog(items []renderItem, flags bool, factorOf func(int64) int
 // Labels are independent of the administrator's UI language, like the base
 // proxy names. Never infer a line's kind from its display name or UUID.
 func subscriptionLineKind(item renderItem) string {
-	if item.route != nil {
-		return "VLESS 路由"
-	}
 	if item.relay != nil {
 		return "中转"
 	}

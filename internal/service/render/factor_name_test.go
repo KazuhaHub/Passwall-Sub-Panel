@@ -6,27 +6,24 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-func TestApplyFactorPlaceholder(t *testing.T) {
-	hk := &domain.Node{ID: 1, PanelID: 10}
+func TestApplyFactorPlaceholderUsesEachEntrysLine(t *testing.T) {
+	direct, relayFactor := 1500, 0
+	hk := &domain.Node{ID: 1, PanelID: 10, TrafficFactorMilli: &direct,
+		Relays: []domain.RelayLine{{ID: "r", TrafficFactorMilli: &relayFactor}}}
 	jp := &domain.Node{ID: 2, PanelID: 20}
 	items := []renderItem{
 		{node: hk, name: "HK {{ factor }}"},
-		{node: hk, name: "HK relay {{factor}}"},
-		{node: jp, name: "JP"}, // no token: untouched whatever the factor
+		{node: hk, relay: &hk.Relays[0], name: "HK relay {{factor}}"},
+		{node: jp, name: "JP"}, // no token: untouched
 		{node: jp, name: "JP {{ factor }}"},
 		{isSeparator: true, name: "---- {{ factor }} ----"},
 	}
-	applyFactorPlaceholder(items, func(panelID int64) int {
-		return map[int64]int{10: 1500, 20: 0}[panelID]
-	})
-	want := []string{"HK ×1.5", "HK relay ×1.5", "JP", "JP ×0", "---- {{ factor }} ----"}
+	applyFactorPlaceholder(items)
+	want := []string{"HK ×1.5", "HK relay ×0", "JP", "JP ×1", "---- {{ factor }} ----"}
 	for i, w := range want {
 		if items[i].name != w {
 			t.Errorf("item %d = %q, want %q", i, items[i].name, w)
 		}
-	}
-	if got := formatTrafficFactor(1000); got != "×1" {
-		t.Errorf("formatTrafficFactor(1000) = %q", got)
 	}
 	if got := formatTrafficFactor(1250); got != "×1.25" {
 		t.Errorf("formatTrafficFactor(1250) = %q", got)
@@ -37,8 +34,9 @@ func TestApplyFactorPlaceholder(t *testing.T) {
 // template reference to the rendered name keeps resolving while a line is
 // stopped.
 func TestLineNameAliasesResolveFactorPlaceholder(t *testing.T) {
-	node := &domain.Node{ID: 7, PanelID: 10, DisplayName: "HK {{ factor }}"}
-	catalog, _ := newLineNameCatalog(nil, false, func(int64) int { return 1500 }, []*domain.Node{node})
+	f := 1500
+	node := &domain.Node{ID: 7, PanelID: 10, DisplayName: "HK {{ factor }}", TrafficFactorMilli: &f}
+	catalog, _ := newLineNameCatalog(nil, false, []*domain.Node{node})
 	for _, line := range catalog.lines {
 		if line.base == "HK ×1.5" {
 			return

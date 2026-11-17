@@ -1,78 +1,78 @@
-# Per-server traffic multiplier
+# 按线路的流量倍率
 
-A server's **traffic factor** says how many bytes a user is charged for each byte
-they move through it, in thousandths: `1000` is one-for-one (every server's
-default), `1500` charges ×1.5, `500` charges ×0.5, and `0` makes the server free.
-Range `0..100000` (×100). It is set on the server form, for every server kind, and
-every change is written to the audit log as `server_traffic_factor_changed`.
+> 4.3。身份模型见 [ADR 0043](adr/0043-per-line-client-identity.md)。
 
-## Granularity: the server, not the node or the line
+每条订阅线路有一个**流量倍率**：用户经这条线路每走 1 字节，配额按多少字节计，以千分之一为单位。
+`1000` 为 1:1（默认），`1500` 为 ×1.5，`500` 为 ×0.5，`0` 为不计流量；范围 `0..100000`（×100）。
 
-A user holds one client counter per server. Every node, relay line, tunnel line and
-VLESS route line on that server reports into the same counter, so the data cannot
-tell them apart. The factor therefore belongs to the server that holds the user's
-client — the node's own server. A relay or managed relay only forwards to it; a
-tunnel line's exit server is not where the user is counted.
+- 节点的直连线路：`nodes.traffic_factor_milli`。
+- 每条中转线路：`nodes.relays` 中的 `TrafficFactorMilli`（缺省为 1:1）。
 
-## Charged at booking
+原则：**设在哪条线路，就按哪条线路算，不管流量经过哪些服务器。** 每次修改记入审计
+`line_traffic_factor_changed`；服务器页面可对该服务器上选中的线路批量修改。
 
-The poll weights each server's delta once, when it books it:
+## 为什么每条线路要有自己的客户端
 
-| Ledger | Holds |
+中转线路只把连接转到落地的入站。如果用户在落地只有一个客户端，直连和中转的流量进同一个计数器，
+无法分开计费。所以每条用户可见的线路都有自己的客户端行和计数器（ADR 0043）：直连线路用用户自己的
+UUID（订阅不变），其他线路用派生 UUID。
+
+## 记账时计费
+
+轮询记账时按**该行线路**的倍率换算一次：
+
+| 账本 | 内容 |
 |---|---|
-| `users.lifetime_*`, `period_baseline_bytes`, `emergency_baseline_bytes` | **charged** bytes — what quota, suspension, the subscription header and mails read |
-| `users.raw_lifetime_{up,down,total}_bytes` | raw bytes, display only |
-| `psp_clients.lifetime_*`, `period_baseline_*` (and the retired `user_xui_clients`) | raw bytes, as before |
-| `psp_clients.charged_lifetime_bytes` (and `user_xui_clients`) | that row's charged bytes |
-| node counters, `node_traffic_snapshots` | raw bytes, unchanged |
+| `users.lifetime_*`、`period_baseline_bytes`、`emergency_baseline_bytes` | **计费**字节：配额、停用、订阅信息头、邮件都读它 |
+| `users.raw_lifetime_{up,down,total}_bytes` | 原始字节，仅显示 |
+| `psp_clients.lifetime_*`、`period_baseline_*`（及已退役的 `user_xui_clients`） | 原始字节，与以前相同 |
+| `psp_clients.charged_lifetime_bytes`（及 `user_xui_clients`） | 该行的计费字节 |
+| `psp_clients.last_factor_milli` | 该行上次记账时的倍率 |
+| 节点计数器、`node_traffic_snapshots` | 原始字节，不变 |
 
-`charged = round(raw × factor / 1000)`, up and down rounded separately so
-`up + down = total` still holds. Changing a factor re-prices only traffic booked
-afterwards; nothing already booked moves. If the factors cannot be read, the poll
-cycle is abandoned before it books anything and the next cycle books the whole
-delta at the right price.
+`计费 = round(原始 × 倍率 / 1000)`，上下行分别取整，保证 `上行 + 下行 = 总计`。修改倍率只影响之后记账的
+流量；线路已删除时按该行上次的倍率记账；4.3 之前的旧行按 1:1。读不到倍率时，本周期在记账前放弃，
+下一周期按正确倍率补记全部增量。
 
-With every factor at 1000 every figure is exactly what it was before the feature.
+所有倍率都是 1000 时，每个数字与以前完全相同。
 
-## Offline enforcement
+## 离线执法
 
-The panel and node gates count **raw** bytes on their own counters, so PSP converts
-the remaining charged quota into raw bytes for each server:
+面板与节点按自己的**原始**计数器拦截，所以 PSP 为每个客户端把剩余的计费额度换算成原始字节：
 
-- **Passwall Node**: headroom = `floor(remaining charged × 1000 / factor)` — rounding
-  down closes the gate no later than the charged ledger would. The advance grant for
-  the next period is `limit × 1000 / factor`. Usage reported by agents but not yet
-  booked is weighted by each client's own server. On a free server the gate is not
-  armed (`nil`) while the user has quota left and is closed (`0`) once it is used up;
-  no advance grant is scheduled for it, so an exhausted user stays closed until PSP
-  is reachable after the period rolls over.
-- **3X-UI / S-UI**: the period headroom goes through `domain.RawHeadroom` before it is
-  rebased onto the panel counter (`domain.PanelQuotaCap`). Unlimited stays `0`, the
-  exhausted sentinel stays `1` on every server, a free server with quota left gets
-  `0` (no cap), and a small headroom never rounds down to `0`.
+- **Passwall Node**：每行 `floor(剩余计费 × 1000 / 倍率)`，向下取整保证不晚于计费账本关闭；下一周期预授权
+  为 `上限 × 1000 / 倍率`。代理已上报、尚未记账的用量按各行倍率计入（其他服务器上的行按其上次记账的
+  倍率）。倍率为 0 时：有剩余额度不设闸（`nil`），用尽后关闭（`0`），且不预排下一周期授权——用尽的用户
+  在周期切换后要等 PSP 可达才会重新开放。
+- **3X-UI / S-UI**：每个客户端的剩余额度先经 `domain.RawHeadroom`（按其线路倍率）再按面板计数器换算
+  （`domain.PanelQuotaCap`）。不限量仍为 `0`，用尽标记 `1` 在任何线路上保留，免费线路有剩余时为 `0`
+  （不设上限），很小的额度不会被取整成 `0`。
 
-## Usage figures
+每个客户端都拿到用户的全部剩余额度：面板不可达期间可能超用，有界。
 
-- The user's usage, history and rollups are charged, as is the
-  `Subscription-Userinfo` header.
-- Admin per-server and per-node usage return raw figures plus `traffic_factor_milli`,
-  `charged_lifetime_bytes` and `charged_period_bytes`, with a raw/charged toggle.
-  Per-row period baselines are raw, so `charged_period_bytes` is the row's raw period
-  at the row's lifetime average price: exact while the factor has not changed.
-- A manual period-usage override (`SetPeriodUsage`) is distributed across the user's
-  rows in proportion to their charged lifetime.
-- The user portal shows a ×f badge on servers that are not one-for-one.
+## 用量显示
 
-## Node names
+- 用户的用量、历史与汇总都是计费值，订阅的 `Subscription-Userinfo` 也是。
+- 管理端按服务器 / 节点的用量返回原始值，以及 `traffic_factor_milli`、`charged_lifetime_bytes`、
+  `charged_period_bytes`，可切换原始 / 计费。按服务器汇总时，若该服务器上各线路倍率不同，
+  `traffic_factor_milli` 为 `null`。每行的本周期计费值按该行生命周期的平均价格换算：倍率未改时准确。
+- 手动设置本周期用量（`SetPeriodUsage`）按各行的计费账本比例分摊。
+- 用户门户在非 1:1 的线路旁显示 ×倍率。
 
-A node, relay line or route line name may contain `{{ factor }}`. Subscriptions and
-the user portal replace it with the server's multiplier (`×1.5`, `×1`, `×0`). Names
-without it never change.
+## 来源 IP
 
-## Upgrade
+直接转发与外部中转线路的客户端，落地看到的是中转地址，不计入个人 IP 数与地理位置判断。
 
-`schema_upgrade_v4_3.go` (`migrateV4_3`) runs once at boot, before the first poll:
-before 4.3 every byte was charged one-for-one, so raw user lifetime is seeded from
-lifetime and each row's charged lifetime from its raw lifetime. It is recorded in
-`schema_migrations`, because after 4.3 a charged ledger of 0 beside a raw lifetime
-is a free server's history and must never be overwritten.
+## 节点名称
+
+节点名或中转线路名可写 `{{ factor }}`，订阅和用户门户中替换为该线路的倍率（`×1.5`、`×1`、`×0`）。
+不写的名称不变。
+
+## 升级
+
+`schema_upgrade_v4_3.go`（`migrateV4_3`）在启动时、首次轮询之前自动执行：
+
+1. 补齐账本：4.3 之前每个字节都按 1:1 计费，原始 = 计费、各行计费 = 原始。记录在 `schema_migrations`
+   中，只执行一次——4.3 之后“原始非 0、计费为 0”是免费线路的真实历史，不能被覆盖。
+2. 转换客户端：旧共享行成为其最小 ID 节点的直连行（保留 ID、邮箱、计数），其他直连线路用同一 UUID
+   新建行，中转线路使用派生身份。3X-UI / S-UI 上的拆分和新建由升级后的正常生命周期完成。

@@ -5,7 +5,7 @@ import PreviewCaption from '@/components/PreviewCaption'
 import type { PreviewHint } from '@/hooks/useDraftPreview'
 
 /**
- * A relay or VLESS route line's own Region and Tags (ADR 0040). They only
+ * A relay line's own Region and Tags (ADR 0040). They only
  * label the line in subscriptions (flag, region:/tag: sets, placeholders) and
  * never decide which users get the node.
  */

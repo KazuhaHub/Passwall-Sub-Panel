@@ -69,43 +69,18 @@ func TestUserStatusForNode_RelayVisibilityAndSanitization(t *testing.T) {
 	}
 }
 
-func TestUserStatusForNode_RoutesReuseEntryHealthAndNamingOptions(t *testing.T) {
-	directTime := time.Date(2026, 10, 17, 1, 0, 0, 0, time.UTC)
-	relayTime := directTime.Add(time.Minute)
-	n := &domain.Node{Enabled: true, DisplayName: "Parent", DesiredProtocol: "vless", DesiredPort: 443,
-		HealthState: domain.NodeHealthOK, HealthCheckedAt: &directTime,
-		Relays:      []domain.RelayLine{{ID: "front", Name: "Front", OnlyLineName: true, Address: "private.example", Enabled: true}},
-		RelayHealth: []domain.RelayHealth{{Index: 0, Address: "private.example", Port: 443, State: domain.NodeHealthUnreachable, CheckedAt: &relayTime}},
-		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{
-			{ID: "direct", Name: "Direct route", Enabled: true},
-			{ID: "relay", OutboundTag: "warp", EntryRelayID: "front", OnlyLineName: true, Enabled: true},
-			{ID: "disabled", Name: "Off", Enabled: false},
-			{ID: "deleted", Name: "Gone", Enabled: true, Deleted: true},
-			{ID: "missing", Name: "Missing", EntryRelayID: "missing", Enabled: true},
-		}},
-	}
+func TestUserStatusCarriesLineFactorsAndResolvesNamePlaceholder(t *testing.T) {
+	direct, relay := 1500, 0
+	n := &domain.Node{DisplayName: "HK {{ factor }}", Region: "HK", Enabled: true, TrafficFactorMilli: &direct,
+		Relays: []domain.RelayLine{{Name: "relay {{ factor }}", Address: "r.example", Port: 1, Enabled: true, TrafficFactorMilli: &relay}}}
 	got := userStatusForNode(n)
-	if len(got.RouteStatuses) != 2 || !got.RelayStatuses[0].OnlyLineName {
-		t.Fatalf("wrong visible lines: %+v", got)
+	if got.TrafficFactorMilli != 1500 || got.Name != "HK ×1.5" || len(got.RelayStatuses) != 1 ||
+		got.RelayStatuses[0].Name != "relay ×0" || got.RelayStatuses[0].TrafficFactorMilli != 0 ||
+		got.RelayStatuses[0].NodeName != "HK ×0" {
+		t.Fatalf("status = %+v", got)
 	}
-	direct, relay := got.RouteStatuses[0], got.RouteStatuses[1]
-	if direct.Name != "Direct route" || direct.OnlyLineName || direct.Status != "ok" || direct.CheckedAt != &directTime {
-		t.Fatal(direct)
-	}
-	if relay.Name != "warp" || !relay.OnlyLineName || relay.Status != "down" || relay.CheckedAt != &relayTime {
-		t.Fatal(relay)
-	}
-	n.HideDirect = true
-	if status := userStatusForNode(n); status.ShowDirect || len(status.RouteStatuses) != 2 || status.RouteStatuses[0].CheckedAt != &directTime {
-		t.Fatal("hidden direct affected route inbound health or visibility")
-	}
-	n.Relays[0].Enabled = false
-	if got := userStatusForNode(n); len(got.RouteStatuses) != 1 || got.RouteStatuses[0].Name != "Direct route" || len(got.RelayStatuses) != 0 {
-		t.Fatal("inactive dependency exposed cached status")
-	}
-	n.HideDirect = false
-	n.RouteState.Status = "drift"
-	if len(userStatusForNode(n).RouteStatuses) != 0 {
-		t.Fatal("unconfirmed route exposed")
+	plain := userStatusForNode(&domain.Node{DisplayName: "JP", Enabled: true})
+	if plain.Name != "JP" || plain.TrafficFactorMilli != 1000 {
+		t.Fatalf("plain status = %+v", plain)
 	}
 }

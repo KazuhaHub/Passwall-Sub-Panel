@@ -16,8 +16,9 @@ func lineLabelFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *doma
 	t.Helper()
 	s, n, u, rule := referenceRenderFixture(t)
 	n.Region, n.Tags = "US", []string{"edge"}
-	n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "JP", Tags: []string{"cmcc"}}}
-	n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "", []string{}
+	// Relay "A B" has its labels cleared explicitly; relay "A R" has its own.
+	n.Relays[0].Region, n.Relays[0].Tags = "", []string{}
+	n.Relays = append(n.Relays, domain.RelayLine{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "JP", Tags: []string{"cmcc"}})
 	return s, n, u, rule
 }
 
@@ -40,10 +41,10 @@ func TestNodeSetMembersSelectByEachEntrysOwnLabels(t *testing.T) {
 	}
 }
 
-func TestRouteLineWithClearedLabelsMatchesNoNodeSet(t *testing.T) {
+func TestRelayLineWithClearedLabelsMatchesNoNodeSet(t *testing.T) {
 	s, _, u, rule := lineLabelFixture(t)
 	u.GroupID = 1
-	// The route line "A B" was cleared explicitly; the node's US/edge must not
+	// The relay line "A B" was cleared explicitly; the node's US/edge must not
 	// leak into it through inheritance.
 	for _, selector := range []string{"region:US", "tag:edge"} {
 		rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node_set", Value: selector}}
@@ -62,13 +63,11 @@ func TestRouteLineWithClearedLabelsMatchesNoNodeSet(t *testing.T) {
 func TestTemplatePlaceholdersUseEntryLabels(t *testing.T) {
 	n := &domain.Node{ID: 1, Region: "US", Tags: []string{"edge"}}
 	relay := &domain.RelayLine{ID: "r", Region: "JP", Tags: []string{"cmcc"}}
-	route := &domain.VlessRouteLine{ID: "v", Region: "SG", Tags: []string{"edge"}}
-	items := []renderItem{{node: n, name: "direct"}, {node: n, name: "relay", relay: relay}, {node: n, name: "route", relay: relay, route: route}}
+	items := []renderItem{{node: n, name: "direct"}, {node: n, name: "relay", relay: relay}}
 	for ref, want := range map[string][]string{
 		"@region:US": {"direct"},
 		"@region:JP": {"relay"},
-		"@region:SG": {"route"},
-		"@tag:edge":  {"direct", "route"},
+		"@tag:edge":  {"direct"},
 		"@tag:cmcc":  {"relay"},
 	} {
 		body := expandNodeRefs("proxies:\n  - "+ref, items)
@@ -82,32 +81,19 @@ func TestTemplatePlaceholdersUseEntryLabels(t *testing.T) {
 	}
 }
 
-func TestRouteLineFlagIgnoresItsEntryRelayRegion(t *testing.T) {
-	n := &domain.Node{ID: 1, Region: "US"}
-	relay := &domain.RelayLine{ID: "r", Region: "JP"}
-	items := []renderItem{{node: n, name: "x", relay: relay, route: &domain.VlessRouteLine{ID: "v", Region: "SG"}}}
-	applyRegionFlagPrefix(items)
-	if items[0].name != "🇸🇬 x" {
-		t.Fatalf("route line flagged by %q", items[0].name)
-	}
-}
-
 func TestInspectionCatalogAndEmptySetCheckIncludeLineLabels(t *testing.T) {
 	n := &domain.Node{ID: 1, DisplayName: "A", Enabled: true, Region: "US", Tags: []string{"edge"},
 		Relays: []domain.RelayLine{{ID: "r", Address: "relay.example", Enabled: true, Region: "JP", Tags: []string{"cmcc"}}},
-		RouteState: domain.NodeRouteState{Lines: []domain.VlessRouteLine{
-			{ID: "v", OutboundTag: "direct", Enabled: true, Region: "SG", Tags: []string{"stream"}},
-			{ID: "gone", OutboundTag: "direct", Deleted: true, Region: "DE", Tags: []string{"retired"}},
-		}}}
+	}
 	members := map[string][]domain.ProxyGroupMember{"G": {
-		{Kind: "node_set", Value: "region:JP"}, {Kind: "node_set", Value: "tag:stream"},
+		{Kind: "node_set", Value: "region:JP"}, {Kind: "node_set", Value: "tag:cmcc"},
 		{Kind: "node_set", Value: "region:DE"}, {Kind: "node_set", Value: "tag:retired"},
 	}}
 	inspection := InspectProxyGroups("- MATCH,G", members, nil, []*domain.Node{n})
-	if want := []string{"JP", "SG", "US"}; !reflect.DeepEqual(inspection.Regions, want) {
+	if want := []string{"JP", "US"}; !reflect.DeepEqual(inspection.Regions, want) {
 		t.Fatalf("regions %v, want %v", inspection.Regions, want)
 	}
-	if want := []string{"cmcc", "edge", "stream"}; !reflect.DeepEqual(inspection.Tags, want) {
+	if want := []string{"cmcc", "edge"}; !reflect.DeepEqual(inspection.Tags, want) {
 		t.Fatalf("tags %v, want %v", inspection.Tags, want)
 	}
 	var empty []string
@@ -124,7 +110,7 @@ func TestInspectionCatalogAndEmptySetCheckIncludeLineLabels(t *testing.T) {
 	for _, line := range inspection.Lines {
 		byLine[line.LineID] = line
 	}
-	if byLine[domain.DirectLineID].Region != "US" || byLine["r"].Region != "JP" || byLine["v"].Region != "SG" || !reflect.DeepEqual(byLine["v"].Tags, []string{"stream"}) {
+	if byLine[domain.DirectLineID].Region != "US" || byLine["r"].Region != "JP" || !reflect.DeepEqual(byLine["r"].Tags, []string{"cmcc"}) {
 		t.Fatalf("catalog lines lost their own labels: %+v", inspection.Lines)
 	}
 }

@@ -412,11 +412,13 @@ type nodeRow struct {
 	// additionally offered through. HideDirect drops the direct entry when at
 	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
 	// rows, no backfill.
-	Relays          jsonRelays     `gorm:"column:relays"`
-	RouteState      jsonRouteState `gorm:"column:route_state"`
-	RouteRevision   int64          `gorm:"not null;default:0"`
-	HideDirect      bool           `gorm:"default:false"`
-	ShowRelayStatus bool           `gorm:"default:false"`
+	Relays     jsonRelays `gorm:"column:relays"`
+	HideDirect bool       `gorm:"default:false"`
+	// TrafficFactorMilli: the direct line's traffic multiplier (ADR 0043).
+	// Relay lines carry theirs inside relays. A pointer so 0 (free) is
+	// storable: GORM replaces a zero value with the default on INSERT.
+	TrafficFactorMilli *int `gorm:"not null;default:1000"`
+	ShowRelayStatus    bool `gorm:"default:false"`
 	// EgressPanelID: the Passwall Node server this node's users leave through
 	// (0 = its own server). See domain.Node.EgressPanelID.
 	EgressPanelID int64           `gorm:"not null;default:0;index"`
@@ -487,8 +489,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		CertSource:              domain.CertSource(r.CertSource),
 		CertID:                  r.CertID,
 		Relays:                  []domain.RelayLine(r.Relays),
-		RouteState:              domain.NodeRouteState(r.RouteState),
 		HideDirect:              r.HideDirect,
+		TrafficFactorMilli:      r.TrafficFactorMilli,
 		ShowRelayStatus:         r.ShowRelayStatus,
 		EgressPanelID:           r.EgressPanelID,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
@@ -552,13 +554,14 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		CertSource:              string(n.CertSource),
 		CertID:                  n.CertID,
 		Relays:                  jsonRelays(n.Relays),
-		RouteState:              jsonRouteState(n.RouteState),
-		RouteRevision:           n.RouteState.Revision,
 		HideDirect:              n.HideDirect,
-		ShowRelayStatus:         n.ShowRelayStatus,
-		EgressPanelID:           n.EgressPanelID,
-		RelayHealth:             jsonRelayHealth(n.RelayHealth),
-		CreatedAt:               n.CreatedAt,
+		// Never NULL into the NOT NULL column: a node built in code without
+		// a factor is one-for-one.
+		TrafficFactorMilli: ptrInt(n.EffectiveTrafficFactor()),
+		ShowRelayStatus:    n.ShowRelayStatus,
+		EgressPanelID:      n.EgressPanelID,
+		RelayHealth:        jsonRelayHealth(n.RelayHealth),
+		CreatedAt:          n.CreatedAt,
 	}, nil
 }
 
@@ -1015,14 +1018,8 @@ type xuiPanelRow struct {
 	// sized varchar with a default, written ONLY by UpdateNativeMetadata (Save
 	// omits it on update).
 	DestResolve string `gorm:"column:dest_resolve;size:16;not null;default:'as_is'"`
-	// TrafficFactorMilli is the per-server traffic multiplier in thousandths
-	// (1000 = one-for-one, 0 = free). A pointer so 0 is storable at all: GORM
-	// replaces a zero value with the column default on INSERT. Written ONLY by
-	// UpdateTrafficFactor; Save omits it on update and leaves it to the
-	// default on create.
-	TrafficFactorMilli *int `gorm:"column:traffic_factor_milli;not null;default:1000"`
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type mailSettingsRow struct {
@@ -1152,7 +1149,6 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		IPLimitProbedAt:    r.IPLimitProbedAt,
 		AuditCollect:       domain.NormalizeAuditCollect(domain.AuditCollect(r.AuditCollect)),
 		DestResolve:        domain.NormalizeDestResolve(domain.DestResolve(r.DestResolve)),
-		TrafficFactorMilli: r.TrafficFactorMilli,
 	}, nil
 }
 
@@ -1184,9 +1180,6 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		IPLimitProbedAt:    p.IPLimitProbedAt,
 		AuditCollect:       string(domain.NormalizeAuditCollect(p.AuditCollect)),
 		DestResolve:        string(domain.NormalizeDestResolve(p.DestResolve)),
-		// Honoured on INSERT only (nil takes the column default); an update
-		// omits the column and goes through UpdateTrafficFactor.
-		TrafficFactorMilli: p.TrafficFactorMilli,
 	}, nil
 }
 
@@ -1614,7 +1607,6 @@ var schemaModels = []any{
 	&roleAssignmentRow{},
 	&groupRow{},
 	&nodeRow{},
-	&routeLeaseRow{},
 	// ownershipRow (user_xui_clients) is intentionally NOT here: v3.9.0 retired the
 	// per-node ownership model. A fresh install never creates the table; an upgrade
 	// keeps its existing one (AutoMigrate leaves untracked tables alone) until the
@@ -1887,3 +1879,5 @@ func applyOnce(db *gorm.DB, id string, fn func(tx *gorm.DB) error) error {
 		return tx.Create(&schemaMigrationRow{ID: id, AppliedAt: time.Now().UTC()}).Error
 	})
 }
+
+func ptrInt(v int) *int { return &v }

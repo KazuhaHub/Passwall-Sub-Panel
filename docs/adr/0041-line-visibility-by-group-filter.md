@@ -2,7 +2,8 @@
 
 - 状态：已接受，已实现（2026-11-16，所有者批准实现）；自动化验证通过，已同步手测环境，见文末“实现与验证”
 - 修订：[ADR 0040](0040-line-region-and-tags.md) 决策第 2 条中“线路值不参与分组 `tag_filter`”及不变量 1；其余决策不变
-- 关联：[ADR 0039](0039-vless-route-lines-v2.md)、[VLESS 路由线路（V2）](../vlessroute-v2.md)、[ARCHITECTURE §6.3、§7.6](../ARCHITECTURE.md)
+- 4.3 更新：[ADR 0039](0039-vless-route-lines-v2.md) 的 VLESS 路由线路已删除（所有者从未使用，不迁移数据）。下文凡涉及 VLESS 路由线路（`VlessRouteLine`、`route_state`、`vlessroute` 包、路由线路编辑器等）之处均为历史记录，现行规则只适用于中转线路。
+- 关联：[ADR 0039](0039-vless-route-lines-v2.md)（已取代）、[VLESS 路由线路（V2）](../vlessroute-v2.md)（已取代）、[ARCHITECTURE §6.3、§7.6](../ARCHITECTURE.md)
 
 ## 背景
 

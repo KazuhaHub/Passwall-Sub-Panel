@@ -1659,3 +1659,25 @@ func TestPollOnce_WiresTheStoredIgnoreList(t *testing.T) {
 		t.Fatalf("state = %q places = %v (%s); the listed address must not be a second country", rec.State, rec.Places, rec.Reason)
 	}
 }
+
+// A relay line's client is seen from the relay's address, so it never adds a
+// place to the person's count: the same two countries that flag through two
+// direct lines stay clean when one of them arrives through a relay line.
+func TestObserveLiveIPs_RelayLineAddressesDoNotCount(t *testing.T) {
+	metrics.Reset()
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}
+	p := domain.DefaultGeoPolicy()
+	p.FlagAfterPolls = 1
+	s := newObserver(geo, &memStreaks{}, p)
+	direct := &domain.PSPClient{UserID: 7, PanelID: 1, NodeID: 3, LineID: domain.DirectLineID, Email: "u7-d@x"}
+	viaRelay := &domain.PSPClient{UserID: 7, PanelID: 1, NodeID: 3, LineID: "r1", Email: "u7-r@x"}
+	ips := func(int64) (map[string][]string, error) {
+		return map[string][]string{"u7-d@x": {"1.1.1.1"}, "u7-r@x": {"2.2.2.2"}}, nil
+	}
+	observe(s, nil, []*domain.PSPClient{direct, viaRelay}, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 0 {
+		t.Fatalf("relay address counted as a second place: flagged=%d", got)
+	}
+}

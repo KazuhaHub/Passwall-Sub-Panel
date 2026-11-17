@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,6 +34,7 @@ type AdminNodeHandler struct {
 	pspClients ports.PSPClientRepo
 	certs      ports.CertificateRepo
 	lines      NodeEditorPreviewer
+	audit      ports.AuditRepo
 }
 
 // NodeEditorPreviewer is group.Service's answers for the node and separator
@@ -129,10 +131,12 @@ type nodeDTO struct {
 	// Relays are the node's transit / 中转 lines; HideDirect drops only the
 	// standalone direct entry. Surfaced so the edit form can
 	// round-trip them. Always present (possibly empty) for real nodes.
-	Relays          []relayLineDTO         `json:"relays"`
-	RouteState      *domain.NodeRouteState `json:"route_state,omitempty"`
-	HideDirect      bool                   `json:"hide_direct"`
-	ShowRelayStatus bool                   `json:"show_relay_status"`
+	Relays          []relayLineDTO `json:"relays"`
+	HideDirect      bool           `json:"hide_direct"`
+	ShowRelayStatus bool           `json:"show_relay_status"`
+	// TrafficFactorMilli is the direct line's traffic multiplier in
+	// thousandths (1000 = one-for-one, 0 = free); each relay carries its own.
+	TrafficFactorMilli int `json:"traffic_factor_milli"`
 	// EgressPanelID is the server the node's traffic leaves from (0: its
 	// own); EgressReady reports that the tunnel runs on both servers, which
 	// is when the node is published.
@@ -162,6 +166,10 @@ type relayLineDTO struct {
 	// ManagedReady is response-only: the entry server confirmed the forward
 	// this managed line asks for, so the line is published.
 	ManagedReady bool `json:"managed_ready,omitempty"`
+	// TrafficFactorMilli is this line's traffic multiplier (0..100000). In a
+	// request, omitted keeps the saved value (a new line is one-for-one);
+	// responses always carry it.
+	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
 }
 
 type inboundDTO struct {
@@ -192,6 +200,8 @@ type importNodeRequest struct {
 	SortOrder  int            `json:"sort_order"`
 	Relays     []relayLineDTO `json:"relays"`
 	HideDirect bool           `json:"hide_direct"`
+	// TrafficFactorMilli is the direct line's multiplier; omitted is 1000.
+	TrafficFactorMilli *int `json:"traffic_factor_milli"`
 }
 
 type realityScanRequest struct {
@@ -212,6 +222,8 @@ type createNodeRequest struct {
 	CertSource    string         `json:"cert_source"`
 	CertID        int64          `json:"cert_id"`
 	Inbound       inboundSpecDTO `json:"inbound" binding:"required"`
+	// TrafficFactorMilli is the direct line's multiplier; omitted is 1000.
+	TrafficFactorMilli *int `json:"traffic_factor_milli"`
 }
 
 type inboundSpecDTO struct {
@@ -244,6 +256,9 @@ type updateMetadataRequest struct {
 	// from, through a tunnel; 0 leaves from its own server. nil (field
 	// absent) leaves it unchanged.
 	EgressPanelID *int64 `json:"egress_panel_id"`
+	// TrafficFactorMilli is the direct line's multiplier; nil (absent) keeps
+	// the saved value. Changes are audited per line.
+	TrafficFactorMilli *int `json:"traffic_factor_milli"`
 }
 
 type setNodeEnabledRequest struct {
@@ -280,7 +295,7 @@ func (h *AdminNodeHandler) List(c *gin.Context) {
 	panelNames := h.loadPanelNames(c.Request.Context())
 	out := make([]nodeDTO, len(nodes))
 	for i, n := range nodes {
-		out[i] = h.toNodeDTO(n, panelNames, false)
+		out[i] = h.toNodeDTO(n, panelNames)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -315,7 +330,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
 		out := gin.H{
-			"node":          h.toNodeDTO(n, panelNames, true),
+			"node":          h.toNodeDTO(n, panelNames),
 			"clients":       []any{},
 			"clients_error": err.Error(),
 		}
@@ -329,7 +344,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		return
 	}
 	out := gin.H{
-		"node":    h.toNodeDTO(n, panelNames, true),
+		"node":    h.toNodeDTO(n, panelNames),
 		"clients": clients,
 	}
 	if inbound != nil {
@@ -515,24 +530,29 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		return
 	}
 	n := &domain.Node{
-		PanelID:         req.PanelID,
-		InboundID:       req.InboundID,
-		DisplayName:     req.DisplayName,
-		ServerAddress:   req.ServerAddress,
-		Flow:            req.Flow,
-		DesiredProtocol: strings.ToLower(req.Protocol),
-		Region:          req.Region,
-		Tags:            req.Tags,
-		SortOrder:       req.SortOrder,
-		Relays:          relays,
-		HideDirect:      req.HideDirect,
+		PanelID:            req.PanelID,
+		InboundID:          req.InboundID,
+		DisplayName:        req.DisplayName,
+		ServerAddress:      req.ServerAddress,
+		Flow:               req.Flow,
+		DesiredProtocol:    strings.ToLower(req.Protocol),
+		Region:             req.Region,
+		Tags:               req.Tags,
+		SortOrder:          req.SortOrder,
+		Relays:             relays,
+		HideDirect:         req.HideDirect,
+		TrafficFactorMilli: req.TrafficFactorMilli,
+	}
+	if req.TrafficFactorMilli != nil && domain.ValidateTrafficFactor(*req.TrafficFactorMilli) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
+		return
 	}
 	if err := h.node.ImportExisting(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames, true))
+	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
 }
 
 func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
@@ -547,16 +567,21 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		return
 	}
 	n := &domain.Node{
-		PanelID:         req.PanelID,
-		DisplayName:     req.DisplayName,
-		ServerAddress:   req.ServerAddress,
-		Flow:            req.Flow,
-		DesiredProtocol: strings.ToLower(req.Inbound.Protocol),
-		Region:          req.Region,
-		Tags:            req.Tags,
-		SortOrder:       req.SortOrder,
-		Relays:          relays,
-		HideDirect:      req.HideDirect,
+		PanelID:            req.PanelID,
+		DisplayName:        req.DisplayName,
+		ServerAddress:      req.ServerAddress,
+		Flow:               req.Flow,
+		DesiredProtocol:    strings.ToLower(req.Inbound.Protocol),
+		Region:             req.Region,
+		Tags:               req.Tags,
+		SortOrder:          req.SortOrder,
+		Relays:             relays,
+		HideDirect:         req.HideDirect,
+		TrafficFactorMilli: req.TrafficFactorMilli,
+	}
+	if req.TrafficFactorMilli != nil && domain.ValidateTrafficFactor(*req.TrafficFactorMilli) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
+		return
 	}
 	spec := ports.InboundSpec{
 		Remark:         req.Inbound.Remark,
@@ -602,7 +627,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames, true))
+	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
 }
 
 func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
@@ -625,6 +650,11 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if err != nil {
 		mapNodeServiceError(c, err)
 		return
+	}
+	before := *n
+	before.Relays = append([]domain.RelayLine(nil), n.Relays...)
+	if req.TrafficFactorMilli != nil {
+		n.TrafficFactorMilli = req.TrafficFactorMilli
 	}
 	if req.DisplayName != "" {
 		n.DisplayName = req.DisplayName
@@ -653,8 +683,84 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
+	h.auditLineFactors(c, node.ChangedLineFactors(&before, n))
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames, true))
+	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames))
+}
+
+const trafficFactorError = "traffic_factor_milli must be between 0 and 100000 (1000 = one-for-one, 0 = free)"
+
+// WithAudit wires the audit log for line traffic factor changes.
+func (h *AdminNodeHandler) WithAudit(audit ports.AuditRepo) *AdminNodeHandler {
+	h.audit = audit
+	return h
+}
+
+// auditLineFactors records each line whose traffic factor changed. A factor
+// is a price: it changes what every user of the line is charged from now on.
+func (h *AdminNodeHandler) auditLineFactors(c *gin.Context, changes []node.AppliedLineFactor) {
+	if h.audit == nil {
+		return
+	}
+	for _, ch := range changes {
+		before, _ := json.Marshal(map[string]any{"node_id": ch.Line.NodeID, "line_id": ch.Line.LineID, "traffic_factor_milli": ch.From})
+		after, _ := json.Marshal(map[string]any{"node_id": ch.Line.NodeID, "line_id": ch.Line.LineID, "traffic_factor_milli": ch.To})
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor:      actorFromGin(c),
+			Action:     "line_traffic_factor_changed",
+			Target:     "node=" + strconv.FormatInt(ch.Line.NodeID, 10) + " line=" + ch.Line.LineID + " name=" + ch.NodeName,
+			BeforeJSON: string(before),
+			AfterJSON:  string(after),
+			IP:         c.ClientIP(),
+			At:         time.Now(),
+		})
+	}
+}
+
+type lineFactorRequest struct {
+	Lines []struct {
+		NodeID             int64  `json:"node_id"`
+		LineID             string `json:"line_id"`
+		TrafficFactorMilli *int   `json:"traffic_factor_milli"`
+	} `json:"lines"`
+}
+
+// SetServerLineFactors is the server page's bulk edit: it sets the factors of
+// the selected lines on one server, all or nothing, and audits each change.
+func (h *AdminNodeHandler) SetServerLineFactors(c *gin.Context) {
+	panelID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	var req lineFactorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.Lines) == 0 || len(req.Lines) > 1000 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "lines must hold between 1 and 1000 entries"})
+		return
+	}
+	changes := make([]node.LineFactorChange, 0, len(req.Lines))
+	for _, l := range req.Lines {
+		if l.TrafficFactorMilli == nil || domain.ValidateTrafficFactor(*l.TrafficFactorMilli) != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
+			return
+		}
+		if l.NodeID <= 0 || l.LineID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "every line needs node_id and line_id (\"direct\" for the node's own line)"})
+			return
+		}
+		changes = append(changes, node.LineFactorChange{Line: domain.LineKey{NodeID: l.NodeID, LineID: l.LineID}, FactorMilli: *l.TrafficFactorMilli})
+	}
+	applied, err := h.node.SetLineFactors(c.Request.Context(), panelID, changes)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	h.auditLineFactors(c, applied)
+	c.JSON(http.StatusOK, gin.H{"changed": len(applied)})
 }
 
 func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
@@ -1018,6 +1124,11 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			Host:         strings.TrimSpace(d.Host),
 			Enabled:      d.Enabled,
 			EntryPanelID: d.EntryPanelID,
+			// nil keeps the saved factor (resolved by the node service).
+			TrafficFactorMilli: d.TrafficFactorMilli,
+		}
+		if d.TrafficFactorMilli != nil && domain.ValidateTrafficFactor(*d.TrafficFactorMilli) != nil {
+			return nil, fmt.Errorf("relay line %d: %s", i+1, trafficFactorError)
 		}
 		if d.EntryPanelID < 0 {
 			return nil, fmt.Errorf("relay line %d: invalid entry server", i+1)
@@ -1046,33 +1157,30 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
 	for _, r := range relays {
 		region, tags := r.Region, domain.CopyLineTags(r.Tags)
 		out = append(out, relayLineDTO{
-			ID:           r.ID,
-			Name:         r.Name,
-			OnlyLineName: r.OnlyLineName,
-			Address:      r.Address,
-			Port:         r.Port,
-			SNI:          r.SNI,
-			Host:         r.Host,
-			Enabled:      r.Enabled,
-			Region:       &region,
-			Tags:         &tags,
-			EntryPanelID: r.EntryPanelID,
-			ManagedReady: r.Managed() && r.ManagedReady,
+			ID:                 r.ID,
+			Name:               r.Name,
+			OnlyLineName:       r.OnlyLineName,
+			Address:            r.Address,
+			Port:               r.Port,
+			SNI:                r.SNI,
+			Host:               r.Host,
+			Enabled:            r.Enabled,
+			Region:             &region,
+			Tags:               &tags,
+			EntryPanelID:       r.EntryPanelID,
+			ManagedReady:       r.Managed() && r.ManagedReady,
+			TrafficFactorMilli: ptrInt(r.EffectiveTrafficFactor()),
 		})
 	}
 	return out
 }
 
-func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string, includeRouteState bool) nodeDTO {
+func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string) nodeDTO {
 	// Panel name is resolved from the in-memory pool snapshot (panelNames map)
 	// rather than from the DB row — the v3 schema dropped the redundant
 	// panel_name column on nodes since renaming a panel would otherwise leave
 	// every historical row stale.
 	panelName := panelNames[n.PanelID]
-	var routeState *domain.NodeRouteState
-	if includeRouteState {
-		routeState = routeStateDTO(n.RouteState)
-	}
 	return nodeDTO{
 		ID:                 n.ID,
 		PanelID:            n.PanelID,
@@ -1101,20 +1209,12 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		CertSource:         string(n.CertSource),
 		CertID:             n.CertID,
 		Relays:             relayDTOs(n.Relays),
-		RouteState:         routeState,
 		HideDirect:         n.HideDirect,
+		TrafficFactorMilli: n.EffectiveTrafficFactor(),
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 		EgressPanelID:      n.EgressPanelID,
 		EgressReady:        n.EgressPanelID != 0 && n.EgressReady,
 	}
-}
-
-func routeStateDTO(state domain.NodeRouteState) *domain.NodeRouteState {
-	if state.Revision == 0 && len(state.Lines) == 0 {
-		return nil
-	}
-	visible := state.Visible()
-	return &visible
 }
 
 func toInboundDTO(inb *ports.Inbound) inboundDTO {
@@ -1172,21 +1272,19 @@ func mapNodeServiceError(c *gin.Context, err error) {
 }
 
 // lineVisibilityRequest is the node editor's unsaved state: the node's own
-// labels and each line's labels in editor order. Only labels and the route
-// lines' entry relay matter for visibility; nothing here is stored.
+// labels and each line's labels in editor order. Only labels matter for
+// visibility; nothing here is stored.
 type lineVisibilityRequest struct {
 	ServerAddress string               `json:"server_address"`
 	Region        string               `json:"region"`
 	Tags          []string             `json:"tags"`
 	Relays        []lineVisibilityLine `json:"relays"`
-	Routes        []lineVisibilityLine `json:"routes"`
 }
 
 type lineVisibilityLine struct {
-	ID           string   `json:"id,omitempty"`
-	EntryRelayID string   `json:"entry_relay_id,omitempty"`
-	Region       string   `json:"region"`
-	Tags         []string `json:"tags"`
+	ID     string   `json:"id,omitempty"`
+	Region string   `json:"region"`
+	Tags   []string `json:"tags"`
 }
 
 type lineVisibilityGroup struct {
@@ -1195,7 +1293,7 @@ type lineVisibilityGroup struct {
 }
 
 // lineVisibilityResponse lists every group once; node_groups are the groups
-// that pass the node and relays[i] / routes[i] the groups that would see the
+// that pass the node and relays[i] the groups that would see the
 // i-th draft line. An empty list means "no group", never "unknown": a failed
 // read is an error response instead.
 type lineVisibilityResponse struct {
@@ -1205,7 +1303,6 @@ type lineVisibilityResponse struct {
 	// name the groups this save would remove the node from (ADR 0042 §2).
 	SavedNodeGroups []int64   `json:"saved_node_groups"`
 	Relays          [][]int64 `json:"relays"`
-	Routes          [][]int64 `json:"routes"`
 }
 
 // PreviewLineVisibility answers POST /admin/nodes/:id/line-visibility. It
@@ -1225,8 +1322,8 @@ func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if len(req.Relays) > maxRelayLines || len(req.Routes) > maxRelayLines {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("at most %d lines of each kind", maxRelayLines)})
+	if len(req.Relays) > maxRelayLines {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("at most %d relay lines", maxRelayLines)})
 		return
 	}
 	stored, err := h.node.Get(c.Request.Context(), id)
@@ -1254,15 +1351,6 @@ func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
 		}
 		draft.Relays[i] = domain.RelayLine{ID: strings.TrimSpace(line.ID), Region: region, Tags: tags}
 	}
-	draft.RouteState.Lines = make([]domain.VlessRouteLine, len(req.Routes))
-	for i, line := range req.Routes {
-		region, tags, err := normalizeLineLabels(line)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("routing line %d: %v", i+1, err)})
-			return
-		}
-		draft.RouteState.Lines[i] = domain.VlessRouteLine{ID: strings.TrimSpace(line.ID), EntryRelayID: strings.TrimSpace(line.EntryRelayID), Region: region, Tags: tags}
-	}
 	result, err := h.lines.PreviewLineVisibility(c.Request.Context(), &draft)
 	if err != nil {
 		respondError(c, err)
@@ -1273,7 +1361,7 @@ func (h *AdminNodeHandler) PreviewLineVisibility(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	out := lineVisibilityResponse{Groups: make([]lineVisibilityGroup, 0, len(result.Groups)), NodeGroups: result.NodeGroups, SavedNodeGroups: saved, Relays: result.Relays, Routes: result.Routes}
+	out := lineVisibilityResponse{Groups: make([]lineVisibilityGroup, 0, len(result.Groups)), NodeGroups: result.NodeGroups, SavedNodeGroups: saved, Relays: result.Relays}
 	for _, g := range result.Groups {
 		out.Groups = append(out.Groups, lineVisibilityGroup{ID: g.ID, Name: g.Name})
 	}
@@ -1338,3 +1426,5 @@ func (h *AdminNodeHandler) PreviewSeparatorGroups(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+func ptrInt(v int) *int { return &v }

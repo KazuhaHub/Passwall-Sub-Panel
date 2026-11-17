@@ -18,13 +18,23 @@ import (
 // The non-unique (panel_id,email) index keeps upstream observation lookups fast
 // without letting a rendered email decide whether a local row survives.
 type pspClientRow struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	UserID    int64  `gorm:"index;not null"`
-	PanelID   int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1"`
-	Email     string `gorm:"size:255;not null;index:idx_psp_client_panel_email,priority:2"`
-	CredClass int    `gorm:"not null;default:0"`
-	UUID      string `gorm:"size:36;not null;default:''"`
-	Password  string `gorm:"size:128;not null;default:''"`
+	ID     int64 `gorm:"primaryKey;autoIncrement"`
+	UserID int64 `gorm:"index;not null;uniqueIndex:uk_psp_client_line,priority:1"`
+	// NodeID / LineID: the subscription line this row is the client of (ADR
+	// 0043), unique per user. NULL on a legacy row (several NULLs never
+	// collide in a unique index on any of the three databases).
+	NodeID *int64  `gorm:"uniqueIndex:uk_psp_client_line,priority:2"`
+	LineID *string `gorm:"size:128;uniqueIndex:uk_psp_client_line,priority:3"`
+	// UUIDKey is the UUID in domain.LineUUIDKey form, indexed so a derived
+	// line identity can be checked for uniqueness on its listener.
+	UUIDKey string `gorm:"column:uuid_key;size:32;not null;default:'';index"`
+	// LastFactorMilli: the line's traffic factor at the last booking.
+	LastFactorMilli *int   `gorm:"not null;default:1000"`
+	PanelID         int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1"`
+	Email           string `gorm:"size:255;not null;index:idx_psp_client_panel_email,priority:2"`
+	CredClass       int    `gorm:"not null;default:0"`
+	UUID            string `gorm:"size:36;not null;default:''"`
+	Password        string `gorm:"size:128;not null;default:''"`
 
 	DesiredEnable      bool  `gorm:"not null;default:false"`
 	DesiredExpiryTime  int64 `gorm:"not null;default:0"`
@@ -98,7 +108,28 @@ func pspClientToRow(c *domain.PSPClient) pspClientRow {
 		PeriodBaselineDownBytes:  c.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: c.PeriodBaselineTotalBytes,
 		ChargedLifetimeBytes:     c.ChargedLifetimeBytes,
+		NodeID:                   lineNodeColumn(c),
+		LineID:                   lineIDColumn(c),
+		UUIDKey:                  domain.LineUUIDKey(c.UUID),
+		LastFactorMilli:          c.LastFactorMilli,
 	}
+}
+
+// lineNodeColumn / lineIDColumn store a legacy row's missing line as NULL.
+func lineNodeColumn(c *domain.PSPClient) *int64 {
+	if _, ok := c.Line(); !ok {
+		return nil
+	}
+	v := c.NodeID
+	return &v
+}
+
+func lineIDColumn(c *domain.PSPClient) *string {
+	if _, ok := c.Line(); !ok {
+		return nil
+	}
+	v := c.LineID
+	return &v
 }
 
 func rowToPSPClient(r *pspClientRow) *domain.PSPClient {
@@ -128,7 +159,17 @@ func rowToPSPClient(r *pspClientRow) *domain.PSPClient {
 		PeriodBaselineDownBytes:  r.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: r.PeriodBaselineTotalBytes,
 		ChargedLifetimeBytes:     r.ChargedLifetimeBytes,
+		NodeID:                   derefInt64(r.NodeID),
+		LineID:                   derefString(r.LineID),
+		LastFactorMilli:          r.LastFactorMilli,
 	}
+}
+
+func derefInt64(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func (r *pspClientRepo) UpdateDesiredLifecycleByUser(ctx context.Context, userID int64, lifecycle domain.UserLifecycle) error {
@@ -183,8 +224,69 @@ func (r *pspClientRepo) UpdateDefinition(ctx context.Context, c *domain.PSPClien
 			"email":      c.Email,
 			"cred_class": c.CredClass,
 			"uuid":       c.UUID,
+			"uuid_key":   domain.LineUUIDKey(c.UUID),
 			"password":   c.Password,
+			// A legacy row adopted as a line gains its line here; a row that
+			// already has one keeps it (the planner matches by line).
+			"node_id": lineNodeColumn(c),
+			"line_id": lineIDColumn(c),
 		}).Error
+}
+
+// DetachedClientIDs lists the rows with no psp_client_inbounds attachment.
+func (r *pspClientRepo) DetachedClientIDs(ctx context.Context) (map[int64]bool, error) {
+	var ids []int64
+	err := r.db.WithContext(ctx).Table("psp_clients AS c").
+		Where("NOT EXISTS (SELECT 1 FROM psp_client_inbounds AS i WHERE i.client_id = c.id)").
+		Pluck("c.id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
+// CountAttachedClientsByPanel counts, per server, the client rows that are
+// attached to at least one listener there.
+func (r *pspClientRepo) CountAttachedClientsByPanel(ctx context.Context) (map[int64]int64, error) {
+	var rows []struct {
+		PanelID int64
+		N       int64
+	}
+	err := r.db.WithContext(ctx).Table("psp_clients AS c").
+		Select("c.panel_id AS panel_id, COUNT(*) AS n").
+		Where("EXISTS (SELECT 1 FROM psp_client_inbounds AS i WHERE i.client_id = c.id)").
+		Group("c.panel_id").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.PanelID] = row.N
+	}
+	return out, nil
+}
+
+// DeleteIfDetached deletes a row only while it has no attachment, in one
+// statement, so a resync that re-attaches it concurrently wins.
+func (r *pspClientRepo) DeleteIfDetached(ctx context.Context, id int64) error {
+	return r.db.WithContext(ctx).
+		Where("id = ? AND NOT EXISTS (SELECT 1 FROM psp_client_inbounds AS i WHERE i.client_id = psp_clients.id)", id).
+		Delete(&pspClientRow{}).Error
+}
+
+// LineUUIDTaken reports whether another client attached to the listener of
+// nodeID holds uuidKey (domain.LineUUIDKey form).
+func (r *pspClientRepo) LineUUIDTaken(ctx context.Context, nodeID int64, uuidKey string, exceptClientID int64) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Table("psp_clients AS c").
+		Joins("JOIN psp_client_inbounds AS i ON i.client_id = c.id").
+		Where("i.node_id = ? AND c.uuid_key = ? AND c.id <> ?", nodeID, uuidKey, exceptClientID).
+		Count(&n).Error
+	return n > 0, err
 }
 
 func (r *pspClientRepo) GetByID(ctx context.Context, id int64) (*domain.PSPClient, error) {
@@ -407,6 +509,7 @@ func pspClientCounterMap(c *domain.PSPClient) map[string]any {
 		"period_baseline_down_bytes":  c.PeriodBaselineDownBytes,
 		"period_baseline_total_bytes": c.PeriodBaselineTotalBytes,
 		"charged_lifetime_bytes":      c.ChargedLifetimeBytes,
+		"last_factor_milli":           c.LastFactor(),
 	}
 }
 
@@ -439,4 +542,7 @@ func (r *pspClientRepo) BatchUpdateCounters(ctx context.Context, items []*domain
 	})
 }
 
-var _ ports.PSPClientRepo = (*pspClientRepo)(nil)
+var (
+	_ ports.PSPClientRepo   = (*pspClientRepo)(nil)
+	_ ports.LineUUIDChecker = (*pspClientRepo)(nil)
+)

@@ -5,14 +5,14 @@ import (
 	"math"
 )
 
-// Per-server traffic multiplier.
+// Per-line traffic multiplier (ADR 0043).
 //
-// A server's factor says how many bytes a user is CHARGED for each byte they
-// move through that server, in thousandths: 1000 is one-for-one, 1500 charges
-// half again, 500 charges half, and 0 makes the server free. It belongs to the
-// ENTRY server because that is the only granularity the data has: a user holds
-// one client counter per server, so relay lines and nodes on the same server
-// cannot be told apart.
+// A line's factor says how many bytes a user is CHARGED for each byte they
+// move through it, in thousandths: 1000 is one-for-one, 1500 charges half
+// again, 500 charges half, and 0 makes the line free. It is set on the line —
+// a node's direct line, or one of its relay lines — and applies to whatever
+// passes through that line, whichever servers it crosses. Each line has its own
+// client identity and counter, so its traffic can be told apart.
 //
 // The factor is applied once, when a poll books a delta: the user's quota
 // ledger (lifetime, period and emergency baselines) holds charged bytes, and
@@ -35,14 +35,40 @@ func ValidateTrafficFactor(milli int) error {
 	return nil
 }
 
-// EffectiveTrafficFactor is the factor this server charges at. A definition
-// that never carried one (nil) is one-for-one, so a panel built in code or by a
-// test double without the field behaves exactly as before the multiplier.
-func (p *Panel) EffectiveTrafficFactor() int {
-	if p == nil || p.TrafficFactorMilli == nil {
+// EffectiveTrafficFactor is the factor of the node's direct line. A node that
+// never carried one (nil) is one-for-one.
+func (n *Node) EffectiveTrafficFactor() int {
+	if n == nil {
 		return TrafficFactorDefault
 	}
-	return clampFactor(*p.TrafficFactorMilli)
+	return factorOrDefault(n.TrafficFactorMilli)
+}
+
+// EffectiveTrafficFactor is the relay line's factor; absent is one-for-one.
+func (r RelayLine) EffectiveTrafficFactor() int { return factorOrDefault(r.TrafficFactorMilli) }
+
+func factorOrDefault(milli *int) int {
+	if milli == nil {
+		return TrafficFactorDefault
+	}
+	return clampFactor(*milli)
+}
+
+// LineFactors indexes the factor of every line of the given nodes.
+func LineFactors(nodes []*Node) map[LineKey]int {
+	out := make(map[LineKey]int, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		out[DirectLine(n.ID)] = n.EffectiveTrafficFactor()
+		for _, r := range n.Relays {
+			if r.ID != "" {
+				out[LineKey{NodeID: n.ID, LineID: r.ID}] = r.EffectiveTrafficFactor()
+			}
+		}
+	}
+	return out
 }
 
 func clampFactor(milli int) int {
@@ -55,14 +81,19 @@ func clampFactor(milli int) int {
 	return milli
 }
 
-// TrafficFactorOf looks a server's factor up in a map read once per pass. A
-// server missing from the map is one-for-one.
-func TrafficFactorOf(factors map[int64]int, panelID int64) int {
-	milli, ok := factors[panelID]
+// ClientTrafficFactor is the factor a client row is booked at: its line's
+// current factor; the factor it was last booked at when its line no longer
+// exists (a delta that arrives after a line was deleted keeps the line's last
+// price); one-for-one for a legacy row without a line.
+func ClientTrafficFactor(factors map[LineKey]int, c *PSPClient) int {
+	line, ok := c.Line()
 	if !ok {
 		return TrafficFactorDefault
 	}
-	return clampFactor(milli)
+	if milli, found := factors[line]; found {
+		return clampFactor(milli)
+	}
+	return c.LastFactor()
 }
 
 // ChargeBytes is raw bytes weighted by a factor in thousandths, rounded half

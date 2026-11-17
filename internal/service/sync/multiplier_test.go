@@ -1,21 +1,28 @@
 package sync
 
 import (
+	"context"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type factorPool struct {
-	fakePool
-	factor int
+type factorNodeRepo struct {
+	ports.NodeRepo
+	node *domain.Node
 }
 
-func (p *factorPool) TrafficFactorOf(int64) (int, bool) { return p.factor, true }
+func (r factorNodeRepo) GetByPanelInbound(context.Context, int64, int) (*domain.Node, error) {
+	if r.node == nil {
+		return nil, domain.ErrNotFound
+	}
+	return r.node, nil
+}
 
-// The legacy per-node push converts the charged headroom into the panel's raw
-// bytes before rebasing onto its counter.
-func TestPanelWantConvertsHeadroomThroughServerFactor(t *testing.T) {
+// A legacy per-node client is its node's direct line: the charged headroom is
+// converted through that line's factor before the rebase onto its counter.
+func TestPanelWantConvertsHeadroomThroughDirectLineFactor(t *testing.T) {
 	for _, tc := range []struct {
 		factor   int
 		headroom int64
@@ -26,13 +33,15 @@ func TestPanelWantConvertsHeadroomThroughServerFactor(t *testing.T) {
 		{0, 3000, 0},
 		{0, 1, 1},
 	} {
-		svc := New(&factorPool{factor: tc.factor}, nil)
-		got := svc.panelWant(10, domain.UserLifecycle{QuotaHeadroom: tc.headroom})
+		f := tc.factor
+		svc := New(&fakePool{}, nil)
+		svc.SetNodeRepo(factorNodeRepo{node: &domain.Node{ID: 1, TrafficFactorMilli: &f}})
+		got := svc.panelWant(context.Background(), 10, 20, domain.UserLifecycle{QuotaHeadroom: tc.headroom})
 		if got.QuotaHeadroom != tc.want {
 			t.Errorf("factor %d headroom %d: raw headroom = %d, want %d", tc.factor, tc.headroom, got.QuotaHeadroom, tc.want)
 		}
-		if spec := buildClientSpec(domain.ProtoVLESS, "", "u", "e", "", got, 500); tc.want > 0 && spec.TotalGB != 500+tc.want {
-			t.Errorf("factor %d: totalGB = %d, want %d", tc.factor, spec.TotalGB, 500+tc.want)
-		}
+	}
+	if got := New(&fakePool{}, nil).panelWant(context.Background(), 10, 20, domain.UserLifecycle{QuotaHeadroom: 3000}); got.QuotaHeadroom != 3000 {
+		t.Fatalf("no node repo: %d", got.QuotaHeadroom)
 	}
 }

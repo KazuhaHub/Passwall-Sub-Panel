@@ -360,7 +360,9 @@ type userServerUsageRow struct {
 	// The byte counts above are raw. traffic_factor_milli is the server's
 	// current factor (1000 = one-for-one); charged_* are what the user's quota
 	// was charged.
-	TrafficFactorMilli   int   `json:"traffic_factor_milli"`
+	// traffic_factor_milli is null when the user's lines on this server are
+	// priced differently.
+	TrafficFactorMilli   *int  `json:"traffic_factor_milli"`
 	ChargedLifetimeBytes int64 `json:"charged_lifetime_bytes"`
 	ChargedPeriodBytes   int64 `json:"charged_period_bytes"`
 }

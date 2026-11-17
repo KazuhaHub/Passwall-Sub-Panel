@@ -13,11 +13,6 @@ import (
 
 type xuiPanelRepo struct{ db *gorm.DB }
 
-var (
-	_ ports.TrafficFactorReader = (*xuiPanelRepo)(nil)
-	_ ports.TrafficFactorWriter = (*xuiPanelRepo)(nil)
-)
-
 func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 	var rows []xuiPanelRow
 	if err := r.db.WithContext(ctx).Order("id ASC").Find(&rows).Error; err != nil {
@@ -97,11 +92,6 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 	if err != nil {
 		return err
 	}
-	if p.TrafficFactorMilli != nil {
-		if err := domain.ValidateTrafficFactor(*p.TrafficFactorMilli); err != nil {
-			return err
-		}
-	}
 	db := r.db.WithContext(ctx)
 	if row.ID == 0 {
 		err = db.Create(row).Error
@@ -114,9 +104,8 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 		// audit_collect is omitted too: it is a recording choice with its own
 		// narrow writer (UpdateNativeMetadata), and the whole-row save of an
 		// admin editing credentials carries whatever the form read earlier.
-		// dest_resolve is omitted for the same reason, and so is the traffic
-		// factor (UpdateTrafficFactor), which the row carries as nil here.
-		err = db.Omit("CreatedAt", "AuditCollect", "DestResolve", "TrafficFactorMilli").Save(row).Error
+		// dest_resolve is omitted for the same reason.
+		err = db.Omit("CreatedAt", "AuditCollect", "DestResolve").Save(row).Error
 	}
 	if err != nil {
 		return err
@@ -273,48 +262,4 @@ func (r *xuiPanelRepo) UpdateIPLimitEnforcement(ctx context.Context, panelID int
 			"ip_limit_enforcement": string(state),
 			"ip_limit_probed_at":   probedAt,
 		}).Error
-}
-
-// UpdateTrafficFactor is the only writer of a server's traffic factor. It is
-// column-scoped for the same reason as UpdateNativeMetadata: the whole-row Save
-// of an admin editing credentials carries whatever the form read earlier, and
-// a stale factor written back would silently re-price everything booked after.
-func (r *xuiPanelRepo) UpdateTrafficFactor(ctx context.Context, id int64, milli int) error {
-	if id <= 0 {
-		return fmt.Errorf("%w: invalid server id", domain.ErrValidation)
-	}
-	if err := domain.ValidateTrafficFactor(milli); err != nil {
-		return err
-	}
-	db := r.db.WithContext(ctx)
-	result := db.Model(&xuiPanelRow{}).Where("id = ?", id).Update("traffic_factor_milli", milli)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		// MySQL reports zero changed rows for a no-op write; tell that apart
-		// from a missing row.
-		var current xuiPanelRow
-		if err := db.Select("id").First(&current, id).Error; err != nil {
-			return wrapNotFound(err)
-		}
-	}
-	return nil
-}
-
-// TrafficFactors reads every server's factor in one query, for a traffic poll
-// or a directive build that needs them all at once.
-func (r *xuiPanelRepo) TrafficFactors(ctx context.Context) (map[int64]int, error) {
-	var rows []struct {
-		ID                 int64
-		TrafficFactorMilli int
-	}
-	if err := r.db.WithContext(ctx).Model(&xuiPanelRow{}).Select("id, traffic_factor_milli").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make(map[int64]int, len(rows))
-	for _, row := range rows {
-		out[row.ID] = row.TrafficFactorMilli
-	}
-	return out, nil
 }

@@ -57,10 +57,7 @@ func TestLineLabelBackfillByKeyPresence(t *testing.T) {
 	relays := `[{"ID":"a","Name":"old","Address":"relay.example","Enabled":true},` +
 		`{"ID":"b","Address":"cleared.example","Enabled":true,"Region":"","Tags":[]},` +
 		`{"ID":"c","Address":"half.example","Enabled":true,"Region":"JP"}]`
-	route := `{"revision":4,"lines":[{"id":"v1","name":"old","outbound_tag":"direct","route":1,"enabled":true},` +
-		`{"id":"v2","outbound_tag":"direct","route":2,"enabled":true,"region":"","tags":[]},` +
-		`{"id":"v3","outbound_tag":"direct","route":3,"deleted":true}],"status":"applied","binding":"keep"}`
-	if err := r.db.Table("nodes").Where("id = ?", n.ID).Updates(map[string]any{"relays": relays, "route_state": route, "route_revision": 4}).Error; err != nil {
+	if err := r.db.Table("nodes").Where("id = ?", n.ID).Updates(map[string]any{"relays": relays}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := backfillLineLabels(r.db); err != nil {
@@ -80,15 +77,8 @@ func TestLineLabelBackfillByKeyPresence(t *testing.T) {
 	if c := got.Relays[2]; c.Region != "JP" || !reflect.DeepEqual(c.Tags, nodeTags) {
 		t.Fatalf("only the missing key may be filled: %+v", c)
 	}
-	lines := got.RouteState.Lines
-	if lines[0].Region != "HK" || !reflect.DeepEqual(lines[0].Tags, nodeTags) || lines[1].Region != "" || len(lines[1].Tags) != 0 || lines[2].Region != "HK" {
-		t.Fatalf("route lines: %+v", lines)
-	}
-	if got.RouteState.Revision != 4 || got.RouteState.Status != "applied" || got.RouteState.Binding != "keep" {
-		t.Fatalf("backfill touched route state metadata: %+v", got.RouteState)
-	}
-	var stored struct{ Relays, RouteState string }
-	if err := r.db.Table("nodes").Select("relays, route_state").Where("id = ?", n.ID).Scan(&stored).Error; err != nil {
+	var stored struct{ Relays string }
+	if err := r.db.Table("nodes").Select("relays").Where("id = ?", n.ID).Scan(&stored).Error; err != nil {
 		t.Fatal(err)
 	}
 	// Idempotent: the second start changes nothing, even after the node moves on.
@@ -98,8 +88,8 @@ func TestLineLabelBackfillByKeyPresence(t *testing.T) {
 	if err := backfillLineLabels(r.db); err != nil {
 		t.Fatal(err)
 	}
-	var again struct{ Relays, RouteState string }
-	if err := r.db.Table("nodes").Select("relays, route_state").Where("id = ?", n.ID).Scan(&again).Error; err != nil {
+	var again struct{ Relays string }
+	if err := r.db.Table("nodes").Select("relays").Where("id = ?", n.ID).Scan(&again).Error; err != nil {
 		t.Fatal(err)
 	}
 	if again != stored {
@@ -150,10 +140,6 @@ func TestStorageRejectsUnresolvedLineLabels(t *testing.T) {
 	n.Relays = nil
 	if err := r.Create(ctx, n); err != nil {
 		t.Fatal(err)
-	}
-	state := &domain.NodeRouteState{Lines: []domain.VlessRouteLine{{ID: "v", OutboundTag: "direct", TagsUnresolved: true}}}
-	if err := r.SaveRouteState(ctx, n.ID, 0, state); !errors.Is(err, domain.ErrUnresolvedLineLabels) {
-		t.Fatalf("unresolved route line stored: %v", err)
 	}
 	stored, err := jsonRelays{{ID: "a", Address: "x"}}.Value()
 	if err != nil || !strings.Contains(stored.(string), `"Region":""`) || !strings.Contains(stored.(string), `"Tags":[]`) {

@@ -100,27 +100,3 @@ func TestValidateTrafficFactor(t *testing.T) {
 		}
 	}
 }
-
-func TestEffectiveTrafficFactor(t *testing.T) {
-	zero, half := 0, 500
-	cases := []struct {
-		panel *Panel
-		want  int
-	}{
-		{nil, TrafficFactorDefault},
-		{&Panel{}, TrafficFactorDefault}, // a definition without the field is one-for-one
-		{&Panel{TrafficFactorMilli: &zero}, 0},
-		{&Panel{TrafficFactorMilli: &half}, 500},
-	}
-	for _, c := range cases {
-		if got := c.panel.EffectiveTrafficFactor(); got != c.want {
-			t.Errorf("EffectiveTrafficFactor(%+v) = %d, want %d", c.panel, got, c.want)
-		}
-	}
-	if got := TrafficFactorOf(map[int64]int{7: 0}, 7); got != 0 {
-		t.Errorf("TrafficFactorOf free = %d", got)
-	}
-	if got := TrafficFactorOf(map[int64]int{7: 0}, 8); got != TrafficFactorDefault {
-		t.Errorf("TrafficFactorOf missing = %d", got)
-	}
-}

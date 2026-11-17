@@ -70,6 +70,6 @@
   "traffic_factor": {
     "free": "不计流量",
     "badge_title": "流量倍率 ×{{factor}}",
-    "free_title": "此服务器的流量不计入配额"
+    "free_title": "此线路的流量不计入配额"
   }
 }

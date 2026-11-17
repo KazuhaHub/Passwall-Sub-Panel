@@ -24,15 +24,15 @@ func (r filterGroupRepo) GetByID(context.Context, int64) (*domain.Group, error) 
 	return &domain.Group{ID: 1, TagFilter: r.filter}, nil
 }
 
-// Node "A" (US / edge) with relay "A R" (JP / cmcc) and route line "A B"
+// Node "A" (US / edge) with relay "A R" (JP / cmcc) and visible relay "A B"
 // (US / edge); the group asks for region:US.
 func lineVisibilityFixture(t *testing.T, filter ...string) (*Service, *domain.Node, *domain.User, *domain.RuleSet) {
 	t.Helper()
 	s, n, u, rule := referenceRenderFixture(t)
 	u.GroupID = 1
 	n.Region, n.Tags = "US", []string{"edge"}
-	n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "JP", Tags: []string{"cmcc"}}}
-	n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
+	n.Relays[0].Region, n.Relays[0].Tags = "US", []string{"edge"}
+	n.Relays = append(n.Relays, domain.RelayLine{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "JP", Tags: []string{"cmcc"}})
 	if len(filter) == 0 {
 		filter = []string{"region:US"}
 	}
@@ -133,18 +133,5 @@ func TestTemplatePlaceholdersSkipHiddenLines(t *testing.T) {
 	}
 	if strings.Contains(string(output.Body), "A R") {
 		t.Fatalf("@all expanded a hidden line:\n%s", output.Body)
-	}
-}
-
-func TestRouteLineThroughHiddenRelayIsHidden(t *testing.T) {
-	s, n, u, rule := lineVisibilityFixture(t)
-	n.RouteState.Lines[0].EntryRelayID = "relay"
-	rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node_set", Value: "remaining"}}
-	names := renderedNames(t, s, u, domain.ClientMihomo)
-	if names["A B"] || names["A R"] {
-		t.Fatalf("a route line exposed its hidden entry relay: %v", names)
-	}
-	if !names["A"] {
-		t.Fatalf("direct entry lost: %v", names)
 	}
 }

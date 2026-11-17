@@ -628,25 +628,6 @@ type PanelKindResolver interface {
 	KindOf(panelID int64) (domain.PanelKind, bool)
 }
 
-// PanelTrafficFactorResolver is an optional pool capability: the traffic
-// factor of a registered panel, as last registered (boot, or the admin edit
-// that re-registers it). Only the panel-side quota safety net reads it; the
-// traffic poll and native directives read the factor from the database.
-type PanelTrafficFactorResolver interface {
-	TrafficFactorOf(panelID int64) (int, bool)
-}
-
-// PanelTrafficFactor is a panel's traffic factor through the pool, one-for-one
-// when the pool cannot tell.
-func PanelTrafficFactor(pool PanelPool, panelID int64) int {
-	if r, ok := pool.(PanelTrafficFactorResolver); ok {
-		if milli, found := r.TrafficFactorOf(panelID); found {
-			return milli
-		}
-	}
-	return domain.TrafficFactorDefault
-}
-
 // XUIPool is a source-compatibility alias for the generic pool contract.
 type XUIPool = PanelPool
 

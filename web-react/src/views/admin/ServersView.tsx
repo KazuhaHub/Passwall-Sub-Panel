@@ -1,6 +1,4 @@
 import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
-import { DEFAULT_TRAFFIC_FACTOR_MILLI, factorTextToMilli, hasCustomFactor, milliToFactorText } from '@/utils/trafficFactor'
-import { TrafficFactorBadge } from '@/components/TrafficFactorBadge'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import NodeMetricsDialog from './NodeMetricsDialog'
@@ -26,6 +24,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -72,6 +71,8 @@ import InsightsIcon from '@mui/icons-material/Insights'
 import UpgradeIcon from '@mui/icons-material/UploadOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import TroubleshootIcon from '@mui/icons-material/Troubleshoot'
+import PercentIcon from '@mui/icons-material/Percent'
+import { LineMultipliersDialog } from './LineMultipliersDialog'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -155,8 +156,6 @@ interface FormState {
   remark: string
   auth_method: XUIAuthMethod
   insecure_https: boolean
-  /** Multiplier as typed (decimal text); converted to milli on submit. */
-  traffic_factor: string
   change_api_token: boolean
   change_password: boolean
   show_api_token: boolean
@@ -168,7 +167,6 @@ const EMPTY_FORM: FormState = {
   panel_type: 'psp',
   update_channel: 'stable',
   auth_method: 'token', insecure_https: false,
-  traffic_factor: '1',
   change_api_token: false, change_password: false,
   show_api_token: false, show_password: false,
 }
@@ -241,6 +239,7 @@ export default function ServersView() {
 	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
   const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
   const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
+  const [lineFactorsTarget, setLineFactorsTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -731,7 +730,6 @@ export default function ServersView() {
       remark: s.remark ?? '',
       auth_method: s.auth_method ?? 'token',
       insecure_https: !!s.insecure_https,
-      traffic_factor: milliToFactorText(s.traffic_factor_milli),
     })
     setFieldErr({})
     setMetadataDetailsOpen(false)
@@ -764,10 +762,6 @@ export default function ServersView() {
     setFieldErr(errs)
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
-    const factorMilli = factorTextToMilli(form.traffic_factor)
-    if (factorMilli === null) { pushSnack(t('admin:servers.validate.traffic_factor'), 'warning'); return }
-    // On update, send the factor only when it changed (omitted = keep).
-    const factorChanged = !editing || factorMilli !== (editing.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI)
     setBusy(true)
     try {
 		let continueInstallation = false
@@ -783,16 +777,14 @@ export default function ServersView() {
 					auth_method: form.auth_method,
 					insecure_https: form.insecure_https,
 				}
-			if (factorChanged) req.traffic_factor_milli = factorMilli
 			if (editing.panel_type !== 'psp' && form.change_api_token) req.api_token = form.api_token
 			if (editing.panel_type !== 'psp' && form.change_password) req.password = form.password
         const saved = await updateServer(editing.id, req)
         mutateItems(prev => prev.map(server => server.id === saved.id ? saved : server))
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
-			const createFactor = factorMilli === DEFAULT_TRAFFIC_FACTOR_MILLI ? {} : { traffic_factor_milli: factorMilli }
 			const created = await createServer(form.panel_type === 'psp'
-				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined, update_channel: form.update_channel, ...createFactor }
+				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined, update_channel: form.update_channel }
 				: {
 					name: form.name, url: form.url,
 					panel_type: form.panel_type,
@@ -802,7 +794,6 @@ export default function ServersView() {
 					remark: form.remark || undefined,
 					auth_method: form.auth_method,
 					insecure_https: form.insecure_https,
-					...createFactor,
 				})
 			if ('server' in created) {
           openNativeInstallation(created.server, created, true)
@@ -1586,7 +1577,19 @@ export default function ServersView() {
                       onChange={(_, c) => toggleOne(s.id, c)}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}{hasCustomFactor(s.traffic_factor_milli) && <TrafficFactorBadge milli={s.traffic_factor_milli} sx={{ ml: 0.75 }} />}</TableCell>
+                  <TableCell sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}
+                    {s.client_identities_warning && (
+                      <Tooltip title={t('admin:servers.identities.warning_tip')}>
+                        <Chip size="small" color="warning" variant="outlined" data-testid="client-identities-warning"
+                          label={t('admin:servers.identities.warning')} sx={{ ml: 0.75, height: 20, fontSize: 11 }} />
+                      </Tooltip>
+                    )}
+                    {typeof s.client_identities === 'number' && (
+                      <Typography variant="caption" color="text.secondary" component="div" data-testid="client-identities">
+                        {t('admin:servers.identities.count', { count: s.client_identities })}
+                      </Typography>
+                    )}
+                  </TableCell>
                   {/* URL is the admin's reference, not subscription-critical
                       — clip aggressively so the table stays scannable and
                       keeps space for status / actions. Full URL shows in a
@@ -1614,6 +1617,11 @@ export default function ServersView() {
                     >
                       {t('admin:servers.action.test')}
                     </Button>
+                    <Tooltip title={t('admin:servers.action.line_factors')}>
+                      <IconButton size="small" onClick={() => setLineFactorsTarget(s)} aria-label={t('admin:servers.action.line_factors')}>
+                        <PercentIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <IconButton size="small" onClick={() => openEdit(s)} aria-label={t('admin:servers.action.edit')}>
                       <EditIcon fontSize="small" />
                     </IconButton>
@@ -1894,16 +1902,6 @@ export default function ServersView() {
               error={!!fieldErr.name}
               helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : form.panel_type === 'psp' ? undefined : t('admin:servers.hint.name')}
             />
-            <TextField
-              fullWidth type="number" label={t('admin:servers.field.traffic_factor')}
-              value={form.traffic_factor}
-              onChange={e => setForm({ ...form, traffic_factor: e.target.value })}
-              error={factorTextToMilli(form.traffic_factor) === null}
-              helperText={factorTextToMilli(form.traffic_factor) === null
-                ? t('admin:servers.validate.traffic_factor')
-                : t('admin:servers.hint.traffic_factor')}
-              slotProps={{ htmlInput: { min: 0, max: 100, step: 0.001, inputMode: 'decimal' } }}
-            />
 
             {form.panel_type === 'psp' ? (
               <>
@@ -2041,6 +2039,7 @@ export default function ServersView() {
       />
       <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
+      {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
         onClose={() => setReinstallTarget(null)}
         onNativeInstall={server => { setReinstallTarget(null); openNativeInstallation(server) }}

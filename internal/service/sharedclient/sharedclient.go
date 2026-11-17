@@ -190,7 +190,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 
 	if cur == nil {
 		// Brand-new client: create it attached to every desired inbound in one POST.
-		if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow, s.trafficFactor(c.PanelID))); err != nil {
+		if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow, s.trafficFactor(ctx, c))); err != nil {
 			return res, fmt.Errorf("create shared client %s: %w", c.Email, err)
 		}
 	} else {
@@ -383,7 +383,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	want := clientdoc.Mint(c, atts).Lifecycle()
 	// From here on the headroom is this server's RAW bytes, so the cap and the
 	// deadband below are measured against the counter the panel compares.
-	factor := s.trafficFactor(c.PanelID)
+	factor := s.trafficFactor(ctx, c)
 	want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, factor)
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
@@ -490,12 +490,20 @@ func (s *Service) countLifecycleFailure(panelID int64, stage string) {
 // the path every poll takes. A pool that cannot name kinds, or an id it does
 // not hold (exactly the pool_get failure), reads as unknown rather than as a
 // guess.
-// trafficFactor is a server's traffic factor as registered in the pool.
-func (s *Service) trafficFactor(panelID int64) int {
-	if s.pool == nil {
-		return domain.TrafficFactorDefault
+// trafficFactor is the factor of the line a client row belongs to: the
+// node's direct-line factor or its relay line's. A row whose line can no
+// longer be read keeps the factor it was last booked at; a legacy row without
+// a line is one-for-one.
+func (s *Service) trafficFactor(ctx context.Context, c *domain.PSPClient) int {
+	line, ok := c.Line()
+	if !ok || s.nodes == nil {
+		return c.LastFactor()
 	}
-	return ports.PanelTrafficFactor(s.pool, panelID)
+	n, err := s.nodes.GetByID(ctx, line.NodeID)
+	if err != nil || n == nil {
+		return c.LastFactor()
+	}
+	return domain.ClientTrafficFactor(domain.LineFactors([]*domain.Node{n}), c)
 }
 
 func (s *Service) panelKindLabel(panelID int64) string {
@@ -964,7 +972,7 @@ func (s *Service) BulkProvisionNodeInbound(ctx context.Context, n *domain.Node, 
 				attachEmails = append(attachEmails, c.Email)
 			} else {
 				createItems = append(createItems, ports.BulkCreateClientItem{
-					Spec:       buildSharedClientSpec(c, atts[0].FlowOverride, s.trafficFactor(c.PanelID)), // partition flow is uniform
+					Spec:       buildSharedClientSpec(c, atts[0].FlowOverride, s.trafficFactor(ctx, c)), // partition flow is uniform
 					InboundIDs: []int{n.InboundID},
 				})
 			}
@@ -1014,6 +1022,13 @@ func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
 	for _, c := range clients {
 		if desiredByPanel[c.PanelID] == nil {
 			desiredByPanel[c.PanelID] = map[string]struct{}{}
+		}
+		// A detached row is a line the user no longer has (ADR 0043): its
+		// panel-side client is exactly the kind of orphan this pass removes,
+		// so it is neither desired nor part of the coverage gate. The panel
+		// is still scanned.
+		if atts, aerr := s.clients.ListInbounds(ctx, c.ID); aerr == nil && len(atts) == 0 {
+			continue
 		}
 		desiredByPanel[c.PanelID][c.Email] = struct{}{}
 	}
@@ -1200,6 +1215,12 @@ func (s *Service) LimitEnforcement(ctx context.Context, userID int64) ([]PanelLi
 	byPanel := make(map[int64]*PanelLimitFacts)
 	order := make([]int64, 0, len(clients))
 	for _, c := range clients {
+		// A row of a line the user no longer has is detached and has no
+		// panel-side client, so it budgets nothing. With one client per line
+		// (ADR 0043) the remaining count is the user's lines on this panel.
+		if atts, aerr := s.clients.ListInbounds(ctx, c.ID); aerr == nil && len(atts) == 0 {
+			continue
+		}
 		f, seen := byPanel[c.PanelID]
 		if !seen {
 			f = &PanelLimitFacts{PanelID: c.PanelID}

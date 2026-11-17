@@ -18,7 +18,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings, lineNames *lineNameCatalog, applied map[int64]appliedClientCredential) (*Output, error) {
+func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, proxyGroupOptions map[string]domain.ProxyGroupOptions, st ports.UISettings, lineNames *lineNameCatalog, applied appliedCredentials) (*Output, error) {
 	outbounds, items := s.buildSingBoxLineOutbounds(ctx, u, items, st, applied)
 	generatedLines := make(map[string]bool, len(items))
 	for _, item := range items {
@@ -120,7 +120,7 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	}, nil
 }
 
-func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, appliedCredentials map[int64]appliedClientCredential) ([]map[string]any, []renderItem) {
+func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, appliedCredentials appliedCredentials) ([]map[string]any, []renderItem) {
 	out := []map[string]any{
 		{"type": "direct", "tag": "direct"},
 		{"type": "block", "tag": "block"},
@@ -164,7 +164,7 @@ func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User,
 			continue
 		}
 		if _, native := nativePanels[it.node.PanelID]; native {
-			if _, applied := appliedCredentials[it.node.ID]; !applied {
+			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
 				continue
@@ -178,11 +178,7 @@ func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User,
 				"node_id", it.node.ID, "panel_id", it.node.PanelID)
 			continue
 		}
-		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
-		renderUser, lineErr := it.userForLine(renderUser)
-		if lineErr != nil {
-			continue
-		}
+		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it, emailRules, appliedCredentials)
 		block, err := emitSingBoxOutbound(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)

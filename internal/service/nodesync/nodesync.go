@@ -1191,14 +1191,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			clientByID[client.ID] = client
 		}
 	}
-	// Traffic factors, read once. The user ledger and pending usage are in
-	// CHARGED bytes; a node gates on its own RAW counter, so every grant below
-	// is converted through this agent's server factor.
-	factors, err := s.trafficFactors(ctx)
-	if err != nil {
-		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: read traffic factors: %w", err)
-	}
-	factor := domain.TrafficFactorOf(factors, agent.PanelID)
+	// Line factors of this server's nodes. The user ledger and pending usage
+	// are in CHARGED bytes; a node gates each client on its own RAW counter, so
+	// every grant below is converted through that client's line factor.
+	factors := domain.LineFactors(snapshot.Nodes)
 	pendingByUser := s.pendingUsage(clientByID, agents, factors)
 	counters := make(map[int64]nodeprotocol.ClientCounters)
 	if hasFull {
@@ -1233,6 +1229,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			baseline = nonNegativeSum(counter.UpBytes, counter.DownBytes)
 		}
 		entry := nodeprotocol.QuotaEntry{Client: nodeprotocol.NewClientKey(client.ID), BaselineBytes: baseline}
+		factor := domain.ClientTrafficFactor(factors, client)
 		if user.EmergencyActive(now) {
 			// Emergency access deliberately overrides an already-exhausted normal
 			// period. Re-measure from the lifetime snapshot taken when the window
@@ -1459,20 +1456,12 @@ func nativeHeadroom(remainingCharged int64, factor int, counterKnown bool) *int6
 	return int64Pointer(raw)
 }
 
-// trafficFactors reads every server's traffic factor when the panel repo can;
-// a repo without the reader (test doubles) leaves every server one-for-one.
-func (s *Service) trafficFactors(ctx context.Context) (map[int64]int, error) {
-	reader, ok := s.panels.(ports.TrafficFactorReader)
-	if !ok || s.panels == nil {
-		return nil, nil
-	}
-	return reader.TrafficFactors(ctx)
-}
-
 // pendingUsage is each user's usage observed by agents but not yet folded into
 // the user row, in CHARGED bytes: each client's raw pending delta weighted by
-// its server's factor, like the poll will book it.
-func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent, factors map[int64]int) map[int64]int64 {
+// its line's factor, like the poll will book it. A client on another server,
+// whose lines are not in factors, is weighted at the factor it was last booked
+// at.
+func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*domain.NodeAgent, factors map[domain.LineKey]int) map[int64]int64 {
 	panelByAgent := make(map[string]int64, len(agents))
 	for _, agent := range agents {
 		if agent != nil {
@@ -1504,7 +1493,7 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 			if client == nil || client.PanelID != panelID {
 				continue
 			}
-			pending := domain.ChargeBytes(s.pendingCounterDelta(client, counter), domain.TrafficFactorOf(factors, client.PanelID))
+			pending := domain.ChargeBytes(s.pendingCounterDelta(client, counter), domain.ClientTrafficFactor(factors, client))
 			result[client.UserID] = saturatingAdd(result[client.UserID], pending)
 		}
 	}

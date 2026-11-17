@@ -1,7 +1,6 @@
 package nodesync
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -11,13 +10,13 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// factorPanels is a panel repo that can read traffic factors.
-type factorPanels struct {
-	ports.XUIPanelRepo
-	factors map[int64]int
+// lineNode is node 3 on panel 9 with its direct line at direct (nil =
+// default) and relay line "r1" at ×3.
+func lineNode(direct *int) *domain.Node {
+	three := 3000
+	return &domain.Node{ID: 3, PanelID: 9, TrafficFactorMilli: direct,
+		Relays: []domain.RelayLine{{ID: "r1", Enabled: true, TrafficFactorMilli: &three}}}
 }
-
-func (p factorPanels) TrafficFactors(context.Context) (map[int64]int, error) { return p.factors, nil }
 
 func TestNativeHeadroomVectors(t *testing.T) {
 	ptr := func(v int64) *int64 { return &v }
@@ -49,20 +48,21 @@ func TestNativeHeadroomVectors(t *testing.T) {
 	}
 }
 
-// A node gates its RAW counter, so the charged grant is divided by its
-// server's factor, and the advance grant for the next period likewise.
+// A node gates each client's RAW counter, so the charged grant is divided by
+// that client's line factor, and the advance grant for the next period
+// likewise.
 func TestBuildDirectivesConvertsQuotaThroughServerFactor(t *testing.T) {
 	now := time.Date(2026, time.September, 16, 12, 0, 0, 0, time.UTC)
 	ptr := func(v int64) *int64 { return &v }
 	for _, tc := range []struct {
 		name     string
-		factor   *int // nil: no factor reader
+		factor   *int // nil: the direct line has no factor set
 		used     int64
 		reported bool
 		want     *int64
 		next     *int64
 	}{
-		{name: "no reader is one-for-one", used: 1500, reported: true, want: ptr(1500), next: ptr(3000)},
+		{name: "no factor is one-for-one", used: 1500, reported: true, want: ptr(1500), next: ptr(3000)},
 		{name: "default factor", factor: intPtr(1000), used: 1500, reported: true, want: ptr(1500), next: ptr(3000)},
 		{name: "×1.5", factor: intPtr(1500), used: 1500, reported: true, want: ptr(1000), next: ptr(2000)},
 		{name: "×0.5", factor: intPtr(500), used: 1500, reported: true, want: ptr(3000), next: ptr(6000)},
@@ -73,7 +73,7 @@ func TestBuildDirectivesConvertsQuotaThroughServerFactor(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			user := &domain.User{ID: 7, TrafficLimitBytes: 3000, TrafficResetPeriod: domain.ResetMonthly, LifetimeTotalBytes: tc.used}
-			client := &domain.PSPClient{ID: 11, UserID: user.ID, PanelID: 9}
+			client := &domain.PSPClient{ID: 11, UserID: user.ID, PanelID: 9, NodeID: 3, LineID: domain.DirectLineID}
 			agent := &domain.NodeAgent{AgentID: "agt_factor", PanelID: client.PanelID}
 			service := &Service{
 				users:    emergencyDirectiveUsers{user: user},
@@ -84,14 +84,12 @@ func TestBuildDirectivesConvertsQuotaThroughServerFactor(t *testing.T) {
 				anchors:  make(map[int64]nodeprotocol.ClientCounters),
 				grants:   make(map[string]map[nodeprotocol.ClientKey]int64),
 			}
-			if tc.factor != nil {
-				service.panels = factorPanels{factors: map[int64]int{client.PanelID: *tc.factor}}
-			}
 			report := nodeprotocol.NodeReport{}
 			if tc.reported {
 				report.Clients = []nodeprotocol.ClientCounters{{Key: nodeprotocol.NewClientKey(client.ID), UpBytes: 100, DownBytes: 50, CounterEpoch: 1}}
 			}
 			body, _, err := service.buildDirectives(t.Context(), agent, &ports.NativeDesiredSnapshot{
+				Nodes:   []*domain.Node{lineNode(tc.factor)},
 				Clients: []ports.NativeDesiredClient{{Client: client}},
 			}, report, nodeprotocol.Version{Epoch: 1, Version: 1}, now)
 			if err != nil {
@@ -119,19 +117,19 @@ func TestBuildDirectivesConvertsEmergencyQuotaThroughServerFactor(t *testing.T) 
 		ID: 7, TrafficLimitBytes: gib, TrafficResetPeriod: domain.ResetMonthly,
 		LifetimeTotalBytes: 5 * gib, EmergencyUntil: &until, EmergencyBaselineBytes: 3 * gib,
 	}
-	client := &domain.PSPClient{ID: 11, UserID: user.ID, PanelID: 9}
+	client := &domain.PSPClient{ID: 11, UserID: user.ID, PanelID: 9, NodeID: 3, LineID: domain.DirectLineID}
 	agent := &domain.NodeAgent{AgentID: "agt_emergency_factor", PanelID: client.PanelID}
 	service := &Service{
 		users:    emergencyDirectiveUsers{user: user},
 		clients:  emergencyDirectiveClients{client: client},
 		agents:   emergencyDirectiveAgents{agent: agent},
 		settings: emergencyDirectiveSettings{perUser: map[int64]ports.UISettings{user.ID: {EmergencyAccessQuotaGB: 5}}},
-		panels:   factorPanels{factors: map[int64]int{client.PanelID: 2000}},
 		reports:  make(map[string]receivedFullReport),
 		anchors:  make(map[int64]nodeprotocol.ClientCounters),
 		grants:   make(map[string]map[nodeprotocol.ClientKey]int64),
 	}
 	body, _, err := service.buildDirectives(t.Context(), agent, &ports.NativeDesiredSnapshot{
+		Nodes:   []*domain.Node{lineNode(intPtr(2000))},
 		Clients: []ports.NativeDesiredClient{{Client: client}},
 	}, nodeprotocol.NodeReport{Clients: []nodeprotocol.ClientCounters{{Key: nodeprotocol.NewClientKey(client.ID), UpBytes: 1, CounterEpoch: 1}}},
 		nodeprotocol.Version{Epoch: 1, Version: 1}, now)
@@ -146,8 +144,9 @@ func TestBuildDirectivesConvertsEmergencyQuotaThroughServerFactor(t *testing.T) 
 }
 
 // Pending usage is charged like the poll will book it: each client's raw
-// pending delta at its own server's factor.
-func TestPendingUsageIsWeightedByEachClientsServer(t *testing.T) {
+// pending delta at its own line's factor, or at the factor it was last booked
+// at when its line is not among the given ones.
+func TestPendingUsageIsWeightedByEachClientsLine(t *testing.T) {
 	service := &Service{
 		reports: map[string]receivedFullReport{
 			"agent-a": {report: nodeprotocol.NodeReport{Clients: []nodeprotocol.ClientCounters{
@@ -160,14 +159,14 @@ func TestPendingUsageIsWeightedByEachClientsServer(t *testing.T) {
 		anchors: make(map[int64]nodeprotocol.ClientCounters),
 	}
 	clients := map[int64]*domain.PSPClient{
-		1: {ID: 1, UserID: 101, PanelID: 10, LastCounterEpoch: 1},
-		2: {ID: 2, UserID: 101, PanelID: 20, LastCounterEpoch: 1},
+		1: {ID: 1, UserID: 101, PanelID: 10, NodeID: 3, LineID: "r1", LastCounterEpoch: 1},
+		2: {ID: 2, UserID: 101, PanelID: 20, NodeID: 8, LineID: domain.DirectLineID, LastCounterEpoch: 1, LastFactorMilli: intPtr(0)},
 	}
 	agents := []*domain.NodeAgent{{AgentID: "agent-a", PanelID: 10}, {AgentID: "agent-b", PanelID: 20}}
 
-	usage := service.pendingUsage(clients, agents, map[int64]int{10: 2000, 20: 0})
-	if usage[101] != 60 {
-		t.Fatalf("pending = %d, want 30 raw at ×2 + 50 raw free = 60", usage[101])
+	usage := service.pendingUsage(clients, agents, domain.LineFactors([]*domain.Node{lineNode(nil)}))
+	if usage[101] != 90 {
+		t.Fatalf("pending = %d, want 30 raw at ×3 + 50 raw last booked free = 90", usage[101])
 	}
 }
 

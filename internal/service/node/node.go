@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,15 +56,14 @@ type MemberResyncer interface {
 }
 
 type Service struct {
-	routeCleaner func(context.Context, int64) error
-	nodes        ports.NodeRepo
-	separators   ports.SeparatorRepo
-	pool         ports.XUIPool
-	cleaner      InboundCleaner
-	tasks        ports.SyncTaskRepo
-	groups       ports.GroupRepo
-	users        ports.UserRepo
-	resyncer     MemberResyncer
+	nodes      ports.NodeRepo
+	separators ports.SeparatorRepo
+	pool       ports.XUIPool
+	cleaner    InboundCleaner
+	tasks      ports.SyncTaskRepo
+	groups     ports.GroupRepo
+	users      ports.UserRepo
+	resyncer   MemberResyncer
 	// eligibility decides whether a group's members get a client on a node
 	// (group.Service.Eligible). Late-bound; nil is MatchOnly.
 	eligibility GroupEligibility
@@ -129,8 +129,6 @@ func (s *Service) groupIncludes(ctx context.Context, n *domain.Node, g *domain.G
 	}
 	return ok
 }
-
-func (s *Service) SetRouteCleaner(clean func(context.Context, int64) error) { s.routeCleaner = clean }
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
 func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
@@ -584,8 +582,8 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 	// A native panel's inbound is PSP's own desired config; the agent deploys it
 	// and GetInbound only reads the agent's last full report. A report that lacks
 	// the node (not reported yet, agent offline, stale) therefore says nothing
-	// about the inbound being gone, and treating it so would clear the node's
-	// routes, burn a new compatibility inbound id and relink the node for nothing.
+	// about the inbound being gone, and treating it so would burn a new
+	// compatibility inbound id and relink the node for nothing.
 	// What Recreate still means here is "push the members' clients now". It does
 	// NOT re-enable a disabled node: enabling is SetEnabled's job.
 	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
@@ -599,11 +597,6 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 	// inbound already exists but whose clients didn't push (e.g. the panel was briefly
 	// broken so the provision queue gave up) is a safe "push clients now".
 	if inb, gerr := c.GetInbound(ctx, n.InboundID); gerr != nil || inb == nil {
-		if s.routeCleaner != nil {
-			if err := s.routeCleaner(ctx, n.ID); err != nil {
-				return err
-			}
-		}
 		if !inboundcfg.HasLocalConfig(n) {
 			return fmt.Errorf("%w: node %d has no captured inbound config to recreate", domain.ErrValidation, nodeID)
 		}
@@ -752,6 +745,9 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if err := domain.ReconcileRelayIDs(previous.Relays, n.Relays); err != nil {
 		return err
 	}
+	if err := resolveLineFactors(previous, n); err != nil {
+		return err
+	}
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
@@ -768,18 +764,162 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	// Column-scoped: a full-row Update here would roll back the poll-owned
 	// columns (traffic counters / health / inbound-config snapshot) to the
 	// stale values the edit dialog loaded.
-	return s.nodes.UpdateMetadata(ctx, n)
+	if err := s.nodes.UpdateMetadata(ctx, n); err != nil {
+		return err
+	}
+	// Each line a user can see has a client of its own (ADR 0043): a line that
+	// appears, disappears or changes who may see it re-plans the members.
+	if domain.LineSetChanged(previous.Relays, n.Relays) {
+		updated := *previous
+		updated.Relays = n.Relays
+		s.provisionNodeMembersInBackground(&updated)
+	}
+	return nil
+}
+
+// resolveLineFactors validates the edited line factors and keeps the stored
+// one wherever the edit carries none: an editor that does not know about
+// factors must not reset them. A new line without one is one-for-one.
+func resolveLineFactors(previous, n *domain.Node) error {
+	if n.TrafficFactorMilli == nil {
+		n.TrafficFactorMilli = previous.TrafficFactorMilli
+	}
+	if n.TrafficFactorMilli != nil {
+		if err := domain.ValidateTrafficFactor(*n.TrafficFactorMilli); err != nil {
+			return err
+		}
+	}
+	saved := make(map[string]*int, len(previous.Relays))
+	for _, r := range previous.Relays {
+		saved[r.ID] = r.TrafficFactorMilli
+	}
+	for i := range n.Relays {
+		r := &n.Relays[i]
+		if r.TrafficFactorMilli == nil {
+			r.TrafficFactorMilli = saved[r.ID]
+		}
+		if r.TrafficFactorMilli != nil {
+			if err := domain.ValidateTrafficFactor(*r.TrafficFactorMilli); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// LineFactorChange sets one line's traffic factor.
+type LineFactorChange struct {
+	Line        domain.LineKey
+	FactorMilli int
+}
+
+// AppliedLineFactor is a change that took effect, for the audit log.
+type AppliedLineFactor struct {
+	Line     domain.LineKey
+	NodeName string
+	From, To int
+}
+
+// SetLineFactors sets the factors of lines on one server in one pass (the
+// server page's bulk edit). Every line must belong to a node of panelID; the
+// whole request is refused before anything is written otherwise. Only the
+// factor changes: each node is written through the column-scoped metadata
+// writer with everything else as stored.
+func (s *Service) SetLineFactors(ctx context.Context, panelID int64, changes []LineFactorChange) ([]AppliedLineFactor, error) {
+	byNode := map[int64]*domain.Node{}
+	original := map[int64]*domain.Node{}
+	var order []int64
+	seen := make(map[domain.LineKey]bool, len(changes))
+	for _, c := range changes {
+		if seen[c.Line] {
+			return nil, fmt.Errorf("%w: line %d/%s is listed twice", domain.ErrValidation, c.Line.NodeID, c.Line.LineID)
+		}
+		seen[c.Line] = true
+		if err := domain.ValidateTrafficFactor(c.FactorMilli); err != nil {
+			return nil, err
+		}
+		n, ok := byNode[c.Line.NodeID]
+		if !ok {
+			loaded, err := s.nodes.GetByID(ctx, c.Line.NodeID)
+			if err != nil {
+				return nil, err
+			}
+			if loaded.PanelID != panelID || loaded.IsSeparator() {
+				return nil, fmt.Errorf("%w: node %d is not on server %d", domain.ErrValidation, c.Line.NodeID, panelID)
+			}
+			n = loaded
+			byNode[n.ID] = n
+			saved := *loaded
+			saved.Relays = append([]domain.RelayLine(nil), loaded.Relays...)
+			original[n.ID] = &saved
+			order = append(order, n.ID)
+		}
+		if !c.Line.IsDirect() && !slices.ContainsFunc(n.Relays, func(r domain.RelayLine) bool { return r.ID == c.Line.LineID }) {
+			return nil, fmt.Errorf("%w: node %d has no line %q", domain.ErrValidation, n.ID, c.Line.LineID)
+		}
+	}
+	var applied []AppliedLineFactor
+	for _, c := range changes {
+		n := byNode[c.Line.NodeID]
+		milli := c.FactorMilli
+		if c.Line.IsDirect() {
+			if from := n.EffectiveTrafficFactor(); from != milli {
+				applied = append(applied, AppliedLineFactor{Line: c.Line, NodeName: n.DisplayName, From: from, To: milli})
+			}
+			n.TrafficFactorMilli = &milli
+			continue
+		}
+		for i := range n.Relays {
+			if n.Relays[i].ID == c.Line.LineID {
+				if from := n.Relays[i].EffectiveTrafficFactor(); from != milli {
+					applied = append(applied, AppliedLineFactor{Line: c.Line, NodeName: n.DisplayName, From: from, To: milli})
+				}
+				n.Relays[i].TrafficFactorMilli = &milli
+			}
+		}
+	}
+	// One write per node. A failure puts the nodes already written back the
+	// way they were, so the request stays all or nothing.
+	for i, id := range order {
+		if err := s.nodes.UpdateMetadata(ctx, byNode[id]); err != nil {
+			for _, done := range order[:i] {
+				if rerr := s.nodes.UpdateMetadata(ctx, original[done]); rerr != nil {
+					log.Error("line factors: roll back node", "node_id", done, "err", rerr)
+				}
+			}
+			return nil, err
+		}
+	}
+	return applied, nil
+}
+
+// ChangedLineFactors lists the lines whose factor differs between two
+// versions of a node, for the audit log.
+func ChangedLineFactors(before, after *domain.Node) []AppliedLineFactor {
+	var out []AppliedLineFactor
+	if from, to := before.EffectiveTrafficFactor(), after.EffectiveTrafficFactor(); from != to {
+		out = append(out, AppliedLineFactor{Line: domain.DirectLine(after.ID), NodeName: after.DisplayName, From: from, To: to})
+	}
+	prev := map[string]int{}
+	for _, r := range before.Relays {
+		prev[r.ID] = r.EffectiveTrafficFactor()
+	}
+	for _, r := range after.Relays {
+		from, existed := prev[r.ID]
+		if !existed {
+			from = domain.TrafficFactorDefault
+		}
+		if to := r.EffectiveTrafficFactor(); from != to {
+			out = append(out, AppliedLineFactor{Line: domain.LineKey{NodeID: after.ID, LineID: r.ID}, NodeName: after.DisplayName, From: from, To: to})
+		}
+	}
+	return out
 }
 
 func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.InboundSpec) error {
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
 		return err
-	}
-	if s.routeCleaner != nil && (spec.Port != n.DesiredPort || !strings.EqualFold(spec.Protocol, n.DesiredProtocol)) {
-		if err := s.routeCleaner(ctx, n.ID); err != nil {
-			return err
-		}
 	}
 	// v3.5 write-through (local-first): PSP owns the inbound config, so persist
 	// the new config into the local snapshot before pushing. Render reflects it
@@ -973,8 +1113,8 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 }
 
 // DetachAndSync drops the node record and the panel's ownership rows without
-// requiring a reachable upstream. Route cleanup is best-effort; clients and any
-// remaining rules must be cleaned up manually in 3X-UI. This is intended for
+// requiring a reachable upstream. Clients and any remaining rules must be
+// cleaned up manually in 3X-UI. This is intended for
 // decommissioned/offline servers where queued remote deletes would retry
 // forever. Separators have no upstream binding and use a plain local delete.
 func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
@@ -984,13 +1124,6 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	}
 	if n.IsSeparator() {
 		return s.nodes.Delete(ctx, id)
-	}
-	if s.routeCleaner != nil {
-		if err := s.routeCleaner(ctx, id); err != nil {
-			// An unreachable upstream must not block local detachment. Unlike
-			// deletion/recreation, remote cleanup is not a prerequisite here.
-			log.Warn("node detach: route cleanup failed; remote rules require manual cleanup", "node_id", id, "err", err)
-		}
 	}
 	if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 		return fmt.Errorf("unclaim owned clients: %w", err)
@@ -1109,20 +1242,12 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		// from that report, and its errors ("not found", "no cached full report:
 		// not found", offline, stale) never match isInboundGoneError, so gating on
 		// it would retry a never-reported node to the attempt cap and leave the row
-		// disabled. This comes BEFORE route cleanup too: native routes are never
-		// upstream and route_state dies with the row, while a node converted from
-		// 3X-UI that still carries route lines would fail the cleaner's validation,
-		// be cancelled as permanent, and stay disabled.
+		// disabled.
 		if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
 			if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
 				return fmt.Errorf("unclaim owned clients: %w", err)
 			}
 			return s.nodes.Delete(ctx, n.ID)
-		}
-		if s.routeCleaner != nil {
-			if err := s.routeCleaner(ctx, n.ID); err != nil {
-				return err
-			}
 		}
 		// If the inbound is already gone upstream (operator deleted it directly
 		// in 3X-UI — the common orphan case), the clients went with it: skip the

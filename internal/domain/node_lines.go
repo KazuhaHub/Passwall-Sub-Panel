@@ -103,10 +103,5 @@ func (n *Node) HasLine(id string) bool {
 			return true
 		}
 	}
-	for _, line := range n.RouteState.Lines {
-		if line.ID == id && id != "" && !line.Deleted {
-			return true
-		}
-	}
 	return false
 }

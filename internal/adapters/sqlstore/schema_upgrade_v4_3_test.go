@@ -2,7 +2,6 @@ package sqlstore
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"gorm.io/gorm"
@@ -126,70 +125,6 @@ VALUES (?, 1, 1, 'legacy@x', 'legacy-uuid', 300)`, pre.ID).Error; err != nil {
 	}
 }
 
-// The factor has one writer. A whole-row Save of a stale panel must not move
-// it, a create may set it (0 included), and the bulk read sees every server.
-func TestTrafficFactorColumnScopedWriter(t *testing.T) {
-	db, err := openTestDB(t)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := ensureTestSchema(db); err != nil {
-		t.Fatalf("schema: %v", err)
-	}
-	ctx := context.Background()
-	repo := &xuiPanelRepo{db: db}
-
-	plain := &domain.XUIPanel{Name: "plain", URL: "https://plain.example"}
-	if err := repo.Save(ctx, plain); err != nil {
-		t.Fatal(err)
-	}
-	zero := 0
-	free := &domain.XUIPanel{Name: "free", URL: "https://free.example", TrafficFactorMilli: &zero}
-	if err := repo.Save(ctx, free); err != nil {
-		t.Fatal(err)
-	}
-	got, err := repo.GetByID(ctx, plain.ID)
-	if err != nil || got.EffectiveTrafficFactor() != domain.TrafficFactorDefault {
-		t.Fatalf("default factor = %v, err %v", got, err)
-	}
-	if got, _ := repo.GetByID(ctx, free.ID); got.EffectiveTrafficFactor() != 0 {
-		t.Fatalf("created free server reads %d, want 0", got.EffectiveTrafficFactor())
-	}
-
-	stale, _ := repo.GetByID(ctx, plain.ID)
-	if err := repo.UpdateTrafficFactor(ctx, plain.ID, 1500); err != nil {
-		t.Fatal(err)
-	}
-	// Same value again: MySQL reports no changed rows, which is not a miss.
-	if err := repo.UpdateTrafficFactor(ctx, plain.ID, 1500); err != nil {
-		t.Fatalf("no-op factor write: %v", err)
-	}
-	stale.Remark = "edited elsewhere"
-	if err := repo.Save(ctx, stale); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := repo.GetByID(ctx, plain.ID); got.EffectiveTrafficFactor() != 1500 || got.Remark != "edited elsewhere" {
-		t.Fatalf("after stale save: factor %d remark %q, want 1500 kept", got.EffectiveTrafficFactor(), got.Remark)
-	}
-
-	factors, err := repo.TrafficFactors(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if factors[plain.ID] != 1500 || factors[free.ID] != 0 || len(factors) != 2 {
-		t.Fatalf("factors = %v", factors)
-	}
-
-	for _, bad := range []int{-1, domain.TrafficFactorMax + 1} {
-		if err := repo.UpdateTrafficFactor(ctx, plain.ID, bad); !errors.Is(err, domain.ErrValidation) {
-			t.Fatalf("UpdateTrafficFactor(%d) = %v, want validation error", bad, err)
-		}
-	}
-	if err := repo.UpdateTrafficFactor(ctx, 999999, 1000); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("missing server = %v, want not found", err)
-	}
-}
-
 // The per-row charged ledgers and the user's raw ledger round-trip through
 // the poll's narrow counter writers.
 func TestMultiplierLedgersPersistThroughCounterWriters(t *testing.T) {
@@ -224,5 +159,152 @@ func TestMultiplierLedgersPersistThroughCounterWriters(t *testing.T) {
 	}
 	if got, _ := clients.GetByID(ctx, id); got.ChargedLifetimeBytes != 1500 || got.LifetimeTotalBytes != 1000 {
 		t.Fatalf("client = raw %d charged %d", got.LifetimeTotalBytes, got.ChargedLifetimeBytes)
+	}
+}
+
+// The VLESS route line feature is gone in 4.3: its columns and lease table are
+// dropped from a database that has them, and the step is a no-op, repeatable,
+// on one that never did.
+func TestMigrateV4_3DropsVLESSRouteState(t *testing.T) {
+	db, err := openIsolatedTestDB(t)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	m := db.Migrator()
+	if m.HasColumn("nodes", "route_state") || m.HasColumn("nodes", "route_revision") || m.HasTable("vless_route_leases") {
+		t.Fatal("a fresh schema still declares route state")
+	}
+	// Never had it: a no-op, twice.
+	for i := 0; i < 2; i++ {
+		if err := migrateV4_3(db); err != nil {
+			t.Fatalf("no-op run %d: %v", i, err)
+		}
+	}
+
+	// A database as a pre-4.3 binary left it, with a node carrying route state.
+	if err := db.Exec(`ALTER TABLE nodes ADD COLUMN route_state TEXT`).Error; err != nil {
+		t.Fatalf("add route_state: %v", err)
+	}
+	if err := db.Exec(`ALTER TABLE nodes ADD COLUMN route_revision BIGINT NOT NULL DEFAULT 0`).Error; err != nil {
+		t.Fatalf("add route_revision: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE vless_route_leases (id BIGINT NOT NULL PRIMARY KEY, node_id BIGINT NOT NULL)`).Error; err != nil {
+		t.Fatalf("create leases: %v", err)
+	}
+	n := &domain.Node{PanelID: 1, InboundID: 1, DisplayName: "keep"}
+	if err := NewRepos(db).Node.Create(context.Background(), n); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`UPDATE nodes SET route_state = '{"revision":2}', route_revision = 2 WHERE id = ?`, n.ID).Error; err != nil {
+		t.Fatalf("seed route state: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := migrateV4_3(db); err != nil {
+			t.Fatalf("drop run %d: %v", i, err)
+		}
+	}
+	for _, column := range []string{"route_state", "route_revision"} {
+		if m.HasColumn("nodes", column) {
+			t.Fatalf("nodes.%s survived the migration", column)
+		}
+	}
+	if m.HasTable("vless_route_leases") {
+		t.Fatal("vless_route_leases survived the migration")
+	}
+	got, err := NewRepos(db).Node.GetByID(context.Background(), n.ID)
+	if err != nil || got.DisplayName != "keep" {
+		t.Fatalf("node lost by the drop: %+v %v", got, err)
+	}
+}
+
+// The upgrade turns each shared client of 4.2 into the direct line of the
+// lowest-ID node it is attached to, fills uuid_key, and queues one resync per
+// user for the planner to create the other lines. Once.
+func TestMigrateV4_3ConvertsClientsToLines(t *testing.T) {
+	db, err := openIsolatedTestDB(t)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	ctx := context.Background()
+	repos := NewRepos(db)
+	ur, gr := reposFor(t, db)
+	g := seedGroup(t, gr, "lines", domain.GroupLimits{})
+	u := seedUser(t, ur, "lines", g.ID, domain.LimitOverrides{})
+	idle := seedUser(t, ur, "idle-lines", g.ID, domain.LimitOverrides{})
+	mk := func(panelID int64, email, uuid string, nodes ...int64) int64 {
+		t.Helper()
+		id, err := repos.PSPClient.Create(ctx, &domain.PSPClient{UserID: u.ID, PanelID: panelID, Email: email, UUID: uuid, Password: "p",
+			LifetimeTotalBytes: 500})
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbs := make([]domain.PSPClientInbound, 0, len(nodes))
+		for _, n := range nodes {
+			inbs = append(inbs, domain.PSPClientInbound{ClientID: id, NodeID: n})
+		}
+		if len(inbs) > 0 {
+			if err := repos.PSPClient.SetInbounds(ctx, id, inbs); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id
+	}
+	shared := mk(10, "lines@psp.local", "A265B1EC-CD81-43E7-8239-09F322EF22D6", 5, 3)
+	other := mk(11, "lines-other@psp.local", "a265b1ec-cd81-43e7-8239-09f322ef22d6", 9)
+	nowhere := mk(12, "lines-nowhere@psp.local", "a265b1ec-cd81-43e7-8239-09f322ef22d6")
+	// Written as 4.2 left them: no line, no uuid_key.
+	if err := db.Table("psp_clients").Where("id IN ?", []int64{shared, other, nowhere}).
+		Updates(map[string]any{"node_id": nil, "line_id": nil, "uuid_key": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("id = ?", perLineClientsMigrationID).Delete(&schemaMigrationRow{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	for run := 0; run < 2; run++ {
+		if err := migrateV4_3(db); err != nil {
+			t.Fatalf("migrateV4_3 run %d: %v", run, err)
+		}
+	}
+	check := func(id int64, wantNode int64, wantLine string) {
+		t.Helper()
+		c, err := repos.PSPClient.GetByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.NodeID != wantNode || c.LineID != wantLine || c.Email == "" || c.LifetimeTotalBytes != 500 {
+			t.Fatalf("client %d = node %d line %q email %q lifetime %d, want node %d line %q",
+				id, c.NodeID, c.LineID, c.Email, c.LifetimeTotalBytes, wantNode, wantLine)
+		}
+	}
+	check(shared, 3, domain.DirectLineID)
+	check(other, 9, domain.DirectLineID)
+	check(nowhere, 0, "")
+	var keys []string
+	if err := db.Table("psp_clients").Where("id IN ?", []int64{shared, other, nowhere}).Pluck("uuid_key", &keys).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		if k != "a265b1eccd810000823909f322ef22d6" {
+			t.Fatalf("uuid_key = %q", k)
+		}
+	}
+	var tasks []syncTaskRow
+	if err := db.Where("type = ?", string(domain.SyncTaskUserResync)).Find(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].TargetID != u.ID || tasks[0].Status != string(domain.SyncTaskPending) {
+		t.Fatalf("resync tasks = %+v, want one pending for user %d (not for %d, who holds no client)", tasks, u.ID, idle.ID)
+	}
+	// The planner can now take over the converted row: its line is unique.
+	if _, err := repos.PSPClient.Create(ctx, &domain.PSPClient{UserID: u.ID, PanelID: 10, NodeID: 3, LineID: domain.DirectLineID,
+		Email: "dup@x", UUID: "u", Password: "p"}); err == nil {
+		t.Fatal("a second row for the same line was accepted")
 	}
 }

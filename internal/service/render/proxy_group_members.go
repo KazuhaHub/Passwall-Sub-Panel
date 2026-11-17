@@ -83,12 +83,6 @@ func inspectNodeLines(nodes []*domain.Node) []ProxyGroupInspectLine {
 			}
 			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: r.ID, Kind: "relay", Name: name, DisplayName: relayEntryName(n.DisplayName, r), Available: n.Enabled && r.Publishable(), Region: r.Region, Tags: domain.CopyLineTags(r.Tags)})
 		}
-		for _, line := range n.RouteState.Lines {
-			if line.Deleted {
-				continue
-			}
-			lines = append(lines, ProxyGroupInspectLine{NodeID: n.ID, LineID: line.ID, Kind: "vless_route", Name: line.Label(), DisplayName: routeEntryName(n.DisplayName, line), Available: line.LocallyAvailable(n), Region: line.Region, Tags: domain.CopyLineTags(line.Tags)})
-		}
 	}
 	return lines
 }
@@ -426,9 +420,9 @@ type lineLabels struct {
 }
 
 // lineLabelCatalog lists the labels every potential subscription entry can
-// carry: the node's own values for its direct entry, plus each relay and
-// undeleted VLESS route line's own values. It feeds the candidate catalog and
-// the "no match" check, mirroring the entries expandNodeLines can produce.
+// carry: the node's own values for its direct entry, plus each relay's
+// own values. It feeds the candidate catalog and the "no match" check,
+// mirroring the entries expandRelays can produce.
 func lineLabelCatalog(nodes []*domain.Node) []lineLabels {
 	out := []lineLabels{}
 	for _, n := range nodes {
@@ -438,11 +432,6 @@ func lineLabelCatalog(nodes []*domain.Node) []lineLabels {
 		out = append(out, lineLabels{n.Region, n.Tags})
 		for _, relay := range n.Relays {
 			out = append(out, lineLabels{relay.Region, relay.Tags})
-		}
-		for _, line := range n.RouteState.Lines {
-			if !line.Deleted {
-				out = append(out, lineLabels{line.Region, line.Tags})
-			}
 		}
 	}
 	return out

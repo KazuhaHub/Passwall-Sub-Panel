@@ -235,11 +235,25 @@ const referenceSingBoxTemplate = `{
   }
 }`
 
+// lineRenderFixture is a VLESS node "A" with one enabled relay line "B" (id
+// "relay-B") and an applied credential for its user, so a render reads no
+// remote panel.
+func lineRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User) {
+	t.Helper()
+	n := vlessRealityNode(true)
+	n.DisplayName = "A"
+	n.Relays = []domain.RelayLine{{ID: "relay-B", Name: "B", Address: "relay.example", Port: 8443, Enabled: true}}
+	u := &domain.User{ID: 5, UUID: "87654321-4321-4def-8abc-cba987654321"}
+	repo := renderCredentialRepo{client: &domain.PSPClient{ID: 11, UserID: 5, UUID: u.UUID}, attachments: []domain.PSPClientInbound{{ClientID: 11, NodeID: n.ID, AppliedUUID: "12345678-1234-4abc-8def-123456789abc", AppliedEmail: "u5@example.test"}}}
+	s := &Service{repos: ports.Repos{Settings: fakeSettings{}, PSPClient: repo}, pool: panicPool{}}
+	return s, n, u
+}
+
 func referenceRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *domain.RuleSet) {
 	t.Helper()
-	s, n, u, _ := routeRenderFixture(t)
+	s, n, u := lineRenderFixture(t)
 	rule := &domain.RuleSet{Slug: "test", Enabled: true, Content: "- MATCH,国外媒体", ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
-		"国外媒体": {{Kind: "line", NodeID: n.ID, LineID: "route-B"}},
+		"国外媒体": {{Kind: "line", NodeID: n.ID, LineID: "relay-B"}},
 	}}
 	s.repos.Group = referenceGroupRepo{}
 	s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: referenceMihomoTemplate, domain.ClientSingBox: referenceSingBoxTemplate}}
@@ -270,7 +284,7 @@ func subscriptionProxyMaps(t *testing.T, output *Output, ct domain.ClientType) [
 	return out
 }
 
-func TestRenderReferencedRouteOnlyAndURIUnchanged(t *testing.T) {
+func TestRenderReferencedRelayOnlyAndURIUnchanged(t *testing.T) {
 	ctx := context.Background()
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
 		t.Run(string(ct), func(t *testing.T) {
@@ -297,13 +311,13 @@ func TestRenderReferencedRouteOnlyAndURIUnchanged(t *testing.T) {
 					if ct == domain.ClientSingBox {
 						portKey = "server_port"
 					}
-					if proxy[serverKey] != n.ServerAddress || proxy["uuid"] != "12345678-1234-03e9-8def-123456789abc" || proxy[portKey] == nil {
-						t.Fatalf("route connection values changed: %v", proxy)
+					if proxy[serverKey] != "relay.example" || proxy["uuid"] != "12345678-1234-4abc-8def-123456789abc" || proxy[portKey] == nil {
+						t.Fatalf("relay connection values changed: %v", proxy)
 					}
 				}
 			}
 			if !found || n.EffectiveHideDirect() {
-				t.Fatal("route disappeared or implementation hid its original entry")
+				t.Fatal("relay disappeared or implementation hid its original entry")
 			}
 			// URI must not read a template or rule set at all.
 			s.repos.Template, s.repos.RuleSet = nil, nil
@@ -324,7 +338,6 @@ func TestRenderLegacyMainReferencedDefinitionsUnchanged(t *testing.T) {
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
 		t.Run(string(ct), func(t *testing.T) {
 			s, n, u, rule := referenceRenderFixture(t)
-			n.RouteState = domain.NodeRouteState{} // main has no VLESS route configuration
 			n.Region = "US"
 			s.repos.Settings = fakeSettings{s: ports.UISettings{SubRegionFlagPrefix: true}}
 			n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Port: 8443, Enabled: true}, {ID: "off", Name: "off", Enabled: false}}
@@ -477,8 +490,8 @@ func TestRenderDynamicAndTemplateReferences(t *testing.T) {
 				s, n, u, rule := referenceRenderFixture(t)
 				n.Region, n.Tags = "US", []string{"edge"}
 				// Lines carry the labels copied at creation (ADR 0040).
-				n.Relays = []domain.RelayLine{{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "US", Tags: []string{"edge"}}}
-				n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
+				n.Relays[0].Region, n.Relays[0].Tags = "US", []string{"edge"}
+				n.Relays = append(n.Relays, domain.RelayLine{ID: "relay", Name: "R", Address: "relay.example", Enabled: true, Region: "US", Tags: []string{"edge"}})
 				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{member}
 				output, err := s.RenderForUser(context.Background(), u, ct)
 				if err != nil {
@@ -499,7 +512,7 @@ func TestRenderDynamicAndTemplateReferences(t *testing.T) {
 		t.Run(ref, func(t *testing.T) {
 			s, n, u, _ := referenceRenderFixture(t)
 			n.Region, n.Tags = "US", []string{"edge"}
-			n.RouteState.Lines[0].Region, n.RouteState.Lines[0].Tags = "US", []string{"edge"}
+			n.Relays[0].Region, n.Relays[0].Tags = "US", []string{"edge"}
 			s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: strings.Replace(referenceMihomoTemplate, "  {{ proxy_groups }}", "  {{ proxy_groups }}\n  - name: Template\n    type: select\n    proxies:\n      - "+ref, 1)}}
 			output, err := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
 			if err != nil {
@@ -515,18 +528,12 @@ func TestRenderDynamicAndTemplateReferences(t *testing.T) {
 
 func TestRenderUnavailableReferencesNeverRestoreAllLines(t *testing.T) {
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
-		for _, reason := range []string{"drift", "unknown", "disabled", "deleted", "missing_entry", "outside_scope"} {
+		for _, reason := range []string{"disabled", "outside_scope"} {
 			t.Run(string(ct)+"/"+reason, func(t *testing.T) {
 				s, n, u, _ := referenceRenderFixture(t)
 				switch reason {
-				case "drift", "unknown":
-					n.RouteState.Status = reason
 				case "disabled":
-					n.RouteState.Lines[0].Enabled = false
-				case "deleted":
-					n.RouteState.Lines[0].Deleted = true
-				case "missing_entry":
-					n.RouteState.Lines[0].EntryRelayID = "missing"
+					n.Relays[0].Enabled = false
 				case "outside_scope":
 					s.groupSvc = referenceGroupResolver{}
 				}

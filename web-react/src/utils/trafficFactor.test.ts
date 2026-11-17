@@ -14,7 +14,7 @@ describe('trafficFactor', () => {
     expect(factorTextToMilli('0')).toBe(0)
   })
   it('rejects values outside 0..100 or not numeric', () => {
-    for (const bad of ['', 'abc', '-1', '100.001', '1e2', '1.5.2']) expect(factorTextToMilli(bad)).toBeNull()
+    for (const bad of ['', 'abc', '-1', '100.001', '1e2', '1.5.2', '0.0004', '1.0005', '.0001']) expect(factorTextToMilli(bad)).toBeNull()
   })
   it('treats 1000 and a missing value as the default', () => {
     expect(hasCustomFactor(1000)).toBe(false)

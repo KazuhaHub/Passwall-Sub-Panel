@@ -32,7 +32,7 @@ func TestReferencedSubscriptionRealCores(t *testing.T) {
 	if xray == "" || mihomo == "" || singbox == "" {
 		t.Skip("set PSP_REFERENCE_XRAY, PSP_REFERENCE_MIHOMO and PSP_REFERENCE_SINGBOX for offline core acceptance")
 	}
-	for _, scenario := range []string{"vless_route", "dangling_members", "hidden_direct_route", "collision_both", "collision_single", "same_type_routes", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
+	for _, scenario := range []string{"relay_line", "dangling_members", "hidden_direct_relay", "collision_both", "collision_single", "direct_special", "direct_quoted", "direct_outer_quoted", "legacy_direct", "legacy_relay"} {
 		t.Run(scenario, func(t *testing.T) {
 			testReferencedCoreScenario(t, xray, mihomo, singbox, scenario)
 		})
@@ -46,18 +46,14 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 	}))
 	defer target.Close()
 	serverPort := referenceFreePort(t)
-	allowedRoute := "1001"
-	if strings.HasPrefix(scenario, "legacy_") {
-		allowedRoute = "19132" // 0x4abc, the unchanged original UUID's route.
-	}
 	serverConfig := map[string]any{
 		"log": map[string]any{"loglevel": "debug"},
 		"inbounds": []any{map[string]any{
 			"listen": "127.0.0.1", "port": serverPort, "protocol": "vless", "tag": "original",
 			"settings": map[string]any{"decryption": "none", "clients": []any{map[string]any{"id": "12345678-1234-4abc-8def-123456789abc"}}},
 		}},
-		// No direct fallback: only the scenario's expected UUID route can reach
-		// the fixture. Other routes use the first (blocked) outbound.
+		// No direct fallback: only traffic that arrives through the fixture's
+		// inbound can reach the target.
 		"outbounds": []any{
 			map[string]any{"protocol": "blackhole", "tag": "blocked"},
 			map[string]any{"protocol": "freedom", "tag": "allowed", "settings": map[string]any{
@@ -66,7 +62,7 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 				"finalRules": []any{map[string]any{"action": "allow", "network": "tcp", "ip": []string{"127.0.0.1/32"}, "port": target.Listener.Addr().(*net.TCPAddr).Port}},
 			}},
 		},
-		"routing": map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"original"}, "vlessRoute": allowedRoute, "outboundTag": "allowed"}}},
+		"routing": map[string]any{"rules": []any{map[string]any{"type": "field", "inboundTag": []string{"original"}, "outboundTag": "allowed"}}},
 	}
 	raw, err := json.Marshal(serverConfig)
 	if err != nil {
@@ -77,10 +73,10 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
 		t.Run(string(ct), func(t *testing.T) {
 			s, node, user, rule := referenceRenderFixture(t)
-			node.HideDirect = scenario == "hidden_direct_route"
+			node.HideDirect = scenario == "hidden_direct_relay"
 			node.ServerAddress, node.DesiredPort, node.Flow = "127.0.0.1", serverPort, ""
 			node.StreamSettings = `{"network":"tcp","security":"none"}`
-			node.RouteState.Binding = domain.RouteBinding("https://panel.example", node)
+			node.Relays[0].Address, node.Relays[0].Port = "127.0.0.1", serverPort
 			rule.Content = "- MATCH,OnlyRoute"
 			rule.ProxyGroupMembers["OnlyRoute"] = rule.ProxyGroupMembers["国外媒体"]
 			delete(rule.ProxyGroupMembers, "国外媒体")
@@ -91,55 +87,46 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 					{Kind: "builtin", Value: "Unknown"},
 				}, rule.ProxyGroupMembers["OnlyRoute"]...)
 			}
-			expectedName, expectedUUID := "A B", "12345678-1234-03e9-8def-123456789abc"
-			if scenario == "same_type_routes" {
-				line := &node.RouteState.Lines[0]
-				line.Name, line.OnlyLineName, line.ID = "same", true, "52787c21-62ab-4496-94fb-6f4b4fb51312"
-				other := *line
-				other.ID, other.Route = "6b752549-4a51-4d6a-bd6c-81930ee5e715", 1002
-				node.RouteState.Lines = append(node.RouteState.Lines, other)
-				rule.ProxyGroupMembers["OnlyRoute"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: line.ID}, {Kind: "line", NodeID: node.ID, LineID: other.ID}}
-				expectedName = "same [VLESS 路由:52787c21]"
-			}
+			expectedName, expectedUUID := "A B", "12345678-1234-4abc-8def-123456789abc"
 			if strings.HasPrefix(scenario, "collision_") {
-				node.Relays = []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Address: "127.0.0.1", Port: serverPort, Enabled: true}}
-				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = "same", true
+				node.Relays[0].Name, node.Relays[0].OnlyLineName = "same", true
 				expectedName = "same"
 				if scenario == "collision_both" {
-					rule.ProxyGroupMembers["OnlyRoute"] = append(rule.ProxyGroupMembers["OnlyRoute"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "relay"})
-					expectedName = "same [VLESS 路由]"
+					node.DisplayName = "same"
+					rule.ProxyGroupMembers["OnlyRoute"] = append(rule.ProxyGroupMembers["OnlyRoute"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "direct"})
+					expectedName = "same [中转]"
 				}
 			}
 			if scenario == "direct_special" {
-				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `same, "quoted"`, true
+				node.Relays[0].Name, node.Relays[0].OnlyLineName = `same, "quoted"`, true
 				expectedName = `same, "quoted"`
-				rawRules, err := yaml.Marshal([]string{`MATCH,"same, ""quoted"" [7:route-B]"`})
+				rawRules, err := yaml.Marshal([]string{`MATCH,"same, ""quoted"" [7:relay-B]"`})
 				if err != nil {
 					t.Fatal(err)
 				}
 				rule.Content = string(rawRules)
 			}
 			if scenario == "direct_quoted" {
-				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `line "quoted"`, true
+				node.Relays[0].Name, node.Relays[0].OnlyLineName = `line "quoted"`, true
 				expectedName = `line "quoted"`
-				rawRules, err := yaml.Marshal([]string{`MATCH,line "quoted" [7:route-B]`})
+				rawRules, err := yaml.Marshal([]string{`MATCH,line "quoted" [7:relay-B]`})
 				if err != nil {
 					t.Fatal(err)
 				}
 				rule.Content = string(rawRules)
 			}
 			if scenario == "direct_outer_quoted" {
-				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = `"quoted"`, true
+				node.Relays[0].Name, node.Relays[0].OnlyLineName = `"quoted"`, true
 				expectedName = `"quoted"`
-				rawRules, err := yaml.Marshal([]string{`MATCH,"quoted" [7:route-B]`})
+				rawRules, err := yaml.Marshal([]string{`MATCH,"quoted" [7:relay-B]`})
 				if err != nil {
 					t.Fatal(err)
 				}
 				rule.Content = string(rawRules)
 			}
 			if strings.HasPrefix(scenario, "legacy_") {
-				// No VLESS route state or precise-line members in main fixtures.
-				node.RouteState = domain.NodeRouteState{}
+				// No relay line or precise-line members, as before relays existed.
+				node.Relays = nil
 				rule.ProxyGroupMembers["OnlyRoute"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
 				expectedName, expectedUUID = "A", "12345678-1234-4abc-8def-123456789abc"
 				if scenario == "legacy_relay" {
@@ -209,7 +196,7 @@ func testReferencedCoreScenario(t *testing.T, xray, mihomo, singbox, scenario st
 			if !foundRoute {
 				t.Fatalf("required %s was not emitted; refusing a DIRECT fallback false positive", expectedName)
 			}
-			if (scenario == "collision_both" || scenario == "same_type_routes") && vlessCount != 2 || scenario == "collision_single" && vlessCount != 1 {
+			if scenario == "collision_both" && vlessCount != 2 || scenario == "collision_single" && vlessCount != 1 {
 				t.Fatalf("collision transition emitted %d VLESS proxies", vlessCount)
 			}
 			file := referenceCoreFile(t, "subscription.json", output.Body)

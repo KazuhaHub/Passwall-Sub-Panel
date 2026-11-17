@@ -49,6 +49,14 @@ describe('UserServerUsage', () => {
 
   const row = { panel_id: 1, server_name: 'srv-a', node_count: 2, lifetime_up_bytes: 1024, lifetime_down_bytes: 1024, lifetime_total_bytes: 2048, period_up_bytes: 512, period_down_bytes: 512, period_total_bytes: 1024, today_up_bytes: 0, today_down_bytes: 0, today_total_bytes: 0, traffic_factor_milli: 1500, charged_lifetime_bytes: 3072, charged_period_bytes: 1536 }
 
+  it('shows a mixed chip instead of a multiplier when the server lines are priced differently', async () => {
+    api.get.mockResolvedValue({ data: { items: [{ ...row, traffic_factor_milli: null }] } })
+    mount()
+    await waitFor(() => expect(screen.getByText('srv-a')).toBeTruthy())
+    expect(screen.getByTestId('traffic-factor-mixed')).toBeTruthy()
+    expect(screen.queryByTestId('traffic-factor-badge')).toBeNull()
+  })
+
   it('defaults to charged totals, shows the factor badge, and toggles to raw', async () => {
     api.get.mockResolvedValue({ data: { items: [row, { ...row, panel_id: 2, server_name: 'srv-b', traffic_factor_milli: 1000, charged_lifetime_bytes: 2048, charged_period_bytes: 1024 }] } })
     mount()

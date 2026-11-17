@@ -65,7 +65,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -143,7 +142,6 @@ type App struct {
 	health        *health.Service
 	geo           *geo.Service
 	render        *render.Service
-	vlessRoute    *vlessroute.Service
 	risk          *risk.Service
 	settings      ports.SettingsRepo
 	syncTasks     ports.SyncTaskRepo
@@ -490,16 +488,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// v3.9.0: let the inbound-deletable guard recognise shared clients as managed,
 	// so node deletion isn't blocked once users are migrated off the ownership table.
 	syncSvc.SetPSPClientRepo(repos.PSPClient)
+	syncSvc.SetNodeRepo(repos.Node) // legacy per-node clients are priced at their direct line
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
-	// The per-server traffic factors are read from the database once per poll,
-	// never from the pool: a factor is a price, and every replica must charge
-	// the same one.
-	if factors, ok := repos.XUIPanel.(ports.TrafficFactorReader); ok {
-		trafficSvc.SetTrafficFactors(factors)
-	}
 	// traffic needs user to push the per-client floor into 3X-UI after each
 	// poll. The reverse edge is gone: user used to take a late-wired usage
 	// reader back from traffic, but that reader only ever subtracted two
@@ -548,8 +541,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
 	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
 	sharedClientSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
-	vlessRouteSvc := vlessroute.New(repos, pool, invalidateSubscriptions)
-	nodeSvc.SetRouteCleaner(vlessRouteSvc.RemoveForNode)
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.
@@ -583,7 +574,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		bgCancel:      cancel,
 		bgRootCtx:     bgCtx,
 		render:        renderSvc,
-		vlessRoute:    vlessRouteSvc,
 	}
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
@@ -898,23 +888,22 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			}
 			return cli.GetServerStatus(ctx)
 		},
-		Auth:       authSvc,
-		SAML:       samlSvc,
-		OIDC:       oidcSvc,
-		User:       userSvc,
-		Group:      groupSvc,
-		Node:       nodeSvc,
-		VlessRoute: vlessRouteSvc,
-		Cert:       certSvc,
-		Render:     renderSvc,
-		Audit:      auditSvc,
-		Sync:       syncSvc,
-		Traffic:    trafficSvc,
-		Mail:       mailSvc,
-		Reconcile:  reconcileSvc,
-		Geo:        geoSvc,
-		NodeSync:   nativeSync,
-		Legal:      handler.LegalWiring{Service: legalSvc, Store: legalRepo},
+		Auth:      authSvc,
+		SAML:      samlSvc,
+		OIDC:      oidcSvc,
+		User:      userSvc,
+		Group:     groupSvc,
+		Node:      nodeSvc,
+		Cert:      certSvc,
+		Render:    renderSvc,
+		Audit:     auditSvc,
+		Sync:      syncSvc,
+		Traffic:   trafficSvc,
+		Mail:      mailSvc,
+		Reconcile: reconcileSvc,
+		Geo:       geoSvc,
+		NodeSync:  nativeSync,
+		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
@@ -1317,11 +1306,6 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		// against a panel we are already talking to, once per traffic poll
 		// (cron_traffic_pull_minutes, default 5).
 		a.probeIPLimitEnforcement(ctx, p, c, now)
-	}
-	if a.vlessRoute != nil {
-		if err := a.vlessRoute.CheckAll(ctx); err != nil {
-			log.Warn("vlessRoute read-only verification", "err", err)
-		}
 	}
 }
 

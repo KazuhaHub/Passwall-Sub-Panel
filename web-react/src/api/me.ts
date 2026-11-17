@@ -172,12 +172,10 @@ export interface MyNodeStatus {
   checked_at?: string
   /** False when this node hides its landing/direct endpoint. */
   show_direct: boolean
-  /** Server traffic multiplier in thousandths (1000 = one-for-one, 0 = free). */
+  /** This node's direct line multiplier in thousandths (1000 = one-for-one, 0 = free). */
   traffic_factor_milli?: number
   /** Enabled relay endpoints selected for user-visible health display. */
   relay_statuses?: MyRelayStatus[]
-  /** Published VLESS routing lines, reusing their entry's reachability. */
-  route_statuses?: MyRelayStatus[]
 }
 
 export interface MyRelayStatus {
@@ -187,6 +185,10 @@ export interface MyRelayStatus {
   only_line_name?: boolean
   status: 'ok' | 'down' | 'unknown'
   checked_at?: string
+  /** The node display name resolved with this relay's own multiplier. */
+  node_name?: string
+  /** This relay line's multiplier in thousandths. */
+  traffic_factor_milli?: number
 }
 
 export async function getMyServerStatus() {

@@ -34,6 +34,21 @@ type NodeSelector interface {
 	NodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error)
 }
 
+// clientLineSelector narrows a group's nodes to the lines its users may see,
+// which are the lines that get a client (ADR 0043). Optional on NodeSelector.
+type clientLineSelector interface {
+	ClientLinesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error)
+}
+
+// clientNodesFor is the node set a user's client rows are planned from: the
+// group's nodes with only the lines the group may see.
+func (s *Service) clientNodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error) {
+	if lines, ok := s.selector.(clientLineSelector); ok {
+		return lines.ClientLinesFor(ctx, g)
+	}
+	return s.selector.NodesFor(ctx, g)
+}
+
 // ClientSyncer is the subset of sync.Service this package needs.
 // Defined here (not imported) so the user package never imports sync.
 type ClientSyncer interface {
@@ -325,7 +340,7 @@ func (s *Service) BackfillPSPClients(ctx context.Context) (BackfillResult, error
 			res.Errors++
 			continue
 		}
-		nodes, err := s.selector.NodesFor(ctx, g)
+		nodes, err := s.clientNodesFor(ctx, g)
 		if err != nil {
 			log.Warn("backfill psp_client: nodes for group", "user_id", u.ID, "err", err)
 			res.Errors++
@@ -2208,7 +2223,7 @@ func (s *Service) syncUserDesired(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
-	desiredNodes, err := s.selector.NodesFor(ctx, g)
+	desiredNodes, err := s.clientNodesFor(ctx, g)
 	if err != nil {
 		return err
 	}
@@ -2260,7 +2275,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
-	desiredNodes, err := s.selector.NodesFor(ctx, g)
+	desiredNodes, err := s.clientNodesFor(ctx, g)
 	if err != nil {
 		return err
 	}

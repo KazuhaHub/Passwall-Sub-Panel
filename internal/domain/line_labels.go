@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -87,28 +86,6 @@ func ResolveRelayLabels(previous, next []RelayLine, region string, tags []string
 	}
 }
 
-// ResolveRouteLineLabels is ResolveRelayLabels for one VLESS route line;
-// prior is nil for a newly created line.
-func ResolveRouteLineLabels(line *VlessRouteLine, prior *VlessRouteLine, region string, tags []string) {
-	if line.RegionUnresolved {
-		line.Region = region
-		if prior != nil {
-			line.Region = prior.Region
-		}
-		line.RegionUnresolved = false
-	}
-	if line.TagsUnresolved {
-		line.Tags = CopyLineTags(tags)
-		if prior != nil {
-			line.Tags = CopyLineTags(prior.Tags)
-		}
-		line.TagsUnresolved = false
-	}
-	if line.Tags == nil {
-		line.Tags = []string{}
-	}
-}
-
 // ErrUnresolvedLineLabels is returned by storage when a parsing step forgot to
 // resolve an omitted field. Failing loudly prevents a silent clear.
 var ErrUnresolvedLineLabels = fmt.Errorf("%w: line region/tags were not resolved before storage", ErrValidation)
@@ -121,43 +98,4 @@ func CheckRelayLabelsResolved(lines []RelayLine) error {
 		}
 	}
 	return nil
-}
-
-// CheckRouteLabelsResolved guards the storage boundary.
-func CheckRouteLabelsResolved(lines []VlessRouteLine) error {
-	for _, line := range lines {
-		if line.RegionUnresolved || line.TagsUnresolved {
-			return ErrUnresolvedLineLabels
-		}
-	}
-	return nil
-}
-
-// splitRouteLineDisplay is the single definition of a VLESS route line's
-// display fields: name, name-only, Region and Tags. They only change PSP's own
-// subscription output, never the 3X-UI routing rule. A field added to
-// VlessRouteLine later stays in the rule half, and therefore requires the
-// remote path, unless it is explicitly moved here.
-func splitRouteLineDisplay(line VlessRouteLine) (rule, display VlessRouteLine) {
-	display = VlessRouteLine{Name: line.Name, OnlyLineName: line.OnlyLineName, Region: line.Region, Tags: CopyLineTags(line.Tags)}
-	rule = line
-	rule.Name, rule.OnlyLineName, rule.Region, rule.Tags = "", false, "", nil
-	rule.RegionUnresolved, rule.TagsUnresolved = false, false
-	return rule, display
-}
-
-// CompareRouteLineDisplay reports whether two lines agree on every
-// rule-relevant field and whether their display fields differ.
-func CompareRouteLineDisplay(saved, next VlessRouteLine) (sameRule, displayChanged bool) {
-	savedRule, savedDisplay := splitRouteLineDisplay(saved)
-	nextRule, nextDisplay := splitRouteLineDisplay(next)
-	return sameEncoding(savedRule, nextRule), !sameEncoding(savedDisplay, nextDisplay)
-}
-
-// sameEncoding compares the persisted form, so nil and empty slices that the
-// JSON column cannot distinguish never count as a change.
-func sameEncoding(a, b VlessRouteLine) bool {
-	left, errA := json.Marshal(a)
-	right, errB := json.Marshal(b)
-	return errA == nil && errB == nil && string(left) == string(right)
 }

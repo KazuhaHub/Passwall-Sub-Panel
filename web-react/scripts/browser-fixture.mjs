@@ -46,7 +46,7 @@ export async function liveBrowserFixture(prefix) {
   assert.ok(password, 'isolated fixture password is required')
   const response = await fetch(`${base}/api/version`)
   assert.equal(response.ok, true)
-  assert.equal((await response.json()).version, 'vlessroute-v2-acceptance')
+  assert.equal((await response.json()).version, 'line-labels-v2-acceptance')
   return { ...await launch(prefix, { width: 1440, height: 1000 }), base, password }
 }
 

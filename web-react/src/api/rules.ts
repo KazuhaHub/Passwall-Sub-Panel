@@ -87,7 +87,7 @@ export interface ProxyGroupInspection {
 export interface ProxyGroupInspectLine {
   node_id: number
   line_id: string
-  kind: 'direct' | 'relay' | 'vless_route'
+  kind: 'direct' | 'relay'
   name: string
   display_name: string
   available: boolean

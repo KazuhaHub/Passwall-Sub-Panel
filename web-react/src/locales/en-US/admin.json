@@ -1834,7 +1834,7 @@
       "add": "Add",
       "kind_node": "Select by node",
       "kind_line": "Select by line",
-      "kind_node_hint": "Includes every publishable direct, relay and VLESS routing line under this node; future lines join automatically.",
+      "kind_node_hint": "Includes every publishable direct and relay line under this node; future lines join automatically.",
       "kind_line_hint": "Includes only the selected line. Renaming or reordering keeps its identity; other new lines do not join automatically.",
       "kind_remaining_hint": "Includes all publishable lines in the current subscription scope, deduplicated in member order. New nodes and lines join automatically.",
       "kind_region_hint": "Includes every publishable line of nodes in the selected region. Future matching nodes and lines join automatically within the current subscription scope.",
@@ -1846,7 +1846,6 @@
       "select_line": "Line",
       "line_type_direct": "Direct line",
       "line_type_relay": "Relay",
-      "line_type_vless_route": "VLESS route",
       "line_unavailable": "Currently unavailable",
       "missing_line": "Deleted line {{id}}",
       "kind_remaining": "Remaining lines",
@@ -1861,7 +1860,6 @@
       "member_label_node": "Node: {{value}}",
       "member_label_direct": "Direct: {{value}}",
       "member_label_relay": "Relay: {{value}}",
-      "member_label_vless_route": "VLESS routing: {{value}}",
       "member_label_line": "Line: {{value}}",
       "member_label_builtin": "Built-in: {{value}}",
       "member_label_proxy_group": "Proxy group: {{value}}",
@@ -1951,46 +1949,6 @@
     "duplicate": "Duplicate as a new rule set"
   },
   "nodes": {
-    "vless_route": {
-      "title": "VLESS routing lines",
-      "tabs": "Additional line type",
-      "hint": "Using Xray's vlessRoute mechanism, derive multiple subscription nodes from the same inbound and route them through different outbounds. Configure the required outbounds in 3X-UI beforehand; only existing outbounds can be selected here, and all inbound settings are reused from the original inbound. Generated routing rules are appended at the end without affecting existing custom rules.",
-      "unsupported": "Only VLESS nodes on 3X-UI are supported.",
-      "read_error": "Cannot read lines. A failed read must not be treated as an empty list.",
-      "catalog_error": "Cannot read existing outbounds; the list does not reflect the server's current state. Refresh before selecting an outbound.",
-      "add": "Add VLESS route",
-      "empty": "No VLESS routing lines added yet",
-      "refresh": "Refresh routing status and outbounds",
-      "draft_conflict": "The line configuration was changed by another operation. Your unsaved edits are preserved. Close and reopen the editor to review it.",
-      "name": "Line name",
-      "outbound": "Line outbound",
-      "entry": "Line inbound",
-      "entry_direct": "Direct",
-      "entry_missing": "Deleted relay line",
-      "entry_unavailable": "The selected relay line is disabled or deleted; this routing line is inactive and not published.",
-      "entry_unsaved_hint": "Save the node before selecting a newly added relay line as the line inbound.",
-      "unknown_protocol": "unknown protocol",
-      "missing_outbound": "Not currently found",
-      "partial_failure": "Node metadata was saved, but routing is not confirmed. The editor remains open; check its status before retrying.",
-      "state_applied": "Routing readback confirmed; actual traffic still needs testing.",
-      "error_code": "Error code:",
-      "warnings": {
-        "earlier_route_priority": "Earlier routing rules take priority; inspect overlaps.",
-        "earlier_broad_rule": "Earlier broad routing rules may shadow this line."
-      },
-      "match": {
-        "title": "Advanced routing rules",
-        "network": "Network",
-        "any": "Any (TCP / UDP)",
-        "protocols": "Protocol",
-        "ip": "IP",
-        "domain": "Domain",
-        "port": "Port"
-      },
-      "state_applying": "Remote application is not confirmed; lines are withheld. Saving again first reads the current state.",
-      "state_unknown": "Remote result unknown; lines are withheld. Save again to retry synchronization.",
-      "state_drift": "Remote routing changed; lines are withheld. Continuing to save will overwrite the remote routing changes."
-    },
     "load_failed": "Nodes are temporarily unavailable",
     "retry": "Retry",
     "cert_source": {
@@ -2049,7 +2007,8 @@
       "entry_managed_hint": "The selected Passwall Node server relays the entry port to this node unchanged, published by PSP. The landing sees the relay server as the source address, so IP-based limits do not apply to connections through this line.",
       "port_managed_hint": "Port the relay server listens on",
       "managed_ready": "Relay server applied it; the line is published",
-      "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then"
+      "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then",
+      "name_factor_hint": "Tip: {{placeholder}} is replaced with this line's multiplier (e.g. ×1.5) in subscriptions."
     },
     "egress": {
       "server": "Exit server",
@@ -2319,7 +2278,9 @@
       "separator_mode_hint_node_bound": "Only visible when the rendered group contains at least one of the linked nodes. Position is still set by drag-to-reorder.",
       "separator_node_ids": "Linked nodes",
       "separator_node_ids_hint": "On subscription render, any group whose user can see at least one of these nodes shows the separator. Leave empty to hide it everywhere.",
-      "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the server's traffic multiplier (e.g. ×1.5) when set."
+      "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the direct line's traffic multiplier (e.g. ×1.5) in subscriptions.",
+      "traffic_factor": "Traffic multiplier",
+      "traffic_factor_direct": "Direct line traffic multiplier"
     },
     "action": {
       "edit": "Edit",
@@ -2329,7 +2290,8 @@
       "drag_to_reorder": "Drag to reorder"
     },
     "validate": {
-      "address_region_required": "Address and Region are required"
+      "address_region_required": "Address and Region are required",
+      "traffic_factor": "Enter a multiplier between 0 and 100 (up to 3 decimals)"
     },
     "toast": {
       "saved": "Saved",
@@ -2361,6 +2323,9 @@
       "visible": "Shown in: {{groups}}",
       "none": "No group currently shows this separator",
       "unknown": "The groups showing it cannot be determined right now"
+    },
+    "hint": {
+      "traffic_factor": "This line's traffic is charged at this multiplier whatever servers it passes through. 1 = one-for-one, 0 = free. Only traffic after saving is affected."
     }
   },
   "users": {
@@ -2392,7 +2357,7 @@
       "mode_label": "Traffic basis",
       "mode_charged": "Charged",
       "mode_raw": "Raw",
-      "charged_hint": "Charged totals apply each server's multiplier. Up/down split and today are raw bytes.",
+      "charged_hint": "Charged totals apply each line's multiplier. Up/down split and today are raw bytes.",
       "charged_total_note": "charged",
       "raw_amount": "raw {{amount}}",
       "today_raw": "Today (raw)"
@@ -2402,7 +2367,9 @@
       "empty": "No servers for this user",
       "unavailable": "Server usage is temporarily unavailable",
       "server": "Server",
-      "node_count": "{{n}} nodes"
+      "node_count": "{{n}} nodes",
+      "factor_mixed": "Mixed",
+      "factor_mixed_title": "This user's lines on this server have different multipliers"
     },
     "result_title": "User created",
     "search_placeholder": "Search UPN / display name / email…",
@@ -2442,11 +2409,11 @@
       "remark": "Remark",
       "cap_void": "Void fleet-wide: {{panels}} cannot enforce it, so the user simply routes through those.",
       "cap_unknown": "Cannot confirm this is in force: {{panels}} could not be read. An unread precondition is not a working one.",
-      "cap_multiplied": "Reachable total is {{total}}: the cap is enforced per panel-side client, and this user has {{rows}}, each allowing {{typed}}.",
+      "cap_multiplied": "Reachable total is {{total}}: the cap is enforced per panel-side client (one per line), and this user has {{rows}}, each allowing {{typed}}.",
       "cap_no_clients": "This user has no panel-side client anywhere yet, so there is nothing enforcing this cap.",
       "cap_void_short": "Void fleet-wide",
       "cap_unknown_short": "Cannot confirm",
-      "cap_multiplied_short": "Reaches {{total}}",
+      "cap_multiplied_short": "Reaches {{total}} (×{{rows}})",
       "cap_no_clients_short": "Nothing to enforce yet",
       "device_limit_inert_short": "Not enforced",
       "limit_unsupported_short": "Unsupported on some panels",
@@ -3140,8 +3107,7 @@
       "core_evidence_yes": "complete",
       "core_evidence_no": "not complete",
       "core_handshake_title": "Tested matrix:",
-      "core_pending": "Pending → {{engine}} {{version}}",
-      "traffic_factor": "Traffic multiplier"
+      "core_pending": "Pending → {{engine}} {{version}}"
     },
     "auth_method": {
       "token": "API Token",
@@ -3162,8 +3128,7 @@
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
       "change": "Change",
-      "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected.",
-      "traffic_factor": "1 = charged one-for-one, 0 = free (not counted toward quota). Changes only affect traffic booked after saving."
+      "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
     },
     "native": {
       "compatibility": {
@@ -3409,7 +3374,8 @@
       "upgrade_panel": "Upgrade 3X-UI panel (Latest)",
       "upgrade_xray": "Upgrade Xray",
       "select_core": "Select core and version",
-      "rotate_node_credential": "Rotate node credential"
+      "rotate_node_credential": "Rotate node credential",
+      "line_factors": "Line multipliers"
     },
     "core_tier": {
       "recommended": "Recommended (broad compatibility)",
@@ -3436,8 +3402,7 @@
     "validate": {
       "url_required": "URL is required",
       "name_required": "Server name is required",
-      "credentials_required": "Please configure an API token or username/password first.",
-      "traffic_factor": "Enter a multiplier between 0 and 100"
+      "credentials_required": "Please configure an API token or username/password first."
     },
     "toast": {
       "saved": "Saved",
@@ -3506,6 +3471,27 @@
       "resolve": "Host name matching",
       "recording_hits_and_usage": "Rule matches and per-site usage",
       "usage_retention": "usage kept {{days}} days"
+    },
+    "line_factors": {
+      "title": "Line multipliers — {{name}}",
+      "hint": "Set the traffic multiplier of lines on this server. Only traffic after saving is affected.",
+      "empty": "This server has no lines yet.",
+      "select_all": "Select all lines",
+      "field": "Traffic multiplier",
+      "field_hint": "Applied to the selected lines. 1 = one-for-one, 0 = free.",
+      "invalid": "Enter a multiplier between 0 and 100 (up to 3 decimals)",
+      "apply": "Apply to selected",
+      "updated": "{{count}} lines updated",
+      "updated_one": "{{count}} line updated",
+      "load_failed": "Could not load the lines of this server.",
+      "loading": "Loading lines…",
+      "apply_failed": "Could not update the lines: {{message}}"
+    },
+    "identities": {
+      "count": "{{count}} client identities",
+      "warning": "Near sync limit",
+      "warning_tip": "Each user gets one client per line they can see. This server is approaching what one node sync can carry; reduce visible lines or users per server.",
+      "count_one": "{{count}} client identity"
     }
   },
   "diagnostics": {

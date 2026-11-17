@@ -27,6 +27,8 @@ export interface ImportNodeRequest {
   region: string
   tags?: string[]
   sort_order?: number
+  /** Direct line multiplier in thousandths; omit for 1000. */
+  traffic_factor_milli?: number
 }
 
 export interface UpdateNodeMetadataRequest {
@@ -40,6 +42,8 @@ export interface UpdateNodeMetadataRequest {
    *  untouched; send [] to clear. */
   relays?: RelayLine[]
   hide_direct?: boolean
+  /** Direct line multiplier in thousandths (0..100000). Omit to keep the saved value. */
+  traffic_factor_milli?: number
   /** Exit server (0: the node's own). Omit to leave it unchanged. */
   egress_panel_id?: number
 }
@@ -106,6 +110,8 @@ export interface CreateInboundRequest {
   sort_order?: number
   cert_source?: 'psp_managed'
   cert_id?: number
+  /** Direct line multiplier in thousandths; omit for 1000. */
+  traffic_factor_milli?: number
   inbound: InboundSpec
 }
 
@@ -325,7 +331,6 @@ export interface LineVisibilityDraft {
   region: string
   tags: string[]
   relays: { id?: string; region: string; tags: string[] }[]
-  routes: { id?: string; entry_relay_id?: string; region: string; tags: string[] }[]
 }
 
 /** Which groups would see each draft line; empty means none, never unknown. */
@@ -335,7 +340,6 @@ export interface LineVisibilityView {
   /** Groups the stored node passes; with node_groups, those a save removes. */
   saved_node_groups: number[]
   relays: number[][]
-  routes: number[][]
 }
 
 /** Read-only and unaudited: called as the editor's typing pauses. A reply
@@ -352,7 +356,6 @@ export async function previewLineVisibility(nodeId: number, draft: LineVisibilit
     node_groups: data.node_groups,
     saved_node_groups: data.saved_node_groups,
     relays: rows(data?.relays, draft.relays.length),
-    routes: rows(data?.routes, draft.routes.length),
   }
 }
 

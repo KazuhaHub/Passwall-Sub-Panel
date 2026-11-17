@@ -3,13 +3,10 @@ package render
 import (
 	"regexp"
 	"strconv"
-
-	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// factorPlaceholderRE matches the opt-in "{{ factor }}" token in a node, relay
-// line or route line name, spaced like every other PSP placeholder.
+// factorPlaceholderRE matches the opt-in "{{ factor }}" token in a node or relay
+// line name, spaced like every other PSP placeholder.
 var factorPlaceholderRE = regexp.MustCompile(`\{\{\s*factor\s*\}\}`)
 
 // formatTrafficFactor renders a factor in thousandths as a multiplier label:
@@ -19,18 +16,25 @@ func formatTrafficFactor(milli int) string {
 }
 
 // applyFactorPlaceholder substitutes "{{ factor }}" in each entry's name with
-// the traffic factor of the server the user's traffic is counted on: the
-// node's own server, for its relay and route lines as well (a relay only
-// forwards to it). Names without the token are untouched, so a subscription
+// the factor of that entry's own line: a relay entry's relay line, the direct
+// entry's node. Names without the token are untouched, so a subscription
 // changes only where an administrator asked for the label.
-func applyFactorPlaceholder(items []renderItem, factorOf func(panelID int64) int) {
+func applyFactorPlaceholder(items []renderItem) {
 	for i := range items {
 		it := &items[i]
 		if it.node == nil || it.isSeparator || !factorPlaceholderRE.MatchString(it.name) {
 			continue
 		}
-		it.name = ReplaceFactorPlaceholder(it.name, factorOf(it.node.PanelID))
+		it.name = ReplaceFactorPlaceholder(it.name, it.lineFactor())
 	}
+}
+
+// lineFactor is the traffic factor of the line this entry renders.
+func (it renderItem) lineFactor() int {
+	if it.relay != nil {
+		return it.relay.EffectiveTrafficFactor()
+	}
+	return it.node.EffectiveTrafficFactor()
 }
 
 // ReplaceFactorPlaceholder substitutes "{{ factor }}" in one name, for the
@@ -40,19 +44,4 @@ func ReplaceFactorPlaceholder(name string, milli int) string {
 		return name
 	}
 	return factorPlaceholderRE.ReplaceAllLiteralString(name, formatTrafficFactor(milli))
-}
-
-// TrafficFactorOf is a server's traffic factor through the pool.
-func (s *Service) TrafficFactorOf(panelID int64) int {
-	if s == nil {
-		return domain.TrafficFactorDefault
-	}
-	return s.trafficFactorOf(panelID)
-}
-
-func (s *Service) trafficFactorOf(panelID int64) int {
-	if s.pool == nil {
-		return domain.TrafficFactorDefault
-	}
-	return ports.PanelTrafficFactor(s.pool, panelID)
 }

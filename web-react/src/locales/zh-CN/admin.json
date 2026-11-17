@@ -1831,7 +1831,7 @@
       "add": "添加",
       "kind_node": "按节点选择",
       "kind_line": "按线路选择",
-      "kind_node_hint": "包含该节点所有可发布的直连线路、中转线路和 VLESS 路由线路；以后新增线路也会自动加入。",
+      "kind_node_hint": "包含该节点所有可发布的直连线路和中转线路；以后新增线路也会自动加入。",
       "kind_line_hint": "只加入选中的一条线路；重命名或排序不会改变引用，其他新增线路不会自动加入。",
       "kind_remaining_hint": "加入当前订阅范围内所有可发布线路，与其他成员按顺序自动去重；新增节点和线路也会自动加入。",
       "kind_region_hint": "加入所选区域内节点的所有可发布线路；当前订阅范围内，后续符合该区域的节点和线路也会自动加入。",
@@ -1843,7 +1843,6 @@
       "select_line": "线路",
       "line_type_direct": "直连线路",
       "line_type_relay": "中转",
-      "line_type_vless_route": "VLESS 路由",
       "line_unavailable": "当前不可发布",
       "missing_line": "已删除线路 {{id}}",
       "kind_remaining": "其余线路",
@@ -1858,7 +1857,6 @@
       "member_label_node": "节点：{{value}}",
       "member_label_direct": "直连：{{value}}",
       "member_label_relay": "中转：{{value}}",
-      "member_label_vless_route": "VLESS 路由：{{value}}",
       "member_label_line": "线路：{{value}}",
       "member_label_builtin": "内置：{{value}}",
       "member_label_proxy_group": "代理组：{{value}}",
@@ -1948,46 +1946,6 @@
     "duplicate": "复制为新的规则集"
   },
   "nodes": {
-    "vless_route": {
-      "title": "VLESS 路由线路",
-      "tabs": "附加线路类型",
-      "hint": "基于 Xray 的 vlessRoute 机制，将同一入站派生为多个订阅节点，并结合路由规则实现不同出站。所需出站需预先在 3X-UI 中配置，这里只选择已有出站，Inbound 配置全部复用原入站。生成的路由规则追加在末尾，不影响已有自定义规则。",
-      "unsupported": "仅支持 3X-UI 的 VLESS 节点。",
-      "read_error": "无法读取线路，不能将读取失败视为没有线路。",
-      "catalog_error": "无法读取已有出站，列表不代表当前服务端状态。请刷新后再选择。",
-      "add": "添加 VLESS 路由",
-      "empty": "尚未添加 VLESS 路由线路",
-      "refresh": "刷新路由状态和出站",
-      "draft_conflict": "线路配置已被其他操作修改，未保存的编辑已保留。请关闭编辑器并重新打开后核对。",
-      "name": "线路名称",
-      "outbound": "线路出站",
-      "entry": "线路入站",
-      "entry_direct": "直连",
-      "entry_missing": "已删除的中转线路",
-      "entry_unavailable": "所选中转线路已停用或删除，该路由线路暂不启用和发布。",
-      "entry_unsaved_hint": "新增中转线路需先保存节点，再选择为线路入站。",
-      "unknown_protocol": "未知协议",
-      "missing_outbound": "当前未找到",
-      "partial_failure": "节点资料已保存，但路由同步尚未确认；编辑器保持打开，请检查状态后重试。",
-      "state_applied": "路由已回读确认；实际流量仍需测试。",
-      "error_code": "错误标识：",
-      "warnings": {
-        "earlier_route_priority": "前面的路由规则优先，请检查是否存在重叠。",
-        "earlier_broad_rule": "前面的宽泛路由规则可能使本线路无法命中。"
-      },
-      "match": {
-        "title": "高级路由规则",
-        "network": "网络",
-        "any": "不限（TCP / UDP）",
-        "protocols": "协议",
-        "ip": "IP",
-        "domain": "域名",
-        "port": "端口"
-      },
-      "state_applying": "远端应用结果尚未确认，线路暂不发布。再次保存会先读取当前状态。",
-      "state_unknown": "远端结果未知，线路暂不发布。再次保存可重试同步。",
-      "state_drift": "检测到远端路由变化，线路暂不发布。继续保存将覆盖远端路由变化。"
-    },
     "load_failed": "暂时无法加载节点",
     "retry": "重试",
     "cert_source": {
@@ -2046,7 +2004,8 @@
       "entry_managed_hint": "由所选 Passwall Node 服务器把入口端口原样转发到本节点，PSP 自动下发。落地看到的来源地址是这台中转服务器，基于 IP 的限制对经此线路的连接不生效。",
       "port_managed_hint": "中转服务器上监听的端口",
       "managed_ready": "中转服务器已生效，线路已发布",
-      "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中"
+      "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中",
+      "name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为该线路的流量倍率（如 ×1.5）。"
     },
     "egress": {
       "server": "出口服务器",
@@ -2316,7 +2275,9 @@
       "separator_mode_hint_node_bound": "仅当该分组包含下方关联的任意节点时才显示。位置仍由拖拽排序决定。",
       "separator_node_ids": "关联节点",
       "separator_node_ids_hint": "订阅渲染时，凡是用户能看到这里任一节点的分组都会显示此分隔符；不填则永远不出现。",
-      "display_name_factor_hint": "提示：可使用 {{placeholder}}，会替换为服务器的流量倍率（如 ×1.5）。"
+      "display_name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为直连线路的流量倍率（如 ×1.5）。",
+      "traffic_factor": "流量倍率",
+      "traffic_factor_direct": "直连线路流量倍率"
     },
     "action": {
       "edit": "编辑",
@@ -2326,7 +2287,8 @@
       "drag_to_reorder": "拖动排序"
     },
     "validate": {
-      "address_region_required": "请填写连接地址和 Region"
+      "address_region_required": "请填写连接地址和 Region",
+      "traffic_factor": "请输入 0 到 100 之间的倍率（最多 3 位小数）"
     },
     "toast": {
       "saved": "已保存",
@@ -2358,6 +2320,9 @@
       "visible": "会出现在：{{groups}}",
       "none": "当前没有分组会显示这个分隔标题",
       "unknown": "出现的分组暂时无法计算"
+    },
+    "hint": {
+      "traffic_factor": "无论经过哪些服务器，此线路的流量都按该倍率计费。1 = 按实际用量计费，0 = 免费。仅对保存之后产生的流量生效。"
     }
   },
   "users": {
@@ -2389,7 +2354,7 @@
       "mode_label": "流量口径",
       "mode_charged": "计费",
       "mode_raw": "原始",
-      "charged_hint": "计费合计已按各服务器倍率换算；上行/下行拆分与今日为原始字节。",
+      "charged_hint": "计费合计已按各线路倍率换算；上行/下行拆分与今日为原始字节。",
       "charged_total_note": "计费",
       "raw_amount": "原始 {{amount}}",
       "today_raw": "今日（原始）"
@@ -2399,7 +2364,9 @@
       "empty": "该用户暂无服务器",
       "unavailable": "暂时无法获取服务器用量",
       "server": "服务器",
-      "node_count": "{{n}} 节点"
+      "node_count": "{{n}} 节点",
+      "factor_mixed": "混合",
+      "factor_mixed_title": "该用户在此服务器上的各线路倍率不同"
     },
     "result_title": "用户已创建",
     "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
@@ -2439,11 +2406,11 @@
       "remark": "备注",
       "cap_void": "此上限整体不生效：{{panels}} 无法执行，用户只走这些面板即可绕过。",
       "cap_unknown": "无法确认此上限是否生效：{{panels}} 的状态读不到。未读到的前提不等于正常。",
-      "cap_multiplied": "实际可达 {{total}}：上限按「面板 × 客户端」各自独立执行，该用户有 {{rows}} 份，每份各放行 {{typed}}。",
+      "cap_multiplied": "实际可达 {{total}}：上限按「面板侧客户端」（每条线路一个）各自独立执行，该用户有 {{rows}} 个，每个各放行 {{typed}}。",
       "cap_no_clients": "该用户在任何面板上都还没有客户端，此上限目前无处执行。",
       "cap_void_short": "整体不生效",
       "cap_unknown_short": "无法确认是否生效",
-      "cap_multiplied_short": "实际可达 {{total}}",
+      "cap_multiplied_short": "实际可达 {{total}}（×{{rows}}）",
       "cap_no_clients_short": "暂无处执行",
       "device_limit_inert_short": "当前不生效",
       "limit_unsupported_short": "部分面板不支持",
@@ -3136,8 +3103,7 @@
       "core_evidence_yes": "已完成",
       "core_evidence_no": "未完成",
       "core_handshake_title": "实测矩阵：",
-      "core_pending": "待切换 → {{engine}} {{version}}",
-      "traffic_factor": "流量倍率"
+      "core_pending": "待切换 → {{engine}} {{version}}"
     },
     "auth_method": {
       "token": "API Token",
@@ -3158,8 +3124,7 @@
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
       "change": "修改",
-      "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。",
-      "traffic_factor": "1 = 按实际用量计费，0 = 免费（不计入配额）。修改仅对保存之后产生的流量生效。"
+      "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "native": {
       "compatibility": {
@@ -3405,7 +3370,8 @@
       "upgrade_panel": "升级 3X-UI 面板（最新）",
       "upgrade_xray": "升级 Xray",
       "select_core": "选择内核与版本",
-      "rotate_node_credential": "轮换节点凭据"
+      "rotate_node_credential": "轮换节点凭据",
+      "line_factors": "线路倍率"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -3432,8 +3398,7 @@
     "validate": {
       "url_required": "URL 必填",
       "name_required": "服务器名称必填",
-      "credentials_required": "请先配置 API Token 或用户名密码",
-      "traffic_factor": "请输入 0 到 100 之间的倍率"
+      "credentials_required": "请先配置 API Token 或用户名密码"
     },
     "toast": {
       "saved": "已保存",
@@ -3502,6 +3467,25 @@
       "resolve": "主机名匹配",
       "recording_hits_and_usage": "记录命中和按网站用量",
       "usage_retention": "用量保留 {{days}} 天"
+    },
+    "line_factors": {
+      "title": "线路倍率 — {{name}}",
+      "hint": "设置此服务器上线路的流量倍率。仅对保存之后产生的流量生效。",
+      "empty": "此服务器上还没有线路。",
+      "select_all": "全选线路",
+      "field": "流量倍率",
+      "field_hint": "应用于所选线路。1 = 按实际用量计费，0 = 免费。",
+      "invalid": "请输入 0 到 100 之间的倍率（最多 3 位小数）",
+      "apply": "应用到所选",
+      "updated": "已更新 {{count}} 条线路",
+      "load_failed": "无法加载此服务器的线路。",
+      "loading": "正在加载线路…",
+      "apply_failed": "更新线路失败：{{message}}"
+    },
+    "identities": {
+      "count": "{{count}} 个客户端身份",
+      "warning": "接近同步上限",
+      "warning_tip": "每个用户对其可见的每条线路各有一个客户端。此服务器已接近单次节点同步可承载的数量，请减少可见线路或每台服务器的用户数。"
     }
   },
   "diagnostics": {

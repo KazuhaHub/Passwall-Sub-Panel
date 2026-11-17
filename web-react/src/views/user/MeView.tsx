@@ -146,13 +146,9 @@ function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNode
       : []
     const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => {
       const label = relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })
-      return { name: relay.only_line_name ? label : `${n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at, factor: n.traffic_factor_milli }
+      return { name: relay.only_line_name ? label : `${relay.node_name ?? n.name} ${label}`, region: n.region, status: relay.status, checked_at: relay.checked_at, factor: relay.traffic_factor_milli }
     })
-    const routes = (n.route_statuses ?? []).map(route => ({
-      name: route.only_line_name ? route.name : `${n.name} ${route.name}`,
-      region: n.region, status: route.status, checked_at: route.checked_at, factor: n.traffic_factor_milli,
-    }))
-    return [...direct, ...relays, ...routes]
+    return [...direct, ...relays]
   })
   if (rows.length === 0) {
     return (
@@ -164,7 +160,6 @@ function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNode
   const okCount = rows.filter(row => row.status === 'ok').length
   const downCount = rows.filter(row => row.status === 'down').length
   const hasRelays = (nodes ?? []).some(n => (n.relay_statuses ?? []).length > 0)
-  const hasRoutes = (nodes ?? []).some(n => (n.route_statuses ?? []).length > 0)
   const checkedAt = rows.find(row => row.checked_at)?.checked_at
   return (
     <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
@@ -197,13 +192,8 @@ function ServerStatusPanel({ md, nodes, loading }: { md: M3Tokens; nodes: MyNode
           {t('status.relay_hint', { defaultValue: '中转状态仅表示中转入口可达，不代表中转链路完全可用。' })}
         </Typography>
       )}
-      {hasRoutes && (
-        <Typography variant="caption" sx={{ display: 'block', mt: hasRelays ? 0.5 : 2, color: md.onSurfaceVariant }}>
-          {t('status.route_hint', { defaultValue: 'VLESS 路由线路复用所选入口的检测结果，仅表示入口可达，不代表线路出站可用。' })}
-        </Typography>
-      )}
       {checkedAt && (
-        <Typography variant="caption" sx={{ display: 'block', mt: hasRelays || hasRoutes ? 0.5 : 2, color: md.onSurfaceVariant }}>
+        <Typography variant="caption" sx={{ display: 'block', mt: hasRelays ? 0.5 : 2, color: md.onSurfaceVariant }}>
           {t('status.checked_at', { time: new Date(checkedAt).toLocaleString(), defaultValue: '最后检查：{{time}}' })}
         </Typography>
       )}
@@ -294,7 +284,9 @@ export default function MeView() {
       .finally(() => { if (live) setStatusLoading(false) })
     return () => { live = false }
   }, [statusTabOpen])
-  const showCharged = (statusNodes ?? []).some(n => hasCustomFactor(n.traffic_factor_milli))
+  const showCharged = (statusNodes ?? []).some(n =>
+    hasCustomFactor(n.traffic_factor_milli)
+    || (n.relay_statuses ?? []).some(r => hasCustomFactor(r.traffic_factor_milli)))
   const loading = profileQuery.isPending
   // Announcement popup: starts hidden, opens after the profile loads
   // unless the visitor has previously chosen "don't remind again" for

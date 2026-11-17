@@ -81,9 +81,9 @@ func storedVisibilityNode() *domain.Node {
 // The draft replaces only labels and lines; everything else is the stored
 // node, and the line labels are normalized exactly as a save would.
 func TestPreviewLineVisibilityBuildsDraftFromStoredNode(t *testing.T) {
-	previewer := &recordingPreviewer{result: &group.LineVisibility{Groups: []*domain.Group{{ID: 4, Name: "VIP"}}, NodeGroups: []int64{4}, Relays: [][]int64{{4}}, Routes: [][]int64{{}}}, saved: []int64{4, 9}}
+	previewer := &recordingPreviewer{result: &group.LineVisibility{Groups: []*domain.Group{{ID: 4, Name: "VIP"}}, NodeGroups: []int64{4}, Relays: [][]int64{{4}}}, saved: []int64{4, 9}}
 	h := NewAdminNodeHandler(node.New(visibilityNodes{node: storedVisibilityNode()}, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil, nil, nil).WithLineVisibility(previewer)
-	w := postLineVisibility(t, h, `{"region":" JP ","tags":[" edge ",""],"relays":[{"id":"gz","region":" cn ","tags":["b","a","b"]}],"routes":[{"id":"r","entry_relay_id":"gz","region":"US","tags":[]}]}`)
+	w := postLineVisibility(t, h, `{"region":" JP ","tags":[" edge ",""],"relays":[{"id":"gz","region":" cn ","tags":["b","a","b"]}]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -94,14 +94,11 @@ func TestPreviewLineVisibilityBuildsDraftFromStoredNode(t *testing.T) {
 	if len(d.Relays) != 1 || d.Relays[0].ID != "gz" || d.Relays[0].Region != "cn" || !reflect.DeepEqual(d.Relays[0].Tags, []string{"b", "a"}) {
 		t.Fatalf("draft relays %+v", d.Relays)
 	}
-	if len(d.RouteState.Lines) != 1 || d.RouteState.Lines[0].EntryRelayID != "gz" || d.RouteState.Lines[0].Region != "US" {
-		t.Fatalf("draft routes %+v", d.RouteState.Lines)
-	}
 	var body lineVisibilityResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(body.Groups, []lineVisibilityGroup{{ID: 4, Name: "VIP"}}) || !reflect.DeepEqual(body.Relays, [][]int64{{4}}) || body.Routes[0] == nil {
+	if !reflect.DeepEqual(body.Groups, []lineVisibilityGroup{{ID: 4, Name: "VIP"}}) || !reflect.DeepEqual(body.Relays, [][]int64{{4}}) {
 		t.Fatalf("response %s", w.Body.String())
 	}
 	// ADR 0042 §2: the groups the STORED node passes, so the editor can name
@@ -121,7 +118,7 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 		{ID: 4, Name: "New address", TagFilter: domain.TagFilter{Tags: []string{"node:new.example"}}},
 	}}, nil, nil)
 	h := NewAdminNodeHandler(node.New(visibilityNodes{node: storedVisibilityNode()}, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil, nil, nil).WithLineVisibility(groups)
-	w := postLineVisibility(t, h, `{"server_address":"new.example","region":"HK","tags":[],"relays":[{"region":"CN","tags":[]},{"region":"hk","tags":[]}],"routes":[]}`)
+	w := postLineVisibility(t, h, `{"server_address":"new.example","region":"HK","tags":[],"relays":[{"region":"CN","tags":[]},{"region":"hk","tags":[]}]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -130,11 +127,11 @@ func TestPreviewLineVisibilityWithGroupService(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(body.NodeGroups, []int64{1, 2, 4}) || !reflect.DeepEqual(body.SavedNodeGroups, []int64{1, 2, 3}) ||
-		!reflect.DeepEqual(body.Relays, [][]int64{{2, 4}, {1, 2, 4}}) || !reflect.DeepEqual(body.Routes, [][]int64{}) {
+		!reflect.DeepEqual(body.Relays, [][]int64{{2, 4}, {1, 2, 4}}) {
 		t.Fatalf("response %s", w.Body.String())
 	}
 	// Moving the draft to JP drops the HK group; the saved answer still has it.
-	w = postLineVisibility(t, h, `{"region":"JP","tags":[],"relays":[],"routes":[]}`)
+	w = postLineVisibility(t, h, `{"region":"JP","tags":[],"relays":[]}`)
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}

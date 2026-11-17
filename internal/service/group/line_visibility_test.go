@@ -21,28 +21,15 @@ func lineNode() *domain.Node {
 			{ID: "sh", Address: "sh.example", Enabled: true, Region: "HK", Tags: []string{"premium", "server:a"}},
 		},
 		RelayHealth: []domain.RelayHealth{{Index: 0, Address: "gz.example", State: "up"}, {Index: 1, Address: "sh.example", State: "down"}},
-		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{
-			{ID: "via-gz", EntryRelayID: "gz", OutboundTag: "direct", Enabled: true, Region: "HK", Tags: []string{"premium"}},
-			{ID: "us", OutboundTag: "direct", Enabled: true, Region: "US", Tags: []string{"premium", "stream"}},
-			{ID: "old", OutboundTag: "direct", Deleted: true, Region: "ZZ"},
-		}},
 	}
-}
-
-func lineIDs[T any](lines []T, id func(T) string) []string {
-	out := []string{}
-	for _, line := range lines {
-		out = append(out, id(line))
-	}
-	return out
 }
 
 func relayIDs(n *domain.Node) []string {
-	return lineIDs(n.Relays, func(l domain.RelayLine) string { return l.ID })
-}
-
-func routeIDs(n *domain.Node) []string {
-	return lineIDs(n.RouteState.Lines, func(l domain.VlessRouteLine) string { return l.ID })
+	out := []string{}
+	for _, relay := range n.Relays {
+		out = append(out, relay.ID)
+	}
+	return out
 }
 
 // The tag_filter is evaluated on the line's own labels with the node's exact
@@ -78,33 +65,29 @@ func TestLineMatchesUsesNodeFilterSemanticsOnLineLabels(t *testing.T) {
 
 func TestVisibleLinesNarrowsByLineLabelsAndEntry(t *testing.T) {
 	n := lineNode()
-	// region:HK keeps the HK relay, drops the CN relay, and with it the route
-	// line entering through that relay even though the route itself is HK.
+	// region:HK keeps the HK relay and drops the CN relay.
 	got := VisibleLines(filterGroup(1, "", "region:HK"), []*domain.Node{n})[0]
 	if want := []string{"sh"}; !reflect.DeepEqual(relayIDs(got), want) {
 		t.Fatalf("relays %v want %v", relayIDs(got), want)
-	}
-	if want := []string{"old"}; !reflect.DeepEqual(routeIDs(got), want) {
-		t.Fatalf("routes %v want %v (deleted lines are kept, hidden entry hides its route)", routeIDs(got), want)
 	}
 	if want := []domain.RelayHealth{{Index: 0, Address: "sh.example", State: "down"}}; !reflect.DeepEqual(got.RelayHealth, want) {
 		t.Fatalf("relay health not re-indexed: %+v", got.RelayHealth)
 	}
 	// The shared node is untouched.
-	if len(n.Relays) != 2 || len(n.RouteState.Lines) != 3 || len(n.RelayHealth) != 2 || n.RelayHealth[1].Index != 1 {
+	if len(n.Relays) != 2 || len(n.RelayHealth) != 2 || n.RelayHealth[1].Index != 1 {
 		t.Fatal("VisibleLines modified the cached node")
 	}
 }
 
-func TestVisibleLinesEntryVisibleKeepsRoute(t *testing.T) {
+func TestVisibleLinesAllVisibleKeepsNode(t *testing.T) {
 	n := lineNode()
 	got := VisibleLines(filterGroup(1, "", "tag:premium"), []*domain.Node{n})[0]
 	if got != n {
 		t.Fatal("a node with every line visible must be passed through, not copied")
 	}
 	got = VisibleLines(filterGroup(1, "any", "region:CN", "region:HK"), []*domain.Node{n})[0]
-	if want := []string{"via-gz", "old"}; !reflect.DeepEqual(routeIDs(got), want) {
-		t.Fatalf("routes %v want %v", routeIDs(got), want)
+	if got != n {
+		t.Fatal("a node with every line visible must be passed through, not copied")
 	}
 }
 
@@ -128,7 +111,6 @@ func TestSubscriptionNodesForOnlyNarrows(t *testing.T) {
 
 func TestPreviewLineVisibilityReportsPerLineGroups(t *testing.T) {
 	n := lineNode()
-	n.RouteState.Lines = n.RouteState.Lines[:2] // a draft has no deleted lines
 	hk := filterGroup(1, "", "region:HK")
 	stream := filterGroup(2, "any", "tag:stream", "node:land.example")
 	jp := filterGroup(3, "", "region:JP")
@@ -143,9 +125,6 @@ func TestPreviewLineVisibilityReportsPerLineGroups(t *testing.T) {
 	if want := [][]int64{{2}, {1, 2}}; !reflect.DeepEqual(got.Relays, want) {
 		t.Fatalf("relays %v want %v", got.Relays, want)
 	}
-	if want := [][]int64{{2}, {2}}; !reflect.DeepEqual(got.Routes, want) {
-		t.Fatalf("routes %v want %v", got.Routes, want)
-	}
 	if len(got.Groups) != 3 {
 		t.Fatal("every group must be listed for the editor to name")
 	}
@@ -153,7 +132,6 @@ func TestPreviewLineVisibilityReportsPerLineGroups(t *testing.T) {
 
 func TestPreviewLineVisibilityEmptyIsNotUnknown(t *testing.T) {
 	n := lineNode()
-	n.RouteState.Lines = nil
 	svc := New(&eligGroups{groups: []*domain.Group{filterGroup(1, "", "region:SG")}}, &eligNodes{}, nil)
 	got, err := svc.PreviewLineVisibility(context.Background(), n)
 	if err != nil || got.NodeGroups == nil || len(got.NodeGroups) != 0 || got.Relays[0] == nil || len(got.Relays[0]) != 0 {

@@ -147,7 +147,7 @@ type opsRecreateRepo struct {
 	recreateNodeRepo
 }
 
-func opsRecreateFixture(client ports.XUIClient) (*Service, *opsRecreateRepo, *recreateResyncer, *int) {
+func opsRecreateFixture(client ports.XUIClient) (*Service, *opsRecreateRepo, *recreateResyncer) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 10, InboundID: 5, Enabled: true,
@@ -164,15 +164,13 @@ func opsRecreateFixture(client ports.XUIClient) (*Service, *opsRecreateRepo, *re
 		users:  recreateUsers{byGroup: map[int64][]*domain.User{7: {{ID: 100, Enabled: true}}}},
 	}
 	svc.SetBackgroundRunner(func(_ string, fn func(context.Context)) { fn(context.Background()) })
-	routeCalls := new(int)
-	svc.SetRouteCleaner(func(context.Context, int64) error { *routeCalls++; return nil })
-	return svc, repo, resync, routeCalls
+	return svc, repo, resync
 }
 
 // On a native panel PSP owns the inbound and the agent deploys whatever PSP's
 // desired config says, so a report that lacks the node (not reported yet, agent
 // offline, stale) says nothing about the inbound being gone. Recreate must not
-// clear the node's routes, allocate a new compatibility id, or relink the node;
+// allocate a new compatibility id, or relink the node;
 // it re-provisions the members, which is the part that still means something.
 func TestNativeRecreateDoesNotTreatAMissingReportAsAMissingInbound(t *testing.T) {
 	for name, getErr := range map[string]error{
@@ -183,12 +181,9 @@ func TestNativeRecreateDoesNotTreatAMissingReportAsAMissingInbound(t *testing.T)
 	} {
 		t.Run(name, func(t *testing.T) {
 			client := &opsNativeClient{getErr: getErr}
-			svc, repo, resync, routeCalls := opsRecreateFixture(client)
+			svc, repo, resync := opsRecreateFixture(client)
 			if err := svc.RecreateInboundOnServer(context.Background(), 1); err != nil {
 				t.Fatalf("err = %v", err)
-			}
-			if *routeCalls != 0 {
-				t.Fatalf("routes were cleared %d time(s)", *routeCalls)
 			}
 			if client.added != 0 || client.deleted != 0 {
 				t.Fatalf("inbound id churn: added=%d deleted=%d", client.added, client.deleted)
@@ -204,40 +199,26 @@ func TestNativeRecreateDoesNotTreatAMissingReportAsAMissingInbound(t *testing.T)
 }
 
 // 3X-UI is unchanged: a failed GetInbound still means "missing", so the inbound
-// is rebuilt from the snapshot, the routes cleared first, and the node relinked.
+// is rebuilt from the snapshot and the node relinked.
 func TestXUIRecreateStillRebuildsAMissingInbound(t *testing.T) {
 	cli := &recreateClient{inbounds: map[int]*ports.Inbound{}, nextID: 12}
-	svc, repo, _, routeCalls := opsRecreateFixture(cli)
+	svc, repo, _ := opsRecreateFixture(cli)
 	if err := svc.RecreateInboundOnServer(context.Background(), 1); err != nil {
 		t.Fatalf("err = %v", err)
-	}
-	if *routeCalls != 1 {
-		t.Fatalf("route cleanup calls = %d, want 1", *routeCalls)
 	}
 	if repo.updated == nil || repo.updated.InboundID != 12 {
 		t.Fatalf("node not relinked to the new inbound: %+v", repo.updated)
 	}
 }
 
-// A node converted from 3X-UI can still carry route lines. Native routes are
-// never upstream and route_state dies with the row, so a failing route cleaner
-// must not block the delete (it would fail validation, be cancelled as
-// permanent, and leave the row disabled).
-func TestNativeNodeDeleteIgnoresRouteCleanup(t *testing.T) {
+// A native node's delete is the upstream delete: nothing upstream is consulted.
+func TestNativeNodeDeleteSkipsUpstreamCleanup(t *testing.T) {
 	svc, repo, cleaner := opsDeleteFixture(&opsNativeClient{getErr: ports.ErrNativePanelSnapshotMissing})
-	calls := 0
-	svc.SetRouteCleaner(func(context.Context, int64) error {
-		calls++
-		return domain.ErrValidation
-	})
 	if err := runNodeDelete(svc); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if !repo.deleted || cleaner.unclaimed != 1 {
 		t.Fatalf("deleted=%v unclaimed=%d", repo.deleted, cleaner.unclaimed)
-	}
-	if calls != 0 {
-		t.Fatalf("route cleaner ran %d time(s) on a native delete", calls)
 	}
 	if cleaner.ensured != 0 || cleaner.delOwned != 0 || cleaner.deleted != 0 {
 		t.Fatalf("upstream cleanup ran: ensured=%d delOwned=%d deleted=%d", cleaner.ensured, cleaner.delOwned, cleaner.deleted)

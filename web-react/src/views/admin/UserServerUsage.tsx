@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  Box, CircularProgress, Table, TableBody, TableCell,
+  Box, Chip, CircularProgress, Table, TableBody, TableCell,
   TableContainer, TableFooter, TableHead, TableRow, TableSortLabel, Typography, useTheme,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
@@ -126,7 +126,7 @@ export function UserServerUsage({ userId }: { userId: number }) {
       </Box>
       {charged && (
         <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mb: 1 }}>
-          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各服务器倍率换算；上行/下行拆分与今日为原始字节。' })}
+          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各线路倍率换算；上行/下行拆分与今日为原始字节。' })}
         </Typography>
       )}
       <TableContainer>
@@ -145,7 +145,14 @@ export function UserServerUsage({ userId }: { userId: number }) {
                 <TableCell>
                   <Typography noWrap sx={{ fontSize: 13, fontWeight: 500 }}>
                     {r.server_name || `#${r.panel_id}`}
-                    <TrafficFactorBadge milli={r.traffic_factor_milli} sx={{ ml: 0.75 }} />
+                    {r.traffic_factor_milli === null ? (
+                      <Chip size="small" variant="outlined" data-testid="traffic-factor-mixed"
+                        label={t('users.serverusage.factor_mixed', { defaultValue: 'Mixed' })}
+                        title={t('users.serverusage.factor_mixed_title', { defaultValue: 'Lines on this server have different multipliers' })}
+                        sx={{ ml: 0.75, height: 20, fontSize: 11, '& .MuiChip-label': { px: 0.75 } }} />
+                    ) : (
+                      <TrafficFactorBadge milli={r.traffic_factor_milli} sx={{ ml: 0.75 }} />
+                    )}
                   </Typography>
                   <Typography noWrap sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
                     {t('users.serverusage.node_count', { n: r.node_count, defaultValue: '{{n}} 节点' })}

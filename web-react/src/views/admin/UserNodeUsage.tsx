@@ -161,7 +161,7 @@ export function UserNodeUsage({ userId }: { userId: number }) {
       </Box>
       {charged && (
         <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mb: 1 }}>
-          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各服务器倍率换算；上行/下行拆分与今日为原始字节。' })}
+          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各线路倍率换算；上行/下行拆分与今日为原始字节。' })}
         </Typography>
       )}
       <TableContainer>

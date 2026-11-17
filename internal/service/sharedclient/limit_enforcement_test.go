@@ -43,7 +43,7 @@ func bothCaps() capClient {
 // types ONE number for the user, so the form's number and the enforced number
 // are different quantities. This reports the facts that difference is made of.
 func TestLimitEnforcement(t *testing.T) {
-	clients := &fakeClients{byUser: []*domain.PSPClient{
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{{NodeID: 1}}, byUser: []*domain.PSPClient{
 		{ID: 1, UserID: 7, PanelID: 10},
 		// Second credential class on the SAME panel: two panel-side rows, so
 		// this panel alone enforces the typed cap twice.
@@ -85,7 +85,7 @@ func TestLimitEnforcement(t *testing.T) {
 // unread precondition must never render as a working cap — the same rule the
 // fail2ban verdict is held to.
 func TestLimitEnforcementSeparatesUnreachableFromUncapable(t *testing.T) {
-	clients := &fakeClients{byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 99}}}
+	clients := &fakeClients{byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 99}}, attachments: []domain.PSPClientInbound{{NodeID: 1}}}
 	svc := New(clients, capPool{byPanel: map[int64]ports.XUIClient{}}, fakeNodes{})
 
 	got, err := svc.LimitEnforcement(context.Background(), 7)
@@ -114,5 +114,15 @@ func TestLimitEnforcementNoClients(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("panels = %d, want 0", len(got))
+	}
+}
+
+// A detached row (a line the user no longer has) budgets no cap: it has no
+// panel-side client.
+func TestLimitEnforcementIgnoresDetachedRows(t *testing.T) {
+	clients := &fakeClients{byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10}}}
+	got, err := New(clients, capPool{}, fakeNodes{}).LimitEnforcement(context.Background(), 7)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("facts = %+v, err %v; want none for a detached row", got, err)
 	}
 }

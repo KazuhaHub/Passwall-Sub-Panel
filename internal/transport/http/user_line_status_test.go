@@ -37,12 +37,7 @@ func (statusPanels) GetByID(context.Context, int64) (*domain.XUIPanel, error) {
 	return &domain.XUIPanel{ID: 1, Kind: domain.PanelKind3XUI, URL: "https://private-panel.example"}, nil
 }
 
-type statusClients struct {
-	ports.PSPClientRepo
-	applied bool
-}
-
-type statusRouteResponse struct {
+type statusRelayResponse struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Only   bool   `json:"only_line_name"`
@@ -50,37 +45,25 @@ type statusRouteResponse struct {
 type statusNodeResponse struct {
 	Name       string                `json:"name"`
 	ShowDirect bool                  `json:"show_direct"`
-	Routes     []statusRouteResponse `json:"route_statuses"`
+	Relays     []statusRelayResponse `json:"relay_statuses"`
 }
 
-func (statusClients) ListByUser(_ context.Context, id int64) ([]*domain.PSPClient, error) {
-	return []*domain.PSPClient{{ID: 1, UserID: id}}, nil
-}
-func (r *statusClients) ListInbounds(context.Context, int64) ([]domain.PSPClientInbound, error) {
-	if !r.applied {
-		return nil, nil
-	}
-	return []domain.PSPClientInbound{{NodeID: 1, AppliedUUID: "12345678-1234-4abc-8def-123456789abc"}}, nil
-}
-
-func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) {
+func TestUserServerStatusSharesRelayPublicationAndGroupScope(t *testing.T) {
 	u := &domain.User{ID: 1, UPN: "subscriber", Role: domain.RoleUser, Enabled: true, GroupID: 1}
 	users := routerReleaseUsers{users: map[int64]*domain.User{1: u}}
 	n := &domain.Node{ID: 1, PanelID: 1, InboundID: 11, Enabled: true, DisplayName: "Mine", Tags: []string{"mine"}, DesiredProtocol: "vless", DesiredPort: 443,
-		HealthState: domain.NodeHealthOK, Relays: []domain.RelayLine{{ID: "front", Name: "Front", Address: "private-relay.example", Enabled: true, OnlyLineName: true, Tags: []string{"mine"}}},
-		RelayHealth: []domain.RelayHealth{{Index: 0, Address: "private-relay.example", Port: 443, State: domain.NodeHealthUnreachable}},
+		HealthState: domain.NodeHealthOK,
 		// Lines carry the labels copied from the node at creation (ADR 0040);
 		// the group's tag_filter holds on them too (ADR 0041).
-		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{
-			{ID: "direct-route", Name: "D", Route: 1001, Enabled: true, Tags: []string{"mine"}},
-			{ID: "relay-route", OutboundTag: "warp", EntryRelayID: "front", Route: 1002, Enabled: true, OnlyLineName: true, Tags: []string{"mine"}},
-		}},
+		Relays: []domain.RelayLine{
+			{ID: "front", Name: "Front", Address: "private-relay.example", Enabled: true, OnlyLineName: true, Tags: []string{"mine"}},
+			{ID: "second", Name: "Second", Address: "second-relay.example", Enabled: true, Tags: []string{"mine"}},
+		},
+		RelayHealth: []domain.RelayHealth{{Index: 0, Address: "private-relay.example", Port: 443, State: domain.NodeHealthUnreachable}},
 	}
-	n.RouteState.Binding = domain.RouteBinding("https://private-panel.example", n)
 	other := *n
 	other.ID, other.DisplayName, other.Tags = 2, "Other tenant", []string{"other"}
-	clients := &statusClients{applied: true}
-	repos := ports.Repos{User: users, Group: statusGroups{}, Node: statusNodes{nodes: []*domain.Node{n, &other}}, XUIPanel: statusPanels{}, PSPClient: clients, Settings: &dispatchSettingsRepo{}}
+	repos := ports.Repos{User: users, Group: statusGroups{}, Node: statusNodes{nodes: []*domain.Node{n, &other}}, XUIPanel: statusPanels{}, Settings: &dispatchSettingsRepo{}}
 	groups := group.New(repos.Group, repos.Node, nil)
 	issuer := jwtutil.NewIssuer(strings.Repeat("status-test-key", 3), func() jwtutil.Params {
 		return jwtutil.Params{AccessTTL: time.Hour, RefreshTTL: time.Hour, Issuer: "line-status-test"}
@@ -100,7 +83,7 @@ func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) 
 		if w.Code != 200 {
 			t.Fatalf("status %d: %s", w.Code, w.Body.String())
 		}
-		for _, secret := range []string{"private-panel.example", "private-relay.example", "Other tenant", "12345678", "entry_relay_id", "outbound_tag"} {
+		for _, secret := range []string{"private-panel.example", "private-relay.example", "second-relay.example", "Other tenant", "12345678", "entry_relay_id", "outbound_tag"} {
 			if strings.Contains(w.Body.String(), secret) {
 				t.Fatalf("user status leaked %q", secret)
 			}
@@ -114,46 +97,24 @@ func TestUserServerStatusSharesRoutePublicationGatesAndGroupScope(t *testing.T) 
 		return body.Nodes
 	}
 	got := read()
-	if len(got) != 1 || len(got[0].Routes) != 2 || got[0].Routes[0].Status != "ok" || got[0].Routes[1].Status != "down" || !got[0].Routes[1].Only {
+	if len(got) != 1 || len(got[0].Relays) != 2 || got[0].Relays[0].Status != "down" || !got[0].Relays[0].Only || got[0].Relays[1].Status != "unknown" {
 		t.Fatalf("unexpected status: %+v", got)
 	}
 	n.HideDirect = true
 	got = read()
-	if len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 2 || got[0].Routes[0].Name != "D" {
-		t.Fatalf("hiding the standalone direct line affected its derived route: %+v", got)
+	if len(got) != 1 || got[0].ShowDirect || len(got[0].Relays) != 2 {
+		t.Fatalf("hiding the standalone direct line affected its relays: %+v", got)
 	}
-	n.Relays[0].Enabled = false
-	if got = read(); len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
-		t.Fatalf("direct-inbound route disappeared without an enabled relay: %+v", got)
-	}
-	relays := n.Relays
-	n.Relays = nil
-	if got = read(); len(got) != 1 || got[0].ShowDirect || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
-		t.Fatalf("direct-inbound-only status card disappeared: %+v", got)
-	}
-	n.Relays = relays
-	n.RouteState.Lines[0].Enabled = false
+	n.Relays[0].Enabled, n.Relays[1].Enabled = false, false
 	if len(read()) != 0 {
 		t.Fatal("entirely hidden node still displayed")
 	}
-	n.RouteState.Lines[0].Enabled = true
-	n.HideDirect, n.Relays[0].Enabled = false, true
-	clients.applied = false
-	if got = read(); len(got[0].Routes) != 0 {
-		t.Fatal("status routes bypassed applied-credential gate")
-	}
 	// ADR 0041: a relay whose own tags no longer satisfy the group is not
-	// listed, and neither is the route line entering through it, while the
-	// direct-inbound route stays. The status page shares the subscription's set.
-	clients.applied = true
+	// listed. The status page shares the subscription's set.
+	n.HideDirect, n.Relays[0].Enabled, n.Relays[1].Enabled = false, true, true
 	n.Relays[0].Tags = []string{"elsewhere"}
 	got = read()
-	if len(got) != 1 || len(got[0].Routes) != 1 || got[0].Routes[0].Name != "D" {
-		t.Fatalf("hidden relay or its route still listed: %+v", got)
-	}
-	n.Relays[0].Tags = []string{"mine"}
-	n.RouteState.Lines[0].Tags = []string{}
-	if got = read(); len(got) != 1 || len(got[0].Routes) != 1 || got[0].Routes[0].Status != "down" {
-		t.Fatalf("a route line with cleared tags is still listed: %+v", got)
+	if len(got) != 1 || len(got[0].Relays) != 1 || got[0].Relays[0].Name != "Second" {
+		t.Fatalf("hidden relay still listed: %+v", got)
 	}
 }

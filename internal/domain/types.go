@@ -614,8 +614,9 @@ type Node struct {
 	// server/port (and optionally the TLS SNI / WS Host for CDN fronting). The
 	// relay machine's actual forwarding is configured outside the panel.
 	Relays []RelayLine
-	// RouteState is written only by the vlessRoute synchronization service.
-	RouteState NodeRouteState
+	// TrafficFactorMilli is the multiplier of this node's DIRECT line, in
+	// thousandths; each relay line carries its own. nil is one-for-one.
+	TrafficFactorMilli *int
 	// HideDirect suppresses only the standalone direct subscription entry.
 	HideDirect bool
 	// ShowRelayStatus is retained for storage compatibility only. Relay status
@@ -730,6 +731,10 @@ type RelayLine struct {
 	// Passwall Node server relays Port to this node, and PSP publishes the
 	// forward and gates the line on the server confirming it.
 	EntryPanelID int64 `json:",omitempty"`
+	// TrafficFactorMilli is this line's traffic multiplier in thousandths
+	// (traffic_factor.go): what a user is charged per byte through this line,
+	// whatever servers it passes. Absent is one-for-one; 0 is free.
+	TrafficFactorMilli *int `json:",omitempty"`
 	// ManagedReady is loaded state, never stored: the entry server has applied
 	// exactly the forward this line now asks for. Read it through Publishable.
 	ManagedReady bool `json:"-"`
@@ -1380,12 +1385,6 @@ type Panel struct {
 	// against IP rules (as_is or on_demand). Only meaningful for Kind == psp,
 	// and written ONLY through the native-metadata writer, like AuditCollect.
 	DestResolve DestResolve
-
-	// TrafficFactorMilli is how many bytes a user is charged per byte through
-	// this server, in thousandths (see traffic_factor.go). nil is one-for-one;
-	// read it through EffectiveTrafficFactor. Written ONLY through the narrow
-	// factor writer: a whole-row Save never touches it.
-	TrafficFactorMilli *int
 }
 
 // XUIPanel is a compatibility alias. New code should use Panel; retaining the

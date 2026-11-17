@@ -13,19 +13,19 @@ import (
 )
 
 // Each entry is flagged by its own Region (ADR 0040): the direct entry by the
-// node's, each relay / route line by the line's own value.
+// node's, each relay line by the line's own value.
 func TestLineOnlyNamesAcrossFormatsAndLineRegionFlags(t *testing.T) {
 	for _, onlyName := range []bool{false, true} {
 		for _, flags := range []bool{false, true} {
-			s, n, user, _ := routeRenderFixture(t)
+			s, n, user := lineRenderFixture(t)
 			n.DisplayName, n.Region = "Parent", "HK"
-			n.Relays = []domain.RelayLine{{ID: "relay", Name: "JP relay", Address: "relay.example", Enabled: true, OnlyLineName: onlyName, Region: "JP"}}
-			n.RouteState.Lines[0].Name = "US route"
-			n.RouteState.Lines[0].OnlyLineName = onlyName
-			n.RouteState.Lines[0].Region = "US"
-			want := []string{"Parent", "Parent JP relay", "Parent US route"}
+			n.Relays = []domain.RelayLine{
+				{ID: "relay", Name: "JP relay", Address: "relay.example", Enabled: true, OnlyLineName: onlyName, Region: "JP"},
+				{ID: "relay-us", Name: "US relay", Address: "us.example", Enabled: true, OnlyLineName: onlyName, Region: "US"},
+			}
+			want := []string{"Parent", "Parent JP relay", "Parent US relay"}
 			if onlyName {
-				want[1], want[2] = "JP relay", "US route"
+				want[1], want[2] = "JP relay", "US relay"
 			}
 			catalog := inspectNodeLines([]*domain.Node{n})
 			for i, line := range catalog {
@@ -33,7 +33,7 @@ func TestLineOnlyNamesAcrossFormatsAndLineRegionFlags(t *testing.T) {
 					t.Fatalf("catalog disagrees with subscription label: %+v", line)
 				}
 			}
-			items := s.filterRouteItems(context.Background(), user, expandNodeLines([]renderItem{{node: n, name: n.DisplayName}}))
+			items := expandRelays([]renderItem{{node: n, name: n.DisplayName}})
 			if flags {
 				applyRegionFlagPrefix(items)
 				for i, flag := range []string{"🇭🇰 ", "🇯🇵 ", "🇺🇸 "} {
@@ -93,12 +93,11 @@ func TestLineOnlyNamingKeepsRelayFallbackAndUniqueIdentities(t *testing.T) {
 		t.Fatal(got)
 	}
 	n := &domain.Node{ID: 1, Enabled: true, DesiredProtocol: "vless",
-		Relays:     []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Enabled: true}},
-		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{{ID: "route", Name: "same", OnlyLineName: true, Enabled: true}}},
+		Relays: []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Enabled: true}, {ID: "relay-2", Name: "same", OnlyLineName: true, Enabled: true}},
 	}
-	items := expandNodeLines([]renderItem{{node: n, name: "Parent"}})
+	items := expandRelays([]renderItem{{node: n, name: "Parent"}})
 	applyLegacyLineNames(items)
-	if items[1].name == items[2].name || items[1].lineID() != "relay" || items[2].lineID() != "route" {
+	if items[1].name == items[2].name || items[1].lineID() != "relay" || items[2].lineID() != "relay-2" {
 		t.Fatal("line-only labels broke disambiguation or stable references")
 	}
 }
@@ -109,16 +108,12 @@ func TestLineNameOptionsRemainIndependent(t *testing.T) {
 			{ID: "r1", Name: "relay-off", Enabled: true},
 			{ID: "r2", Name: "relay-on", OnlyLineName: true, Enabled: true},
 		},
-		RouteState: domain.NodeRouteState{Status: "applied", Lines: []domain.VlessRouteLine{
-			{ID: "v1", Name: "route-off", Enabled: true},
-			{ID: "v2", Name: "route-on", OnlyLineName: true, Enabled: true},
-		}},
 	}
 	var names []string
-	for _, item := range expandNodeLines([]renderItem{{node: n, name: "Parent"}}) {
+	for _, item := range expandRelays([]renderItem{{node: n, name: "Parent"}}) {
 		names = append(names, item.name)
 	}
-	if want := []string{"Parent", "Parent relay-off", "relay-on", "Parent route-off", "route-on"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"Parent", "Parent relay-off", "relay-on"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("line options affected another line: %v", names)
 	}
 }

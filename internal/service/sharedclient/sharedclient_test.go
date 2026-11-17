@@ -366,7 +366,7 @@ func TestDeleteSharedForUser_RemovesClientsAndRows(t *testing.T) {
 // client, or another user's client — and only when the desired client covers the
 // orphan's inbounds.
 func TestReconcileOrphans_DeletesStaleSharedOnly(t *testing.T) {
-	clients := &fakeClients{byUser: []*domain.PSPClient{
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{{NodeID: 1}}, byUser: []*domain.PSPClient{
 		{ID: 1, UserID: 18, PanelID: 10, Email: "u18@psp.local", UUID: "uuid-18"},
 	}}
 	xui := &fakeXUI{liveClients: map[string][]int{

@@ -1055,16 +1055,20 @@ type XUIPanelRepo interface {
 	UpdateIPLimitEnforcement(ctx context.Context, panelID int64, state domain.IPLimitEnforcement, probedAt time.Time) error
 }
 
-// TrafficFactorReader reads every server's traffic factor (thousandths) in one
-// query. Implemented by the XUIPanelRepo adapter; optional so test doubles of
-// that repo need not grow it — a missing reader is one-for-one everywhere.
-type TrafficFactorReader interface {
-	TrafficFactors(ctx context.Context) (map[int64]int, error)
+// DetachedClientLister lists the shared-client rows that have no attachment:
+// clients of a line the user no longer has, kept until the traffic poll has
+// booked their last counters. Optional on PSPClientRepo.
+type DetachedClientLister interface {
+	DetachedClientIDs(ctx context.Context) (map[int64]bool, error)
+	// DeleteIfDetached deletes the row only if it still has no attachment.
+	DeleteIfDetached(ctx context.Context, id int64) error
 }
 
-// TrafficFactorWriter is the only writer of a server's traffic factor.
-type TrafficFactorWriter interface {
-	UpdateTrafficFactor(ctx context.Context, panelID int64, milli int) error
+// LineUUIDChecker answers whether a client UUID, in domain.LineUUIDKey form,
+// is held by a client other than exceptClientID attached to the listener of
+// nodeID. Optional on PSPClientRepo; without it no collision is detected.
+type LineUUIDChecker interface {
+	LineUUIDTaken(ctx context.Context, nodeID int64, uuidKey string, exceptClientID int64) (bool, error)
 }
 
 // CertificateRepo persists PSP-managed ACME certificates (cert_source=psp_managed).
@@ -2289,7 +2293,6 @@ type Repos struct {
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
-	NodeRoute               NodeRouteStore
 	Separator               SeparatorRepo
 	Ownership               OwnershipRepo
 	PSPClient               PSPClientRepo

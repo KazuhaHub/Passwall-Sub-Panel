@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -41,6 +40,7 @@ type AdminServersHandler struct {
 	audit             ports.AuditRepo
 	async             AsyncDispatcher
 	invalidateRender  func()
+	clientCounts      ClientIdentityCounter
 	realityNormalizer RealityFingerprintNormalizer
 	native            ports.NativeAgentProvisioningRepo
 	agents            ports.NodeAgentRepo
@@ -186,11 +186,8 @@ type serverDTO struct {
 	// DestResolve is how a Passwall Node server's routing treats a hostname
 	// against IP rules (as_is or on_demand); absent for other panels.
 	DestResolve string `json:"dest_resolve,omitempty"`
-	// TrafficFactorMilli is the per-server traffic multiplier in thousandths:
-	// 1000 charges users one-for-one, 0 makes the server free.
-	TrafficFactorMilli int  `json:"traffic_factor_milli"`
-	HasAPIToken        bool `json:"has_api_token"`
-	HasPassword        bool `json:"has_password"`
+	HasAPIToken bool   `json:"has_api_token"`
+	HasPassword bool   `json:"has_password"`
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
@@ -255,6 +252,28 @@ type serverDTO struct {
 	// would be noise an admin has to learn to ignore.
 	IPLimitEnforcement string     `json:"ip_limit_enforcement,omitempty"`
 	IPLimitProbedAt    *time.Time `json:"ip_limit_probed_at,omitempty"`
+	// ClientIdentities is how many client identities (one per user and line,
+	// ADR 0043) this server holds; ClientIdentitiesWarning is set on a
+	// Passwall Node server approaching what one sync exchange can carry.
+	ClientIdentities        *int64 `json:"client_identities,omitempty"`
+	ClientIdentitiesWarning bool   `json:"client_identities_warning,omitempty"`
+}
+
+// ClientIdentityWarnAt is where a Passwall Node server's client count starts
+// to be flagged. One roster entry is a few hundred bytes and one sync
+// exchange carries at most protocol.MaxSyncBodyBytes (16 MiB) together with
+// the report, so the ceiling is a few tens of thousands; this leaves room.
+const ClientIdentityWarnAt = 20000
+
+// ClientIdentityCounter counts the attached client identities per server.
+type ClientIdentityCounter interface {
+	CountAttachedClientsByPanel(ctx context.Context) (map[int64]int64, error)
+}
+
+// WithClientIdentityCounts wires the per-server identity counts of the list.
+func (h *AdminServersHandler) WithClientIdentityCounts(counter ClientIdentityCounter) *AdminServersHandler {
+	h.clientCounts = counter
+	return h
 }
 
 type serverCreateRequest struct {
@@ -268,8 +287,6 @@ type serverCreateRequest struct {
 	AuthMethod    string  `json:"auth_method"` // "" (auto) | "token" | "password"
 	InsecureHTTPS bool    `json:"insecure_https"`
 	UpdateChannel *string `json:"update_channel,omitempty"`
-	// TrafficFactorMilli: omitted is one-for-one.
-	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
 }
 
 type nativeServerCreateResponse struct {
@@ -307,9 +324,6 @@ type serverUpdateRequest struct {
 	// DestResolve is a Passwall Node server's hostname-against-IP-rules mode;
 	// omitted keeps it. if_non_match is refused by name.
 	DestResolve *string `json:"dest_resolve,omitempty"`
-	// TrafficFactorMilli is the traffic multiplier (0..100000); omitted keeps
-	// it. Allowed for every server kind and audited on change.
-	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
 }
 
 // validAuthMethod gates the auth_method input to the known values.
@@ -387,10 +401,23 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 		}
 	}
 	policy := h.compatPolicy(ctx)
+	var identities map[int64]int64
+	if h.clientCounts != nil {
+		if counts, countErr := h.clientCounts.CountAttachedClientsByPanel(ctx); countErr != nil {
+			log.Warn("server list: client identity counts", "err", countErr)
+		} else {
+			identities = counts
+		}
+	}
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
 		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID], policy)
 		applyNodeMetrics(&out[i], agentsByPanel[panel.ID], metricsByPanel[panel.ID])
+		if identities != nil {
+			n := identities[panel.ID]
+			out[i].ClientIdentities = &n
+			out[i].ClientIdentitiesWarning = domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP && n >= ClientIdentityWarnAt
+		}
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -485,10 +512,6 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
 		return
 	}
-	if req.TrafficFactorMilli != nil && domain.ValidateTrafficFactor(*req.TrafficFactorMilli) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
-		return
-	}
 	kind := domain.NormalizePanelKind(domain.PanelKind(req.Kind))
 	if req.UpdateChannel != nil && (kind != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid()) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable, rc or beta (testing is a compatibility alias) for a Passwall Node server"})
@@ -527,7 +550,6 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		Remark:             req.Remark,
 		AuthMethod:         domain.XUIAuthMethod(req.AuthMethod),
 		InsecureSkipVerify: req.InsecureHTTPS,
-		TrafficFactorMilli: req.TrafficFactorMilli,
 	}
 	if err := h.repo.Save(c.Request.Context(), p); err != nil {
 		mapServerError(c, err)
@@ -539,7 +561,6 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register in pool: " + err.Error()})
 		return
 	}
-	h.auditCreatedTrafficFactor(c, p)
 	c.JSON(http.StatusCreated, h.toServerDTO(c.Request.Context(), p))
 }
 
@@ -580,7 +601,6 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 	panel := &domain.XUIPanel{
 		Kind: domain.PanelKindPSP, Name: req.Name, URL: "psp://" + agentID,
 		Remark: req.Remark, UpdateChannel: domain.PanelUpdateStable,
-		TrafficFactorMilli: req.TrafficFactorMilli,
 	}
 	if req.UpdateChannel != nil {
 		panel.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)
@@ -601,7 +621,6 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register native node in pool: " + err.Error()})
 		return
 	}
-	h.auditCreatedTrafficFactor(c, panel)
 	privateNodeResponse(c)
 	c.JSON(http.StatusCreated, nativeServerCreateResponse{
 		Server: h.toServerDTO(c.Request.Context(), panel), AgentID: agentID, Credential: credential,
@@ -691,26 +710,8 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
 		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel, audit_collect, dest_resolve and traffic_factor_milli can be edited for a Passwall Node server"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
 		return
-	}
-	// The traffic factor has its own column-scoped writer; a repo without one
-	// (an older test double) cannot store it, so it is refused rather than
-	// silently dropped.
-	factorWriter, canWriteFactor := h.repo.(ports.TrafficFactorWriter)
-	factorChanged := false
-	if req.TrafficFactorMilli != nil {
-		if domain.ValidateTrafficFactor(*req.TrafficFactorMilli) != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
-			return
-		}
-		if !canWriteFactor {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "traffic factor storage is not wired in this build"})
-			return
-		}
-		milli := *req.TrafficFactorMilli
-		factorChanged = milli != existing.EffectiveTrafficFactor()
-		existing.TrafficFactorMilli = &milli // a fresh pointer: before keeps the old one
 	}
 	if req.AuditCollect != nil {
 		if domain.NormalizePanelKind(existing.Kind) != domain.PanelKindPSP || !domain.AuditCollect(*req.AuditCollect).Valid() {
@@ -813,27 +814,6 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		mapServerError(c, err)
 		return
 	}
-	persistFactor := func(panel *domain.Panel) error {
-		if !factorChanged {
-			return nil
-		}
-		return factorWriter.UpdateTrafficFactor(c.Request.Context(), id, panel.EffectiveTrafficFactor())
-	}
-	if err := persistFactor(existing); err != nil {
-		if rollbackErr := persist(&before); rollbackErr != nil {
-			log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
-		}
-		mapServerError(c, err)
-		return
-	}
-	rollback := func() {
-		if rollbackErr := persist(&before); rollbackErr != nil {
-			log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
-		}
-		if rollbackErr := persistFactor(&before); rollbackErr != nil {
-			log.Error("admin server traffic factor rollback failed", "panel_id", id, "err", rollbackErr)
-		}
-	}
 	// Panel rename no longer needs to cascade to nodes / user_xui_clients —
 	// the panel_name columns were dropped in v3. The pool refresh below
 	// makes every subsequent name lookup return the new value automatically.
@@ -846,7 +826,9 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		Replace(*domain.XUIPanel) error
 	}); ok {
 		if err := rp.Replace(existing); err != nil {
-			rollback()
+			if rollbackErr := persist(&before); rollbackErr != nil {
+				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
 			return
 		}
@@ -854,50 +836,14 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		_ = h.pool.Remove(id)
 		if err := h.pool.Add(existing); err != nil {
 			_ = h.pool.Add(&before)
-			rollback()
+			if rollbackErr := persist(&before); rollbackErr != nil {
+				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
 			return
 		}
 	}
-	if factorChanged {
-		h.writeTrafficFactorAudit(c, existing, before.EffectiveTrafficFactor(), existing.EffectiveTrafficFactor())
-		// Subscriptions may carry the factor in names ("{{ factor }}").
-		if h.invalidateRender != nil {
-			h.invalidateRender()
-		}
-	}
 	c.JSON(http.StatusOK, h.toServerDTO(c.Request.Context(), existing))
-}
-
-// auditCreatedTrafficFactor records a server created at anything other than
-// one-for-one: otherwise a server created free would charge nothing for its
-// whole life without a trace in the audit log.
-func (h *AdminServersHandler) auditCreatedTrafficFactor(c *gin.Context, panel *domain.Panel) {
-	if milli := panel.EffectiveTrafficFactor(); milli != domain.TrafficFactorDefault {
-		h.writeTrafficFactorAudit(c, panel, domain.TrafficFactorDefault, milli)
-	}
-}
-
-const trafficFactorError = "traffic_factor_milli must be between 0 and 100000 (1000 = one-for-one, 0 = free)"
-
-// writeTrafficFactorAudit records a factor change. A factor is a price: it
-// changes what every user is charged from now on, so who changed it, from
-// what and when belongs in the audit trail.
-func (h *AdminServersHandler) writeTrafficFactorAudit(c *gin.Context, panel *domain.Panel, from, to int) {
-	if h.audit == nil {
-		return
-	}
-	beforeJSON, _ := json.Marshal(map[string]int{"traffic_factor_milli": from})
-	afterJSON, _ := json.Marshal(map[string]int{"traffic_factor_milli": to})
-	_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
-		Actor:      actorFromGin(c),
-		Action:     "server_traffic_factor_changed",
-		Target:     "panel=" + strconv.FormatInt(panel.ID, 10) + " name=" + panel.Name,
-		BeforeJSON: string(beforeJSON),
-		AfterJSON:  string(afterJSON),
-		IP:         c.ClientIP(),
-		At:         time.Now(),
-	})
 }
 
 // Test issues a lightweight ListInbounds against the named server. Returns
@@ -1885,8 +1831,6 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,
-
-		TrafficFactorMilli: p.EffectiveTrafficFactor(),
 	}
 	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
 		dto.UpdateChannel = string(p.UpdateChannel.Effective())

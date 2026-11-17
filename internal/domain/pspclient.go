@@ -23,6 +23,16 @@ type PSPClient struct {
 	ID      int64
 	UserID  int64
 	PanelID int64
+	// NodeID and LineID name the subscription line this row is the client
+	// of (ADR 0043): one row per (user, line). LineID is DirectLineID for a
+	// node's direct line. Both zero/empty on a legacy row written before 4.3
+	// that the upgrade has not converted.
+	NodeID int64
+	LineID string
+	// LastFactorMilli is the line's traffic factor as of the last booking, so
+	// a delta that arrives after its line was deleted is still charged at the
+	// price the line had. nil (a legacy row) is one-for-one.
+	LastFactorMilli *int
 	// CredClass describes the current password-compatibility partition on one
 	// panel. It is a mutable planner output, not identity. It is almost always 0
 	// (a single shared client covers
@@ -225,4 +235,22 @@ func PSPClientEmail(userID int64, suffix string, rules EmailRules) string {
 		d = "psp.local"
 	}
 	return fmt.Sprintf("u%d%s@%s", userID, suffix, d)
+}
+
+// Line returns the subscription line this row belongs to; ok is false for a
+// legacy row that predates per-line identities.
+func (c *PSPClient) Line() (LineKey, bool) {
+	if c == nil || c.NodeID == 0 || c.LineID == "" {
+		return LineKey{}, false
+	}
+	return LineKey{NodeID: c.NodeID, LineID: c.LineID}, true
+}
+
+// LastFactor is the factor the row was last booked at (one-for-one when it
+// never was).
+func (c *PSPClient) LastFactor() int {
+	if c == nil || c.LastFactorMilli == nil {
+		return TrafficFactorDefault
+	}
+	return clampFactor(*c.LastFactorMilli)
 }

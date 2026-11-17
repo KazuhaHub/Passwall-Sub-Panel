@@ -294,3 +294,75 @@ func TestPSPClientListByUserAndPeriodUsage(t *testing.T) {
 		t.Fatalf("summed per-server period usage = %d, want 1300", totalPeriod)
 	}
 }
+
+// The per-line columns round-trip, and the queries the planner, the poll and
+// the server list use answer per listener / per server.
+func TestPSPClientLineColumnsAndQueries(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	ctx := context.Background()
+	repo := NewRepos(db).PSPClient.(*pspClientRepo)
+	free := 0
+	directID, err := repo.Create(ctx, &domain.PSPClient{UserID: 1, PanelID: 10, NodeID: 5, LineID: domain.DirectLineID,
+		Email: "u1@x", UUID: "C4B0E7F9-05EB-40CE-A204-5A443F2EF4E3", Password: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayID, err := repo.Create(ctx, &domain.PSPClient{UserID: 1, PanelID: 10, NodeID: 5, LineID: "r1",
+		Email: "u1-l@x", UUID: "d94e0af3-a2e2-49c4-a3b7-50ef6ad8c3ec", Password: "p", LastFactorMilli: &free})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetInbounds(ctx, directID, []domain.PSPClientInbound{{ClientID: directID, NodeID: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetByID(ctx, relayID)
+	if got.NodeID != 5 || got.LineID != "r1" || got.LastFactor() != 0 {
+		t.Fatalf("relay row = %+v", got)
+	}
+	// Same masked UUID (only the version nibble differs) on the same listener.
+	if taken, err := repo.LineUUIDTaken(ctx, 5, domain.LineUUIDKey("c4b0e7f9-05eb-11ce-a204-5a443f2ef4e3"), relayID); err != nil || !taken {
+		t.Fatalf("collision on listener 5 = %v, %v", taken, err)
+	}
+	if taken, _ := repo.LineUUIDTaken(ctx, 5, domain.LineUUIDKey("c4b0e7f9-05eb-40ce-a204-5a443f2ef4e3"), directID); taken {
+		t.Fatal("a row collided with itself")
+	}
+	if taken, _ := repo.LineUUIDTaken(ctx, 6, domain.LineUUIDKey("c4b0e7f9-05eb-40ce-a204-5a443f2ef4e3"), 0); taken {
+		t.Fatal("collision reported on another listener")
+	}
+	detached, err := repo.DetachedClientIDs(ctx)
+	if err != nil || !detached[relayID] || detached[directID] {
+		t.Fatalf("detached = %v, %v", detached, err)
+	}
+	// The conditional delete spares an attached row and takes a detached one.
+	if err := repo.DeleteIfDetached(ctx, directID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetByID(ctx, directID); err != nil {
+		t.Fatalf("attached row deleted: %v", err)
+	}
+	spare, _ := repo.Create(ctx, &domain.PSPClient{UserID: 1, PanelID: 10, NodeID: 5, LineID: "r-gone", Email: "gone@x", UUID: "u", Password: "p"})
+	if err := repo.DeleteIfDetached(ctx, spare); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetByID(ctx, spare); err == nil {
+		t.Fatal("detached row survived DeleteIfDetached")
+	}
+	counts, err := repo.CountAttachedClientsByPanel(ctx)
+	if err != nil || counts[10] != 1 {
+		t.Fatalf("counts = %v, %v", counts, err)
+	}
+	// Updating a row's definition keeps it on its line.
+	got.UUID, got.Email = "11111111-2222-4333-8444-555555555555", "u1-l2@x"
+	if err := repo.UpdateDefinition(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := repo.GetByID(ctx, relayID); again.LineID != "r1" || again.UUID != got.UUID {
+		t.Fatalf("after UpdateDefinition = %+v", again)
+	}
+}
