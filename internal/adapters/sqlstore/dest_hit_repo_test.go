@@ -90,7 +90,7 @@ func TestDestHitRow_WidthsMatchTheColumns(t *testing.T) {
 // MySQL's InnoDB refuses a key over 3072 bytes, and utf8mb4 costs four a
 // character: the wide aggregation key must stay under it.
 func TestDestHitRow_PrimaryKeyFitsMySQL(t *testing.T) {
-	bytesOf := destHitSourceWidth*4 + destHitActionWidth*4 + destHitDestWidth*4 + 8*3 + 4
+	bytesOf := destHitSourceWidth*4 + destHitActionWidth*4 + destHitDestWidth*4 + 8*4 + 4
 	if bytesOf >= 3072 {
 		t.Fatalf("primary key is %d bytes, over InnoDB's 3072", bytesOf)
 	}
@@ -664,5 +664,104 @@ func TestBlockCountsSince_BlocksOnlyPerUserAndSource(t *testing.T) {
 	}
 	if got, _ = r.BlockCountsSince(context.Background(), h+hourMS); got[7]["p12"] != 1 || got[8] != nil {
 		t.Fatalf("windowed = %+v", got)
+	}
+}
+
+// ---- the exit server ----
+
+func hitVia(h domain.DestHit, exit int64) domain.DestHit { h.EgressPanelID = exit; return h }
+
+// The exit is part of the aggregation key: the same rule and destination
+// through two exits (or through an exit and from the server itself) are three
+// rows, and a re-send of one of them adds to that row alone.
+func TestStoreBatch_TheExitIsPartOfTheKey(t *testing.T) {
+	r, db := newHitRepo(t)
+	ctx := context.Background()
+	h := 400 * hourMS
+	base := hit(h, 1, 7, "p12", "block", "bad.example", 443, 3, h+10, h+20)
+	if _, err := r.StoreBatch(ctx, "agt_a", "b1", time.Now(), []domain.DestHit{base, hitVia(base, 2), hitVia(base, 3)}); err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	db.Model(&destHitRow{}).Count(&n)
+	if n != 3 {
+		t.Fatalf("rows = %d, want 3 (one per exit, 0 included)", n)
+	}
+	if _, err := r.StoreBatch(ctx, "agt_a", "b2", time.Now(), []domain.DestHit{hitVia(base, 2)}); err != nil {
+		t.Fatal(err)
+	}
+	var row destHitRow
+	if err := db.Where("egress_panel_id = ?", 2).First(&row).Error; err != nil || row.Count != 6 {
+		t.Fatalf("exit 2 = %+v, %v; want the re-send added to it", row, err)
+	}
+	db.Model(&destHitRow{}).Where("egress_panel_id = ?", 3).Count(&n)
+	if n != 1 {
+		t.Fatalf("exit 3 rows = %d", n)
+	}
+}
+
+func TestMergeDestHits_KeepsExitsApart(t *testing.T) {
+	h := 400 * hourMS
+	base := hit(h, 1, 7, "p12", "block", "bad.example", 443, 1, h, h)
+	got := domain.MergeDestHits([]domain.DestHit{base, hitVia(base, 2), base, hitVia(base, 2)})
+	if len(got) != 2 || got[0].Count != 2 || got[1].Count != 2 || got[1].EgressPanelID != 2 {
+		t.Fatalf("merged = %+v", got)
+	}
+}
+
+func TestList_ExitFilterGroupAndSummary(t *testing.T) {
+	r, _ := newHitRepo(t)
+	ctx := context.Background()
+	h := 400 * hourMS
+	base := hit(h, 1, 7, "p12", "block", "bad.example", 443, 3, h+10, h+20)
+	obs := hit(h, 1, 7, "p12", "observe", "bad.example", 443, 1, h+10, h+20)
+	if _, err := r.StoreBatch(ctx, "agt_a", "b1", time.Now(), []domain.DestHit{base, hitVia(base, 2), hitVia(base, 2), hitVia(obs, 2), hitVia(base, 3)}); err != nil {
+		t.Fatal(err)
+	}
+	rows, total, err := r.List(ctx, domain.DestHitFilter{})
+	if err != nil || total != 4 {
+		t.Fatalf("all = %d rows (%d), %v", len(rows), total, err)
+	}
+	seen := map[int64]bool{}
+	for _, row := range rows {
+		seen[row.EgressPanelID] = true
+	}
+	if !seen[0] || !seen[2] || !seen[3] {
+		t.Fatalf("rows do not carry their exit: %+v", rows)
+	}
+	// Not set: no filter. Set to 0: exactly the rows that left from the server.
+	if _, total, _ = r.List(ctx, domain.DestHitFilter{EgressPanelID: 0}); total != 4 {
+		t.Fatalf("an unset exit filter selected %d, want 4", total)
+	}
+	rows, total, _ = r.List(ctx, domain.DestHitFilter{EgressSet: true})
+	if total != 1 || rows[0].EgressPanelID != 0 {
+		t.Fatalf("exit 0 = %+v (%d)", rows, total)
+	}
+	if _, total, _ = r.List(ctx, domain.DestHitFilter{EgressSet: true, EgressPanelID: 2}); total != 2 {
+		t.Fatalf("exit 2 = %d rows, want block and observe", total)
+	}
+	rows, total, _ = r.List(ctx, domain.DestHitFilter{GroupBy: "exit", Action: "block"})
+	if total != 3 || len(rows) != 3 || rows[0].EgressPanelID != 2 || rows[0].Count != 6 {
+		t.Fatalf("group by exit = %+v (%d)", rows, total)
+	}
+	// The summary honours the exit filter, like the panel and user filters.
+	sum, err := r.Summary(ctx, domain.DestHitFilter{EgressSet: true, EgressPanelID: 2})
+	if err != nil || sum.Block != 6 || sum.Observe != 1 {
+		t.Fatalf("summary = %+v, %v", sum, err)
+	}
+	if _, _, err := r.List(ctx, domain.DestHitFilter{GroupBy: "egress"}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("an unknown group_by = %v", err)
+	}
+}
+
+func TestDestHitConflict_NamesTheExitColumn(t *testing.T) {
+	for _, dialect := range []string{"mysql", "sqlite", "postgres"} {
+		found := false
+		for _, c := range destHitConflict(dialect).Columns {
+			found = found || c.Name == "egress_panel_id"
+		}
+		if !found {
+			t.Errorf("%s: the upsert's conflict columns lack egress_panel_id", dialect)
+		}
 	}
 }

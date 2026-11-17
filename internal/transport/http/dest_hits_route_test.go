@@ -253,3 +253,59 @@ func TestDestHitsSummaryHonoursTheSourceFilter(t *testing.T) {
 		t.Fatalf("summary with action/source_kind = %v, want the whole selection", s)
 	}
 }
+
+// A hit row names the exit server it left through, the list can be narrowed to
+// one exit (0 being the server itself) or grouped by it, and a bad value is
+// refused.
+func TestDestHitsAPI_ExitServer(t *testing.T) {
+	f := newDestFixture(t, true)
+	via := func(h domain.DestHit, exit int64) domain.DestHit { h.EgressPanelID = exit; return h }
+	f.seedHits(
+		hitOf(time.Hour, 1, 2, "p1", "block", "a.example", 10),
+		via(hitOf(time.Hour, 1, 2, "p1", "block", "a.example", 4), 7),
+		via(hitOf(time.Hour, 1, 2, "p1", "observe", "b.example", 1), 8),
+	)
+	all := f.expect("GET", "/hits", "", 200, "")
+	if num(all["total"]) != 3 {
+		t.Fatalf("total = %v, want every row with no exit filter", all["total"])
+	}
+	exits := map[int64]bool{}
+	for _, it := range all["items"].([]any) {
+		m := it.(map[string]any)
+		v, present := m["exit_panel_id"]
+		if !present {
+			t.Fatalf("a row without exit_panel_id: %v", m)
+		}
+		exits[int64(num(v))] = true
+	}
+	if !exits[0] || !exits[7] || !exits[8] {
+		t.Fatalf("exits = %v", exits)
+	}
+	zero := f.expect("GET", "/hits?exit_panel_id=0", "", 200, "")
+	if num(zero["total"]) != 1 || num(zero["items"].([]any)[0].(map[string]any)["exit_panel_id"]) != 0 {
+		t.Fatalf("exit 0 = %v", zero["items"])
+	}
+	if one := f.expect("GET", "/hits?exit_panel_id=7", "", 200, ""); num(one["total"]) != 1 {
+		t.Fatalf("exit 7 = %v", one["items"])
+	}
+	by := f.expect("GET", "/hits?group_by=exit&action=block", "", 200, "")
+	rows := by["items"].([]any)
+	if len(rows) != 2 || num(rows[0].(map[string]any)["exit_panel_id"]) != 0 || num(rows[0].(map[string]any)["count"]) != 10 {
+		t.Fatalf("group_by exit = %v", rows)
+	}
+	// A grouping that folds the exit away has no exit to name: the field is absent,
+	// not 0 (which would read as "left from the server itself").
+	for _, g := range []string{"site", "user", "policy"} {
+		for _, it := range f.expect("GET", "/hits?group_by="+g, "", 200, "")["items"].([]any) {
+			m := it.(map[string]any)
+			if _, present := m["exit_panel_id"]; present {
+				t.Fatalf("group_by=%s row carries exit_panel_id: %v", g, m)
+			}
+			if _, present := m["exit_panel_name"]; present {
+				t.Fatalf("group_by=%s row carries exit_panel_name: %v", g, m)
+			}
+		}
+	}
+	f.expect("GET", "/hits?exit_panel_id=-1", "", 400, "dest_hits_invalid")
+	f.expect("GET", "/hits?exit_panel_id=abc", "", 400, "dest_hits_invalid")
+}

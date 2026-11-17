@@ -12,7 +12,7 @@ export const REC_ACTIONS = ['block', 'observe'] as const
 /** `block` is "blocked"; `observe` is a report-only policy's "would have blocked". The URL keeps the wire word. */
 export type RecAction = (typeof REC_ACTIONS)[number]
 
-export const REC_GROUP_BY = ['none', 'site', 'user', 'policy'] as const
+export const REC_GROUP_BY = ['none', 'site', 'user', 'policy', 'exit'] as const
 export type RecGroupBy = (typeof REC_GROUP_BY)[number]
 
 export const REC_PAGE_SIZES = [25, 50, 100, 200] as const
@@ -25,6 +25,8 @@ export const REC_MAX_RANGE_DAYS = 31
 export interface RecordsFilter {
   user_id?: number
   panel_id?: number
+  /** Exit server: 0 is "this server (direct)"; left out, any. */
+  exit_panel_id?: number
   /** p<policy id>, s<inbound node id> or g<group id> (an allowlist group). */
   source?: string
   action?: RecAction
@@ -54,6 +56,7 @@ function validSince(raw: string): boolean {
 export function parseRecordsParams(params: URLSearchParams): RecordsFilter {
   const user = parseUserId(params.get('rec_user'))
   const panel = parseUserId(params.get('rec_panel'))
+  const rawExit = params.get('rec_exit') ?? ''
   const rawSource = params.get('rec_source') ?? ''
   const action = oneOf(params.get('rec_action'), REC_ACTIONS)
   const sinceRaw = params.get('rec_since') ?? ''
@@ -64,6 +67,7 @@ export function parseRecordsParams(params: URLSearchParams): RecordsFilter {
   return {
     ...(user ? { user_id: user } : {}),
     ...(panel ? { panel_id: panel } : {}),
+    ...(/^\d{1,12}$/.test(rawExit) ? { exit_panel_id: Number(rawExit) } : {}),
     ...(SOURCE.test(rawSource) ? { source: rawSource } : {}),
     ...(action ? { action } : {}),
     since,
@@ -88,6 +92,7 @@ export function recordsSearch(prev: URLSearchParams, patch: Partial<RecordsFilte
   }
   if ('user_id' in patch) put('rec_user', patch.user_id ? String(patch.user_id) : undefined)
   if ('panel_id' in patch) put('rec_panel', patch.panel_id ? String(patch.panel_id) : undefined)
+  if ('exit_panel_id' in patch) put('rec_exit', patch.exit_panel_id === undefined ? undefined : String(patch.exit_panel_id))
   if ('source' in patch) put('rec_source', patch.source)
   if ('action' in patch) put('rec_action', patch.action)
   if ('since' in patch) put('rec_since', patch.since === REC_DEFAULT_SINCE ? undefined : patch.since)
@@ -101,7 +106,7 @@ export function recordsSearch(prev: URLSearchParams, patch: Partial<RecordsFilte
 
 /** How many filters are in force (the phone's badge): who, where, which rule and what happened. Not the view, the page or the range. */
 export function recordsFilterCount(f: RecordsFilter): number {
-  return [f.user_id, f.panel_id, f.source, f.action].filter(v => v !== undefined).length
+  return [f.user_id, f.panel_id, f.exit_panel_id, f.source, f.action].filter(v => v !== undefined).length
 }
 
 /**
@@ -130,6 +135,7 @@ export function recordsApiParams(
   const out: DestHitsParams = {}
   if (f.user_id) out.user_id = f.user_id
   if (f.panel_id) out.panel_id = f.panel_id
+  if (f.exit_panel_id !== undefined) out.exit_panel_id = f.exit_panel_id
   if (f.source) out.source = f.source
   if (f.action) out.action = f.action
 
@@ -163,6 +169,6 @@ export function recordsApiParams(
  * policy row, an account drawer, the risk center). Relative ranges only: a
  * link carries "the last 7 days", never a moment, and never a search term.
  */
-export function recordsHref(patch: Partial<Pick<RecordsFilter, 'user_id' | 'panel_id' | 'source' | 'action' | 'since' | 'group_by'>>): string {
+export function recordsHref(patch: Partial<Pick<RecordsFilter, 'user_id' | 'panel_id' | 'exit_panel_id' | 'source' | 'action' | 'since' | 'group_by'>>): string {
   return `?${recordsSearch(new URLSearchParams({ tab: 'records' }), patch).toString()}`
 }

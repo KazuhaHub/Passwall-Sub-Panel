@@ -138,6 +138,28 @@ func (r *transitLinkRepo) GetLink(ctx context.Context, entry, exit int64) (domai
 	return row.toDomain()
 }
 
+// LinkEnds resolves link ids to {entry, exit} in one query (ids are chunked
+// under every dialect's parameter limit). Unknown ids are simply absent.
+func (r *transitLinkRepo) LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error) {
+	out := make(map[int64]domain.TransitLinkEnds, len(ids))
+	const chunk = 500
+	for start := 0; start < len(ids); start += chunk {
+		part := ids[start:min(start+chunk, len(ids))]
+		var rows []struct {
+			ID           int64
+			EntryPanelID int64
+			ExitPanelID  int64
+		}
+		if err := r.db.WithContext(ctx).Model(&transitLinkRow{}).Select("id, entry_panel_id, exit_panel_id").Where("id IN ?", part).Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("resolve transit links: %w", err)
+		}
+		for _, row := range rows {
+			out[row.ID] = domain.TransitLinkEnds{EntryPanelID: row.EntryPanelID, ExitPanelID: row.ExitPanelID}
+		}
+	}
+	return out, nil
+}
+
 // ListLinks returns every link, by id.
 func (r *transitLinkRepo) ListLinks(ctx context.Context) ([]domain.TransitLink, error) {
 	var rows []transitLinkRow

@@ -109,7 +109,7 @@ func (s *Service) SetTransit(t TransitPublisher) { s.transit = t }
 type AuditSink interface {
 	// Enqueue offers one validated batch for storage. It does no database work
 	// and never blocks: it is called while the node waits for its response.
-	Enqueue(agentID string, panelID int64, observation *nodeprotocol.AuditObservation)
+	Enqueue(agentID string, panelID int64, capabilities []string, observation *nodeprotocol.AuditObservation)
 }
 
 // DestPolicyCompiler is the destination-policy collaborator
@@ -460,7 +460,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// The response is complete and will be sent: only now does the node's batch
 	// leave for the store. Enqueue does no database work and cannot fail the sync.
 	if s.audit != nil && audit != nil {
-		s.audit.Enqueue(agent.AgentID, agent.PanelID, audit)
+		s.audit.Enqueue(agent.AgentID, agent.PanelID, report.Capabilities, audit)
 	}
 	return response, nil
 }

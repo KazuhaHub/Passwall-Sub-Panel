@@ -15,6 +15,7 @@ import KpiTile, { KpiGrid } from '@/components/KpiTile'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import ToneBadge from '@/components/ToneBadge'
 import UserAutocomplete from '@/components/UserAutocomplete'
+import { useAllNodes, useAllServers } from '@/query/nodes'
 import { useDestHits, useDestPolicies, useDestSettings, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
@@ -30,6 +31,12 @@ import {
 } from './recordsParams'
 
 const R = 'admin:access_control.records.'
+
+// Widths of the details table's fixed columns; the destination takes the rest.
+const COLUMN_WIDTH: Partial<Record<'hour' | 'user' | 'rule' | 'dest' | 'panel' | 'exit', number>> = { hour: 120, user: 170, rule: 230, panel: 110, exit: 120 }
+const COUNT_WIDTH = 80
+const MENU_WIDTH = 52
+const DEST_MIN_WIDTH = 200
 const HOUR = 3_600_000
 const SEARCH_DEBOUNCE_MS = 400
 
@@ -91,7 +98,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   const hits = useDestHits(scope, request)
 
   const patch = (next: Partial<RecordsFilter>) => setParams(prev => recordsSearch(prev, next), { replace: true })
-  const clear = () => { setTyped(''); setQ(''); setParams(prev => recordsSearch(prev, { user_id: undefined, panel_id: undefined, source: undefined, action: undefined }), { replace: true }) }
+  const clear = () => { setTyped(''); setQ(''); setParams(prev => recordsSearch(prev, { user_id: undefined, panel_id: undefined, exit_panel_id: undefined, source: undefined, action: undefined }), { replace: true }) }
 
   const [menu, setMenu] = useState<{ el: HTMLElement; hit: DestHitItem } | null>(null)
   const [exception, setException] = useState<ExceptionTarget | null>(null)
@@ -113,6 +120,9 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   }
   const deletedRule = (source: string) => t(`${R}rule.${source.startsWith('s') ? 'deleted_source_rule' : source.startsWith('g') ? 'deleted_group' : 'deleted_policy'}`)
   const userName = (h: Pick<DestHitItem, 'user_id' | 'upn'>) => h.upn ?? t(`${R}rule.deleted_user`, { id: h.user_id })
+  /** Where a hit left from: the exit server's name, or "this server" when it went out directly. */
+  const exitLabel = (h: Pick<DestHitItem, 'exit_panel_id' | 'exit_panel_name'>) =>
+    h.exit_panel_id === undefined ? '—' : h.exit_panel_id === 0 ? t(`${R}exit.direct`) : h.exit_panel_name ?? `#${h.exit_panel_id}`
   const days7 = relativeSince(7, retention)
 
   // ---- the rule filter's options: policies, source rules and the deleted, from what is there and what the range saw ----
@@ -133,6 +143,16 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
     return { policies: [...byId].map(([source, label]) => ({ source, label })), rules, allowlists, deleted }
   }, [policies.data, data?.sources, t])
   const known = new Set([...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.allowlists, ...ruleOptions.deleted].map(o => o.source))
+  // Exit servers exist only where a tunnel does: a node that leaves through another server. Without one, nothing of this shows.
+  const nodeList = useAllNodes(scope)
+  const exitIds = useMemo(() => [...new Set((nodeList.data ?? []).map(n => n.egress_panel_id ?? 0).filter(id => id > 0))].sort((a, b) => a - b), [nodeList.data])
+  const hasTunnels = exitIds.length > 0
+  // A link may carry an exit filter or view: it stays visible for as long as it is in force.
+  const showExit = hasTunnels || filter.exit_panel_id !== undefined || filter.group_by === 'exit'
+  const serverList = useAllServers(scope, { enabled: showExit })
+  const serverNames = useMemo(() => new Map((serverList.data ?? []).map(s => [s.id, s.name])), [serverList.data])
+  // The exit servers the tunnels name, whether or not they record hits; a linked exit that no tunnel names any more stays while it is the filter.
+  const exitOptions = filter.exit_panel_id && !exitIds.includes(filter.exit_panel_id) ? [...exitIds, filter.exit_panel_id] : exitIds
   const panels = (status.data?.nodes ?? []).filter(n => isNativeKind(n.kind) && n.state !== 'unsupported_kind')
 
   // ---- state of the page ----
@@ -202,6 +222,18 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
       {panels.map(n => <MenuItem key={n.panel_id} value={n.panel_id}>{n.panel_name}</MenuItem>)}
     </TextField>
   )
+  const exitName = (id: number) => serverNames.get(id) ?? panels.find(n => n.panel_id === id)?.panel_name ?? `#${id}`
+  const exitField = (
+    <TextField select size="small" label={t(`${R}filters.exit`)} value={filter.exit_panel_id === undefined ? '' : filter.exit_panel_id}
+      onChange={e => patch({ exit_panel_id: e.target.value === '' ? undefined : Number(e.target.value) })}
+      sx={{ minWidth: 160 }} fullWidth={phone} slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: (v: unknown) => (
+        v === '' ? t(`${R}filters.exit_all`) : v === 0 ? t(`${R}filters.exit_direct`) : exitName(Number(v))
+      ) } }}>
+      <MenuItem value="">{t(`${R}filters.exit_all`)}</MenuItem>
+      <MenuItem value={0}>{t(`${R}filters.exit_direct`)}</MenuItem>
+      {exitOptions.map(id => <MenuItem key={id} value={id}>{exitName(id)}</MenuItem>)}
+    </TextField>
+  )
   const rangeField = (
     <TextField select size="small" label={t(`${R}filters.range`)} value={rangeValue} onChange={e => setRange(e.target.value)}
       sx={{ minWidth: 160 }} fullWidth={phone}>
@@ -214,7 +246,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
       sx={{ minWidth: 220 }} fullWidth={phone} slotProps={{ htmlInput: { autoComplete: 'off', spellCheck: false } }} />
   )
 
-  const views: RecGroupBy[] = ['none', 'site', 'user', 'policy']
+  const views: RecGroupBy[] = showExit ? ['none', 'site', 'user', 'policy', 'exit'] : ['none', 'site', 'user', 'policy']
 
   // ---- the list ----
   const grouped = filter.group_by !== 'none'
@@ -244,9 +276,9 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
     else body = empty(t(`${R}empty.none`))
   } else if (data) {
     body = grouped
-      ? <GroupList data={data} view={filter.group_by} folded={folded} num={num} userName={userName} ruleName={ruleName} onOpenUser={onOpenUser}
+      ? <GroupList data={data} view={filter.group_by} folded={folded} num={num} userName={userName} ruleName={ruleName} exitLabel={exitLabel} onOpenUser={onOpenUser}
         onPickSource={s => patch({ source: s })} />
-      : <HitList data={data} folded={folded} tz={tz} now={now} num={num} userName={userName} ruleName={ruleName}
+      : <HitList data={data} folded={folded} tz={tz} now={now} num={num} userName={userName} ruleName={ruleName} exitLabel={exitLabel} showExit={showExit}
         onOpenUser={onOpenUser} onPickSource={s => patch({ source: s })} onMenu={(el, hit) => setMenu({ el, hit })} />
   }
 
@@ -265,11 +297,11 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
                 <Button size="small" variant="outlined" startIcon={<FilterListIcon />} onClick={e => setMore(e.currentTarget)}>{t(`${R}filters.more`)}</Button>
               </Badge>
               <Popover open={more !== null} anchorEl={more} onClose={() => setMore(null)} slotProps={{ paper: { sx: { p: 2, display: 'grid', gap: 1.5, width: 300, maxWidth: '90vw' } } }}>
-                {ruleField}{panelField}{searchField}
+                {ruleField}{panelField}{showExit && exitField}{searchField}
               </Popover>
             </>
           )
-          : <>{ruleField}{panelField}{searchField}</>}
+          : <>{ruleField}{panelField}{showExit && exitField}{searchField}</>}
       </Box>
       {custom && (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1, alignItems: 'center' }}>
@@ -334,6 +366,7 @@ type Namers = {
   num: Intl.NumberFormat
   userName: (h: Pick<DestHitItem, 'user_id' | 'upn'>) => string
   ruleName: (h: Pick<DestHitItem, 'source' | 'source_name' | 'source_kind'>) => string | null
+  exitLabel: (h: Pick<DestHitItem, 'exit_panel_id' | 'exit_panel_name'>) => string
   onOpenUser: (id: number) => void
   onPickSource: (source: string) => void
 }
@@ -381,8 +414,9 @@ function Dest({ hit }: { hit: DestHitItem }) {
   )
 }
 
-function HitList({ data, folded, tz, now, num, userName, ruleName, onOpenUser, onPickSource, onMenu }: Namers & {
+function HitList({ data, folded, tz, now, num, userName, ruleName, exitLabel, showExit, onOpenUser, onPickSource, onMenu }: Namers & {
   data: DestHits
+  showExit: boolean
   folded: boolean
   tz: string
   now: number
@@ -438,7 +472,7 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, onOpenUser, o
                   <Box sx={{ flex: '1 1 160px', minWidth: 0 }}><Dest hit={h} /></Box>
                 </Box>
                 <Typography data-line variant="body2" data-testid="hit-time" title={hover(h)} sx={{ color: md.onSurfaceVariant }}>
-                  {formatHourRange(h.hour_ms, tz)} · {h.panel_name ?? '—'}
+                  {formatHourRange(h.hour_ms, tz)} · {h.panel_name ?? '—'}{showExit && <span data-testid="hit-exit"> → {exitLabel(h)}</span>}
                 </Typography>
               </Box>
             ))}
@@ -448,23 +482,28 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, onOpenUser, o
     )
   }
 
+  const columns = showExit ? ['hour', 'user', 'rule', 'dest', 'panel', 'exit'] as const : ['hour', 'user', 'rule', 'dest', 'panel'] as const
+  // A fixed layout gives the auto destination column only what the fixed
+  // columns leave over, so the table is never narrower than all of them plus
+  // room for a destination; a narrower container scrolls instead.
+  const fixedWidth = columns.reduce((sum, c) => sum + (COLUMN_WIDTH[c] ?? 0), 0) + COUNT_WIDTH + MENU_WIDTH
   return (
     <TableContainer>
-      <Table size="small" aria-label={t(`${R}title`)} sx={{ tableLayout: 'fixed', minWidth: 720 }}>
+      <Table size="small" aria-label={t(`${R}title`)} sx={{ tableLayout: 'fixed', minWidth: fixedWidth + DEST_MIN_WIDTH }}>
         <TableHead>
           <TableRow>
-            {(['hour', 'user', 'rule', 'dest', 'panel'] as const).map(c => (
-              <TableCell key={c} sx={{ width: { hour: 120, user: 170, rule: 230, dest: 'auto', panel: 110 }[c] }}>{t(`${R}cols.${c}`)}</TableCell>
+            {columns.map(c => (
+              <TableCell key={c} sx={{ width: COLUMN_WIDTH[c] ?? 'auto' }}>{t(`${R}cols.${c}`)}</TableCell>
             ))}
-            <TableCell align="right" sx={{ width: 80 }}>{t(`${R}cols.count`)}</TableCell>
-            <TableCell sx={{ width: 52 }}><Box component="span" sx={hidden}>{t(`${R}menu.label`)}</Box></TableCell>
+            <TableCell align="right" sx={{ width: COUNT_WIDTH }}>{t(`${R}cols.count`)}</TableCell>
+            <TableCell sx={{ width: MENU_WIDTH }}><Box component="span" sx={hidden}>{t(`${R}menu.label`)}</Box></TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {groups.map(g => (
             <Fragment key={g.day + g.ms}>
               <TableRow>
-                <TableCell colSpan={7} sx={{ position: 'sticky', top: 0, bgcolor: md.surface, py: 0.5 }}>
+                <TableCell colSpan={showExit ? 8 : 7} sx={{ position: 'sticky', top: 0, bgcolor: md.surface, py: 0.5 }}>
                   <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant }}>{dayLabel(g.ms)}</Typography>
                 </TableCell>
               </TableRow>
@@ -482,6 +521,7 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, onOpenUser, o
                   </TableCell>
                   <TableCell sx={{ minWidth: 0 }}><Dest hit={h} /></TableCell>
                   <TableCell sx={{ overflowWrap: 'anywhere' }}>{h.panel_name ?? '—'}</TableCell>
+                  {showExit && <TableCell data-testid="hit-exit" sx={{ overflowWrap: 'anywhere' }}>{exitLabel(h)}</TableCell>}
                   <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{num.format(h.count)}</TableCell>
                   <TableCell padding="none">{menuButton(h)}</TableCell>
                 </TableRow>
@@ -500,7 +540,7 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, onOpenUser, o
  * the sum and the span of the fold, not how many accounts or policies are
  * behind it, so there is no such column.
  */
-function GroupList({ data, view, folded, num, userName, ruleName, onOpenUser, onPickSource }: Namers & { data: DestHits; view: RecGroupBy; folded: boolean }) {
+function GroupList({ data, view, folded, num, userName, ruleName, exitLabel, onOpenUser, onPickSource }: Namers & { data: DestHits; view: RecGroupBy; folded: boolean }) {
   const { t, i18n } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
@@ -514,6 +554,7 @@ function GroupList({ data, view, folded, num, userName, ruleName, onOpenUser, on
   const objectCell = (h: DestHitItem) => {
     if (view === 'site') return <Typography component="span" noWrap sx={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{h.dest}</Typography>
     if (view === 'user') return <UserCell hit={h} userName={userName} onOpenUser={onOpenUser} />
+    if (view === 'exit') return <Typography component="span" data-testid="hit-exit" noWrap sx={{ fontSize: 13 }}>{exitLabel(h)}</Typography>
     return <RuleLink hit={h} ruleName={ruleName} onPickSource={onPickSource} />
   }
   return (

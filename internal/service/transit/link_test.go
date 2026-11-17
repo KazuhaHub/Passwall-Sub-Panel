@@ -144,3 +144,153 @@ func TestUpdateLinkSwitchesProtocolAndAddress(t *testing.T) {
 		t.Fatalf("custom camouflage = %+v, %v", custom, err)
 	}
 }
+
+// ---- link counters ----
+
+type linkFixture struct {
+	service   *Service
+	repos     ports.Repos
+	entrySent *nodeprotocol.Transit
+	exitSent  *nodeprotocol.Transit
+	key       nodeprotocol.LinkKey
+	id        int64
+}
+
+// newLinkFixture creates the link between entry server 9 and exit server 3 and
+// the two configs the panel would have sent them.
+func newLinkFixture(t *testing.T) linkFixture {
+	t.Helper()
+	repos := linkStore(t)
+	bound := landing(1, 9, "entry.example", 443)
+	bound.EgressPanelID = 3
+	exitListener := landing(3, 3, "exit.example", 443)
+	service := New(fakeNodes{bound, exitListener}, newFakeRepo()).WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"})
+	entry, err := service.LinksFor(t.Context(), 9, map[int]bool{443: true})
+	if err != nil || len(entry.Out) != 1 {
+		t.Fatalf("entry plan = %+v, %v", entry, err)
+	}
+	exit, err := service.LinksFor(t.Context(), 3, map[int]bool{443: true})
+	if err != nil || len(exit.In) != 1 {
+		t.Fatalf("exit plan = %+v, %v", exit, err)
+	}
+	id, err := entry.Out[0].Key.RowID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return linkFixture{
+		service: service, repos: repos, key: entry.Out[0].Key, id: id,
+		entrySent: &nodeprotocol.Transit{LinksOut: entry.Out}, exitSent: &nodeprotocol.Transit{LinksIn: exit.In},
+	}
+}
+
+func (f linkFixture) totals(t *testing.T) domain.TransitLink {
+	t.Helper()
+	links, err := f.repos.TransitLinks.ListLinks(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.ID == f.id {
+			return link
+		}
+	}
+	t.Fatalf("link %d is gone", f.id)
+	return domain.TransitLink{}
+}
+
+func counter(key nodeprotocol.LinkKey, up, down int64, epoch uint64) nodeprotocol.LinkCounters {
+	return nodeprotocol.LinkCounters{Key: key, Present: true, UpBytes: up, DownBytes: down, CounterEpoch: epoch}
+}
+
+// The server that holds the incoming half (the exit) books on In, the one that
+// holds the outgoing half (the entry) on Out, each only for what it was sent.
+func TestRecordLinkCountersBooksOnTheSideTheReporterHolds(t *testing.T) {
+	f := newLinkFixture(t)
+	ctx := t.Context()
+	if err := f.service.RecordLinkCounters(ctx, f.exitSent, []nodeprotocol.LinkCounters{counter(f.key, 11, 22, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.totals(t); got.InUpBytes != 11 || got.InDownBytes != 22 || got.OutUpBytes != 0 || got.OutDownBytes != 0 {
+		t.Fatalf("after the exit's report: in %d/%d out %d/%d", got.InUpBytes, got.InDownBytes, got.OutUpBytes, got.OutDownBytes)
+	}
+	if err := f.service.RecordLinkCounters(ctx, f.entrySent, []nodeprotocol.LinkCounters{counter(f.key, 33, 44, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.totals(t); got.InUpBytes != 11 || got.InDownBytes != 22 || got.OutUpBytes != 33 || got.OutDownBytes != 44 {
+		t.Fatalf("after the entry's report: in %d/%d out %d/%d", got.InUpBytes, got.InDownBytes, got.OutUpBytes, got.OutDownBytes)
+	}
+}
+
+func TestRecordLinkCountersIgnoresWhatWasNotSentOrIsNotRunning(t *testing.T) {
+	f := newLinkFixture(t)
+	ctx := t.Context()
+	err := f.service.RecordLinkCounters(ctx, f.exitSent, []nodeprotocol.LinkCounters{
+		counter(nodeprotocol.NewLinkKey(f.id+100), 999, 999, 1),                     // a key this server was not sent
+		{Key: f.key, Present: false, UpBytes: 999, DownBytes: 999, CounterEpoch: 1}, // not running
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A server whose config carried no link at all cannot book one either.
+	if err := f.service.RecordLinkCounters(ctx, &nodeprotocol.Transit{}, []nodeprotocol.LinkCounters{counter(f.key, 5, 5, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.RecordLinkCounters(ctx, nil, []nodeprotocol.LinkCounters{counter(f.key, 5, 5, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.totals(t); got.InUpBytes+got.InDownBytes+got.OutUpBytes+got.OutDownBytes != 0 {
+		t.Fatalf("booked %+v", got)
+	}
+}
+
+// Within one counter epoch a sample books what grew; a new epoch (the core
+// restarted) books the whole value; a replay books nothing.
+func TestRecordLinkCountersSameEpochBooksTheDeltaNewEpochTheWhole(t *testing.T) {
+	f := newLinkFixture(t)
+	for _, sample := range []struct {
+		up, down int64
+		epoch    uint64
+	}{
+		{100, 1000, 1}, // first sample of an epoch counts whole
+		{150, 1500, 1}, // +50 / +500
+		{150, 1500, 1}, // replay: nothing
+		{20, 30, 2},    // new epoch: the whole value
+	} {
+		if err := f.service.RecordLinkCounters(t.Context(), f.entrySent, []nodeprotocol.LinkCounters{counter(f.key, sample.up, sample.down, sample.epoch)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.totals(t); got.OutUpBytes != 100+50+20 || got.OutDownBytes != 1000+500+30 {
+		t.Fatalf("totals = %d / %d, want 170 / 1530", got.OutUpBytes, got.OutDownBytes)
+	}
+}
+
+// Both ends meter the same traffic, so the administrator sees the entry's
+// figure, and the exit's only while the entry has reported none.
+func TestLinkViewPrefersTheEntryTotalsAndFallsBackToTheExit(t *testing.T) {
+	f := newLinkFixture(t)
+	ctx := t.Context()
+	view := func() LinkView {
+		t.Helper()
+		v, err := f.service.Link(ctx, 9, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := view(); v.UpBytes != 0 || v.DownBytes != 0 {
+		t.Fatalf("an unmetered link shows %d/%d", v.UpBytes, v.DownBytes)
+	}
+	if err := f.service.RecordLinkCounters(ctx, f.exitSent, []nodeprotocol.LinkCounters{counter(f.key, 7, 8, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if v := view(); v.UpBytes != 7 || v.DownBytes != 8 {
+		t.Fatalf("with only the exit's totals the view shows %d/%d, want 7/8", v.UpBytes, v.DownBytes)
+	}
+	if err := f.service.RecordLinkCounters(ctx, f.entrySent, []nodeprotocol.LinkCounters{counter(f.key, 70, 80, 1)}); err != nil {
+		t.Fatal(err)
+	}
+	if v := view(); v.UpBytes != 70 || v.DownBytes != 80 {
+		t.Fatalf("with both the view shows %d/%d, want the entry's 70/80", v.UpBytes, v.DownBytes)
+	}
+}

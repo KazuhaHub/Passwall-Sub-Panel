@@ -133,3 +133,51 @@ func TestTunnelIsPublishedToBothSidesAndGatesTheBoundNode(t *testing.T) {
 		t.Fatal("a rejected tunnel kept its node published")
 	}
 }
+
+// Both ends of a link running sing-box meter it: each end's counters are booked
+// on the side it holds, whatever engine reported them.
+func TestSingBoxLinkCountersAreBookedOnEachSide(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	f.service.SetTransit(transit.New(f.repos.Node, f.repos.Transit).WithLinks(f.repos.TransitLinks, f.repos.NodeAgent))
+	exit := f.exitServer(t)
+	if err := f.db.Table("nodes").Where("id = ?", f.node.ID).Update("egress_panel_id", exit.PanelID).Error; err != nil {
+		t.Fatal(err)
+	}
+	report := func(agent *domain.NodeAgent) nodeprotocol.NodeReport {
+		return nodeprotocol.NodeReport{AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+			ReportedAtMS: f.now.UnixMilli(), Have: emptyProtocolHave(), Capabilities: linkCapabilities, CoreEngine: "sing-box"}
+	}
+	fromExit := sourceaddr.With(t.Context(), "198.51.100.7")
+	exitResponse := f.syncAs(t, fromExit, report(exit))
+	entryResponse := f.syncAs(t, t.Context(), report(f.agent))
+	key := entryResponse.Config.Body.Transit.LinksOut[0].Key
+
+	counters := func(agent *domain.NodeAgent, response nodeprotocol.SyncResponse, up, down int64) nodeprotocol.NodeReport {
+		receipt := linkReceipt(agent, f.now.UnixMilli(), response, key, nodeprotocol.ObjectApplied)
+		receipt.CoreEngine = "sing-box"
+		receipt.LinkCounters = []nodeprotocol.LinkCounters{{Key: key, Present: true, UpBytes: up, DownBytes: down, CounterEpoch: 1}}
+		return receipt
+	}
+	f.syncAs(t, t.Context(), counters(f.agent, entryResponse, 1000, 2000))
+	f.syncAs(t, fromExit, counters(exit, exitResponse, 900, 1900))
+
+	id, err := key.RowID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	links, err := f.repos.TransitLinks.ListLinks(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range links {
+		if link.ID != id {
+			continue
+		}
+		if link.OutUpBytes != 1000 || link.OutDownBytes != 2000 || link.InUpBytes != 900 || link.InDownBytes != 1900 {
+			t.Fatalf("booked out %d/%d in %d/%d, want entry 1000/2000 and exit 900/1900",
+				link.OutUpBytes, link.OutDownBytes, link.InUpBytes, link.InDownBytes)
+		}
+		return
+	}
+	t.Fatalf("link %d not found in %+v", id, links)
+}

@@ -126,7 +126,7 @@ func batchID(n int) string { return fmt.Sprintf("%032x", n) }
 
 func (f *fixture) enqueueAndDrain(agent string, panel int64, o *protocol.AuditObservation) {
 	f.t.Helper()
-	f.svc.Enqueue(agent, panel, o)
+	f.svc.Enqueue(agent, panel, nil, o)
 	f.svc.Drain(context.Background())
 }
 
@@ -268,7 +268,7 @@ func TestIngest_ADuplicateAfterARestartIsCaughtByTheStore(t *testing.T) {
 	f.enqueueAndDrain("agt_1", 5, o)
 
 	restarted := New(Deps{Store: f.store, Now: func() time.Time { return f.now }, Metrics: f.ctr.metrics()})
-	restarted.Enqueue("agt_1", 5, o)
+	restarted.Enqueue("agt_1", 5, nil, o)
 	restarted.Drain(context.Background())
 	if rows := f.stored(); len(rows) != 1 || rows[0].Count != 7 {
 		t.Fatalf("rows = %+v", rows)
@@ -281,7 +281,7 @@ func TestIngest_ADuplicateAfterARestartIsCaughtByTheStore(t *testing.T) {
 	o2.DroppedHits, o2.Unmatched = 5, 6
 	f.enqueueAndDrain("agt_1", 5, o2)
 	restarted2 := New(Deps{Store: f.store, Now: func() time.Time { return f.now }, Metrics: f.ctr.metrics()})
-	restarted2.Enqueue("agt_1", 5, o2)
+	restarted2.Enqueue("agt_1", 5, nil, o2)
 	restarted2.Drain(context.Background())
 	if f.ctr.nodeDropped != 5 || f.ctr.nodeUnmatched != 6 {
 		t.Fatalf("node counters = %d %d, want 5 6 once", f.ctr.nodeDropped, f.ctr.nodeUnmatched)
@@ -297,7 +297,7 @@ func TestIngest_TheQueueIsBoundedPerAgentAndInAll(t *testing.T) {
 	}
 	// No worker drains: 4 fit for one agent, the fifth is lost.
 	for i := 1; i <= 5; i++ {
-		f.svc.Enqueue("agt_1", 5, mk(i))
+		f.svc.Enqueue("agt_1", 5, nil, mk(i))
 	}
 	if f.ctr.reports["accepted"] != 4 || f.ctr.reports["queue_full"] != 1 {
 		t.Fatalf("per-agent bound: %+v", f.ctr.reports)
@@ -305,10 +305,10 @@ func TestIngest_TheQueueIsBoundedPerAgentAndInAll(t *testing.T) {
 	// 256 in all: 64 agents of 4 fill it, the next agent is refused.
 	for a := 0; a < 63; a++ {
 		for i := 0; i < 4; i++ {
-			f.svc.Enqueue(fmt.Sprintf("agt_x%d", a), int64(100+a), mk(1000+a*10+i))
+			f.svc.Enqueue(fmt.Sprintf("agt_x%d", a), int64(100+a), nil, mk(1000+a*10+i))
 		}
 	}
-	f.svc.Enqueue("agt_last", 999, mk(9999))
+	f.svc.Enqueue("agt_last", 999, nil, mk(9999))
 	if f.ctr.reports["queue_full"] != 2 {
 		t.Fatalf("global bound: %+v", f.ctr.reports)
 	}
@@ -460,7 +460,7 @@ func TestRun_DrainsTheQueueOnShutdown(t *testing.T) {
 	done := make(chan struct{})
 	go func() { f.svc.Run(ctx); close(done) }()
 	for i := 1; i <= 3; i++ {
-		f.svc.Enqueue("agt_1", 5, obs(batchID(i), hitRow(h, "p1", "block", f.subject(0), fmt.Sprintf("h%d.example", i), 1, 1)))
+		f.svc.Enqueue("agt_1", 5, nil, obs(batchID(i), hitRow(h, "p1", "block", f.subject(0), fmt.Sprintf("h%d.example", i), 1, 1)))
 	}
 	cancel()
 	select {
@@ -492,7 +492,8 @@ func TestOutcomeStringsMatchTheMetricLabels(t *testing.T) {
 	for got, want := range map[string]string{
 		metricsStored: metrics.DestRowsHitsStored, metricsUnknown: metrics.DestRowsHitsUnknown,
 		metricsOutOfRange: metrics.DestRowsHitsOutOfRange, metricsOverBudget: metrics.DestRowsHitsOverBudget,
-		metricsUsageOff: metrics.DestRowsUsageCollOff, metricsUsageStored: metrics.DestRowsUsageStored,
+		metricsEgressUnk: metrics.DestRowsHitsEgressUnk,
+		metricsUsageOff:  metrics.DestRowsUsageCollOff, metricsUsageStored: metrics.DestRowsUsageStored,
 		metricsUsageUnknown: metrics.DestRowsUsageUnknown, metricsUsageOutOfRange: metrics.DestRowsUsageOutOfRange,
 		metricsUsageOverBudget: metrics.DestRowsUsageOverBudget,
 		reportAccepted:         metrics.NodeAuditAccepted, reportDuplicate: metrics.NodeAuditDuplicate,
@@ -604,7 +605,7 @@ func TestIngestUsage_ADuplicateBatchCountsOnce(t *testing.T) {
 	f.enqueueAndDrain("agt_1", 5, o)
 	f.enqueueAndDrain("agt_1", 5, o)
 	restarted := New(Deps{Store: f.store, Now: func() time.Time { return f.now }, Metrics: f.ctr.metrics(), UsageTier: func(context.Context, int64) (bool, error) { return true, nil }})
-	restarted.Enqueue("agt_1", 5, o)
+	restarted.Enqueue("agt_1", 5, nil, o)
 	restarted.Drain(context.Background())
 	if got := f.usageOf(f.users[0]); got.Total != 5 {
 		t.Fatalf("usage = %+v, want counted once", got)
@@ -653,7 +654,7 @@ func TestIngestUsage_RowsLostWithAFailedOrUnqueuedBatchAreCounted(t *testing.T) 
 
 	// Queue full: no worker drains, so the fifth batch of one agent is refused.
 	for i := 2; i <= 6; i++ {
-		f.svc.Enqueue("agt_2", 6, f.usageObs(batchID(i), usageRow(h, f.subject(0), fmt.Sprintf("q%d.example", i), 1)))
+		f.svc.Enqueue("agt_2", 6, nil, f.usageObs(batchID(i), usageRow(h, f.subject(0), fmt.Sprintf("q%d.example", i), 1)))
 	}
 	f.svc.Drain(ctx)
 	if n, _ := f.store.UsageDropped(ctx, h, h+hourMS, 6); n != 1 {
@@ -671,7 +672,7 @@ func TestIngestUsage_AnUnqueuedBatchOfAPanelBelowTierBCountsNoUsageLoss(t *testi
 	})
 	h := f.hour()
 	for i := 1; i <= 5; i++ {
-		f.svc.Enqueue("agt_1", 5, f.usageObs(batchID(i), usageRow(h, f.subject(0), "a.example", 1)))
+		f.svc.Enqueue("agt_1", 5, nil, f.usageObs(batchID(i), usageRow(h, f.subject(0), "a.example", 1)))
 	}
 	f.svc.Drain(context.Background())
 	if n, _ := f.store.UsageDropped(context.Background(), h, h+hourMS, 5); n != 0 {
@@ -703,5 +704,143 @@ func TestIngestUsage_DoesNotCrowdTheHitsOutOfTheAccountLookup(t *testing.T) {
 	f.enqueueAndDrain("agt_1", 5, o)
 	if rows := f.stored(); len(rows) != 1 {
 		t.Fatalf("the hit was crowded out by usage accounts: %+v (asked %d ids)", rows, len(rec.asked))
+	}
+}
+
+// ---- the exit link of a hit ----
+
+type fakeLinks struct {
+	mu    sync.Mutex
+	ends  map[int64]domain.TransitLinkEnds
+	err   error
+	calls [][]int64
+}
+
+func (l *fakeLinks) LinkEnds(_ context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, append([]int64(nil), ids...))
+	if l.err != nil {
+		return nil, l.err
+	}
+	out := map[int64]domain.TransitLinkEnds{}
+	for _, id := range ids {
+		if e, ok := l.ends[id]; ok {
+			out[id] = e
+		}
+	}
+	return out, nil
+}
+
+// Link 5 starts at panel 5 and ends at panel 8; link 6 belongs to panel 77.
+func newLinks() *fakeLinks {
+	return &fakeLinks{ends: map[int64]domain.TransitLinkEnds{
+		5: {EntryPanelID: 5, ExitPanelID: 8},
+		6: {EntryPanelID: 77, ExitPanelID: 9},
+	}}
+}
+
+func viaLink(h protocol.AuditHit, link int64) protocol.AuditHit {
+	h.Egress = protocol.NewLinkKey(link)
+	return h
+}
+
+var egressCaps = []string{protocol.CapabilityAuditHits, protocol.CapabilityAuditHitsEgress}
+
+func (f *fixture) enqueueCapsAndDrain(agent string, panel int64, caps []string, o *protocol.AuditObservation) {
+	f.t.Helper()
+	f.svc.Enqueue(agent, panel, caps, o)
+	f.svc.Drain(context.Background())
+}
+
+func TestIngest_BooksAHitOnTheExitOfItsLink(t *testing.T) {
+	links := newLinks()
+	f := newFixture(t, func(d *Deps) { d.Links = links })
+	h := f.hour()
+	f.enqueueCapsAndDrain("agt_1", 5, egressCaps, obs(batchID(1),
+		viaLink(hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 2), 5),
+		viaLink(hitRow(h, "p1x2", "block", f.subject(0), "bad.example", 443, 3), 5),
+		hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 4),
+	))
+	got := map[int64]int64{}
+	for _, r := range f.stored() {
+		got[r.EgressPanelID] += r.Count
+	}
+	if len(got) != 2 || got[8] != 5 || got[0] != 4 {
+		t.Fatalf("counts by exit = %v, want exit 8: 5 (merged) and the server itself: 4", got)
+	}
+	if len(links.calls) != 1 || len(links.calls[0]) != 1 {
+		t.Fatalf("link lookups = %v, want one call for the one link", links.calls)
+	}
+}
+
+func TestIngest_DropsAHitWhoseLinkItCannotVouchFor(t *testing.T) {
+	cases := []struct {
+		name string
+		caps []string
+		link int64
+	}{
+		{"agent never declared the capability", []string{protocol.CapabilityAuditHits}, 5},
+		{"link does not exist", egressCaps, 99},
+		{"link starts at another server", egressCaps, 6},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, func(d *Deps) { d.Links = newLinks() })
+			h := f.hour()
+			f.enqueueCapsAndDrain("agt_1", 5, tc.caps, obs(batchID(1),
+				viaLink(hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 2), tc.link),
+				hitRow(h, "p1", "block", f.subject(1), "fine.example", 443, 1),
+			))
+			rows := f.stored()
+			if len(rows) != 1 || rows[0].Dest != "fine.example" || rows[0].EgressPanelID != 0 {
+				t.Fatalf("stored = %+v, want only the hit that named no link", rows)
+			}
+			if f.ctr.rows[metricsEgressUnk] != 1 {
+				t.Fatalf("hits_egress_unknown = %d, want 1", f.ctr.rows[metricsEgressUnk])
+			}
+			var n int64
+			f.db.Model(&struct {
+				Kind  string
+				Count int64
+			}{}).Table("dest_audit_drops").Where("kind = ?", domain.DestDropEgressUnknown).Select("COALESCE(SUM(count), 0)").Scan(&n)
+			if n != 1 {
+				t.Fatalf("egress_unknown drop rows = %d, want 1", n)
+			}
+			if got, _ := f.store.DroppedInRange(context.Background(), h, h+hourMS); got != 1 {
+				t.Fatalf("dropped in range = %d: an untrusted exit is a gap in the record", got)
+			}
+		})
+	}
+}
+
+func TestIngest_ALinkLookupErrorFailsTheBatchLikeAnyDatabaseError(t *testing.T) {
+	links := newLinks()
+	links.err = errors.New("links unavailable")
+	f := newFixture(t, func(d *Deps) { d.Links = links })
+	h := f.hour()
+	f.enqueueCapsAndDrain("agt_1", 5, egressCaps, obs(batchID(1),
+		viaLink(hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 2), 5),
+		hitRow(h, "p1", "block", f.subject(1), "fine.example", 443, 1),
+	))
+	if rows := f.stored(); len(rows) != 0 {
+		t.Fatalf("stored = %+v, want nothing from a failed batch", rows)
+	}
+	if f.ctr.reports[reportIngestError] != 1 {
+		t.Fatalf("reports = %v", f.ctr.reports)
+	}
+	if got, _ := f.store.DroppedInRange(context.Background(), h, h+hourMS); got != 2 {
+		t.Fatalf("dropped in range = %d, want both rows counted as an ingest error", got)
+	}
+}
+
+// No resolver wired: a hit that names a link is not believed.
+func TestIngest_WithoutAResolverEveryNamedLinkIsUnknown(t *testing.T) {
+	f := newFixture(t, nil)
+	h := f.hour()
+	f.enqueueCapsAndDrain("agt_1", 5, egressCaps, obs(batchID(1),
+		viaLink(hitRow(h, "p1", "block", f.subject(0), "bad.example", 443, 2), 5)))
+	if rows := f.stored(); len(rows) != 0 || f.ctr.rows[metricsEgressUnk] != 1 {
+		t.Fatalf("stored = %+v, unknown = %d", rows, f.ctr.rows[metricsEgressUnk])
 	}
 }

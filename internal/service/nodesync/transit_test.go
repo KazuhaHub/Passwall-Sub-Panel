@@ -124,3 +124,38 @@ func TestManagedRelayIsPublishedOnlyToACapableEntryAndConfirmedByIt(t *testing.T
 		t.Fatal("a rejected forward kept its line published")
 	}
 }
+
+// A server running sing-box meters its forwards like an Xray one: the counters
+// its report carries are booked against the forwards the panel sent it, and the
+// engine plays no part in whether they are.
+func TestSingBoxForwardCountersAreBooked(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	f.service.SetTransit(transit.New(f.repos.Node, f.repos.Transit))
+	landing := f.managedLanding(t, 20443)
+
+	capable := nodeprotocol.NodeReport{
+		AgentID: f.agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ReportedAtMS: f.now.UnixMilli(), Have: emptyProtocolHave(), CoreEngine: "sing-box",
+		Capabilities: []string{nodeprotocol.CapabilityTransitForward},
+	}
+	response := f.syncReport(t, capable)
+	if response.Config.Body == nil || response.Config.Body.Transit == nil || len(response.Config.Body.Transit.Forwards) != 1 {
+		t.Fatalf("transit = %+v", response.Config.Body)
+	}
+	key := response.Config.Body.Transit.Forwards[0].Key
+	receipt := f.receipt(response)
+	receipt.CoreEngine, receipt.Capabilities = "sing-box", capable.Capabilities
+	receipt.ForwardCounters = []nodeprotocol.ForwardCounters{{Key: key, Present: true, UpBytes: 70, DownBytes: 80, CounterEpoch: 1}}
+	f.syncReport(t, receipt)
+	// The same epoch again books only what grew.
+	receipt.ForwardCounters = []nodeprotocol.ForwardCounters{{Key: key, Present: true, UpBytes: 100, DownBytes: 90, CounterEpoch: 1}}
+	f.syncReport(t, receipt)
+
+	rows, err := f.repos.Transit.ListByNodes(t.Context(), []int64{landing.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %v, %v", rows, err)
+	}
+	if rows[0].UpBytes != 100 || rows[0].DownBytes != 90 {
+		t.Fatalf("booked %d up / %d down, want 100 / 90", rows[0].UpBytes, rows[0].DownBytes)
+	}
+}

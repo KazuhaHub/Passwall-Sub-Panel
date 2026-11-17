@@ -396,8 +396,9 @@ func (s *Service) Link(ctx context.Context, entry, exit int64) (LinkView, error)
 	if err != nil {
 		return LinkView{}, err
 	}
-	// Both sides count the same traffic, and only an Xray side counts at all:
-	// the entry's figure is used, the exit's when the entry has none.
+	// Both sides meter the same traffic (an Xray and a sing-box server both
+	// do): the entry's figure is used, the exit's only while the entry has
+	// reported none.
 	up, down := link.OutUpBytes, link.OutDownBytes
 	if up == 0 && down == 0 {
 		up, down = link.InUpBytes, link.InDownBytes

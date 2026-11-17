@@ -38,7 +38,7 @@ type DestHitRepo struct{ db *gorm.DB }
 // service/rollup's onConflictClause.
 func destHitConflict(dialect string) clause.OnConflict {
 	cols := []clause.Column{
-		{Name: "hour_ms"}, {Name: "panel_id"}, {Name: "user_id"}, {Name: "source"},
+		{Name: "hour_ms"}, {Name: "panel_id"}, {Name: "egress_panel_id"}, {Name: "user_id"}, {Name: "source"},
 		{Name: "action"}, {Name: "dest"}, {Name: "port"},
 	}
 	col := func(name string) clause.Column { return clause.Column{Name: name} }
@@ -66,7 +66,7 @@ func destHitConflict(dialect string) clause.OnConflict {
 
 func destHitRowOf(r domain.DestHit) destHitRow {
 	return destHitRow{
-		HourMS: r.HourMS, PanelID: r.PanelID, UserID: r.UserID, Source: r.Source, Action: r.Action,
+		HourMS: r.HourMS, PanelID: r.PanelID, EgressPanelID: r.EgressPanelID, UserID: r.UserID, Source: r.Source, Action: r.Action,
 		Dest: r.Dest, Port: r.Port, Count: r.Count, FirstMS: r.FirstMS, LastMS: r.LastMS,
 	}
 }
@@ -237,6 +237,9 @@ func destHitScope(q *gorm.DB, f domain.DestHitFilter, withSourceAction bool) *go
 	if f.PanelID > 0 {
 		q = q.Where("panel_id = ?", f.PanelID)
 	}
+	if f.EgressSet {
+		q = q.Where("egress_panel_id = ?", f.EgressPanelID)
+	}
 	if f.SinceMS > 0 {
 		q = q.Where("hour_ms >= ?", f.SinceMS)
 	}
@@ -270,7 +273,7 @@ func destHitScope(q *gorm.DB, f domain.DestHitFilter, withSourceAction bool) *go
 
 // List pages the hit rows a filter selects, newest hour first, or grouped.
 // Group "site" folds hours, users and ports away (one row per destination),
-// "user" one row per user and "policy" one per source. A listing never holds an
+// "user" one row per user, "policy" one per source and "exit" one per exit server. A listing never holds an
 // address of a client: there is none to hold.
 func (r *DestHitRepo) List(ctx context.Context, f domain.DestHitFilter) ([]domain.DestHitRow, int64, error) {
 	base := destHitScope(r.db.WithContext(ctx).Model(&destHitRow{}), f, true)
@@ -286,10 +289,12 @@ func (r *DestHitRepo) List(ctx context.Context, f domain.DestHitFilter) ([]domai
 		sel, groupBy, order = "user_id, action, SUM(count) AS count, MIN(first_ms) AS first_ms, MAX(last_ms) AS last_ms", "user_id, action", "count DESC, user_id ASC, action ASC"
 	case "policy":
 		sel, groupBy, order = "source, action, SUM(count) AS count, MIN(first_ms) AS first_ms, MAX(last_ms) AS last_ms", "source, action", "count DESC, source ASC, action ASC"
+	case "exit":
+		sel, groupBy, order = "egress_panel_id, action, SUM(count) AS count, MIN(first_ms) AS first_ms, MAX(last_ms) AS last_ms", "egress_panel_id, action", "count DESC, egress_panel_id ASC, action ASC"
 	case "", "none":
-		sel, order = "hour_ms, panel_id, user_id, source, action, dest, port, count, first_ms, last_ms", "hour_ms DESC, last_ms DESC, source ASC, user_id ASC, dest ASC, port ASC"
+		sel, order = "hour_ms, panel_id, egress_panel_id, user_id, source, action, dest, port, count, first_ms, last_ms", "hour_ms DESC, last_ms DESC, source ASC, user_id ASC, dest ASC, port ASC"
 	default:
-		return nil, 0, fmt.Errorf("%w: group_by is none, site, user or policy", domain.ErrValidation)
+		return nil, 0, fmt.Errorf("%w: group_by is none, site, user, policy or exit", domain.ErrValidation)
 	}
 	var total int64
 	if groupBy == "" {
@@ -321,7 +326,7 @@ func (r *DestHitRepo) List(ctx context.Context, f domain.DestHitFilter) ([]domai
 	}
 	out := make([]domain.DestHitRow, len(rows))
 	for i, h := range rows {
-		out[i] = domain.DestHitRow{HourMS: h.HourMS, PanelID: h.PanelID, UserID: h.UserID, Source: h.Source, Action: h.Action,
+		out[i] = domain.DestHitRow{HourMS: h.HourMS, PanelID: h.PanelID, EgressPanelID: h.EgressPanelID, UserID: h.UserID, Source: h.Source, Action: h.Action,
 			Dest: h.Dest, Port: h.Port, Count: h.Count, FirstMS: h.FirstMS, LastMS: h.LastMS}
 	}
 	return out, total, nil

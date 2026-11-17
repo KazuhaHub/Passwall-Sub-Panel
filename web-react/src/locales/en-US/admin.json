@@ -5623,6 +5623,9 @@
         "group_deleted": "Deleted",
         "panel": "Node",
         "panel_all": "All nodes",
+        "exit": "Exit server",
+        "exit_all": "All exit servers",
+        "exit_direct": "This server (direct)",
         "range": "Time range",
         "search": "Search destinations…",
         "more": "Filters",
@@ -5642,7 +5645,8 @@
         "none": "Details",
         "site": "By destination",
         "user": "By account",
-        "policy": "By policy"
+        "policy": "By policy",
+        "exit": "By exit"
       },
       "count": {
         "detail": "{{n}} rows · summed by the hour",
@@ -5654,9 +5658,13 @@
         "rule": "Rule",
         "dest": "Destination",
         "panel": "Node",
+        "exit": "Exit server",
         "count": "Hits",
         "object": "Object",
         "last": "Latest"
+      },
+      "exit": {
+        "direct": "This server (direct)"
       },
       "rule": {
         "blocked": "Blocked",
