@@ -78,7 +78,7 @@ func TestTheNewerReviewWinsAcrossAWriteAndARestart(t *testing.T) {
 	path := filepath.Join(directory, "core-catalog.json")
 
 	// The origin publishes a review NEWER than the shipped one; the panel reads it.
-	f := newFixture(t, snapshotAt(t, "2026-09-19T00:00:00Z", "26.9.9"))
+	f := newFixture(t, snapshotAt(t, "2027-01-01T00:00:00Z", "26.9.9"))
 	withSnapshot := func() *Catalog {
 		catalog, err := New(Options{
 			Releases: currentReleases(), HTTPClient: f.server.Client(),
@@ -130,7 +130,7 @@ func TestTheNewerReviewWinsAcrossAWriteAndARestart(t *testing.T) {
 func TestAShippedReviewOlderThanTheSnapshotIsNotServed(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "core-catalog.json")
-	if err := os.WriteFile(path, []byte(snapshotAt(t, "2026-09-19T00:00:00Z", "26.9.9")), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(snapshotAt(t, "2027-01-01T00:00:00Z", "26.9.9")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	f := newFixture(t, documentFixture)
@@ -229,7 +229,7 @@ func TestTheStatusReportsTheReviewInForce(t *testing.T) {
 	if status.LastSuccess == nil || !status.LastSuccess.Equal(f.now) {
 		t.Fatalf("the last successful read is not reported: %+v", status.LastSuccess)
 	}
-	if status.ReviewTime == nil || !status.ReviewTime.Equal(time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)) {
+	if status.ReviewTime == nil || !status.ReviewTime.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("the review's own date is not reported: %+v", status.ReviewTime)
 	}
 
@@ -290,5 +290,37 @@ func TestTheShippedReviewIsTheOneTheProjectPublishes(t *testing.T) {
 			"Regenerate internal/adapters/corecatalogdoc/snapshot.json with the publisher's own\n"+
 			"`go run ./deployment/cmd/publish-core-catalog -output …` and commit the result.\n"+
 			"shipped:   %s\npublished: %s", canonical(shipped), canonical(published))
+	}
+}
+
+// TWO ASSETS FOR ONE OS AND ARCH, TOLD APART BY LIBC, ARE BOTH KEPT.
+//
+// The Alpine image installs the musl build of an engine that also ships a glibc one
+// for the same linux/amd64 target. The panel's reader ignores fields it does not
+// know, so a document with libc is never refused; the field is declared so that a
+// stored snapshot keeps it through a write and a re-read, and so that the
+// shipped-versus-published comparison covers it. The strict decode here only makes
+// sure every field of the sample is a declared one.
+func TestAssetsThatDifferOnlyByLibcRoundTrip(t *testing.T) {
+	body := `{"schema_version":1,"updated_at":"2026-11-16T00:00:00Z","releases":[{"engine":"sing-box","version":"1.14.0","assets":[` +
+		`{"os":"linux","arch":"amd64","url":"u1","sha256":"a","archive":"tar.gz","binary":"b1","libc":"glibc"},` +
+		`{"os":"linux","arch":"amd64","url":"u2","sha256":"b","archive":"tar.gz","binary":"b2","libc":"musl"},` +
+		`{"os":"darwin","arch":"arm64","url":"u3","sha256":"c","archive":"tar.gz","binary":"b3"}]}]}`
+	var document ports.CoreCatalogDocument
+	decoder := json.NewDecoder(strings.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("a document carrying libc is refused: %v", err)
+	}
+	assets := document.Releases[0].Assets
+	if len(assets) != 3 || assets[0].Libc != "glibc" || assets[1].Libc != "musl" || assets[2].Libc != "" {
+		t.Fatalf("libc was not read per asset: %+v", assets)
+	}
+	out, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(out), `"libc"`); got != 2 {
+		t.Fatalf("libc did not round-trip (want 2 occurrences, an absent one omitted): %s", out)
 	}
 }
