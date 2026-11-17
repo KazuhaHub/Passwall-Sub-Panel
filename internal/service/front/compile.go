@@ -221,7 +221,7 @@ func (s *Service) forwardOf(ctx context.Context, panelID int64, port int, target
 		if line.ID != target.LineID {
 			continue
 		}
-		if line.EntryPanelID != panelID || line.Port != port {
+		if line.Tunnel() || line.EntryPanelID != panelID || line.Port != port {
 			return nodeprotocol.Forward{}, false, nil
 		}
 		if !domain.LandingOfRelay(landing).OK {

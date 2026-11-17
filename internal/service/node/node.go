@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -94,6 +95,11 @@ type Service struct {
 	// repoWrapped guards SetSubscriptionInvalidator against stacking a second
 	// decorator on a re-wire.
 	repoWrapped bool
+	// tunnelLinks makes the tunnel a new tunnel line leaves through (tunnel.go).
+	tunnelLinks TunnelLinker
+	// planned are the ports picked for listeners about to be made, by line.
+	plannedMu sync.Mutex
+	planned   map[string]int
 }
 
 // GroupEligibility is the one test of "does this group include this node"
@@ -300,8 +306,20 @@ func (s *Service) ScanRealityTargets(ctx context.Context, panelID int64, targets
 	return scanner.ScanRealityTargets(ctx, targets)
 }
 
+// List returns the nodes an administrator manages: the hidden listeners of
+// tunnel lines are reached through the lines of their landing.
 func (s *Service) List(ctx context.Context) ([]*domain.Node, error) {
-	return s.nodes.List(ctx)
+	all, err := s.nodes.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0:0]
+	for _, n := range all {
+		if !n.IsTunnelChild() {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Node, int64, error) {
@@ -532,11 +550,23 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if n.DisplayName == "" || n.Region == "" || n.PanelID == 0 {
 		return fmt.Errorf("%w: display_name, region and panel_id required", domain.ErrValidation)
 	}
+	// A tunnel line needs its landing to exist: it is added to a saved node.
+	for _, line := range n.Relays {
+		if line.Tunnel() {
+			return fmt.Errorf("%w: a tunnel line is added to a node that already exists", domain.ErrValidation)
+		}
+	}
 	// Resolve before any queued retry captures the node: the request-only
 	// markers are not serialized into the task payload.
 	// The server's lock comes before anything reads fronts, relay lines included;
 	// the keys are taken in sorted order everywhere, so locks never cross.
 	defer s.lockFronts(relayPanels(n)...)()
+	return s.createInboundLocked(ctx, n, spec)
+}
+
+// createInboundLocked is CreateInbound for a caller that already holds the
+// locks of the node's server and of the entry servers of its lines.
+func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec ports.InboundSpec) error {
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if err := s.validateManagedRelays(ctx, n); err != nil {
 		return err
@@ -549,9 +579,12 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if err != nil {
 		return err
 	}
+	// A tunnel listener is never queued: a queued create would leave the line
+	// pointing at a listener that does not exist (id 0), so the error is returned
+	// and the save that asked for it is undone, with nothing stored.
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
-		if offer != nil {
+		if offer != nil || n.IsTunnelChild() {
 			return fmt.Errorf("xui panel: %w", err) // a join is never queued: the admin retries
 		}
 		return s.enqueueNodeCreateTask(ctx, n, spec, fmt.Errorf("xui panel: %w", err))
@@ -560,6 +593,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if err != nil {
 		if permanentErr := permanentInboundCreateError(err); permanentErr != nil {
 			return permanentErr
+		}
+		if n.IsTunnelChild() {
+			return fmt.Errorf("xui addInbound: %w", err)
 		}
 		if offer != nil {
 			// A queued create would run later with no join: the node would land on
@@ -584,7 +620,11 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 		return err
 	}
 	s.inboundsChanged(ctx, n.PanelID)
-	s.syncExistingUsersToNodeInBackground(n)
+	if !n.IsTunnelChild() {
+		// A tunnel listener belongs to no group: its users are its landing's, and
+		// the save of the line re-plans them.
+		s.syncExistingUsersToNodeInBackground(n)
+	}
 	return nil
 }
 
@@ -778,15 +818,78 @@ func (s *Service) Reorder(ctx context.Context, updates []ports.NodeSortUpdate) e
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
-	previous, err := s.nodes.GetByID(ctx, n.ID)
+	return s.updateMetadata(ctx, n, nil)
+}
+
+// updateMetadata is UpdateMetadata. switching names the lines whose mode this
+// save may change: only SwitchLineMode, which confirms it, passes any.
+func (s *Service) updateMetadata(ctx context.Context, n *domain.Node, switching map[string]bool) error {
+	// The tunnels only a removed listener's routes used are cleaned up once the
+	// server locks below are let go (deferred first, so it runs last).
+	ctx, sink := withRouteSink(ctx)
+	defer s.cleanup(ctx, sink)
+	previous, unlock, err := s.lockAndLoad(ctx, n.ID, n.Relays)
 	if err != nil {
 		return err
 	}
-	lockPanels := []int64{previous.PanelID}
-	for _, line := range append(append([]domain.RelayLine(nil), previous.Relays...), n.Relays...) {
-		lockPanels = append(lockPanels, line.EntryPanelID)
+	defer unlock()
+	if previous.IsTunnelChild() {
+		return s.updateTunnelListenerMetadata(ctx, previous, n)
 	}
-	defer s.lockFronts(lockPanels...)()
+	return s.updateMetadataLocked(ctx, previous, n, switching)
+}
+
+// lockAndLoad takes the locks of a landing's server and of the entry server of
+// each of its lines (stored and about to be stored), and only then reads the
+// stored node, so that what a save plans from is what no other save can change
+// under it. A concurrent save that moved a line to another entry server between
+// the first read and the locks is caught by comparing the lock set with the
+// re-read node, and the load is retried with the wider set.
+func (s *Service) lockAndLoad(ctx context.Context, id int64, next []domain.RelayLine) (*domain.Node, func(), error) {
+	panels := map[int64]bool{}
+	for _, line := range next {
+		panels[line.EntryPanelID] = true
+	}
+	for attempt := 0; ; attempt++ {
+		peek, err := s.nodes.GetByID(ctx, id)
+		if err != nil {
+			return nil, nil, err
+		}
+		panels[peek.PanelID] = true
+		for _, line := range peek.Relays {
+			panels[line.EntryPanelID] = true
+		}
+		list := make([]int64, 0, len(panels))
+		for p := range panels {
+			list = append(list, p)
+		}
+		unlock := s.lockFronts(list...)
+		previous, err := s.nodes.GetByID(ctx, id)
+		if err != nil {
+			unlock()
+			return nil, nil, err
+		}
+		covered := panels[previous.PanelID]
+		for _, line := range previous.Relays {
+			covered = covered && panels[line.EntryPanelID]
+		}
+		if covered || attempt >= 3 {
+			if !covered {
+				unlock()
+				return nil, nil, fmt.Errorf("%w: the node's lines changed while it was being saved: reload it and try again", domain.ErrConflict)
+			}
+			return previous, unlock, nil
+		}
+		unlock()
+		for _, line := range previous.Relays {
+			panels[line.EntryPanelID] = true
+		}
+	}
+}
+
+// updateMetadataLocked is the save of a landing's metadata for a caller that
+// holds lockAndLoad's locks and passes the node as it read it under them.
+func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.Node, switching map[string]bool) error {
 	if err := domain.ReconcileRelayIDs(previous.Relays, n.Relays); err != nil {
 		return err
 	}
@@ -796,30 +899,77 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
+	// Tunnel lines: the server-owned fields come from the stored lines, and the
+	// listeners to make and to delete are settled before anything is written.
+	work, err := s.planTunnels(ctx, previous, n, switching)
+	if err != nil {
+		return err
+	}
 	// The landing's own panel and port decide collisions, and metadata edits
-	// do not change them, so check against the stored node.
+	// do not change them, so check against the stored node. The listeners about
+	// to be removed do not count: a tunnel line going back to a forward may take
+	// its listener's port.
 	landing := *previous
 	landing.Relays = n.Relays
-	if err := s.validateManagedRelays(ctx, &landing); err != nil {
+	if err := s.validateManagedRelays(ctx, &landing, work.dropping...); err != nil {
 		return err
 	}
 	if err := s.validateEgress(previous, n.EgressPanelID); err != nil {
+		return err
+	}
+	// Only now is the confirmation asked: a save that would be refused anyway is
+	// refused first.
+	if work.refusal != nil {
+		return work.refusal
+	}
+	// A line switched off or on moves its listener the same way: settle what
+	// that does to a shared port before anything is written.
+	checked := *previous
+	checked.Relays, checked.Enabled = n.Relays, previous.Enabled
+	if err := s.tunnelEnabledRefusal(ctx, &checked); err != nil {
+		return err
+	}
+	if err := s.makeTunnels(ctx, previous, n, work); err != nil {
+		return err
+	}
+	// The listeners of lines that go are removed BEFORE the lines are saved: a cut
+	// short save then leaves a line whose listener is missing (withheld, and
+	// fixed by removing or switching the line), never a hidden listener that no
+	// line owns.
+	if err := s.dropTunnels(ctx, work); err != nil {
+		s.undoTunnels(ctx, work)
 		return err
 	}
 	// Column-scoped: a full-row Update here would roll back the poll-owned
 	// columns (traffic counters / health / inbound-config snapshot) to the
 	// stale values the edit dialog loaded.
 	if err := s.nodes.UpdateMetadata(ctx, n); err != nil {
+		s.undoTunnels(ctx, work)
+		return err
+	}
+	// The listeners follow their lines: enabled only while the line and the
+	// landing are, and carrying the line's labels, address and factor.
+	updated := *previous
+	updated.Relays = n.Relays
+	updated.DisplayName, updated.SortOrder = n.DisplayName, n.SortOrder
+	if err := s.followTunnelLines(ctx, &updated); err != nil {
 		return err
 	}
 	// Each line a user can see has a client of its own (ADR 0043): a line that
 	// appears, disappears or changes who may see it re-plans the members.
 	if domain.LineSetChanged(previous.Relays, n.Relays) {
-		updated := *previous
-		updated.Relays = n.Relays
 		s.provisionNodeMembersInBackground(&updated)
 	}
 	return nil
+}
+
+// updateTunnelListenerMetadata is a metadata save of a tunnel listener, which
+// is edited as a node: only its flow is its own. Its name, address, labels,
+// exit and traffic factor follow its line.
+func (s *Service) updateTunnelListenerMetadata(ctx context.Context, previous, n *domain.Node) error {
+	next := *previous
+	next.Flow = n.Flow
+	return s.nodes.UpdateMetadata(ctx, &next)
 }
 
 // resolveLineFactors validates the edited line factors and keeps the stored
@@ -871,6 +1021,45 @@ type AppliedLineFactor struct {
 // factor changes: each node is written through the column-scoped metadata
 // writer with everything else as stored.
 func (s *Service) SetLineFactors(ctx context.Context, panelID int64, changes []LineFactorChange) ([]AppliedLineFactor, error) {
+	// The landings are read, written and their tunnel listeners brought in step
+	// under the locks of the server and of the entry servers of their tunnel
+	// lines, as every other write of these lines is. The set of entry servers is
+	// learned from a first read and checked again under the locks.
+	panels := map[int64]bool{panelID: true}
+	for attempt := 0; ; attempt++ {
+		for _, c := range changes {
+			if n, err := s.nodes.GetByID(ctx, c.Line.NodeID); err == nil {
+				for _, p := range tunnelEntryPanels(n) {
+					panels[p] = true
+				}
+			}
+		}
+		list := make([]int64, 0, len(panels))
+		for p := range panels {
+			list = append(list, p)
+		}
+		unlock := s.lockFronts(list...)
+		covered := true
+		for _, c := range changes {
+			if n, err := s.nodes.GetByID(ctx, c.Line.NodeID); err == nil {
+				for _, p := range tunnelEntryPanels(n) {
+					covered = covered && panels[p]
+				}
+			}
+		}
+		if covered {
+			defer unlock()
+			break
+		}
+		unlock()
+		if attempt >= 3 {
+			return nil, fmt.Errorf("%w: the tunnel lines changed while the factors were being saved: reload and try again", domain.ErrConflict)
+		}
+	}
+	return s.setLineFactorsLocked(ctx, panelID, changes)
+}
+
+func (s *Service) setLineFactorsLocked(ctx context.Context, panelID int64, changes []LineFactorChange) ([]AppliedLineFactor, error) {
 	byNode := map[int64]*domain.Node{}
 	original := map[int64]*domain.Node{}
 	var order []int64
@@ -888,6 +1077,9 @@ func (s *Service) SetLineFactors(ctx context.Context, panelID int64, changes []L
 			loaded, err := s.nodes.GetByID(ctx, c.Line.NodeID)
 			if err != nil {
 				return nil, err
+			}
+			if loaded.IsTunnelChild() {
+				return nil, fmt.Errorf("%w: node %d is the listener of a tunnel line: its factor is the line's, set on the line of its landing", domain.ErrValidation, loaded.ID)
 			}
 			if loaded.PanelID != panelID || loaded.IsSeparator() {
 				return nil, fmt.Errorf("%w: node %d is not on server %d", domain.ErrValidation, c.Line.NodeID, panelID)
@@ -935,6 +1127,18 @@ func (s *Service) SetLineFactors(ctx context.Context, panelID int64, changes []L
 			return nil, err
 		}
 	}
+	// A tunnel line's listener carries a copy of its line's factor, which the
+	// entry server's own planning reads: keep it in step.
+	// A failure is returned, not only logged: the factors are saved, a listener's
+	// copy is not, and the entry server grants quota through the copy. The next
+	// sync also raises an issue (tunnel_factor_stale) for every listener whose
+	// copy differs from its line.
+	for _, id := range order {
+		if err := s.followTunnelLines(ctx, byNode[id]); err != nil {
+			log.Warn("line factors: a tunnel listener did not follow its line", "node_id", id, "err", err)
+			return applied, fmt.Errorf("the traffic factors were saved, but a tunnel listener of node %q did not take its line's factor (retry the save): %w", byNode[id].DisplayName, err)
+		}
+	}
 	return applied, nil
 }
 
@@ -971,8 +1175,25 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	// immediately and survives a 3X-UI outage; the push (or its retry task)
 	// then aligns 3X-UI. Use the column-scoped writer so a concurrent health
 	// pass doesn't clobber our snapshot — and we don't clobber its writes.
-	sniffingBefore := n.Sniffing
 	defer s.lockFronts(n.PanelID)()
+	return s.updateInboundConfigLockedNode(ctx, n, spec)
+}
+
+// updateInboundConfigLocked is UpdateInboundConfig for a caller that holds the
+// node's server lock.
+func (s *Service) updateInboundConfigLocked(ctx context.Context, id int64, spec ports.InboundSpec) error {
+	n, err := s.nodes.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.updateInboundConfigLockedNode(ctx, n, spec)
+}
+
+func (s *Service) updateInboundConfigLockedNode(ctx context.Context, n *domain.Node, spec ports.InboundSpec) error {
+	sniffingBefore := n.Sniffing
+	if err := s.tunnelListenerRefusal(ctx, n, spec); err != nil {
+		return err
+	}
 	next := *n
 	inboundcfg.ApplySpec(&next, spec)
 	offer, err := s.checkInboundAgainstFronts(ctx, &next)
@@ -1101,7 +1322,35 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err != nil {
 		return err
 	}
-	defer s.lockFronts(n.PanelID)()
+	if n.IsTunnelChild() {
+		return fmt.Errorf("%w: node %q is the listener of a tunnel line: enable or disable the line", domain.ErrValidation, n.DisplayName)
+	}
+	// Read again under the locks of the server and of every tunnel line's entry
+	// server, so a line added a moment ago is followed too.
+	n, unlock, err := s.lockAndLoad(ctx, id, nil)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// The tunnel lines of a landing follow it: disabling the landing disables
+	// their listeners and enabling it enables those of the lines that are on. A
+	// listener behind a shared port asks first, and that is settled before
+	// anything is changed.
+	next := *n
+	next.Enabled = enabled
+	if err := s.tunnelEnabledRefusal(ctx, &next); err != nil {
+		return err
+	}
+	if err := s.setEnabledLocked(ctx, n, enabled); err != nil {
+		return err
+	}
+	n.Enabled = enabled
+	return s.followTunnelLines(ctx, n)
+}
+
+// setEnabledLocked is the body of SetEnabled for a caller that holds the lock
+// of the node's server.
+func (s *Service) setEnabledLocked(ctx context.Context, n *domain.Node, enabled bool) error {
 	// Disabling a listener that is behind a shared port sends the names routed
 	// to it to the default site: it is allowed, and asks first.
 	if !enabled && n.Enabled && s.frontSvc != nil && s.fronts != nil && !front.ConfirmationFrom(ctx).Confirmed {
@@ -1168,7 +1417,21 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 		// reclaim, no sync task to enqueue. Drop the panel-side record.
 		return s.deleteNode(ctx, id)
 	}
-	defer s.lockFronts(n.PanelID)()
+	ctx, sink := withRouteSink(ctx)
+	defer s.cleanup(ctx, sink)
+	if n.IsTunnelChild() {
+		return s.removeOrphanListener(ctx, n)
+	}
+	n, unlock, err := s.lockAndLoad(ctx, id, nil)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Deleting a landing deletes the listeners of its tunnel lines: it asks
+	// first, naming them.
+	if err := s.tunnelDeleteRefusal(ctx, n, "delete_node"); err != nil {
+		return err
+	}
 	change, err := s.checkRemovalAgainstFronts(ctx, n)
 	if err != nil {
 		return err
@@ -1182,6 +1445,9 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 		log.Warn("node delete preflight failed; queueing guarded delete", "node_id", n.ID, "err", err)
 	}
 	if err := s.finishFront(ctx, n, change); err != nil {
+		return err
+	}
+	if err := s.removeTunnelListeners(ctx, n); err != nil {
 		return err
 	}
 	n.Enabled = false
@@ -1211,6 +1477,11 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 	// the tunnels only the node's routes used is done. That cleanup takes the same
 	// server locks the detach holds, which are not reentrant: it runs after the
 	// detach has let go of them.
+	ctx, sink := withRouteSink(ctx)
+	defer s.cleanup(ctx, sink)
+	if n.IsTunnelChild() {
+		return s.removeOrphanListener(ctx, n)
+	}
 	defer s.lockRoutes(n.PanelID)()
 	routed, err := s.detachLocked(ctx, n)
 	if err != nil {
@@ -1222,8 +1493,22 @@ func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
 
 // detachLocked is the part of DetachAndSync that holds the node's server lock.
 // It returns the deleted node when it had routes, for afterRemove.
-func (s *Service) detachLocked(ctx context.Context, n *domain.Node) (*domain.Node, error) {
-	defer s.lockFronts(n.PanelID)()
+func (s *Service) detachLocked(ctx context.Context, peek *domain.Node) (*domain.Node, error) {
+	n, unlock, err := s.lockAndLoad(ctx, peek.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := s.tunnelDeleteRefusal(ctx, n, "delete_node"); err != nil {
+		return nil, err
+	}
+	return s.detachNoLock(ctx, n)
+}
+
+// detachNoLock detaches a node whose server's lock (and that of the entry of
+// each tunnel line it owns) the caller holds. The listeners of its tunnel lines
+// go with it.
+func (s *Service) detachNoLock(ctx context.Context, n *domain.Node) (*domain.Node, error) {
 	change, err := s.checkRemovalAgainstFronts(ctx, n)
 	if err != nil {
 		return nil, err
@@ -1232,6 +1517,9 @@ func (s *Service) detachLocked(ctx context.Context, n *domain.Node) (*domain.Nod
 		return nil, fmt.Errorf("unclaim owned clients: %w", err)
 	}
 	if err := s.finishFront(ctx, n, change); err != nil {
+		return nil, err
+	}
+	if err := s.removeTunnelListeners(ctx, n); err != nil {
 		return nil, err
 	}
 	routed, err := s.removeNode(ctx, n.ID)
@@ -2085,7 +2373,7 @@ func (s *Service) validateEgress(node *domain.Node, egress int64) error {
 	return nil
 }
 
-func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Node) error {
+func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Node, dropping ...int64) error {
 	if err := s.checkRelaysAgainstFronts(ctx, landing); err != nil {
 		return err
 	}
@@ -2124,7 +2412,7 @@ func (s *Service) validateManagedRelays(ctx context.Context, landing *domain.Nod
 		taken[key] = owner
 	}
 	for _, other := range nodes {
-		if other == nil || other.IsSeparator() || (landing.ID != 0 && other.ID == landing.ID) {
+		if other == nil || other.IsSeparator() || (landing.ID != 0 && other.ID == landing.ID) || slices.Contains(dropping, other.ID) {
 			continue
 		}
 		if other.DesiredPort > 0 && !shared[bind{other.PanelID, other.DesiredPort}] {

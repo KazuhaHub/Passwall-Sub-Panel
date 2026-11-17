@@ -18,6 +18,7 @@ import {
   draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newRouteKey, newlyMoved, targetKey, type Draft,
 } from './frontDraft'
 import { frontErrorText, issueText } from './frontErrors'
+import { listenerLabel } from './listenerLabel'
 
 interface Props {
   panelId: number
@@ -39,7 +40,10 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
   const port = Number(draft.port)
   const listeners = listenersFor(options, port, draft)
   const lines = linesFor(options, port)
-  const nodeName = (id: number) => options.listeners.find(l => l.node_id === id)?.name ?? `#${id}`
+  const nodeName = (id: number) => {
+    const o = options.listeners.find(l => l.node_id === id)
+    return o ? listenerLabel(t, o.name, o) : `#${id}`
+  }
 
   // What a route can point at: the listeners the draft moves behind the front
   // and the relay lines entering on this port.
@@ -47,7 +51,7 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
     const out: { key: string; label: string; names: string[] }[] = []
     for (const l of draft.listeners) {
       const o = options.listeners.find(x => x.node_id === l.node_id)
-      out.push({ key: targetKey.listener(l.node_id), label: t('admin:servers.fronts.target.listener', { name: o?.name ?? `#${l.node_id}` }), names: o?.server_names ?? [] })
+      out.push({ key: targetKey.listener(l.node_id), label: o?.parent_node_id ? listenerLabel(t, '', o) : t('admin:servers.fronts.target.listener', { name: o?.name ?? `#${l.node_id}` }), names: o?.server_names ?? [] })
     }
     for (const line of lines) {
       out.push({
@@ -152,7 +156,7 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
                     sx={{ minWidth: 260 }}
                     control={<Checkbox size="small" checked={!!chosen} disabled={!l.frontable}
                       onChange={(_, c) => void toggleListener(l.node_id, c)} />}
-                    label={`${l.name} (${l.protocol}${l.security ? `+${l.security}` : ''}, :${l.port})`}
+                    label={`${listenerLabel(t, l.name, l)} (${l.protocol}${l.security ? `+${l.security}` : ''}, :${l.port})`}
                   />
                   {!l.frontable && (
                     <Typography variant="caption" color="warning.main">{t(`admin:servers.fronts.refusal.${l.reason ?? 'no_sni'}`)}</Typography>
@@ -162,7 +166,7 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
                       <TextField
                         size="small" label={t('admin:servers.fronts.loopback')} value={chosen.loopback} sx={{ width: 170 }}
                         onChange={e => setDraft(d => ({ ...d, listeners: d.listeners.map(x => x.node_id === l.node_id ? { ...x, loopback: e.target.value } : x) }))}
-                        slotProps={{ htmlInput: { inputMode: 'numeric', 'aria-label': t('admin:servers.fronts.loopback_of', { name: l.name }) } }}
+                        slotProps={{ htmlInput: { inputMode: 'numeric', 'aria-label': t('admin:servers.fronts.loopback_of', { name: listenerLabel(t, l.name, l) }) } }}
                       />
                       <Button size="small" onClick={() => void randomLoopback(l.node_id)}>{t('admin:servers.fronts.random')}</Button>
                     </>

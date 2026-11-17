@@ -51,13 +51,13 @@ func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.Us
 			lines = append(lines, buildSeparatorURI(it.name))
 			continue
 		}
-		inb := inboundByNode[it.node.ID]
+		inb := inboundByNode[it.listener().ID]
 		if inb == nil {
 			log.Warn("uri-list: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID)
 			continue
 		}
-		if _, native := nativePanels[it.node.PanelID]; native {
+		if _, native := nativePanels[it.listener().PanelID]; native {
 			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("uri-list: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
@@ -68,7 +68,7 @@ func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.Us
 		// it.name (not DisplayName) carries the layout-applied name — the
 		// region-flag prefix and, for relay variants, the per-line suffix —
 		// so each transit entry gets a distinct fragment.
-		uri, err := buildURI(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay)
+		uri, err := buildURI(it.name, it.listener(), renderUser, inb, userEmail, appliedPassword, it.relay)
 		if err != nil {
 			log.Warn("uri-list: skip node, build uri failed", "node_id", it.node.ID, "err", err)
 			continue

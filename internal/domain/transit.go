@@ -7,8 +7,16 @@ import (
 	"time"
 )
 
-// Managed reports whether a Passwall Node server runs this line's forwarding.
-func (r RelayLine) Managed() bool { return r.EntryPanelID != 0 }
+// Managed reports whether a Passwall Node server runs this line as a port
+// forward. A tunnel-mode line also names an entry server, but it is carried by
+// a listener of its own (see Tunnel), so it is not a forward and none of the
+// forward machinery (entry ports, forward keys, confirmation) applies to it.
+func (r RelayLine) Managed() bool { return r.EntryPanelID != 0 && !r.Tunnel() }
+
+// Gated reports whether the line needs ManagedReady to be published: a managed
+// forward the entry must confirm, or a tunnel line whose listener and link must
+// both be running.
+func (r RelayLine) Gated() bool { return r.Managed() || r.Tunnel() }
 
 // Publishable reports whether the line may appear in subscriptions, status
 // pages and line references. An external line follows Enabled alone. A managed
@@ -16,9 +24,10 @@ func (r RelayLine) Managed() bool { return r.EntryPanelID != 0 }
 // forward (or whose state was never loaded) is withheld: it fails closed. A
 // line whose probes have been down long enough to be withheld (ProbeWithheld,
 // only ever set while withholding is on) is left out too, and never replaced
-// by a direct line.
+// by a direct line. A tunnel line is gated the same way (ManagedReady is the
+// state of its listener and link, see TunnelReady).
 func (r RelayLine) Publishable() bool {
-	return r.Enabled && !r.ProbeWithheld && (!r.Managed() || r.ManagedReady)
+	return r.Enabled && !r.ProbeWithheld && (!r.Gated() || r.ManagedReady)
 }
 
 // ManagedForward is what an entry server must relay for one managed line. It

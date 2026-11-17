@@ -43,8 +43,8 @@ func (s *Service) resolveInbounds(ctx context.Context, items []renderItem, st po
 		if it.isSeparator || it.node == nil {
 			continue
 		}
-		if nodeHasLocalConfig(it.node) {
-			out[it.node.ID] = inboundFromNode(it.node)
+		if nodeHasLocalConfig(it.listener()) {
+			out[it.listener().ID] = inboundFromNode(it.listener())
 		} else {
 			fallback = append(fallback, it)
 		}

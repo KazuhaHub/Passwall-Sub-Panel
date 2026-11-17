@@ -550,6 +550,12 @@ type nodeTrafficRow struct {
 	PermanentTotalBytes int64    `json:"permanent_total_bytes"`
 	PeriodUsedBytes     int64    `json:"period_used_bytes"`
 	TodayUsedBytes      int64    `json:"today_used_bytes"`
+	// TunnelLine marks the traffic of a tunnel line's listener: it is the line's
+	// of ParentNodeID (named ParentName, the line LineName), not a node.
+	TunnelLine   bool   `json:"tunnel_line,omitempty"`
+	ParentNodeID int64  `json:"parent_node_id,omitempty"`
+	ParentName   string `json:"parent_name,omitempty"`
+	LineName     string `json:"line_name,omitempty"`
 }
 
 // NodesTop returns the top-N nodes by current-month usage. N defaults to 20.
@@ -572,6 +578,10 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 			realNodes = append(realNodes, n)
 		}
 	}
+	byID := make(map[int64]*domain.Node, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
 	reports := h.traffic.NodeReportForNodes(c.Request.Context(), realNodes)
 	rows := make([]nodeTrafficRow, 0, len(realNodes))
 	for _, node := range realNodes {
@@ -579,7 +589,7 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 		if report == nil {
 			continue
 		}
-		rows = append(rows, nodeTrafficRow{
+		row := nodeTrafficRow{
 			NodeID:              node.ID,
 			DisplayName:         node.DisplayName,
 			PanelName:           panelNames[node.PanelID],
@@ -588,7 +598,22 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 			PermanentTotalBytes: report.PermanentTotalBytes,
 			PeriodUsedBytes:     report.PeriodUsedBytes,
 			TodayUsedBytes:      report.TodayUsedBytes,
-		})
+		}
+		if node.IsTunnelChild() {
+			// Its traffic is the landing's tunnel line's: shown as that line, with
+			// the names the page words as "<landing> · tunnel line <line>".
+			row.TunnelLine, row.ParentNodeID = true, node.ParentNodeID
+			if parent := byID[node.ParentNodeID]; parent != nil {
+				row.ParentName = parent.DisplayName
+				row.LineName = node.ParentLineID
+				for _, l := range parent.Relays {
+					if l.ID == node.ParentLineID {
+						row.LineName = firstNonEmptyText(l.Name, l.Address, l.ID)
+					}
+				}
+			}
+		}
+		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].PeriodUsedBytes > rows[j].PeriodUsedBytes
@@ -644,7 +669,8 @@ func (h *AdminTrafficHandler) NodesHistory(c *gin.Context) {
 	}
 	nodesCount := 0
 	for _, node := range nodes {
-		if !node.IsSeparator() {
+		// A tunnel line's hidden listener is a line of its landing, not a node.
+		if !node.IsSeparator() && !node.IsTunnelChild() {
 			nodesCount++
 		}
 	}

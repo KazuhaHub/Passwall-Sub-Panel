@@ -136,6 +136,23 @@ describe('ServersView shared ports', () => {
     expect(within(dialog).getByText('admin:servers.fronts.ports.default_arrow')).toBeTruthy()
   })
 
+  it('names a tunnel line\'s listener by its line in the usage tab', async () => {
+    install(view(), [
+      { port: 40123, bind: 'public', kind: 'listener', node_id: 77, node_name: 'tunnel-77', parent_node_id: 5, parent_name: 'HK-1', line_name: 'Mobile', protocol: 'vless', label: 'x', enabled: true },
+      { port: 30001, bind: 'loopback', kind: 'front_loopback', node_id: 77, node_name: 'tunnel-77', parent_node_id: 5, parent_name: 'HK-1', line_name: 'Mobile', label: 'y', enabled: true },
+      { port: 443, bind: 'public', kind: 'front', front_id: 1, label: 'z', enabled: true, behind: [
+        { server_names: ['a.example.com'], target: { kind: 'listener', node_id: 77 }, label: 'l', loopback_port: 30001, parent_node_id: 5, parent_name: 'HK-1', line_name: 'Mobile' },
+      ] },
+    ])
+    mount(<ServersView />)
+    const dialog = await openDialog()
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:servers.fronts.tab_ports' }))
+    await within(dialog).findByText('admin:servers.fronts.ports.kind.tunnel_listener')
+    expect(within(dialog).getByText('admin:servers.fronts.ports.kind.tunnel_front_loopback')).toBeTruthy()
+    expect(within(dialog).queryByText('admin:servers.fronts.ports.kind.listener')).toBeNull()
+    expect(within(dialog).getByText('admin:servers.fronts.ports.route_arrow')).toBeTruthy()
+  })
+
   it('marks saved fronts as not in effect, with the reason, when the server is not on Xray', async () => {
     const saved = { id: 7, port: 443, listeners: [], routes: [{ server_names: ['a.example.com'], target: { kind: 'forward', node_id: 5, line_id: 'x' } }], default: { kind: 'external', host: 'www.example.com', port: 443 } }
     install(view({ support: { supported: false, reason: 'engine_not_xray' }, fronts: [saved] }))

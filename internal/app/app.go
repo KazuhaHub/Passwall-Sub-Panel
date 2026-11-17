@@ -386,6 +386,21 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// shared ports.
 	frontSvc := front.New(repos.TransitFronts, repos.Node, repos.XUIPanel, repos.NodeAgent, repos.Transit, repos.TransitLinks, nil)
 	transitSvc.WithServerLock(frontSvc.Lock)
+	frontSvc.WithReservations(transitSvc.ReservedPorts)
+	// A link's port also avoids the shared ports and loopbacks of the exit server;
+	// a port that cannot be checked counts as taken.
+	transitSvc.WithPortCheck(func(ctx context.Context, panelID int64, port int) bool {
+		usage, err := frontSvc.Usage(ctx, panelID)
+		if err != nil {
+			return true
+		}
+		for _, entry := range usage {
+			if entry.Port == port || (entry.RangeHigh != 0 && port >= entry.Port && port <= entry.RangeHigh) {
+				return true
+			}
+		}
+		return false
+	})
 	nativeSync.SetFronts(frontSvc)
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
@@ -508,6 +523,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
+	nodeSvc.SetTunnelLinks(transitSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each

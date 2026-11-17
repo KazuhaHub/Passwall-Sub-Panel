@@ -216,6 +216,12 @@ func (s *Service) viewFor(ctx context.Context, in CompileInput, cb *cachedBase) 
 			if n != nil {
 				view.nodeIDs[n.ID] = true
 				nodes = append(nodes, n)
+				if n.IsTunnelChild() {
+					if view.parents == nil {
+						view.parents = map[int64]int64{}
+					}
+					view.parents[n.ID] = n.ParentNodeID
+				}
 			}
 		}
 		seen := map[int64]bool{}
@@ -1023,6 +1029,11 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 		sourceActions[src.Node] = protocol.RuleBlock
 		if src.State == string(domain.DestStateReport) {
 			sourceActions[src.Node] = protocol.RuleObserve
+		}
+	}
+	for child, parent := range v.parents {
+		if action, ok := sourceActions[parent]; ok {
+			sourceActions[child] = action
 		}
 	}
 	roster := map[protocol.SubjectKey]bool{}

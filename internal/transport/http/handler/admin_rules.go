@@ -118,6 +118,7 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	nodes = withoutTunnelListeners(nodes)
 	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
 	advanced := render.NormalizeMihomoRuleFeatures(render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds})
 	metadata := render.NormalizeProxyGroupMetadata(content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions, advanced)
@@ -235,6 +236,7 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	nodes = withoutTunnelListeners(nodes)
 	content := mergeLegacyRuleContent(req.MihomoRules, req.Content)
 	advanced := render.MihomoRuleFeatures{SubRules: req.MihomoSubRules, RematchOutbounds: req.MihomoRematchOutbounds}
 	c.JSON(http.StatusOK, render.InspectProxyGroupsWithMihomo(content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, advanced))
@@ -292,4 +294,17 @@ func (h *AdminRuleSetsHandler) Reset(c *gin.Context) {
 		h.invalidate()
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// withoutTunnelListeners leaves out the hidden listeners of tunnel lines: they
+// are lines of their landing (which the inspector lists), never nodes of their
+// own, so a proxy group can neither name nor match one.
+func withoutTunnelListeners(nodes []*domain.Node) []*domain.Node {
+	out := make([]*domain.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if !n.IsTunnelChild() {
+			out = append(out, n)
+		}
+	}
+	return out
 }

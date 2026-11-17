@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -444,13 +445,160 @@ func (s *Service) serverAddresses(ctx context.Context, panelIDs []int64) (map[in
 	return out, nil
 }
 
+// ErrReservedPortTaken is returned when the port promised to a new link was
+// taken by something else before the link was made: the link is not made on
+// another port behind the back of a confirmation that listed this one.
+var ErrReservedPortTaken = fmt.Errorf("%w: the port planned for the tunnel was taken: plan it again", domain.ErrConflict)
+
+func (s *Service) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// liveReservations are the ports promised on an exit server that have not
+// expired (expired ones are forgotten).
+func (s *Service) liveReservations(exit int64) map[int]bool {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	live := map[int]bool{}
+	for key, r := range s.reserved {
+		if !r.expires.After(s.clock()) {
+			delete(s.reserved, key)
+			continue
+		}
+		if key[1] == exit {
+			live[r.port] = true
+		}
+	}
+	return live
+}
+
+// ReservedPorts are the link ports promised on a server and still live. Every
+// allocator of ports on a server reads them, so that none hands one out.
+func (s *Service) ReservedPorts(exit int64) []int {
+	live := s.liveReservations(exit)
+	out := make([]int, 0, len(live))
+	for port := range live {
+		out = append(out, port)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func (s *Service) takeReservation(key [2]int64) (reservation, bool) {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	r, had := s.reserved[key]
+	delete(s.reserved, key)
+	return r, had
+}
+
+func (s *Service) putReservation(key [2]int64, r reservation) {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	if s.reserved == nil {
+		s.reserved = map[[2]int64]reservation{}
+	}
+	s.reserved[key] = r
+}
+
+// PlanLink says which port on the exit server the tunnel from entry uses: the
+// existing link's, or the one a new link will be made with. Making it reserves
+// the port for the pair for ten minutes, so that a confirmation that lists the
+// port is followed by a link that has it; the reservation is honoured by every
+// other link's allocation. The caller holds the exit server's lock (a node save
+// does), which makes the choice and the use of the port one critical section.
+func (s *Service) PlanLink(ctx context.Context, entry, exit int64) (int, bool, error) {
+	if s.links == nil {
+		return 0, false, errors.New("transit: tunnels are not enabled")
+	}
+	if link, err := s.links.GetLink(ctx, entry, exit); err == nil {
+		return link.Port, true, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return 0, false, err
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	key := [2]int64{entry, exit}
+	r, had := s.takeReservation(key) // so that its own promise does not count against it
+	if had && r.expires.After(s.clock()) && s.portFree(ctx, nodes, exit, r.port) {
+		// Seen again, the same promise is kept (and its ten minutes begin anew).
+		s.putReservation(key, reservation{port: r.port, expires: s.clock().Add(reservationTTL)})
+		return r.port, false, nil
+	}
+	port, err := s.freeExitPortLocked(ctx, nodes, exit)
+	if err != nil {
+		return 0, false, err
+	}
+	s.putReservation(key, reservation{port: port, expires: s.clock().Add(reservationTTL)})
+	return port, false, nil
+}
+
+// portFree says nothing holds the port on the exit server: its inbounds,
+// forwards entering it, other links, the fronts' ports and loopbacks, and the
+// other live reservations. The caller holds allocMu.
+func (s *Service) portFree(ctx context.Context, nodes []*domain.Node, exit int64, port int) bool {
+	if s.liveReservations(exit)[port] {
+		return false
+	}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if node.PanelID == exit && node.DesiredPort == port {
+			return false
+		}
+		for _, relay := range node.Relays {
+			if desired, ok := domain.DesiredManagedForward(node, relay); ok && desired.EntryPanelID == exit && desired.Port == port {
+				return false
+			}
+		}
+	}
+	if links, err := s.links.ListLinks(ctx); err != nil {
+		return false
+	} else {
+		for _, link := range links {
+			if link.ExitPanelID == exit && link.Port == port {
+				return false
+			}
+		}
+	}
+	return s.portInUse == nil || !s.portInUse(ctx, exit, port)
+}
+
+// reservedPort takes the port PlanLink reserved for a pair, and reports whether
+// there was one. found with ok false means it was promised and has been taken
+// since.
+func (s *Service) reservedPort(ctx context.Context, nodes []*domain.Node, entry, exit int64) (port int, found, ok bool) {
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	r, has := s.takeReservation([2]int64{entry, exit})
+	if !has || !r.expires.After(s.clock()) {
+		return 0, false, false
+	}
+	// Its own reservation is already gone, so portFree sees only the others.
+	return r.port, true, s.portFree(ctx, nodes, exit, r.port)
+}
+
 // newLink creates a link with fresh credentials for both protocols (so an
 // administrator can switch protocol without new secrets), a free port on the
 // exit and a camouflage site drawn from the defaults.
 func (s *Service) newLink(ctx context.Context, nodes []*domain.Node, entry, exit int64) (domain.TransitLink, error) {
-	port, err := s.freeExitPort(ctx, nodes, exit)
-	if err != nil {
-		return domain.TransitLink{}, err
+	port, promised, usable := s.reservedPort(ctx, nodes, entry, exit)
+	switch {
+	case promised && !usable:
+		return domain.TransitLink{}, ErrReservedPortTaken
+	case !promised:
+		var err error
+		if port, err = s.freeExitPort(ctx, nodes, exit); err != nil {
+			return domain.TransitLink{}, err
+		}
 	}
 	ssKey := make([]byte, 16)
 	if _, err := rand.Read(ssKey); err != nil {
@@ -483,7 +631,16 @@ func (s *Service) newLink(ctx context.Context, nodes []*domain.Node, entry, exit
 // freeExitPort picks a random port in the link range that nothing on the exit
 // server uses: its inbounds, forwards entering it, and its other links.
 func (s *Service) freeExitPort(ctx context.Context, nodes []*domain.Node, exit int64) (int, error) {
-	used := map[int]bool{}
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	return s.freeExitPortLocked(ctx, nodes, exit)
+}
+
+// freeExitPortLocked is freeExitPort for a caller holding allocMu. The live
+// reservations of other links on the server count as used, and so does anything
+// the port check names (shared ports, loopbacks).
+func (s *Service) freeExitPortLocked(ctx context.Context, nodes []*domain.Node, exit int64) (int, error) {
+	used := s.liveReservations(exit)
 	for _, node := range nodes {
 		if node == nil {
 			continue
@@ -511,7 +668,7 @@ func (s *Service) freeExitPort(ctx context.Context, nodes []*domain.Node, exit i
 		if err != nil {
 			return 0, err
 		}
-		if port := linkPortLow + int(n.Int64()); !used[port] {
+		if port := linkPortLow + int(n.Int64()); !used[port] && (s.portInUse == nil || !s.portInUse(ctx, exit, port)) {
 			return port, nil
 		}
 	}

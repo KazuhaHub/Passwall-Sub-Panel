@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
@@ -458,5 +459,92 @@ func TestLinksForDoesNotResurrectATunnelThatWasJustDropped(t *testing.T) {
 	service = New(nodes, newFakeRepo()).WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"}).WithServerLock(func(int64) func() { return func() {} })
 	if plan, err = service.LinksFor(context.Background(), 9, map[int]bool{}, true); err != nil || len(plan.Out) != 1 {
 		t.Fatalf("a tunnel that is still used: %+v, %v", plan, err)
+	}
+}
+
+// The listener of a tunnel line is an ordinary listener whose default exit is
+// the landing's server: the tunnel from its server to that one is made for it,
+// the entry binds exactly that listener to it, and the landing's server holds
+// the exit half. Nothing is said about the landing's own listener.
+func TestLinksForBindsATunnelLinesListenerToTheLandingsServer(t *testing.T) {
+	repos := linkStore(t)
+	landingNode := landing(1, 3, "land.example", 443)
+	child := landing(2, 9, "entry.example", 24443)
+	child.ParentNodeID, child.ParentLineID, child.EgressPanelID = 1, "line", 3
+	service := New(fakeNodes{landingNode, child}, newFakeRepo()).WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"})
+	ctx := context.Background()
+
+	entry, err := service.LinksFor(ctx, 9, map[int]bool{24443: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entry.Out) != 1 || len(entry.Egress) != 1 || entry.Egress[0].Listener != nodeprotocol.NewListenerKey(2) {
+		t.Fatalf("entry plan = %+v, want the listener of the line bound to the tunnel", entry)
+	}
+	if entry.EgressExit[2] != 3 {
+		t.Fatalf("exits = %v", entry.EgressExit)
+	}
+	exit, err := service.LinksFor(ctx, 3, map[int]bool{443: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exit.In) != 1 || len(exit.Egress) != 0 {
+		t.Fatalf("exit plan = %+v", exit)
+	}
+	// A disabled line's listener has no tunnel.
+	child.Enabled = false
+	if plan, err := service.LinksFor(ctx, 9, map[int]bool{24443: true}, false); err != nil || len(plan.Egress) != 0 {
+		t.Fatalf("a disabled listener is bound: %+v (%v)", plan, err)
+	}
+}
+
+// PlanLink's promise is kept while it is fresh and honoured by every other
+// link's allocation, expires, and is not honoured by a link made after the port
+// was taken: that is refused, never moved quietly.
+func TestPlanLinkReservationsExpireAreHonouredAndNeverMovedQuietly(t *testing.T) {
+	repos := linkStore(t)
+	exitNode := landing(1, 3, "exit.example", 443)
+	service := New(fakeNodes{exitNode, landing(2, 9, "entry.example", 8443)}, newFakeRepo()).WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"})
+	clock := time.Unix(1_700_000_000, 0)
+	service.now = func() time.Time { return clock }
+	ctx := context.Background()
+
+	port, exists, err := service.PlanLink(ctx, 9, 3)
+	if err != nil || exists {
+		t.Fatalf("PlanLink = %d %v %v", port, exists, err)
+	}
+	if again, _, _ := service.PlanLink(ctx, 9, 3); again != port {
+		t.Fatalf("the same pair was promised %d then %d", port, again)
+	}
+	// Another entry planning a link to the same exit never gets the promised port.
+	for i := 0; i < 200; i++ {
+		if other, _, _ := service.PlanLink(ctx, 10, 3); other == port {
+			t.Fatal("a live reservation was given to another link")
+		}
+		service.takeReservation([2]int64{10, 3})
+	}
+	// Taken before the link is made (a shared port of the exit): refused.
+	service.WithPortCheck(func(_ context.Context, panel int64, p int) bool { return panel == 3 && p == port })
+	if _, err := service.EnsureLink(ctx, 9, 3); !errors.Is(err, ErrReservedPortTaken) {
+		t.Fatalf("err = %v, want the promised port reported taken", err)
+	}
+	// An expired promise is forgotten, and a link made without one takes a free port.
+	service.WithPortCheck(nil)
+	first, _, _ := service.PlanLink(ctx, 9, 3)
+	clock = clock.Add(11 * time.Minute)
+	live := service.liveReservations(3)
+	if live[first] || len(live) != 0 {
+		t.Fatalf("an expired reservation is still live: %v", live)
+	}
+	link, err := service.EnsureLink(ctx, 9, 3)
+	if err != nil || link.Port < 20000 {
+		t.Fatalf("link = %+v err = %v", link, err)
+	}
+	// A planned port is the one the link is then made with.
+	service.takeReservation([2]int64{9, 3})
+	planned, _, _ := service.PlanLink(ctx, 11, 3)
+	made, err := service.EnsureLink(ctx, 11, 3)
+	if err != nil || made.Port != planned {
+		t.Fatalf("made on %d (%v), planned %d", made.Port, err, planned)
 	}
 }

@@ -91,6 +91,16 @@ type Service struct {
 	links    LinkLister
 	resolver Resolver
 	locks    keyedmutex.Map[int64]
+	// reserved lists the link ports promised on a server to tunnels being set up
+	// (transit.Service.ReservedPorts); nil knows none.
+	reserved func(panelID int64) []int
+}
+
+// WithReservations lets the port views and pickers see the link ports promised
+// to tunnels about to be made, which no listener or forward may be given.
+func (s *Service) WithReservations(reserved func(panelID int64) []int) *Service {
+	s.reserved = reserved
+	return s
 }
 
 // New returns the service. links may be nil (the usage view then lists no
@@ -478,6 +488,9 @@ func nodeLabel(n *domain.Node) string {
 func TargetLabel(t domain.FrontTarget, nodes map[int64]*domain.Node) string {
 	switch t.Kind {
 	case domain.FrontTargetListener:
+		if n := nodes[t.NodeID]; n.IsTunnelChild() {
+			return tunnelListenerLabel(n, nodes[n.ParentNodeID])
+		}
 		return "listener of node " + nodeLabel(nodes[t.NodeID])
 	case domain.FrontTargetForward:
 		name := t.LineID
@@ -857,6 +870,10 @@ func (s *Service) validateRouteTarget(panelID int64, port int, target *domain.Fr
 		if line == nil {
 			return refuse(CodeBadTarget, "node %s has no relay line %q", map[string]any{"node": landing.DisplayName, "line_id": target.LineID}, nodeLabel(landing), target.LineID)
 		}
+		if line.Tunnel() {
+			return refuse(CodeBadTarget, "relay line %q of node %s is a tunnel line, served by a listener of its own: route to that listener instead",
+				map[string]any{"node": landing.DisplayName, "line_id": target.LineID}, firstNonEmpty(line.Name, line.ID), nodeLabel(landing))
+		}
 		if line.EntryPanelID != panelID {
 			return refuse(CodeBadTarget, "relay line %q of node %s does not enter through this server",
 				map[string]any{"node": landing.DisplayName, "line_id": target.LineID}, firstNonEmpty(line.Name, line.ID), nodeLabel(landing))
@@ -1108,6 +1125,40 @@ func (s *Service) SuggestLoopbackPort(ctx context.Context, panelID int64) (int, 
 		return 0, err
 	}
 	return suggestPort(use, randInt)
+}
+
+// SuggestPublicPort is a port nothing on the server holds, in the range a
+// tunnel listener starts from, for the editor's "random" button. It reads and
+// stores nothing.
+func (s *Service) SuggestPublicPort(ctx context.Context, panelID int64) (int, error) {
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	fronts, err := s.fronts.ListByPanel(ctx, panelID)
+	if err != nil {
+		return 0, err
+	}
+	var onPanel []*domain.Node
+	for _, n := range nodes {
+		if n != nil && n.PanelID == panelID && !n.IsSeparator() {
+			onPanel = append(onPanel, n)
+		}
+	}
+	use, err := s.collectUse(ctx, panelID, onPanel, nodes, fronts)
+	if err != nil {
+		return 0, err
+	}
+	const low, high = 20000, 59999
+	span := high - low + 1
+	start := randInt(span)
+	for i := 0; i < span; i++ {
+		port := low + (start+i)%span
+		if !use.has(port) {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("front: no free port in %d-%d", low, high)
 }
 
 // SuggestCamouflage is a camouflage site a new default can start from, the

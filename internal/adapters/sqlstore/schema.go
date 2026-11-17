@@ -423,7 +423,11 @@ type nodeRow struct {
 	// (0 = its own server). See domain.Node.EgressPanelID.
 	EgressPanelID int64           `gorm:"not null;default:0;index"`
 	RelayHealth   jsonRelayHealth `gorm:"column:relay_health"`
-	CreatedAt     time.Time
+	// ParentNodeID / ParentLineID mark the hidden listener of a tunnel-mode
+	// relay line (domain.Node.ParentNodeID); 0 / '' on every ordinary node.
+	ParentNodeID int64  `gorm:"not null;default:0;index"`
+	ParentLineID string `gorm:"size:128;not null;default:''"`
+	CreatedAt    time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -494,6 +498,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		ShowRelayStatus:         r.ShowRelayStatus,
 		EgressPanelID:           r.EgressPanelID,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
+		ParentNodeID:            r.ParentNodeID,
+		ParentLineID:            r.ParentLineID,
 		CreatedAt:               r.CreatedAt,
 	}, nil
 }
@@ -561,6 +567,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		ShowRelayStatus:    n.ShowRelayStatus,
 		EgressPanelID:      n.EgressPanelID,
 		RelayHealth:        jsonRelayHealth(n.RelayHealth),
+		ParentNodeID:       n.ParentNodeID,
+		ParentLineID:       n.ParentLineID,
 		CreatedAt:          n.CreatedAt,
 	}, nil
 }

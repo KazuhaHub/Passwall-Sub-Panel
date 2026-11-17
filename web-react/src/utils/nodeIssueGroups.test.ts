@@ -228,4 +228,8 @@ describe('groupNodeIssues', () => {
     expect(secondPage.issues).toHaveLength(1)
     expect(secondPage.unacknowledgedCount).toBe(1)
   })
+
+  it.each(['tunnel_listener_orphan', 'tunnel_factor_stale'])('files %s under sync', code => {
+    expect(groupNodeIssues([issue(1, { code })])[0].category).toBe('sync')
+  })
 })

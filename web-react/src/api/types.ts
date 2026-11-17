@@ -193,6 +193,10 @@ export interface Node {
   egress_withheld?: boolean
   /** Traffic multiplier of the node's DIRECT line, in thousandths (1000 = one-for-one, 0 = free). Optional so fixtures may omit it. */
   traffic_factor_milli?: number
+  /** Set on a tunnel line's hidden listener: the landing node and line it belongs to. */
+  parent_node_id?: number
+  parent_line_id?: string
+  parent_node_name?: string
 }
 
 export type ProbeState = 'ok' | 'degraded' | 'down' | 'unknown'
@@ -240,6 +244,43 @@ export interface RelayLine {
   probe_withheld?: boolean
   /** This line's traffic multiplier in thousandths. Responses always carry it; send it back unchanged to keep it. A new line defaults to 1000. */
   traffic_factor_milli?: number
+  /** 'tunnel': the entry ends the user's connection with its own listener. Absent is a direct forward. For a saved line the mode only changes through the mode endpoint. */
+  mode?: LineMode
+  /** Response-only: the line is published (a tunnel line: listener applied, link ready on both servers, not withheld). */
+  running?: boolean
+  /** Response-only: the hidden listener of a tunnel line; absent when its row is gone. */
+  tunnel?: TunnelListener
+}
+
+export type LineMode = 'tunnel'
+
+/** The hidden listener a tunnel line runs on its entry server (response-only). */
+export interface TunnelListener {
+  node_id: number
+  name: string
+  enabled: boolean
+  port: number
+  protocol: string
+  flow: string
+  listen?: string
+  /** 'reality', 'tls', 'none' ... */
+  security?: string
+  server_names?: string[]
+  target?: string
+  short_ids?: string[]
+  public_key?: string
+  /** Admin only; may be absent. */
+  private_key?: string
+  fingerprint?: string
+  config_sync_state: string
+  applied: boolean
+  egress_panel_id: number
+  egress_ready: boolean
+  egress_withheld?: boolean
+  egress_probe?: ProbeQuality
+  /** Routes by destination set on the listener. */
+  routes: number
+  routes_withheld?: string
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'

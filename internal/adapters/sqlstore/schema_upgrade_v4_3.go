@@ -32,6 +32,13 @@ import (
 // transit_route_repo_test.go. The one exception is a database a 4.3 BETA made
 // the routes table in with a TEXT column; widenRouteSpec carries it over.
 //
+// Tunnel-mode relay lines add two columns to nodes (parent_node_id and
+// parent_line_id, 0 and '' on every ordinary node) and two fields inside the
+// relays JSON (Mode and TunnelNodeID, absent on every existing line). Every
+// existing line is a direct forward, so there is nothing to carry over:
+// autoMigrateCurrentSchema adds the columns and the old lines read as before.
+// Their test is in transit_tunnel_repo_test.go.
+//
 // Delete this file, its test file and the migrateV4_3 call once upgrades from
 // releases before 4.3.0 are no longer supported. Nothing outside this file may
 // depend on a helper defined here, so that deletion stays a deletion.
@@ -55,10 +62,29 @@ func migrateV4_3(db *gorm.DB) error {
 		dropVLESSRouteState,
 		convertClientsToLines,
 		widenRouteSpec,
+		widenClientLineKey,
 	} {
 		if err := step(db); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// widenClientLineKey replaces the unique key of a client row's line, (user,
+// node, line), by one that also holds the server: a tunnel-mode line's client
+// lives on the entry server while the line belongs to the landing, so switching
+// the line's mode moves the identity to another server and the old server's row
+// stays, detached, until its counters are booked. The new key
+// (uk_psp_client_line_panel) is a superset, so every existing row satisfies it;
+// AutoMigrate has already created it, and this drops the old one. Repeatable.
+func widenClientLineKey(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasIndex("psp_clients", "uk_psp_client_line") {
+		return nil
+	}
+	if err := m.DropIndex("psp_clients", "uk_psp_client_line"); err != nil {
+		return fmt.Errorf("drop the old client line key: %w", err)
 	}
 	return nil
 }

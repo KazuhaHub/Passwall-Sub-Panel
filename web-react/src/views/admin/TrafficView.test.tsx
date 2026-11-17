@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
@@ -46,5 +46,29 @@ describe('TrafficView', () => {
     mount()
 
     await waitFor(() => expect(screen.getByText('暂时无法加载流量数据')).toBeTruthy())
+  })
+
+  it('reads a tunnel listener\'s row as its line of the landing, and other rows by name', async () => {
+    const emptyList = { items: [], total: 0, page: 1, page_size: 25 }
+    const base = { panel_name: 'entry', region: 'HK', tags: [], permanent_total_bytes: 0, period_used_bytes: 0, today_used_bytes: 0 }
+    api.get.mockImplementation(async (url: string) => {
+      switch (url) {
+        case '/admin/traffic/nodes/top':
+          return { data: { items: [
+            { ...base, node_id: 1, display_name: 'plain-node' },
+            { ...base, node_id: 77, display_name: 'hidden-listener', tunnel_line: true, parent_node_id: 5, parent_name: 'HK-1', line_name: 'Mobile' },
+          ] } }
+        case '/admin/traffic/top': return { data: { items: [] } }
+        case '/admin/nodes': case '/admin/users': return { data: emptyList }
+        case '/admin/settings/ui': return { data: {} }
+        default: return { data: { items: [], buckets: [], series: [], totals: {}, total: 0 } }
+      }
+    })
+    mount()
+    fireEvent.click(await screen.findByRole('tab', { name: 'traffic.tab_rank' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'traffic.scope_node' }))
+    await screen.findByText('plain-node')
+    expect(screen.getByText('traffic.node_tunnel_line')).toBeTruthy()
+    expect(screen.queryByText('hidden-listener')).toBeNull()
   })
 })

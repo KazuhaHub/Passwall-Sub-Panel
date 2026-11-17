@@ -24,6 +24,9 @@ describe('fronts api', () => {
     expect(http.get).toHaveBeenCalledWith('/admin/servers/4/fronts/suggest', expect.objectContaining({ params: { what: 'loopback' } }))
     http.get.mockResolvedValue({ data: { host: 'www.asus.com', port: 443 } })
     expect(await api.suggestCamouflage(4)).toEqual({ host: 'www.asus.com', port: 443 })
+    http.get.mockResolvedValue({ data: { port: 41234 } })
+    expect(await api.suggestPort(4)).toBe(41234)
+    expect(http.get).toHaveBeenLastCalledWith('/admin/servers/4/fronts/suggest', expect.objectContaining({ params: { what: 'port' } }))
     expect(http.post).not.toHaveBeenCalled()
   })
 

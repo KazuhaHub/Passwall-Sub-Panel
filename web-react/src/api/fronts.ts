@@ -73,6 +73,11 @@ export interface FrontListenerOption {
   /** The names the listener already serves; a pre-fill for its route. */
   server_names: string[]
   front_id?: number
+  /** Set when the listener is a tunnel line's hidden listener. */
+  parent_node_id?: number
+  parent_line_id?: string
+  parent_name?: string
+  line_name?: string
 }
 
 export interface FrontLineOption {
@@ -89,7 +94,7 @@ export interface FrontLineOption {
 
 export interface FrontOptions { listeners: FrontListenerOption[]; lines: FrontLineOption[] }
 
-export type PortKind = 'listener' | 'forward' | 'link' | 'front' | 'front_loopback' | 'probe_range' | 'reserved'
+export type PortKind = 'listener' | 'forward' | 'link' | 'link_planned' | 'front' | 'front_loopback' | 'probe_range' | 'reserved'
 
 export interface PortBehind {
   server_names: string[]
@@ -97,6 +102,10 @@ export interface PortBehind {
   label: string
   loopback_port?: number
   is_default?: boolean
+  /** Set when the target is a tunnel line's hidden listener. */
+  parent_node_id?: number
+  parent_name?: string
+  line_name?: string
 }
 
 export interface PortUsage {
@@ -107,6 +116,12 @@ export interface PortUsage {
   kind: PortKind
   node_id?: number
   node_name?: string
+  /** Set when the listener is a tunnel line's hidden listener. */
+  parent_node_id?: number
+  parent_name?: string
+  line_name?: string
+  /** A hidden tunnel listener whose line is gone. */
+  orphan?: boolean
   line_id?: string
   peer_panel_id?: number
   front_id?: number
@@ -155,6 +170,12 @@ export async function suggestLoopbackPort(panelId: number): Promise<number> {
 export async function suggestCamouflage(panelId: number): Promise<{ host: string; port: number }> {
   const { data } = await client.get<{ host: string; port: number }>(`${base(panelId)}/fronts/suggest`, { params: { what: 'camouflage' }, ...quiet })
   return data
+}
+
+/** A free public port on the server, to pre-fill; nothing is stored. */
+export async function suggestPort(panelId: number): Promise<number> {
+  const { data } = await client.get<{ port: number }>(`${base(panelId)}/fronts/suggest`, { params: { what: 'port' }, ...quiet })
+  return data.port
 }
 
 export interface FrontSaved { front: Front; warnings: string[] }

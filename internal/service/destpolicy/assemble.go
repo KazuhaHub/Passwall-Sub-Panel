@@ -14,6 +14,11 @@ import (
 type nodeView struct {
 	// nodeIDs are the inbounds (listeners) the node has.
 	nodeIDs map[int64]bool
+	// parents maps the hidden listener of a tunnel-mode line to its landing node:
+	// a source rule set on the landing applies to the landing's tunnel listeners
+	// too (the line belongs to the landing, and a setting applies to the item it
+	// is set on). Empty on a server without any.
+	parents map[int64]int64
 	panelID int64
 	// users are the roster's user ids, and groupOf their groups. Both are only
 	// needed for group-scoped rules; users is read whenever a policy names a
@@ -241,7 +246,15 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 				continue
 			}
 			var inbounds []protocol.ListenerKey
-			for _, n := range g.nodes {
+			covered := slices.Clone(g.nodes)
+			if !v.bound {
+				for child, parent := range v.parents {
+					if v.nodeIDs[child] && slices.Contains(g.nodes, parent) {
+						covered = append(covered, child)
+					}
+				}
+			}
+			for _, n := range covered {
 				if v.bound || v.nodeIDs[n] {
 					inbounds = append(inbounds, protocol.NewListenerKey(n))
 				}
@@ -257,6 +270,11 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 						first = n
 						break
 					}
+				}
+				if !v.nodeIDs[first] {
+					// Only listeners of the landing's lines are here: the rule is
+					// named after the landing, the node the rule was set on.
+					first = g.nodes[0]
 				}
 			}
 			action := protocol.RuleBlock

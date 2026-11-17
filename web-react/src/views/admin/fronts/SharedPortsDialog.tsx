@@ -18,6 +18,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import FrontEditor from './FrontEditor'
 import { frontErrorText } from './frontErrors'
 import PortUsageTable, { behindText } from './PortUsageTable'
+import { listenerLabel } from './listenerLabel'
 
 /**
  * The shared ports (SNI fronts) of one Passwall Node server, and the view of
@@ -66,7 +67,11 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
     }
   }
 
-  const nodeName = (id?: number) => optionData?.listeners.find(l => l.node_id === id)?.name ?? `#${id ?? 0}`
+  const nodeName = (id?: number) => {
+    const o = optionData?.listeners.find(l => l.node_id === id)
+    return o ? listenerLabel(t, o.name, o) : `#${id ?? 0}`
+  }
+  const isTunnelListener = (id?: number) => !!optionData?.listeners.find(l => l.node_id === id)?.parent_node_id
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="md">
@@ -114,7 +119,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
                     {t('admin:servers.fronts.ports.route_arrow', {
                       names: r.server_names.join(', '),
                       to: r.target.kind === 'listener'
-                        ? t('admin:servers.fronts.target.listener', { name: nodeName(r.target.node_id) })
+                        ? (isTunnelListener(r.target.node_id) ? nodeName(r.target.node_id) : t('admin:servers.fronts.target.listener', { name: nodeName(r.target.node_id) }))
                         : behindText(t, { server_names: r.server_names, target: r.target, label: t('admin:servers.fronts.target.forward_short', { node: nodeName(r.target.node_id), line: r.target.line_id ?? '' }) }),
                     })}
                   </Box>

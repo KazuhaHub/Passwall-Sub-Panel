@@ -43,6 +43,17 @@ func (it renderItem) tags() []string {
 	return it.node.Tags
 }
 
+// listener is the node whose inbound this entry dials and whose server holds
+// the client: the node itself, or for a tunnel-mode relay line the hidden
+// listener on the entry server (the landing's own listener is not involved).
+// Names, labels, factors and group references stay with it.node.
+func (it renderItem) listener() *domain.Node {
+	if it.relay != nil && it.relay.Tunnel() && it.relay.TunnelNode != nil {
+		return it.relay.TunnelNode
+	}
+	return it.node
+}
+
 func (it renderItem) lineID() string {
 	if it.relay != nil {
 		return it.relay.ID

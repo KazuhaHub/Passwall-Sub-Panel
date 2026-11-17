@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -44,6 +45,34 @@ type Service struct {
 	// serverLock is the fronts' per-server lock, which a save that drops or binds
 	// a tunnel holds; nil takes none.
 	serverLock func(panelID int64) func()
+	// reserved are link ports PlanLink promised to a pair of servers.
+	// allocMu makes choosing and using a link port one critical section (PlanLink,
+	// a new link, the allocation); reservedMu guards the map alone and is never
+	// held across a call out, because the port check reads the reservations too.
+	allocMu    sync.Mutex
+	reservedMu sync.Mutex
+	reserved   map[[2]int64]reservation
+	// portInUse says something on a server holds a port (its listeners, forwards,
+	// shared ports and loopbacks); nil knows only what the nodes and links say.
+	portInUse func(ctx context.Context, panelID int64, port int) bool
+	// now is the clock the reservations expire by.
+	now func() time.Time
+}
+
+// reservationTTL is how long a link port PlanLink promised stays promised.
+const reservationTTL = 10 * time.Minute
+
+type reservation struct {
+	port    int
+	expires time.Time
+}
+
+// WithPortCheck gives the service a way to ask whether a port on a server is
+// held by anything (fronts' shared ports and loopbacks included), which a link
+// port must also avoid.
+func (s *Service) WithPortCheck(inUse func(ctx context.Context, panelID int64, port int) bool) *Service {
+	s.portInUse = inUse
+	return s
 }
 
 // WithServerLock gives the service the lock of a server that node saves and the

@@ -147,10 +147,17 @@ func (s *Service) SyncUserRetirements(ctx context.Context, userID int64, userUUI
 		byPanel[n.PanelID] = append(byPanel[n.PanelID], n)
 	}
 
+	// A tunnel line's client lives on the line's own listener, on the entry
+	// server, not on the landing's server.
+	tunnelLines := clientplan.TunnelLineCreds(desiredNodes)
+
 	// Union the desired panels with the panels the user currently has clients on,
 	// so a now-empty panel is visited and retired without deleting its counters.
-	panels := make(map[int64]struct{}, len(byPanel))
+	panels := make(map[int64]struct{}, len(byPanel)+len(tunnelLines))
 	for p := range byPanel {
+		panels[p] = struct{}{}
+	}
+	for p := range tunnelLines {
 		panels[p] = struct{}{}
 	}
 	existing, err := s.clients.ListByUser(ctx, userID)
@@ -165,6 +172,7 @@ func (s *Service) SyncUserRetirements(ctx context.Context, userID int64, userUUI
 	var firstErr error
 	for panelID := range panels {
 		creds := clientplan.LineCredsFromNodes(byPanel[panelID]) // empty slice → retires live access
+		creds = append(creds, tunnelLines[panelID]...)
 		p, removed, serr := s.sync(ctx, userID, userUUID, panelID, rules, creds)
 		if len(p) > 0 {
 			if removed {

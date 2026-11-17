@@ -49,7 +49,11 @@ type Service struct {
 	clients  ports.PSPClientRepo
 	nodes    ports.NodeRepo
 	settings ports.ScopedSettings
-	panels   ports.XUIPanelRepo
+	// orphanSeen counts, per tunnel listener, the syncs in a row that found no line
+	// for it (see orphanTunnelIssues).
+	orphanMu   sync.Mutex
+	orphanSeen map[int64]int
+	panels     ports.XUIPanelRepo
 	// coreCatalog is the review the configured core is re-checked against.
 	coreCatalog ports.CoreCatalog
 
@@ -111,6 +115,113 @@ type FrontPublisher interface {
 	// UnservedListeners are the listeners that must not be sent because their
 	// front is not being sent and they would bind one port together.
 	UnservedListeners(ctx context.Context, panelID int64, plan front.Plan, present []int64) ([]front.Unserved, error)
+}
+
+// IssueTunnelListenerOrphan is the issue recorded for a hidden tunnel listener
+// whose line is gone (a delete that was cut short): it is still sent, serves
+// nobody, and can be removed from the server's port usage or its node page.
+const IssueTunnelListenerOrphan = "tunnel_listener_orphan"
+
+// IssueTunnelFactorStale is the issue recorded for a tunnel listener whose copy
+// of its line's traffic factor differs from the line's.
+const IssueTunnelFactorStale = "tunnel_factor_stale"
+
+// orphanTunnelIssues names the tunnel listeners of the snapshot that no line of
+// an existing landing points at.
+func (s *Service) orphanTunnelIssues(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	s.pruneOrphans(ctx, snapshot)
+	var out []domain.NodeAgentIssue
+	for _, node := range snapshot.Nodes {
+		if node == nil || !node.IsTunnelChild() || s.nodes == nil {
+			continue
+		}
+		parent, err := s.nodes.GetByID(ctx, node.ParentNodeID)
+		if err == nil && tunnelLineOf(parent, node) {
+			s.clearOrphan(node.ID)
+			// The listener carries a copy of its line's factor, which the quota
+			// grants of this server read: a copy that differs is reported.
+			for _, line := range parent.Relays {
+				if line.ID == node.ParentLineID && line.EffectiveTrafficFactor() != node.EffectiveTrafficFactor() {
+					out = append(out, domain.NodeAgentIssue{
+						Code: IssueTunnelFactorStale, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+						Detail: fmt.Sprintf("%s carries traffic factor %d but its line's is %d: save the line's factor again",
+							node.DisplayName, node.EffectiveTrafficFactor(), line.EffectiveTrafficFactor()),
+					})
+				}
+			}
+			continue
+		} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			continue // unreadable is not orphaned
+		}
+		// A listener is made, and the line pointed at it, by one save under the
+		// servers' locks; a sync that reads between the two would take a listener
+		// being made for an orphan. So an orphan is reported only once it has been
+		// seen as one by two syncs in a row.
+		if !s.confirmOrphan(node.ID) {
+			continue
+		}
+		out = append(out, domain.NodeAgentIssue{
+			Code: IssueTunnelListenerOrphan, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+			Detail: fmt.Sprintf("%s belongs to a tunnel line that no longer exists: remove it", node.DisplayName),
+		})
+	}
+	return out
+}
+
+// confirmOrphan counts the syncs that saw a listener as an orphan and says
+// whether it is the second in a row (true), which is when it is reported.
+func (s *Service) confirmOrphan(id int64) bool {
+	s.orphanMu.Lock()
+	defer s.orphanMu.Unlock()
+	if s.orphanSeen == nil {
+		s.orphanSeen = map[int64]int{}
+	}
+	s.orphanSeen[id]++
+	return s.orphanSeen[id] >= 2
+}
+
+// pruneOrphans forgets the count of every listener that no longer exists, so
+// the map cannot grow with listeners that were removed.
+func (s *Service) pruneOrphans(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) {
+	inSnapshot := map[int64]bool{}
+	for _, n := range snapshot.Nodes {
+		if n != nil {
+			inSnapshot[n.ID] = true
+		}
+	}
+	s.orphanMu.Lock()
+	ids := make([]int64, 0, len(s.orphanSeen))
+	for id := range s.orphanSeen {
+		if !inSnapshot[id] {
+			ids = append(ids, id)
+		}
+	}
+	s.orphanMu.Unlock()
+	if s.nodes == nil {
+		return
+	}
+	for _, id := range ids {
+		if _, err := s.nodes.GetByID(ctx, id); errors.Is(err, domain.ErrNotFound) {
+			s.clearOrphan(id)
+		}
+	}
+}
+
+// clearOrphan forgets the count of a listener that is not an orphan.
+func (s *Service) clearOrphan(id int64) {
+	s.orphanMu.Lock()
+	delete(s.orphanSeen, id)
+	s.orphanMu.Unlock()
+}
+
+// tunnelLineOf reports whether a line of the landing is served by the listener.
+func tunnelLineOf(landing, child *domain.Node) bool {
+	for _, line := range landing.Relays {
+		if line.ID == child.ParentLineID && line.Tunnel() && line.TunnelNodeID == child.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // IssueFrontWithheld is the issue recorded for a saved front that is not being
@@ -736,6 +847,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	}
 	policyIssues = append(policyIssues, frontIssues...)
 	policyIssues = append(policyIssues, routeIssues...)
+	policyIssues = append(policyIssues, s.orphanTunnelIssues(ctx, snapshot)...)
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
 			policyIssues[i].AgentID = agent.AgentID

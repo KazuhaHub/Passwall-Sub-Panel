@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1814,13 +1815,48 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	byID := make(map[int64]*domain.Node, len(all))
 	for _, n := range all {
-		if n.PanelID == id {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "Server still has nodes attached; delete or reassign them first",
-			})
-			return
+		byID[n.ID] = n
+	}
+	var attached []gin.H
+	hidden := false
+	for _, n := range all {
+		if n.PanelID != id {
+			continue
 		}
+		item := gin.H{"node_id": n.ID, "node": n.DisplayName}
+		if n.IsTunnelChild() {
+			// A hidden listener is not a node anyone can find in the list: name it
+			// as the tunnel line it is, and say the line is what to remove.
+			hidden = true
+			line := n.ParentLineID
+			landing := ""
+			if parent := byID[n.ParentNodeID]; parent != nil {
+				landing = parent.DisplayName
+				for _, l := range parent.Relays {
+					if l.ID == n.ParentLineID {
+						line = firstNonEmptyText(l.Name, l.Address, l.ID)
+					}
+				}
+			}
+			item["tunnel_line_of_node_id"], item["tunnel_line_of"], item["tunnel_line"] = n.ParentNodeID, landing, line
+		}
+		attached = append(attached, item)
+	}
+	if len(attached) > 0 {
+		message := "Server still has nodes attached; delete or reassign them first"
+		if hidden {
+			var names []string
+			for _, item := range attached {
+				if line, ok := item["tunnel_line"].(string); ok {
+					names = append(names, fmt.Sprintf("%v · tunnel line %q", item["tunnel_line_of"], line))
+				}
+			}
+			message += " (tunnel lines enter through this server, remove those lines on their landing nodes: " + strings.Join(names, "; ") + ")"
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": message, "code": "server_has_nodes", "nodes": attached})
+		return
 	}
 	// Refuse if any node's routes by destination leave through this server: the
 	// destinations they take would otherwise have nowhere to go, and the node
@@ -2156,4 +2192,13 @@ func mapServerError(c *gin.Context, err error) {
 	default:
 		respondError(c, err)
 	}
+}
+
+func firstNonEmptyText(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

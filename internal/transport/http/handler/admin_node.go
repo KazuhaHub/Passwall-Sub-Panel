@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
@@ -147,6 +148,12 @@ type nodeDTO struct {
 	// EgressWithheld says its probes have taken the node out of subscriptions.
 	EgressProbe    *probeQualityDTO `json:"egress_probe,omitempty"`
 	EgressWithheld bool             `json:"egress_withheld,omitempty"`
+	// ParentNodeID names the landing when this node is the hidden listener of
+	// a tunnel line (ParentLineID the line): it is edited as a node but is not
+	// listed, and its name, labels, exit and factor follow the line.
+	ParentNodeID   int64  `json:"parent_node_id,omitempty"`
+	ParentLineID   string `json:"parent_line_id,omitempty"`
+	ParentNodeName string `json:"parent_node_name,omitempty"`
 }
 
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
@@ -179,6 +186,19 @@ type relayLineDTO struct {
 	// request, omitted keeps the saved value (a new line is one-for-one);
 	// responses always carry it.
 	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
+	// Mode is how the entry carries the line: absent is a raw port forward
+	// (直接转发), "tunnel" a listener of its own on the entry that carries the
+	// traffic through a tunnel to the landing (加密隧道). In a request a new line
+	// may name it; an existing line's mode changes only through the confirmed
+	// mode switch, and omitting it keeps the saved one. For a tunnel line port is
+	// the listener's own port (response), or the one a new listener starts on
+	// (request; 0 picks one).
+	Mode *string `json:"mode,omitempty"`
+	// Tunnel is response-only: the listener of a tunnel line and its state.
+	Tunnel *tunnelDTO `json:"tunnel,omitempty"`
+	// Running is response-only: the line is published, which for a tunnel line
+	// needs its listener applied and its tunnel ready on both servers.
+	Running bool `json:"running,omitempty"`
 }
 
 type inboundDTO struct {
@@ -380,13 +400,25 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	// Resolve only this node's panel name (one GetByID) instead of listing every
 	// panel just to look up a single entry.
 	panelNames := h.panelNameOf(c.Request.Context(), n.PanelID)
+	nodeView := func() nodeDTO {
+		dto := h.toNodeDTO(n, panelNames)
+		// An administrator also reads the REALITY private key of each tunnel
+		// listener; an operator never does.
+		dto.Relays = relayDTOsFor(n.Relays, isAdmin)
+		if n.IsTunnelChild() {
+			if parent, perr := h.node.Get(c.Request.Context(), n.ParentNodeID); perr == nil {
+				dto.ParentNodeName = parent.DisplayName
+			}
+		}
+		return dto
+	}
 
 	// Bundle the inbound clients so the detail page only needs one round-trip.
 	clients, err := h.node.ListClientsOfInbound(c.Request.Context(), id, h.ownership, h.pspClients)
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
 		out := gin.H{
-			"node":          h.toNodeDTO(n, panelNames),
+			"node":          nodeView(),
 			"clients":       []any{},
 			"clients_error": err.Error(),
 		}
@@ -400,7 +432,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		return
 	}
 	out := gin.H{
-		"node":    h.toNodeDTO(n, panelNames),
+		"node":    nodeView(),
 		"clients": clients,
 	}
 	if inbound != nil {
@@ -743,13 +775,26 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.EgressPanelID != nil {
 		n.EgressPanelID = *req.EgressPanelID
 	}
-	if err := h.node.UpdateMetadata(c.Request.Context(), n); err != nil {
+	// Removing a tunnel line removes its listener, which asks first.
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	err = h.node.UpdateMetadata(ctx, n)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
 	h.auditLineFactors(c, node.ChangedLineFactors(&before, n))
+	h.auditTunnelLines(c, n.ID, before.Relays, n.Relays)
+	// Reload: the service settled the tunnel lines (listener ids, ports).
+	saved, err := h.node.Get(c.Request.Context(), id)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames))
+	dto := h.toNodeDTO(saved, panelNames)
+	dto.Relays = relayDTOsFor(saved.Relays, callerIsAdmin(c))
+	c.JSON(http.StatusOK, dto)
 }
 
 const trafficFactorError = "traffic_factor_milli must be between 0 and 100000 (1000 = one-for-one, 0 = free)"
@@ -948,7 +993,10 @@ func (h *AdminNodeHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	ctx, conf := frontContext(c, nil, c.Query("confirm_front") == "true")
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	if c.Query("confirm_front") == "true" {
+		conf.Confirmed = true
+	}
 	// Audited whatever happens next: a join or leave that was done stays done.
 	err = h.node.DeleteAndSync(ctx, id)
 	h.auditFrontJoin(c, conf)
@@ -969,7 +1017,10 @@ func (h *AdminNodeHandler) Detach(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	ctx, conf := frontContext(c, nil, c.Query("confirm_front") == "true")
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	if c.Query("confirm_front") == "true" {
+		conf.Confirmed = true
+	}
 	// Audited whatever happens next: a join or leave that was done stays done.
 	err = h.node.DetachAndSync(ctx, id)
 	h.auditFrontJoin(c, conf)
@@ -1210,7 +1261,17 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		if d.EntryPanelID < 0 {
 			return nil, fmt.Errorf("relay line %d: invalid entry server", i+1)
 		}
-		if d.EntryPanelID > 0 && d.Port == 0 {
+		if d.Mode == nil {
+			line.ModeUnresolved = true
+		} else if *d.Mode == domain.RelayModeTunnel {
+			line.Mode = domain.RelayModeTunnel
+		} else if *d.Mode != "" && *d.Mode != "forward" {
+			return nil, fmt.Errorf("relay line %d: unknown mode %q", i+1, *d.Mode)
+		}
+		// A managed forward needs its entry port (a request that omits the mode is
+		// judged by the service, which knows the saved line); a tunnel line's
+		// listener takes the port given, or one the service picks, when it is made.
+		if d.EntryPanelID > 0 && d.Port == 0 && d.Mode != nil && !line.Tunnel() {
 			return nil, fmt.Errorf("relay line %d: a managed relay needs an entry port between 1 and 65535", i+1)
 		}
 		if d.Region == nil {
@@ -1229,23 +1290,39 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 }
 
 // relayDTOs maps the domain shape back for the API response.
-func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
+func relayDTOs(relays []domain.RelayLine) []relayLineDTO { return relayDTOsFor(relays, false) }
+
+// relayDTOsFor is relayDTOs; secrets adds the private keys of tunnel listeners,
+// which only an administrator reads.
+func relayDTOsFor(relays []domain.RelayLine, secrets bool) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
 		region, tags := r.Region, domain.CopyLineTags(r.Tags)
+		mode, port := (*string)(nil), r.Port
+		var tunnel *tunnelDTO
+		if r.Tunnel() {
+			m := domain.RelayModeTunnel
+			mode, tunnel = &m, tunnelDTOOf(r.TunnelNode, secrets)
+			if r.TunnelNode != nil {
+				port = r.TunnelNode.DesiredPort
+			}
+		}
 		out = append(out, relayLineDTO{
+			Mode:               mode,
+			Tunnel:             tunnel,
+			Running:            r.Gated() && r.ManagedReady,
 			ID:                 r.ID,
 			Name:               r.Name,
 			OnlyLineName:       r.OnlyLineName,
 			Address:            r.Address,
-			Port:               r.Port,
+			Port:               port,
 			SNI:                r.SNI,
 			Host:               r.Host,
 			Enabled:            r.Enabled,
 			Region:             &region,
 			Tags:               &tags,
 			EntryPanelID:       r.EntryPanelID,
-			ManagedReady:       r.Managed() && r.ManagedReady,
+			ManagedReady:       r.Gated() && r.ManagedReady,
 			Probe:              probeQualityOf(r.Probe),
 			ProbeWithheld:      r.ProbeWithheld,
 			TrafficFactorMilli: ptrInt(r.EffectiveTrafficFactor()),
@@ -1295,6 +1372,8 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		EgressReady:        n.EgressPanelID != 0 && n.EgressReady,
 		EgressProbe:        probeQualityOf(n.EgressProbe),
 		EgressWithheld:     n.EgressPanelID != 0 && n.EgressWithheld,
+		ParentNodeID:       n.ParentNodeID,
+		ParentLineID:       n.ParentLineID,
 	}
 }
 
@@ -1342,6 +1421,10 @@ func mapNodeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &refusal):
 		respondFrontError(c, err)
+	case errors.Is(err, transit.ErrReservedPortTaken):
+		// The port promised to a new tunnel was taken before it was made: a
+		// conflict the admin can retry (the retry plans a fresh port).
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": "link_port_taken"})
 	case errors.Is(err, domain.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrAlreadyExists):

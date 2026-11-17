@@ -75,6 +75,7 @@ import { previewSeparatorGroups, type LineVisibilityDraft, type SeparatorGroupsP
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
+import { registerServerNames } from '@/utils/tunnelConfirm'
 import { useQueryScope } from '@/query/useQueryScope'
 import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
@@ -84,6 +85,7 @@ import LineLabelsFields from './LineLabelsFields'
 import LinkQualityCell from './LinkQualityCell'
 import RoutesSection from './routes/RoutesSection'
 import ProbeQualityChip from './ProbeQualityChip'
+import TunnelLineEditor, { mergeServerLine } from './TunnelLineEditor'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
@@ -2429,6 +2431,8 @@ export default function NodesView() {
   // has one owner instead of two independent fetchers.
   const serversQuery = useServersList(qScope, { page: 1, page_size: 200 })
   const servers = serversQuery.data?.items ?? []
+  // Tunnel confirmations name the servers whose ports open and close.
+  useEffect(() => { registerServerNames(serversQuery.data?.items ?? []) }, [serversQuery.data])
   const writableServers = useMemo(
     () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
@@ -2439,6 +2443,12 @@ export default function NodesView() {
     () => servers.filter(s => s.panel_type === 'psp' && s.id !== editing?.panel_id),
     [servers, editing?.panel_id],
   )
+  // The editor opened on a tunnel line's hidden listener: the server takes its
+  // name, address, exit and multiplier from the line, so those fields are left out.
+  const isListener = (editing?.parent_node_id ?? 0) > 0
+  const listenerLineName = isListener
+    ? managed.find(n => n.id === editing?.parent_node_id)?.relays?.find(x => x.id === editing?.parent_line_id)?.name
+    : undefined
   // The tunnel of the node being edited, between its server and the chosen
   // exit. Its settings are shared by every node of the pair.
   const [linkForm, setLinkForm] = useState<TransitLink | null>(null)
@@ -2585,9 +2595,8 @@ export default function NodesView() {
     })
   }
 
-  function openEdit(n: Node) {
-    setEditing(n)
-    setEditForm({
+  function editFormOf(n: Node): MetaForm {
+    return {
       display_name: n.display_name,
       server_address: n.server_address,
       flow: n.flow ?? '',
@@ -2598,7 +2607,52 @@ export default function NodesView() {
       hide_direct: !!n.hide_direct,
       traffic_factor_milli: n.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI,
       egress_panel_id: n.egress_panel_id ?? 0,
-    })
+    }
+  }
+
+  // The form as the admin has changed it, without what the server decides
+  // (status, a tunnel line's listener and port), for telling edits from a refresh.
+  const editSnapshot = (f: MetaForm) => JSON.stringify({
+    ...f,
+    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, mode: _mode, ...r }) =>
+      (_mode === 'tunnel' ? { ...r, port: 0, sni: '', host: '' } : r)),
+  })
+  // The form as it was opened or last refreshed from the server.
+  const editBaseline = useRef<MetaForm | null>(null)
+  const editFormDirty = () => linkDirty || (editBaseline.current !== null && editSnapshot(editForm) !== editSnapshot(editBaseline.current))
+
+  // The server settled one saved line (a mode switch, a listener edit or sync):
+  // show it on that row, keep every other edit, and keep the list's copy current.
+  function applyServerLine(landingId: number, relays: RelayLine[], lineId: string) {
+    setEditForm(f => ({ ...f, relays: mergeServerLine(f.relays, relays, lineId) }))
+    if (editBaseline.current) editBaseline.current = { ...editBaseline.current, relays: mergeServerLine(editBaseline.current.relays, relays, lineId) }
+    mutateManaged(prev => prev.map(x => (x.id === landingId ? { ...x, relays } : x)))
+  }
+
+  // A tunnel line's listener is a node of its own, hidden from the list: its
+  // settings open in this same editor. Unsaved edits to the landing are not carried over.
+  async function openListener(listenerId: number) {
+    if (editFormDirty()) {
+      const ok = await confirm({
+        title: t('admin:nodes.tunnel.open_discard_title'),
+        message: t('admin:nodes.tunnel.open_discard_message'),
+        destructive: true,
+      })
+      if (!ok) return
+    }
+    try {
+      const { node: listener } = await getNode(listenerId)
+      openEdit(listener)
+    } catch {
+      // The request layer already surfaced the failure.
+    }
+  }
+
+  function openEdit(n: Node) {
+    setEditing(n)
+    const form = editFormOf(n)
+    editBaseline.current = form
+    setEditForm(form)
     setLinkForm(null)
     setLinkDirty(false)
     setEditMetaErr({})
@@ -2652,7 +2706,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
         // Direct factor only when changed; relay lines carry their own value above.
@@ -3960,31 +4014,43 @@ export default function NodesView() {
         </DialogTitle>
         <DialogContent>
           <Box component="form" id="node-form" onSubmit={submitEdit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField required fullWidth label={t('admin:nodes.field.display_name')}
+            {isListener && (
+              <Box data-testid="listener-banner" sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography sx={{ fontSize: 13 }}>
+                  {listenerLineName
+                    ? t('admin:nodes.tunnel.listener_banner', { parent: editing?.parent_node_name ?? `#${editing?.parent_node_id}`, line: listenerLineName })
+                    : t('admin:nodes.tunnel.listener_banner_no_line', { parent: editing?.parent_node_name ?? `#${editing?.parent_node_id}` })}
+                </Typography>
+                {editing && panelSupports(editing.panel_id, 'inbound.update') && (
+                  <Button size="small" sx={{ alignSelf: 'flex-start' }} onClick={() => void openEditInbound(editing)}>{t('admin:nodes.tunnel.listener_inbound')}</Button>
+                )}
+              </Box>
+            )}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.display_name')}
               value={editForm.display_name}
               onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editMetaErr.display_name}
-              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />
-            <TextField required fullWidth label={t('admin:nodes.field.server_address')}
+              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.server_address')}
               value={editForm.server_address}
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
               error={!!editMetaErr.server_address}
-              helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />
+              helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />}
             {/* Flow is a VLESS inbound-level setting, configured where the
                 inbound is created / imported — not a node-meta field. It's
                 deliberately NOT editable here; editForm.flow round-trips the
                 node's existing value unchanged on save. */}
-            <TextField required fullWidth label={t('admin:nodes.field.region')}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.region')}
               value={editForm.region}
               onChange={e => setEditForm({ ...editForm, region: e.target.value })}
               error={!!editMetaErr.region}
-              helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />
-            <TagsAutocomplete
+              helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />}
+            {!isListener && <TagsAutocomplete
               label={t('admin:nodes.field.tags')}
               value={editForm.tags_text}
               options={allTags}
-              onChange={v => setEditForm({ ...editForm, tags_text: v })} />
-            {(() => {
+              onChange={v => setEditForm({ ...editForm, tags_text: v })} />}
+            {!isListener && (() => {
               const nodeGroups = nodeGroupsHint(lineVisibility)
               return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: -1.5 }}>
                 <PreviewCaption hint={nodeGroups.now} testId="node-groups"
@@ -3995,11 +4061,11 @@ export default function NodesView() {
                 </Typography>}
               </Box>
             })()}
-            {editForm.relays.length > 0 && (
+            {!isListener && editForm.relays.length > 0 && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
 
-            {editing && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && relayEntryServers.length > 0 && (
+            {!isListener && editing && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && relayEntryServers.length > 0 && (
               <Box data-testid="egress-section" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <TextField select size="small" label={t('admin:nodes.egress.server')} value={editEgress}
                   onChange={e => {
@@ -4083,7 +4149,7 @@ export default function NodesView() {
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
                 set up outside the panel; here we only record each front's
                 address/port (+ optional CDN SNI/Host). */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {!isListener && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
@@ -4116,7 +4182,7 @@ export default function NodesView() {
                       onChange={e => {
                         const entry = Number(e.target.value) || 0
                         // A managed entry forwards unchanged: no SNI/Host override.
-                        update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0 })
+                        update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0, mode: undefined })
                       }}
                       helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
                       <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
@@ -4124,21 +4190,29 @@ export default function NodesView() {
                         <MenuItem key={server.id} value={server.id}>{server.name}</MenuItem>
                       ))}
                     </TextField>
-                    {(r.entry_panel_id ?? 0) > 0 && r.id && (
+                    {(r.entry_panel_id ?? 0) > 0 && (
+                      <TunnelLineEditor nodeId={editing?.id ?? 0} line={r}
+                        savedEntry={editing?.relays?.find(x => x.id === r.id)?.entry_panel_id ?? 0}
+                        onPatch={update}
+                        onSwitched={node => applyServerLine(node.id, node.relays ?? [], r.id!)}
+                        onRelays={relays => applyServerLine(editing?.id ?? 0, relays, r.id!)}
+                        onOpenListener={id => void openListener(id)} />
+                    )}
+                    {(r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
                       <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
                         {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
                       </Typography>
                     )}
-                    {(r.entry_panel_id ?? 0) > 0 && r.id && (
+                    {(r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
                       <ProbeQualityChip probe={r.probe} withheld={r.probe_withheld} testId="relay-probe" />
                     )}
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
                         onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
-                      <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
+                      {r.mode !== 'tunnel' && <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
                         required={(r.entry_panel_id ?? 0) > 0}
                         onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
-                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />
+                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />}
                     </Box>
                     {!((r.entry_panel_id ?? 0) > 0) && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
@@ -4164,7 +4238,7 @@ export default function NodesView() {
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
               <TrafficFactorField label={t('admin:nodes.field.traffic_factor_direct')} text={editForm.traffic_factor_text ?? milliToFactorText(editForm.traffic_factor_milli)}
                 onText={(text, m) => setEditForm(f => ({ ...f, traffic_factor_text: text, ...(m !== null ? { traffic_factor_milli: m } : {}) }))} />
-            </Box>
+            </Box>}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

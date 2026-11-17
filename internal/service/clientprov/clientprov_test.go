@@ -2,6 +2,7 @@ package clientprov
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -21,7 +22,24 @@ func newFakeRepo() *fakePSPClientRepo {
 	return &fakePSPClientRepo{clients: map[int64]*domain.PSPClient{}, inbounds: map[int64][]domain.PSPClientInbound{}}
 }
 
+// uniqueLine mirrors the store's unique key uk_psp_client_line_panel: one row
+// per (user, server, node, line). Legacy rows (no line) never collide.
+func (r *fakePSPClientRepo) uniqueLine(c *domain.PSPClient, exceptID int64) error {
+	if _, ok := c.Line(); !ok {
+		return nil
+	}
+	for _, other := range r.clients {
+		if other.ID != exceptID && other.UserID == c.UserID && other.PanelID == c.PanelID && other.NodeID == c.NodeID && other.LineID == c.LineID {
+			return errors.New("UNIQUE constraint failed: psp_clients.user_id, panel_id, node_id, line_id")
+		}
+	}
+	return nil
+}
+
 func (r *fakePSPClientRepo) Create(ctx context.Context, c *domain.PSPClient) (int64, error) {
+	if err := r.uniqueLine(c, 0); err != nil {
+		return 0, err
+	}
 	r.nextID++
 	cp := *c
 	cp.ID = r.nextID
@@ -32,6 +50,9 @@ func (r *fakePSPClientRepo) UpdateDefinition(ctx context.Context, c *domain.PSPC
 	ex, ok := r.clients[c.ID]
 	if !ok || ex.UserID != c.UserID || ex.PanelID != c.PanelID {
 		return domain.ErrNotFound
+	}
+	if err := r.uniqueLine(c, c.ID); err != nil {
+		return err
 	}
 	ex.Email, ex.CredClass, ex.UUID, ex.Password = c.Email, c.CredClass, c.UUID, c.Password
 	if c.NodeID != 0 {
@@ -307,4 +328,93 @@ func assertClientBaselines(t *testing.T, got, want *domain.PSPClient) {
 		got.LastCounterEpoch != want.LastCounterEpoch {
 		t.Fatalf("counter baselines changed:\n got  %+v\n want %+v", got, want)
 	}
+}
+
+func tunnelNodes() []*domain.Node {
+	child := &domain.Node{ID: 20, PanelID: 11, DesiredProtocol: "vless", Flow: "xtls-rprx-vision", ParentNodeID: 1, ParentLineID: "t"}
+	return []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless", Relays: []domain.RelayLine{
+		{ID: "t", Enabled: true, EntryPanelID: 11, Mode: domain.RelayModeTunnel, TunnelNodeID: 20, TunnelNode: child},
+	}}}
+}
+
+// A tunnel line's client is a row of the line (the landing's node and line) on
+// the entry server, attached to the line's own listener. The landing's server
+// holds only the direct line, and the user's other panels are not touched.
+func TestSyncUser_ATunnelLineLivesOnTheEntryServersListener(t *testing.T) {
+	repo := newFakeRepo()
+	if _, err := New(repo).SyncUser(context.Background(), 42, "uuid-x", rules, tunnelNodes()); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.clients) != 2 {
+		t.Fatalf("rows = %d, want the direct line on server 10 and the tunnel line on server 11", len(repo.clients))
+	}
+	direct := lineRow(t, repo, domain.DirectLine(1))
+	tunnel := lineRow(t, repo, domain.LineKey{NodeID: 1, LineID: "t"})
+	if direct.PanelID != 10 || tunnel.PanelID != 11 {
+		t.Fatalf("panels: direct %d, tunnel %d", direct.PanelID, tunnel.PanelID)
+	}
+	if got := attached(repo, tunnel); len(got) != 1 || got[0] != 20 {
+		t.Fatalf("tunnel row attached to %v, want its listener 20", got)
+	}
+	if got := attached(repo, direct); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("direct row attached to %v", got)
+	}
+	if want := domain.DeriveLineUUID("uuid-x", domain.LineKey{NodeID: 1, LineID: "t"}, 1); tunnel.UUID != want || tunnel.UUID == "uuid-x" {
+		t.Fatalf("tunnel uuid = %s, want the derived %s", tunnel.UUID, want)
+	}
+}
+
+// When the line goes (removed, switched to a forward), its row is detached and
+// keeps its counters like any dropped line, and is reported as regrouped, not as
+// a lost server.
+func TestSyncUser_ARemovedTunnelLineIsDetachedFromItsListener(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, tunnelNodes()); err != nil {
+		t.Fatal(err)
+	}
+	tunnel := lineRow(t, repo, domain.LineKey{NodeID: 1, LineID: "t"})
+	got, err := svc.SyncUserRetirements(ctx, 42, "uuid-x", rules, []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept, gerr := repo.GetByID(ctx, tunnel.ID); gerr != nil || len(attached(repo, kept)) != 0 {
+		t.Fatalf("tunnel row after its line went: %+v (%v)", kept, gerr)
+	}
+	if len(got.PanelRemoved[11]) != 1 {
+		t.Fatalf("retired = %+v, want the tunnel row retired from server 11 (the user has nothing left there)", got)
+	}
+}
+
+// Switching a line forward -> tunnel -> forward never collides with the old
+// server's row: the identity moves, and comes back on the row it left.
+func TestSyncUser_AModeSwitchMovesTheIdentityBetweenServersAndBack(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+	forward := []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless", Relays: []domain.RelayLine{{ID: "t", Enabled: true, EntryPanelID: 11, Port: 20001}}}}
+	var firstOn10 int64
+	for step, nodes := range [][]*domain.Node{forward, tunnelNodes(), forward, tunnelNodes()} {
+		if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		if step == 0 {
+			firstOn10 = lineRowOn(t, repo, 10, "t").ID
+		}
+	}
+	if got := lineRowOn(t, repo, 10, "t").ID; got != firstOn10 {
+		t.Fatalf("the forward row was replaced instead of reused: %d then %d", firstOn10, got)
+	}
+}
+
+func lineRowOn(t *testing.T, repo *fakePSPClientRepo, panel int64, line string) *domain.PSPClient {
+	t.Helper()
+	for _, c := range repo.clients {
+		if c.PanelID == panel && c.LineID == line {
+			return c
+		}
+	}
+	t.Fatalf("no row of line %s on server %d", line, panel)
+	return nil
 }

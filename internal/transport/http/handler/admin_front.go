@@ -170,6 +170,13 @@ type frontListenerOptionDTO struct {
 	Security    string   `json:"security,omitempty"`
 	ServerNames []string `json:"server_names"`
 	FrontID     int64    `json:"front_id,omitempty"`
+	// ParentNodeID is set for the hidden listener of a tunnel-mode line: it is
+	// the landing the line belongs to, and the editor writes "<landing>'s tunnel
+	// line <line>" instead of a node name.
+	ParentNodeID int64  `json:"parent_node_id,omitempty"`
+	ParentLineID string `json:"parent_line_id,omitempty"`
+	ParentName   string `json:"parent_name,omitempty"`
+	LineName     string `json:"line_name,omitempty"`
 }
 
 type frontLineOptionDTO struct {
@@ -205,7 +212,8 @@ func (h *AdminFrontHandler) Options(c *gin.Context) {
 		listeners = append(listeners, frontListenerOptionDTO{
 			NodeID: item.NodeID, Name: item.Name, Protocol: item.Protocol, Port: item.Port, Enabled: item.Enabled,
 			Frontable: item.Frontable.OK, Reason: item.Frontable.Reason, Security: item.Frontable.Security,
-			ServerNames: names, FrontID: item.FrontID,
+			ServerNames: names, FrontID: item.FrontID, ParentNodeID: item.ParentNodeID, ParentLineID: item.ParentLineID,
+			ParentName: item.ParentName, LineName: item.LineName,
 		})
 	}
 	lines := make([]frontLineOptionDTO, 0, len(options.Lines))
@@ -241,8 +249,16 @@ func (h *AdminFrontHandler) Suggest(c *gin.Context) {
 	case "camouflage":
 		site := h.fronts.SuggestCamouflage()
 		c.JSON(http.StatusOK, gin.H{"host": site.Host, "port": site.Port})
+	case "port":
+		// A free public port for a new listener, such as the one of a tunnel line.
+		port, err := h.fronts.SuggestPublicPort(c.Request.Context(), panelID)
+		if err != nil {
+			mapNodeServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"port": port})
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "what must be loopback or camouflage"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "what must be loopback, camouflage or port"})
 	}
 }
 
@@ -368,6 +384,9 @@ type portBehindDTO struct {
 	Label        string             `json:"label"`
 	LoopbackPort int                `json:"loopback_port,omitempty"`
 	IsDefault    bool               `json:"is_default,omitempty"`
+	ParentNodeID int64              `json:"parent_node_id,omitempty"`
+	ParentName   string             `json:"parent_name,omitempty"`
+	LineName     string             `json:"line_name,omitempty"`
 }
 
 type portUsageDTO struct {
@@ -386,6 +405,13 @@ type portUsageDTO struct {
 	Unrouted    bool            `json:"unrouted,omitempty"`
 	Behind      []portBehindDTO `json:"behind,omitempty"`
 	Inactive    string          `json:"inactive,omitempty"`
+	// ParentNodeID, ParentName and LineName are set for the listener of a
+	// tunnel-mode line: it reads as the tunnel line of its landing.
+	ParentNodeID int64  `json:"parent_node_id,omitempty"`
+	ParentName   string `json:"parent_name,omitempty"`
+	LineName     string `json:"line_name,omitempty"`
+	// Orphan: a tunnel listener whose line is gone; deletable as a node.
+	Orphan bool `json:"orphan,omitempty"`
 }
 
 // Ports answers every port the server uses, read only: listeners, relay lines,
@@ -407,6 +433,7 @@ func (h *AdminFrontHandler) Ports(c *gin.Context) {
 			Port: item.Port, RangeHigh: item.RangeHigh, Bind: item.Bind, Kind: item.Kind, NodeID: item.NodeID,
 			NodeName: item.NodeName, LineID: item.LineID, PeerPanelID: item.PeerPanelID, FrontID: item.FrontID,
 			Protocol: item.Protocol, Label: item.Label, Enabled: item.Enabled, Unrouted: item.Unrouted, Inactive: item.Inactive,
+			ParentNodeID: item.ParentNodeID, ParentName: item.ParentName, LineName: item.LineName, Orphan: item.Orphan,
 		}
 		for _, behind := range item.Behind {
 			names := behind.ServerNames
@@ -416,6 +443,7 @@ func (h *AdminFrontHandler) Ports(c *gin.Context) {
 			dto.Behind = append(dto.Behind, portBehindDTO{
 				ServerNames: names, Target: behind.Target, Label: behind.Label,
 				LoopbackPort: behind.LoopbackPort, IsDefault: behind.IsDefault,
+				ParentNodeID: behind.ParentNodeID, ParentName: behind.ParentName, LineName: behind.LineName,
 			})
 		}
 		out = append(out, dto)

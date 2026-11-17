@@ -83,8 +83,10 @@ func LineEmailSuffix(key LineKey) string {
 // so the landing sees the relay's address for every user of the line: those
 // addresses say nothing about how many places a person connects from and are
 // left out of the person-level IP and location counts. The direct line and a
-// legacy row count. (A line served by a listener of its own terminates the
-// user's connection itself and will count too, once such lines exist.)
+// legacy row count. A tunnel-mode line is served by a listener of its own that
+// terminates the user's connection, so its rows count too, but a row alone
+// cannot tell it is one (the line is the landing's, the row sits on another
+// server): the traffic service decides by the landing's lines (tunnelLineRows).
 func (c *PSPClient) CountsSourceIPs() bool {
 	line, ok := c.Line()
 	return !ok || line.IsDirect()
@@ -99,7 +101,8 @@ func LineSetChanged(before, after []RelayLine) bool {
 	}
 	for i := range before {
 		b, a := before[i], after[i]
-		if b.ID != a.ID || b.Enabled != a.Enabled || b.Region != a.Region || !slices.Equal(b.Tags, a.Tags) {
+		if b.ID != a.ID || b.Enabled != a.Enabled || b.Region != a.Region || !slices.Equal(b.Tags, a.Tags) ||
+			b.Mode != a.Mode || b.TunnelNodeID != a.TunnelNodeID {
 			return true
 		}
 	}

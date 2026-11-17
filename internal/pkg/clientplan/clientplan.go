@@ -147,11 +147,41 @@ func LineCredsFromNodes(nodes []*domain.Node) []LineCred {
 			continue
 		}
 		for _, r := range n.Relays {
-			if !r.Enabled || r.ID == "" {
+			// A tunnel line lives on another server's listener: see
+			// TunnelLineCreds.
+			if !r.Enabled || r.ID == "" || r.Tunnel() {
 				continue
 			}
 			out = append(out, LineCred{Line: domain.LineKey{NodeID: n.ID, LineID: r.ID}, ListenerNodeID: n.ID,
 				Protocol: nc.Protocol, SSMethod: nc.SSMethod, Flow: nc.Flow, FactorMilli: intPtr(r.EffectiveTrafficFactor())})
+		}
+	}
+	return out
+}
+
+// TunnelLineCreds lists, per server, the tunnel-mode lines of the given nodes
+// (the nodes as the user may see them). A tunnel line is a line of its landing
+// node, so its client is keyed by (landing, line) and carries the landing's
+// per-line identity, but it lives on the line's own listener on the entry
+// server: the listener's server is the panel, and the listener's protocol and
+// flow decide the credential. A line whose listener is gone has no client.
+func TunnelLineCreds(nodes []*domain.Node) map[int64][]LineCred {
+	out := map[int64][]LineCred{}
+	for _, n := range nodes {
+		if n == nil || n.Kind == domain.NodeKindSeparator {
+			continue
+		}
+		for _, r := range n.Relays {
+			if !r.Enabled || r.ID == "" || !r.Tunnel() || r.TunnelNode == nil {
+				continue
+			}
+			child := NodeCredFromNode(r.TunnelNode)
+			if child.Protocol == "" {
+				continue
+			}
+			out[r.TunnelNode.PanelID] = append(out[r.TunnelNode.PanelID], LineCred{
+				Line: domain.LineKey{NodeID: n.ID, LineID: r.ID}, ListenerNodeID: r.TunnelNode.ID,
+				Protocol: child.Protocol, SSMethod: child.SSMethod, Flow: child.Flow, FactorMilli: intPtr(r.EffectiveTrafficFactor())})
 		}
 	}
 	return out

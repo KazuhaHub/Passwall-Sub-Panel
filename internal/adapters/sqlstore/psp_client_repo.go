@@ -19,18 +19,22 @@ import (
 // without letting a rendered email decide whether a local row survives.
 type pspClientRow struct {
 	ID     int64 `gorm:"primaryKey;autoIncrement"`
-	UserID int64 `gorm:"index;not null;uniqueIndex:uk_psp_client_line,priority:1"`
+	UserID int64 `gorm:"index;not null;uniqueIndex:uk_psp_client_line_panel,priority:1"`
 	// NodeID / LineID: the subscription line this row is the client of (ADR
-	// 0043), unique per user. NULL on a legacy row (several NULLs never
-	// collide in a unique index on any of the three databases).
-	NodeID *int64  `gorm:"uniqueIndex:uk_psp_client_line,priority:2"`
-	LineID *string `gorm:"size:128;uniqueIndex:uk_psp_client_line,priority:3"`
+	// 0043), unique per user and server (panel_id is the second key column: a
+	// tunnel-mode line's client lives on the entry server, not the landing's, so
+	// switching a line's mode moves its identity to another server, while the old
+	// server's row waits, detached, for its counters to be booked). NULL on a
+	// legacy row (several NULLs never collide in a unique index on any of the
+	// three databases).
+	NodeID *int64  `gorm:"uniqueIndex:uk_psp_client_line_panel,priority:3"`
+	LineID *string `gorm:"size:128;uniqueIndex:uk_psp_client_line_panel,priority:4"`
 	// UUIDKey is the UUID in domain.LineUUIDKey form, indexed so a derived
 	// line identity can be checked for uniqueness on its listener.
 	UUIDKey string `gorm:"column:uuid_key;size:32;not null;default:'';index"`
 	// LastFactorMilli: the line's traffic factor at the last booking.
 	LastFactorMilli *int   `gorm:"not null;default:1000"`
-	PanelID         int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1"`
+	PanelID         int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1;uniqueIndex:uk_psp_client_line_panel,priority:2"`
 	Email           string `gorm:"size:255;not null;index:idx_psp_client_panel_email,priority:2"`
 	CredClass       int    `gorm:"not null;default:0"`
 	UUID            string `gorm:"size:36;not null;default:''"`

@@ -14,6 +14,8 @@ const categories: Readonly<Record<string, NodeIssueCategory>> = {
   directive_unknown_client: 'sync',
   report_missing_object: 'sync',
   front_withheld: 'sync',
+  tunnel_listener_orphan: 'sync',
+  tunnel_factor_stale: 'sync',
   routes_not_sent: 'sync',
   route_listener_withheld: 'sync',
   route_skipped: 'sync',

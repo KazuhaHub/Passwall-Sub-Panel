@@ -102,10 +102,18 @@ func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	nodes, err := h.nodes.List(ctx)
+	allNodes, err := h.nodes.List(ctx)
 	if err != nil {
 		respondError(c, err)
 		return
+	}
+	// The hidden listeners of tunnel lines are parts of their landing's lines,
+	// not nodes to count.
+	nodes := allNodes[:0:0]
+	for _, n := range allNodes {
+		if !n.IsTunnelChild() {
+			nodes = append(nodes, n)
+		}
 	}
 	groups, err := h.groups.List(ctx)
 	if err != nil {

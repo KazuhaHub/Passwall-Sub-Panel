@@ -647,6 +647,12 @@ type Node struct {
 	DestRoutes    []DestRoute
 	RoutesSent    string
 	RoutesApplied string
+	// ParentNodeID and ParentLineID make this node the hidden listener of a
+	// tunnel-mode line (transit_tunnel.go): a listener on the entry server of its
+	// own, left out of node lists and groups, whose users are the parent's. Both
+	// are zero/empty on every ordinary node.
+	ParentNodeID int64
+	ParentLineID string
 	// RoutesWithheld is why the panel is not sending this node: its routes
 	// cannot be sent, and the node without them would send their destinations
 	// through its default exit. "" while it is sent.
@@ -753,12 +759,27 @@ type RelayLine struct {
 	// refuses a line that still carries either marker.
 	RegionUnresolved bool `json:"-"`
 	TagsUnresolved   bool `json:"-"`
+	// ModeUnresolved marks a request that omitted the mode: the saved line keeps
+	// its own.
+	ModeUnresolved bool `json:"-"`
 	// EntryPanelID selects who runs the forwarding. 0 is an external entry:
 	// the administrator forwards Address:Port to the landing outside the panel
 	// (a relay machine, a CDN front). Non-zero is a managed entry: that
 	// Passwall Node server relays Port to this node, and PSP publishes the
 	// forward and gates the line on the server confirming it.
 	EntryPanelID int64 `json:",omitempty"`
+	// Mode is how a managed entry carries the line: "" is a raw port forward
+	// to the landing's listener (直接转发), RelayModeTunnel is a listener of its
+	// own on the entry that carries the traffic to the landing's server through
+	// a tunnel (加密隧道, transit_tunnel.go). Fixed when the line is made; it
+	// changes only through the confirmed mode switch.
+	Mode string `json:",omitempty"`
+	// TunnelNodeID is the hidden listener node a tunnel-mode line is served by
+	// (Node.ParentNodeID names the landing back). Owned by the node service.
+	TunnelNodeID int64 `json:",omitempty"`
+	// TunnelNode is loaded state, never stored: the listener node of a tunnel
+	// line, nil for any other line or when the row is gone.
+	TunnelNode *Node `json:"-"`
 	// TrafficFactorMilli is this line's traffic multiplier in thousandths
 	// (traffic_factor.go): what a user is charged per byte through this line,
 	// whatever servers it passes. Absent is one-for-one; 0 is free.

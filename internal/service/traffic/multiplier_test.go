@@ -368,3 +368,41 @@ func TestPollOnce_DeletesDetachedRowAfterBookingIt(t *testing.T) {
 		t.Fatalf("deleted = %v, want only row 4, whose client the panel no longer reports", repo.deleted)
 	}
 }
+
+// The traffic of a tunnel line is read from the entry server (the client row is
+// the landing's line on that server) and booked per row at the line's own
+// factor, whichever server's counter it came from. The user pays once, on the
+// listener where the identity ends.
+func TestPollOnce_ATunnelLineIsBookedAtItsOwnFactorFromTheEntryServer(t *testing.T) {
+	old := time.Now().Add(-24 * time.Hour)
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true, LifetimeBaselineAt: &old}}}
+	direct := &domain.PSPClient{ID: 1, UserID: 1, PanelID: 10, NodeID: 5, LineID: domain.DirectLineID, Email: "u1-ld@x",
+		LastRawUpBytes: 1, LastRawDownBytes: 1, LastRawTotalBytes: 2}
+	viaTunnel := &domain.PSPClient{ID: 2, UserID: 1, PanelID: 11, NodeID: 5, LineID: "t", Email: "u1-lt@x",
+		LastRawUpBytes: 1, LastRawDownBytes: 1, LastRawTotalBytes: 2}
+	psp := &fakePSPClientRepo{byUser: map[int64][]*domain.PSPClient{1: {direct, viaTunnel}}}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{
+		10: &fakeXUIClient{inbounds: []ports.Inbound{{ID: 20, ClientStats: []ports.ClientTraffic{{Email: "u1-ld@x", Up: 101, Down: 101}}}}},
+		11: &fakeXUIClient{inbounds: []ports.Inbound{{ID: 30, ClientStats: []ports.ClientTraffic{{Email: "u1-lt@x", Up: 51, Down: 51}}}}},
+	}}
+	three := 3000
+	landing := &domain.Node{ID: 5, PanelID: 10, InboundID: 20, Relays: []domain.RelayLine{
+		{ID: "t", Enabled: true, EntryPanelID: 11, Mode: domain.RelayModeTunnel, TunnelNodeID: 6, TrafficFactorMilli: &three}}}
+	child := &domain.Node{ID: 6, PanelID: 11, InboundID: 30, ParentNodeID: 5, ParentLineID: "t", EgressPanelID: 10, TrafficFactorMilli: &three}
+	nodes := &lineNodes{fakeNodeRepo: &fakeNodeRepo{
+		nodes:   map[int64]*domain.Node{5: landing, 6: child},
+		byMatch: map[fakeNodeKey]int64{{panelID: 10, inboundID: 20}: 5, {panelID: 11, inboundID: 30}: 6},
+	}}
+	svc := New(users, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}}, &fakeTrafficRepo{}, nodes, nil, pool, &fakeDisabler{})
+	svc.SetPSPClientRepo(psp)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	u := users.users[1]
+	if u.LifetimeTotalBytes != 200+300 || u.RawLifetimeTotalBytes != 300 {
+		t.Fatalf("user charged=%d raw=%d, want 200 for the direct line and 100 raw at ×3 for the tunnel line: 500/300", u.LifetimeTotalBytes, u.RawLifetimeTotalBytes)
+	}
+	if viaTunnel.ChargedLifetimeBytes != 300 || viaTunnel.LastFactor() != 3000 || direct.ChargedLifetimeBytes != 200 {
+		t.Fatalf("rows: tunnel charged %d (factor %d), direct charged %d", viaTunnel.ChargedLifetimeBytes, viaTunnel.LastFactor(), direct.ChargedLifetimeBytes)
+	}
+}

@@ -438,8 +438,9 @@ export async function updateServerLineFactors(id: number, lines: LineFactorChang
   return data
 }
 
-export async function deleteServer(id: number) {
-  await client.delete(`/admin/servers/${id}`)
+/** `quiet`: the caller words a refusal itself (a server that still has nodes names them). */
+export async function deleteServer(id: number, opts: { quiet?: boolean } = {}) {
+  await client.delete(`/admin/servers/${id}`, opts.quiet ? { _skipErrorToast: true } : undefined)
 }
 
 export async function testServer(id: number) {

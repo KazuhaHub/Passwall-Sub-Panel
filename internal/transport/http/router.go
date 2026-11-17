@@ -577,6 +577,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
+		// Tunnel-mode relay lines: the confirmed mode switch, the listener's own
+		// settings, and the re-copy from the landing.
+		adminGroup.POST("/nodes/:id/lines/:line_id/mode", nodes.SwitchLineMode)
+		adminGroup.PUT("/nodes/:id/lines/:line_id/tunnel", nodes.UpdateTunnelListener)
+		adminGroup.GET("/nodes/:id/lines/:line_id/tunnel/sync", nodes.PreviewTunnelSync)
+		adminGroup.POST("/nodes/:id/lines/:line_id/tunnel/sync", nodes.SyncTunnelFromLanding)
 		if d.Repos.TransitProbe != nil && d.Repos.TransitLinks != nil {
 			var invalidateSubscriptions func()
 			if d.Render != nil {
@@ -629,6 +635,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes/:id/recreate-inbound", nodes.RecreateInbound)
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
+		adminGroup.POST("/nodes/reality-public-key", nodes.DeriveRealityPublicKey)
 		adminGroup.POST("/nodes/reality-targets/scan", realityScanLimiter.Handler(), nodes.ScanRealityTargets)
 
 		// PSP-managed certificates + DNS credentials (v3.6.4). adminGroup only —
