@@ -26,10 +26,26 @@ type xuiStreamSettings struct {
 	TLSSettings     *xuiTLSSettings     `json:"tlsSettings"`
 	WSSettings      *xuiWSSettings      `json:"wsSettings"`
 	GRPCSettings    *xuiGRPCSettings    `json:"grpcSettings"`
+	// HTTPUpgradeSettings is the HTTPUpgrade transport (path + Host).
+	HTTPUpgradeSettings *xuiHTTPUpgradeSettings `json:"httpupgradeSettings"`
 	// Finalmask is the xray-core extension where 3X-UI stores Hysteria 2
 	// salamander obfs (under .udp[] as type=salamander). Documented in
 	// frontend/src/models/inbound.js FinalMaskStreamSettings.
 	FinalMask *xuiFinalMask `json:"finalmask,omitempty"`
+
+	// cdn marks the stream of a CDN line (effectiveEndpoint sets it): the
+	// builders then also carry the landing's TLS fingerprint, which the client
+	// presents to the CDN.
+	cdn bool
+}
+
+// cdnFingerprint is the TLS fingerprint a CDN line's client presents: the
+// landing's own, and empty for every other entry (whose output is unchanged).
+func (s xuiStreamSettings) cdnFingerprint() string {
+	if !s.cdn || s.TLSSettings == nil {
+		return ""
+	}
+	return s.TLSSettings.Settings.Fingerprint
 }
 
 type xuiFinalMask struct {
@@ -70,10 +86,42 @@ type xuiTLSSettings struct {
 }
 
 type xuiWSSettings struct {
-	Path    string            `json:"path"`
+	Path string `json:"path"`
+	// Host is Xray's own wsSettings.host, which a headers.Host overrides.
+	Host    string            `json:"host"`
 	Headers map[string]string `json:"headers"`
 }
 
 type xuiGRPCSettings struct {
 	ServiceName string `json:"serviceName"`
+	// MultiMode is Xray's multi mode (otherwise gun).
+	MultiMode bool `json:"multiMode"`
+	// Authority is the gRPC :authority (xray's grpcSettings.authority).
+	Authority string `json:"authority"`
+}
+
+type xuiHTTPUpgradeSettings struct {
+	Path    string            `json:"path"`
+	Host    string            `json:"host"`
+	Headers map[string]string `json:"headers"`
+}
+
+// host is the Host an HTTPUpgrade client sends: the host field, else the Host
+// header.
+func (h xuiHTTPUpgradeSettings) host() string {
+	if h.Host != "" {
+		return h.Host
+	}
+	return h.Headers["Host"]
+}
+
+// normalizeHosts puts the Host that Xray's own host fields name into the header
+// the builders read, unless the header is set.
+func (s *xuiStreamSettings) normalizeHosts() {
+	if w := s.WSSettings; w != nil && w.Host != "" && w.Headers["Host"] == "" {
+		if w.Headers == nil {
+			w.Headers = map[string]string{}
+		}
+		w.Headers["Host"] = w.Host
+	}
 }

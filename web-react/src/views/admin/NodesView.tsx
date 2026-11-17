@@ -86,6 +86,7 @@ import LinkQualityCell from './LinkQualityCell'
 import RoutesSection from './routes/RoutesSection'
 import ProbeQualityChip from './ProbeQualityChip'
 import TunnelLineEditor, { mergeServerLine } from './TunnelLineEditor'
+import CdnLineFields, { CDN_DEFAULT_PORT } from './CdnLineFields'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
@@ -149,6 +150,8 @@ type RelayDraft = RelayLine & {
   /** The admin changed this line's multiplier in this edit session. */
   _factor_touched?: boolean
 }
+/** The entry select's value for a CDN line (a server id is never negative). */
+const CDN_ENTRY = -1
 let relayDraftSeq = 0
 const newRelayKey = () => `new-${++relayDraftSeq}`
 
@@ -2614,7 +2617,7 @@ export default function NodesView() {
   // (status, a tunnel line's listener and port), for telling edits from a refresh.
   const editSnapshot = (f: MetaForm) => JSON.stringify({
     ...f,
-    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, mode: _mode, ...r }) =>
+    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, cdn_issues: _issues, mode: _mode, ...r }) =>
       (_mode === 'tunnel' ? { ...r, port: 0, sni: '', host: '' } : r)),
   })
   // The form as it was opened or last refreshed from the server.
@@ -2680,6 +2683,10 @@ export default function NodesView() {
       || editForm.relays.some(r => r._factor_text !== undefined && factorTextToMilli(r._factor_text) === null)) {
       pushSnack(t('admin:nodes.validate.traffic_factor'), 'warning'); return
     }
+    // A CDN line without a domain is not dropped like a blank row: it blocks the save.
+    if (editForm.relays.some(r => r.mode === 'cdn' && !r.domain?.trim())) {
+      pushSnack(t('admin:nodes.cdn.domain_required'), 'warning'); return
+    }
     setEditBusy(true)
     try {
       const egress = editForm.egress_panel_id ?? 0
@@ -2706,8 +2713,9 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
-          .filter(r => r.address),
+          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, cdn_issues: _issues, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), domain: r.mode === 'cdn' ? r.domain?.trim() : undefined, port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          // A CDN line may leave the address empty (it is the domain); every other line needs one.
+          .filter(r => r.address || (r.mode === 'cdn' && r.domain)),
         hide_direct: editForm.hide_direct,
         // Direct factor only when changed; relay lines carry their own value above.
         ...(editForm.traffic_factor_milli !== undefined
@@ -2718,6 +2726,12 @@ export default function NodesView() {
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       setEditing(saved)
       pushSnack(t('admin:nodes.toast.saved'), 'success')
+      // What the saved node says about its CDN lines is shown on the lines when
+      // the editor is opened again; do not let a likely problem pass unseen.
+      const flagged = (saved.relays ?? []).filter(r => r.mode === 'cdn' && r.cdn_issues?.some(i => i.warn))
+      if (flagged.length > 0) {
+        pushSnack(t('admin:nodes.cdn.saved_warnings', { lines: flagged.map(r => r.name || r.domain).join(', ') }), 'warning')
+      }
       setEditOpen(false)
     } catch {
       // The request layer already surfaced the failure.
@@ -4178,19 +4192,35 @@ export default function NodesView() {
                         </IconButton>
                       </Tooltip>
                     </Box>
-                    <TextField select size="small" label={t('admin:nodes.relay.entry')} value={r.entry_panel_id ?? 0}
-                      onChange={e => {
-                        const entry = Number(e.target.value) || 0
-                        // A managed entry forwards unchanged: no SNI/Host override.
-                        update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0, mode: undefined })
-                      }}
-                      helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
-                      <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
-                      {relayEntryServers.map(server => (
-                        <MenuItem key={server.id} value={server.id}>{server.name}</MenuItem>
-                      ))}
-                    </TextField>
-                    {(r.entry_panel_id ?? 0) > 0 && (
+                    {/* The kind of line: an external entry, a Passwall Node server (a direct
+                        forward or an encrypted tunnel, chosen below), or a CDN in front of the
+                        landing. A CDN line is never turned into another kind, nor another into it. */}
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                      <TextField select size="small" fullWidth label={t('admin:nodes.relay.entry')}
+                        value={r.mode === 'cdn' ? CDN_ENTRY : (r.entry_panel_id ?? 0)}
+                        disabled={r.mode === 'cdn' && !!r.id}
+                        onChange={e => {
+                          const entry = Number(e.target.value) || 0
+                          if (entry === CDN_ENTRY) {
+                            update({ mode: 'cdn', entry_panel_id: 0, domain: '', address: '', sni: '', host: '', port: CDN_DEFAULT_PORT, client_tls: undefined })
+                          } else if (r.mode === 'cdn') {
+                            update({ mode: undefined, domain: undefined, client_tls: undefined, entry_panel_id: entry, address: '', sni: '', host: '', port: 0 })
+                          } else {
+                            // A managed entry forwards unchanged: no SNI/Host override.
+                            update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0, mode: undefined })
+                          }
+                        }}
+                        helperText={r.mode === 'cdn' ? t('admin:nodes.cdn.entry_hint')
+                          : (r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
+                        <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
+                        <MenuItem value={CDN_ENTRY} disabled={!!r.id && r.mode !== 'cdn'}>{t('admin:nodes.relay.entry_cdn')}</MenuItem>
+                        {relayEntryServers.map(server => (
+                          <MenuItem key={server.id} value={server.id} disabled={r.mode === 'cdn' && !!r.id}>{server.name}</MenuItem>
+                        ))}
+                      </TextField>
+                    </Box>
+                    {r.mode === 'cdn' && <CdnLineFields line={r} onPatch={update} />}
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && (
                       <TunnelLineEditor nodeId={editing?.id ?? 0} line={r}
                         savedEntry={editing?.relays?.find(x => x.id === r.id)?.entry_panel_id ?? 0}
                         onPatch={update}
@@ -4198,23 +4228,23 @@ export default function NodesView() {
                         onRelays={relays => applyServerLine(editing?.id ?? 0, relays, r.id!)}
                         onOpenListener={id => void openListener(id)} />
                     )}
-                    {(r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
                       <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
                         {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
                       </Typography>
                     )}
-                    {(r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
                       <ProbeQualityChip probe={r.probe} withheld={r.probe_withheld} testId="relay-probe" />
                     )}
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                    {r.mode !== 'cdn' && <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
                         onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
                       {r.mode !== 'tunnel' && <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
                         required={(r.entry_panel_id ?? 0) > 0}
                         onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
                         helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />}
-                    </Box>
-                    {!((r.entry_panel_id ?? 0) > 0) && (
+                    </Box>}
+                    {r.mode !== 'cdn' && !((r.entry_panel_id ?? 0) > 0) && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" label={t('admin:nodes.relay.sni')} value={r.sni ?? ''}
                         onChange={e => update({ sni: e.target.value })} sx={{ flex: 1 }}

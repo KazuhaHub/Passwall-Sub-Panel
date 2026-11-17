@@ -83,7 +83,7 @@ func TunnelLineLabel(landingName, lineName string) string {
 func ValidateTunnelRelays(landing *Node, lines []RelayLine) error {
 	for i, line := range lines {
 		if !line.Tunnel() {
-			if line.Mode != "" {
+			if line.Mode != "" && !line.CDN() {
 				return fmt.Errorf("%w: relay line %d: unknown mode %q", ErrValidation, i+1, line.Mode)
 			}
 			continue

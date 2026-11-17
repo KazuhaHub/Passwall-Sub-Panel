@@ -31,7 +31,7 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 	_ = json.Unmarshal([]byte(inb.StreamSettings), &stream)
 
 	protocol := crypto.DetectProtocol(inb.Protocol, settings.Method)
-	if protocol == "" {
+	if protocol == "" || !relaySupportsInbound(relay, n, inb, protocol) {
 		return nil, nil
 	}
 	// Resolve the dialed endpoint: the node's own address for a direct entry,
@@ -199,6 +199,9 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 		if stream.TLSSettings != nil {
 			base["servername"] = stream.TLSSettings.ServerName
 			base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
+			if fp := stream.cdnFingerprint(); fp != "" {
+				base["client-fingerprint"] = fp
+			}
 		}
 	}
 	applyTransportOpts(base, stream)
@@ -216,6 +219,9 @@ func emitVMess(base map[string]any, uuid string, stream xuiStreamSettings) map[s
 		if stream.TLSSettings != nil {
 			base["servername"] = stream.TLSSettings.ServerName
 			base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
+			if fp := stream.cdnFingerprint(); fp != "" {
+				base["client-fingerprint"] = fp
+			}
 		}
 	} else {
 		base["tls"] = false
@@ -230,6 +236,9 @@ func emitTrojan(base map[string]any, password string, stream xuiStreamSettings) 
 	if stream.TLSSettings != nil {
 		base["sni"] = stream.TLSSettings.ServerName
 		base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
+		if fp := stream.cdnFingerprint(); fp != "" {
+			base["client-fingerprint"] = fp
+		}
 	} else {
 		base["skip-cert-verify"] = false
 	}
@@ -310,7 +319,26 @@ func emitSS2022(base map[string]any, method, serverPSK, userPSK string) map[stri
 }
 
 func applyTransportOpts(base map[string]any, stream xuiStreamSettings) {
+	// Trojan states no network of its own; the transport needs one to be used.
+	if _, has := base["network"]; !has {
+		switch stream.Network {
+		case "ws", "grpc":
+			base["network"] = stream.Network
+		case "httpupgrade":
+			base["network"] = "ws"
+		}
+	}
 	switch stream.Network {
+	case "httpupgrade":
+		// mihomo carries HTTPUpgrade as a WebSocket transport in upgrade mode.
+		base["network"] = "ws"
+		if h := stream.HTTPUpgradeSettings; h != nil {
+			opts := map[string]any{"path": defaultStr(h.Path, "/"), "v2ray-http-upgrade": true}
+			if host := h.host(); host != "" {
+				opts["headers"] = map[string]string{"Host": host}
+			}
+			base["ws-opts"] = opts
+		}
 	case "ws":
 		if stream.WSSettings != nil {
 			opts := map[string]any{"path": defaultStr(stream.WSSettings.Path, "/")}

@@ -35,7 +35,7 @@ export function LineMultipliersDialog({ server, onClose }: { server: Server; onC
       out.push({ key: `${n.id}:direct`, node_id: n.id, line_id: 'direct', label: n.display_name, milli: n.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI })
       for (const r of n.relays ?? []) {
         if (!r.id) continue
-        out.push({ key: `${n.id}:${r.id}`, node_id: n.id, line_id: r.id, label: `${n.display_name} / ${r.name || r.address}`, milli: r.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI })
+        out.push({ key: `${n.id}:${r.id}`, node_id: n.id, line_id: r.id, label: `${n.display_name} / ${r.name || (r.mode === 'cdn' && r.domain) || r.address}`, milli: r.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI })
       }
     }
     return out

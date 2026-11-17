@@ -119,7 +119,7 @@ func buildURI(name string, n *domain.Node, u *domain.User, inb *ports.Inbound, u
 	_ = json.Unmarshal([]byte(inb.StreamSettings), &stream)
 
 	protocol := crypto.DetectProtocol(inb.Protocol, settings.Method)
-	if protocol == "" {
+	if protocol == "" || !relaySupportsInbound(relay, n, inb, protocol) {
 		return "", nil
 	}
 	// Resolve the dialed endpoint (relay front for a transit variant, the
@@ -274,6 +274,9 @@ func buildVLESSURI(name, host string, port int, uuid string, stream xuiStreamSet
 			if stream.TLSSettings.AllowInsecure {
 				q.Set("allowInsecure", "1")
 			}
+			if fp := stream.cdnFingerprint(); fp != "" {
+				q.Set("fp", fp)
+			}
 		}
 	}
 	applyTransportQuery(q, stream)
@@ -316,9 +319,17 @@ func buildVMessURI(name, host string, port int, uuid string, stream xuiStreamSet
 			if len(stream.TLSSettings.ALPN) > 0 {
 				cfg["alpn"] = strings.Join(stream.TLSSettings.ALPN, ",")
 			}
+			if fp := stream.cdnFingerprint(); fp != "" {
+				cfg["fp"] = fp
+			}
 		}
 	}
 	switch stream.Network {
+	case "httpupgrade":
+		if h := stream.HTTPUpgradeSettings; h != nil {
+			cfg["path"] = defaultStr(h.Path, "/")
+			cfg["host"] = h.host()
+		}
 	case "ws":
 		if stream.WSSettings != nil {
 			cfg["path"] = defaultStr(stream.WSSettings.Path, "/")
@@ -327,9 +338,11 @@ func buildVMessURI(name, host string, port int, uuid string, stream xuiStreamSet
 			}
 		}
 	case "grpc":
-		if stream.GRPCSettings != nil {
-			cfg["path"] = stream.GRPCSettings.ServiceName
-			cfg["type"] = "multi"
+		if g := stream.GRPCSettings; g != nil {
+			cfg["path"] = g.ServiceName
+			cfg["type"] = grpcMode(g)
+			// v2rayN-family clients read the gRPC authority from host.
+			cfg["host"] = g.Authority
 		}
 	}
 	body, _ := json.Marshal(cfg)
@@ -350,6 +363,9 @@ func buildTrojanURI(name, host string, port int, password string, stream xuiStre
 		}
 		if stream.TLSSettings.AllowInsecure {
 			q.Set("allowInsecure", "1")
+		}
+		if fp := stream.cdnFingerprint(); fp != "" {
+			q.Set("fp", fp)
 		}
 	}
 	q.Set("type", defaultStr(stream.Network, "tcp"))
@@ -445,6 +461,13 @@ func buildSS2022URI(name, host string, port int, method, serverPSK, userPSK stri
 
 func applyTransportQuery(q url.Values, stream xuiStreamSettings) {
 	switch stream.Network {
+	case "httpupgrade":
+		if h := stream.HTTPUpgradeSettings; h != nil {
+			q.Set("path", defaultStr(h.Path, "/"))
+			if host := h.host(); host != "" {
+				q.Set("host", host)
+			}
+		}
 	case "ws":
 		if stream.WSSettings != nil {
 			q.Set("path", defaultStr(stream.WSSettings.Path, "/"))
@@ -455,7 +478,10 @@ func applyTransportQuery(q url.Values, stream xuiStreamSettings) {
 	case "grpc":
 		if stream.GRPCSettings != nil {
 			q.Set("serviceName", stream.GRPCSettings.ServiceName)
-			q.Set("mode", "gun")
+			q.Set("mode", grpcMode(stream.GRPCSettings))
+			if a := stream.GRPCSettings.Authority; a != "" {
+				q.Set("authority", a)
+			}
 		}
 	}
 }
@@ -467,4 +493,13 @@ func joinHostPort(host string, port int) string {
 		return "[" + host + "]:" + strconv.Itoa(port)
 	}
 	return host + ":" + strconv.Itoa(port)
+}
+
+// grpcMode is the gRPC mode clients are told: the landing's (gun unless it
+// serves multi).
+func grpcMode(g *xuiGRPCSettings) string {
+	if g != nil && g.MultiMode {
+		return "multi"
+	}
+	return "gun"
 }

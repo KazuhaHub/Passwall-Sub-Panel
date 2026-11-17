@@ -360,3 +360,37 @@ Node 对带分流的编译有硬上限：目的条目 `MaxRoutedEntries` = 1,000
 - 子监听器的 `Region`／`Tags` 取落地节点的，不是线路的（线路标签只作订阅显示，ADR 0040）。
 - 落地不是 REALITY 时子监听器用默认的 VLESS + REALITY + Vision，不复制其协议；“从落地同步”对这样的落地不可用。
 - 加入共用端口和节点保存不在同一个事务里（第 13 节“已接受的限制”同样适用）。
+
+## 16. CDN 线路（“CDN（如 Cloudflare）”，4.3，开发分支）
+
+落地节点 L 上的第三种线路：客户端连 CDN，CDN 回源到 L 自己的监听器。没有入口服务器、没有转发、没有隧道。PSP 看不到 CDN，所以线路**随 L 一起发布**（`Publishable()` 只看启用开关，`Managed()`／`Gated()` 为假），**不做转发探测**（没有入口节点；节点健康检查对线路地址做的 TCP 可达检查照旧，只说明边缘能连上）。
+
+**模型**：仍是 `RelayLine`，`Mode = "cdn"`、`EntryPanelID = 0`，新增 `Domain`（CDN 域名）。其余全部是已有字段，**按线路字面生效，管理员看得到、改得了每一个值**：
+
+| 字段 | 含义 | 留空时 |
+|---|---|---|
+| `Domain` | CDN 代理的域名（必填，小写化；不接受 IP、端口、路径、通配符） | 拒绝保存 |
+| `Address` | 客户端拨的地址：优选 IP 或域名 | 保存时填入域名 |
+| `Port` | 客户端拨的端口 | 保存时填入 443 |
+| `SNI` | 客户端发的 TLS 服务器名（CDN 按它路由） | 保存时填入域名 |
+| `Host` | WS／HTTPUpgrade 的 Host，gRPC 的 authority | 保存时填入域名 |
+| `ClientTLS` | 客户端到 CDN 是否用 TLS（与落地自己的 TLS 无关） | 保存时按端口填：CDN 的 HTTPS 端口开，HTTP 端口（80、8080、8880、2052、2082、2086、2095）关 |
+
+留空补默认只发生在保存那一刻，补进去的值就是线路自己的值，之后不再由域名推导（改域名不会悄悄改它们；编辑器里改域名时，仍等于旧域名的地址／SNI／Host 会跟着变，一眼可见，改过的不动）。线路的名称、区域、标签、倍率（默认 1000）、身份与其他线路完全一样：身份是 (L, 线路) 的派生 UUID，行在 L 自己的监听器上（`clientplan.LineCredsFromNodes`，没有改动），倍率按行入账。
+
+**落地必须能过 CDN**（`domain.CDNLandingProblem`，保存线路、创建节点、导入节点、**修改落地的入站配置**时都查，拒绝时点名节点和线路）：VLESS／VMess／Trojan + 传输 WS／gRPC／HTTPUpgrade，落地一般需要 TLS；**例外**：VLESS／VMess 的 WS／HTTPUpgrade 可以不带 TLS（Cloudflare 灵活模式，CDN 用明文 HTTP 回源，警告里写明这一跳不加密：VLESS 内容可读，VMess 仍加密载荷）。不带 TLS 的 Trojan 和 gRPC 仍拒绝；Trojan 的 `ClientTLS` 不能关。拒绝：REALITY、裸 TCP、Hysteria2／TUIC／SS／AnyTLS 等非 HTTP 协议、带 `xtls-rprx-vision` 流控的节点；检查按**这次保存之后的节点**判断（包括这次编辑里的流控，导入时在复制入站流控之后），线路详情按界面语言显示诊断原因；拒绝信息建议“在同一台落地服务器上另建一个 TLS + WS/gRPC 节点”。**XHTTP 暂不支持**：订阅渲染目前对任何客户端都不输出 XHTTP（Xray 服务端本身可以，但没有可用的客户端配置），所以不放行。线路的种类保存后不能变（CDN ↔ 转发／隧道都拒绝，删掉重加）；模式切换接口对 CDN 线路本来就拒绝（没有入口服务器）。
+
+**警告而不拒绝**（`domain.CDNWarnings`，随节点详情的每条线路返回 `cdn_issues`，编辑器显示；保存后有“可能不通”的警告时再弹一次提示）：落地内联证书没有覆盖 CDN 域名（读得出证书才判断；证书是文件路径或没设置时只提示“无法检查”，源站 CA 证书另行配置的情况合法）；落地的 TLS serverName 不是该域名；落地端口不在 Cloudflare 的端口表里（落地有 TLS 看 HTTPS 表 443、2053、2083、2087、2096、8443，没有 TLS 看 HTTP 表 80、8080、8880、2052、2082、2086、2095），线路端口同理按 `ClientTLS` 选表；落地没有 TLS（回源明文）、客户端不用 TLS；落地的 Host（`wsSettings.host`／`headers.Host`、HTTPUpgrade 的 host）与线路的 Host 不同；线路端口不等于落地端口（要用源站规则改写）；SNI／Host 不是域名；落地允许不安全 TLS（对 CDN 线路无效）。Cloudflare 的 gRPC 端点要求 443、TLS 和 HTTP/2。gRPC 的 Host 与 SNI 不同时，也会提示 mihomo 和 sing-box 使用 SNI 作为 authority。
+
+**订阅渲染**（`effectiveEndpoint`／`applyCDNStream`，Clash／mihomo、sing-box、URI 列表都走同一处）：拨 `Address:Port`；线路的 Host 是**所有设了 Host 的线路**（不只 CDN）的 WS／HTTPUpgrade Host 和 gRPC authority；路径／serviceName、ALPN 取落地的。客户端侧由线路自己的 `ClientTLS` 决定：开则带线路的 SNI 和落地的 TLS 指纹，**`allowInsecure` 恒为 false**（CDN 出示自己的证书，客户端必须验证），落地没有 TLS 时补一段 TLS 客户端设置；关则不输出 TLS。落地 Xray 的 `wsSettings.host` 也会读（`headers.Host` 优先）。**落地后来不再适合 CDN 时**（在面板外被改成 REALITY 等，或导入时就是），这条线路不渲染，节点同步记问题 `cdn_landing_unfit`（点名线路和原因）；没有本地快照时，渲染器检查实际取到的入站配置。无名称的 CDN 线路用域名作标签，不用优选 IP。随之补了两处原本缺的输出，对所有条目生效：HTTPUpgrade 传输（mihomo 用 `ws` + `v2ray-http-upgrade`，sing-box `httpupgrade`，URI `type=httpupgrade`）；mihomo 的 Trojan 在 ws／grpc 下补上 `network`（原先只有 `ws-opts` 而没有 `network`，客户端会当成裸 TCP）。gRPC 的 authority：VLESS／Trojan URI 用 `authority=`，VMess JSON 放在 `host`（`type` 为落地的 gRPC 模式 gun／multi，VLESS 的 `mode` 同）；mihomo 和 sing-box 的 gRPC 取 TLS SNI。
+
+**接口**：`relays[]` 里 `mode: "cdn"`、`domain`；`address`、`port`、`sni`、`host` 可省略（见上表）。响应里每条 CDN 线路带 `domain`、`cdn_issues: [{code, warn, params}]`。没有新增列或表：线路在 `nodes.relays` 的 JSON 里，只多 `Mode: "cdn"` 和 `Domain`（`omitempty`），升级不需要迁移，旧版本留下的外部线路原样不动。
+
+**界面**：节点编辑器“中转线路”每条线路的“入口”下拉里，在“外部入口”之后多一项“CDN（如 Cloudflare）”（保存后的线路种类不可改）。选中后这条线路显示：CDN 域名、端口（默认 443）、优选 IP／地址、SNI、Host／authority，页首说明“没有入口服务器，随节点发布，不做探测”，ⓘ 说明 Cloudflare 设置（橙色云代理、SSL 完全（严格）、WebSockets／gRPC 开启、允许的端口、证书走“证书”里的 Cloudflare DNS-01）。落地的检查结果按线路列在下面。CDN 域名必填。保存时为留空的字段填入默认值，已保存的地址、SNI、Host 和客户端 TLS 各自独立编辑。
+
+**未做／已知限制**
+
+- XHTTP（见上）；渲染器补上 XHTTP 之后，只需在 `CDNLandingProblem` 放行。
+- 警告基于已保存的节点，编辑器里尚未保存的改动不会实时重算（保存后显示）。
+- 证书检查只读内联证书（PSP 托管证书部署到节点后就是内联证书，会被检查）；文件路径或未设置时只提示“无法检查”。
+- 不检查 Cloudflare 一侧的设置（PSP 没有它的凭据用途），只在 ⓘ 里列出。

@@ -126,6 +126,40 @@ const IssueTunnelListenerOrphan = "tunnel_listener_orphan"
 // of its line's traffic factor differs from the line's.
 const IssueTunnelFactorStale = "tunnel_factor_stale"
 
+// IssueCDNLandingUnfit is the issue recorded for a node whose CDN lines cannot
+// work any more because its transport no longer suits a CDN (changed outside PSP,
+// or adopted from a panel). The lines are withheld from subscriptions.
+const IssueCDNLandingUnfit = "cdn_landing_unfit"
+
+// cdnUnfitIssues names the CDN lines of the snapshot's nodes that are withheld
+// because their landing cannot go through a CDN, with the reason.
+func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	var out []domain.NodeAgentIssue
+	for _, node := range snapshot.Nodes {
+		if node == nil || node.IsTunnelChild() {
+			continue
+		}
+		fault := domain.CDNLandingFault(node)
+		if fault == nil || fault.Code == domain.CDNFaultUnreadable {
+			continue
+		}
+		problem := domain.CDNLandingProblem(node)
+		var lines []string
+		for _, line := range node.Relays {
+			if line.CDN() {
+				lines = append(lines, fmt.Sprintf("%q", line.Label()))
+			}
+		}
+		if len(lines) > 0 {
+			out = append(out, domain.NodeAgentIssue{
+				Code: IssueCDNLandingUnfit, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+				Detail: fmt.Sprintf("CDN line %s of %s is withheld from subscriptions: %s", strings.Join(lines, ", "), node.DisplayName, problem),
+			})
+		}
+	}
+	return out
+}
+
 // orphanTunnelIssues names the tunnel listeners of the snapshot that no line of
 // an existing landing points at.
 func (s *Service) orphanTunnelIssues(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
@@ -848,6 +882,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	policyIssues = append(policyIssues, frontIssues...)
 	policyIssues = append(policyIssues, routeIssues...)
 	policyIssues = append(policyIssues, s.orphanTunnelIssues(ctx, snapshot)...)
+	policyIssues = append(policyIssues, cdnUnfitIssues(snapshot)...)
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
 			policyIssues[i].AgentID = agent.AgentID

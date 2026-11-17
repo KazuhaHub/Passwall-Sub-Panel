@@ -220,7 +220,7 @@ func (h *AdminNodeHandler) SwitchLineMode(c *gin.Context) {
 		map[string]any{"line_id": lineID, "mode": modeName(lineModeOf(after.Relays, lineID))})
 	panelNames := h.loadPanelNames(c.Request.Context())
 	dto := h.toNodeDTO(after, panelNames)
-	dto.Relays = relayDTOsFor(after.Relays, callerIsAdmin(c))
+	dto.Relays = relayDTOsOn(after, after.Relays, callerIsAdmin(c))
 	c.JSON(http.StatusOK, dto)
 }
 
@@ -283,7 +283,7 @@ func (h *AdminNodeHandler) UpdateTunnelListener(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"relays": relayDTOsFor(landing.Relays, callerIsAdmin(c))})
+	c.JSON(http.StatusOK, gin.H{"relays": relayDTOsOn(landing, landing.Relays, callerIsAdmin(c))})
 }
 
 // PreviewTunnelSync answers GET /admin/nodes/:id/lines/:line_id/tunnel/sync:
@@ -333,7 +333,7 @@ func (h *AdminNodeHandler) SyncTunnelFromLanding(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"diff": diff, "relays": relayDTOsFor(landing.Relays, callerIsAdmin(c))})
+	c.JSON(http.StatusOK, gin.H{"diff": diff, "relays": relayDTOsOn(landing, landing.Relays, callerIsAdmin(c))})
 }
 
 type realityPublicKeyRequest struct {

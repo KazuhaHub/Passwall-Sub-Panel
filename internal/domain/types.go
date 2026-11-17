@@ -746,6 +746,18 @@ type RelayLine struct {
 	// Host overrides the WebSocket Host header for this line. Empty keeps the
 	// landing's. Same CDN-fronting use case as SNI.
 	Host string
+	// Domain is a CDN line's own CDN domain (RelayModeCDN, transit_cdn.go): the
+	// name the CDN proxies. Address, SNI and Host are filled from it when the
+	// line is saved and are the values clients use; this field only records
+	// which name they came from, for the editor and for checking the landing's
+	// certificate. Empty on every other line.
+	Domain string `json:",omitempty"`
+	// ClientTLS is whether clients use TLS to the CDN (SNI, fingerprint), apart
+	// from whether the landing itself does: Cloudflare Flexible reaches a plain
+	// origin over a TLS client connection, an HTTP port needs none. Set when the
+	// line is saved (on for a CDN HTTPS port, off for an HTTP one), then the
+	// administrator's own value. Nil on every other line.
+	ClientTLS *bool `json:",omitempty"`
 	// Enabled gates whether the line renders. A disabled line is kept in the
 	// DB (so the admin can toggle it back) but produces no subscription entry.
 	Enabled bool
@@ -768,11 +780,13 @@ type RelayLine struct {
 	// Passwall Node server relays Port to this node, and PSP publishes the
 	// forward and gates the line on the server confirming it.
 	EntryPanelID int64 `json:",omitempty"`
-	// Mode is how a managed entry carries the line: "" is a raw port forward
-	// to the landing's listener (直接转发), RelayModeTunnel is a listener of its
-	// own on the entry that carries the traffic to the landing's server through
-	// a tunnel (加密隧道, transit_tunnel.go). Fixed when the line is made; it
-	// changes only through the confirmed mode switch.
+	// Mode is how the line is carried: "" is a raw port forward to the
+	// landing's listener (直接转发, or an external entry), RelayModeTunnel is a
+	// listener of its own on the entry that carries the traffic to the landing's
+	// server through a tunnel (加密隧道, transit_tunnel.go), RelayModeCDN is a
+	// CDN in front of the landing (transit_cdn.go). Fixed when the line is made;
+	// forward and tunnel change only through the confirmed mode switch, a CDN
+	// line never changes.
 	Mode string `json:",omitempty"`
 	// TunnelNodeID is the hidden listener node a tunnel-mode line is served by
 	// (Node.ParentNodeID names the landing back). Owned by the node service.

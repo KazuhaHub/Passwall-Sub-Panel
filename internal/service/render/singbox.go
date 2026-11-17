@@ -211,7 +211,7 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 	_ = json.Unmarshal([]byte(inb.StreamSettings), &stream)
 
 	protocol := crypto.DetectProtocol(inb.Protocol, settings.Method)
-	if protocol == "" {
+	if protocol == "" || !relaySupportsInbound(relay, n, inb, protocol) {
 		return nil, nil
 	}
 	// Relay variant dials the transit front (and overrides SNI / Host on
@@ -386,6 +386,14 @@ func normalizedNaiveCongestion(value string) string {
 
 func applySingBoxTransport(base map[string]any, stream xuiStreamSettings) {
 	switch stream.Network {
+	case "httpupgrade":
+		if h := stream.HTTPUpgradeSettings; h != nil {
+			transport := map[string]any{"type": "httpupgrade", "path": defaultStr(h.Path, "/")}
+			if host := h.host(); host != "" {
+				transport["host"] = host
+			}
+			base["transport"] = transport
+		}
 	case "ws":
 		if stream.WSSettings != nil {
 			transport := map[string]any{

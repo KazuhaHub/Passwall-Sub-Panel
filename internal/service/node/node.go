@@ -525,6 +525,10 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 				"panel_id", n.PanelID, "inbound_id", n.InboundID, "err", perr)
 		}
 	}
+	// The CDN lines are judged against the node as it is now stored, flow included.
+	if err := settleCDN(nil, n, n.Relays); err != nil {
+		return err
+	}
 	// Import = take ownership: capture the live inbound's config into the local
 	// snapshot so render reads it without a live fetch and reconcile can keep
 	// 3X-UI aligned to PSP. clients[] is stripped (ownership-managed).
@@ -575,6 +579,9 @@ func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec 
 	// the spec's.
 	probe := *n
 	inboundcfg.ApplySpec(&probe, spec)
+	if err := settleCDN(nil, &probe, n.Relays); err != nil {
+		return err
+	}
 	offer, err := s.checkInboundAgainstFronts(ctx, &probe)
 	if err != nil {
 		return err
@@ -899,6 +906,13 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
+	// Check CDN lines against the saved transport and the flow in this request
+	// before planning any listeners.
+	saved := *previous
+	saved.Flow = n.Flow
+	if err := settleCDN(previous.Relays, &saved, n.Relays); err != nil {
+		return err
+	}
 	// Tunnel lines: the server-owned fields come from the stored lines, and the
 	// listeners to make and to delete are settled before anything is written.
 	work, err := s.planTunnels(ctx, previous, n, switching)
@@ -1196,6 +1210,9 @@ func (s *Service) updateInboundConfigLockedNode(ctx context.Context, n *domain.N
 	}
 	next := *n
 	inboundcfg.ApplySpec(&next, spec)
+	if err := domain.ValidateCDNRelays(&next, next.Relays); err != nil {
+		return fmt.Errorf("%w (the change would leave its CDN lines without a transport a CDN can carry: remove those lines first, or keep a TLS + WebSocket, gRPC or HTTPUpgrade transport)", err)
+	}
 	offer, err := s.checkInboundAgainstFronts(ctx, &next)
 	if err != nil {
 		return err

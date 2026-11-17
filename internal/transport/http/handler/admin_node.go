@@ -166,7 +166,13 @@ type relayLineDTO struct {
 	Port         int    `json:"port"`
 	SNI          string `json:"sni,omitempty"`
 	Host         string `json:"host,omitempty"`
-	Enabled      bool   `json:"enabled"`
+	// Domain is a CDN line's CDN domain (mode "cdn"). Address, port, SNI and
+	// Host left empty in a request are filled from it and stored.
+	Domain string `json:"domain,omitempty"`
+	// ClientTLS is whether clients use TLS to the CDN (CDN lines only); omitted
+	// in a request keeps the saved value, or defaults from the port.
+	ClientTLS *bool `json:"client_tls,omitempty"`
+	Enabled   bool  `json:"enabled"`
 	// Region / Tags are line-only subscription labels (ADR 0040). Omitted in a
 	// request keeps the saved value (a new line takes the node's value);
 	// explicit "" / [] clears. Responses always carry both.
@@ -199,6 +205,15 @@ type relayLineDTO struct {
 	// Running is response-only: the line is published, which for a tunnel line
 	// needs its listener applied and its tunnel ready on both servers.
 	Running bool `json:"running,omitempty"`
+	// CDNIssues is response-only: what is likely to keep a CDN line from
+	// working given its landing as it is now (never blocks saving).
+	CDNIssues []cdnIssueDTO `json:"cdn_issues,omitempty"`
+}
+
+type cdnIssueDTO struct {
+	Code   string            `json:"code"`
+	Warn   bool              `json:"warn"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 type inboundDTO struct {
@@ -404,7 +419,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		dto := h.toNodeDTO(n, panelNames)
 		// An administrator also reads the REALITY private key of each tunnel
 		// listener; an operator never does.
-		dto.Relays = relayDTOsFor(n.Relays, isAdmin)
+		dto.Relays = relayDTOsOn(n, n.Relays, isAdmin)
 		if n.IsTunnelChild() {
 			if parent, perr := h.node.Get(c.Request.Context(), n.ParentNodeID); perr == nil {
 				dto.ParentNodeName = parent.DisplayName
@@ -793,7 +808,7 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
 	dto := h.toNodeDTO(saved, panelNames)
-	dto.Relays = relayDTOsFor(saved.Relays, callerIsAdmin(c))
+	dto.Relays = relayDTOsOn(saved, saved.Relays, callerIsAdmin(c))
 	c.JSON(http.StatusOK, dto)
 }
 
@@ -1236,7 +1251,9 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 	var err error
 	for i, d := range dtos {
 		addr := strings.TrimSpace(d.Address)
-		if addr == "" {
+		cdn := d.Mode != nil && *d.Mode == domain.RelayModeCDN
+		// A CDN line's address is the optimised IP and defaults to its domain.
+		if addr == "" && !cdn && !(d.Mode == nil && d.Domain != "") {
 			return nil, fmt.Errorf("relay line %d: address is required", i+1)
 		}
 		if d.Port < 0 || d.Port > 65535 {
@@ -1250,6 +1267,8 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			Port:         d.Port,
 			SNI:          strings.TrimSpace(d.SNI),
 			Host:         strings.TrimSpace(d.Host),
+			Domain:       strings.TrimSpace(d.Domain),
+			ClientTLS:    d.ClientTLS,
 			Enabled:      d.Enabled,
 			EntryPanelID: d.EntryPanelID,
 			// nil keeps the saved factor (resolved by the node service).
@@ -1265,13 +1284,15 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			line.ModeUnresolved = true
 		} else if *d.Mode == domain.RelayModeTunnel {
 			line.Mode = domain.RelayModeTunnel
+		} else if *d.Mode == domain.RelayModeCDN {
+			line.Mode = domain.RelayModeCDN
 		} else if *d.Mode != "" && *d.Mode != "forward" {
 			return nil, fmt.Errorf("relay line %d: unknown mode %q", i+1, *d.Mode)
 		}
 		// A managed forward needs its entry port (a request that omits the mode is
 		// judged by the service, which knows the saved line); a tunnel line's
 		// listener takes the port given, or one the service picks, when it is made.
-		if d.EntryPanelID > 0 && d.Port == 0 && d.Mode != nil && !line.Tunnel() {
+		if d.EntryPanelID > 0 && d.Port == 0 && d.Mode != nil && !line.Tunnel() && !line.CDN() {
 			return nil, fmt.Errorf("relay line %d: a managed relay needs an entry port between 1 and 65535", i+1)
 		}
 		if d.Region == nil {
@@ -1295,6 +1316,12 @@ func relayDTOs(relays []domain.RelayLine) []relayLineDTO { return relayDTOsFor(r
 // relayDTOsFor is relayDTOs; secrets adds the private keys of tunnel listeners,
 // which only an administrator reads.
 func relayDTOsFor(relays []domain.RelayLine, secrets bool) []relayLineDTO {
+	return relayDTOsOn(nil, relays, secrets)
+}
+
+// relayDTOsOn is relayDTOsFor for the lines of a landing node: with the
+// landing it also says what is likely to keep each CDN line from working.
+func relayDTOsOn(landing *domain.Node, relays []domain.RelayLine, secrets bool) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
 		region, tags := r.Region, domain.CopyLineTags(r.Tags)
@@ -1307,7 +1334,18 @@ func relayDTOsFor(relays []domain.RelayLine, secrets bool) []relayLineDTO {
 				port = r.TunnelNode.DesiredPort
 			}
 		}
+		var issues []cdnIssueDTO
+		if r.CDN() {
+			m := domain.RelayModeCDN
+			mode = &m
+			for _, issue := range domain.CDNWarnings(landing, r) {
+				issues = append(issues, cdnIssueDTO{Code: issue.Code, Warn: issue.Warn, Params: issue.Params})
+			}
+		}
 		out = append(out, relayLineDTO{
+			CDNIssues:          issues,
+			Domain:             r.Domain,
+			ClientTLS:          r.ClientTLS,
 			Mode:               mode,
 			Tunnel:             tunnel,
 			Running:            r.Gated() && r.ManagedReady,
@@ -1364,7 +1402,7 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		Kind:               string(n.Kind),
 		CertSource:         string(n.CertSource),
 		CertID:             n.CertID,
-		Relays:             relayDTOs(n.Relays),
+		Relays:             relayDTOsOn(n, n.Relays, false),
 		HideDirect:         n.HideDirect,
 		TrafficFactorMilli: n.EffectiveTrafficFactor(),
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),

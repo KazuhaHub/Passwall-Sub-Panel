@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // expandRelays turns each real node that carries relay lines into multiple
@@ -25,6 +26,19 @@ func expandRelays(items []renderItem) []renderItem {
 			continue
 		}
 		relays := enabledRelays(it.node.Relays)
+		// A CDN line whose landing can no longer go through a CDN (its transport
+		// was changed outside PSP, or adopted that way) is withheld rather than
+		// rendered broken; the node sync raises the cdn_landing_unfit issue.
+		// A node whose transport is not known here (no snapshot yet) is not judged.
+		if f := domain.CDNLandingFault(it.node); f != nil && f.Code != domain.CDNFaultUnreadable {
+			kept := relays[:0:0]
+			for _, r := range relays {
+				if !r.CDN() {
+					kept = append(kept, r)
+				}
+			}
+			relays = kept
+		}
 		// Hiding the direct entry is independent of enabled relay/route lines.
 		if !it.node.EffectiveHideDirect() {
 			out = append(out, it)
@@ -55,13 +69,23 @@ func enabledRelays(relays []domain.RelayLine) []domain.RelayLine {
 	return out
 }
 
+// relaySupportsInbound checks the inbound selected for this render, including
+// a live inbound fetched for a node without a local snapshot.
+func relaySupportsInbound(relay *domain.RelayLine, n *domain.Node, inb *ports.Inbound, protocol domain.Protocol) bool {
+	if relay == nil || !relay.CDN() {
+		return true
+	}
+	landing := domain.Node{
+		DisplayName: n.DisplayName, Flow: n.Flow,
+		DesiredProtocol: string(protocol), StreamSettings: inb.StreamSettings,
+	}
+	return domain.ValidateCDNRelays(&landing, []domain.RelayLine{*relay}) == nil
+}
+
 // relayEntryName uses the line's name (or its address when unnamed), either
 // on its own or appended to the node's display name, space-separated.
 func relayEntryName(base string, r domain.RelayLine) string {
-	label := r.Name
-	if label == "" {
-		label = r.Address
-	}
+	label := r.Label()
 	if r.OnlyLineName {
 		return label
 	}
@@ -77,6 +101,9 @@ func relayEntryName(base string, r domain.RelayLine) string {
 // the override up without extra threading. (Hysteria2 reads SNI from its own
 // opts struct and is overridden separately at the call site.)
 func effectiveEndpoint(relay *domain.RelayLine, server string, inboundPort int, stream *xuiStreamSettings) (string, int) {
+	if stream != nil {
+		stream.normalizeHosts()
+	}
 	if relay == nil {
 		return server, inboundPort
 	}
@@ -100,11 +127,28 @@ func effectiveEndpoint(relay *domain.RelayLine, server string, inboundPort int, 
 				}
 			}
 		}
-		if relay.Host != "" && stream.WSSettings != nil {
-			if stream.WSSettings.Headers == nil {
-				stream.WSSettings.Headers = map[string]string{}
+		// The line's Host is the Host of whichever transport the landing uses: the
+		// WebSocket and HTTPUpgrade Host header, the gRPC authority.
+		if relay.Host != "" {
+			if stream.WSSettings != nil {
+				if stream.WSSettings.Headers == nil {
+					stream.WSSettings.Headers = map[string]string{}
+				}
+				stream.WSSettings.Headers["Host"] = relay.Host
 			}
-			stream.WSSettings.Headers["Host"] = relay.Host
+			if h := stream.HTTPUpgradeSettings; h != nil {
+				h.Host = relay.Host
+				if h.Headers == nil {
+					h.Headers = map[string]string{}
+				}
+				h.Headers["Host"] = relay.Host
+			}
+			if g := stream.GRPCSettings; g != nil {
+				g.Authority = relay.Host
+			}
+		}
+		if relay.CDN() {
+			applyCDNStream(relay, stream)
 		}
 	}
 	return server, port
@@ -132,5 +176,28 @@ func applyLegacyLineNames(out []renderItem) {
 		if counts[out[i].name] > 1 && out[i].node != nil && !out[i].isSeparator {
 			out[i].name = fmt.Sprintf("%s [%d:%s]", out[i].name, out[i].node.ID, out[i].lineID())
 		}
+	}
+}
+
+// applyCDNStream is what a CDN line adds to the stream it shares with its
+// landing: how clients reach the CDN, which is the line's own setting and
+// independent of the landing's TLS. With TLS on, clients present the line's SNI
+// and the landing's fingerprint and always verify the certificate (the CDN
+// presents its own, so the landing's allowInsecure is not carried); a landing
+// without TLS gets a plain TLS client section. With TLS off, no TLS is emitted.
+// Path, serviceName and ALPN stay the landing's. A line that states no choice
+// follows the landing.
+func applyCDNStream(relay *domain.RelayLine, stream *xuiStreamSettings) {
+	stream.cdn = true
+	if !relay.ClientUsesTLS(stream.Security == "tls") {
+		stream.Security, stream.TLSSettings, stream.RealitySettings = "", nil, nil
+		return
+	}
+	if stream.Security != "tls" || stream.TLSSettings == nil {
+		stream.Security, stream.TLSSettings, stream.RealitySettings = "tls", &xuiTLSSettings{}, nil
+	}
+	stream.TLSSettings.AllowInsecure = false
+	if relay.SNI != "" {
+		stream.TLSSettings.ServerName = relay.SNI
 	}
 }
