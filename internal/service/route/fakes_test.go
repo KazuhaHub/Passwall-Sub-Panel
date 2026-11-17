@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -304,5 +303,3 @@ func generated(prefix string, n int) []string {
 	slices.Sort(out)
 	return out
 }
-
-func has(text, part string) bool { return strings.Contains(text, part) }

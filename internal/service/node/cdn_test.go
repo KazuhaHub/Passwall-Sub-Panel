@@ -154,6 +154,9 @@ func TestCreateInboundJudgesCDNLinesAgainstSpec(t *testing.T) {
 	if err := svc.CreateInbound(context.Background(), n, spec(cdnWSStream)); err != nil {
 		t.Fatal(err)
 	}
+	if client.added == nil || client.added.StreamSettings != cdnWSStream {
+		t.Fatalf("unexpected inbound: %+v", client.added)
+	}
 	if repo.created == nil || len(repo.created.Relays) != 1 || repo.created.Relays[0].Address != "cdn.example.com" || repo.created.Relays[0].Port != 443 {
 		t.Fatalf("created = %+v", repo.created)
 	}

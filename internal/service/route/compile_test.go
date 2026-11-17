@@ -1,6 +1,7 @@
 package route
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -17,7 +18,7 @@ func planInput(w *world, caps ...string) PlanInput {
 	if len(caps) == 0 {
 		caps = []string{nodeprotocol.CapabilityTransitLink, nodeprotocol.CapabilityTransitRoute}
 	}
-	nodes, _ := fakeNodes{w}.List(nil)
+	nodes, _ := fakeNodes{w}.List(context.Background())
 	var mine []*domain.Node
 	for _, n := range nodes {
 		if n.PanelID == 1 {
@@ -28,7 +29,7 @@ func planInput(w *world, caps ...string) PlanInput {
 }
 
 func linkTo(w *world, exit int64) nodeprotocol.LinkOut {
-	l, _ := fakeLinks{w}.EnsureLink(nil, 1, exit)
+	l, _ := fakeLinks{w}.EnsureLink(context.Background(), 1, exit)
 	return nodeprotocol.LinkOut{Key: nodeprotocol.NewLinkKey(l.ID), Address: "192.0.2.2", Port: 20001, Protocol: nodeprotocol.LinkProtocolSS2022,
 		SS: &nodeprotocol.LinkSS{Method: "2022-blake3-aes-128-gcm", Password: "AAAAAAAAAAAAAAAAAAAAAA=="}}
 }
