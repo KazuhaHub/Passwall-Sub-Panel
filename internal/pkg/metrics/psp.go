@@ -741,6 +741,9 @@ var (
 //	hits_unknown_subject the account no longer exists
 //	hits_out_of_range    the hour was outside [now-48h, now+1h]
 //	hits_over_budget     the node's hourly row budget was spent
+//	hits_egress_unknown  the hit named an exit link the panel could not
+//	                     vouch for (unknown link, not this node's, or the
+//	                     capability was not declared)
 //	usage_collect_off    the panel is not on tier B (per-site usage), so the
 //	                     rows are dropped unread
 //	usage_stored         written to dest_usage_hourly
@@ -765,6 +768,7 @@ const (
 	DestRowsHitsUnknown    = "hits_unknown_subject"
 	DestRowsHitsOutOfRange = "hits_out_of_range"
 	DestRowsHitsOverBudget = "hits_over_budget"
+	DestRowsHitsEgressUnk  = "hits_egress_unknown"
 	DestRowsUsageCollOff   = "usage_collect_off"
 	// The per-site usage outcomes (tier B).
 	DestRowsUsageStored     = "usage_stored"

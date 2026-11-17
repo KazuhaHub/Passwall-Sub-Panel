@@ -324,6 +324,10 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 	// where a rule has IP rules; an inbound that cannot run it holds the node at
 	// as_is below, once the rules are final.
 	withResolve(desired, resolve)
+	// Which exit a hit left through is a property of the recorded hits, asked
+	// for only where the node can give it and there is more than one exit.
+	auditEgress := auditEgressFor(in, engine)
+	withAuditEgress(desired, auditEgress)
 	// REPORT-ONLY MUST NOT DISTURB ENFORCEMENT: observe rules that cannot be
 	// deployed on this node (an inbound's sniffing cannot supply them, or they
 	// are what overruns the budget) are left out, and the enforced rules go on
@@ -491,7 +495,7 @@ func (s *Service) compileFresh(ctx context.Context, in CompileInput, meta *domai
 		var ferr error
 		if s.bodyReadBackedOff(bodyKey(in.AgentID, meta.AppliedSHA256), now) {
 			output, unreadable = nil, true
-		} else if output, ferr = s.fallbackPolicy(ctx, in.AgentID, meta, cb, view, collect, resolve); ferr != nil {
+		} else if output, ferr = s.fallbackPolicy(ctx, in.AgentID, meta, cb, view, collect, resolve, auditEgress); ferr != nil {
 			// A transient read error must not become "no policy": fail the
 			// sync, cache nothing, and the node keeps what it has. But a read
 			// that keeps failing cannot freeze the node (and its roster) for
@@ -848,6 +852,7 @@ func enforcedOnly(p *protocol.DestinationPolicy) *protocol.DestinationPolicy {
 	withCollect(out, p.Collect)
 	// Without its observe rules the policy may have no IP rule left to resolve for.
 	withResolve(out, p.Resolve)
+	withAuditEgress(out, p.AuditEgress)
 	return out
 }
 
@@ -962,7 +967,7 @@ func compileKey(gen int64, caps []string, engine string, collect protocol.Collec
 // No LKG, an LKG that does not decode, or one that is invalid after trimming,
 // is nil: no policy is always deployable and matches a node that is not
 // enforcing, which is the truth.
-func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *domain.DestAgentPolicy, cb *cachedBase, v nodeView, collect protocol.CollectLevel, resolve protocol.ResolveMode) (*protocol.DestinationPolicy, error) {
+func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *domain.DestAgentPolicy, cb *cachedBase, v nodeView, collect protocol.CollectLevel, resolve protocol.ResolveMode, auditEgress bool) (*protocol.DestinationPolicy, error) {
 	if meta.AppliedSHA256 == "" {
 		return nil, nil
 	}
@@ -1134,6 +1139,9 @@ func (s *Service) fallbackPolicy(ctx context.Context, agentID string, meta *doma
 	// The same for how hostnames meet the IP rules: the lower of what the LKG ran
 	// and the current choice, re-derived from the rules that are left.
 	withResolve(out, lowerResolve(lkg.Resolve, resolve))
+	// Like the others, only downwards: the flag the node never applied is not
+	// minted into its last known good.
+	withAuditEgress(out, lkg.AuditEgress && auditEgress)
 	if err := protocol.ValidateDestinationPolicy(out); err != nil {
 		log.Warn("destpolicy: the trimmed last-known-good policy does not validate; sending none", "agent_id", agentID, "err", err)
 		return nil, nil

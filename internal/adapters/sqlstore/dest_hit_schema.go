@@ -4,7 +4,7 @@ import "time"
 
 // Destination-policy hit records.
 //
-// dest_hits is an hourly aggregate: one row per (hour, panel, user, source,
+// dest_hits is an hourly aggregate: one row per (hour, panel, exit, user, source,
 // action, destination, port), with a count and the first and last instant in
 // the hour. It holds NO client source address (the protocol does not carry one
 // and the table has no column for it), and rows are pruned on a retention
@@ -31,16 +31,20 @@ const (
 )
 
 type destHitRow struct {
-	HourMS  int64  `gorm:"column:hour_ms;primaryKey;autoIncrement:false;index:idx_dest_hit_user,priority:2;index:idx_dest_hit_source,priority:2;index:idx_dest_hit_panel,priority:2"`
-	PanelID int64  `gorm:"column:panel_id;primaryKey;autoIncrement:false;index:idx_dest_hit_panel,priority:1"`
-	UserID  int64  `gorm:"column:user_id;primaryKey;autoIncrement:false;index:idx_dest_hit_user,priority:1"`
-	Source  string `gorm:"column:source;primaryKey;size:24;index:idx_dest_hit_source,priority:1"`
-	Action  string `gorm:"column:action;primaryKey;size:8"`
-	Dest    string `gorm:"column:dest;primaryKey;size:253"`
-	Port    int    `gorm:"column:port;primaryKey;autoIncrement:false"`
-	Count   int64  `gorm:"column:count;not null;default:0"`
-	FirstMS int64  `gorm:"column:first_ms;not null;default:0"`
-	LastMS  int64  `gorm:"column:last_ms;not null;default:0"`
+	HourMS  int64 `gorm:"column:hour_ms;primaryKey;autoIncrement:false;index:idx_dest_hit_user,priority:2;index:idx_dest_hit_source,priority:2;index:idx_dest_hit_panel,priority:2;index:idx_dest_hit_egress,priority:2"`
+	PanelID int64 `gorm:"column:panel_id;primaryKey;autoIncrement:false;index:idx_dest_hit_panel,priority:1"`
+	// EgressPanelID is the exit server of the transit link the connection left
+	// through; 0 is "left from the reporting server itself" and is what every
+	// row from before the column holds.
+	EgressPanelID int64  `gorm:"column:egress_panel_id;primaryKey;autoIncrement:false;not null;default:0;index:idx_dest_hit_egress,priority:1"`
+	UserID        int64  `gorm:"column:user_id;primaryKey;autoIncrement:false;index:idx_dest_hit_user,priority:1"`
+	Source        string `gorm:"column:source;primaryKey;size:24;index:idx_dest_hit_source,priority:1"`
+	Action        string `gorm:"column:action;primaryKey;size:8"`
+	Dest          string `gorm:"column:dest;primaryKey;size:253"`
+	Port          int    `gorm:"column:port;primaryKey;autoIncrement:false"`
+	Count         int64  `gorm:"column:count;not null;default:0"`
+	FirstMS       int64  `gorm:"column:first_ms;not null;default:0"`
+	LastMS        int64  `gorm:"column:last_ms;not null;default:0"`
 }
 
 func (destHitRow) TableName() string { return "dest_hits" }

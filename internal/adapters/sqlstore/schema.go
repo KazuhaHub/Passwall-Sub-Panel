@@ -1684,11 +1684,7 @@ func EnsureSchema(db *gorm.DB) error {
 	if err := repairTrafficCounterNulls(db); err != nil {
 		return err
 	}
-	// Assign labels before the ID migration serializes missing labels as empty keys.
-	if err := backfillLineLabels(db); err != nil {
-		return err
-	}
-	if err := backfillRelayLineIDs(db); err != nil {
+	if err := migrateV4_2(db); err != nil {
 		return err
 	}
 	return seedBuiltinRoles(db)

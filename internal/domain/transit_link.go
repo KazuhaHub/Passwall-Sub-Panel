@@ -13,6 +13,13 @@ import (
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
+// TransitLinkEnds is the entry and exit server of one link. A link's pair is
+// immutable, so it is what a hit's link id is resolved to.
+type TransitLinkEnds struct {
+	EntryPanelID int64
+	ExitPanelID  int64
+}
+
 // TransitLink is the tunnel between one ordered pair of Passwall Node
 // servers: nodes on the entry server whose EgressPanelID is the exit server
 // send their users' traffic through it. One row per pair, created when the

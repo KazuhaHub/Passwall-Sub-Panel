@@ -187,6 +187,7 @@ func settleResolve(p *protocol.DestinationPolicy, nodes []*domain.Node, engine s
 		res := &protocol.DestinationPolicy{Rules: out, Exempt: slices.Clone(p.Exempt)}
 		withCollect(res, p.Collect)
 		withResolve(res, p.Resolve)
+		withAuditEgress(res, p.AuditEgress)
 		return res
 	}
 	res := build(false)

@@ -11,6 +11,29 @@ const HOUR = 3_600_000
 const DAY = 24 * HOUR
 const P = (qs: string) => new URLSearchParams(qs)
 
+describe('the exit server param', () => {
+  it('0 is "this server" and differs from absent; it round-trips', () => {
+    expect(parseRecordsParams(P('')).exit_panel_id).toBeUndefined()
+    expect(parseRecordsParams(P('rec_exit=0')).exit_panel_id).toBe(0)
+    expect(parseRecordsParams(P('rec_exit=6')).exit_panel_id).toBe(6)
+    expect(recordsSearch(P('tab=records'), { exit_panel_id: 0 }).get('rec_exit')).toBe('0')
+    expect(recordsSearch(P('tab=records&rec_exit=0'), { exit_panel_id: undefined }).has('rec_exit')).toBe(false)
+  })
+
+  it('a negative or non-numeric value is no filter', () => {
+    expect(parseRecordsParams(P('rec_exit=-1')).exit_panel_id).toBeUndefined()
+    expect(parseRecordsParams(P('rec_exit=abc')).exit_panel_id).toBeUndefined()
+  })
+
+  it('is sent to the API (0 included), counts as a filter, and a change returns to page 1', () => {
+    const f0 = parseRecordsParams(P('rec_exit=0'))
+    expect(recordsApiParams(f0, { now: NOW, retentionDays: undefined }).exit_panel_id).toBe(0)
+    expect(recordsApiParams(parseRecordsParams(P('')), { now: NOW, retentionDays: undefined })).not.toHaveProperty('exit_panel_id')
+    expect(recordsFilterCount(f0)).toBe(1)
+    expect(recordsSearch(P('rec_page=3'), { exit_panel_id: 6 }).has('rec_page')).toBe(false)
+  })
+})
+
 describe('the records tab URL grammar', () => {
   it('defaults are not written: an empty query is the default filter', () => {
     const f = parseRecordsParams(P(''))

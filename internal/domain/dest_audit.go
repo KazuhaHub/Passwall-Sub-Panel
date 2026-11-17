@@ -53,6 +53,11 @@ func (c AuditCollect) Normalized() AuditCollect { return NormalizeAuditCollect(c
 type DestHit struct {
 	HourMS  int64
 	PanelID int64
+	// EgressPanelID is the exit server of the transit link the connection left
+	// through (or, for a block, would have left through). 0 means the
+	// connection left from the reporting server itself, which is also what
+	// every row stored before the column existed holds.
+	EgressPanelID int64
 	// UserID is 0 for an allowlist trial row, which the node folds to group x
 	// site before it leaves the node.
 	UserID int64
@@ -92,6 +97,10 @@ const (
 	DestDropOverBudget = "over_budget"
 	DestDropQueueFull  = "queue_full"
 	DestDropIngest     = "ingest_error"
+	// DestDropEgressUnknown counts hits whose exit link could not be trusted:
+	// the link id is unknown to the panel, its entry is not the reporting
+	// server, or the agent never declared the capability that carries it.
+	DestDropEgressUnknown = "egress_unknown"
 	// The usage side's own kinds: what a node could not aggregate, and what the
 	// panel's per-agent hourly usage budget refused. Kept apart from the hit
 	// kinds so a gap in the usage record is never read as a gap in the hits.
@@ -113,11 +122,15 @@ func DestUsageDropKinds() []string {
 type DestHitFilter struct {
 	UserID  int64
 	PanelID int64
-	Source  string
-	Action  string
-	SinceMS int64
-	UntilMS int64
-	Keyword string
+	// EgressPanelID selects rows by exit server when EgressSet is true; 0 then
+	// selects the rows that left from the reporting server itself.
+	EgressPanelID int64
+	EgressSet     bool
+	Source        string
+	Action        string
+	SinceMS       int64
+	UntilMS       int64
+	Keyword       string
 	// SourceKind is "", "policy" (p*), "source" (s*) or "group" (g*).
 	SourceKind string
 	// IncludeTrial lists the allowlist trial rows (a group's observe), which a
@@ -125,7 +138,7 @@ type DestHitFilter struct {
 	IncludeTrial bool
 	Page         int
 	PageSize     int
-	// GroupBy is "", "site", "user" or "policy".
+	// GroupBy is "", "site", "user", "policy" or "exit".
 	GroupBy string
 }
 
@@ -134,14 +147,16 @@ type DestHitFilter struct {
 type DestHitRow struct {
 	HourMS  int64
 	PanelID int64
-	UserID  int64
-	Source  string
-	Action  string
-	Dest    string
-	Port    int
-	Count   int64
-	FirstMS int64
-	LastMS  int64
+	// EgressPanelID is the exit server (0: the reporting server itself).
+	EgressPanelID int64
+	UserID        int64
+	Source        string
+	Action        string
+	Dest          string
+	Port          int
+	Count         int64
+	FirstMS       int64
+	LastMS        int64
 }
 
 // DestHitSummary counts the rows a time/user/panel selection holds, whatever
@@ -188,10 +203,10 @@ const (
 const AuditBatchMarkerRetention = AuditHourPastWindow + 24*time.Hour
 
 type destHitKey struct {
-	hour, panel, user int64
-	source, action    string
-	dest              string
-	port              int
+	hour, panel, egress, user int64
+	source, action            string
+	dest                      string
+	port                      int
 }
 
 // MergeDestHits folds rows that share an aggregation key into one: counts add,
@@ -207,7 +222,7 @@ func MergeDestHits(rows []DestHit) []DestHit {
 	index := make(map[destHitKey]int, len(rows))
 	out := make([]DestHit, 0, len(rows))
 	for _, r := range rows {
-		k := destHitKey{r.HourMS, r.PanelID, r.UserID, r.Source, r.Action, r.Dest, r.Port}
+		k := destHitKey{r.HourMS, r.PanelID, r.EgressPanelID, r.UserID, r.Source, r.Action, r.Dest, r.Port}
 		i, seen := index[k]
 		if !seen {
 			index[k] = len(out)

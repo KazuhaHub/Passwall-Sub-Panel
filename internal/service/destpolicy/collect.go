@@ -190,3 +190,24 @@ func CollectingForRisk(m *domain.DestAgentPolicy, caps []string, engine domain.N
 	}
 	return m.ReportedSHA256 == m.AppliedSHA256 && m.AppliedCollect != ""
 }
+
+// auditEgressFor says whether the policy asks the agent to give each hit its
+// exit link. All of it must hold: the agent declared the capability, the engine
+// is Xray (the only one that can tell a link apart per rule), and the server has
+// egress bindings (without a tunnel every connection leaves from the server and
+// there is nothing to tell apart). Recording not being off is the fourth, and is
+// decided on the final policy by withAuditEgress.
+func auditEgressFor(in CompileInput, engine string) bool {
+	return engine == xrayEngine && len(in.Egress) > 0 && slices.Contains(in.Capabilities, capabilityAuditHitsEgress)
+}
+
+// withAuditEgress sets the policy's flag where it is wanted and leaves it empty
+// elsewhere: emitting it where it does nothing would change the digest and
+// restart the core for no benefit. It must run AFTER withCollect, because the
+// protocol refuses the flag on a policy that records nothing.
+func withAuditEgress(p *protocol.DestinationPolicy, on bool) {
+	if p == nil {
+		return
+	}
+	p.AuditEgress = on && p.Collect != protocol.CollectOff
+}

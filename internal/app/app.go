@@ -816,6 +816,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// batch, which is why TestBuildStoresAReportedHitBatch drives one through.
 	destAudit := destaudit.New(destaudit.Deps{
 		Store: destRepos.Hits,
+		// A hit's exit link is resolved to its two servers, and trusted only when
+		// the link starts at the reporting server.
+		Links: repos.TransitLinks,
 		// Per-site usage is kept only for a panel set to tier B. The panel row's
 		// choice is the one question: a node that was told a lower level may still
 		// send a batch that was in flight, and that is dropped and counted.

@@ -30,7 +30,7 @@ type fakeAuditCall struct {
 	obs     *nodeprotocol.AuditObservation
 }
 
-func (f *fakeAudit) Enqueue(agentID string, panelID int64, o *nodeprotocol.AuditObservation) {
+func (f *fakeAudit) Enqueue(agentID string, panelID int64, _ []string, o *nodeprotocol.AuditObservation) {
 	f.enqueue++
 	f.calls = append(f.calls, fakeAuditCall{agentID, panelID, o})
 	if f.onEnq != nil {

@@ -104,20 +104,26 @@ func sourceKind(source string) string {
 }
 
 type destHitItem struct {
-	HourMS     int64   `json:"hour_ms"`
-	PanelID    int64   `json:"panel_id"`
-	PanelName  *string `json:"panel_name"`
-	UserID     int64   `json:"user_id"`
-	UPN        *string `json:"upn"`
-	Source     string  `json:"source"`
-	SourceName *string `json:"source_name"`
-	SourceKind string  `json:"source_kind"`
-	Action     string  `json:"action"`
-	Dest       string  `json:"dest"`
-	Port       int     `json:"port"`
-	Count      int64   `json:"count"`
-	FirstMS    int64   `json:"first_ms"`
-	LastMS     int64   `json:"last_ms"`
+	HourMS    int64   `json:"hour_ms"`
+	PanelID   int64   `json:"panel_id"`
+	PanelName *string `json:"panel_name"`
+	// ExitPanelID is the exit server of the link the connection left through;
+	// 0 is the reporting server itself (and every row from before this column).
+	// A grouping that folds the exit away (site, user, policy) leaves both
+	// fields out: 0 would read as "direct" when it means "not asked".
+	ExitPanelID   *int64  `json:"exit_panel_id,omitempty"`
+	ExitPanelName *string `json:"exit_panel_name,omitempty"`
+	UserID        int64   `json:"user_id"`
+	UPN           *string `json:"upn"`
+	Source        string  `json:"source"`
+	SourceName    *string `json:"source_name"`
+	SourceKind    string  `json:"source_kind"`
+	Action        string  `json:"action"`
+	Dest          string  `json:"dest"`
+	Port          int     `json:"port"`
+	Count         int64   `json:"count"`
+	FirstMS       int64   `json:"first_ms"`
+	LastMS        int64   `json:"last_ms"`
 }
 
 func badHits(c *gin.Context, code, field, msg string) {
@@ -129,7 +135,8 @@ func badHits(c *gin.Context, code, field, msg string) {
 // Query: user_id, panel_id, source, source_kind (policy|source|group), action
 // (block|observe), since and until (UTC ms, at most 31 days apart; default the
 // policy window up to now), include_trial, q (destination keyword),
-// group_by (none|site|user|policy), page, page_size. The response adds
+// exit_panel_id (0 = left from the reporting server itself; absent = any),
+// group_by (none|site|user|policy|exit), page, page_size. The response adds
 // summary {block, deny, observe, users} (the time/user/panel selection, narrowed
 // to the exact source when one is given, whatever the action and source_kind
 // filters: the convert dialog reads the accounts a policy hit from summary.users
@@ -162,6 +169,11 @@ func (h *AdminDestHandler) Hits(c *gin.Context) {
 		return
 	}
 	if f.PanelID, _, ok = intParam("panel_id"); !ok {
+		return
+	}
+	// exit_panel_id: absent means no filter; 0 selects what left from the
+	// reporting server itself.
+	if f.EgressPanelID, f.EgressSet, ok = intParam("exit_panel_id"); !ok {
 		return
 	}
 	since, hasSince, ok := intParam("since")
@@ -202,10 +214,10 @@ func (h *AdminDestHandler) Hits(c *gin.Context) {
 		return
 	}
 	switch g := q.Get("group_by"); g {
-	case "", "none", "site", "user", "policy":
+	case "", "none", "site", "user", "policy", "exit":
 		f.GroupBy = g
 	default:
-		badHits(c, codeHitsInvalid, "group_by", "group_by is none, site, user or policy")
+		badHits(c, codeHitsInvalid, "group_by", "group_by is none, site, user, policy or exit")
 		return
 	}
 	f.IncludeTrial = q.Get("include_trial") == "1" || q.Get("include_trial") == "true"
@@ -249,6 +261,8 @@ func (h *AdminDestHandler) Hits(c *gin.Context) {
 	}
 	namer := h.namer(ctx)
 	upns, panels := map[int64]*string{}, map[int64]*string{}
+	// Only the ungrouped listing and group_by=exit still know the exit.
+	withExit := f.GroupBy == "" || f.GroupBy == "none" || f.GroupBy == "exit"
 	items := make([]destHitItem, 0, len(rows))
 	for _, r := range rows {
 		it := destHitItem{
@@ -277,6 +291,20 @@ func (h *AdminDestHandler) Hits(c *gin.Context) {
 				}
 			}
 			it.PanelName = panels[r.PanelID]
+		}
+		if withExit {
+			exit := r.EgressPanelID
+			it.ExitPanelID = &exit
+		}
+		if withExit && r.EgressPanelID > 0 && h.w.Panels != nil {
+			if _, seen := panels[r.EgressPanelID]; !seen {
+				panels[r.EgressPanelID] = nil
+				if p, err := h.w.Panels.GetByID(ctx, r.EgressPanelID); err == nil {
+					v := p.Name
+					panels[r.EgressPanelID] = &v
+				}
+			}
+			it.ExitPanelName = panels[r.EgressPanelID]
 		}
 		items = append(items, it)
 	}

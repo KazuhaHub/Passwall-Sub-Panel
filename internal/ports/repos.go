@@ -2333,4 +2333,8 @@ type TransitLinkRepo interface {
 	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
+	// LinkEnds resolves link ids to their two servers in one read. An unknown
+	// id is absent from the result. Links are never deleted and a link's pair
+	// never changes, so an answer stays true.
+	LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error)
 }

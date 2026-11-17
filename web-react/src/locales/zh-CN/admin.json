@@ -5587,6 +5587,9 @@
         "group_deleted": "已删除",
         "panel": "节点",
         "panel_all": "全部节点",
+        "exit": "出口服务器",
+        "exit_all": "全部出口服务器",
+        "exit_direct": "本服务器（直接出站）",
         "range": "时间范围",
         "search": "搜索目的地…",
         "more": "筛选",
@@ -5606,7 +5609,8 @@
         "none": "明细",
         "site": "按目的地",
         "user": "按账号",
-        "policy": "按策略"
+        "policy": "按策略",
+        "exit": "按出口"
       },
       "count": {
         "detail": "共 {{n}} 条 · 按小时汇总",
@@ -5618,9 +5622,13 @@
         "rule": "规则",
         "dest": "目的地",
         "panel": "节点",
+        "exit": "出口服务器",
         "count": "次数",
         "object": "对象",
         "last": "最近"
+      },
+      "exit": {
+        "direct": "本服务器（直接出站）"
       },
       "rule": {
         "blocked": "拦截",

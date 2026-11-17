@@ -186,6 +186,7 @@ func restrictForSniffing(p *protocol.DestinationPolicy, nodes []*domain.Node, en
 	// derived again from what is left.
 	withCollect(res, p.Collect)
 	withResolve(res, p.Resolve)
+	withAuditEgress(res, p.AuditEgress)
 	return res, info
 }
 

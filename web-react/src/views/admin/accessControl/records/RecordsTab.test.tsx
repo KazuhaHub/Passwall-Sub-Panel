@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import type { DestHitItem, DestHits, DestNodeStatus, DestPolicies, DestStatus } from '@/api/accessControl'
+import * as nodesApi from '@/api/nodes'
+import * as serversApi from '@/api/servers'
 import { renderAccess, setTestLang, snack, whereIs } from '@/test/accessControlHarness'
 import { useSiteStore } from '@/stores/site'
 import { formatHourRange } from './hitTime'
@@ -16,6 +18,8 @@ vi.mock('@/api/accessControl', async importOriginal => {
 })
 const media = vi.hoisted(() => ({ folded: false }))
 vi.mock('@mui/material', async importOriginal => ({ ...await importOriginal<typeof import('@mui/material')>(), useMediaQuery: () => media.folded }))
+vi.mock('@/api/nodes', async importOriginal => ({ ...await importOriginal<typeof import('@/api/nodes')>(), listNodes: vi.fn() }))
+vi.mock('@/api/servers', async importOriginal => ({ ...await importOriginal<typeof import('@/api/servers')>(), listServers: vi.fn() }))
 vi.mock('@/components/UserAutocomplete', () => ({
   default: ({ value, onChange }: { value: number | null; onChange: (id: number | null) => void }) => (
     <button aria-label="pick-user" data-value={String(value)} onClick={() => onChange(value ? null : 7)}>pick</button>
@@ -67,6 +71,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   media.folded = false
   useSiteStore.setState({ timezone: 'Asia/Shanghai' })
+  vi.mocked(nodesApi.listNodes).mockResolvedValue({ items: [{ id: 1, egress_panel_id: 0 }], total: 1, page: 1, page_size: 500 } as never)
+  vi.mocked(serversApi.listServers).mockResolvedValue({ items: [{ id: 6, name: '法兰克福 02' }, { id: 9, name: '新加坡 03' }], total: 2 } as never)
   vi.mocked(api.getDestHits).mockResolvedValue(result())
   vi.mocked(api.getDestPolicies).mockResolvedValue(policies)
   vi.mocked(api.getDestStatus).mockResolvedValue(status())
@@ -504,6 +510,103 @@ describe('on a phone', () => {
     expect(first.querySelectorAll('[data-line]')).toHaveLength(3)
     expect(within(first).getByText('账号')).toBeTruthy()
     expect(within(first).getByText('次数')).toBeTruthy()
+  })
+})
+
+describe('the exit server', () => {
+  const tunnel = () => vi.mocked(nodesApi.listNodes).mockResolvedValue({ items: [{ id: 1, egress_panel_id: 0 }, { id: 2, egress_panel_id: 6 }], total: 2, page: 1, page_size: 500 } as never)
+  const twoExits = () => vi.mocked(nodesApi.listNodes).mockResolvedValue({ items: [{ id: 1, egress_panel_id: 0 }, { id: 2, egress_panel_id: 6 }, { id: 3, egress_panel_id: 9 }, { id: 4, egress_panel_id: 6 }], total: 4 } as never)
+
+  it('shows nothing of it on an install without tunnels', async () => {
+    renderAccess(ui, { route })
+    await screen.findAllByTestId('hit-row')
+    await waitFor(() => expect(nodesApi.listNodes).toHaveBeenCalled())
+    expect(screen.queryByRole('combobox', { name: '出口服务器' })).toBeNull()
+    expect(screen.queryByRole('columnheader', { name: '出口服务器' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '按出口' })).toBeNull()
+    expect(screen.queryAllByTestId('hit-exit')).toHaveLength(0)
+    expect(lastParams()).not.toHaveProperty('exit_panel_id')
+  })
+
+  it('with a tunnel: the filter sends the exit server, and 0 for this server', async () => {
+    tunnel(); twoExits()
+    const { router } = renderAccess(ui, { route })
+    await screen.findAllByTestId('hit-row')
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: '出口服务器' }))
+    let list = await screen.findByRole('listbox')
+    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['全部出口服务器', '本服务器（直接出站）', '法兰克福 02', '新加坡 03'])
+    fireEvent.click(within(list).getByRole('option', { name: '法兰克福 02' }))
+    await waitFor(() => expect(lastParams().exit_panel_id).toBe(6))
+    expect(whereIs(router)).toContain('rec_exit=6')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '出口服务器' }))
+    list = await screen.findByRole('listbox')
+    fireEvent.click(within(list).getByRole('option', { name: '本服务器（直接出站）' }))
+    await waitFor(() => expect(lastParams().exit_panel_id).toBe(0))
+    expect(whereIs(router)).toContain('rec_exit=0')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '出口服务器' }))
+    list = await screen.findByRole('listbox')
+    fireEvent.click(within(list).getByRole('option', { name: '全部出口服务器' }))
+    await waitFor(() => expect(lastParams()).not.toHaveProperty('exit_panel_id'))
+    expect(whereIs(router)).not.toContain('rec_exit')
+  })
+
+  it('finds tunnels on a later page of nodes, and shows an exit that records no hits', async () => {
+    const page1 = Array.from({ length: 200 }, (_, i) => ({ id: i + 1, egress_panel_id: 0 }))
+    vi.mocked(nodesApi.listNodes).mockImplementation((async (p: { page?: number }) => (p.page === 1
+      ? { items: page1, total: 201 } : { items: [{ id: 201, egress_panel_id: 9 }], total: 201 })) as never)
+    renderAccess(ui, { route })
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: '出口服务器' }))
+    const list = await screen.findByRole('listbox')
+    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['全部出口服务器', '本服务器（直接出站）', '新加坡 03'])
+    expect(vi.mocked(nodesApi.listNodes).mock.calls.map(c => c[0]?.page)).toEqual([1, 2])
+  })
+
+  it('names a linked exit that no tunnel lists any more by its server name', async () => {
+    tunnel()
+    renderAccess(ui, { route: `${route}&rec_exit=9` })
+    const box = await screen.findByRole('combobox', { name: '出口服务器' })
+    await waitFor(() => expect(box.textContent).toBe('新加坡 03'))
+  })
+
+  it('with a tunnel: the column names the exit server, or says this server', async () => {
+    tunnel(); twoExits()
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [
+      item({ exit_panel_id: 6, exit_panel_name: '法兰克福 02' }), item({ exit_panel_id: 0, exit_panel_name: null }),
+    ] }))
+    renderAccess(ui, { route })
+    expect(await screen.findByRole('columnheader', { name: '出口服务器' })).toBeTruthy()
+    const rows = await screen.findAllByTestId('hit-row')
+    expect(within(rows[0]).getByTestId('hit-exit').textContent).toBe('法兰克福 02')
+    expect(within(rows[1]).getByTestId('hit-exit').textContent).toBe('本服务器（直接出站）')
+  })
+
+  it('with a tunnel: a narrow screen\'s card shows it too', async () => {
+    media.folded = true
+    tunnel()
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ exit_panel_id: 6, exit_panel_name: '法兰克福 02' })] }))
+    renderAccess(ui, { route })
+    const row = (await screen.findAllByTestId('hit-row'))[0]
+    expect(within(row).getByTestId('hit-exit').textContent).toContain('法兰克福 02')
+  })
+
+  it('with a tunnel: "by exit" sends group_by=exit and lists one row per exit server', async () => {
+    tunnel()
+    vi.mocked(api.getDestHits).mockImplementation(async p => (p?.group_by === 'exit'
+      ? result({ group_by: 'exit', total: 2, items: [
+        item({ hour_ms: 0, user_id: 0, upn: null, source: '', source_name: null, dest: '', port: 0, count: 90, exit_panel_id: 6, exit_panel_name: '法兰克福 02' }),
+        item({ hour_ms: 0, user_id: 0, upn: null, source: '', source_name: null, dest: '', port: 0, count: 30, exit_panel_id: 0, exit_panel_name: null }),
+      ] })
+      : result()))
+    const { router } = renderAccess(ui, { route })
+    await screen.findAllByTestId('hit-row')
+    fireEvent.click(await screen.findByRole('button', { name: '按出口' }))
+    await waitFor(() => expect(whereIs(router)).toContain('rec_group_by=exit'))
+    await waitFor(() => expect(screen.getAllByTestId('hit-group-row')).toHaveLength(2))
+    const rows = screen.getAllByTestId('hit-group-row')
+    expect(within(rows[0]).getByText('法兰克福 02')).toBeTruthy()
+    expect(within(rows[0]).getByText('90')).toBeTruthy()
+    expect(within(rows[1]).getByText('本服务器（直接出站）')).toBeTruthy()
+    expect(lastParams().group_by).toBe('exit')
   })
 })
 

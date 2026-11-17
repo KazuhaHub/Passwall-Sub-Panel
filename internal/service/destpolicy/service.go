@@ -114,7 +114,7 @@ func policyHasCapability(caps []string) bool {
 }
 
 // capsToken is the three capabilities that gate delivery, as a short token:
-// "p" policy, "h" hits, "u" usage, "g" groups, "r" resolve. A change of the set is a reason to try a
+// "p" policy, "h" hits, "u" usage, "g" groups, "r" resolve, "e" hit egress. A change of the set is a reason to try a
 // refused policy again; any other capability change is not (a node's task
 // capabilities come and go).
 func capsToken(caps []string) string {
@@ -144,6 +144,11 @@ func capsToken(caps []string) string {
 			tok = append(tok, 'r')
 		}
 	}
+	for _, c := range caps {
+		if c == capabilityAuditHitsEgress {
+			tok = append(tok, 'e')
+		}
+	}
 	return string(tok)
 }
 
@@ -156,6 +161,8 @@ const capabilityDestinationGroups = protocol.CapabilityDestinationGroups
 const (
 	capabilityAuditHits  = protocol.CapabilityAuditHits
 	capabilityAuditUsage = protocol.CapabilityAuditUsage
+	// capabilityAuditHitsEgress: the agent can say which link a hit left through.
+	capabilityAuditHitsEgress = protocol.CapabilityAuditHitsEgress
 )
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }

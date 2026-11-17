@@ -355,13 +355,17 @@ export interface DestTestResult {
 /** Rows are one account's hits on one destination in one hour, or (group_by) a fold of them. */
 export type DestHitAction = 'block' | 'observe'
 export type DestHitSourceKind = 'policy' | 'source' | 'group'
-export type DestHitGroupBy = 'none' | 'site' | 'user' | 'policy'
+export type DestHitGroupBy = 'none' | 'site' | 'user' | 'policy' | 'exit'
 
 export interface DestHitItem {
   /** UTC ms of the start of the hour; 0 in a grouped view. */
   hour_ms: number
   panel_id: number
   panel_name: string | null
+  /** The exit server of the tunnel the connection left through; 0: it left from the server itself. Absent in grouped views other than group_by=exit: not applicable, never "the server itself". */
+  exit_panel_id?: number
+  /** Null for the server itself, or an exit server that no longer exists. */
+  exit_panel_name?: string | null
   user_id: number
   /** Null: the account is gone (or a grouped view that folds accounts away). */
   upn: string | null
@@ -400,6 +404,8 @@ export interface DestHits {
 export interface DestHitsParams {
   user_id?: number
   panel_id?: number
+  /** Exit server: 0 selects what left from the server itself; left out, any. */
+  exit_panel_id?: number
   source?: string
   source_kind?: DestHitSourceKind
   action?: DestHitAction

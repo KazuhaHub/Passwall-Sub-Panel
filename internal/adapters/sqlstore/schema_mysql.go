@@ -9,14 +9,18 @@ import (
 )
 
 func autoMigrateCurrentSchema(db *gorm.DB) error {
+	models, err := modelsWithoutPendingV4_2Rebuilds(db, schemaModels)
+	if err != nil {
+		return err
+	}
 	if db.Dialector.Name() != "mysql" {
-		return db.AutoMigrate(schemaModels...)
+		return db.AutoMigrate(models...)
 	}
 	// Do not change the caller's dialect or normal query behavior. Only this
 	// schema session suppresses MySQL's automatic unique-index deletion.
 	migrationDB := db.Session(&gorm.Session{})
 	migrationDB.Dialector = preservingMySQLSchemaDialect{db.Dialector}
-	return migrationDB.AutoMigrate(schemaModels...)
+	return migrationDB.AutoMigrate(models...)
 }
 
 type preservingMySQLSchemaDialect struct{ gorm.Dialector }

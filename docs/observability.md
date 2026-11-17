@@ -176,7 +176,7 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 | `psp_dest_policy_publish_rejected_total` | 发布前校验拒绝的次数（超出上限或策略无效）；上一份快照继续生效，原因在访问控制页的结论条里 |
 | `psp_node_policy_status_dropped_total` | 节点上报的 `policy_status` 被整体丢弃的次数（无法解码、校验失败、缺能力）。**同步本身仍然成功**，所以只有这个计数能看出来 |
 | `psp_node_audit_report_total{outcome=…}` | 节点上报的 audit（命中）子树的去向：`accepted`（入队）、`oversized`、`invalid`、`no_capability`（这三种丢整批，同步仍成功）、`duplicate_batch`（节点重发或 PSP 重启后由批次标记认出）、`queue_full`（有界队列满，这批没存）、`ingest_error`（写入失败）。后三项之外的丢失会让命中记录缺一段，`GET /api/admin/dest/hits` 的 `dropped_in_range` 给出行数 |
-| `psp_dest_audit_rows_total{outcome=…}` | 命中与用量**行**的去向（单标签：种类与结果合并）：`hits_stored`、`hits_unknown_subject`（账号已删）、`hits_out_of_range`（小时不在 [now−48h, now+1h]）、`hits_over_budget`（该节点本小时 20000 行的预算用完）、`usage_collect_off`（按站用量未提供，直接丢弃） |
+| `psp_dest_audit_rows_total{outcome=…}` | 命中与用量**行**的去向（单标签：种类与结果合并）：`hits_stored`、`hits_unknown_subject`（账号已删）、`hits_out_of_range`（小时不在 [now−48h, now+1h]）、`hits_over_budget`（该节点本小时 20000 行的预算用完）、`hits_egress_unknown`（命中的出口链路不可信，见 transit-lines.md §7）、`usage_collect_off`（按站用量未提供，直接丢弃） |
 | `psp_dest_audit_node_dropped_total` / `psp_dest_audit_node_unmatched_total` | 节点自己报告的：因聚合表满而丢弃的事件数（命中、试运行、用量合计），以及无法解析、无账号或指向未知规则的事件数。持续增长说明节点上命中过多或规则不一致 |
 | `psp_dest_pruned_rows_total{table=…}` | 保留期清理删掉的行：`hits`、`trial`（白名单试运行行）、`batches`、`orphans` |
 | `psp_dest_list_refresh_total{result=…}` | 远程列表与 geosite 更新的刷新结果：`unchanged`、`updated`、`failed`、`broad` |

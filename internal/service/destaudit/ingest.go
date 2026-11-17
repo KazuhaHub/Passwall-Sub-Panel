@@ -28,6 +28,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,7 @@ const (
 	metricsUnknown    = "hits_unknown_subject"
 	metricsOutOfRange = "hits_out_of_range"
 	metricsOverBudget = "hits_over_budget"
+	metricsEgressUnk  = "hits_egress_unknown"
 	metricsUsageOff   = "usage_collect_off"
 
 	metricsUsageStored     = "usage_stored"
@@ -85,6 +87,13 @@ type Store interface {
 	ExistingUserIDs(ctx context.Context, ids []int64) (map[int64]bool, error)
 }
 
+// LinkResolver resolves transit link ids to the two servers they join
+// (sqlstore's transit link repo). A link's pair never changes and links are
+// never deleted, so an answer stays true.
+type LinkResolver interface {
+	LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error)
+}
+
 // Metrics are the counters the service moves. Every field is optional.
 type Metrics struct {
 	// Report counts a report's audit subtree once, by outcome.
@@ -100,6 +109,9 @@ type Metrics struct {
 type Deps struct {
 	Store   Store
 	Metrics Metrics
+	// Links resolves the link a hit says it left through. Nil: no link is
+	// known, so every hit that names one is dropped as egress_unknown.
+	Links LinkResolver
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// HourlyRowBudget overrides the per-agent hourly row budget (0: 20000).
@@ -115,8 +127,11 @@ type Deps struct {
 }
 
 type queued struct {
-	agentID    string
-	panelID    int64
+	agentID string
+	panelID int64
+	// egress: the agent declared protocol.CapabilityAuditHitsEgress, the only
+	// way a hit's Egress is believed.
+	egress     bool
 	obs        *protocol.AuditObservation
 	receivedAt time.Time
 }
@@ -136,6 +151,7 @@ type budget struct {
 type Service struct {
 	store       Store
 	metrics     Metrics
+	links       LinkResolver
 	now         func() time.Time
 	budget      int
 	usageBudget int
@@ -170,7 +186,7 @@ func New(d Deps) *Service {
 		ub = defaultHourlyUsageBudget
 	}
 	return &Service{
-		store: d.Store, metrics: d.Metrics, now: now, budget: b, usageBudget: ub, usageTier: d.UsageTier,
+		store: d.Store, metrics: d.Metrics, links: d.Links, now: now, budget: b, usageBudget: ub, usageTier: d.UsageTier,
 		perAgent: map[string]int{}, lost: map[lostKey]int64{}, budgets: map[string]*budget{},
 		seen: map[string]*list.Element{}, order: list.New(), wake: make(chan struct{}, 1),
 	}
@@ -223,7 +239,12 @@ func (s *Service) forget(key string) {
 // rows twice would double every hit of a flaky link. The id is remembered BEFORE
 // the batch is queued, so a re-send that arrives while the first is still
 // waiting is not queued a second time either.
-func (s *Service) Enqueue(agentID string, panelID int64, o *protocol.AuditObservation) {
+//
+// capabilities are what the agent declared in the report that carried the
+// batch: a hit's egress is only believed from an agent that declared
+// protocol.CapabilityAuditHitsEgress (the protocol leaves that check to the
+// panel).
+func (s *Service) Enqueue(agentID string, panelID int64, capabilities []string, o *protocol.AuditObservation) {
 	if s == nil || s.store == nil || o == nil {
 		return
 	}
@@ -245,7 +266,7 @@ func (s *Service) Enqueue(agentID string, panelID int64, o *protocol.AuditObserv
 		s.signal()
 		return
 	}
-	s.queue = append(s.queue, queued{agentID: agentID, panelID: panelID, obs: o, receivedAt: s.now().UTC()})
+	s.queue = append(s.queue, queued{agentID: agentID, panelID: panelID, egress: slices.Contains(capabilities, protocol.CapabilityAuditHitsEgress), obs: o, receivedAt: s.now().UTC()})
 	s.perAgent[agentID]++
 	s.mu.Unlock()
 	s.report(reportAccepted)
@@ -443,12 +464,12 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 
 	// Per-row dispositions are tallied and reported only once the batch is known
 	// not to be a duplicate, or a re-send would count its rejects twice.
-	var outOfRange, unknown, overBudget int
+	var outOfRange, unknown, overBudget, egressUnknown int
 	lostRows := map[lostKey]int64{}
 	lose := func(hour int64, kind string) { lostRows[lostKey{hour, q.panelID, kind}]++ }
 
-	var ids []int64
-	idSeen := map[int64]bool{}
+	var ids, linkIDs []int64
+	idSeen, linkSeen := map[int64]bool{}, map[int64]bool{}
 	// Per-site usage rows count only on a panel that is on tier B; anywhere else
 	// they are dropped unread and counted (the node may still send a batch that
 	// was in flight when the admin switched the level down).
@@ -473,9 +494,10 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 	}
 	var usageOutOfRange, usageUnknown, usageOverBudget int
 	type prepared struct {
-		hit  protocol.AuditHit
-		user int64
-		ok   bool
+		hit    protocol.AuditHit
+		user   int64
+		egress int64
+		ok     bool
 	}
 	cands := make([]prepared, 0, len(o.Hits))
 	for _, h := range o.Hits {
@@ -494,6 +516,21 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 			if !idSeen[id] && len(ids) < userIDLookupMaxIDs {
 				idSeen[id] = true
 				ids = append(ids, id)
+			}
+		}
+		if h.Egress != "" {
+			// Without the capability the field is not believed (a producer bug the
+			// protocol leaves to the panel); a malformed id cannot name a link.
+			id, err := h.Egress.RowID()
+			if !q.egress || err != nil || id <= 0 {
+				egressUnknown++
+				lose(h.Hour, domain.DestDropEgressUnknown)
+				continue
+			}
+			p.egress = id
+			if !linkSeen[id] {
+				linkSeen[id] = true
+				linkIDs = append(linkIDs, id)
 			}
 		}
 		cands = append(cands, p)
@@ -535,15 +572,33 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 			return
 		}
 	}
+	var links map[int64]domain.TransitLinkEnds
+	if len(linkIDs) > 0 && s.links != nil {
+		var err error
+		if links, err = s.links.LinkEnds(ctx, linkIDs); err != nil {
+			s.failBatch(q, domain.DestDropIngest)
+			log.Warn("destination hit batch not stored: link lookup failed", "agent_id", q.agentID, "rows", len(o.Hits), "err", err)
+			return
+		}
+	}
 	mapped := make([]domain.DestHit, 0, len(cands))
 	for _, c := range cands {
+		if c.egress != 0 {
+			// The link must exist and must start at the reporting server: a hit
+			// naming someone else's link would book another server's exit.
+			if ends, ok := links[c.egress]; !ok || ends.EntryPanelID != q.panelID {
+				egressUnknown++
+				lose(c.hit.Hour, domain.DestDropEgressUnknown)
+				continue
+			}
+		}
 		if c.user != 0 && !existing[c.user] {
 			unknown++
 			continue
 		}
 		h := c.hit
 		mapped = append(mapped, domain.DestHit{
-			HourMS: h.Hour, PanelID: q.panelID, UserID: c.user, Source: sourceOf(h.RuleID), Action: h.Action,
+			HourMS: h.Hour, PanelID: q.panelID, EgressPanelID: egressExit(links, c.egress), UserID: c.user, Source: sourceOf(h.RuleID), Action: h.Action,
 			Dest: h.Dest, Port: int(h.Port), Count: int64(h.Count), FirstMS: h.FirstMS, LastMS: h.LastMS,
 		})
 	}
@@ -610,6 +665,7 @@ func (s *Service) processBatch(ctx context.Context, q queued, reserved, usageRes
 	s.rows(metricsOutOfRange, outOfRange)
 	s.rows(metricsUnknown, unknown)
 	s.rows(metricsOverBudget, overBudget)
+	s.rows(metricsEgressUnk, egressUnknown)
 	if !collectUsage && !tierUnknown {
 		s.rows(metricsUsageOff, len(o.Usage))
 	}
@@ -679,4 +735,12 @@ func redactErr(err error, rows []domain.DestHit) string {
 		}
 	}
 	return msg
+}
+
+// egressExit is the exit server of a resolved link; 0 for a hit with none.
+func egressExit(links map[int64]domain.TransitLinkEnds, link int64) int64 {
+	if link == 0 {
+		return 0
+	}
+	return links[link].ExitPanelID
 }

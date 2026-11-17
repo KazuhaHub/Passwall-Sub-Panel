@@ -124,3 +124,46 @@ func TestConfirmAndCountersStayWithinWhatWasSent(t *testing.T) {
 		t.Fatalf("counters = %v", repo.counters)
 	}
 }
+
+// ---- forward counters, against the real store ----
+
+func TestRecordCountersBooksDeltaWithinAnEpochAndWholeAcrossOne(t *testing.T) {
+	repos := linkStore(t)
+	ctx := t.Context()
+	node := landing(0, 3, "203.0.113.9", 443)
+	node.InboundID = 2
+	node.Relays = []domain.RelayLine{{ID: "managed", Name: "via A", Address: "a.example.com", Port: 20443, Enabled: true, EntryPanelID: 9, Tags: []string{}}}
+	if err := repos.Node.Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	row, err := repos.Transit.Ensure(ctx, node.ID, "managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := New(fakeNodes{}, repos.Transit)
+	key := nodeprotocol.NewForwardKey(row.ID)
+	sent := &nodeprotocol.Transit{Forwards: []nodeprotocol.Forward{{Key: key, Port: 20443, Target: "203.0.113.9", TargetPort: 443, Network: nodeprotocol.ForwardNetworkTCPUDP}}}
+	for _, sample := range []struct {
+		up, down int64
+		epoch    uint64
+		present  bool
+	}{
+		{100, 1000, 1, true},
+		{150, 1500, 1, true}, // +50 / +500
+		{150, 1500, 1, true}, // replay
+		{9999, 9999, 1, false},
+		{20, 30, 2, true}, // new epoch: whole
+	} {
+		counters := []nodeprotocol.ForwardCounters{{Key: key, Present: sample.present, UpBytes: sample.up, DownBytes: sample.down, CounterEpoch: sample.epoch}}
+		if err := service.RecordCounters(ctx, sent, counters); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := repos.Transit.ListByNodes(ctx, []int64{node.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %v, %v", rows, err)
+	}
+	if rows[0].UpBytes != 170 || rows[0].DownBytes != 1530 {
+		t.Fatalf("totals = %d / %d, want 170 / 1530", rows[0].UpBytes, rows[0].DownBytes)
+	}
+}
