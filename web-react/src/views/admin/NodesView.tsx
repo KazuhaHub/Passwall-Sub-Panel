@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
 import { useSearchParams } from 'react-router'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Autocomplete,
   Alert,
   Box,
@@ -36,6 +39,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import CloudSyncIcon from '@mui/icons-material/CloudSync'
 import { useTranslation } from 'react-i18next'
@@ -70,7 +74,6 @@ import {
   getTransitLink,
   updateTransitLink,
   type TransitLink,
-  type TransitLinkProtocol,
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
 import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
@@ -90,6 +93,7 @@ import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
 import LinkQualityCell from './LinkQualityCell'
+import TransitLinkFields from './TransitLinkFields'
 import RoutesSection from './routes/RoutesSection'
 import { draftIssues, inputOf, type DraftRoute } from './routes/routeDraft'
 import ProbeQualityChip from './ProbeQualityChip'
@@ -101,7 +105,7 @@ import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLine
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
 import { useQueryClient } from '@tanstack/react-query'
-import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
+import { randomRealitySite, xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
 /** The managed-tab read always covers the whole set, so its key is a constant. */
 const NODES_PARAMS = { page: 1, page_size: 500 } as const
@@ -500,9 +504,6 @@ export function serverHost(server?: Pick<Server, 'panel_type' | 'url' | 'address
   return hostFromURL(server.url)
 }
 
-// Camouflage sites a REALITY tunnel draws from when the administrator does
-// not name one; the panel picks one at random for a new tunnel too.
-const TUNNEL_REALITY_SITES = ['www.asus.com', 'www.samsung.com', 'www.nvidia.com', 'www.amd.com', 'www.intel.com']
 // How often the node editor asks whether a pending tunnel now runs on both
 // servers.
 const EGRESS_READY_POLL_MS = 5000
@@ -3117,7 +3118,7 @@ export default function NodesView() {
       return
     }
     const landing = writableServers[0]
-    const site = randomSetupSite()
+    const site = randomRealitySite()
     setCreateForm({
       ...EMPTY_INBOUND, panel_id: landing.id, server_address: serverHost(landing), display_name: landing.name,
       region: landing.region ?? '', reality_dest: `${site}:443`, reality_server_names_text: site,
@@ -3137,15 +3138,9 @@ export default function NodesView() {
     void genKeys()
   }
 
-  function randomSetupSite(exclude: string[] = []) {
-    const candidates = TUNNEL_REALITY_SITES.filter(site => !exclude.includes(site))
-    const sites = candidates.length ? candidates : TUNNEL_REALITY_SITES
-    return sites[Math.floor(Math.random() * sites.length)]
-  }
-
   function randomizeLandingSite() {
     setCreateForm(previous => {
-      const site = randomSetupSite(splitList(previous.reality_server_names_text))
+      const site = randomRealitySite(splitList(previous.reality_server_names_text))
       return { ...previous, reality_dest: `${site}:443`, reality_server_names_text: site }
     })
   }
@@ -4002,7 +3997,7 @@ export default function NodesView() {
               servers={relayEntryServers.filter(s => s.id !== createForm.panel_id)} recent={recentSetupEntries}
               canTunnel={servers.find(s => s.id === createForm.panel_id)?.panel_type === 'psp'}
               entries={setupEntries} onChange={setSetupEntries} useDirect={setupDirect} onDirectChange={setSetupDirect}
-              hostOf={serverHost} newKey={newRelayKey} randomSite={randomSetupSite} onBusyChange={setSetupEntriesBusy}
+              hostOf={serverHost} newKey={newRelayKey} randomSite={randomRealitySite} onBusyChange={setSetupEntriesBusy}
               tcpTLS={createForm.vless_network === 'tcp' && createForm.vless_security !== 'none'} />}
             {setupStep === 2 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -4296,42 +4291,18 @@ export default function NodesView() {
                   <Typography sx={{ fontSize: 12, color: md.error }}>{t('admin:nodes.egress.load_failed')}</Typography>
                 )}
                 {editEgress > 0 && linkForm && (
-                  <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.egress.shared_hint')}</Typography>
+                  <>
                     <LinkQualityCell entry={editing.panel_id} exit={editEgress} />
-                    <TextField select size="small" label={t('admin:nodes.egress.protocol')} value={linkForm.protocol}
-                      onChange={e => {
-                        const protocol = e.target.value as TransitLinkProtocol
-                        // A REALITY tunnel needs a camouflage site; keep the
-                        // tunnel's own, or draw one from the defaults.
-                        const site = linkForm.reality_server_name || TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
-                        patchLink(protocol === 'vless_reality'
-                          ? { protocol, reality_server_name: site, reality_target: linkForm.reality_target || `${site}:443` }
-                          : { protocol })
-                      }}>
-                      <MenuItem value="ss2022">Shadowsocks 2022</MenuItem>
-                      <MenuItem value="vless_reality">VLESS + REALITY</MenuItem>
-                    </TextField>
-                    <TextField size="small" label={t('admin:nodes.egress.exit_address')} value={linkForm.exit_address}
-                      onChange={e => patchLink({ exit_address: e.target.value })}
-                      placeholder={linkForm.server_address}
-                      helperText={linkForm.server_address
-                        ? t('admin:nodes.egress.exit_address_default', { address: linkForm.server_address })
-                        : t('admin:nodes.egress.exit_address_unknown')} />
-                    {linkForm.protocol === 'vless_reality' && (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                        <TextField size="small" label={t('admin:nodes.egress.reality_server_name')} value={linkForm.reality_server_name}
-                          onChange={e => {
-                            const name = e.target.value
-                            patchLink({ reality_server_name: name, reality_target: name.trim() ? `${name.trim()}:443` : '' })
-                          }} sx={{ flex: 1 }} />
-                        <Button size="small" sx={{ mt: 0.5 }} onClick={() => {
-                          const site = TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
-                          patchLink({ reality_server_name: site, reality_target: `${site}:443` })
-                        }}>{t('admin:nodes.egress.random_site')}</Button>
-                      </Box>
-                    )}
-                  </Box>
+                    <Accordion key={editEgress} disableGutters elevation={0} variant="outlined">
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="body2">{t('admin:nodes.egress.advanced')}</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary">{t('admin:nodes.egress.shared_hint')}</Typography>
+                        <TransitLinkFields link={linkForm} onChange={patchLink} />
+                      </AccordionDetails>
+                    </Accordion>
+                  </>
                 )}
               </Box>
             )}

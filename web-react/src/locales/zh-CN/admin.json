@@ -2233,12 +2233,14 @@
       "ready": "隧道已在两台服务器生效，节点已发布",
       "pending": "等待隧道在两台服务器生效，生效前不会出现在订阅中",
       "load_failed": "读取隧道设置失败",
+      "advanced": "高级隧道设置",
       "shared_hint": "隧道设置由这两台服务器之间的所有节点共用",
       "protocol": "隧道协议",
       "exit_address": "出口地址",
       "exit_address_default": "留空则使用服务器地址 {{address}}",
       "exit_address_unknown": "出口服务器尚未连接过面板，请填写入口服务器可达的地址",
       "reality_server_name": "伪装站点 (SNI)",
+      "reality_target": "伪装目标（主机:端口）",
       "random_site": "随机"
     },
     "routes": {

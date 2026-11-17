@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, Box, Button, Collapse, MenuItem, TextField, Typography, useTheme } from '@mui/material'
+import { Alert, Box, Button, Collapse, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { getTransitLink, updateTransitLink, type TransitLink, type TransitLinkProtocol } from '@/api/nodes'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import LinkQualityCell from '../LinkQualityCell'
-
-const SITES = ['www.asus.com', 'www.samsung.com', 'www.nvidia.com', 'www.amd.com', 'www.intel.com']
-const randomSite = () => SITES[Math.floor(Math.random() * SITES.length)]
+import TransitLinkFields from '../TransitLinkFields'
 
 /**
  * The tunnel between the node's server and one exit server a route uses, with
@@ -94,29 +92,7 @@ export default function RouteTunnelSettings({ entry, exit, name, defaultExitNode
                 </Typography>
               )}
               <LinkQualityCell entry={entry} exit={exit} />
-              <TextField select size="small" label={t(`${E}protocol`)} value={form.protocol}
-                onChange={e => {
-                  const protocol = e.target.value as TransitLinkProtocol
-                  const site = form.reality_server_name || randomSite()
-                  patch(protocol === 'vless_reality'
-                    ? { protocol, reality_server_name: site, reality_target: form.reality_target || `${site}:443` }
-                    : { protocol })
-                }}>
-                <MenuItem value="ss2022">Shadowsocks 2022</MenuItem>
-                <MenuItem value="vless_reality">VLESS + REALITY</MenuItem>
-              </TextField>
-              <TextField size="small" label={t(`${E}exit_address`)} value={form.exit_address} placeholder={form.server_address}
-                onChange={e => patch({ exit_address: e.target.value })}
-                helperText={form.server_address ? t(`${E}exit_address_default`, { address: form.server_address }) : t(`${E}exit_address_unknown`)} />
-              {form.protocol === 'vless_reality' && (
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                  <TextField size="small" label={t(`${E}reality_server_name`)} value={form.reality_server_name} sx={{ flex: 1 }}
-                    onChange={e => { const n = e.target.value; patch({ reality_server_name: n, reality_target: n.trim() ? `${n.trim()}:443` : '' }) }} />
-                  <Button size="small" sx={{ mt: 0.5 }} onClick={() => { const s = randomSite(); patch({ reality_server_name: s, reality_target: `${s}:443` }) }}>
-                    {t(`${E}random_site`)}
-                  </Button>
-                </Box>
-              )}
+              <TransitLinkFields link={form} onChange={patch} />
               <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <Button size="small" variant="contained" data-testid="route-tunnel-save" disabled={!dirty || busy} onClick={() => void save()}>
                   {t('admin:nodes.routes.tunnel.save')}

@@ -2236,12 +2236,14 @@
       "ready": "The tunnel runs on both servers; the node is published",
       "pending": "Waiting for the tunnel to run on both servers; the node stays out of subscriptions until then",
       "load_failed": "Failed to load the tunnel settings",
+      "advanced": "Advanced tunnel settings",
       "shared_hint": "Tunnel settings are shared by every node between these two servers",
       "protocol": "Tunnel protocol",
       "exit_address": "Exit address",
       "exit_address_default": "Leave empty to use the server address {{address}}",
       "exit_address_unknown": "The exit server has not connected yet; enter an address the entry server can reach",
       "reality_server_name": "Camouflage site (SNI)",
+      "reality_target": "Camouflage target (host:port)",
       "random_site": "Random"
     },
     "routes": {

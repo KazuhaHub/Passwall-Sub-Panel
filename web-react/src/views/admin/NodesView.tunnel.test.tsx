@@ -36,6 +36,35 @@ function setup(relays: unknown[]) {
 beforeEach(() => confirmation.mockReset())
 
 describe('NodesView tunnel lines', () => {
+  it('keeps an explicitly configured camouflage target when editing the SNI', async () => {
+    const landing = { ...node, egress_panel_id: 2 }
+    const link = {
+      exists: true, protocol: 'vless_reality', exit_address: '', reality_server_name: 'original.example',
+      reality_target: 'custom.example:8443', server_address: 'entry.example', up_bytes: 0, down_bytes: 0,
+    }
+    installReads({
+      '/admin/nodes': list([landing]),
+      '/admin/servers': list([landingServer, entry]),
+      '/admin/transit/links/1/2': link,
+    })
+    api.put.mockImplementation(async (url: string, body: object) =>
+      ({ data: { ...(url === '/admin/transit/links/1/2' ? link : landing), ...body } }))
+    mount(<NodesView />)
+    const dialog = await editRow()
+    const advanced = await within(dialog).findByRole('button', { name: 'admin:nodes.egress.advanced' })
+    expect(advanced.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(advanced)
+    fireEvent.change(within(dialog).getByLabelText('admin:nodes.egress.reality_server_name'), { target: { value: 'new.example' } })
+    const target = within(dialog).getByLabelText('admin:nodes.egress.reality_target') as HTMLInputElement
+    expect(target.value).toBe(link.reality_target)
+    fireEvent.change(target, { target: { value: 'other.example:9443' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/transit/links/1/2', expect.objectContaining({
+      reality_server_name: 'new.example',
+      reality_target: 'other.example:9443',
+    })))
+  })
+
   it('round-trips a saved tunnel line without sending the listener or the running flag', async () => {
     setup([tunnelLine, forwardLine])
     mount(<NodesView />)
