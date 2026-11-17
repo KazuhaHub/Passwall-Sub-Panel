@@ -334,6 +334,9 @@ P1 的具体 schema 与 P2 反方向验证的旧 PSP 清单应在实现 PR 中�
 - 2026-11-16：PN `4.2.0-beta.7`（`36d1ce39`，转发链路）与 `4.2.0-beta.8`（`da7f8887`，审计命中出口与 sing-box 转发计量）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`；矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.8`。
   - `contract_source` 移到 `v4.2.0-beta.8`（提交 `da7f8887`）。契约代理仍声明三项目的地能力，且有意不声明任何 `audit.*` 能力（包括新增的 `audit.hits.egress.v1`），`TestLive_RealNodePolicyContract` 的断言不变。
   - 核心目录新增逐资产的 `libc` 字段（`musl`／`glibc`），同一引擎在 linux/amd64 与 linux/arm64 上各可发布一对 glibc／musl 资产；PSP 的 `ports.CoreReleaseAsset` 同步读取该字段，随目录快照一并更新。
+- 2026-11-17：PN `4.2.0-beta.9`（`9356fc4c`，新核心评审与诊断修复）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`；矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.9`。
+  - `contract_source` 移到 `v4.2.0-beta.9`（提交 `9356fc4c`）。契约代理与 beta.8 相同，`TestLive_RealNodePolicyContract` 的断言不变。
+  - 核心目录快照随之更新：新增 Xray `26.11.9`（受限）与 sing-box `1.14.4`（已核验）。
 
 原反方向实测日期记录为 2026-09-19，组合为 PN `v0.0.1-beta11` 与 PSP `v4.0.0-beta.19`；
 原始过程见 [观测进展记录](psp-node-rootless-observability-progress.md)。本文未重新执行该测试。

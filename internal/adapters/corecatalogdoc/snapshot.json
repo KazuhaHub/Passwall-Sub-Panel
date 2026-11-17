@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-16T00:00:00Z",
+  "updated_at": "2026-11-17T00:00:00Z",
   "releases": [
     {
       "engine": "xray",
@@ -310,6 +310,128 @@
       ]
     },
     {
+      "engine": "xray",
+      "version": "26.11.9",
+      "tier": "restricted",
+      "prerelease": false,
+      "selectable": true,
+      "requires_confirmation": true,
+      "published_at": "2026-11-09T05:31:16Z",
+      "source_url": "https://github.com/XTLS/Xray-core/releases/tag/v26.11.9",
+      "summary": {
+        "en": "Restricted REALITY compatibility, unchanged from 26.9.9: Mihomo requires chrome plus ML-KEM opt-in; sing-box 1.14.0 and 1.14.4 are unsupported. Carries the upstream CA and MPTCP security fixes from 26.10.21 and 26.10.31.",
+        "zh_cn": "REALITY 兼容受限，与 26.9.9 相同：Mihomo 必须使用 chrome 并开启 ML-KEM；sing-box 1.14.0 与 1.14.4 不兼容。包含上游 26.10.21 与 26.10.31 的 CA 与 MPTCP 安全修复。"
+      },
+      "reality": {
+        "xray": "supported",
+        "mihomo": "conditional",
+        "sing_box": "unsupported",
+        "uri_list": "unverified",
+        "mihomo_fingerprint": "chrome",
+        "mihomo_x25519mlkem768": true
+      },
+      "evidence": {
+        "source_audited": true,
+        "config_tested": true,
+        "handshake_tested": true,
+        "verified_at": "2026-11-17T00:00:00Z",
+        "handshakes": [
+          {
+            "client": "xray",
+            "version": "26.6.27",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; hermetic HTTP transfer",
+            "result": "pass"
+          },
+          {
+            "client": "xray",
+            "version": "26.11.9",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; hermetic HTTP transfer",
+            "result": "pass"
+          },
+          {
+            "client": "mihomo",
+            "version": "1.19.30",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; chrome; support-x25519mlkem768=true; hermetic HTTP transfer",
+            "result": "pass"
+          },
+          {
+            "client": "mihomo",
+            "version": "1.19.30",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; chrome; hermetic HTTP transfer",
+            "result": "expected_failure"
+          },
+          {
+            "client": "sing_box",
+            "version": "1.14.0",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; uTLS chrome; hermetic HTTP transfer",
+            "result": "expected_failure"
+          },
+          {
+            "client": "sing_box",
+            "version": "1.14.4",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node Xray 26.11.9 VLESS/TCP/REALITY/XTLS Vision; uTLS chrome; hermetic HTTP transfer",
+            "result": "expected_failure"
+          }
+        ]
+      },
+      "assets": [
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-64.zip",
+          "sha256": "b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82",
+          "archive": "zip",
+          "binary": "xray"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-arm64-v8a.zip",
+          "sha256": "64ed6858982a7f5eb85d88b811089063bd4f17561f4c8f44e0f1dc8e6f6430be",
+          "archive": "zip",
+          "binary": "xray"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-macos-64.zip",
+          "sha256": "488963e676e06f5e48547f9dd38116aaca8de4234959b4272ae8f284e658dfd0",
+          "archive": "zip",
+          "binary": "xray"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-macos-arm64-v8a.zip",
+          "sha256": "233f0c66681cd0726f81a6b2b6ed6a5710869e312047b522e46ed53035bebd26",
+          "archive": "zip",
+          "binary": "xray"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-windows-64.zip",
+          "sha256": "1262522266337b824f07beb8e1375786b437683b3890105469088f8e17e0a69d",
+          "archive": "zip",
+          "binary": "xray.exe"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64",
+          "url": "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-windows-arm64-v8a.zip",
+          "sha256": "9fdd48ff890e54ffdc37f92df9037c940fe4d4f914755b70cc644b97e9678a83",
+          "archive": "zip",
+          "binary": "xray.exe"
+        }
+      ]
+    },
+    {
       "engine": "sing-box",
       "version": "1.14.0",
       "tier": "recommended",
@@ -425,6 +547,125 @@
           "sha256": "f58dff882b2feb022da8de41943804b38681ecab5e1f490f23602fc37e9d5dd4",
           "archive": "zip",
           "binary": "sing-box-1.14.0-windows-arm64/sing-box.exe"
+        }
+      ]
+    },
+    {
+      "engine": "sing-box",
+      "version": "1.14.4",
+      "tier": "verified",
+      "prerelease": false,
+      "selectable": true,
+      "requires_confirmation": false,
+      "published_at": "2026-10-24T01:04:25Z",
+      "source_url": "https://github.com/SagerNet/sing-box/releases/tag/v1.14.4",
+      "summary": {
+        "en": "Verified sing-box patch release: the 1.14.0 compiler, policy, daemon API and link artifacts pass unchanged; Xray, Mihomo and sing-box REALITY handshakes pass.",
+        "zh_cn": "已核验的 sing-box 补丁版本：1.14.0 的编译、策略、守护进程 API 与链路产物均原样通过；Xray、Mihomo 和 sing-box REALITY 握手均通过。"
+      },
+      "reality": {
+        "xray": "supported",
+        "mihomo": "supported",
+        "sing_box": "supported",
+        "uri_list": "unverified"
+      },
+      "evidence": {
+        "source_audited": true,
+        "config_tested": true,
+        "handshake_tested": true,
+        "verified_at": "2026-11-17T00:00:00Z",
+        "handshakes": [
+          {
+            "client": "xray",
+            "version": "26.6.27",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node sing-box 1.14.4 VLESS/TCP/REALITY/XTLS Vision; hermetic HTTP transfer",
+            "result": "pass"
+          },
+          {
+            "client": "mihomo",
+            "version": "1.19.30",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node sing-box 1.14.4 VLESS/TCP/REALITY/XTLS Vision; chrome; hermetic HTTP transfer",
+            "result": "pass"
+          },
+          {
+            "client": "sing_box",
+            "version": "1.14.4",
+            "platform": "linux/amd64",
+            "profile": "Passwall-Node sing-box 1.14.4 VLESS/TCP/REALITY/XTLS Vision; uTLS chrome; hermetic HTTP transfer",
+            "result": "pass"
+          }
+        ]
+      },
+      "assets": [
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz",
+          "sha256": "699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-linux-amd64/sing-box",
+          "libc": "glibc"
+        },
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64-musl.tar.gz",
+          "sha256": "8f7c5f0651238850d96a0e488e5473cd77ec1a0098f63942e943f475a12057ca",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-linux-amd64-musl/sing-box",
+          "libc": "musl"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-arm64.tar.gz",
+          "sha256": "436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-linux-arm64/sing-box",
+          "libc": "glibc"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-arm64-musl.tar.gz",
+          "sha256": "b95e25f921dc5e17a4cf13327243d1177642c7e35425bf5372862c477c359f56",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-linux-arm64-musl/sing-box",
+          "libc": "musl"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-darwin-amd64.tar.gz",
+          "sha256": "eae86b9b033bba50b7c44ab719e4bfac0aca05efd28483390ed3aa510f32db25",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-darwin-amd64/sing-box"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-darwin-arm64.tar.gz",
+          "sha256": "0d8c7f5ed5d587b0f1a5e9772a708ec3bfa4ac4c9329604b01d8d9c2ba406838",
+          "archive": "tar.gz",
+          "binary": "sing-box-1.14.4-darwin-arm64/sing-box"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip",
+          "sha256": "99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df",
+          "archive": "zip",
+          "binary": "sing-box-1.14.4-windows-amd64/sing-box.exe"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64",
+          "url": "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-arm64.zip",
+          "sha256": "8cd0a4d0cd8cd480be5731ac31f17038969a42d12add9feb6e031fd43d85bbae",
+          "archive": "zip",
+          "binary": "sing-box-1.14.4-windows-arm64/sing-box.exe"
         }
       ]
     }
