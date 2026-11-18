@@ -220,3 +220,31 @@ func TestRefusedSourcesAreKeptFromFullReportsOfOwnLandingsOnly(t *testing.T) {
 		t.Fatalf("hits from an agent without the capability were kept: %+v", got)
 	}
 }
+
+func TestWithheldRelayLineIsReportedAsAnIssue(t *testing.T) {
+	f, _ := guardFixture(t)
+	node := f.storedNode(t)
+	two := 2000
+	node.Relays = []domain.RelayLine{{ID: "dear", Name: "dear", Address: "x.example", Port: 443, Enabled: true, TrafficFactorMilli: &two}}
+	if err := f.repos.Node.UpdateMetadata(t.Context(), node); err != nil {
+		t.Fatal(err)
+	}
+	// The landing's server cannot guard: the line is withheld and an issue says so.
+	guardSync(t, f)
+	issues, _, err := f.repos.NodeAgentIssue.List(t.Context(), ports.NodeAgentIssueFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *domain.NodeAgentIssue
+	for _, issue := range issues {
+		if issue.Code == IssueSourceGuardWithheld {
+			found = issue
+		}
+	}
+	if found == nil || !strings.Contains(found.Detail, `"dear"`) || found.Key != string(nodeprotocol.NewListenerKey(node.ID)) {
+		t.Fatalf("issues = %+v", issues)
+	}
+	if got := f.storedNode(t).Relays[0]; got.Publishable() || got.SourceWithheld != domain.SourceWithheldFactor {
+		t.Fatalf("line = %+v", got)
+	}
+}

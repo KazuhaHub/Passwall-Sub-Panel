@@ -136,6 +136,12 @@ const IssueTunnelFactorStale = "tunnel_factor_stale"
 // or adopted from a panel). The lines are withheld from subscriptions.
 const IssueCDNLandingUnfit = "cdn_landing_unfit"
 
+// IssueSourceGuardWithheld is the issue recorded for a relay line that is left
+// out of subscriptions because its landing cannot tell it from the direct line
+// (its traffic factor differs and the landing cannot check where connections
+// come from), or because it can and the line's source addresses are not known.
+const IssueSourceGuardWithheld = "source_guard_withheld"
+
 const rosterIdentityWarningThreshold = 20_000
 
 func rosterCapacityIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
@@ -179,6 +185,29 @@ func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIss
 				Detail: fmt.Sprintf("CDN line %s of %s is withheld from subscriptions: %s", strings.Join(lines, ", "), node.DisplayName, problem),
 			})
 		}
+	}
+	return out
+}
+
+// sourceGuardIssues names the relay lines the source guard withholds, with the
+// reason.
+func sourceGuardIssues(withheld []sourceguard.Withheld) []domain.NodeAgentIssue {
+	var out []domain.NodeAgentIssue
+	for _, w := range withheld {
+		var detail string
+		switch w.Reason {
+		case domain.SourceWithheldFactor:
+			detail = fmt.Sprintf("line %q of %s costs %d where the direct line costs %d, and this server cannot check where connections come from, so the line is withheld from subscriptions. Give the line the direct line's factor, or use a Passwall Node that supports source checks.",
+				w.Line.Label(), w.Node.DisplayName, w.Line.EffectiveTrafficFactor(), w.Node.EffectiveTrafficFactor())
+		case domain.SourceWithheldUnknown:
+			detail = fmt.Sprintf("line %q of %s is withheld from subscriptions: the addresses its traffic reaches this server from are not known yet. Add them to the line's source addresses.",
+				w.Line.Label(), w.Node.DisplayName)
+		default:
+			continue
+		}
+		out = append(out, domain.NodeAgentIssue{
+			Code: IssueSourceGuardWithheld, Key: string(nodeprotocol.NewListenerKey(w.Node.ID)), Detail: detail,
+		})
 	}
 	return out
 }
@@ -433,6 +462,7 @@ type RoutePlanner interface {
 // server (service/sourceguard.Planner).
 type SourceGuardPlanner interface {
 	PlanFor(ctx context.Context, capabilities []string, nodes []*domain.Node) (sourceguard.Plan, error)
+	WithheldLines(ctx context.Context, capabilities []string, nodes []*domain.Node) ([]sourceguard.Withheld, error)
 }
 
 // SetSourceGuard binds the source guard planner. Left unbound, no config
@@ -990,6 +1020,11 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 		}
 		transitBody.SourceSets = guardPlan.Sets
+		withheld, err := s.guard.WithheldLines(ctx, report.Capabilities, snapshot.Nodes)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		policyIssues = append(policyIssues, sourceGuardIssues(withheld)...)
 	}
 	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 || len(transitBody.SourceSets) > 0 {
 		configBody.Transit = &transitBody
@@ -1364,6 +1399,10 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
 		return fmt.Errorf("nodesync: record protocol observation: %w", err)
 	}
+	// What the source guard publishes depends on the server's addresses and on
+	// whether its agent can guard, so a change of either refreshes subscriptions.
+	guardMoved := slices.Contains(agent.ObservedCapabilities, nodeprotocol.CapabilitySourceGuard) !=
+		slices.Contains(report.Capabilities, nodeprotocol.CapabilitySourceGuard)
 	if recorder, ok := s.agents.(interface {
 		RecordObservedAddress(ctx context.Context, agentID, address string) error
 	}); ok {
@@ -1371,6 +1410,7 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 			if err := recorder.RecordObservedAddress(ctx, agent.AgentID, address); err != nil {
 				return fmt.Errorf("nodesync: record server address: %w", err)
 			}
+			guardMoved = true
 		}
 	}
 	// The server's own public addresses are what a landing accepts a managed
@@ -1385,7 +1425,11 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 			if err := recorder.RecordInterfaceAddresses(ctx, agent.AgentID, report.InterfaceAddresses); err != nil {
 				return fmt.Errorf("nodesync: record interface addresses: %w", err)
 			}
+			guardMoved = true
 		}
+	}
+	if guardMoved && s.invalidateRender != nil {
+		s.invalidateRender()
 	}
 	if s.allowlistResync != nil && allowlistCapabilitiesChanged(agent.ObservedCapabilities, report.Capabilities) {
 		// A node that newly declares the capabilities (a fresh install, an

@@ -185,3 +185,47 @@ func (p *Planner) PlanFor(ctx context.Context, capabilities []string, nodes []*d
 	}
 	return Compute(nodes, in), nil
 }
+
+// Withheld is a relay line the source guard keeps out of subscriptions.
+type Withheld struct {
+	Node   *domain.Node
+	Line   domain.RelayLine
+	Reason string
+}
+
+// WithheldLines lists the relay lines of the nodes a landing server must not
+// publish (domain.Node.SourceGuardWithheld), given what its agent declared.
+func (p *Planner) WithheldLines(ctx context.Context, capabilities []string, nodes []*domain.Node) ([]Withheld, error) {
+	canGuard := slices.Contains(capabilities, nodeprotocol.CapabilitySourceGuard)
+	// A line the guard cannot touch costs no lookup: nothing to read unless a line
+	// differs from the direct one or is a managed forward.
+	needed := false
+	for _, node := range nodes {
+		if node == nil || node.IsTunnelChild() {
+			continue
+		}
+		for _, line := range node.Relays {
+			needed = needed || (line.Guarded() && (line.Managed() || line.EffectiveTrafficFactor() != node.EffectiveTrafficFactor()))
+		}
+	}
+	if !needed {
+		return nil, nil
+	}
+	in, err := p.Inputs(ctx, nodes)
+	if err != nil {
+		return nil, err
+	}
+	var out []Withheld
+	for _, node := range nodes {
+		if node == nil || node.IsTunnelChild() {
+			continue
+		}
+		for _, line := range node.Relays {
+			entryKnown := line.Managed() && len(in.EntryAddresses[line.EntryPanelID]) > 0
+			if reason := node.SourceGuardWithheld(line, canGuard, entryKnown); reason != "" {
+				out = append(out, Withheld{Node: node, Line: line, Reason: reason})
+			}
+		}
+	}
+	return out, nil
+}

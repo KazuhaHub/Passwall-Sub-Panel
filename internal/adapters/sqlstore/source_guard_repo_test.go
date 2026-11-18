@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +79,64 @@ func TestSourceGuardRepoHitsAreReplacedPrunedAndCleared(t *testing.T) {
 	}
 	if got, _ = repo.ListHits(ctx, []int64{1}); len(got) != 0 {
 		t.Fatalf("not cleared: %+v", got)
+	}
+}
+
+// A landing publishes a relay line only when the source guard allows it: a
+// landing that cannot guard keeps only lines that cost what the direct line
+// does, a landing that can guard needs a managed line's entry to be known.
+func TestRelayLinesAreWithheldBySourceGuardState(t *testing.T) {
+	nodes, ctx := newNodeTestRepo(t)
+	agents := &nodeAgentRepo{db: nodes.db}
+	two := 2000
+	mk := func(panel int64, inbound int, lines ...domain.RelayLine) *domain.Node {
+		n := &domain.Node{PanelID: panel, InboundID: inbound, DisplayName: "n", ServerAddress: "land.example.com",
+			DesiredProtocol: "vless", DesiredPort: 443, Region: "JP", Enabled: true, Relays: lines}
+		if err := nodes.Create(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+		got, err := nodes.GetByID(ctx, n.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	ext := domain.RelayLine{ID: "ext", Name: "e", Address: "e.example", Port: 1, Enabled: true, Tags: []string{}, TrafficFactorMilli: &two}
+	same := domain.RelayLine{ID: "same", Name: "s", Address: "s.example", Port: 2, Enabled: true, Tags: []string{}}
+	extWith := ext
+	extWith.ID, extWith.SourceCIDRs = "ext2", []string{"192.0.2.0/24"}
+	fwd := domain.RelayLine{ID: "fwd", Name: "f", Address: "f.example", Port: 3, Enabled: true, Tags: []string{}, EntryPanelID: 21}
+
+	// No agent: it cannot guard.
+	got := mk(20, 1, ext, same)
+	if got.Relays[0].SourceWithheld != domain.SourceWithheldFactor || got.Relays[0].Publishable() || got.Relays[1].SourceWithheld != "" {
+		t.Fatalf("cannot guard: %+v", got.Relays)
+	}
+
+	// A capable landing: the external line needs addresses, the managed line an entry.
+	if err := agents.Create(ctx, &domain.NodeAgent{AgentID: "agt_land", PanelID: 30, Epoch: 1, CredentialSHA256: strings.Repeat("a", 64), DesiredCoreEngine: domain.NodeCoreXray}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.UpdateProtocolObservation(ctx, "agt_land", 1, []string{"transit.source_guard.v1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.Create(ctx, &domain.NodeAgent{AgentID: "agt_entry", PanelID: 21, Epoch: 1, CredentialSHA256: strings.Repeat("b", 64), DesiredCoreEngine: domain.NodeCoreXray}); err != nil {
+		t.Fatal(err)
+	}
+	got = mk(30, 2, ext, extWith, same, fwd)
+	reasons := map[string]string{}
+	for _, line := range got.Relays {
+		reasons[line.ID] = line.SourceWithheld
+	}
+	want := map[string]string{"ext": domain.SourceWithheldUnknown, "ext2": "", "same": "", "fwd": domain.SourceWithheldUnknown}
+	if !reflect.DeepEqual(reasons, want) {
+		t.Fatalf("capable, entry unknown: %v", reasons)
+	}
+	if err := agents.RecordObservedAddress(ctx, "agt_entry", "93.184.216.34"); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := nodes.GetByID(ctx, got.ID)
+	if again.Relays[3].SourceWithheld != "" {
+		t.Fatalf("the entry's address is known now: %+v", again.Relays[3])
 	}
 }

@@ -227,7 +227,63 @@ func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) 
 			}
 		}
 	}
+	if err := attachSourceGuardState(ctx, db, nodes); err != nil {
+		return err
+	}
 	return attachProbeState(ctx, db, nodes, forwardIDs)
+}
+
+// attachSourceGuardState fills RelayLine.SourceWithheld (ADR 0044): the lines a
+// landing must not publish because it cannot tell them from the direct line, or
+// because it guards and the line's source is not known yet. Only a node with a
+// line that can be affected costs the agent read.
+func attachSourceGuardState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	panels := map[int64]bool{}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		for i := range node.Relays {
+			node.Relays[i].SourceWithheld = ""
+			line := node.Relays[i]
+			if !line.Guarded() {
+				continue
+			}
+			if line.Managed() || line.EffectiveTrafficFactor() != node.EffectiveTrafficFactor() {
+				panels[node.PanelID] = true
+				if line.Managed() {
+					panels[line.EntryPanelID] = true
+				}
+			}
+		}
+	}
+	if len(panels) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(panels))
+	for id := range panels {
+		ids = append(ids, id)
+	}
+	var rows []nodeAgentRow
+	if err := db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id IN ?", ids).Find(&rows).Error; err != nil {
+		return fmt.Errorf("load source guard state: %w", err)
+	}
+	agents := make(map[int64]*domain.NodeAgent, len(rows))
+	for i := range rows {
+		agents[rows[i].PanelID] = rowToNodeAgent(&rows[i])
+	}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		canGuard := agents[node.PanelID].CanSourceGuard()
+		for i := range node.Relays {
+			line := node.Relays[i]
+			entryKnown := line.Managed() && len(agents[line.EntryPanelID].SourceAddresses()) > 0
+			node.Relays[i].SourceWithheld = node.SourceGuardWithheld(line, canGuard, entryKnown)
+		}
+	}
+	return nil
 }
 
 // tunnelNodes are the listener nodes of the tunnel lines of a set of loaded
