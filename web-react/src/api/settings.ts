@@ -289,6 +289,9 @@ export interface UISettings {
    *  name. Only one is ever active (no merging → no conflict). */
   geo_ip_db_file: string
   geo_ip_auto_update: boolean
+  /** Fetch Cloudflare's address ranges once a day for CDN lines' source guard
+   *  (ADR 0044). Absent (an older server) reads as on. */
+  cloudflare_ips_auto_fetch?: boolean
   /** Updater source. maxmind (GeoLite2-City, recommended) / dbip / ipinfo / custom. */
   geo_ip_update_source: 'maxmind' | 'dbip' | 'ipinfo' | 'custom' | ''
   geo_ip_update_url: string

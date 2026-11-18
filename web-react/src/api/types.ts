@@ -244,6 +244,10 @@ export interface RelayLine {
   probe_withheld?: boolean
   /** This line's traffic multiplier in thousandths. Responses always carry it; send it back unchanged to keep it. A new line defaults to 1000. */
   traffic_factor_milli?: number
+  /** Source addresses (CIDRs) the admin adds to this line's source set: where its traffic reaches the landing from (ADR 0044). Omitted keeps the saved list, [] clears it. Not for tunnel lines. */
+  source_cidrs?: string[]
+  /** Response-only: why the source guard keeps the line out of subscriptions. */
+  source_withheld?: string
   /** 'tunnel': the entry ends the user's connection with its own listener. 'cdn': a CDN in front of the landing (no entry server). Absent is a direct forward. For a saved line the mode only changes through the mode endpoint; a CDN line's never changes. */
   mode?: LineMode
   /** A CDN line's CDN domain; address, port, SNI and Host default to it when left empty. */

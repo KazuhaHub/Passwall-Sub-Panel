@@ -44,7 +44,11 @@
     "server": "Server error — please try again later.",
     "rate_limited": "Too many requests; please wait a moment and try again.",
     "copy_failed": "Copy failed; please select the text and press Ctrl+C.",
-    "copied": "Copied to clipboard."
+    "copied": "Copied to clipboard.",
+    "codes": {
+      "source_guard_factor_mismatch": "Line \"{{line}}\" of {{node}} costs {{line_factor}} but the direct line costs {{direct_factor}}. This node's server cannot check where connections come from, so every line of the node must cost the same. Use a Passwall Node that supports source checks to price lines apart.",
+      "source_guard_needs_cidrs": "External line \"{{line}}\" of {{node}} costs {{line_factor}} but the direct line costs {{direct_factor}}. List the addresses its traffic comes from in the line's source addresses, so the two can be told apart."
+    }
   },
   "auth": {
     "logout": "Sign out"

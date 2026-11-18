@@ -292,3 +292,16 @@ describe('read failure', () => {
     await waitFor(() => expect(screen.getByText('admin:settings.saml_load_failed')).toBeTruthy())
   })
 })
+
+describe('Cloudflare auto-fetch setting', () => {
+  it('reads as on when the server does not say, and sends the switch the admin sets', async () => {
+    await mountSettings()
+    const toggle = screen.getByRole('switch', { name: 'admin:settings.general.cloudflare_auto_fetch' }) as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
+    fireEvent.click(toggle)
+    save()
+    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+    expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({ cloudflare_ips_auto_fetch: false }))
+  })
+})
