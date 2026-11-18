@@ -775,6 +775,110 @@ type LinkView struct {
 	ServerAddress string
 	UpBytes       int64
 	DownBytes     int64
+	// RealityRefused says REALITY cannot be chosen for this pair: the entry runs
+	// sing-box and the exit Xray.
+	RealityRefused bool
+}
+
+const (
+	// CodeLinkRealityEngines refuses a REALITY tunnel from a sing-box entry to an
+	// Xray exit.
+	CodeLinkRealityEngines = "link_reality_engines"
+	// CodeEngineRealityLinks refuses an engine switch that would leave a REALITY
+	// tunnel between a sing-box entry and an Xray exit.
+	CodeEngineRealityLinks = "engine_reality_links"
+)
+
+// realityRefused is true for a sing-box entry and an Xray exit: a sing-box
+// REALITY client cannot connect to an Xray 26.9 or later REALITY server (the
+// core catalog records the handshake as an expected failure), so the tunnel
+// would simply be down. An Xray client works against a sing-box server.
+func realityRefused(entry, exit domain.NodeCoreEngine) bool {
+	return entry == domain.NodeCoreSingBox && exit == domain.NodeCoreXray
+}
+
+// desiredEngines maps each server that has an agent to the engine it is meant
+// to run; a server PSP has no agent for is absent (unknown).
+func (s *Service) desiredEngines(ctx context.Context, panelIDs ...int64) (map[int64]domain.NodeCoreEngine, error) {
+	out := map[int64]domain.NodeCoreEngine{}
+	if s.agents == nil {
+		return out, nil
+	}
+	agents, err := s.agents.ListByPanelIDs(ctx, panelIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, agent := range agents {
+		if agent != nil {
+			out[agent.PanelID] = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
+		}
+	}
+	return out, nil
+}
+
+// pairRealityRefused reports whether REALITY is refused between two servers;
+// unknown engines do not refuse.
+func (s *Service) pairRealityRefused(ctx context.Context, entry, exit int64) (bool, error) {
+	engines, err := s.desiredEngines(ctx, entry, exit)
+	if err != nil {
+		return false, err
+	}
+	entryEngine, okEntry := engines[entry]
+	exitEngine, okExit := engines[exit]
+	return okEntry && okExit && realityRefused(entryEngine, exitEngine), nil
+}
+
+// EngineSwitchRefusal refuses switching a server's desired engine when that
+// would make it one end of a REALITY tunnel between a sing-box entry and an Xray
+// exit. It is a refusal, not a confirmation: the administrator changes the
+// listed tunnels to Shadowsocks 2022 first, so no tunnel's protocol changes
+// without being chosen.
+func (s *Service) EngineSwitchRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	if s.links == nil {
+		return nil
+	}
+	to = domain.NormalizeNodeCoreEngine(to)
+	links, err := s.links.ListLinks(ctx)
+	if err != nil {
+		return err
+	}
+	var affected []domain.TransitLink
+	for _, link := range links {
+		if link.Protocol != nodeprotocol.LinkProtocolVLESSReality || (link.EntryPanelID != panelID && link.ExitPanelID != panelID) {
+			continue
+		}
+		other := link.ExitPanelID
+		if link.ExitPanelID == panelID {
+			other = link.EntryPanelID
+		}
+		engines, err := s.desiredEngines(ctx, other)
+		if err != nil {
+			return err
+		}
+		otherEngine, known := engines[other]
+		if !known {
+			continue
+		}
+		entryEngine, exitEngine := to, otherEngine
+		if link.ExitPanelID == panelID {
+			entryEngine, exitEngine = otherEngine, to
+		}
+		if realityRefused(entryEngine, exitEngine) {
+			affected = append(affected, link)
+		}
+	}
+	if len(affected) == 0 {
+		return nil
+	}
+	labels := make([]string, len(affected))
+	for i, link := range affected {
+		labels[i] = fmt.Sprintf("#%d -> #%d", link.EntryPanelID, link.ExitPanelID)
+	}
+	list := strings.Join(labels, ", ")
+	return &domain.CodedValidationError{
+		Code: CodeEngineRealityLinks, Params: map[string]string{"links": list},
+		Msg: fmt.Sprintf("this change would leave REALITY tunnels (entry -> exit server) from a sing-box entry to an Xray exit, which cannot connect: %s; change those tunnels to Shadowsocks 2022 first", list),
+	}
 }
 
 // Link returns the link from entry to exit as the administrator sees it.
@@ -786,9 +890,13 @@ func (s *Service) Link(ctx context.Context, entry, exit int64) (LinkView, error)
 	if err != nil {
 		return LinkView{}, err
 	}
+	refused, err := s.pairRealityRefused(ctx, entry, exit)
+	if err != nil {
+		return LinkView{}, err
+	}
 	link, err := s.links.GetLink(ctx, entry, exit)
 	if errors.Is(err, domain.ErrNotFound) {
-		return LinkView{Protocol: nodeprotocol.LinkProtocolSS2022, ServerAddress: address}, nil
+		return LinkView{Protocol: nodeprotocol.LinkProtocolSS2022, ServerAddress: address, RealityRefused: refused}, nil
 	}
 	if err != nil {
 		return LinkView{}, err
@@ -803,7 +911,7 @@ func (s *Service) Link(ctx context.Context, entry, exit int64) (LinkView, error)
 	return LinkView{
 		Exists: true, Protocol: link.Protocol, ExitAddress: link.ExitAddress,
 		RealityServerName: link.RealityServerName, RealityTarget: link.RealityTarget,
-		Port: link.Port, ServerAddress: address, UpBytes: up, DownBytes: down,
+		Port: link.Port, ServerAddress: address, UpBytes: up, DownBytes: down, RealityRefused: refused,
 	}, nil
 }
 
@@ -816,6 +924,18 @@ func (s *Service) UpdateLink(ctx context.Context, entry, exit int64, settings do
 	}
 	if entry <= 0 || exit <= 0 || entry == exit {
 		return LinkView{}, fmt.Errorf("%w: a tunnel joins two different servers", domain.ErrValidation)
+	}
+	if settings.Protocol == nodeprotocol.LinkProtocolVLESSReality {
+		refused, err := s.pairRealityRefused(ctx, entry, exit)
+		if err != nil {
+			return LinkView{}, err
+		}
+		if refused {
+			return LinkView{}, &domain.CodedValidationError{
+				Code: CodeLinkRealityEngines, Params: map[string]string{"entry": fmt.Sprint(entry), "exit": fmt.Sprint(exit)},
+				Msg: "a sing-box entry cannot use a REALITY tunnel to an Xray exit; use Shadowsocks 2022",
+			}
+		}
 	}
 	defer s.lockPair(entry, exit)()
 	nodes, err := s.nodes.List(ctx)

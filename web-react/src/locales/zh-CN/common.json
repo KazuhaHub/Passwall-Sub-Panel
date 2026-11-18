@@ -47,7 +47,9 @@
     "copied": "已复制到剪贴板",
     "codes": {
       "source_guard_factor_mismatch": "{{node}} 的线路「{{line}}」倍率为 {{line_factor}}，直连倍率为 {{direct_factor}}。这个节点的服务器无法检查连接来源，所以节点上所有线路的倍率必须相同。需要按线路分别定价，请使用支持来源校验的 Passwall Node。",
-      "source_guard_needs_cidrs": "{{node}} 的外部中转线路「{{line}}」倍率为 {{line_factor}}，直连倍率为 {{direct_factor}}。请在线路的来源地址里填写它的流量来自哪些地址，这样才能把两者区分开。"
+      "source_guard_needs_cidrs": "{{node}} 的外部中转线路「{{line}}」倍率为 {{line_factor}}，直连倍率为 {{direct_factor}}。请在线路的来源地址里填写它的流量来自哪些地址，这样才能把两者区分开。",
+      "link_reality_engines": "sing-box 入口不能通过 REALITY 隧道连接 Xray 出口，请改用 Shadowsocks 2022。",
+      "engine_reality_links": "此更改会使以下从 sing-box 入口到 Xray 出口的 REALITY 隧道无法连接：{{links}}。请先把这些隧道改为 Shadowsocks 2022。"
     }
   },
   "auth": {

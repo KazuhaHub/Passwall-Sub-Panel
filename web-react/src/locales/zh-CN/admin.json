@@ -2267,6 +2267,7 @@
       "advanced": "高级隧道设置",
       "shared_hint": "隧道设置由这两台服务器之间的所有节点共用",
       "protocol": "隧道协议",
+      "reality_refused": "无法使用 REALITY：sing-box 入口无法连接 Xray 出口，请使用 Shadowsocks 2022。",
       "exit_address": "出口地址",
       "exit_address_default": "留空则使用服务器地址 {{address}}",
       "exit_address_unknown": "出口服务器尚未连接过面板，请填写入口服务器可达的地址",

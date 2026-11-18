@@ -18,9 +18,10 @@ export default function TransitLinkFields({ link, onChange }: {
           onChange(protocol === 'vless_reality'
             ? { protocol, reality_server_name: site, reality_target: link.reality_target || `${site}:443` }
             : { protocol })
-        }}>
+        }}
+        helperText={link.reality_refused ? t(`${E}reality_refused`) : undefined}>
         <MenuItem value="ss2022">Shadowsocks 2022</MenuItem>
-        <MenuItem value="vless_reality">VLESS + REALITY</MenuItem>
+        <MenuItem value="vless_reality" disabled={link.reality_refused && link.protocol !== 'vless_reality'}>VLESS + REALITY</MenuItem>
       </TextField>
       <TextField size="small" label={t(`${E}exit_address`)} value={link.exit_address} placeholder={link.server_address}
         onChange={e => onChange({ exit_address: e.target.value })}

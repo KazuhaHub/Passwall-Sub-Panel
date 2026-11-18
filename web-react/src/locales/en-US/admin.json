@@ -2270,6 +2270,7 @@
       "advanced": "Advanced tunnel settings",
       "shared_hint": "Tunnel settings are shared by every node between these two servers",
       "protocol": "Tunnel protocol",
+      "reality_refused": "REALITY is unavailable: a sing-box entry cannot connect to an Xray exit. Use Shadowsocks 2022.",
       "exit_address": "Exit address",
       "exit_address_default": "Leave empty to use the server address {{address}}",
       "exit_address_unknown": "The exit server has not connected yet; enter an address the entry server can reach",

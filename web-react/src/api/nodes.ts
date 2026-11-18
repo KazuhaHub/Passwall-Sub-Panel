@@ -69,6 +69,8 @@ export interface TransitLink {
   server_address: string
   up_bytes: number
   down_bytes: number
+  /** True when REALITY cannot be used: the entry runs sing-box and the exit Xray. */
+  reality_refused?: boolean
 }
 
 export interface UpdateTransitLinkRequest {

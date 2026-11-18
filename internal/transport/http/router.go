@@ -880,6 +880,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithCoreCatalog(d.CoreCatalog).
 			WithServerMigrationPreviewer(d.ServerMigration).
 			WithFronts(d.Repos.TransitFronts, frontsForServers)
+		if d.Repos.TransitLinks != nil {
+			servers.WithEngineLinkGuard(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))
+		}
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)

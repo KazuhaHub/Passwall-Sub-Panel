@@ -653,3 +653,97 @@ func TestRemoveLinkKeepsATunnelAFrontRoutesTo(t *testing.T) {
 		t.Fatalf("an unused tunnel survived: %v", err)
 	}
 }
+
+// ---- REALITY needs a client the server's core accepts ----
+
+type engineAgents map[int64]domain.NodeCoreEngine
+
+func (f engineAgents) ListByPanelIDs(_ context.Context, panelIDs []int64) ([]*domain.NodeAgent, error) {
+	var out []*domain.NodeAgent
+	for _, id := range panelIDs {
+		if engine, ok := f[id]; ok {
+			out = append(out, &domain.NodeAgent{PanelID: id, ObservedAddress: "198.51.100.7", DesiredCoreEngine: engine})
+		}
+	}
+	return out, nil
+}
+
+func realityRequest() domain.TransitLinkSettings {
+	return domain.TransitLinkSettings{Protocol: nodeprotocol.LinkProtocolVLESSReality}
+}
+
+func TestUpdateLinkRefusesRealityFromSingBoxToXray(t *testing.T) {
+	repos := linkStore(t)
+	agents := engineAgents{9: domain.NodeCoreSingBox, 3: domain.NodeCoreXray}
+	service := New(fakeNodes{}, newFakeRepo()).WithLinks(repos.TransitLinks, agents)
+	_, err := service.UpdateLink(t.Context(), 9, 3, realityRequest())
+	var coded *domain.CodedValidationError
+	if !errors.Is(err, domain.ErrValidation) || !errors.As(err, &coded) || coded.Code != CodeLinkRealityEngines {
+		t.Fatalf("err = %v", err)
+	}
+	// ss2022 stays possible, and nothing was written for the refused request.
+	view, err := service.UpdateLink(t.Context(), 9, 3, domain.TransitLinkSettings{Protocol: nodeprotocol.LinkProtocolSS2022})
+	if err != nil || view.Protocol != nodeprotocol.LinkProtocolSS2022 {
+		t.Fatalf("ss2022 = %+v, %v", view, err)
+	}
+	if view, err := service.Link(t.Context(), 9, 3); err != nil || !view.RealityRefused {
+		t.Fatalf("the view does not say REALITY is refused: %+v, %v", view, err)
+	}
+}
+
+func TestUpdateLinkAllowsRealityWhereTheClientConnects(t *testing.T) {
+	for name, engines := range map[string]engineAgents{
+		"xray to xray":         {9: domain.NodeCoreXray, 3: domain.NodeCoreXray},
+		"sing-box to sing-box": {9: domain.NodeCoreSingBox, 3: domain.NodeCoreSingBox},
+		"xray to sing-box":     {9: domain.NodeCoreXray, 3: domain.NodeCoreSingBox},
+		"exit unknown":         {9: domain.NodeCoreSingBox},
+		"nothing known":        {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repos := linkStore(t)
+			service := New(fakeNodes{}, newFakeRepo()).WithLinks(repos.TransitLinks, engines)
+			view, err := service.UpdateLink(t.Context(), 9, 3, realityRequest())
+			if err != nil || view.Protocol != nodeprotocol.LinkProtocolVLESSReality || view.RealityRefused {
+				t.Fatalf("view = %+v, %v", view, err)
+			}
+		})
+	}
+}
+
+func TestEngineSwitchRefusedWhenItMakesAnUnusableRealityLink(t *testing.T) {
+	const xray, sing = domain.NodeCoreXray, domain.NodeCoreSingBox
+	for _, c := range []struct {
+		name         string
+		entry, exit  domain.NodeCoreEngine
+		protocol     string
+		switchServer int64
+		to           domain.NodeCoreEngine
+		refused      bool
+	}{
+		{"entry to sing-box, exit Xray", xray, xray, nodeprotocol.LinkProtocolVLESSReality, 9, sing, true},
+		{"exit to Xray, entry sing-box", sing, sing, nodeprotocol.LinkProtocolVLESSReality, 3, xray, true},
+		{"exit to sing-box, entry Xray", xray, xray, nodeprotocol.LinkProtocolVLESSReality, 3, sing, false},
+		{"entry to Xray, exit sing-box", sing, sing, nodeprotocol.LinkProtocolVLESSReality, 9, xray, false},
+		{"both Xray already, stays Xray", xray, xray, nodeprotocol.LinkProtocolVLESSReality, 9, xray, false},
+		{"ss2022 link is not affected", xray, xray, nodeprotocol.LinkProtocolSS2022, 9, sing, false},
+		{"server without links", xray, xray, nodeprotocol.LinkProtocolVLESSReality, 77, sing, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repos := linkStore(t)
+			agents := engineAgents{9: c.entry, 3: c.exit, 77: xray}
+			service := New(fakeNodes{}, newFakeRepo()).WithLinks(repos.TransitLinks, agents)
+			if _, err := service.UpdateLink(t.Context(), 9, 3, domain.TransitLinkSettings{Protocol: c.protocol}); err != nil {
+				t.Fatal(err)
+			}
+			err := service.EngineSwitchRefusal(t.Context(), c.switchServer, c.to)
+			var coded *domain.CodedValidationError
+			if c.refused {
+				if !errors.Is(err, domain.ErrValidation) || !errors.As(err, &coded) || coded.Code != CodeEngineRealityLinks || coded.Params["links"] == "" {
+					t.Fatalf("err = %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+		})
+	}
+}
