@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": "2026-11-17.1",
+  "revision": "2026-11-17.2",
   "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported — that list lives in docs/compat/passwall-node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each release resolved to, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever a tag points at today. THE KEYS ARE VERSIONS, NOT TAGS. They were the same string while the legacy scheme was the only one, and the two consumers split on it: the case planner looked a version up and the contract check looked a tag up. Neither was wrong, and nothing noticed, because no release had ever had two names. A product release does — `release/4.0.0` is the address, `4.0.0` is the version — so the key is the VERSION and each consumer derives the tag where it needs one. The legacy pins moved to docs/compat/historical-pins.json, which nothing reads.",
   "profiles": {
     "node-wire-v1": {
@@ -23,13 +23,15 @@
     "4.2.0-beta.6": "eca6b7b4ce0e217e68e7cde79794834b4d19d385",
     "4.2.0-beta.7": "36d1ce39c381e6219ae49e575d7c248084a3da24",
     "4.2.0-beta.8": "da7f88875c79a48a624abe58dcc3a8fd7a82c6ee",
-    "4.2.0-beta.9": "9356fc4c3a9087a6b80257a836265fdfed704686"
+    "4.2.0-beta.9": "9356fc4c3a9087a6b80257a836265fdfed704686",
+    "4.2.0": "9356fc4c3a9087a6b80257a836265fdfed704686",
+    "4.3.0-beta.1": "f328ef8302c9f8bff6630d51bdf0974de5f415b3"
   },
   "excluded": [],
   "contract_source": {
     "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision. The tag names the release this build is a candidate against, and the pin it must agree with is looked up by the VERSION that tag names — see the pin-key note above. A PUBLISHED PRE-RELEASE IS A VALID SOURCE, because what this job needs is a release that can be named, pinned and fetched, and a pre-release is all three; the planner and this check accept the `-beta.N`/`-rc.N` spelling. The source is chosen to declare every capability the contract tests below exercise: v4.2.0-beta.2 was the first release whose contract agent declares policy.destination.v1 and reports a PolicyStatus, and v4.2.0-beta.5 additionally declares policy.destination.groups.v1 and policy.destination.resolve.v1, and v4.2.0-beta.6 (the per-site usage release) still declares all three while deliberately declaring no audit capability, since it records nothing, and v4.2.0-beta.8 (audit hit egress and transit metering) still declares all three while its contract agent deliberately declares no audit capability, audit.hits.egress.v1 included, and v4.2.0-beta.9 (newly reviewed cores and the doctor fix) leaves the contract agent unchanged (internal/service/nodesync TestLive_RealNodePolicyContract, judged by deploy/compat/profiles-node-contract.json). Moving the source to an older release fails that test rather than skipping it.",
-    "tag": "v4.2.0-beta.9",
-    "commit": "9356fc4c3a9087a6b80257a836265fdfed704686",
+    "tag": "v4.3.0-beta.1",
+    "commit": "f328ef8302c9f8bff6630d51bdf0974de5f415b3",
     "module_path": "github.com/KazuhaHub/passwall-node"
   },
   "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision. These are commits of the PRODUCT releases, whose tags live under `release/`; the commit below is what that tag resolved to when it was first resolved."

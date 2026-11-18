@@ -338,5 +338,7 @@ P1 的具体 schema 与 P2 反方向验证的旧 PSP 清单应在实现 PR 中�
   - `contract_source` 移到 `v4.2.0-beta.9`（提交 `9356fc4c`）。契约代理与 beta.8 相同，`TestLive_RealNodePolicyContract` 的断言不变。
   - 核心目录快照随之更新：新增 Xray `26.11.9`（受限）与 sing-box `1.14.4`（已核验）。
 
+- 2026-11-17：PN `4.2.0`（`9356fc4c`）与 `4.3.0-beta.1`（`f328ef83`）加入 `released_nodes`。矩阵下限仍为 `4.1.0`，上限和固定契约来源更新为 `4.3.0-beta.1`。两版沿用已评审的核心目录。
+
 原反方向实测日期记录为 2026-09-19，组合为 PN `v0.0.1-beta11` 与 PSP `v4.0.0-beta.19`；
 原始过程见 [观测进展记录](psp-node-rootless-observability-progress.md)。本文未重新执行该测试。
