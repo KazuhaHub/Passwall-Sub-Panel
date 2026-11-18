@@ -543,6 +543,26 @@ func TestUsageListsEveryPort(t *testing.T) {
 	if len(front.Behind) != 3 || !front.Behind[2].IsDefault {
 		t.Fatalf("front behind = %+v", front.Behind)
 	}
+	for _, u := range usage {
+		if u.Kind == KindProbeLoopback && u.PeerPanelID != 3 {
+			t.Errorf("the link probe does not name the tunnel's other server: %+v", u)
+		}
+	}
+
+	// The reported probe ports are informational: failing to read them costs
+	// only their rows, not the view (which port checks are built on).
+	e.svc.WithProbePorts(func(context.Context, int64, time.Time) ([]domain.ProbeState, error) {
+		return nil, errors.New("probe table unavailable")
+	})
+	usage, err = e.svc.Usage(t.Context(), panelID)
+	if err != nil {
+		t.Fatalf("a probe read failure failed the whole view: %v", err)
+	}
+	for _, u := range usage {
+		if u.Kind == KindProbeLoopback {
+			t.Errorf("probe row listed without probe data: %+v", u)
+		}
+	}
 }
 
 func TestSuggestionsAvoidWhatIsInUse(t *testing.T) {

@@ -4053,7 +4053,8 @@
           "link": "Tunnel from server {{peer}}",
           "front": "Shared port",
           "front_loopback": "Node {{name}} (behind a shared port)",
-          "probe_loopback": "Reported link probe for {{link}}",
+          "probe_loopback": "Reported probe of the tunnel with server {{peer}}",
+          "probe_loopback_other": "Reported probe port",
           "probe_range": "Reserved range for Node link probes",
           "reserved": "Node's own (core API; do not use)"
         },

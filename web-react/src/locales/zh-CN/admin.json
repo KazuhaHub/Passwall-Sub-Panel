@@ -4046,7 +4046,8 @@
           "link": "来自服务器 {{peer}} 的隧道",
           "front": "共用端口",
           "front_loopback": "节点 {{name}}（在共用端口后面）",
-          "probe_loopback": "Node 上报的链路 {{link}} 探测端口",
+          "probe_loopback": "Node 上报的探测端口（与服务器 {{peer}} 的隧道）",
+          "probe_loopback_other": "Node 上报的探测端口",
           "probe_range": "Node 链路探测预留范围",
           "reserved": "Node 自留（核心 API，勿占用）"
         },

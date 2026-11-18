@@ -10,6 +10,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 )
 
 // Kinds of port use the usage view lists.
@@ -346,21 +347,51 @@ func (s *Service) Usage(ctx context.Context, panelID int64) ([]PortUsage, error)
 		})
 	}
 	if s.probePorts != nil {
-		probes, err := s.probePorts(ctx, panelID, time.Now())
-		if err != nil {
-			return nil, fmt.Errorf("front: list observed probe ports: %w", err)
-		}
-		for _, probe := range probes {
-			if domain.InNodeProbeRange(probe.LoopbackPort) {
-				table.entries = append(table.entries, PortUsage{
-					Port: probe.LoopbackPort, Bind: "loopback", Kind: KindProbeLoopback,
-					Label: probe.ObjectKey, Enabled: true,
-				})
-			}
-		}
+		table.entries = append(table.entries, s.probeUsage(ctx, panelID)...)
 		sort.SliceStable(table.entries, func(i, j int) bool { return table.entries[i].Port < table.entries[j].Port })
 	}
 	return table.entries, nil
+}
+
+// probeUsage lists the probe loopback ports the server's Node reported. They
+// are informational: the whole probe range is already listed as in use, so a
+// failure to read them is logged and costs only these rows, never the view or
+// a port check built on it. A link probe names the server at the tunnel's
+// other end.
+func (s *Service) probeUsage(ctx context.Context, panelID int64) []PortUsage {
+	probes, err := s.probePorts(ctx, panelID, time.Now())
+	if err != nil {
+		log.Warn("port usage: reported probe ports not listed", "panel_id", panelID, "err", err)
+		return nil
+	}
+	peers := map[int64]int64{}
+	if len(probes) > 0 && s.links != nil {
+		links, err := s.links.ListLinks(ctx)
+		if err != nil {
+			log.Warn("port usage: probe tunnels not named", "panel_id", panelID, "err", err)
+		}
+		for _, l := range links {
+			switch panelID {
+			case l.EntryPanelID:
+				peers[l.ID] = l.ExitPanelID
+			case l.ExitPanelID:
+				peers[l.ID] = l.EntryPanelID
+			}
+		}
+	}
+	var out []PortUsage
+	for _, probe := range probes {
+		if !domain.InNodeProbeRange(probe.LoopbackPort) {
+			continue
+		}
+		usage := PortUsage{Port: probe.LoopbackPort, Bind: "loopback", Kind: KindProbeLoopback, Label: "probe " + probe.ObjectKey, Enabled: true}
+		if id, err := nodeprotocol.LinkKey(probe.ObjectKey).RowID(); err == nil && peers[id] != 0 {
+			usage.PeerPanelID = peers[id]
+			usage.Label = fmt.Sprintf("probe of the tunnel with server %d", peers[id])
+		}
+		out = append(out, usage)
+	}
+	return out
 }
 
 func randInt(n int) int { return rand.IntN(n) }
