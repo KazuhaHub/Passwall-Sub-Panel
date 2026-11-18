@@ -1695,6 +1695,8 @@ var schemaModels = []any{
 	&transitLinkRow{},
 	&transitProbeRow{},
 	&transitFrontRow{},
+	&sourceGuardCloudflareRow{},
+	&sourceGuardHitRow{},
 	&transitRouteRow{},
 	&transitRouteListRow{},
 }

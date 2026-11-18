@@ -5,9 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
 // Source guard (ADR 0044).
@@ -25,10 +29,6 @@ const (
 	// MaxSourceCIDRs bounds one line's own addresses (the protocol's limit for a
 	// whole source set).
 	MaxSourceCIDRs = 1024
-	// SourceGuardCapability is the capability an agent declares when it enforces
-	// source guards (nodeprotocol.CapabilitySourceGuard). A copy of the string,
-	// because the domain stays free of the wire package for this check only.
-	SourceGuardCapability = "transit.source_guard.v1"
 )
 
 // Guarded reports whether the line ends on the landing's own listener, and so
@@ -233,3 +233,70 @@ const (
 	// are not known.
 	SourceWithheldUnknown = "source_guard_unknown"
 )
+
+// SourceGuardHit is the latest report of connections a landing refused because
+// their source did not belong to the identity's line (ADR 0044): how many came
+// from IP and were matched by Set on a listener, and when the last was seen.
+type SourceGuardHit struct {
+	PanelID int64
+	// Set is the wire key of the source set that refused it (see
+	// SourceSetSuffix); SetNodeID and the line are read back from it.
+	Set string
+	// ListenerNodeID is the listener that refused the connection.
+	ListenerNodeID int64
+	IP             string
+	Count          int64
+	LastSeen       time.Time
+}
+
+// CloudflareRanges are the Cloudflare address ranges a CDN line is checked
+// against when it names none of its own.
+type CloudflareRanges struct {
+	CIDRs     []string
+	FetchedAt time.Time
+}
+
+// CanSourceGuard reports whether the server's agent enforces source guards:
+// whether a landing on it can tell a relay line's traffic from a direct one. A
+// 3X-UI or S-UI server has no agent and cannot.
+func (a *NodeAgent) CanSourceGuard() bool {
+	return a != nil && slices.Contains(a.ObservedCapabilities, nodeprotocol.CapabilitySourceGuard)
+}
+
+// SourceAddresses are the public addresses a landing sees this server's
+// outbound connections from: what its last full report listed for its own
+// interfaces, and the address the panel saw its sync come from. Private,
+// shared and documentation addresses are left out, since a landing never sees
+// them. Plain addresses, sorted and unique.
+func (a *NodeAgent) SourceAddresses() []string {
+	if a == nil {
+		return nil
+	}
+	seen := map[netip.Addr]struct{}{}
+	var addrs []netip.Addr
+	add := func(text string) {
+		addr, err := netip.ParseAddr(strings.TrimSpace(text))
+		if err != nil {
+			return
+		}
+		addr = addr.Unmap()
+		if _, dup := seen[addr]; dup || !nodeprotocol.IsPublicSourceAddr(addr) {
+			return
+		}
+		seen[addr] = struct{}{}
+		addrs = append(addrs, addr)
+	}
+	for _, text := range a.InterfaceAddresses {
+		add(text)
+	}
+	add(a.ObservedAddress)
+	if len(addrs) == 0 {
+		return nil
+	}
+	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Compare(addrs[j]) < 0 })
+	out := make([]string, len(addrs))
+	for i, addr := range addrs {
+		out[i] = addr.String()
+	}
+	return out
+}

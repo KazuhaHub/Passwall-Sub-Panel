@@ -121,3 +121,25 @@ func TestSourceGuardWithheld(t *testing.T) {
 		t.Fatal("a tunnel line does not count")
 	}
 }
+
+func TestNodeAgentSourceAddresses(t *testing.T) {
+	agent := &NodeAgent{
+		InterfaceAddresses: []string{"198.51.100.7", "10.0.0.5", "2001:db8::1", "203.0.113.1"},
+		ObservedAddress:    "::ffff:93.184.216.34",
+	}
+	// 198.51.100.0/24, 2001:db8::/32 and 203.0.113.0/24 are documentation
+	// ranges: a landing never sees them.
+	if got := agent.SourceAddresses(); !reflect.DeepEqual(got, []string{"93.184.216.34"}) {
+		t.Fatalf("got %v", got)
+	}
+	agent = &NodeAgent{InterfaceAddresses: []string{"93.184.216.35", "93.184.216.34"}, ObservedAddress: "93.184.216.34"}
+	if got := agent.SourceAddresses(); !reflect.DeepEqual(got, []string{"93.184.216.34", "93.184.216.35"}) {
+		t.Fatalf("got %v", got)
+	}
+	if (&NodeAgent{ObservedAddress: "not an address"}).SourceAddresses() != nil {
+		t.Fatal("garbage became an address")
+	}
+	if (&NodeAgent{}).CanSourceGuard() || !(&NodeAgent{ObservedCapabilities: []string{nodeprotocol.CapabilitySourceGuard}}).CanSourceGuard() {
+		t.Fatal("capability misread")
+	}
+}

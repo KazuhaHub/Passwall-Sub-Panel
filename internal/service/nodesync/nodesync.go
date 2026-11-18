@@ -1325,6 +1325,20 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 			}
 		}
 	}
+	// The server's own public addresses are what a landing accepts a managed
+	// relay line's traffic from (ADR 0044). Only a full report from an agent that
+	// declared the capability carries them; a partial one says nothing, and an
+	// empty full list is a fact (no public address), not an absence.
+	if !report.Partial && slices.Contains(report.Capabilities, nodeprotocol.CapabilitySourceGuard) &&
+		!slices.Equal(agent.InterfaceAddresses, report.InterfaceAddresses) {
+		if recorder, ok := s.agents.(interface {
+			RecordInterfaceAddresses(ctx context.Context, agentID string, addresses []string) error
+		}); ok {
+			if err := recorder.RecordInterfaceAddresses(ctx, agent.AgentID, report.InterfaceAddresses); err != nil {
+				return fmt.Errorf("nodesync: record interface addresses: %w", err)
+			}
+		}
+	}
 	if s.allowlistResync != nil && allowlistCapabilitiesChanged(agent.ObservedCapabilities, report.Capabilities) {
 		// A node that newly declares the capabilities (a fresh install, an
 		// upgrade) must get its allowlist members' clients, and one that lost

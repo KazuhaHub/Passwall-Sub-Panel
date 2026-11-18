@@ -554,6 +554,10 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("transit_probe", "withhold_after", &s.TransitProbeWithholdAfter),
 		intField("transit_probe", "restore_after", &s.TransitProbeRestoreAfter),
 
+		// source_guard --- Cloudflare ranges auto-fetch (ADR 0044), stored
+		// inverted: absent = fetch.
+		boolField("source_guard", "cloudflare_fetch_off", &s.SourceGuardCloudflareFetchOff),
+
 		// legal --- privacy and terms. legal.consent_version is written by the
 		// publish endpoint only (the system settings PUT keeps it as stored).
 		boolField("legal", "enabled", &s.LegalEnabled),

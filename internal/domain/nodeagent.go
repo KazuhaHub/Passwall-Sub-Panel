@@ -52,7 +52,11 @@ type NodeAgent struct {
 	// addresses an administrator would otherwise type (a node's connection
 	// address, a link's exit address), never used without being shown.
 	ObservedAddress string
-	LastSeen        *time.Time
+	// InterfaceAddresses are the public addresses of the server's own
+	// interfaces, as its last full report listed them (CapabilitySourceGuard):
+	// where a managed relay line's traffic leaves this server from (ADR 0044).
+	InterfaceAddresses []string
+	LastSeen           *time.Time
 	// Refused* record the most recent authenticated report this panel REFUSED at
 	// the wire boundary, which is a different fact from an observation and is
 	// stored in different columns for that reason.

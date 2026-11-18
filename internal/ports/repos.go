@@ -1771,6 +1771,11 @@ type UISettings struct {
 	// be taken out of subscriptions (default off): after
 	// TransitProbeWithholdAfter consecutive down windows (default 3) and back
 	// after TransitProbeRestoreAfter consecutive ok ones (default 3), both 1..20.
+	// SourceGuardCloudflareFetchOff turns off the daily fetch of Cloudflare's
+	// address ranges (ADR 0044); stored inverted so that a panel that never saw
+	// the key fetches. The built-in snapshot is then the CDN default.
+	SourceGuardCloudflareFetchOff bool `json:"source_guard_cloudflare_fetch_off"`
+
 	TransitProbeOff             bool   `json:"transit_probe_off"`
 	TransitProbeIntervalSeconds int    `json:"transit_probe_interval_seconds"`
 	TransitProbeTimeoutMS       int    `json:"transit_probe_timeout_ms"`
@@ -2316,10 +2321,13 @@ type OIDCConfigRepo interface {
 type Repos struct {
 	// Transit is the managed relay state store (one row per managed relay
 	// line: forward key, entry confirmation, relayed traffic).
-	Transit                 TransitRepo
-	TransitLinks            TransitLinkRepo
-	TransitProbe            TransitProbeRepo
-	TransitFronts           TransitFrontRepo
+	Transit       TransitRepo
+	TransitLinks  TransitLinkRepo
+	TransitProbe  TransitProbeRepo
+	TransitFronts TransitFrontRepo
+	// SourceGuard holds the fetched Cloudflare ranges and the sources a landing
+	// refused (ADR 0044).
+	SourceGuard             SourceGuardRepo
 	TransitRoutes           TransitRouteRepo
 	User                    UserRepo
 	Group                   GroupRepo
@@ -2447,4 +2455,21 @@ type TransitLinkRepo interface {
 	// deleted link are then dropped as egress_unknown (the receiver cannot tell
 	// which servers they left through), and counted, never mis-attributed.
 	LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error)
+}
+
+// SourceGuardRepo stores what the source guard keeps between syncs.
+type SourceGuardRepo interface {
+	// LoadCloudflare returns the last good fetch; ok is false when none was
+	// stored.
+	LoadCloudflare(ctx context.Context) (ranges domain.CloudflareRanges, ok bool, err error)
+	SaveCloudflare(ctx context.Context, ranges domain.CloudflareRanges) error
+	// RecordHits stores the latest report of refused sources of a server: each
+	// (set, listener, ip) is replaced by what was reported, and the server's rows
+	// are pruned to the newest limit rows and to those seen since cutoff.
+	RecordHits(ctx context.Context, panelID int64, hits []domain.SourceGuardHit, cutoff time.Time, limit int) error
+	// ListHits returns the stored sources of the given servers, newest first.
+	ListHits(ctx context.Context, panelIDs []int64) ([]domain.SourceGuardHit, error)
+	// ClearHits removes the rows of one set and source address, and reports how
+	// many went.
+	ClearHits(ctx context.Context, set, ip string) (int64, error)
 }

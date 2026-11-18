@@ -269,6 +269,9 @@ type settingsDTO struct {
 	NodeTaskOfflineReconcileDays int `json:"node_task_offline_reconcile_days"`
 	NodeTaskBackupRestoreDays    int `json:"node_task_backup_restore_days"`
 	NodeTaskResultRetentionDays  int `json:"node_task_result_retention_days"`
+	// CloudflareIPsAutoFetch is whether the panel fetches Cloudflare's address
+	// ranges once a day for CDN lines' source guard (ADR 0044).
+	CloudflareIPsAutoFetch bool `json:"cloudflare_ips_auto_fetch"`
 }
 
 // Response values stay concrete numbers, while the new request fields are
@@ -280,6 +283,8 @@ type settingsRequest struct {
 	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
 	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
 	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+	// Presence-aware like the fields above: omitted keeps the stored choice.
+	CloudflareIPsAutoFetch *bool `json:"cloudflare_ips_auto_fetch"`
 	// The response-only runtime maps, shadowed as raw JSON so the embedded
 	// DTO's typed maps are never decoded. The SPA posts back the whole
 	// object it read, maps included; a tab loaded before a change to their
@@ -413,6 +418,7 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		GeoAnomalyCoTravel:          s.GeoAnomalyCoTravel,
 		GeoAnomalyAllowAnywhere:     s.GeoAnomalyAllowAnywhere,
 		GeoAnomalyIgnoreAddresses:   s.GeoAnomalyIgnoreAddresses,
+		CloudflareIPsAutoFetch:      !s.SourceGuardCloudflareFetchOff,
 		GeoIPEnabled:                s.GeoIPEnabled,
 		GeoIPDBFile:                 s.GeoIPDBFile,
 		GeoIPAutoUpdate:             s.GeoIPAutoUpdate,
@@ -656,6 +662,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// The link-probe keys (transit_probe_*) have their own endpoint the same
 	// way (PUT /transit/probe-settings): written back exactly as loaded.
 	s.SetTransitProbeSettings(prev.TransitProbeSettings())
+	s.SourceGuardCloudflareFetchOff = prev.SourceGuardCloudflareFetchOff
+	if req.CloudflareIPsAutoFetch != nil {
+		s.SourceGuardCloudflareFetchOff = !*req.CloudflareIPsAutoFetch
+	}
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
