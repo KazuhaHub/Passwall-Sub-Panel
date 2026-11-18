@@ -115,7 +115,7 @@ func ListenerGuardable(n *Node, engines []NodeCoreEngine) bool {
 					return false
 				}
 			}
-			if acceptsProxyAnywhere(inbound) {
+			if acceptsProxyAnywhere(inbound) || trustsForwardedFor(inbound) {
 				return false
 			}
 		}
@@ -177,19 +177,35 @@ func ListenerGuardRefusal(previous, next *Node, before, after []NodeCoreEngine) 
 	}
 }
 
-func trustsForwardedFor(stream map[string]any) bool {
-	for _, sock := range ciValues(stream, "sockopt") {
-		m, _ := sock.(map[string]any)
-		for _, trusted := range ciValues(m, "trustedXForwardedFor") {
-			switch v := trusted.(type) {
-			case []any:
-				if len(v) > 0 {
-					return true
+// trustsForwardedFor finds a non-empty trustedXForwardedFor anywhere in v,
+// ignoring case. Xray reads it from sockopt; Passwall Node refuses a listener
+// that carries it at any depth, so the panel must call the same listeners
+// unguardable or it would send guards the node rejects.
+func trustsForwardedFor(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			if strings.EqualFold(k, "trustedXForwardedFor") {
+				switch trusted := x.(type) {
+				case []any:
+					if len(trusted) > 0 {
+						return true
+					}
+				case string:
+					if strings.TrimSpace(trusted) != "" {
+						return true
+					}
 				}
-			case string:
-				if strings.TrimSpace(v) != "" {
-					return true
-				}
+				continue
+			}
+			if trustsForwardedFor(x) {
+				return true
+			}
+		}
+	case []any:
+		for _, x := range t {
+			if trustsForwardedFor(x) {
+				return true
 			}
 		}
 	}
