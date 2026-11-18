@@ -2380,6 +2380,7 @@ type TransitProbeRepo interface {
 	Apply(ctx context.Context, panelID int64, key, kind string,
 		update func(prev *domain.ProbeState) (next domain.ProbeState, write bool, err error)) (prev *domain.ProbeState, next domain.ProbeState, err error)
 	List(ctx context.Context) ([]domain.ProbeState, error)
+	ListProbePorts(ctx context.Context, panelID int64, now time.Time) ([]domain.ProbeState, error)
 	// PruneExcept deletes the rows of a server whose object is not in keep.
 	PruneExcept(ctx context.Context, panelID int64, keep []string) (int64, error)
 	// ClearWithheld clears every withheld flag and reports how many changed.

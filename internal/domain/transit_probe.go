@@ -69,6 +69,7 @@ type ProbeState struct {
 	RTTMaxMS      int
 	LastError     string
 	LastSuccessMS int64
+	LoopbackPort  int
 
 	// State is the verdict of that window; Consecutive how many reports in a
 	// row have given it; StateSince when the run began.

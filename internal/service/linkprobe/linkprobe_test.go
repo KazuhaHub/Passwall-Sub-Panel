@@ -59,6 +59,10 @@ func (r *fakeRepo) Apply(_ context.Context, panelID int64, k, kind string,
 	r.rows[key(panelID, k, kind)] = next
 	return prev, next, nil
 }
+func (r *fakeRepo) ListProbePorts(context.Context, int64, time.Time) ([]domain.ProbeState, error) {
+	return nil, nil
+}
+
 func (r *fakeRepo) List(context.Context) ([]domain.ProbeState, error) {
 	var out []domain.ProbeState
 	for _, row := range r.rows {

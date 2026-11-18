@@ -93,13 +93,20 @@ type Service struct {
 	locks    keyedmutex.Map[int64]
 	// reserved lists the link ports promised on a server to tunnels being set up
 	// (transit.Service.ReservedPorts); nil knows none.
-	reserved func(panelID int64) []int
+	reserved   func(panelID int64) []int
+	probePorts func(context.Context, int64, time.Time) ([]domain.ProbeState, error)
 }
 
 // WithReservations lets the port views and pickers see the link ports promised
 // to tunnels about to be made, which no listener or forward may be given.
 func (s *Service) WithReservations(reserved func(panelID int64) []int) *Service {
 	s.reserved = reserved
+	return s
+}
+
+// WithProbePorts supplies the most recent internal listeners reported by Node.
+func (s *Service) WithProbePorts(list func(context.Context, int64, time.Time) ([]domain.ProbeState, error)) *Service {
+	s.probePorts = list
 	return s
 }
 

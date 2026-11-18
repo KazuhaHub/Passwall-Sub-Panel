@@ -94,7 +94,7 @@ export interface FrontLineOption {
 
 export interface FrontOptions { listeners: FrontListenerOption[]; lines: FrontLineOption[] }
 
-export type PortKind = 'listener' | 'forward' | 'link' | 'link_planned' | 'front' | 'front_loopback' | 'probe_range' | 'reserved'
+export type PortKind = 'listener' | 'forward' | 'link' | 'link_planned' | 'front' | 'front_loopback' | 'probe_loopback' | 'probe_range' | 'reserved'
 
 export interface PortBehind {
   server_names: string[]

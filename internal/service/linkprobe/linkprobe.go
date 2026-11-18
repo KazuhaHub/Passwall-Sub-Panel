@@ -237,14 +237,14 @@ func (s *Service) Ingest(ctx context.Context, panelID int64, capabilities []stri
 			next := domain.ProbeState{
 				Attempts: result.Attempts, Failures: result.Failures,
 				RTTMinMS: result.RTTMinMS, RTTMedianMS: result.RTTMedianMS, RTTMaxMS: result.RTTMaxMS,
-				LastError: result.LastError, LastSuccessMS: result.LastSuccessMS,
+				LastError: result.LastError, LastSuccessMS: result.LastSuccessMS, LoopbackPort: result.LoopbackPort,
 				ReportedAt: now, ValidUntil: now.Add(validFor), AgentReportedMS: agentReportedMS,
 			}
 			// Only an exact repeat (the same agent timestamp and the same
 			// window) is a replay. The agent's clock is never ordered: one that
 			// stepped back, or once ran far ahead, must not freeze the row. A
 			// report without a timestamp is never taken for a replay.
-			if prev != nil && agentReportedMS != 0 && prev.AgentReportedMS == agentReportedMS && prev.SameWindow(next) {
+			if prev != nil && agentReportedMS != 0 && prev.AgentReportedMS == agentReportedMS && prev.LoopbackPort == next.LoopbackPort && prev.SameWindow(next) {
 				return domain.ProbeState{}, false, nil
 			}
 			counts := prev == nil || prev.StaleAt(now) || !prev.SameWindow(next) || now.Sub(prev.CountedAt) >= interval

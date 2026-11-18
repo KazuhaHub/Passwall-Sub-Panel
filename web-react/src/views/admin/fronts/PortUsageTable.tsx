@@ -35,6 +35,7 @@ function what(t: (key: string, values?: Record<string, unknown>) => string, u: P
     case 'front_loopback': return u.parent_node_id
       ? t('admin:servers.fronts.ports.kind.tunnel_front_loopback', { label: listenerLabel(t, '', u) })
       : t('admin:servers.fronts.ports.kind.front_loopback', { name: u.node_name ?? '' })
+    case 'probe_loopback': return t('admin:servers.fronts.ports.kind.probe_loopback', { link: u.label })
     case 'probe_range': return t('admin:servers.fronts.ports.kind.probe_range')
     case 'reserved': return t('admin:servers.fronts.ports.kind.reserved')
   }
