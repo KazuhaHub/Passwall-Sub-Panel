@@ -329,7 +329,8 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByLabelText('admin:servers.native.install_command')
     expect(screen.queryByText('admin:servers.native.command_expired')).toBeNull()
-    expect(expire).toBeDefined()
+    // The command can appear before React runs the passive effect that schedules expiration.
+    await waitFor(() => expect(expire).toBeDefined())
     timer.mockRestore(); now.mockRestore()
     act(() => { expire!() })
     expect(screen.getByText('admin:servers.native.command_expired')).toBeTruthy()
