@@ -163,7 +163,7 @@
 
 **压缩同步（`sync.gzip.v1`）**
 
-- `/v1/node/sync` 只接受声明过该能力的 agent 的 gzip 请求（其余带 `Content-Encoding` 的请求为 415）；线上 16 MiB、解压后 64 MiB，先读完线上字节（受 16 MiB 限制），再取解压槽，只在解压时占用；解压并发由信号量限制为 4，同一 agent 同时只解一份；等不到槽返回 503（带 `Retry-After`，agent 保持状态、下次轮询重发）。对声明了该能力的 agent，所有响应带 `Vary: Accept-Encoding`。指标：`psp_node_sync_gzip_refused_total`（415）、`psp_node_sync_decode_busy_total`（503）、`psp_node_sync_gzip_bytes_total`。
+- `/v1/node/sync` 只接受声明过该能力的 agent 的 gzip 请求（其余带 `Content-Encoding` 的请求为 415）；线上 16 MiB、解压后 64 MiB，先读完线上字节（受 16 MiB 限制），再取解压槽，只在解压时占用；解压并发由信号量限制为 4，同一 agent 同时只解一份；等不到槽返回 503（带 `Retry-After`，agent 保持状态、下次轮询重发）。对声明了该能力的 agent，所有响应带 `Vary: Accept-Encoding`。 agent 同时接受 gzip 时，面板可发送解压后超过 16 MiB 的名单；响应仍受 16 MiB 线上和 64 MiB 解压上限约束。大响应优先发送配置和名单，任务留到后续轮询。指标：`psp_node_sync_gzip_refused_total`（415）、`psp_node_sync_decode_busy_total`（503）、`psp_node_sync_gzip_bytes_total`。
 - 对声明了该能力的 agent，每个 2xx 响应带 `Accept-Encoding: gzip`；请求带 `Accept-Encoding: gzip` 时响应也压缩。没有该能力的 agent 行为不变。
 
 ## 13. SNI 共用端口（`transit.sni.v1`，4.3，开发分支）

@@ -547,6 +547,15 @@ func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context
 // this service: the production HTTP boundary resolves a strict Bearer digest
 // to the same agent ID before calling this coordinator.
 func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+	return s.SyncWithResponseEncoding(ctx, report, "")
+}
+
+// SyncWithResponseEncoding budgets the response for the coding negotiated by HTTP.
+func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeprotocol.NodeReport, encoding string) (nodeprotocol.SyncResponse, error) {
+	responseLimit := nodeprotocol.MaxSyncWireBytes
+	if encoding == nodeprotocol.SyncEncodingGzip && slices.Contains(report.Capabilities, nodeprotocol.CapabilitySyncGzip) {
+		responseLimit = nodeprotocol.MaxSyncDecodedBytes
+	}
 	// THE TELEMETRY SUBTREE LEAVES THE CONTROL PATH HERE, before anything reads
 	// the report. Everything below this line decides config, roster, directives,
 	// tasks and accounting, and none of it may be influenced by a telemetry
@@ -934,7 +943,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		Roster:     segmentFor(report.Have[nodeprotocol.StreamRoster], agent.Epoch, rosterStream, rosterBody),
 		Directives: segmentFor(report.Have[nodeprotocol.StreamDirectives], agent.Epoch, directivesStream, directivesBody),
 	}
-	taskJSONBudget, err := availableTaskJSONBytes(response)
+	taskJSONBudget, err := availableTaskJSONBytes(response, responseLimit)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -970,8 +979,8 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: encode response: %w", err)
 	}
-	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
-		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	if int64(len(encoded)) > responseLimit {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", responseLimit)
 	}
 	// The response is complete and will be sent: only now does the node's batch
 	// leave for the store. Enqueue does no database work and cannot fail the sync.
@@ -1629,16 +1638,18 @@ func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities [
 	return tasks, hadFirstOffer, nil
 }
 
-func availableTaskJSONBytes(response nodeprotocol.SyncResponse) (int, error) {
+func availableTaskJSONBytes(response nodeprotocol.SyncResponse, responseLimit int64) (int, error) {
 	response.Tasks = nil
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return 0, fmt.Errorf("nodesync: encode response without tasks: %w", err)
 	}
-	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
-		return 0, fmt.Errorf("nodesync: response without tasks exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	if int64(len(encoded)) > responseLimit {
+		return 0, fmt.Errorf("nodesync: response without tasks exceeds %d bytes", responseLimit)
 	}
-	remaining := int(nodeprotocol.MaxSyncBodyBytes) - len(encoded) - syncTasksFieldJSONBytes
+	// Keep task offers within the plain budget. Large compressed control
+	// responses take priority and tasks can be offered on the next poll.
+	remaining := int(nodeprotocol.MaxSyncWireBytes) - len(encoded) - syncTasksFieldJSONBytes
 	if remaining < len("[]") {
 		return 0, nil
 	}

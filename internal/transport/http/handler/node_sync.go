@@ -481,7 +481,15 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		// what it asked for, so a cache between the two must not mix them.
 		w.Header().Add("Vary", nodeprotocol.SyncAcceptEncodingHeader)
 	}
-	response, err := h.service.Sync(request.Context(), report)
+	acceptGzip := declaredGzip && nodeprotocol.AcceptsSyncGzip(strings.Join(request.Header.Values(nodeprotocol.SyncAcceptEncodingHeader), ","))
+	var response nodeprotocol.SyncResponse
+	if service, ok := h.service.(interface {
+		SyncWithResponseEncoding(context.Context, nodeprotocol.NodeReport, string) (nodeprotocol.SyncResponse, error)
+	}); ok && acceptGzip {
+		response, err = service.SyncWithResponseEncoding(request.Context(), report, nodeprotocol.SyncEncodingGzip)
+	} else {
+		response, err = h.service.Sync(request.Context(), report)
+	}
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this
 		// boundary must leave the node's immutable outbox retryable. In particular,
@@ -496,24 +504,27 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 	payload, err := json.Marshal(response)
-	if err != nil || int64(len(payload)) > nodeprotocol.MaxSyncBodyBytes {
+	if err != nil || int64(len(payload)) > nodeprotocol.MaxSyncDecodedBytes {
 		log.Error("native node sync response encoding failed", "agent_id", agentID, "bytes", len(payload), "err", err)
+		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
+		return
+	}
+	if acceptGzip {
+		if compressed, err := nodeprotocol.EncodeSyncBody(payload); err == nil {
+			w.Header().Set(nodeprotocol.SyncContentEncodingHeader, nodeprotocol.SyncEncodingGzip)
+			metrics.NodeSyncBytesTotal.With("response_plain").Add(int64(len(payload)))
+			metrics.NodeSyncBytesTotal.With("response_wire").Add(int64(len(compressed)))
+			payload = compressed
+		}
+	}
+	if int64(len(payload)) > nodeprotocol.MaxSyncWireBytes {
+		log.Error("native node sync response exceeds wire limit", "agent_id", agentID, "bytes", len(payload))
 		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if declaredGzip {
-		// An agent that declared the capability is told, on every 2xx, that the
-		// panel takes compressed requests; it replaces whatever it believed.
 		w.Header().Set(nodeprotocol.SyncAcceptEncodingHeader, nodeprotocol.SyncEncodingGzip)
-		if nodeprotocol.AcceptsSyncGzip(strings.Join(request.Header.Values(nodeprotocol.SyncAcceptEncodingHeader), ",")) {
-			if compressed, err := nodeprotocol.EncodeSyncBody(payload); err == nil {
-				w.Header().Set(nodeprotocol.SyncContentEncodingHeader, nodeprotocol.SyncEncodingGzip)
-				metrics.NodeSyncBytesTotal.With("response_plain").Add(int64(len(payload)))
-				metrics.NodeSyncBytesTotal.With("response_wire").Add(int64(len(compressed)))
-				payload = compressed
-			}
-		}
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)

@@ -200,7 +200,7 @@ func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
 		t.Fatalf("test fixture cannot reach response boundary: filler=%d", fillerBytes)
 	}
 	base.Config.ETag = nodeprotocol.ETag(strings.Repeat("a", fillerBytes))
-	budget, err := availableTaskJSONBytes(base)
+	budget, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes)
 	if err != nil || budget != len(taskArray) {
 		t.Fatalf("task JSON budget = (%d, %v), want %d", budget, err, len(taskArray))
 	}
@@ -215,9 +215,17 @@ func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
 
 	base.Tasks = nil
 	base.Config.ETag += "a"
-	budget, err = availableTaskJSONBytes(base)
+	budget, err = availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes)
 	if err != nil || budget != len(taskArray)-1 {
 		t.Fatalf("one-byte-smaller task budget = (%d, %v), want %d", budget, err, len(taskArray)-1)
+	}
+
+	base.Config.ETag += nodeprotocol.ETag(strings.Repeat("a", len(taskArray)+syncTasksFieldJSONBytes))
+	if _, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes); err == nil {
+		t.Fatal("oversize plain response was accepted")
+	}
+	if budget, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncDecodedBytes); err != nil || budget != 0 {
+		t.Fatalf("large gzip response task budget = (%d, %v), want (0, nil)", budget, err)
 	}
 }
 

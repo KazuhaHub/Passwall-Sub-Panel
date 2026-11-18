@@ -392,3 +392,27 @@ func TestSyncGzipCapabilityLookupFailureIsAServerError(t *testing.T) {
 		t.Fatalf("status %d body %s", response.Code, response.Body.String())
 	}
 }
+
+func TestSyncLargeResponseRequiresNegotiatedGzip(t *testing.T) {
+	handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(context.Context, nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+		var response nodeprotocol.SyncResponse
+		response.Roster.ETag = nodeprotocol.ETag(strings.Repeat("a", int(nodeprotocol.MaxSyncWireBytes)))
+		return response, nil
+	}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_expected", nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := gzipFixture{handler: handler}
+	header := map[string][]string{"Accept-Encoding": {"gzip"}}
+	if plain := f.do(strings.NewReader(reportJSON()), header); plain.Code != http.StatusInternalServerError {
+		t.Fatalf("unnegotiated response status = %d", plain.Code)
+	}
+	zipped := f.do(strings.NewReader(reportJSON(nodeprotocol.CapabilitySyncGzip)), header)
+	if zipped.Code != http.StatusOK || zipped.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("negotiated response status = %d, headers = %v", zipped.Code, zipped.Header())
+	}
+	decoded, err := nodeprotocol.DecodeSyncBody(zipped.Body, "gzip")
+	if err != nil || int64(len(decoded)) <= nodeprotocol.MaxSyncWireBytes {
+		t.Fatalf("decoded response size = %d, err = %v", len(decoded), err)
+	}
+}
