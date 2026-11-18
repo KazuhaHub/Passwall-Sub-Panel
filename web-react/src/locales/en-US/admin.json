@@ -3312,6 +3312,21 @@
     "cred_add_field": "Add field"
   },
   "servers": {
+    "retired_routes": {
+      "upgrade_notice": "Upgrading from a version with 3X-UI VLESS route lines? Use the cleanup action on the affected server to preview any rules left by the retired feature.",
+      "open": "Clean retired VLESS routes",
+      "title": "Retired VLESS routes on {{server}}",
+      "description": "Preview the rules left by the retired 3X-UI VLESS route line feature. Cleanup removes the listed rules from this server’s template.",
+      "preview": "Preview rules",
+      "confirm": "Remove the {{count}} listed rules? Xray may restart and briefly interrupt connections.",
+      "cleanup": "Remove listed rules",
+      "empty": "No rules from the retired feature were found.",
+      "removed": "Removed {{count}} rules.",
+      "stale": "The template changed. Preview it again before removing any rules.",
+      "preview_failed": "The routing template could not be read.",
+      "cleanup_failed": "The update could not be confirmed. Preview again before retrying.",
+      "close": "Close"
+    },
     "install_reinstall": {
       "action": "Install / Reinstall",
       "title": "Install / Reinstall · {{name}}",

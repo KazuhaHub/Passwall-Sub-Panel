@@ -6,6 +6,8 @@ import NodeMetricsDialog from './NodeMetricsDialog'
 import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
+import RetiredRouteCleanupDialog from './RetiredRouteCleanupDialog'
+import CleaningServicesIcon from '@mui/icons-material/CleaningServicesOutlined'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { compatNotice } from '@/utils/compatNotice'
 import NodeInstallCommand from '@/components/NodeInstallCommand'
@@ -250,6 +252,7 @@ export default function ServersView() {
   const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
   const [lineFactorsTarget, setLineFactorsTarget] = useState<Server | null>(null)
   const [sharedPortsTarget, setSharedPortsTarget] = useState<Server | null>(null)
+  const [retiredRoutesTarget, setRetiredRoutesTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1436,6 +1439,9 @@ export default function ServersView() {
           a policy reviewed for another build, an expired one, a range that is
           the last good one. Nothing is shown for a merely old range, because a
           banner nobody needs is how banners stop being read. */}
+      {items.some(s => s.panel_type === '3xui') && (
+        <Alert severity="info" sx={{ mb: 2 }}>{t('admin:servers.retired_routes.upgrade_notice')}</Alert>
+      )}
       {compatBanner && (
         <Alert severity="warning" sx={{ mt: 2 }}>
           {t(`admin:servers.compat_notice.${compatBanner.kind}`, compatBanner.values)}
@@ -1658,6 +1664,13 @@ export default function ServersView() {
                           <Badge color="warning" variant="dot" invisible={!s.fronts_inactive}>
                             <CallSplitIcon fontSize="small" />
                           </Badge>
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {s.panel_type === '3xui' && (
+                      <Tooltip title={t('admin:servers.retired_routes.open')}>
+                        <IconButton size="small" onClick={() => setRetiredRoutesTarget(s)} aria-label={t('admin:servers.retired_routes.open')}>
+                          <CleaningServicesIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     )}
@@ -2086,6 +2099,7 @@ export default function ServersView() {
       <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
       <ServerHasNodesDialog nodes={blockingNodes} onClose={() => setBlockingNodes(null)} />
+      {retiredRoutesTarget && <RetiredRouteCleanupDialog server={retiredRoutesTarget} onClose={() => setRetiredRoutesTarget(null)} />}
       {sharedPortsTarget && <SharedPortsDialog key={`sharedports-${sharedPortsTarget.id}`} server={sharedPortsTarget} onClose={() => setSharedPortsTarget(null)} />}
       {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}

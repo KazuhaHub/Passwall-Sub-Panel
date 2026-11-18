@@ -877,6 +877,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers/sui-release", servers.GetSUIRelease)
 		adminGroup.GET("/servers/compat-status", servers.CompatStatus)
 		adminGroup.POST("/servers", servers.Create)
+		adminGroup.GET("/servers/:id/retired-route-cleanup", servers.PreviewRetiredRoutes)
+		adminGroup.POST("/servers/:id/retired-route-cleanup", servers.CleanRetiredRoutes)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.PUT("/servers/:id/line-factors", nodes.SetServerLineFactors)
 		adminGroup.DELETE("/servers/:id", servers.Delete)

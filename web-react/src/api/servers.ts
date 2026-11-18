@@ -729,3 +729,18 @@ export async function selectCore(
 		return data
 	}
 }
+
+export interface RetiredRoutePreview {
+  rule_tags: string[]
+  revision: string
+}
+
+export async function previewRetiredRoutes(id: number): Promise<RetiredRoutePreview> {
+  const { data } = await client.get<RetiredRoutePreview>(`/admin/servers/${id}/retired-route-cleanup`, { _skipErrorToast: true })
+  return data
+}
+
+export async function cleanRetiredRoutes(id: number, revision: string): Promise<RetiredRoutePreview> {
+  const { data } = await client.post<RetiredRoutePreview>(`/admin/servers/${id}/retired-route-cleanup`, { confirm: true, revision }, { _skipErrorToast: true })
+  return data
+}
