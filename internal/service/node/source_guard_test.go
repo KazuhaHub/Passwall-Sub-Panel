@@ -294,6 +294,21 @@ func TestUpdateInboundConfigRefusesWhatStopsAListenerFromGuarding(t *testing.T) 
 			t.Errorf("%s: err = %v written %v", c.name, err, repo.updateCfg)
 		}
 	}
+	// A failed read of what the rules need fails the edit instead of reading as
+	// "cannot guard", which would let it through.
+	{
+		n := cdnLanding(`{"network":"tcp"}`)
+		n.Relays = priced
+		repo := &captureNodeRepo{node: &n}
+		svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{}}}
+		svc.SetSourceGuardInputs(func(context.Context, []*domain.Node) (domain.SourceInputs, error) {
+			return domain.SourceInputs{}, errors.New("database unavailable")
+		})
+		err := svc.UpdateInboundConfig(context.Background(), 1, spec(`{"network":"tcp","sockopt":{"trustedXForwardedFor":["X"]}}`))
+		if err == nil || repo.updateCfg != nil {
+			t.Fatalf("an edit was saved although the guard inputs could not be read: err = %v written %v", err, repo.updateCfg)
+		}
+	}
 	// A server that cannot guard is not asked: its priced lines are already refused.
 	n := cdnLanding(`{"network":"tcp"}`)
 	n.Relays = priced

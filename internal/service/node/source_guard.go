@@ -76,20 +76,21 @@ func resolveSourceCIDRs(previous *domain.Node, n *domain.Node) error {
 
 // sourceGuardInputs are the facts the rules are judged by for one landing: the
 // ranges Cloudflare publishes, the entry servers' addresses and what the
-// landing's server can do. A failed read leaves them out, so the landing counts
-// as unable to guard: the stricter rule is the safe one to save by.
-func (s *Service) sourceGuardInputs(ctx context.Context, n *domain.Node) domain.SourceInputs {
+// landing's server can do. A failure to read them fails the save: guessing
+// "cannot guard" would let a listener edit through that the rules refuse.
+func (s *Service) sourceGuardInputs(ctx context.Context, n *domain.Node) (domain.SourceInputs, error) {
 	if s.guardInputs != nil {
-		if in, err := s.guardInputs(ctx, []*domain.Node{n}); err == nil {
-			return in
+		in, err := s.guardInputs(ctx, []*domain.Node{n})
+		if err != nil {
+			return domain.SourceInputs{}, fmt.Errorf("node: read what the source guard rules need: %w", err)
 		}
-		return domain.SourceInputs{}
+		return in, nil
 	}
 	in := domain.SourceInputs{Cloudflare: domain.BuiltinCloudflare, Servers: map[int64]domain.SourceGuardServer{}}
 	if s.canGuard != nil {
 		in.Servers[n.PanelID] = domain.SourceGuardServer{Capable: s.canGuard(ctx, n.PanelID)}
 	}
-	return in
+	return in, nil
 }
 
 // checkSourceGuard refuses a save that introduces or changes something the
@@ -103,13 +104,21 @@ func (s *Service) checkSourceGuard(ctx context.Context, previous, next *domain.N
 	if (s.canGuard == nil && s.guardInputs == nil) || next == nil || next.IsTunnelChild() || next.IsSeparator() {
 		return nil
 	}
-	after := next.AnalyzeSourceGuard(s.sourceGuardInputs(ctx, next)).Problems
+	inputs, err := s.sourceGuardInputs(ctx, next)
+	if err != nil {
+		return err
+	}
+	after := next.AnalyzeSourceGuard(inputs).Problems
 	if len(after) == 0 {
 		return nil
 	}
 	known := map[string]bool{}
 	if previous != nil {
-		for _, p := range previous.AnalyzeSourceGuard(s.sourceGuardInputs(ctx, previous)).Problems {
+		before, err := s.sourceGuardInputs(ctx, previous)
+		if err != nil {
+			return err
+		}
+		for _, p := range previous.AnalyzeSourceGuard(before).Problems {
 			known[p.ID] = true
 		}
 	}
@@ -129,7 +138,11 @@ func (s *Service) checkListenerGuard(ctx context.Context, previous, next *domain
 	if (s.canGuard == nil && s.guardInputs == nil) || previous == nil || next == nil || len(next.PricedLines()) == 0 {
 		return nil
 	}
-	server := s.sourceGuardInputs(ctx, next).Servers[next.PanelID]
+	inputs, err := s.sourceGuardInputs(ctx, next)
+	if err != nil {
+		return err
+	}
+	server := inputs.Servers[next.PanelID]
 	if !server.Capable {
 		return nil
 	}
