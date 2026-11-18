@@ -128,15 +128,30 @@ func ValidateTransitLinkSettings(settings TransitLinkSettings) error {
 // ValidateRealityNames checks a REALITY server name and short id with the rules
 // the link protocol uses for them. An empty one is left unchecked.
 func ValidateRealityNames(serverName, shortID string) error {
+	return validateRealityProbe(serverName, shortID, "")
+}
+
+// ValidateRealityTarget checks a REALITY dest/target (host:port) with the rules
+// the link protocol uses for it. An empty one is left unchecked.
+func ValidateRealityTarget(target string) error {
+	return validateRealityProbe("", "", target)
+}
+
+// validateRealityProbe runs the link protocol's own check over a probe link whose
+// REALITY fields are the ones given, the others being valid placeholders.
+func validateRealityProbe(serverName, shortID, target string) error {
 	name := serverName
 	if name == "" {
 		name = "example.com"
 	}
+	if target == "" {
+		target = "example.com:443"
+	}
 	probe := protocol.LinkIn{Key: "lnk_1", Port: 1, Protocol: protocol.LinkProtocolVLESSReality, Reality: &protocol.LinkRealityServer{
 		UUID: "00000000-0000-4000-8000-000000000000", PrivateKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		Target: "example.com:443", ServerNames: []string{name}, ShortIDs: []string{shortID}}}
+		Target: target, ServerNames: []string{name}, ShortIDs: []string{shortID}}}
 	if err := protocol.ValidateLinkIn(probe); err != nil {
-		return fmt.Errorf("%w: REALITY server name or short id: %v", ErrValidation, err)
+		return fmt.Errorf("%w: REALITY server name, short id or target: %v", ErrValidation, err)
 	}
 	return nil
 }

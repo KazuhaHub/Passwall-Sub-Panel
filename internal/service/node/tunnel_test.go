@@ -1524,3 +1524,27 @@ func TestEditingTheListenerRefusesABadShortIDOrServerName(t *testing.T) {
 		t.Fatal("a refused edit changed the listener")
 	}
 }
+
+// The REALITY target goes to the entry's Xray as it is, so a bad one is refused
+// by the link protocol's own rules and the stored listener stays as it was.
+func TestEditingTheListenerChecksItsRealityTarget(t *testing.T) {
+	env := newTunnelEnv(t, nil)
+	lineID := env.addTunnel(t, 0)
+	before := env.repo.child(1, lineID)
+	ctx := context.Background()
+	for _, target := range []string{"no-port", "example.com:0", "example.com:99999", "bad host:443", ":443", "example.com:abc"} {
+		err := env.svc.UpdateTunnelListener(ctx, 1, lineID, TunnelListenerEdit{Target: target})
+		if err == nil || !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("target %q: err = %v, want a validation error", target, err)
+		}
+	}
+	if env.repo.child(1, lineID).StreamSettings != before.StreamSettings {
+		t.Fatal("a refused target changed the listener")
+	}
+	if err := env.svc.UpdateTunnelListener(ctx, 1, lineID, TunnelListenerEdit{Target: "www.example.org:8443"}); err != nil {
+		t.Fatalf("a good target was refused: %v", err)
+	}
+	if got := realityOf(t, env.repo.child(1, lineID))["target"]; got != "www.example.org:8443" {
+		t.Fatalf("target = %v", got)
+	}
+}

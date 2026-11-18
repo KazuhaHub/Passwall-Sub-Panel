@@ -1045,6 +1045,9 @@ func (s *Service) UpdateTunnelListener(ctx context.Context, landingID int64, lin
 		if err := domain.ValidateRealityNames(strings.ToLower(strings.TrimSpace(edit.ServerName)), strings.ToLower(strings.TrimSpace(edit.ShortID))); err != nil {
 			return err
 		}
+		if err := domain.ValidateRealityTarget(strings.TrimSpace(edit.Target)); err != nil {
+			return err
+		}
 		if edit.ServerName != "" {
 			reality["serverNames"] = []string{strings.ToLower(strings.TrimSpace(edit.ServerName))}
 			if edit.Target == "" {
