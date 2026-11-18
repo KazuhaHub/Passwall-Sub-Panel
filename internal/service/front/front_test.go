@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
@@ -503,6 +504,12 @@ func TestPlanForWithholdsWhatCannotBeSent(t *testing.T) {
 func TestUsageListsEveryPort(t *testing.T) {
 	e := newEnv(realityNode(1, "hk", 443, "a.example.com"), realityNode(2, "us", 8443, "b.example.com"), forwardLanding(443))
 	e.nodes[1].InboundListen = "192.0.2.20"
+	e.svc.WithProbePorts(func(_ context.Context, id int64, _ time.Time) ([]domain.ProbeState, error) {
+		if id != panelID {
+			t.Errorf("probe ports requested for server %d", id)
+		}
+		return []domain.ProbeState{{ObjectKey: "lnk_1", LoopbackPort: 31123}}, nil
+	})
 	e.svc.links = fakeLinks{{ID: 1, EntryPanelID: 3, ExitPanelID: panelID, Port: 22222}}
 	in := simpleInput()
 	in.Routes = append(in.Routes, domain.FrontRoute{ServerNames: []string{"land.example.com"},
@@ -525,7 +532,7 @@ func TestUsageListsEveryPort(t *testing.T) {
 			front = u
 		}
 	}
-	for _, want := range []string{"front:443", "front_loopback:30001", "listener:8443", "forward:443", "link:22222", "probe_range:31000"} {
+	for _, want := range []string{"front:443", "front_loopback:30001", "listener:8443", "forward:443", "link:22222", "probe_range:31000", "probe_loopback:31123"} {
 		if seen[want] != 1 {
 			t.Errorf("usage lacks %s: %v", want, seen)
 		}

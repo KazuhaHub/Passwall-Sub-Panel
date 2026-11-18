@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sort"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -16,9 +17,10 @@ const (
 	KindLink          = "link"           // the exit half of a tunnel into this server
 	KindFront         = "front"          // a shared port
 	KindFrontLoopback = "front_loopback" // 127.0.0.1 port of a listener behind a front
-	KindProbeRange    = "probe_range"    // Node's internal probe sockets
-	KindReserved      = "reserved"       // a port Node keeps for itself (its core API)
-	KindLinkPlanned   = "link_planned"   // a port promised to a tunnel about to be made into this server
+	KindProbeLoopback = "probe_loopback"
+	KindProbeRange    = "probe_range"  // Node's internal probe sockets
+	KindReserved      = "reserved"     // a port Node keeps for itself (its core API)
+	KindLinkPlanned   = "link_planned" // a port promised to a tunnel about to be made into this server
 )
 
 // PortBehind is one thing behind a front: the names that reach it, or, for the
@@ -331,6 +333,21 @@ func (s *Service) Usage(ctx context.Context, panelID int64) ([]PortUsage, error)
 		table.entries[i].Behind = append(table.entries[i].Behind, PortBehind{
 			Target: f.Default, Label: TargetLabel(f.Default, byID), IsDefault: true,
 		})
+	}
+	if s.probePorts != nil {
+		probes, err := s.probePorts(ctx, panelID, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("front: list observed probe ports: %w", err)
+		}
+		for _, probe := range probes {
+			if domain.InNodeProbeRange(probe.LoopbackPort) {
+				table.entries = append(table.entries, PortUsage{
+					Port: probe.LoopbackPort, Bind: "loopback", Kind: KindProbeLoopback,
+					Label: probe.ObjectKey, Enabled: true,
+				})
+			}
+		}
+		sort.SliceStable(table.entries, func(i, j int) bool { return table.entries[i].Port < table.entries[j].Port })
 	}
 	return table.entries, nil
 }

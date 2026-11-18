@@ -4035,7 +4035,8 @@
           "link": "Tunnel from server {{peer}}",
           "front": "Shared port",
           "front_loopback": "Node {{name}} (behind a shared port)",
-          "probe_range": "Node's internal link probes (loopback; do not use)",
+          "probe_loopback": "Reported link probe for {{link}}",
+          "probe_range": "Reserved range for Node link probes",
           "reserved": "Node's own (core API; do not use)"
         },
         "inactive": "Not in effect: {{why}}"

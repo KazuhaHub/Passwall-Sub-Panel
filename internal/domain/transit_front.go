@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
 // An SNI front (transit.sni.v1) shares one TCP port of a Passwall Node server
@@ -141,8 +143,8 @@ const (
 	// NodeProbeLoopbackLow and High are the loopback ports Node uses internally
 	// for link probes. A loopback port or any other port the panel hands out
 	// must stay out of it; the port-usage view lists it so nobody has to know.
-	NodeProbeLoopbackLow  = 31000
-	NodeProbeLoopbackHigh = 31999
+	NodeProbeLoopbackLow  = nodeprotocol.ProbePortFirst
+	NodeProbeLoopbackHigh = nodeprotocol.ProbePortLast
 	// DefaultFrontPort is the pre-fill of a new front's port. Any TCP port may
 	// be shared.
 	DefaultFrontPort = 443

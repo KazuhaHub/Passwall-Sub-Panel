@@ -126,11 +126,13 @@ describe('ServersView shared ports', () => {
       ] },
       { port: 30001, bind: 'loopback', kind: 'front_loopback', node_name: 'hk', label: 'y', enabled: true },
       { port: 31000, range_high: 31999, bind: 'loopback', kind: 'probe_range', label: 'z', enabled: true },
+      { port: 31123, bind: 'loopback', kind: 'probe_loopback', label: 'lnk_1', enabled: true },
     ])
     mount(<ServersView />)
     const dialog = await openDialog()
     fireEvent.click(within(dialog).getByRole('tab', { name: 'admin:servers.fronts.tab_ports' }))
     await within(dialog).findByText('31000–31999')
+    await within(dialog).findByText('31123')
     expect(within(dialog).getByText('30001')).toBeTruthy()
     expect(within(dialog).getByText('admin:servers.fronts.ports.route_arrow')).toBeTruthy()
     expect(within(dialog).getByText('admin:servers.fronts.ports.default_arrow')).toBeTruthy()

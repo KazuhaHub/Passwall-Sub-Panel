@@ -33,7 +33,11 @@ func TestTransitProbeRepo_ApplyListPruneClear(t *testing.T) {
 	put := func(panel int64, key, kind string, withheld bool) (*domain.ProbeState, domain.ProbeState) {
 		t.Helper()
 		prev, next, err := repo.Apply(ctx, panel, key, kind, func(prev *domain.ProbeState) (domain.ProbeState, bool, error) {
-			return probeRow(0, "", "", domain.ProbeDown, withheld, soon), true, nil
+			row := probeRow(0, "", "", domain.ProbeDown, withheld, soon)
+			if kind == "e2e" {
+				row.LoopbackPort = 31123
+			}
+			return row, true, nil
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -71,6 +75,15 @@ func TestTransitProbeRepo_ApplyListPruneClear(t *testing.T) {
 	}
 	if !rows[0].ValidUntil.Equal(soon) || rows[0].Attempts != 20 {
 		t.Fatalf("row did not round trip: %+v", rows[0])
+	}
+
+	observed, err := repo.ListProbePorts(ctx, 1, soon.Add(-time.Second))
+	if err != nil || len(observed) != 1 || observed[0].PanelID != 1 || observed[0].LoopbackPort != 31123 {
+		t.Fatalf("fresh probe listeners = %+v, %v", observed, err)
+	}
+	observed, err = repo.ListProbePorts(ctx, 1, soon)
+	if err != nil || len(observed) != 0 {
+		t.Fatalf("expired probe listeners = %+v, %v", observed, err)
 	}
 
 	if n, err := repo.PruneExcept(ctx, 1, []string{"lnk_1"}); err != nil || n != 1 {

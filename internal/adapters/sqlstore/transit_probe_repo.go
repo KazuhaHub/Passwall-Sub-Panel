@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -29,6 +30,7 @@ type transitProbeRow struct {
 	RTTMaxMS      int    `gorm:"column:rtt_max_ms;not null;default:0"`
 	LastError     string `gorm:"size:32;not null;default:''"`
 	LastSuccessMS int64  `gorm:"not null;default:0"`
+	LoopbackPort  int    `gorm:"not null;default:0"`
 
 	State       string    `gorm:"size:16;not null"`
 	Consecutive int       `gorm:"not null;default:0"`
@@ -48,7 +50,7 @@ func (r transitProbeRow) toDomain() domain.ProbeState {
 		PanelID: r.PanelID, ObjectKey: r.ObjectKey, Kind: r.Kind,
 		Attempts: r.Attempts, Failures: r.Failures,
 		RTTMinMS: r.RTTMinMS, RTTMedianMS: r.RTTMedianMS, RTTMaxMS: r.RTTMaxMS,
-		LastError: r.LastError, LastSuccessMS: r.LastSuccessMS,
+		LastError: r.LastError, LastSuccessMS: r.LastSuccessMS, LoopbackPort: r.LoopbackPort,
 		State: domain.ProbeHealth(r.State), Consecutive: r.Consecutive, StateSince: r.StateSince, Withheld: r.Withheld,
 		ReportedAt: r.ReportedAt, ValidUntil: r.ValidUntil, AgentReportedMS: r.AgentReportedMS, CountedAt: r.CountedAt,
 	}
@@ -62,7 +64,7 @@ func probeRowOf(s domain.ProbeState) transitProbeRow {
 		PanelID: s.PanelID, ObjectKey: s.ObjectKey, Kind: s.Kind,
 		Attempts: s.Attempts, Failures: s.Failures,
 		RTTMinMS: s.RTTMinMS, RTTMedianMS: s.RTTMedianMS, RTTMaxMS: s.RTTMaxMS,
-		LastError: s.LastError, LastSuccessMS: s.LastSuccessMS,
+		LastError: s.LastError, LastSuccessMS: s.LastSuccessMS, LoopbackPort: s.LoopbackPort,
 		State: string(s.State), Consecutive: s.Consecutive, StateSince: s.StateSince.UTC(), Withheld: s.Withheld,
 		ReportedAt: s.ReportedAt.UTC(), ValidUntil: s.ValidUntil.UTC(), AgentReportedMS: s.AgentReportedMS, CountedAt: s.CountedAt.UTC(),
 	}
@@ -138,6 +140,21 @@ func (r *transitProbeRepo) Apply(ctx context.Context, panelID int64, key, kind s
 func (r *transitProbeRepo) List(ctx context.Context) ([]domain.ProbeState, error) {
 	var rows []transitProbeRow
 	if err := r.db.WithContext(ctx).Order("panel_id ASC, object_key ASC, kind ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]domain.ProbeState, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.toDomain())
+	}
+	return out, nil
+}
+
+// ListProbePorts returns fresh end-to-end observations that identify an internal listener.
+func (r *transitProbeRepo) ListProbePorts(ctx context.Context, panelID int64, now time.Time) ([]domain.ProbeState, error) {
+	var rows []transitProbeRow
+	if err := r.db.WithContext(ctx).
+		Where("panel_id = ? AND kind = ? AND loopback_port > 0 AND valid_until > ?", panelID, nodeprotocol.ProbeKindE2E, now.UTC()).
+		Order("loopback_port ASC, object_key ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]domain.ProbeState, 0, len(rows))
