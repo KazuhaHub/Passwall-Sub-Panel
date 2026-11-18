@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sourceguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
@@ -104,6 +105,10 @@ type Service struct {
 	// MEANS THIS BUILD DOES NOT SHARE PORTS: no config carries Fronts.
 	fronts FrontPublisher
 	routes RoutePlanner
+	// guard decides the source guard sent to a landing server that can enforce
+	// one. NIL MEANS THIS BUILD DOES NOT GUARD: no set, no guard.
+	guard SourceGuardPlanner
+	hits  SourceGuardHitStore
 }
 
 // FrontPublisher is the SNI front collaborator (service/front.Service).
@@ -423,6 +428,31 @@ type RoutePlanner interface {
 	// Confirm records which routes the server confirmed holding.
 	Confirm(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 }
+
+// SourceGuardPlanner decides the source sets and client guards of a landing
+// server (service/sourceguard.Planner).
+type SourceGuardPlanner interface {
+	PlanFor(ctx context.Context, capabilities []string, nodes []*domain.Node) (sourceguard.Plan, error)
+}
+
+// SetSourceGuard binds the source guard planner. Left unbound, no config
+// carries a source set and no roster a guard.
+func (s *Service) SetSourceGuard(g SourceGuardPlanner) { s.guard = g }
+
+// SourceGuardHitStore keeps the sources a landing refused.
+type SourceGuardHitStore interface {
+	RecordHits(ctx context.Context, panelID int64, hits []domain.SourceGuardHit, cutoff time.Time, limit int) error
+}
+
+// SetSourceGuardHits binds where refused sources are kept. Left unbound, they
+// are not recorded.
+func (s *Service) SetSourceGuardHits(store SourceGuardHitStore) { s.hits = store }
+
+// How long, and how many, refused sources a server keeps.
+const (
+	sourceGuardHitRetention = 30 * 24 * time.Hour
+	sourceGuardHitLimit     = 1000
+)
 
 // SetRoutes binds the routing planner. Left unbound, no config carries routes.
 func (s *Service) SetRoutes(r RoutePlanner) { s.routes = r }
@@ -947,7 +977,21 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 		configBody.Policy, policyDigest = result.Policy, result.Digest
 		policyIssues = append(policyIssues, result.Issues...)
 	}
-	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 {
+	// SOURCE GUARD (ADR 0044). The sets go in the config and each guarded client
+	// refers to one from the roster, only for an agent that declared
+	// transit.source_guard.v1: one that did not would ignore both and accept
+	// every connection while the config reads as applied. The sets are worked
+	// out from the nodes of THIS config, so a listener that was left out above
+	// has no set and none of its clients a guard.
+	var guardPlan sourceguard.Plan
+	if s.guard != nil {
+		guardPlan, err = s.guard.PlanFor(ctx, report.Capabilities, snapshot.Nodes)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		transitBody.SourceSets = guardPlan.Sets
+	}
+	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 || len(transitBody.SourceSets) > 0 {
 		configBody.Transit = &transitBody
 	}
 	policyIssues = append(policyIssues, frontIssues...)
@@ -967,7 +1011,7 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-	rosterBody := buildRoster(snapshot, nodeprotocol.Version{Epoch: agent.Epoch, Version: configStream.DesiredVersion})
+	rosterBody := buildRoster(snapshot, nodeprotocol.Version{Epoch: agent.Epoch, Version: configStream.DesiredVersion}, guardPlan)
 	rosterStream, err := s.mint(ctx, agent, domain.NodeAgentStreamRoster, rosterBody, now)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
@@ -1237,7 +1281,10 @@ func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent,
 	return body, nil
 }
 
-func buildRoster(snapshot *ports.NativeDesiredSnapshot, configVersion nodeprotocol.Version) nodeprotocol.RosterBody {
+// buildRoster lists the clients of the snapshot. guard is the source guard of the
+// landing (empty when it has none, or cannot enforce one): a roster built
+// without it is what it was before source guards existed.
+func buildRoster(snapshot *ports.NativeDesiredSnapshot, configVersion nodeprotocol.Version, guard sourceguard.Plan) nodeprotocol.RosterBody {
 	nodeIDs := make(map[int64]struct{}, len(snapshot.Nodes))
 	for _, node := range snapshot.Nodes {
 		if node != nil {
@@ -1280,6 +1327,7 @@ func buildRoster(snapshot *ports.NativeDesiredSnapshot, configVersion nodeprotoc
 			Credentials: nodeprotocol.Credential{
 				Username: client.Email, UUID: client.UUID, Password: client.Password, Flow: flow,
 			},
+			SourceGuard: guard.Guard(client, len(listeners)),
 		})
 		subjects[client.UserID] = struct{}{}
 	}
@@ -1392,6 +1440,9 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	if report.Partial {
 		return nil
 	}
+	if err := s.recordSourceGuardHits(ctx, agent, snapshot, report, now); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	s.reports[agent.AgentID] = receivedFullReport{
 		report: cloneObservationReport(report), receivedAtMS: now.UnixMilli(),
@@ -1414,7 +1465,10 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		for _, client := range appliedRoster.Clients {
 			appliedClients[client.Key] = client
 		}
-		currentRoster := buildRoster(snapshot, appliedRoster.MinConfigVersion)
+		// The guard is left out of this comparison on purpose: it restricts where an
+		// identity may connect from, not what the identity is, so it does not decide
+		// whether the credentials a client holds are the applied ones.
+		currentRoster := buildRoster(snapshot, appliedRoster.MinConfigVersion, sourceguard.Plan{})
 		statuses := objectStatuses(report.Objects, nodeprotocol.StreamRoster)
 		for _, currentClient := range currentRoster.Clients {
 			appliedClient, existed := appliedClients[currentClient.Key]
@@ -2336,3 +2390,34 @@ func containsInt(items []int, want int) bool {
 }
 
 var _ ports.NativePanelSnapshotReader = (*Service)(nil)
+
+// recordSourceGuardHits keeps the sources a landing refused, from a full report
+// of an agent that declared the capability. A hit names a set; it is kept only
+// when the set is one of this server's own landings, so an agent cannot put a
+// warning on a line of another server.
+func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, report nodeprotocol.NodeReport, now time.Time) error {
+	if s.hits == nil || !slices.Contains(report.Capabilities, nodeprotocol.CapabilitySourceGuard) {
+		return nil
+	}
+	own := make(map[int64]bool, len(snapshot.Nodes))
+	for _, node := range snapshot.Nodes {
+		if node != nil {
+			own[node.ID] = true
+		}
+	}
+	hits := make([]domain.SourceGuardHit, 0, len(report.SourceGuardHits))
+	for _, hit := range report.SourceGuardHits {
+		listener, err := hit.Listener.RowID()
+		if err != nil || !own[sourceguard.NodeIDOf(string(hit.Set))] || !own[listener] {
+			continue
+		}
+		hits = append(hits, domain.SourceGuardHit{
+			PanelID: agent.PanelID, Set: string(hit.Set), ListenerNodeID: listener, IP: hit.SourceIP,
+			Count: hit.Count, LastSeen: time.UnixMilli(hit.LastSeenMS).UTC(),
+		})
+	}
+	if err := s.hits.RecordHits(ctx, agent.PanelID, hits, now.Add(-sourceGuardHitRetention), sourceGuardHitLimit); err != nil {
+		return fmt.Errorf("nodesync: record source guard hits: %w", err)
+	}
+	return nil
+}

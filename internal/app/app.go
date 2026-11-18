@@ -64,6 +64,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sourceguard"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
@@ -144,10 +145,12 @@ type App struct {
 	mail          *mailer.Service
 	health        *health.Service
 	geo           *geo.Service
-	render        *render.Service
-	risk          *risk.Service
-	settings      ports.SettingsRepo
-	syncTasks     ports.SyncTaskRepo
+	// cloudflareRanges keeps Cloudflare's address ranges current (source guard).
+	cloudflareRanges *sourceguard.Cloudflare
+	render           *render.Service
+	risk             *risk.Service
+	settings         ports.SettingsRepo
+	syncTasks        ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -380,6 +383,17 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			return errors.Is(err, domain.ErrNotFound)
 		})
 	nativeSync.SetTransit(transitSvc)
+	// SOURCE GUARD (ADR 0044): the Cloudflare ranges a CDN line defaults to, the
+	// sets and guards a landing that can enforce them is sent, and where the
+	// sources it refused are kept. Auto-fetch is read from settings before every
+	// attempt, so the switch takes effect without a restart; a settings outage
+	// leaves it on, the default.
+	cloudflareRanges := sourceguard.NewCloudflare(repos.SourceGuard, func(ctx context.Context) bool {
+		set, err := repos.Settings.Load(ctx, ports.UISettings{})
+		return err != nil || !set.SourceGuardCloudflareFetchOff
+	})
+	nativeSync.SetSourceGuard(sourceguard.NewPlanner(repos.NodeAgent, cloudflareRanges))
+	nativeSync.SetSourceGuardHits(repos.SourceGuard)
 	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
 	// ONE front service for the sync, the node saves and the HTTP handlers: it
 	// owns the per-server lock that serializes everything touching a server's
@@ -998,6 +1012,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.mail = mailSvc
 	a.health = healthSvc
 	a.geo = geoSvc
+	a.cloudflareRanges = cloudflareRanges
 	a.settings = repos.Settings
 	a.syncTasks = repos.SyncTask
 	a.trafficRepo = repos.Traffic
@@ -1188,6 +1203,10 @@ func (a *App) Run() error {
 	})
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
+	if a.cloudflareRanges != nil {
+		// Once a day; a restart within a day of the last fetch waits out the rest.
+		safego.GoTracked(&a.bgWG, "cloudflare-ranges-loop", func() { a.cloudflareRanges.Run(bgCtx, time.Minute) })
+	}
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, a.riskFirstDelay(bgCtx)) })
