@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -52,6 +55,10 @@ type AdminServersHandler struct {
 	coreCatalog       ports.CoreCatalog
 	serverMigration   ServerMigrationPreviewer
 	nodeMetrics       ports.NodeHostMetricRepo
+	// fronts and frontSvc are the SNI fronts: a server's go with it, and
+	// leaving Xray with some saved asks first.
+	fronts   ports.TransitFrontRepo
+	frontSvc *front.Service
 
 	// startedAt is when THIS PSP process began listening. It exists because a
 	// node's silence during the panel's own downtime is not evidence about the
@@ -60,6 +67,12 @@ type AdminServersHandler struct {
 	// reads as "up long enough", which keeps the pre-existing verdict for any
 	// handler built without the constructor.
 	startedAt time.Time
+}
+
+// WithFronts binds the SNI front store and service.
+func (h *AdminServersHandler) WithFronts(fronts ports.TransitFrontRepo, svc *front.Service) *AdminServersHandler {
+	h.fronts, h.frontSvc = fronts, svc
+	return h
 }
 
 // RealityFingerprintNormalizer converges PSP-owned inbound snapshots after a
@@ -179,6 +192,8 @@ type serverDTO struct {
 	URL                  string                  `json:"url"`
 	Username             string                  `json:"username,omitempty"`
 	Remark               string                  `json:"remark,omitempty"`
+	Region               string                  `json:"region,omitempty"`
+	Tags                 []string                `json:"tags,omitempty"`
 	UpdateChannel        string                  `json:"update_channel,omitempty"`
 	// AuditCollect is how much a Passwall Node server records of its
 	// destination rules (off, hits, hits_and_usage); absent for other panels.
@@ -257,6 +272,9 @@ type serverDTO struct {
 	// Passwall Node server approaching what one sync exchange can carry.
 	ClientIdentities        *int64 `json:"client_identities,omitempty"`
 	ClientIdentitiesWarning bool   `json:"client_identities_warning,omitempty"`
+	// FrontsInactive is how many saved shared ports (SNI fronts) are not being
+	// sent to this server right now: all of them when it cannot run fronts.
+	FrontsInactive int `json:"fronts_inactive,omitempty"`
 }
 
 // ClientIdentityWarnAt is where a Passwall Node server's client count starts
@@ -277,16 +295,18 @@ func (h *AdminServersHandler) WithClientIdentityCounts(counter ClientIdentityCou
 }
 
 type serverCreateRequest struct {
-	Kind          string  `json:"panel_type"`
-	Name          string  `json:"name" binding:"required"`
-	URL           string  `json:"url"`
-	APIToken      string  `json:"api_token"`
-	Username      string  `json:"username"`
-	Password      string  `json:"password"`
-	Remark        string  `json:"remark"`
-	AuthMethod    string  `json:"auth_method"` // "" (auto) | "token" | "password"
-	InsecureHTTPS bool    `json:"insecure_https"`
-	UpdateChannel *string `json:"update_channel,omitempty"`
+	Kind          string   `json:"panel_type"`
+	Name          string   `json:"name" binding:"required"`
+	URL           string   `json:"url"`
+	APIToken      string   `json:"api_token"`
+	Username      string   `json:"username"`
+	Password      string   `json:"password"`
+	Remark        string   `json:"remark"`
+	Region        string   `json:"region" binding:"max=32"`
+	Tags          []string `json:"tags"`
+	AuthMethod    string   `json:"auth_method"` // "" (auto) | "token" | "password"
+	InsecureHTTPS bool     `json:"insecure_https"`
+	UpdateChannel *string  `json:"update_channel,omitempty"`
 }
 
 type nativeServerCreateResponse struct {
@@ -309,16 +329,18 @@ func newNativeCredential() (raw, digest string, err error) {
 // serverUpdateRequest uses pointers so omitted fields preserve existing
 // values; admin only re-enters secrets when actually changing them.
 type serverUpdateRequest struct {
-	Kind          *string `json:"panel_type,omitempty"`
-	Name          *string `json:"name,omitempty"`
-	URL           *string `json:"url,omitempty"`
-	APIToken      *string `json:"api_token,omitempty"`
-	Username      *string `json:"username,omitempty"`
-	Password      *string `json:"password,omitempty"`
-	Remark        *string `json:"remark,omitempty"`
-	AuthMethod    *string `json:"auth_method,omitempty"`
-	InsecureHTTPS *bool   `json:"insecure_https,omitempty"`
-	UpdateChannel *string `json:"update_channel,omitempty"`
+	Kind          *string   `json:"panel_type,omitempty"`
+	Name          *string   `json:"name,omitempty"`
+	URL           *string   `json:"url,omitempty"`
+	APIToken      *string   `json:"api_token,omitempty"`
+	Username      *string   `json:"username,omitempty"`
+	Password      *string   `json:"password,omitempty"`
+	Remark        *string   `json:"remark,omitempty"`
+	Region        *string   `json:"region" binding:"omitempty,max=32"`
+	Tags          *[]string `json:"tags"`
+	AuthMethod    *string   `json:"auth_method,omitempty"`
+	InsecureHTTPS *bool     `json:"insecure_https,omitempty"`
+	UpdateChannel *string   `json:"update_channel,omitempty"`
 	// AuditCollect is a Passwall Node server's recording level; omitted keeps it.
 	AuditCollect *string `json:"audit_collect,omitempty"`
 	// DestResolve is a Passwall Node server's hostname-against-IP-rules mode;
@@ -418,6 +440,7 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 			out[i].ClientIdentities = &n
 			out[i].ClientIdentitiesWarning = domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP && n >= ClientIdentityWarnAt
 		}
+		out[i].FrontsInactive = h.frontsInactive(ctx, panel)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -536,6 +559,12 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	tags, err := domain.NormalizeLineTags(req.Tags)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	req.Region, req.Tags = strings.TrimSpace(req.Region), tags
 	if kind == domain.PanelKindPSP {
 		h.createNative(c, req)
 		return
@@ -548,6 +577,8 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		Username:           req.Username,
 		Password:           req.Password,
 		Remark:             req.Remark,
+		Region:             req.Region,
+		Tags:               req.Tags,
 		AuthMethod:         domain.XUIAuthMethod(req.AuthMethod),
 		InsecureSkipVerify: req.InsecureHTTPS,
 	}
@@ -600,7 +631,7 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 	}
 	panel := &domain.XUIPanel{
 		Kind: domain.PanelKindPSP, Name: req.Name, URL: "psp://" + agentID,
-		Remark: req.Remark, UpdateChannel: domain.PanelUpdateStable,
+		Remark: req.Remark, Region: req.Region, Tags: req.Tags, UpdateChannel: domain.PanelUpdateStable,
 	}
 	if req.UpdateChannel != nil {
 		panel.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)
@@ -710,7 +741,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
 		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark, region, tags, update_channel, audit_collect and dest_resolve can be edited for a Passwall Node server"})
 		return
 	}
 	if req.AuditCollect != nil {
@@ -765,6 +796,17 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	if req.Remark != nil {
 		existing.Remark = *req.Remark
 	}
+	if req.Region != nil {
+		existing.Region = strings.TrimSpace(*req.Region)
+	}
+	if req.Tags != nil {
+		tags, err := domain.NormalizeLineTags(*req.Tags)
+		if err != nil {
+			mapServerError(c, err)
+			return
+		}
+		existing.Tags = tags
+	}
 	if req.AuthMethod != nil {
 		if !validAuthMethod(*req.AuthMethod) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
@@ -805,6 +847,19 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			}
 			if req.DestResolve != nil {
 				resolve = &panel.DestResolve
+			}
+			if labels, ok := h.repo.(interface {
+				UpdateNativeMetadataAndLabels(context.Context, int64, *string, *string, *domain.PanelUpdateChannel, *domain.AuditCollect, *domain.DestResolve, *string, *[]string) error
+			}); ok && (req.Region != nil || req.Tags != nil) {
+				var region *string
+				var tags *[]string
+				if req.Region != nil {
+					region = &panel.Region
+				}
+				if req.Tags != nil {
+					tags = &panel.Tags
+				}
+				return labels.UpdateNativeMetadataAndLabels(c.Request.Context(), id, name, remark, channel, collect, resolve, region, tags)
 			}
 			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel, collect, resolve)
 		}
@@ -1336,6 +1391,9 @@ type selectCoreRequest struct {
 	Engine            string `json:"engine"`
 	Version           string `json:"version"`
 	ConfirmRestricted bool   `json:"confirm_restricted"`
+	// ConfirmFronts is the go-ahead for leaving Xray while shared ports are
+	// saved: they stay saved but stop being sent.
+	ConfirmFronts bool `json:"confirm_fronts"`
 }
 
 // SelectCore records one exact, catalog-audited deployment identity. The
@@ -1385,6 +1443,17 @@ func (h *AdminServersHandler) SelectCore(c *gin.Context) {
 	if !release.RequiresConfirmation && req.ConfirmRestricted {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
 		return
+	}
+	if engine != domain.NodeCoreXray && h.frontSvc != nil && !req.ConfirmFronts {
+		refusal, err := h.frontSvc.EngineChangeRefusal(c.Request.Context(), id)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		if refusal != nil {
+			respondFrontError(c, refusal)
+			return
+		}
 	}
 	client, err := h.pool.Get(id)
 	if err != nil {
@@ -1784,13 +1853,70 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	byID := make(map[int64]*domain.Node, len(all))
 	for _, n := range all {
-		if n.PanelID == id {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "Server still has nodes attached; delete or reassign them first",
-			})
-			return
+		byID[n.ID] = n
+	}
+	var attached []gin.H
+	hidden := false
+	for _, n := range all {
+		if n.PanelID != id {
+			continue
 		}
+		item := gin.H{"node_id": n.ID, "node": n.DisplayName}
+		if n.IsTunnelChild() {
+			// A hidden listener is not a node anyone can find in the list: name it
+			// as the tunnel line it is, and say the line is what to remove.
+			hidden = true
+			line := n.ParentLineID
+			landing := ""
+			if parent := byID[n.ParentNodeID]; parent != nil {
+				landing = parent.DisplayName
+				for _, l := range parent.Relays {
+					if l.ID == n.ParentLineID {
+						line = firstNonEmptyText(l.Name, l.Address, l.ID)
+					}
+				}
+			}
+			item["tunnel_line_of_node_id"], item["tunnel_line_of"], item["tunnel_line"] = n.ParentNodeID, landing, line
+		}
+		attached = append(attached, item)
+	}
+	if len(attached) > 0 {
+		message := "Server still has nodes attached; delete or reassign them first"
+		if hidden {
+			var names []string
+			for _, item := range attached {
+				if line, ok := item["tunnel_line"].(string); ok {
+					names = append(names, fmt.Sprintf("%v · tunnel line %q", item["tunnel_line_of"], line))
+				}
+			}
+			message += " (tunnel lines enter through this server, remove those lines on their landing nodes: " + strings.Join(names, "; ") + ")"
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": message, "code": "server_has_nodes", "nodes": attached})
+		return
+	}
+	// Refuse if any node's routes by destination leave through this server: the
+	// destinations they take would otherwise have nowhere to go, and the node
+	// could not be sent.
+	var users []gin.H
+	for _, n := range all {
+		var routes []string
+		for _, r := range n.DestRoutes {
+			if r.Target.Kind == domain.DestRouteServer && r.Target.PanelID == id {
+				routes = append(routes, r.ID)
+			}
+		}
+		if len(routes) > 0 {
+			users = append(users, gin.H{"node_id": n.ID, "node": n.DisplayName, "routes": routes})
+		}
+	}
+	if len(users) > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "Routes by destination still leave through this server; change or remove them first",
+			"code":  "server_used_by_routes", "used_by": users,
+		})
+		return
 	}
 	panel, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
@@ -1811,7 +1937,58 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		return
 	}
 	_ = h.pool.Remove(id)
+	h.deleteFrontsOf(c, id)
 	c.Status(http.StatusNoContent)
+}
+
+// frontsInactive counts a Passwall Node server's saved shared ports that are
+// not being sent, for the server row. A failure shows nothing rather than fail
+// the list.
+func (h *AdminServersHandler) frontsInactive(ctx context.Context, panel *domain.XUIPanel) int {
+	if h.frontSvc == nil || h.fronts == nil || panel == nil || domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		return 0
+	}
+	fronts, err := h.fronts.ListByPanel(ctx, panel.ID)
+	if err != nil || len(fronts) == 0 {
+		return 0
+	}
+	diagnosis, err := h.frontSvc.Diagnose(ctx, panel.ID)
+	if err != nil {
+		return 0
+	}
+	if diagnosis.Inactive != "" {
+		return len(fronts)
+	}
+	return len(diagnosis.Withheld)
+}
+
+// deleteFrontsOf removes the shared ports of a server that is gone, each with
+// its own audit entry. A failure here leaves orphans, which no guard counts
+// (they belong to no server), so it is logged and never fails the delete.
+func (h *AdminServersHandler) deleteFrontsOf(c *gin.Context, panelID int64) {
+	if h.fronts == nil {
+		return
+	}
+	fronts, err := h.fronts.ListByPanel(c.Request.Context(), panelID)
+	if err != nil {
+		log.Warn("list fronts of a deleted server failed", "panel_id", panelID, "err", err)
+		return
+	}
+	for _, f := range fronts {
+		if _, err := h.fronts.Delete(c.Request.Context(), panelID, f.ID); err != nil {
+			log.Warn("delete front of a deleted server failed", "panel_id", panelID, "front", f.ID, "err", err)
+			continue
+		}
+		if h.audit == nil {
+			continue
+		}
+		before, _ := json.Marshal(frontDTOOf(f))
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor: actorFromGin(c), Action: "transit_front_deleted",
+			Target:     "server=" + strconv.FormatInt(panelID, 10) + " port=" + strconv.Itoa(f.Port) + " (server deleted)",
+			BeforeJSON: string(before), IP: c.ClientIP(), At: time.Now(),
+		})
+	}
 }
 
 // ---- helpers ----
@@ -1824,6 +2001,8 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		URL:              p.URL,
 		Username:         p.Username,
 		Remark:           p.Remark,
+		Region:           p.Region,
+		Tags:             p.Tags,
 		HasAPIToken:      p.APIToken != "",
 		HasPassword:      p.Password != "",
 		AuthMethod:       string(effectiveAuthMethod(p)),
@@ -2053,4 +2232,13 @@ func mapServerError(c *gin.Context, err error) {
 	default:
 		respondError(c, err)
 	}
+}
+
+func firstNonEmptyText(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

@@ -742,6 +742,35 @@
         "major": "重大变更"
       },
       "retry": "重试"
+    },
+    "probe": {
+      "section": "链路探测",
+      "intro": "入口服务器会探测每条隧道和托管中转线路，并上报延迟与丢包，结果显示在节点列表中。",
+      "load_failed": "加载链路探测设置失败",
+      "save": "保存链路探测",
+      "saved": "链路探测设置已保存",
+      "save_failed": "保存链路探测设置失败",
+      "default_hint": "留空或填 0 使用默认值（{{value}}）",
+      "enabled": "启用链路探测",
+      "enabled_help": "开启或关闭链路探测。关闭后会立即解除所有撤下，线路和节点恢复出现在订阅中。",
+      "interval": "探测间隔（秒）",
+      "interval_help": "每条链路的探测频率，同时也是一个探测窗口的长度。范围 30 到 3600；留空或 0 使用默认值。",
+      "timeout": "探测超时（毫秒）",
+      "timeout_help": "单次探测等待响应的时长，超时记为丢包。范围 500 到 10000；留空或 0 使用默认值。",
+      "url": "探测地址",
+      "url_help": "通过每条链路访问、用于端到端测量的地址。必须以 http:// 或 https:// 开头；如带端口，范围 1 到 65535。留空表示仅测传输：不会通过隧道请求任何地址，只测试传输连接，因此没有端到端结果，也没有端到端延迟和丢包；质量标签此时显示传输层数据。",
+      "url_default_hint": "默认：{{value}}。留空 = 仅测传输（无端到端结果）",
+      "url_reset": "恢复默认",
+      "withhold": "撤下中断的链路",
+      "withhold_help": "开启后，链路连续中断达到设定窗口数的线路或节点会从订阅中撤下，且不会回退为直连。“暂无数据”不会触发撤下。关闭此项会立即解除撤下。",
+      "withhold_after": "连续中断 N 个窗口后撤下",
+      "withhold_after_help": "链路被撤下前需连续中断的窗口数。范围 1 到 20；留空或 0 使用默认值。",
+      "restore_after": "连续良好 N 个窗口后恢复",
+      "restore_after_help": "被撤下的链路恢复到订阅前需连续良好的窗口数。范围 1 到 20；留空或 0 使用默认值。",
+      "err_range": "请输入 {{min}} 到 {{max}} 的整数（留空或 0 使用默认值）",
+      "err_url": "请输入以 http:// 或 https:// 开头、端口有效（1 到 65535）的地址",
+      "err_server": "{{message}}",
+      "info": "说明"
     }
   },
   "traffic": {
@@ -750,6 +779,7 @@
     "retry": "重试",
     "poll_now": "立即采集",
     "poll_done": "采集完成",
+    "node_tunnel_line": "{{parent}} · 隧道线路 {{line}}",
     "scope_user": "按用户",
     "scope_node": "按节点",
     "node_table": {
@@ -1015,7 +1045,17 @@
       "destination_policy_resolve_not_deployed": "按需解析未生效",
       "task_identity_conflict": "任务身份冲突",
       "task_replay_fenced": "任务重放已阻止",
-      "legacy_task_result_quarantined": "旧任务结果已隔离"
+      "legacy_task_result_quarantined": "旧任务结果已隔离",
+      "front_withheld": "共用端口未下发",
+      "tunnel_listener_orphan": "隧道监听器没有线路",
+      "roster_identity_capacity": "客户端身份数量较多",
+      "cdn_landing_unfit": "CDN 线路被撤下：节点已不适合 CDN",
+      "tunnel_factor_stale": "隧道监听器的流量倍率未同步",
+      "routes_not_sent": "路由未下发",
+      "route_listener_withheld": "入站的路由未下发",
+      "route_skipped": "路由未下发",
+      "route_regexp_skipped": "路由跳过了正则条目",
+      "route_policy_approximate": "路由上的策略为近似处理"
     },
     "code_summaries": {
       "core_telemetry_failed": "节点未能读取内核运行状态或流量计数。",
@@ -1032,7 +1072,17 @@
       "destination_policy_resolve_not_deployed": "这台节点保持按原样（不解析主机名）：某个入站的嗅探开了 routeOnly:true 或无法解析，会替换被解析的名字；其余策略照常执行。",
       "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
       "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
-      "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。"
+      "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。",
+      "front_withheld": "一个已保存的 SNI 共用端口没有发给这台服务器（原因见详情），它后面的监听器保持自己的端口。",
+      "tunnel_listener_orphan": "隧道监听器的线路已不存在。请在服务器的端口占用里或它的节点页移除该监听器。",
+      "roster_identity_capacity": "这台服务器至少有 20,000 个客户端身份。同步大小取决于编码后的数据，包括身份关联的监听器。",
+      "cdn_landing_unfit": "节点的传输已无法放在 CDN 后面，它的 CDN 线路不再出现在订阅里（详情里有线路和原因）。请把节点改回去，或删除这条线路。",
+      "tunnel_factor_stale": "隧道监听器保存的线路流量倍率已过期。请重新保存该线路的流量倍率。",
+      "routes_not_sent": "某个节点已保存的按目标分流路由没有发给这台服务器（原因见详情），它的流量走默认出口。",
+      "route_listener_withheld": "某个入站因路由无法下发而不带路由发送（原因见详情），它的流量走默认出口。",
+      "route_skipped": "有一条路由没有可下发的目标，已从配置中省略。",
+      "route_regexp_skipped": "路由跳过了列表中的正则条目：路由不接受正则。",
+      "route_policy_approximate": "在 Xray 上，使用正则或关键字的目标策略规则无法与路由精确组合，已做近似处理。"
     },
     "filter": {
       "all": "全部查看状态",
@@ -1946,6 +1996,63 @@
     "duplicate": "复制为新的规则集"
   },
   "nodes": {
+    "setup": {
+      "recent": "最近使用",
+      "untagged": "其他服务器",
+      "landing": "落地节点",
+      "entries": "入口服务器",
+      "exit": "默认出口",
+      "review": "核对端口",
+      "confirm": "创建节点",
+      "next": "下一步",
+      "back": "上一步",
+      "direct": "发布直连线路",
+      "direct_on": "订阅包含直连线路。",
+      "direct_off": "订阅使用配置的其他入口。",
+      "exit_local": "从落地服务器出网",
+      "invalid_routes": "请检查按目标分流的规则后继续。",
+      "routes_count": "{{count}} 条按目标分流规则",
+      "needs_entry": "请发布直连线路，或添加至少一个其他入口。",
+      "tunnel_landing": "加密隧道的落地服务器须运行 Passwall Node。",
+      "request_failed": "无法验证或创建节点。",
+      "mode": "转发方式",
+      "mode_help": "直接转发将客户端连接原样交给落地监听器。加密隧道在入口服务器使用独立监听器，再把流量送到落地服务器。",
+      "random_port": "建议端口",
+      "listen": "绑定地址",
+      "sni": "SNI",
+      "target": "REALITY 目标站点",
+      "shared": "按 SNI 共用端口",
+      "loopback": "回环端口",
+      "all_addresses": "所有地址",
+      "link_port": "中转隧道端口",
+      "review_changes": "请重新核对修改后的端口，再创建节点。",
+      "server": "服务器",
+      "binding": "地址和端口",
+      "reused": "复用现有隧道",
+      "kind": {
+        "landing": "直连",
+        "forward": "直接转发",
+        "tunnel": "加密隧道",
+        "link": "服务器间隧道",
+        "external": "外部入口",
+        "cdn": "CDN"
+      }
+    },
+    "lines": {
+      "title": "线路表",
+      "filter": "按名称、服务器或地址筛选",
+      "node": "落地节点",
+      "line": "订阅线路",
+      "entry": "入口",
+      "exit": "默认出口",
+      "status": "状态",
+      "factor": "流量倍率",
+      "published": "已发布",
+      "pending": "等待生效",
+      "issue": "需要检查",
+      "disabled": "已停用",
+      "empty": "没有符合条件的线路。"
+    },
     "load_failed": "暂时无法加载节点",
     "retry": "重试",
     "cert_source": {
@@ -2001,11 +2108,124 @@
       "entry": "入口",
       "entry_external": "外部入口（转发在面板外配置）",
       "entry_external_hint": "中转机的端口转发由你在面板外配置。",
+      "entry_cdn": "CDN（如 Cloudflare）",
       "entry_managed_hint": "由所选 Passwall Node 服务器把入口端口原样转发到本节点，PSP 自动下发。落地看到的来源地址是这台中转服务器，基于 IP 的限制对经此线路的连接不生效。",
       "port_managed_hint": "中转服务器上监听的端口",
       "managed_ready": "中转服务器已生效，线路已发布",
       "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中",
       "name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为该线路的流量倍率（如 ×1.5）。"
+    },
+    "cdn": {
+      "no_entry": "没有入口服务器，也没有转发：客户端连 CDN，由 CDN 回源到本节点。线路随节点一起发布；PSP 看不到 CDN，因此不做探测。",
+      "tip": "此线路的 Cloudflare 设置：\n- 该域名的 DNS 记录已代理（橙色云）。\n- SSL/TLS 模式决定 CDN 到源站这一跳。完全（严格）：源站有 TLS，Cloudflare 验证它为该域名提供的证书（公共证书或 Cloudflare 源站 CA 证书）。灵活：Cloudflare 用明文 HTTP 回源，所以节点可以是不带 TLS 的 VLESS/VMess + WebSocket 或 HTTPUpgrade；这一跳不加密（VLESS 内容在这一跳可读，VMess 仍加密自己的载荷）。\n- 网络：WebSockets 已开启（WebSocket / HTTPUpgrade），gRPC 已开启（使用 443 端口、TLS 和 HTTP/2）。\n- 端口：Cloudflare 代理 HTTPS 的端口是 443、2053、2083、2087、2096、8443，代理明文 HTTP 的端口是 80、8080、8880、2052、2082、2086、2095。除非用源站规则改写，回源用客户端所用的端口。\n其他 CDN 不同，所以端口不在列表里只提示，不拒绝。\n节点需要 WebSocket、gRPC（带 TLS）或 HTTPUpgrade；REALITY、裸 TCP、Hysteria2、TUIC、Shadowsocks 和不带 TLS 的 Trojan 无法经过 CDN。请在同一台落地服务器上另建一个 TLS + WebSocket（或 gRPC）节点，并在“证书”里为它签发证书（Cloudflare DNS-01）。",
+      "client_tls": "客户端到 CDN 使用 TLS",
+      "client_tls_tip": "客户端连 CDN 时是否使用 TLS（SNI、指纹），与节点自己的 TLS 无关：Cloudflare 灵活模式下，客户端仍对 Cloudflare 用 TLS，而节点是明文 HTTP。默认值：Cloudflare 的 HTTPS 端口为开，HTTP 端口（80、8080、8880、2052、2082、2086、2095）为关。关闭后客户端到 CDN 这一段是明文。Trojan 必须开启。",
+      "domain": "CDN 域名",
+      "domain_hint": "CDN 代理的域名，如 cdn.example.com。SNI 和 Host 从它填入。",
+      "domain_required": "CDN 线路需要填写 CDN 域名。",
+      "port": "端口",
+      "port_hint": "留空 = 443",
+      "address": "优选 IP / 地址（可选）",
+      "address_hint": "客户端实际拨的地址：优选的 Cloudflare IP；留空则直接拨域名。",
+      "host": "Host / authority",
+      "sni_hint": "客户端发出的 TLS 服务器名，CDN 按它路由。",
+      "host_hint": "WebSocket / HTTPUpgrade 的 Host，或 gRPC 的 authority，CDN 按它路由。",
+      "entry_hint": "在本节点前面加一层 CDN。线路类型保存后不能改：删除后重新添加。",
+      "saved_warnings": "已保存。下列 CDN 线路按当前设置可能不通：{{lines}}。打开节点查看原因。",
+      "issue": {
+        "cert_not_covering": "本节点上的证书不包含 {{domain}}。Cloudflare 完全（严格）需要回源主机名有有效证书。如果你用的是另行配置的源站证书，可以忽略。",
+        "cert_unverifiable": "这里读不到本节点的证书（是文件，或没有设置），PSP 无法检查它是否包含 {{domain}}。Cloudflare 完全（严格）需要为它配置有效的源站证书。",
+        "server_name_differs": "本节点的 TLS 服务器名是 {{server_name}}，不是 {{domain}}。",
+        "origin_port": "本节点监听 {{port}} 端口，不是 Cloudflare 代理 {{kind}} 的端口（{{ports}}）。用其他 CDN，或用源站规则改写端口时没有问题。",
+        "line_port": "线路端口 {{port}} 不是 Cloudflare 代理 {{kind}} 的端口（{{ports}}）。用其他 CDN 时没有问题。",
+        "port_differs": "客户端连 {{port}} 端口，而本节点监听 {{origin_port}}：CDN 需要设置为回源到 {{origin_port}}（Cloudflare 用源站规则）。",
+        "sni_differs": "SNI {{sni}} 不是 CDN 域名 {{domain}}，CDN 按它路由。",
+        "host_differs": "Host {{host}} 不是 CDN 域名 {{domain}}，CDN 按它路由。",
+        "origin_plaintext": "本节点没有 TLS，CDN 用明文 HTTP 回源（Cloudflare 灵活模式）。这一跳不加密：VLESS 内容在这一跳可读；{{protocol}} 只有自己加密载荷时才安全（VMess 会）。",
+        "cloudflare_grpc": "Cloudflare 的 gRPC 端点要求使用 443 端口、TLS 和 HTTP/2。请检查客户端 TLS、CDN 端口和源站端口。",
+        "grpc_authority": "mihomo 和 sing-box 用 SNI {{sni}} 作为 gRPC authority。支持独立 authority 的 URI 客户端使用 {{host}}。",
+        "client_plaintext": "客户端通过明文 HTTP 连接 CDN。这一跳的 HTTP 请求和未加密的载荷在网络上可见。",
+        "origin_host": "本节点要求 Host 为 {{origin_host}}，而线路发送的是 {{host}}，节点会匹配不上请求。",
+        "insecure_ignored": "本节点允许不安全的 TLS。CDN 线路从不如此：CDN 出示自己的证书，客户端会验证。"
+      },
+      "reason": {
+        "unknown_node": "落地节点未知。",
+        "protocol": "本节点使用 {{protocol}}，无法经过 CDN（只有 WebSocket、gRPC 或 HTTPUpgrade 上的 VLESS、VMess、Trojan 可以）。请在同一台服务器上另建 TLS + WebSocket（或 gRPC）节点，把线路放到它上面。",
+        "unreadable": "暂时读不到本节点的传输设置。",
+        "reality": "本节点使用 REALITY，无法经过 CDN。请在同一台服务器上另建 TLS + WebSocket（或 gRPC）节点，把线路放到它上面。",
+        "no_tls_trojan": "本节点是不带 TLS 的 Trojan：Trojan 必须有 TLS，所以不能原样经过 CDN。",
+        "no_tls_grpc": "本节点的 gRPC 没有 TLS，CDN 回源不了：gRPC 的源站需要 TLS。",
+        "no_tls": "本节点的安全设置不支持放在 CDN 后面（使用 TLS，或在 WebSocket / HTTPUpgrade 上用不带 TLS 的 VLESS/VMess）。",
+        "raw_tcp": "本节点使用裸 TCP，无法经过 CDN。请在同一台服务器上另建 TLS + WebSocket（或 gRPC）节点，把线路放到它上面。",
+        "xhttp": "本节点使用 XHTTP，PSP 的 CDN 线路暂不支持。",
+        "transport": "本节点使用 {{network}} 传输，无法经过 CDN（WebSocket、gRPC、HTTPUpgrade 可以）。",
+        "flow": "本节点带有 xtls-rprx-vision 流控，它需要裸 TCP，无法经过 CDN。请清除流控或换一个节点。"
+      }
+    },
+    "tunnel": {
+      "mode": "模式",
+      "mode_forward": "直接转发",
+      "mode_tunnel": "加密隧道",
+      "mode_tip": "直接转发：入口服务器把用户连接原样转发到落地，用落地自己的加密，端到端，开销最低。\n加密隧道：入口服务器用自己的 REALITY 监听器终结用户连接，再经服务器之间的加密隧道送到落地所在服务器。入口的网络只看到入口自己的指纹，看不到落地的指纹，开销略多。",
+      "new_hint": "监听器的端口和密钥在保存后预填，之后在该线路上修改。",
+      "switched_tunnel": "线路已改为加密隧道，订阅者需要刷新订阅。",
+      "switched_forward": "线路已改为直接转发，订阅者需要刷新订阅。",
+      "failed": "请求失败",
+      "saved": "监听器已保存",
+      "synced": "已从落地同步",
+      "sync_none": "监听器与落地已一致",
+      "running": "运行中：线路已发布",
+      "pending": "尚未运行，运行前不会出现在订阅中",
+      "applied": "入口服务器已应用监听器",
+      "not_applied": "等待入口服务器应用监听器（{{state}}）",
+      "link_ready": "隧道两端服务器均已运行",
+      "link_pending": "等待隧道在两端服务器上运行",
+      "routes_withheld": "按目标分流暂未下发：{{why}}",
+      "missing": "该线路的监听器不存在。把线路切换为直接转发再切回来即可重新创建。",
+      "port": "监听器端口",
+      "server_name": "REALITY 服务名（SNI）",
+      "target": "REALITY 目标",
+      "short_id": "Short ID",
+      "public_key": "公钥",
+      "private_key": "私钥",
+      "show_key": "显示私钥",
+      "hide_key": "隐藏私钥",
+      "fingerprint": "指纹",
+      "random": "随机生成",
+      "random_keys": "随机生成密钥",
+      "prefill_hint": "“随机生成”只是预填，点“保存监听器”后才会生效。",
+      "save": "保存监听器",
+      "sync": "从落地同步",
+      "open_listener": "监听器设置",
+      "routes_note": "按目标分流按监听器设置，不继承落地（已设置 {{count}} 条）；落地上设置的访问来源规则（国家、IP）对它的隧道监听器同样生效。",
+      "routes_open": "打开监听器设置",
+      "open_discard_title": "打开监听器设置？",
+      "open_discard_message": "当前编辑器里有未保存的节点修改，打开监听器设置会丢弃它们。",
+      "listener_banner": "这是 {{parent}} 的隧道线路 {{line}} 的监听器；名称、地址、出口、倍率跟随线路。",
+      "listener_banner_no_line": "这是 {{parent}} 的一条隧道线路的监听器；名称、地址、出口、倍率跟随线路。",
+      "listener_inbound": "编辑入站配置",
+      "confirm": {
+        "switch_mode_title": "切换线路模式？",
+        "switch_mode_text": "切换模式会替换这条线路的承载方式。",
+        "create_line_title": "新建隧道线路？",
+  "create_line_text": "新建隧道线路；端口已变化，请确认新的端口",
+  "remove_line_title": "删除隧道线路？",
+        "remove_line_text": "删除隧道线路会同时删除它的监听器。",
+        "delete_node_title": "删除节点及其隧道监听器？",
+        "delete_node_text": "删除该节点会同时删除它的隧道线路的监听器。",
+        "sync_from_landing_title": "从落地同步设置？",
+        "sync_from_landing_text": "监听器的以下设置会改为与落地一致：",
+        "creates_item": "将为 {{landing}} 的线路 {{line}} 创建监听器：在 {{entry}} 上开放端口 {{port}}。",
+  "creates_link": "将在 {{exit}} 上开放隧道端口 {{port}}（{{entry}} 与 {{exit}} 之间的新隧道）。",
+  "creates_forward": "将为 {{landing}} 的线路 {{line}} 在 {{entry}} 上开放转发端口 {{port}}。",
+  "server_fallback": "服务器 #{{id}}",
+        "removes_item": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}。",
+        "removes_item_front": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}，并离开共用端口 {{front_port}}。",
+        "diff_item": "{{field}}：{{from}} → {{to}}",
+        "sync_keeps": "监听器保留自己的端口、服务名、目标、密钥、short id 和地址。",
+        "sync_discards": "监听器卡片里未保存的修改会被丢弃。",
+        "refresh": "订阅者需要刷新订阅，才能拿到新的线路参数。"
+      }
     },
     "egress": {
       "server": "出口服务器",
@@ -2015,13 +2235,152 @@
       "ready": "隧道已在两台服务器生效，节点已发布",
       "pending": "等待隧道在两台服务器生效，生效前不会出现在订阅中",
       "load_failed": "读取隧道设置失败",
+      "advanced": "高级隧道设置",
       "shared_hint": "隧道设置由这两台服务器之间的所有节点共用",
       "protocol": "隧道协议",
       "exit_address": "出口地址",
       "exit_address_default": "留空则使用服务器地址 {{address}}",
       "exit_address_unknown": "出口服务器尚未连接过面板，请填写入口服务器可达的地址",
       "reality_server_name": "伪装站点 (SNI)",
+      "reality_target": "伪装目标（主机:端口）",
       "random_site": "随机"
+    },
+    "routes": {
+      "tunnel": {
+        "confirm_title": "修改到 {{name}} 的隧道？",
+        "confirm_nodes": "以下节点把这条隧道作为默认出口，它们的全部流量都经过它：{{nodes}}。",
+        "confirm_protocol": "更换协议会让隧道重新握手：以这条隧道为默认出口的节点，在两台服务器都重新生效前会从订阅中撤下。",
+        "default_users": "默认出口为此隧道的节点：{{nodes}}",
+        "title": "隧道设置：{{name}}",
+        "save": "保存隧道",
+        "saved": "隧道已保存"
+      },
+      "title": "按目标分流",
+      "hint": "让部分目标地址改走另一台服务器出站。路由从上到下依次匹配，命中第一条即生效；没有命中任何路由的流量走默认出口。",
+      "help": {
+        "what": "按目标分流：让部分目标地址不走本节点的默认出口，而从另一台服务器出站。每个节点有一份有序的路由列表，连接命中的第一条路由决定它从哪里出站。路由可按目标列表（含 geosite 列表）、带前缀的域名条目、CIDR、端口和 TCP/UDP 匹配，命中的流量经隧道交给另一台 Passwall Node 服务器，或留在本节点所在服务器直出。",
+        "default_exit": "默认出口是没有命中任何路由的流量的去向：本节点所在服务器直出，或经上方「出口服务器」所选的那条隧道出站。路由只对它命中的目标覆盖默认出口。\n路由指向的出口不可用时，这些目标会连接失败（不会回退到默认出口），面板只给出警告。只有默认出口的隧道未就绪时，节点才会从订阅中撤下。",
+        "local": "本机直出：无视默认出口，从本节点所在服务器直接出站。这是一个明确的选择，不是「没有路由」：用它让部分目标留在本机，其余流量走另一台服务器。",
+        "xray": "Xray 的限制：使用正则或关键字的目标策略规则无法与路由精确组合。放行或仅报告的规则，其副本会在该路由的分段中省略；拦截规则的副本会被放宽，被拦截的目标仍然被拦截。路由中不接受带 regexp: 的条目；列表里的正则条目会被跳过（在对应路由上显示）。",
+        "unsupported": "只有位于 Passwall Node 服务器、且该服务器的 Node 代理支持按目标分流及所需隧道的节点才能编辑路由。已保存的路由仍会显示，也仍可全部清除。"
+      },
+      "load_failed": "读取该节点的路由失败",
+      "saved": "路由已保存",
+      "unsaved": "有未保存的更改",
+      "add": "添加路由",
+      "empty": "没有路由：所有流量走默认出口。",
+      "name": "名称（可选）",
+      "move_up": "上移",
+      "move_down": "下移",
+      "remove": "删除路由",
+      "lists": "目标列表",
+      "lists_hint": "自定义、远程和 geosite 列表；在访问控制 > 列表中管理。",
+      "list_option": "{{name}} · {{kind}} · {{entries}} 条",
+      "domains": "带前缀的域名",
+      "domains_hint": "每行一条：domain:example.com（该域名及其子域名）、full:www.example.com（仅此域名）、keyword:ads。不支持 regexp。",
+      "cidrs": "CIDR",
+      "ports": "端口",
+      "ports_hint": "25,465,587 或 6881-6889；留空表示任意端口",
+      "network": "网络",
+      "network_any": "TCP 和 UDP",
+      "target": {
+        "label": "出站位置",
+        "local": "本机直出（从本服务器出站）",
+        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站"
+      },
+      "entries_other": "已编译 {{count}} 条目标",
+      "sent": {
+        "sent": "已在发给服务器的配置中",
+        "not_sent": "未发给服务器",
+        "unsaved": "未保存"
+      },
+      "link": {
+        "gone": "该服务器已不存在：在修改或删除这条规则之前，该节点不会下发",
+        "missing": "尚无到该服务器的隧道",
+        "not_ready": "隧道未就绪",
+        "ready": "隧道已就绪",
+        "in_end": "出口端",
+        "out_end": "入口端",
+        "applied": "已生效",
+        "waiting": "等待中"
+      },
+      "default_exit": "默认出口：{{name}}",
+      "default_exit_pending": "上方的出口服务器已修改但尚未保存；路由按已保存的默认出口检查。",
+      "exit": {
+        "local": "本服务器"
+      },
+      "applied": {
+        "not_sent": "路由尚未发给服务器",
+        "waiting": "已发送，等待服务器生效",
+        "running": "运行中：服务器已确认这些路由",
+        "sent_at": "发送于 {{time}}",
+        "applied_at": "生效于 {{time}}"
+      },
+      "budget": {
+        "title": "{{engine}} 上的预算",
+        "entries": "目标条目：{{used}} / {{max}}",
+        "rules": "规则：{{used}} / {{max}}",
+        "bytes": "体积：{{used}} / {{max}} 字节"
+      },
+      "limit": {
+        "entries": "条目",
+        "rules": "规则",
+        "bytes": "体积"
+      },
+      "clear": "清除全部路由",
+      "clear_title": "清除全部路由？",
+      "clear_message": "将删除该节点已保存的全部 {{count}} 条路由，所有流量重新走默认出口。",
+      "revert": "放弃更改",
+      "save": "保存路由",
+      "reason": {
+        "not_node": "该节点不在 Passwall Node 服务器上，不能按目标分流。",
+        "no_agent": "这台服务器上的 Node 代理尚未连接。",
+        "no_capability": "这台服务器上的 Node 代理版本过旧，不支持按目标分流（transit.route.v1），请先升级。",
+        "no_link_capability": "这台服务器上的 Node 代理无法建立路由所需的隧道，请先升级。",
+        "unknown": "该节点暂时不能按目标分流。"
+      },
+      "note": {
+        "list_last_good": "列表 {{list}} 目前没有可用内容；这条规则继续使用它上一次的内容。",
+        "list_not_ready": "列表 {{list}} 还没有内容，暂时匹配不到任何目标。",
+        "list_empty": "列表 {{list}} 为空，匹配不到任何目标。",
+        "list_regexp_skipped": "列表 {{list}} 中有 {{count}} 条正则条目被跳过：路由不接受正则。",
+        "route_skipped": "这条路由不在发给服务器的配置中：它没有可下发的目标。"
+      },
+      "issue": {
+        "target": "第 {{route}} 条路由：请选择出站位置。",
+        "name_long": "第 {{route}} 条路由：名称超过 64 字节。",
+        "no_match": "第 {{route}} 条路由：至少选择一个列表、条目、CIDR、端口或网络作为匹配条件。",
+        "regexp": "第 {{route}} 条路由：{{entry}} 是正则，路由不接受；请用 domain:、full: 或 keyword:。",
+        "entry": "第 {{route}} 条路由：{{entry}} 必须以 domain:、full: 或 keyword: 开头。",
+        "ports": "第 {{route}} 条路由：端口格式应为 25,465,587 或 6881-6889（1-65535）。"
+      },
+      "error": {
+        "not_node": "该节点不在 Passwall Node 服务器上。",
+        "no_agent": "这台服务器上的 Node 代理尚未连接。",
+        "no_capability": "这台服务器上的 Node 代理版本过旧，不支持按目标分流。",
+        "no_link_capability": "这台服务器上的 Node 代理无法建立路由所需的隧道。",
+        "separator": "分隔标题没有路由。",
+        "bad_route": "路由 {{route}} 无效。",
+        "bad_target": "路由 {{route}} 没有有效的出站位置（另一台 Passwall Node 服务器，或本机直出）。",
+        "bad_list": "路由 {{route}} 使用了不存在的列表，或该列表不是目标列表。",
+        "bad_entry": "路由 {{route}} 含有无法使用的条目；请用 domain:、full: 或 keyword:。",
+        "regexp_in_route": "路由 {{route}}：{{entry}} 是正则，路由不接受；请用 domain:、full: 或 keyword:。",
+        "exit_no_address": "路由 {{route}} 要从 {{server}} 出站，但没有可用的地址：该服务器还没连接过面板，隧道也没有填写出口地址。请先在隧道上填写出口地址。",
+        "too_many_entries": "条目过多：路由 {{routes}} / {{max_routes}}，带前缀的域名 {{domains}} / {{max_domains}}，CIDR {{cidrs}} / {{max_cidrs}}。",
+        "over_budget": "节点 {{node}} 的入站 {{listener}} 会超出{{limit}}预算（{{used}} / {{max}}）。请减少路由或改用更小的列表。"
+      },
+      "warning": {
+        "policy_approximate": "在 Xray 上，{{node}} 有 {{count}} 条目标策略规则使用了正则或关键字，无法与路由精确组合（{{items}}）。放行和仅报告规则的副本会在该路由的分段中省略；拦截规则的副本会被放宽。",
+        "budget_near_limit": "节点 {{node}} 的入站 {{listener}} 接近{{limit}}预算：{{used}} / {{max}}。",
+        "list_last_good": "{{route}}：列表 {{list}} 目前没有可用内容；规则继续使用它上一次的内容。",
+        "list_not_ready": "{{route}}：列表 {{list}} 还没有内容，暂时匹配不到任何目标。",
+        "list_regexp_skipped": "{{route}}：列表 {{list}} 中有 {{count}} 条正则条目被跳过（路由不接受正则）。",
+        "route_skipped": "{{route}} 不在发给服务器的配置中：它没有可下发的目标。",
+        "exit_not_ready": "到 {{server}} 的隧道在两台服务器上尚未都就绪。在此之前，指向它的目标会连接失败（不会回退到默认出口）；节点仍保留在订阅中。",
+        "exit_no_link_capability": "{{server}} 上的 Node 代理无法承载这条隧道，指向它的目标会连接失败。",
+        "redundant_route": "{{route}} 的出站方式与默认出口相同，没有任何效果。",
+        "routes_not_sent": "已保存的路由没有发给服务器：{{reason}}"
+      }
     },
     "line_labels": {
       "region": "Region",
@@ -2323,6 +2682,22 @@
     },
     "hint": {
       "traffic_factor": "无论经过哪些服务器，此线路的流量都按该倍率计费。1 = 按实际用量计费，0 = 免费。仅对保存之后产生的流量生效。"
+    },
+    "probe": {
+      "title": "链路质量",
+      "state_ok": "良好",
+      "state_degraded": "降级",
+      "state_down": "中断",
+      "state_unknown": "暂无数据",
+      "quality": "质量",
+      "no_link_data": "此隧道暂无质量数据",
+      "rtt": "{{ms}} ms",
+      "loss": "丢包 {{percent}}%",
+      "withheld": "已撤下",
+      "withheld_hint": "链路持续中断，已从订阅中撤下；链路恢复后自动回到订阅。不会回退为直连。",
+      "tip_measured": "由入口服务器测得的链路质量",
+      "tip_unknown": "尚未收到探测结果。暂无数据不会导致撤下。",
+      "tip_reported": "上报于 {{time}}"
     }
   },
   "users": {
@@ -3083,6 +3458,8 @@
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
+      "region": "地区",
+      "tags": "标签（逗号分隔）",
       "panel_type": "服务器类型",
       "update_channel": "Passwall Node 更新频道",
       "name": "服务器名称",
@@ -3371,7 +3748,8 @@
       "upgrade_xray": "升级 Xray",
       "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据",
-      "line_factors": "线路倍率"
+      "line_factors": "线路倍率",
+      "shared_ports": "共用端口（SNI）"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -3423,6 +3801,10 @@
     "confirm": {
       "delete_title": "删除服务器",
       "delete_message": "删除服务器 {{name}}？该服务器必须没有节点引用才能删除。",
+      "has_nodes_title": "该服务器上还有节点",
+      "has_nodes_text": "请先移除或迁走这些节点。隐藏的隧道监听器要到落地节点上删除对应的线路才会移除。",
+      "has_nodes_item": "{{node}}",
+      "has_nodes_tunnel_item": "{{landing}} 的隧道线路 {{line}}",
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "batch_upgrade_xray_title": "批量升级 Xray",
@@ -3486,6 +3868,193 @@
       "count": "{{count}} 个客户端身份",
       "warning": "接近同步上限",
       "warning_tip": "每个用户对其可见的每条线路各有一个客户端。此服务器已接近单次节点同步可承载的数量，请减少可见线路或每台服务器的用户数。"
+    },
+    "fronts": {
+      "title": "共用端口 — {{name}}",
+      "tab_fronts": "共用端口",
+      "tab_ports": "端口占用",
+      "loading": "正在加载…",
+      "load_failed": "无法加载此服务器的共用端口。",
+      "empty": "这台服务器还没有共用端口。每个端口按 TLS 握手里的 SNI 分给不同的用途；没有共用的端口保持原样。",
+      "add": "新增共用端口",
+      "full": "每台服务器最多 {{max}} 个共用端口",
+      "unsupported_short": "此服务器当前不能编辑共用端口",
+      "front_title": "端口 {{port}}",
+      "edit_title": "编辑共用端口 {{port}}",
+      "new_title": "新增共用端口",
+      "edit_port": "编辑端口 {{port}}",
+      "delete_port": "删除端口 {{port}}",
+      "delete_title": "删除共用端口 {{port}}",
+      "delete_text": "删除后，放在这个端口后面的监听器会回到自己的公网端口，它们的用户会重新连接一次；指向这个端口的中转线路不再下发，直到重新配置。",
+      "deleted": "已删除共用端口",
+      "saved": "已保存共用端口",
+      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
+      "port": "共用的端口",
+      "port_hint": "任意 TCP 端口，默认 443。",
+      "listeners": "放在这个端口后面的监听器",
+      "no_listeners": "这个端口上没有监听器。端口上没有监听器时，只能放中转线路。",
+      "loopback": "回环端口",
+      "loopback_of": "{{name}} 的回环端口",
+      "random": "随机生成",
+      "routes": "按 SNI 分流",
+      "names": "SNI 名称",
+      "names_hint": "用逗号或空格分隔，精确匹配，不支持通配符。",
+      "names_of": "第 {{route}} 条路由的 SNI",
+      "goes_to": "去向",
+      "target_of": "第 {{route}} 条路由的去向",
+      "add_route": "添加路由",
+      "remove_route": "删除这条路由",
+      "no_targets": "先勾选一个监听器，或把一条中转线路的入口端口设为这个端口。",
+      "default": "没有 SNI 或未知 SNI 时去哪",
+      "default_host": "伪装站点",
+      "default_host_hint": "一个真实网站的域名或 IP，探测者连上来看到的就是它。",
+      "default_port": "端口",
+      "confirm_text": "端口 {{port}} 现在被监听器 {{nodes}} 使用。共用它会把这些监听器移到本机回环端口，它们的用户会重新连接一次。",
+      "confirm_label": "我确认：移动这些监听器，用户会重连一次",
+      "tunnel_listener": "{{parent}} 的隧道线路 {{line}}",
+      "target": {
+        "listener": "监听器 {{name}}",
+        "forward": "中转线路 {{node}} / {{line}}",
+        "forward_short": "中转线路 {{node}} / {{line}}"
+      },
+      "refusal": {
+        "no_sni": "没有可读的 SNI（如 Shadowsocks / SS-2022），保持自己的端口",
+        "udp": "基于 UDP，不能共用 TCP 端口",
+        "no_tls": "没有开启 TLS 或 REALITY，保持自己的端口",
+        "bad_settings": "传输设置无法解析",
+        "separator": "分隔线",
+        "transport": "传输不是 TCP（WebSocket、gRPC、XHTTP 等），前置只能承载 TCP 的 TLS／REALITY",
+        "proxy_protocol": "监听器自己接收 PROXY 头，而前置会再加一个",
+        "no_name": "没有服务器名（SNI）：订阅里不会给客户端任何可按名称分流的名字"
+      },
+      "unsupported": {
+        "engine_not_xray": "SNI 共用端口需要 Xray",
+        "no_capability": "这台服务器的节点程序还不支持 SNI 共用端口（transit.sni.v1），请先升级并等待它同步。",
+        "not_node": "SNI 共用端口只适用于 Passwall Node 服务器。",
+        "no_agent": "这台服务器的节点程序还没有上报过。",
+        "not_running_xray": "这台服务器的节点程序没有报告正在运行 Xray，SNI 共用端口需要 Xray。"
+      },
+      "warning": {
+        "default_unresolved": "面板解析不到这个伪装站点的域名；节点会在连接时再解析，请确认它可用。"
+      },
+      "issue": {
+        "port": "共用端口需要 1 到 65535 之间的数字，且不在 Node 内部探测范围内",
+        "loopback": "{{node}} 的回环端口需要 1 到 65535 之间的数字，且不能和共用端口相同",
+        "loopback_probe": "{{node}} 的回环端口不能在 Node 内部探测范围内",
+        "loopback_twice": "回环端口 {{port}} 被用了两次",
+        "route_target": "第 {{route}} 条路由还没有选择去向",
+        "route_names": "第 {{route}} 条路由还没有 SNI 名称",
+        "name_twice": "SNI {{name}}（第 {{route}} 条路由）已经指向 {{owner}}",
+        "listener_unrouted": "{{node}} 被移到了这个端口后面，但没有路由把 SNI 交给它",
+        "default_host": "请填写没有 SNI 时去的伪装站点",
+        "default_port": "伪装站点的端口需要 1 到 65535"
+      },
+      "error": {
+        "engine_not_xray": "SNI 共用端口需要 Xray",
+        "no_capability": "这台服务器的节点程序还不支持 SNI 共用端口，请先升级并等待它同步。",
+        "not_node": "SNI 共用端口只适用于 Passwall Node 服务器。",
+        "no_agent": "这台服务器的节点程序还没有上报过。",
+        "bad_port": "端口 {{port}} 不能共用：需要 1 到 65535，且不在 Node 内部探测范围或 Node 自留端口内。",
+        "too_many_fronts": "每台服务器最多 {{max}} 个共用端口。",
+        "port_has_front": "这台服务器已经共用了端口 {{port}}。",
+        "listener_not_frontable": "节点 {{node}} 不能共用端口：只有 TCP 上的 TLS／REALITY 监听器（自己不接收 PROXY 头）才能放在共用端口后面。SS-2022 等保持自己的端口。",
+        "listener_port_mismatch": "节点 {{node}} 监听 {{listen_port}}，不是共用端口 {{port}}；放在后面的监听器保持自己的公网端口。",
+        "unknown_node": "节点 {{node_id}} 不是这台服务器的监听器。",
+        "loopback_port_bad": "节点 {{node}} 的回环端口 {{port}} 不可用：需要 1 到 65535、不同于共用端口，且不在 {{low}}–{{high}}（Node 内部探测）内，也不是 Node 自留端口（如 10085）。",
+        "port_conflict": "端口 {{port}} 已被 {{owner}} 使用。",
+        "listener_on_port": "端口 {{port}} 正被节点 {{node}} 使用，它不在这个共用端口后面：请把它加进来，或换一个端口。",
+        "confirm_required": "这个操作需要你确认。",
+        "no_routes": "共用端口至少需要一条路由；全部交给默认站点就没有共用任何东西。",
+        "bad_server_name": "SNI {{name}} 不可用：{{why}}",
+        "duplicate_server_name": "SNI {{name}} 已经指向 {{owner}}。",
+        "bad_target": "路由的去向不可用。",
+        "listener_unrouted": "节点 {{node}} 被移到了共用端口后面，但没有路由把 SNI 交给它。",
+        "link_unsupported": "隧道出口暂时不能共用端口。",
+        "default_missing": "请选择没有 SNI 或未知 SNI 时去的伪装站点。",
+        "default_not_external": "默认去向必须是外部站点。",
+        "default_bad": "默认站点 {{host}} 不可用。",
+        "default_is_self": "默认站点 {{host}}:{{port}} 就是这台服务器自己的公网地址（或解析到它），连接会绕回共用端口。请换一个真实的外部站点。",
+        "contract_refused": "节点协议拒绝了这个配置：{{why}}",
+        "not_running_xray": "这台服务器的节点程序没有报告正在运行 Xray，SNI 共用端口需要 Xray。",
+        "name_not_served": "节点 {{node}} 不使用 SNI {{name}}，它的客户端永远不会发这个名字；请用它自己的服务器名。",
+        "landing_not_tls": "节点 {{node}} 不是 TCP 上的 TLS／REALITY 监听器，它的中转线路没有 SNI 可以分流，不能共用端口。",
+        "join_needs_name": "端口 {{port}} 是共用端口：节点 {{node}} 需要先设置一个服务器名（SNI），才能加入。",
+        "confirm_required_join": "端口 {{port}} 是共用端口：节点 {{node}} 会加入它，移到回环端口 {{loopback_port}}，用 SNI {{names}} 分流；它的用户会重连一次。",
+        "confirm_required_disable": "节点正在共用端口 {{port}} 后面：停用它之后，SNI {{routes}} 会改去默认站点。",
+        "confirm_required_engine": "离开 Xray 后，共用端口 {{ports}} 会保留但不再下发：监听器 {{leaving_listeners}} 各自是所在端口上唯一的监听器，回到自己的公网端口（用户会重连一次）；中转线路 {{leaving_lines}} 停止下发。",
+        "confirm_required_delete": "删除共用端口 {{port}}：监听器 {{leaving_listeners}} 会回到自己的公网端口（它是后面唯一的监听器，用户会重连一次），中转线路 {{leaving_lines}} 会停止下发。",
+        "confirm_required_save": "保存共用端口 {{port}} 会改动：移到回环端口的监听器 {{nodes}}、回到公网端口的监听器 {{leaving_listeners}}、停止下发的中转线路 {{leaving_lines}}。相关用户会重连一次。",
+        "rendered_name_missing": "到节点 {{node}} 的路由必须包含 {{name}}：这是订阅给它的客户端的服务器名，缺了它客户端会落到默认站点。",
+        "listener_still_on_port": "{{nodes}} 仍监听共用端口 {{port}}：先改这个监听器自己的端口（那次保存会把它移出前置），再在这里移除。",
+        "listeners_share_port": "监听器 {{nodes}} 共用端口 {{port}}：节点不能让两个监听器占同一个端口，请先把除一个以外的监听器各自改到别的端口（每次保存都会把它移出前置），再对共用端口执行“{{action}}”。",
+        "leave_empties_front": "节点 {{node}} 是共用端口 {{port}} 后面唯一的内容：请先删除这个共用端口。",
+        "confirm_required_leave": "节点 {{node}} 在共用端口 {{port}} 后面：继续会把它移出这个前置，SNI {{routes}} 会改去默认站点。",
+        "confirm_required_move": "节点 {{node}} 会离开共用端口 {{leave_port}}（SNI {{routes}} 改去那个端口的默认站点），并加入共用端口 {{port}}：移到回环端口 {{loopback_port}}，用 SNI {{names}} 分流；它的用户会重连一次。",
+        "confirm_required_enable": "共用端口 {{port}} 当前没有下发（{{reason}}）：启用节点会让 {{nodes}} 占同一个端口，在修复之前它们都会保持停止。"
+      },
+      "help": {
+        "what": "SNI 共用端口：让多个 TLS / REALITY 用途共用同一个 TCP 端口（例如 443）。节点读取每个连接 ClientHello 里的 SNI（不解密），按 SNI 把连接交给对应的监听器、中转线路或伪装站点。\n注意：客户端不能把 ClientHello 拆成多个 TLS 记录发送；纯 HTTP 探测会等待约 1 秒才被送到默认站点。仅 Xray 可用。",
+        "listeners": "放在共用端口后面的监听器会被移到本机回环端口（127.0.0.1），对外仍使用原来的公网端口，订阅不变。该监听器的用户会重新连接一次。只有带 SNI 的 TLS / REALITY 监听器可以；SS-2022、Hysteria2 等保持自己的端口。",
+        "routes": "每条路由把一组 SNI 名称（精确匹配、同一个端口内不能重复）交给一个去向：本机监听器，或一条中转线路（按落地节点的 SNI 原样转发到落地）。",
+        "default": "SNI 缺失或不在任何路由里的连接都会转到这个外部站点，探测者看到的是一个正常网站。不能填这台服务器自己的公网地址。",
+        "ports": "这里列出这台服务器上正在使用的每一个端口：监听器、中转线路、隧道端口、共用端口及其后面的 SNI → 去向、回环端口，以及 Node 内部的探测范围。只读。"
+      },
+      "ports": {
+        "hint": "这台服务器占用的所有端口。",
+        "load_failed": "无法加载端口占用。",
+        "port": "端口",
+        "bind": "监听范围",
+        "used_by": "用途",
+        "bind_public": "公网（所有地址）",
+        "bind_loopback": "仅本机 127.0.0.1",
+        "disabled": "已停用",
+        "unrouted": "尚未被路由选中，暂不下发",
+        "route_arrow": "{{names}} → {{to}}",
+        "default_arrow": "其他 / 无 SNI → {{to}}",
+        "to_listener": "本机监听器（回环端口 {{port}}）",
+        "orphan": "孤立的隧道监听器：它的线路已不存在",
+        "orphan_remove": "移除",
+        "orphan_remove_title": "移除孤立的监听器？",
+        "orphan_remove_message": "监听器 {{name}}（端口 {{port}}）所属的隧道线路已不存在。移除后会关闭该端口。",
+        "orphan_removed": "已移除孤立的监听器",
+        "to_tunnel_listener": "{{label}}（回环端口 {{port}}）",
+        "to_external": "外部站点 {{host}}:{{port}}",
+        "kind": {
+          "link_planned": "已预留给正在建立的隧道",
+          "tunnel_listener": "{{label}}（{{protocol}}）",
+          "tunnel_front_loopback": "{{label}}（在共用端口后面）",
+          "listener": "节点 {{name}} 的入站（{{protocol}}）",
+          "forward": "{{label}}",
+          "link": "来自服务器 {{peer}} 的隧道",
+          "front": "共用端口",
+          "front_loopback": "节点 {{name}}（在共用端口后面）",
+          "probe_range": "Node 内部链路探测（回环，勿占用）",
+          "reserved": "Node 自留（核心 API，勿占用）"
+        },
+        "inactive": "未生效：{{why}}"
+      },
+      "inactive": "未生效",
+      "confirm_leaving_listeners": "这些监听器会回到自己的公网端口（每个前置只剩一个监听器时才允许），用户会重连一次：{{nodes}}。",
+      "confirm_leaving_lines": "有 {{count}} 条中转线路会停止下发。",
+      "confirm": {
+        "join_title": "加入共用端口",
+        "disable_title": "停用共用端口后面的监听器",
+        "engine_title": "离开 Xray",
+        "leave_title": "离开共用端口",
+        "move_title": "换到另一个共用端口",
+        "enable_title": "启用共用端口上的监听器"
+      },
+      "withheld": {
+        "text": "端口 {{port}} 已保存但没有下发：{{why}}。{{detail}}",
+        "reason": {
+          "no_routes": "没有任何可下发的路由（目标已停用或不可用）",
+          "listener_unfit": "后面的监听器已不能被前置承载",
+          "listener_port": "后面的监听器已不在这个端口",
+          "listener_not_behind": "这个端口上有一个启用的监听器不在它后面，节点会拒绝整份配置",
+          "contract": "节点协议拒绝了它"
+        }
+      },
+      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效"
     }
   },
   "diagnostics": {
@@ -4146,6 +4715,18 @@
         "label": "节点同步上报被拒",
         "desc": "已通过认证、但被面板拒收的原生节点同步上报。「版本不兼容」意味着该节点实际处于离线状态。"
       },
+      "psp_node_sync_gzip_refused_total": {
+        "label": "压缩同步被拒",
+        "desc": "因 Content-Encoding 被以 415 拒绝的同步请求：agent 从未声明 sync.gzip.v1，或使用了 gzip 以外的编码。"
+      },
+      "psp_node_sync_decode_busy_total": {
+        "label": "压缩同步繁忙",
+        "desc": "因解压槽全部占用而返回 503 的压缩同步请求；agent 下次轮询会重发。持续增长说明解压成为瓶颈。"
+      },
+      "psp_node_sync_gzip_bytes_total": {
+        "label": "压缩同步字节数",
+        "desc": "压缩同步正文的字节数。对比请求线上字节与解压后字节（响应同理）即可看出节省。"
+      },
       "psp_dest_list_refresh_total": {
         "label": "访问控制列表刷新",
         "desc": "刷新访问控制策略所用列表（远程列表与 geosite 更新）的结果分布。「失败」持续出现，说明有列表仍在使用旧条目；出现「因过宽被拒」需要管理员查看该列表。"
@@ -4197,6 +4778,10 @@
       "psp_dest_pruned_rows_total": {
         "label": "访问控制记录清理",
         "desc": "按保留期清理掉的访问控制记录行数，按表统计：命中、试运行、批次标记、孤儿（已删除账号或面板留下的行）。"
+      },
+      "psp_fronts_withheld_total": {
+        "label": "已保存的共用端口未下发",
+        "desc": "已保存的 SNI 共用端口在同步时没有发给服务器，按原因计数；每次都有对应的节点问题记录。"
       }
     },
     "labels": {
@@ -4285,6 +4870,16 @@
       "node_refused": {
         "protocol_generation": "版本不兼容",
         "report_invalid": "内容无效"
+      },
+      "node_gzip_refused": {
+        "not_negotiated": "未协商",
+        "unknown_coding": "未知编码"
+      },
+      "node_gzip_bytes": {
+        "request_wire": "请求（线上）",
+        "request_decoded": "请求（解压后）",
+        "response_plain": "响应（原文）",
+        "response_wire": "响应（线上）"
       },
       "dest_list_refresh": {
         "unchanged": "无变化",
@@ -4375,6 +4970,13 @@
         "batches": "批次标记",
         "exemptions": "豁免",
         "orphans": "孤儿"
+      },
+      "front_withheld": {
+        "no_routes": "没有可下发的路由",
+        "listener_unfit": "监听器不能被前置承载",
+        "listener_port": "监听器不在共用端口上",
+        "listener_not_behind": "端口上有不在前置后面的监听器",
+        "contract": "节点协议拒绝"
       }
     }
   },
@@ -4669,6 +5271,11 @@
         "message": "这个列表没有被使用，删除不会影响节点。",
         "action": "删除"
       },
+      "route_impact": {
+        "title": "这会让某些路由失去匹配内容",
+        "message": "修改后，该列表将不再为这些节点的路由提供任何目标：{{nodes}}。这些路由原本接管的目标会改走各节点的默认出口。",
+        "action": "仍然修改"
+      },
       "list_in_use": {
         "title": "列表正在被使用",
         "message": "先从这些地方移除它：",
@@ -4867,6 +5474,7 @@
         "pending_used": "从未下载，引用它的部分暂不生效"
       },
       "usage": {
+        "routes_other": "{{count}} 个节点路由",
         "policies_other": "{{count}} 条策略",
         "unused": "未使用",
         "groups_other": "{{count}} 个白名单分组"

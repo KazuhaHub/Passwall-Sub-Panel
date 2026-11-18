@@ -12,12 +12,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 )
 
 // NodeLister is the slice of ports.NodeRepo this service reads.
@@ -38,6 +40,71 @@ type Service struct {
 	repo   Repo
 	links  LinkRepo
 	agents AgentLister
+	// panelGone says a server no longer exists; nil knows of none that do not.
+	panelGone func(ctx context.Context, panelID int64) bool
+	// serverLock is the fronts' per-server lock, which a save that drops or binds
+	// a tunnel holds; nil takes none.
+	serverLock func(panelID int64) func()
+	// reserved are link ports PlanLink promised to a pair of servers.
+	// allocMu makes choosing and using a link port one critical section (PlanLink,
+	// a new link, the allocation); reservedMu guards the map alone and is never
+	// held across a call out, because the port check reads the reservations too.
+	allocMu    sync.Mutex
+	reservedMu sync.Mutex
+	reserved   map[[2]int64]reservation
+	// portInUse says something on a server holds a port (its listeners, forwards,
+	// shared ports and loopbacks); nil knows only what the nodes and links say.
+	portInUse func(ctx context.Context, panelID int64, port int) bool
+	// now is the clock the reservations expire by.
+	now func() time.Time
+}
+
+// reservationTTL is how long a link port PlanLink promised stays promised.
+const reservationTTL = 10 * time.Minute
+
+type reservation struct {
+	port    int
+	expires time.Time
+}
+
+// WithPortCheck gives the service a way to ask whether a port on a server is
+// held by anything (fronts' shared ports and loopbacks included), which a link
+// port must also avoid.
+func (s *Service) WithPortCheck(inUse func(ctx context.Context, panelID int64, port int) bool) *Service {
+	s.portInUse = inUse
+	return s
+}
+
+// WithServerLock gives the service the lock of a server that node saves and the
+// routes' cleanup hold, so that a sync does not make a tunnel that was dropped
+// a moment ago (LinksFor).
+func (s *Service) WithServerLock(lock func(panelID int64) func()) *Service {
+	s.serverLock = lock
+	return s
+}
+
+// lockPair takes the lock of both servers of a tunnel, lower id first (the order
+// everything else takes them in).
+func (s *Service) lockPair(a, b int64) func() {
+	if s.serverLock == nil {
+		return func() {}
+	}
+	if a > b {
+		a, b = b, a
+	}
+	first := s.serverLock(a)
+	if a == b {
+		return first
+	}
+	second := s.serverLock(b)
+	return func() { second(); first() }
+}
+
+// WithPanelCheck lets the service know which servers have been deleted, so that
+// no tunnel is ever made to one.
+func (s *Service) WithPanelCheck(gone func(ctx context.Context, panelID int64) bool) *Service {
+	s.panelGone = gone
+	return s
 }
 
 func New(nodes NodeLister, repo Repo) *Service { return &Service{nodes: nodes, repo: repo} }
@@ -47,11 +114,19 @@ func New(nodes NodeLister, repo Repo) *Service { return &Service{nodes: nodes, r
 // inbound port) is left out, and so is a forward the wire contract would
 // refuse; one bad line never costs the server its other forwards.
 func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error) {
+	forwards, _, err := s.ForwardsWithProbeMethods(ctx, entryPanelID)
+	return forwards, err
+}
+
+// ForwardsWithProbeMethods is ForwardsFor together with the method each
+// forward is probed with (transit.probe.v1), decided from its landing node.
+func (s *Service) ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error) {
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("transit: list nodes: %w", err)
+		return nil, nil, fmt.Errorf("transit: list nodes: %w", err)
 	}
 	var forwards []nodeprotocol.Forward
+	methods := map[nodeprotocol.ForwardKey]string{}
 	for _, node := range nodes {
 		if node == nil {
 			continue
@@ -66,7 +141,7 @@ func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodepr
 			}
 			row, err := s.repo.Ensure(ctx, node.ID, line.ID)
 			if err != nil {
-				return nil, fmt.Errorf("transit: record line %s of node %d: %w", line.ID, node.ID, err)
+				return nil, nil, fmt.Errorf("transit: record line %s of node %d: %w", line.ID, node.ID, err)
 			}
 			forward := nodeprotocol.Forward{
 				Key: nodeprotocol.NewForwardKey(row.ID), Port: desired.Port,
@@ -81,10 +156,13 @@ func (s *Service) ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodepr
 				continue
 			}
 			forwards = append(forwards, forward)
+			// No SNI front targets a forward yet (fronts come with the
+			// front editor); when they do, the front route decides here.
+			methods[forward.Key] = linkprobe.Method(linkprobe.UDPOnlyProtocol(node.DesiredProtocol), false)
 		}
 	}
 	sort.Slice(forwards, func(i, j int) bool { return forwards[i].Key < forwards[j].Key })
-	return forwards, nil
+	return forwards, methods, nil
 }
 
 // Confirm records, for every forward in the config the entry now holds, what

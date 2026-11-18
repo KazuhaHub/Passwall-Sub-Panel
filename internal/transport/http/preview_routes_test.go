@@ -22,7 +22,9 @@ var readOnlyPreviewRoutes = []string{
 	"/groups/:id/node-preview",
 	"/groups/node-preview",
 	"/nodes/:id/line-visibility",
+	"/nodes/:id/routes/check",
 	"/nodes/separator/group-preview",
+	"/nodes/setup-preview",
 	"/users/:id/group-preview",
 }
 

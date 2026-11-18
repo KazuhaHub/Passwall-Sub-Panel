@@ -72,4 +72,15 @@ describe('NodesView egress status', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
     expect(nodeReads()).toBe(0)
   })
+
+  it('shows the link quality chip next to the egress status', async () => {
+    const probe = { state: 'degraded', median_rtt_ms: 80, loss_percent: 5, withheld: false }
+    reads(() => ({ node: { ...tunnelled, egress_ready: true, egress_probe: probe, egress_withheld: true }, clients: [] }),
+      { ...tunnelled, egress_ready: true, egress_probe: probe, egress_withheld: true })
+    mount(<NodesView />)
+    await editRow()
+    const chip = await screen.findByTestId('egress-probe')
+    expect(chip.dataset.state).toBe('degraded')
+    expect(screen.getByTestId('egress-probe-withheld')).toBeTruthy()
+  })
 })

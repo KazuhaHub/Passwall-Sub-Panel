@@ -1681,3 +1681,55 @@ func TestObserveLiveIPs_RelayLineAddressesDoNotCount(t *testing.T) {
 		t.Fatalf("relay address counted as a second place: flagged=%d", got)
 	}
 }
+
+// A tunnel-mode line's client is served by the entry server's own listener,
+// which sees the person's real addresses: they count like a direct line's, and
+// all of one person's rows are one set of addresses.
+func TestObserveLiveIPs_TunnelLineAddressesCountAsThePersons(t *testing.T) {
+	metrics.Reset()
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}
+	p := domain.DefaultGeoPolicy()
+	p.FlagAfterPolls = 1
+	s := newObserver(geo, &memStreaks{}, p)
+	landing := &domain.Node{ID: 3, PanelID: 1, Relays: []domain.RelayLine{
+		{ID: "t", Enabled: true, EntryPanelID: 2, Mode: domain.RelayModeTunnel, TunnelNodeID: 9},
+		{ID: "f", Enabled: true, EntryPanelID: 2, Port: 20001},
+	}}
+	s.nodes = &fakeNodeRepo{nodes: map[int64]*domain.Node{3: landing}}
+	direct := &domain.PSPClient{ID: 1, UserID: 7, PanelID: 1, NodeID: 3, LineID: domain.DirectLineID, Email: "u7-d@x"}
+	viaTunnel := &domain.PSPClient{ID: 2, UserID: 7, PanelID: 2, NodeID: 3, LineID: "t", Email: "u7-t@x"}
+	ips := func(panel int64) (map[string][]string, error) {
+		if panel == 1 {
+			return map[string][]string{"u7-d@x": {"1.1.1.1"}}, nil
+		}
+		return map[string][]string{"u7-t@x": {"2.2.2.2"}}, nil
+	}
+	observe(s, nil, []*domain.PSPClient{direct, viaTunnel}, ips, panelsOf(1, 2))
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got == 0 {
+		t.Fatal("the tunnel line's real source address was left out of the person's places")
+	}
+	// A forward line's rows still do not count.
+	metrics.Reset()
+	s = newObserver(geo, &memStreaks{}, p)
+	s.nodes = &fakeNodeRepo{nodes: map[int64]*domain.Node{3: landing}}
+	viaForward := &domain.PSPClient{ID: 3, UserID: 7, PanelID: 2, NodeID: 3, LineID: "f", Email: "u7-t@x"}
+	observe(s, nil, []*domain.PSPClient{direct, viaForward}, ips, panelsOf(1, 2))
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 0 {
+		t.Fatalf("a forward line's relay address was counted: flagged=%d", got)
+	}
+}
+
+// Only the row on the tunnel line's entry server counts: a row of the same line
+// left on another server by a mode switch is not the tunnel's.
+func TestTunnelLineRowsAreOnlyTheOnesOnTheEntryServer(t *testing.T) {
+	s := &Service{nodes: &fakeNodeRepo{nodes: map[int64]*domain.Node{3: {ID: 3, PanelID: 1, Relays: []domain.RelayLine{
+		{ID: "t", Enabled: true, EntryPanelID: 2, Mode: domain.RelayModeTunnel, TunnelNodeID: 9}}}}}}
+	onEntry := &domain.PSPClient{ID: 1, UserID: 7, PanelID: 2, NodeID: 3, LineID: "t"}
+	leftBehind := &domain.PSPClient{ID: 2, UserID: 7, PanelID: 1, NodeID: 3, LineID: "t"}
+	got := s.tunnelLineRows(t.Context(), []*domain.PSPClient{onEntry, leftBehind})
+	if !got[1] || got[2] {
+		t.Fatalf("rows = %v, want only the one on the entry server", got)
+	}
+}

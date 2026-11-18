@@ -115,6 +115,11 @@ export interface NodeTrafficRow {
   permanent_total_bytes: number
   period_used_bytes: number
   today_used_bytes: number
+  /** Set on a tunnel line's hidden listener: the row is read as its line of the landing. */
+  tunnel_line?: boolean
+  parent_node_id?: number
+  parent_name?: string
+  line_name?: string
 }
 
 export async function topNodes(limit = 20, opts: { signal?: AbortSignal } = {}) {

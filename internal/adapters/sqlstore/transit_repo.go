@@ -95,6 +95,22 @@ func (r *transitRepo) ListByNodes(ctx context.Context, nodeIDs []int64) ([]domai
 	return out, nil
 }
 
+// ListByIDs returns the rows with the given ids (unknown ids are absent).
+func (r *transitRepo) ListByIDs(ctx context.Context, ids []int64) ([]domain.TransitForward, error) {
+	out := make([]domain.TransitForward, 0, len(ids))
+	const chunk = 500
+	for start := 0; start < len(ids); start += chunk {
+		var rows []transitForwardRow
+		if err := r.db.WithContext(ctx).Where("id IN ?", ids[start:min(start+chunk, len(ids))]).Order("id ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out = append(out, row.toDomain())
+		}
+	}
+	return out, nil
+}
+
 // SetApplied records what the entry confirmed. It reports whether the stored
 // confirmation changed, so the caller refreshes rendering only on a
 // transition and not on every replayed receipt.
@@ -155,7 +171,21 @@ func (r *transitRepo) RecordCounters(ctx context.Context, id int64, up, down int
 // line is ready when its entry confirmed exactly the forward the line now asks
 // for. Nodes without managed lines cost nothing.
 func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	// The listeners of tunnel-mode lines are loaded with the nodes that own the
+	// lines, so a line can report whether its listener and link are running.
+	// The listener nodes go through the same attach steps as any node.
+	tunnels, err := loadTunnelNodes(ctx, db, nodes)
+	if err != nil {
+		return err
+	}
+	if len(tunnels.extra) > 0 {
+		nodes = append(append(make([]*domain.Node, 0, len(nodes)+len(tunnels.extra)), nodes...), tunnels.extra...)
+	}
+	defer tunnels.attach()
 	if err := attachEgressState(ctx, db, nodes); err != nil {
+		return err
+	}
+	if err := attachRouteState(ctx, db, nodes); err != nil {
 		return err
 	}
 	var ids []int64
@@ -170,35 +200,110 @@ func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) 
 			}
 		}
 	}
-	if len(ids) == 0 {
-		return nil
+	forwardIDs := map[probeLineRef]int64{}
+	if len(ids) > 0 {
+		forwards, err := (&transitRepo{db: db}).ListByNodes(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("load managed relay state: %w", err)
+		}
+		byLine := make(map[probeLineRef]domain.TransitForward, len(forwards))
+		for _, forward := range forwards {
+			byLine[probeLineRef{forward.NodeID, forward.RelayID}] = forward
+			forwardIDs[probeLineRef{forward.NodeID, forward.RelayID}] = forward.ID
+		}
+		for _, node := range nodes {
+			if node == nil {
+				continue
+			}
+			for i := range node.Relays {
+				relay := &node.Relays[i]
+				relay.ManagedReady = false
+				if !relay.Managed() {
+					continue
+				}
+				state, exists := byLine[probeLineRef{node.ID, relay.ID}]
+				desired, publishable := domain.DesiredManagedForward(node, *relay)
+				relay.ManagedReady = exists && publishable && state.AppliedAt != nil && state.Applied == desired
+			}
+		}
 	}
-	forwards, err := (&transitRepo{db: db}).ListByNodes(ctx, ids)
-	if err != nil {
-		return fmt.Errorf("load managed relay state: %w", err)
-	}
-	type lineKey struct {
-		node  int64
-		relay string
-	}
-	byLine := make(map[lineKey]domain.TransitForward, len(forwards))
-	for _, forward := range forwards {
-		byLine[lineKey{forward.NodeID, forward.RelayID}] = forward
-	}
+	return attachProbeState(ctx, db, nodes, forwardIDs)
+}
+
+// tunnelNodes are the listener nodes of the tunnel lines of a set of loaded
+// nodes. extra are the ones not already in the set, loaded here; byID is every
+// one.
+type tunnelNodes struct {
+	nodes []*domain.Node
+	extra []*domain.Node
+	byID  map[int64]*domain.Node
+}
+
+func loadTunnelNodes(ctx context.Context, db *gorm.DB, nodes []*domain.Node) (tunnelNodes, error) {
+	out := tunnelNodes{nodes: nodes, byID: map[int64]*domain.Node{}}
+	have := make(map[int64]*domain.Node, len(nodes))
+	var missing []int64
 	for _, node := range nodes {
+		if node != nil {
+			have[node.ID] = node
+		}
+	}
+	seen := map[int64]bool{}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		for _, relay := range node.Relays {
+			if !relay.Tunnel() || relay.TunnelNodeID == 0 || seen[relay.TunnelNodeID] {
+				continue
+			}
+			seen[relay.TunnelNodeID] = true
+			if child, ok := have[relay.TunnelNodeID]; ok {
+				out.byID[child.ID] = child
+			} else {
+				missing = append(missing, relay.TunnelNodeID)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return out, nil
+	}
+	var rows []nodeRow
+	if err := db.WithContext(ctx).Where("id IN ?", missing).Find(&rows).Error; err != nil {
+		return out, fmt.Errorf("load tunnel listeners: %w", err)
+	}
+	for i := range rows {
+		child, err := rows[i].toDomain()
+		if err != nil {
+			return out, err
+		}
+		out.extra = append(out.extra, child)
+		out.byID[child.ID] = child
+	}
+	return out, nil
+}
+
+// attach fills each tunnel line's loaded listener and what the line reports
+// from it: running (ManagedReady) when the listener is applied on the entry and
+// its link is ready, and the quality of the link, which can withhold the line.
+// It runs after the egress, route and probe state of the listener nodes is in.
+func (t tunnelNodes) attach() {
+	for _, node := range t.nodes {
 		if node == nil {
 			continue
 		}
 		for i := range node.Relays {
 			relay := &node.Relays[i]
-			relay.ManagedReady = false
-			if !relay.Managed() {
+			relay.TunnelNode = nil
+			if !relay.Tunnel() {
 				continue
 			}
-			state, exists := byLine[lineKey{node.ID, relay.ID}]
-			desired, publishable := domain.DesiredManagedForward(node, *relay)
-			relay.ManagedReady = exists && publishable && state.AppliedAt != nil && state.Applied == desired
+			child := t.byID[relay.TunnelNodeID]
+			relay.TunnelNode = child
+			relay.ManagedReady = domain.TunnelRunning(node, *relay, child)
+			if child != nil {
+				relay.Probe, relay.ProbeWithheld = child.EgressProbe, child.EgressWithheld
+			}
 		}
 	}
-	return nil
 }

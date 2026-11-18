@@ -381,6 +381,9 @@ func (r *nodeRepo) Delete(ctx context.Context, id int64) error {
 		if err := tx.Delete(&nodeRow{}, id).Error; err != nil {
 			return err
 		}
+		if err := deleteNodeRoutesTx(tx, id); err != nil {
+			return err
+		}
 		return deleteDestSourceRuleTx(tx, id)
 	})
 }
@@ -469,7 +472,9 @@ var nodeSortAllowlist = map[string]string{
 }
 
 func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Node, int64, error) {
-	q := r.db.WithContext(ctx).Model(&nodeRow{})
+	// The hidden listeners of tunnel-mode lines are not nodes an administrator
+	// lists; they are reached through the lines of their parent.
+	q := r.db.WithContext(ctx).Model(&nodeRow{}).Where("parent_node_id = 0")
 	if like := keywordLike(p.Keyword); like != "" {
 		// tags is a JSON-encoded text column; the LIKE on it gives "any
 		// tag substring matches" which is what admin expects.
@@ -502,8 +507,11 @@ func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain
 
 func (r *nodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 	var rows []nodeRow
+	// ListEnabled feeds group membership and subscriptions, which never see the
+	// hidden listener of a tunnel line: the subscription renders it as a line
+	// of its parent.
 	err := r.db.WithContext(ctx).
-		Where("enabled = ?", true).
+		Where("enabled = ? AND parent_node_id = 0", true).
 		Order("sort_order ASC, id ASC").
 		Find(&rows).Error
 	if err != nil {

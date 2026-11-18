@@ -259,9 +259,16 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 		now = time.Now()
 	}
 
+	// A tunnel-mode line's client lives on the entry server, which terminates the
+	// user's own connection: the addresses it sees are the person's, so those rows
+	// count like the direct line's (a forward's do not: the landing sees the
+	// relay). They are attributed to the same user, so a person's addresses
+	// across all their rows are one set, and a limit judged on it is the person's,
+	// not multiplied by the number of lines.
+	tunnelRows := s.tunnelLineRows(ctx, in.clients)
 	owners := make(map[domain.ClientKey]int64, len(in.clients))
 	for _, c := range in.clients {
-		if c == nil || c.Email == "" || !c.CountsSourceIPs() {
+		if c == nil || c.Email == "" || !(c.CountsSourceIPs() || tunnelRows[c.ID]) {
 			continue
 		}
 		owners[domain.NewClientKey(c.PanelID, c.Email)] = c.UserID
@@ -697,4 +704,46 @@ func countExclusions(e domain.GeoExcluded) {
 			metrics.LiveIPExcludedTotal.With(r.reason).Add(int64(r.n))
 		}
 	}
+}
+
+// tunnelLineRows are the client rows that belong to a tunnel-mode line. A row is
+// a line of its landing node, so the landing's relay lines say which are tunnels.
+// An unreadable node list reads as none (the rows then stay out of the counts,
+// as before tunnel lines existed), never as a guess.
+func (s *Service) tunnelLineRows(ctx context.Context, clients []*domain.PSPClient) map[int64]bool {
+	out := map[int64]bool{}
+	if s.nodes == nil {
+		return out
+	}
+	var candidates []*domain.PSPClient
+	for _, c := range clients {
+		if line, ok := c.Line(); ok && !line.IsDirect() {
+			candidates = append(candidates, c)
+		}
+	}
+	if len(candidates) == 0 {
+		return out
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return out
+	}
+	// The entry server of each tunnel line: only a row ON that server is the
+	// tunnel's (a row of the same line left on another server, from before a mode
+	// switch, is a detached remnant whose addresses are the relay's).
+	tunnels := map[domain.LineKey]int64{}
+	for _, n := range nodes {
+		for _, r := range n.Relays {
+			if r.Tunnel() {
+				tunnels[domain.LineKey{NodeID: n.ID, LineID: r.ID}] = r.EntryPanelID
+			}
+		}
+	}
+	for _, c := range candidates {
+		line, _ := c.Line()
+		if entry, ok := tunnels[line]; ok && c.PanelID == entry {
+			out[c.ID] = true
+		}
+	}
+	return out
 }

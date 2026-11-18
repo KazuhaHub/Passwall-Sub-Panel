@@ -633,14 +633,48 @@ type Node struct {
 	// link this node leaves through, with this node bound to it. A node whose
 	// egress is not ready is withheld from subscriptions (see EgressPublishable).
 	EgressReady bool
+	// EgressWithheld is loaded state, never stored: the probes of the tunnel
+	// this node leaves through have been down long enough that, with
+	// withholding on, the node is taken out of subscriptions (transit.probe.v1).
+	// It is the default exit's link only. EgressProbe is that link's quality
+	// for display, nil when it is not probed.
+	EgressWithheld bool
+	EgressProbe    *ProbeQuality
+	// DestRoutes are the node's routes by destination (transit.route.v1) and
+	// RoutesSent / RoutesApplied the digests of what the panel last sent its
+	// server and what the server confirmed. All three are loaded state, never
+	// written through the node row: the routes have their own store.
+	DestRoutes    []DestRoute
+	RoutesSent    string
+	RoutesApplied string
+	// ParentNodeID and ParentLineID make this node the hidden listener of a
+	// tunnel-mode line (transit_tunnel.go): a listener on the entry server of its
+	// own, left out of node lists and groups, whose users are the parent's. Both
+	// are zero/empty on every ordinary node.
+	ParentNodeID int64
+	ParentLineID string
+	// RoutesWithheld is why the panel is not sending this node: its routes
+	// cannot be sent, and the node without them would send their destinations
+	// through its default exit. "" while it is sent.
+	RoutesWithheld string
+}
+
+// RoutesRunning reports whether the server confirmed the routes the panel last
+// sent for this node.
+func (n *Node) RoutesRunning() bool {
+	return n != nil && n.RoutesSent != "" && n.RoutesSent == n.RoutesApplied
 }
 
 // EgressPublishable reports whether the node may appear in subscriptions as
 // far as its exit is concerned. A node that leaves from its own server always
 // may; one that leaves through another server only once the link is ready, so
 // a subscriber is never handed a node whose traffic has nowhere to go.
+//
+// A node whose routes are being withheld is not published either: it is not
+// running on its server, and handing out a node whose routed destinations have
+// nowhere to go would be the leak the withholding exists to prevent.
 func (n *Node) EgressPublishable() bool {
-	return n != nil && (n.EgressPanelID == 0 || n.EgressReady)
+	return n != nil && (n.EgressPanelID == 0 || n.EgressReady) && n.RoutesWithheld == ""
 }
 
 // NodeObservedEndpoint is the only payload accepted by the observed endpoint
@@ -712,6 +746,18 @@ type RelayLine struct {
 	// Host overrides the WebSocket Host header for this line. Empty keeps the
 	// landing's. Same CDN-fronting use case as SNI.
 	Host string
+	// Domain is a CDN line's own CDN domain (RelayModeCDN, transit_cdn.go): the
+	// name the CDN proxies. Address, SNI and Host are filled from it when the
+	// line is saved and are the values clients use; this field only records
+	// which name they came from, for the editor and for checking the landing's
+	// certificate. Empty on every other line.
+	Domain string `json:",omitempty"`
+	// ClientTLS is whether clients use TLS to the CDN (SNI, fingerprint), apart
+	// from whether the landing itself does: Cloudflare Flexible reaches a plain
+	// origin over a TLS client connection, an HTTP port needs none. Set when the
+	// line is saved (on for a CDN HTTPS port, off for an HTTP one), then the
+	// administrator's own value. Nil on every other line.
+	ClientTLS *bool `json:",omitempty"`
 	// Enabled gates whether the line renders. A disabled line is kept in the
 	// DB (so the admin can toggle it back) but produces no subscription entry.
 	Enabled bool
@@ -725,12 +771,29 @@ type RelayLine struct {
 	// refuses a line that still carries either marker.
 	RegionUnresolved bool `json:"-"`
 	TagsUnresolved   bool `json:"-"`
+	// ModeUnresolved marks a request that omitted the mode: the saved line keeps
+	// its own.
+	ModeUnresolved bool `json:"-"`
 	// EntryPanelID selects who runs the forwarding. 0 is an external entry:
 	// the administrator forwards Address:Port to the landing outside the panel
 	// (a relay machine, a CDN front). Non-zero is a managed entry: that
 	// Passwall Node server relays Port to this node, and PSP publishes the
 	// forward and gates the line on the server confirming it.
 	EntryPanelID int64 `json:",omitempty"`
+	// Mode is how the line is carried: "" is a raw port forward to the
+	// landing's listener (直接转发, or an external entry), RelayModeTunnel is a
+	// listener of its own on the entry that carries the traffic to the landing's
+	// server through a tunnel (加密隧道, transit_tunnel.go), RelayModeCDN is a
+	// CDN in front of the landing (transit_cdn.go). Fixed when the line is made;
+	// forward and tunnel change only through the confirmed mode switch, a CDN
+	// line never changes.
+	Mode string `json:",omitempty"`
+	// TunnelNodeID is the hidden listener node a tunnel-mode line is served by
+	// (Node.ParentNodeID names the landing back). Owned by the node service.
+	TunnelNodeID int64 `json:",omitempty"`
+	// TunnelNode is loaded state, never stored: the listener node of a tunnel
+	// line, nil for any other line or when the row is gone.
+	TunnelNode *Node `json:"-"`
 	// TrafficFactorMilli is this line's traffic multiplier in thousandths
 	// (traffic_factor.go): what a user is charged per byte through this line,
 	// whatever servers it passes. Absent is one-for-one; 0 is free.
@@ -738,6 +801,12 @@ type RelayLine struct {
 	// ManagedReady is loaded state, never stored: the entry server has applied
 	// exactly the forward this line now asks for. Read it through Publishable.
 	ManagedReady bool `json:"-"`
+	// ProbeWithheld is loaded state, never stored: the entry server's probes of
+	// this managed line's forward have been down long enough that, with
+	// withholding on, the line is taken out of subscriptions. Probe is the
+	// forward's quality for display, nil when it is not probed.
+	ProbeWithheld bool          `json:"-"`
+	Probe         *ProbeQuality `json:"-"`
 }
 
 // RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index
@@ -1341,6 +1410,8 @@ type Panel struct {
 	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+	Region   string
+	Tags     []string
 	// UpdateChannel is a Passwall Node-only release preference, not an automatic
 	// update policy. Empty legacy values resolve to stable via Effective().
 	UpdateChannel PanelUpdateChannel

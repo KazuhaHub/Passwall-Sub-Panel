@@ -187,8 +187,27 @@ export interface Node {
   egress_panel_id?: number
   /** Response-only: the tunnel runs on both servers, so the node is published. */
   egress_ready?: boolean
+  /** Response-only: measured quality of the tunnel's link. Absent when not probed. */
+  egress_probe?: ProbeQuality
+  /** Response-only: the node is withheld from subscriptions for a down link. */
+  egress_withheld?: boolean
   /** Traffic multiplier of the node's DIRECT line, in thousandths (1000 = one-for-one, 0 = free). Optional so fixtures may omit it. */
   traffic_factor_milli?: number
+  /** Set on a tunnel line's hidden listener: the landing node and line it belongs to. */
+  parent_node_id?: number
+  parent_line_id?: string
+  parent_node_name?: string
+}
+
+export type ProbeState = 'ok' | 'degraded' | 'down' | 'unknown'
+
+/** Measured quality of a transit link (response-only). */
+export interface ProbeQuality {
+  state: ProbeState
+  median_rtt_ms: number
+  loss_percent: number
+  withheld: boolean
+  reported_at?: string
 }
 
 /** One transit front for a Node. See domain.RelayLine. */
@@ -219,8 +238,63 @@ export interface RelayLine {
   /** Response-only: the entry server confirmed this managed line's forward,
    *  so the line is published. */
   managed_ready?: boolean
+  /** Response-only: measured quality of this managed line's link. */
+  probe?: ProbeQuality
+  /** Response-only: the line is withheld from subscriptions for a down link. */
+  probe_withheld?: boolean
   /** This line's traffic multiplier in thousandths. Responses always carry it; send it back unchanged to keep it. A new line defaults to 1000. */
   traffic_factor_milli?: number
+  /** 'tunnel': the entry ends the user's connection with its own listener. 'cdn': a CDN in front of the landing (no entry server). Absent is a direct forward. For a saved line the mode only changes through the mode endpoint; a CDN line's never changes. */
+  mode?: LineMode
+  /** A CDN line's CDN domain; address, port, SNI and Host default to it when left empty. */
+  domain?: string
+  /** A CDN line: clients use TLS to the CDN (independent of the landing's own TLS). Defaults from the port when omitted. */
+  client_tls?: boolean
+  /** Response-only: what is likely to keep a CDN line from working given its landing as saved. */
+  cdn_issues?: CdnIssue[]
+  /** Response-only: the line is published (a tunnel line: listener applied, link ready on both servers, not withheld). */
+  running?: boolean
+  /** Response-only: the hidden listener of a tunnel line; absent when its row is gone. */
+  tunnel?: TunnelListener
+}
+
+export type LineMode = 'tunnel' | 'cdn'
+
+/** A warning about a CDN line (response-only). It never blocks saving. */
+export interface CdnIssue {
+  code: string
+  /** True when it is likely to stop the line working, false for a note. */
+  warn: boolean
+  params?: Record<string, string>
+}
+
+/** The hidden listener a tunnel line runs on its entry server (response-only). */
+export interface TunnelListener {
+  node_id: number
+  name: string
+  enabled: boolean
+  port: number
+  protocol: string
+  flow: string
+  listen?: string
+  /** 'reality', 'tls', 'none' ... */
+  security?: string
+  server_names?: string[]
+  target?: string
+  short_ids?: string[]
+  public_key?: string
+  /** Admin only; may be absent. */
+  private_key?: string
+  fingerprint?: string
+  config_sync_state: string
+  applied: boolean
+  egress_panel_id: number
+  egress_ready: boolean
+  egress_withheld?: boolean
+  egress_probe?: ProbeQuality
+  /** Routes by destination set on the listener. */
+  routes: number
+  routes_withheld?: string
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'

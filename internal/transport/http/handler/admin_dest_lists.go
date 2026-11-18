@@ -246,7 +246,7 @@ func (h *AdminDestHandler) UpdateList(c *gin.Context) {
 	if !bindDestJSON(c, &req) {
 		return
 	}
-	ctx := c.Request.Context()
+	ctx := routeConfirmed(c)
 	cur, err := h.w.Lists.GetList(ctx, id)
 	if err != nil {
 		respondError(c, err)
@@ -320,7 +320,7 @@ func (h *AdminDestHandler) ListEntries(c *gin.Context) {
 	if !bindDestJSON(c, &req) {
 		return
 	}
-	l, report, err := h.w.Lists.AddEntries(c.Request.Context(), id, req.Add, req.Remove)
+	l, report, err := h.w.Lists.AddEntries(routeConfirmed(c), id, req.Add, req.Remove)
 	if err != nil {
 		h.destError(c, err, errCodes{})
 		return
@@ -362,4 +362,15 @@ func (h *AdminDestHandler) RefreshList(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusAccepted, gin.H{"state": "refreshing"})
+}
+
+// routeConfirmed is the request's context, carrying the administrator's go-ahead
+// (?confirm_routes=true) for an edit that leaves a node's routes with nothing
+// from the list.
+func routeConfirmed(c *gin.Context) context.Context {
+	ctx := c.Request.Context()
+	if c.Query("confirm_routes") == "true" {
+		return destlist.WithRouteConfirmation(ctx)
+	}
+	return ctx
 }

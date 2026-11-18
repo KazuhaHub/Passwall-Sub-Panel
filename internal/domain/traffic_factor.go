@@ -55,8 +55,18 @@ func factorOrDefault(milli *int) int {
 }
 
 // LineFactors indexes the factor of every line of the given nodes.
+//
+// A tunnel line's clients live on its listener's server, whose own node set does
+// not hold the landing that owns the line, so the listener carries a copy of
+// the line's factor (the node service keeps it in step) and stands for the line
+// here. A landing in the set, which owns the real value, takes precedence.
 func LineFactors(nodes []*Node) map[LineKey]int {
 	out := make(map[LineKey]int, len(nodes))
+	for _, n := range nodes {
+		if n != nil && n.IsTunnelChild() {
+			out[LineKey{NodeID: n.ParentNodeID, LineID: n.ParentLineID}] = n.EffectiveTrafficFactor()
+		}
+	}
 	for _, n := range nodes {
 		if n == nil {
 			continue

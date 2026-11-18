@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -39,4 +40,18 @@ func GenerateShortID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// PublicFromPrivate derives the public key of a base64-url (no padding)
+// X25519 private key, in the same encoding GenerateKeypair uses.
+func PublicFromPrivate(privateKey string) (string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(privateKey)
+	if err != nil || len(raw) != 32 {
+		return "", errors.New("a REALITY private key is 32 bytes, base64-url encoded")
+	}
+	pub, err := curve25519.X25519(raw, curve25519.Basepoint)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(pub), nil
 }

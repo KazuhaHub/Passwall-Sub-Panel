@@ -23,10 +23,14 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sourceaddr"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
@@ -45,7 +49,11 @@ type Service struct {
 	clients  ports.PSPClientRepo
 	nodes    ports.NodeRepo
 	settings ports.ScopedSettings
-	panels   ports.XUIPanelRepo
+	// orphanSeen counts, per tunnel listener, the syncs in a row that found no line
+	// for it (see orphanTunnelIssues).
+	orphanMu   sync.Mutex
+	orphanSeen map[int64]int
+	panels     ports.XUIPanelRepo
 	// coreCatalog is the review the configured core is re-checked against.
 	coreCatalog ports.CoreCatalog
 
@@ -89,17 +97,324 @@ type Service struct {
 	// records what they confirm. NIL MEANS THIS BUILD HAS NO MANAGED RELAYS:
 	// no config carries Transit, so every config is what it was before.
 	transit TransitPublisher
+	// probes decides what an entry server probes and takes what it measured.
+	// NIL MEANS THIS BUILD DOES NOT PROBE: no config carries a probe block.
+	probes ProbeCoordinator
+	// fronts plans the SNI-shared ports of a server (transit.sni.v1). NIL
+	// MEANS THIS BUILD DOES NOT SHARE PORTS: no config carries Fronts.
+	fronts FrontPublisher
+	routes RoutePlanner
 }
+
+// FrontPublisher is the SNI front collaborator (service/front.Service).
+type FrontPublisher interface {
+	// PlanFor is the fronts a server is sent: empty unless the agent declared
+	// transit.sni.v1, its desired engine is Xray and it reports Xray running.
+	// present are the nodes in its config.
+	PlanFor(ctx context.Context, panelID int64, capabilities []string, desired, observed domain.NodeCoreEngine, present []int64) (front.Plan, error)
+	// UnservedListeners are the listeners that must not be sent because their
+	// front is not being sent and they would bind one port together.
+	UnservedListeners(ctx context.Context, panelID int64, plan front.Plan, present []int64) ([]front.Unserved, error)
+}
+
+// IssueTunnelListenerOrphan is the issue recorded for a hidden tunnel listener
+// whose line is gone (a delete that was cut short): it is still sent, serves
+// nobody, and can be removed from the server's port usage or its node page.
+const IssueTunnelListenerOrphan = "tunnel_listener_orphan"
+
+// IssueTunnelFactorStale is the issue recorded for a tunnel listener whose copy
+// of its line's traffic factor differs from the line's.
+const IssueTunnelFactorStale = "tunnel_factor_stale"
+
+// IssueCDNLandingUnfit is the issue recorded for a node whose CDN lines cannot
+// work any more because its transport no longer suits a CDN (changed outside PSP,
+// or adopted from a panel). The lines are withheld from subscriptions.
+const IssueCDNLandingUnfit = "cdn_landing_unfit"
+
+const rosterIdentityWarningThreshold = 20_000
+
+func rosterCapacityIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	count := 0
+	for _, desired := range snapshot.Clients {
+		if desired.Client != nil {
+			count++
+		}
+	}
+	if count < rosterIdentityWarningThreshold {
+		return nil
+	}
+	return []domain.NodeAgentIssue{{
+		Code:   "roster_identity_capacity",
+		Detail: fmt.Sprintf("Server roster reached %d client identities. The sync byte limit still applies.", rosterIdentityWarningThreshold),
+	}}
+}
+
+// cdnUnfitIssues names the CDN lines of the snapshot's nodes that are withheld
+// because their landing cannot go through a CDN, with the reason.
+func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	var out []domain.NodeAgentIssue
+	for _, node := range snapshot.Nodes {
+		if node == nil || node.IsTunnelChild() {
+			continue
+		}
+		fault := domain.CDNLandingFault(node)
+		if fault == nil || fault.Code == domain.CDNFaultUnreadable {
+			continue
+		}
+		problem := domain.CDNLandingProblem(node)
+		var lines []string
+		for _, line := range node.Relays {
+			if line.CDN() {
+				lines = append(lines, fmt.Sprintf("%q", line.Label()))
+			}
+		}
+		if len(lines) > 0 {
+			out = append(out, domain.NodeAgentIssue{
+				Code: IssueCDNLandingUnfit, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+				Detail: fmt.Sprintf("CDN line %s of %s is withheld from subscriptions: %s", strings.Join(lines, ", "), node.DisplayName, problem),
+			})
+		}
+	}
+	return out
+}
+
+// orphanTunnelIssues names the tunnel listeners of the snapshot that no line of
+// an existing landing points at.
+func (s *Service) orphanTunnelIssues(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	s.pruneOrphans(ctx, snapshot)
+	var out []domain.NodeAgentIssue
+	for _, node := range snapshot.Nodes {
+		if node == nil || !node.IsTunnelChild() || s.nodes == nil {
+			continue
+		}
+		parent, err := s.nodes.GetByID(ctx, node.ParentNodeID)
+		if err == nil && tunnelLineOf(parent, node) {
+			s.clearOrphan(node.ID)
+			// The listener carries a copy of its line's factor, which the quota
+			// grants of this server read: a copy that differs is reported.
+			for _, line := range parent.Relays {
+				if line.ID == node.ParentLineID && line.EffectiveTrafficFactor() != node.EffectiveTrafficFactor() {
+					out = append(out, domain.NodeAgentIssue{
+						Code: IssueTunnelFactorStale, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+						Detail: fmt.Sprintf("%s carries traffic factor %d but its line's is %d: save the line's factor again",
+							node.DisplayName, node.EffectiveTrafficFactor(), line.EffectiveTrafficFactor()),
+					})
+				}
+			}
+			continue
+		} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			continue // unreadable is not orphaned
+		}
+		// A listener is made, and the line pointed at it, by one save under the
+		// servers' locks; a sync that reads between the two would take a listener
+		// being made for an orphan. So an orphan is reported only once it has been
+		// seen as one by two syncs in a row.
+		if !s.confirmOrphan(node.ID) {
+			continue
+		}
+		out = append(out, domain.NodeAgentIssue{
+			Code: IssueTunnelListenerOrphan, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+			Detail: fmt.Sprintf("%s belongs to a tunnel line that no longer exists: remove it", node.DisplayName),
+		})
+	}
+	return out
+}
+
+// confirmOrphan counts the syncs that saw a listener as an orphan and says
+// whether it is the second in a row (true), which is when it is reported.
+func (s *Service) confirmOrphan(id int64) bool {
+	s.orphanMu.Lock()
+	defer s.orphanMu.Unlock()
+	if s.orphanSeen == nil {
+		s.orphanSeen = map[int64]int{}
+	}
+	s.orphanSeen[id]++
+	return s.orphanSeen[id] >= 2
+}
+
+// pruneOrphans forgets the count of every listener that no longer exists, so
+// the map cannot grow with listeners that were removed.
+func (s *Service) pruneOrphans(ctx context.Context, snapshot *ports.NativeDesiredSnapshot) {
+	inSnapshot := map[int64]bool{}
+	for _, n := range snapshot.Nodes {
+		if n != nil {
+			inSnapshot[n.ID] = true
+		}
+	}
+	s.orphanMu.Lock()
+	ids := make([]int64, 0, len(s.orphanSeen))
+	for id := range s.orphanSeen {
+		if !inSnapshot[id] {
+			ids = append(ids, id)
+		}
+	}
+	s.orphanMu.Unlock()
+	if s.nodes == nil {
+		return
+	}
+	for _, id := range ids {
+		if _, err := s.nodes.GetByID(ctx, id); errors.Is(err, domain.ErrNotFound) {
+			s.clearOrphan(id)
+		}
+	}
+}
+
+// clearOrphan forgets the count of a listener that is not an orphan.
+func (s *Service) clearOrphan(id int64) {
+	s.orphanMu.Lock()
+	delete(s.orphanSeen, id)
+	s.orphanMu.Unlock()
+}
+
+// tunnelLineOf reports whether a line of the landing is served by the listener.
+func tunnelLineOf(landing, child *domain.Node) bool {
+	for _, line := range landing.Relays {
+		if line.ID == child.ParentLineID && line.Tunnel() && line.TunnelNodeID == child.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// IssueFrontWithheld is the issue recorded for a saved front that is not being
+// sent; its key is the front's key and its detail says why.
+const IssueFrontWithheld = "front_withheld"
+
+// withoutNodes is the snapshot without the nodes of the listeners left out.
+func withoutNodes(snapshot *ports.NativeDesiredSnapshot, left []route.Withheld) *ports.NativeDesiredSnapshot {
+	drop := make(map[int64]bool, len(left))
+	for _, w := range left {
+		drop[w.NodeID] = true
+	}
+	clone := *snapshot
+	clone.Nodes = nil
+	for _, node := range snapshot.Nodes {
+		if node != nil && !drop[node.ID] {
+			clone.Nodes = append(clone.Nodes, node)
+		}
+	}
+	return &clone
+}
+
+// presentNodes are the nodes in a server's desired config.
+func presentNodes(snapshot *ports.NativeDesiredSnapshot) []int64 {
+	out := make([]int64, 0, len(snapshot.Nodes))
+	for _, node := range snapshot.Nodes {
+		if node != nil {
+			out = append(out, node.ID)
+		}
+	}
+	return out
+}
+
+// frontContractFaults says which fronts the contract refuses, and why. Each is
+// checked on its own: alone with the forwards it routes to, then next to
+// everything else in the body that is not a front. One bad front is the only one
+// withheld, and a fault that belongs to some other object (a link) is charged to
+// none: the body without any front must itself be accepted for a front to be
+// blamed. The fronts that pass are finally checked together, which catches two
+// of them clashing; those are then all withheld.
+func frontContractFaults(body nodeprotocol.Transit, plan front.Plan) map[nodeprotocol.FrontKey]string {
+	faulty := map[nodeprotocol.FrontKey]string{}
+	forwards := map[nodeprotocol.ForwardKey]nodeprotocol.Forward{}
+	for _, forward := range plan.Forwards {
+		forwards[forward.Key] = forward
+	}
+	forwardsOf := func(f nodeprotocol.Front) []nodeprotocol.Forward {
+		var out []nodeprotocol.Forward
+		for _, route := range f.Routes {
+			if forward, ok := forwards[route.Target.Forward]; ok && route.Target.Forward != "" {
+				out = append(out, forward)
+			}
+		}
+		return out
+	}
+	base := body
+	base.Fronts = nil
+	base.Forwards = nil
+	for _, forward := range body.Forwards {
+		if !plan.FrontedForwards[forward.Key] {
+			base.Forwards = append(base.Forwards, forward)
+		}
+	}
+	baseOK := nodeprotocol.ValidateTransit(&base) == nil
+	var remaining []nodeprotocol.Front
+	for _, f := range plan.Fronts {
+		alone := nodeprotocol.Transit{Fronts: []nodeprotocol.Front{f}, Forwards: forwardsOf(f)}
+		if err := nodeprotocol.ValidateTransit(&alone); err != nil {
+			faulty[f.Key] = err.Error()
+			continue
+		}
+		if baseOK {
+			next := base
+			next.Fronts = []nodeprotocol.Front{f}
+			next.Forwards = append(slices.Clone(base.Forwards), forwardsOf(f)...)
+			if err := nodeprotocol.ValidateTransit(&next); err != nil {
+				faulty[f.Key] = err.Error()
+				continue
+			}
+		}
+		remaining = append(remaining, f)
+	}
+	if baseOK && len(remaining) > 1 {
+		together := base
+		together.Fronts = remaining
+		for _, f := range remaining {
+			together.Forwards = append(together.Forwards, forwardsOf(f)...)
+		}
+		if err := nodeprotocol.ValidateTransit(&together); err != nil {
+			for _, f := range remaining {
+				faulty[f.Key] = err.Error()
+			}
+		}
+	}
+	return faulty
+}
+
+// SetFronts binds the SNI front planner. Left unbound, no config carries
+// fronts.
+func (s *Service) SetFronts(f FrontPublisher) { s.fronts = f }
 
 // TransitPublisher is the managed relay collaborator (service/transit.Service).
 type TransitPublisher interface {
-	ForwardsFor(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, error)
+	ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error)
 	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
-	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (transit.LinkPlan, error)
+	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (transit.LinkPlan, error)
 	ConfirmLinks(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus) (bool, error)
 	RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.LinkCounters) error
 }
+
+// RoutePlanner is the routing-by-destination collaborator (service/route.Service).
+type RoutePlanner interface {
+	// PlanFor compiles the routes of the nodes a server is sent: empty unless
+	// the agent declared transit.route.v1 and transit.link.v1.
+	PlanFor(ctx context.Context, in route.PlanInput) (route.Plan, error)
+	// RecordSent stores what the config holds of each node's routes.
+	RecordSent(ctx context.Context, nodes []*domain.Node, sent []nodeprotocol.ListenerRoutes, withheld map[int64]string) (bool, error)
+	// Early decides which listeners cannot be sent with their routes before
+	// shared ports and links are planned.
+	Early(ctx context.Context, panelID int64, caps []string, nodes []*domain.Node) (route.Plan, error)
+	// Confirm records which routes the server confirmed holding.
+	Confirm(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
+}
+
+// SetRoutes binds the routing planner. Left unbound, no config carries routes.
+func (s *Service) SetRoutes(r RoutePlanner) { s.routes = r }
+
+// ProbeCoordinator is the link-probe collaborator (service/linkprobe.Service).
+type ProbeCoordinator interface {
+	// Config is the probe block for a server's transit body, nil when it must
+	// not be sent (no capability, probing off, nothing to probe).
+	Config(ctx context.Context, capabilities []string, transit *nodeprotocol.Transit, methods map[nodeprotocol.ForwardKey]string) (*nodeprotocol.ProbeSettings, error)
+	// Ingest books the probe results of a full report against the config that
+	// was sent, and reports whether a withheld flag changed.
+	Ingest(ctx context.Context, panelID int64, capabilities []string, sent *nodeprotocol.Transit, results []nodeprotocol.ProbeResult, agentReportedMS int64) (bool, error)
+}
+
+// SetProbes binds the link-probe coordinator. Left unbound, no probe block is
+// sent and no result is read.
+func (s *Service) SetProbes(p ProbeCoordinator) { s.probes = p }
 
 // SetTransit binds the managed relay publisher. Left unbound, no forwards are
 // published and managed relay lines stay withheld from subscriptions.
@@ -232,6 +547,15 @@ func (s *Service) SetRealityFingerprintNormalizer(normalize func(context.Context
 // this service: the production HTTP boundary resolves a strict Bearer digest
 // to the same agent ID before calling this coordinator.
 func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+	return s.SyncWithResponseEncoding(ctx, report, "")
+}
+
+// SyncWithResponseEncoding budgets the response for the coding negotiated by HTTP.
+func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeprotocol.NodeReport, encoding string) (nodeprotocol.SyncResponse, error) {
+	responseLimit := nodeprotocol.MaxSyncWireBytes
+	if encoding == nodeprotocol.SyncEncodingGzip && slices.Contains(report.Capabilities, nodeprotocol.CapabilitySyncGzip) {
+		responseLimit = nodeprotocol.MaxSyncDecodedBytes
+	}
 	// THE TELEMETRY SUBTREE LEAVES THE CONTROL PATH HERE, before anything reads
 	// the report. Everything below this line decides config, roster, directives,
 	// tasks and accounting, and none of it may be influenced by a telemetry
@@ -321,7 +645,32 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	// the policy sees exactly the config it always did.
 	var transitBody nodeprotocol.Transit
 	var egressExit map[int64]int64
+	var linkPlan transit.LinkPlan
+	var routeExits map[int64][]destpolicy.RouteExit
+	var routeIssues []domain.NodeAgentIssue
+	var routeWithheld, late []route.Withheld
+	// routedNodes are the nodes the server is configured for, before any is left
+	// out of this config: what the routes of each is recorded against.
+	routedNodes := snapshot.Nodes
+	var forwardMethods map[nodeprotocol.ForwardKey]string
+	var frontIssues []domain.NodeAgentIssue
+	var frontPlan front.Plan
 	if s.transit != nil {
+		// LISTENERS WHOSE ROUTES CANNOT BE SENT ARE DECIDED FIRST, before the
+		// shared ports and the links are planned from the config: one left out is
+		// then simply not there, and drops out of a shared port with its routes
+		// instead of being named by a front the server would refuse whole.
+		if s.routes != nil {
+			early, err := s.routes.Early(ctx, agent.PanelID, report.Capabilities, snapshot.Nodes)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			if len(early.Withheld) > 0 {
+				routeWithheld = append(routeWithheld, early.Withheld...)
+				routeIssues = append(routeIssues, early.Issues...)
+				snapshot = withoutNodes(snapshot, early.Withheld)
+			}
+		}
 		// A forward or an incoming link on a port one of this server's own
 		// inbounds uses would make the node refuse the whole config, listener
 		// changes included. Such an object is withheld here instead; its
@@ -333,12 +682,38 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 				listening[node.DesiredPort] = true
 			}
 		}
+		// SNI-SHARED PORTS. A shared port is taken for everything that is not
+		// behind its front, the loopback ports of fronted listeners with it, so
+		// a forward or a link on one is withheld like any other collision. The
+		// forwards a front routes to are the exception: they are bound where the
+		// front is, relay TCP only, and are sent with the fronts below.
+		if s.fronts != nil {
+			plan, err := s.fronts.PlanFor(ctx, agent.PanelID, report.Capabilities, agent.DesiredCoreEngine,
+				domain.NodeCoreEngine(report.CoreEngine), presentNodes(snapshot))
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			frontPlan = plan
+			for _, w := range plan.Withheld {
+				metrics.FrontsWithheldTotal.With(w.Reason).Inc()
+				frontIssues = append(frontIssues, domain.NodeAgentIssue{
+					Code: IssueFrontWithheld, Key: string(nodeprotocol.NewFrontKey(w.FrontID)), Detail: w.Reason + ": " + w.Detail,
+				})
+			}
+			for port := range frontPlan.Ports {
+				listening[port] = true
+			}
+		}
 		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitForward) {
-			forwards, err := s.transit.ForwardsFor(ctx, agent.PanelID)
+			forwards, methods, err := s.transit.ForwardsWithProbeMethods(ctx, agent.PanelID)
+			forwardMethods = methods
 			if err != nil {
 				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 			}
 			for _, forward := range forwards {
+				if frontPlan.FrontedForwards[forward.Key] {
+					continue
+				}
 				// Two lines claiming one port (two saves that raced) would fail
 				// the same way; the older line keeps the port.
 				if listening[forward.Port] {
@@ -351,16 +726,161 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 			}
 		}
 		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitLink) {
-			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening)
+			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening, slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitRoute))
 			if err != nil {
 				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 			}
+			linkPlan = plan
 			transitBody.LinksIn, transitBody.LinksOut, transitBody.Egress = plan.In, plan.Out, plan.Egress
 			egressExit = plan.EgressExit
 			if plan.Changed && s.invalidateRender != nil {
 				// What is sent decides which bound nodes may be published.
 				s.invalidateRender()
 			}
+		}
+		// ROUTES BY DESTINATION go only to an agent that declared transit.route.v1:
+		// one that did not would ignore them and send every destination through
+		// the default exit with no error anywhere. A listener whose routes cannot
+		// be sent is left out of the config instead (below), so its destinations
+		// never go through the default exit by omission.
+		if s.routes != nil {
+			routePlan, err := s.routes.PlanFor(ctx, route.PlanInput{
+				PanelID: agent.PanelID, Capabilities: report.Capabilities, Nodes: snapshot.Nodes,
+				RouteOut: linkPlan.RouteOut, RouteKeys: linkPlan.RouteKeys, Out: linkPlan.Out,
+				Egress: linkPlan.Egress, EgressExit: linkPlan.EgressExit,
+			})
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			transitBody.Routes, routeExits = routePlan.Routes, routePlan.Exits
+			routeIssues = append(routeIssues, routePlan.Issues...)
+			late = routePlan.Withheld
+			routeWithheld = append(routeWithheld, late...)
+		}
+		if len(frontPlan.Fronts) > 0 {
+			transitBody.Forwards = append(transitBody.Forwards, frontPlan.Forwards...)
+			sort.Slice(transitBody.Forwards, func(i, j int) bool { return transitBody.Forwards[i].Key < transitBody.Forwards[j].Key })
+			transitBody.Fronts = frontPlan.Fronts
+			// What is sent must be what the contract accepts: fronts it would
+			// refuse fail the whole config, so they are withheld instead (the
+			// listeners keep their public ports), recorded as an issue and
+			// counted. The fronts are checked on their own first, so a fault
+			// of some other object (a link) is not charged to them, and a
+			// fault that is theirs is not hidden by it.
+			if faulty := frontContractFaults(transitBody, frontPlan); len(faulty) > 0 {
+				drop := map[nodeprotocol.FrontKey]bool{}
+				for key, reason := range faulty {
+					drop[key] = true
+					log.Warn("SNI front withheld: the contract refuses it", "agent_id", agent.AgentID, "front", string(key), "err", reason)
+					metrics.FrontsWithheldTotal.With(front.WithheldContract).Inc()
+					frontIssues = append(frontIssues, domain.NodeAgentIssue{
+						Code: IssueFrontWithheld, Key: string(key), Detail: front.WithheldContract + ": " + reason,
+					})
+				}
+				kept := transitBody.Forwards[:0]
+				for _, forward := range transitBody.Forwards {
+					if !frontPlan.FrontedForwards[forward.Key] {
+						kept = append(kept, forward)
+					}
+				}
+				frontPlan = frontPlan.Without(drop)
+				transitBody.Forwards = append(kept, frontPlan.Forwards...)
+				sort.Slice(transitBody.Forwards, func(i, j int) bool { return transitBody.Forwards[i].Key < transitBody.Forwards[j].Key })
+				transitBody.Fronts = frontPlan.Fronts
+			}
+			// A forward behind a front is probed by a TLS handshake naming the
+			// route's server name: a TCP connect would only show the front up.
+			if len(frontPlan.FrontedForwards) > 0 {
+				if forwardMethods == nil {
+					forwardMethods = map[nodeprotocol.ForwardKey]string{}
+				}
+				for key := range frontPlan.FrontedForwards {
+					forwardMethods[key] = linkprobe.Method(false, true)
+				}
+			}
+		}
+		// The probe block comes last: it names what the config above holds.
+		// Only an agent that declared transit.probe.v1 gets it, so everyone
+		// else receives the bytes they always did.
+		if s.probes != nil {
+			probe, err := s.probes.Config(ctx, report.Capabilities, &transitBody, forwardMethods)
+			if err != nil {
+				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+			}
+			transitBody.Probe = probe
+		}
+	}
+	// A front that is not being sent cannot give its listeners their public port
+	// when two or more would bind the same one: Node refuses a config where that
+	// happens, so those listeners are left out of this one (as Node itself does
+	// when it drops a front it cannot run) and an issue names them. A front with a
+	// single listener lets it fall back to its public port.
+	if s.fronts != nil {
+		unserved, err := s.fronts.UnservedListeners(ctx, agent.PanelID, frontPlan, presentNodes(snapshot))
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		if len(unserved) > 0 {
+			drop := map[int64]bool{}
+			for _, u := range unserved {
+				drop[u.NodeID] = true
+				log.Warn("listener withheld: its shared port is not being served and another listener would bind the same port",
+					"agent_id", agent.AgentID, "node_id", u.NodeID, "port", u.Port)
+				metrics.FrontsWithheldTotal.With("listener_unserved").Inc()
+				frontIssues = append(frontIssues, domain.NodeAgentIssue{
+					Code: IssueFrontWithheld, Key: string(nodeprotocol.NewListenerKey(u.NodeID)),
+					Detail: fmt.Sprintf("listener_unserved: %s is not sent because its shared port %d is not being served and it would share that port with %s",
+						u.Name, u.Port, strings.Join(u.With, ", ")),
+				})
+			}
+			clone := *snapshot
+			clone.Nodes = nil
+			for _, node := range snapshot.Nodes {
+				if node != nil && !drop[node.ID] {
+					clone.Nodes = append(clone.Nodes, node)
+				}
+			}
+			snapshot = &clone
+		}
+	}
+	// A listener whose routes cannot be sent is not sent either: its routed
+	// destinations would otherwise leave through its default exit.
+	for _, w := range routeWithheld {
+		log.Warn("listener withheld: its routes cannot be sent", "agent_id", agent.AgentID, "node_id", w.NodeID, "reason", w.Reason, "detail", w.Detail)
+	}
+	if len(late) > 0 {
+		snapshot = withoutNodes(snapshot, late)
+	}
+	// Routes name listeners of this config only: one a front left out is not sent.
+	if len(transitBody.Routes) > 0 {
+		present := make(map[nodeprotocol.ListenerKey]bool, len(snapshot.Nodes))
+		for _, node := range snapshot.Nodes {
+			if node != nil {
+				present[nodeprotocol.NewListenerKey(node.ID)] = true
+			}
+		}
+		kept := transitBody.Routes[:0:0]
+		for _, lr := range transitBody.Routes {
+			if present[lr.Listener] {
+				kept = append(kept, lr)
+			} else if id, err := lr.Listener.RowID(); err == nil {
+				delete(routeExits, id)
+			}
+		}
+		transitBody.Routes = kept
+	}
+	if s.routes != nil {
+		reasons := make(map[int64]string, len(routeWithheld))
+		for _, w := range routeWithheld {
+			reasons[w.NodeID] = w.Reason
+		}
+		moved, err := s.routes.RecordSent(ctx, routedNodes, transitBody.Routes, reasons)
+		if err != nil {
+			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+		}
+		if moved && s.invalidateRender != nil {
+			// A node that is withheld is not published, and one that is sent again is.
+			s.invalidateRender()
 		}
 	}
 	configBody, err := buildConfig(snapshot, agent, coreDocument)
@@ -375,7 +895,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		result, err := s.policies.Compile(ctx, destpolicy.CompileInput{
 			PanelID: agent.PanelID, AgentID: agent.AgentID, Capabilities: report.Capabilities,
 			Snapshot: snapshot, Config: configBody, CoreVersion: report.CoreVersion, AgentVersion: report.AgentVersion,
-			AuditCollect: choices.collect, DestResolve: choices.resolve, Egress: egressExit,
+			AuditCollect: choices.collect, DestResolve: choices.resolve, Egress: egressExit, RouteExits: routeExits,
 		})
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: compile destination policy: %w", err)
@@ -383,9 +903,14 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		configBody.Policy, policyDigest = result.Policy, result.Digest
 		policyIssues = append(policyIssues, result.Issues...)
 	}
-	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 {
+	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 {
 		configBody.Transit = &transitBody
 	}
+	policyIssues = append(policyIssues, frontIssues...)
+	policyIssues = append(policyIssues, routeIssues...)
+	policyIssues = append(policyIssues, s.orphanTunnelIssues(ctx, snapshot)...)
+	policyIssues = append(policyIssues, cdnUnfitIssues(snapshot)...)
+	policyIssues = append(policyIssues, rosterCapacityIssues(snapshot)...)
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
 			policyIssues[i].AgentID = agent.AgentID
@@ -418,7 +943,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 		Roster:     segmentFor(report.Have[nodeprotocol.StreamRoster], agent.Epoch, rosterStream, rosterBody),
 		Directives: segmentFor(report.Have[nodeprotocol.StreamDirectives], agent.Epoch, directivesStream, directivesBody),
 	}
-	taskJSONBudget, err := availableTaskJSONBytes(response)
+	taskJSONBudget, err := availableTaskJSONBytes(response, responseLimit)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
@@ -454,8 +979,8 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: encode response: %w", err)
 	}
-	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
-		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	if int64(len(encoded)) > responseLimit {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", responseLimit)
 	}
 	// The response is complete and will be sent: only now does the node's batch
 	// leave for the store. Enqueue does no database work and cannot fail the sync.
@@ -949,6 +1474,15 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		if err := s.transit.RecordLinkCounters(ctx, sent.Transit, report.LinkCounters); err != nil {
 			return fmt.Errorf("nodesync: %w", err)
 		}
+		// Probe results are booked against the same sent config: only its own
+		// links and forwards, on the side that probes them.
+		if s.probes != nil {
+			moved, err := s.probes.Ingest(ctx, agent.PanelID, report.Capabilities, sent.Transit, report.Probes, report.ReportedAtMS)
+			if err != nil {
+				return fmt.Errorf("nodesync: %w", err)
+			}
+			renderCredentialsChanged = renderCredentialsChanged || moved
+		}
 		// Confirmations need the node to hold that config: only then do its
 		// object statuses describe these forwards.
 		if configHave.Applied.Epoch == agent.Epoch && string(configHave.ETag) == configCurrent.DesiredETag {
@@ -962,6 +1496,14 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 				return fmt.Errorf("nodesync: %w", err)
 			}
 			renderCredentialsChanged = renderCredentialsChanged || changed || linksChanged
+			if s.routes != nil {
+				// The routes of a listener run when the listener is applied; they
+				// do not decide whether a node is published, so nothing is
+				// refreshed for them.
+				if _, err := s.routes.Confirm(ctx, sent.Transit, statuses, now); err != nil {
+					return fmt.Errorf("nodesync: %w", err)
+				}
+			}
 		}
 	}
 	if renderCredentialsChanged && s.invalidateRender != nil {
@@ -1096,16 +1638,18 @@ func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities [
 	return tasks, hadFirstOffer, nil
 }
 
-func availableTaskJSONBytes(response nodeprotocol.SyncResponse) (int, error) {
+func availableTaskJSONBytes(response nodeprotocol.SyncResponse, responseLimit int64) (int, error) {
 	response.Tasks = nil
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return 0, fmt.Errorf("nodesync: encode response without tasks: %w", err)
 	}
-	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
-		return 0, fmt.Errorf("nodesync: response without tasks exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	if int64(len(encoded)) > responseLimit {
+		return 0, fmt.Errorf("nodesync: response without tasks exceeds %d bytes", responseLimit)
 	}
-	remaining := int(nodeprotocol.MaxSyncBodyBytes) - len(encoded) - syncTasksFieldJSONBytes
+	// Keep task offers within the plain budget. Large compressed control
+	// responses take priority and tasks can be offered on the next poll.
+	remaining := int(nodeprotocol.MaxSyncWireBytes) - len(encoded) - syncTasksFieldJSONBytes
 	if remaining < len("[]") {
 		return 0, nil
 	}

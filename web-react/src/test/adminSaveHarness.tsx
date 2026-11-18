@@ -43,6 +43,7 @@ const defaults: Record<string, unknown> = {
   '/admin/users': list([]),
   '/admin/traffic/top': { items: [] },
   '/admin/settings/ui': {},
+  '/admin/transit/probe-settings': { settings: {}, defaults: {}, effective: {} },
   '/admin/certs': { certs: [] },
   '/admin/dns-credentials': { credentials: [] },
   '/admin/acme-accounts': { accounts: [] },

@@ -51,6 +51,12 @@ func ensureDestStateRow(tx *gorm.DB) error {
 // writers are policies (create, update, delete, reorder), lists (update,
 // content, batch, delete), source rules, exemptions and a node's removal.
 //
+// The routes by destination of nodes follow the same order: Replace, the kept
+// list content (SaveGoodList, ForgetGoodList) and a node's removal take this
+// lock first and only then touch transit_routes and transit_route_lists, and
+// DeleteUnused reads those tables under it, so a list's deletion, a route
+// naming it and the content kept for it never wait on one another in a cycle.
+//
 // lockDestState takes the state row's lock for the rest of the transaction.
 // Writers that must not interleave — a policy that references lists against a
 // list's deletion, two instantiations of one template — queue here, which is a

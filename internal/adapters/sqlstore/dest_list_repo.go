@@ -428,8 +428,26 @@ func (r *DestListRepo) DeleteUnused(ctx context.Context, id int64) (using domain
 				using.GroupIDs = append(using.GroupIDs, g.ID)
 			}
 		}
+		// The routes by destination of a node hold lists too. They are read here,
+		// under the same lock their own writes take, so a route cannot pick the
+		// list up between this check and the delete.
+		held, err := listRoutes(ctx, tx)
+		if err != nil {
+			return err
+		}
+		for _, item := range held {
+			for _, route := range item.Routes {
+				if slices.Contains(route.ListIDs, id) {
+					using.NodeIDs = append(using.NodeIDs, item.NodeID)
+					break
+				}
+			}
+		}
 		if using.Any() {
 			return nil
+		}
+		if err := tx.Where("list_id = ?", id).Delete(&transitRouteListRow{}).Error; err != nil {
+			return err
 		}
 		return tx.Delete(&destListRow{}, id).Error
 	})

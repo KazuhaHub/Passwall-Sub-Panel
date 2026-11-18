@@ -69,9 +69,16 @@ func (s *Service) AddEntries(ctx context.Context, id int64, add, remove []string
 		return nil, nil, err
 	}
 	now := s.now().UTC()
+	forget, err := s.guardRoutes(ctx, id, p.Entries)
+	if err != nil {
+		return nil, nil, err
+	}
 	l.SourceText, l.Entries = text, p.Entries
 	l.EntryCount, l.RegexpCount, l.ContentSHA256, l.LastFetchedAt, l.LastError = p.EntryCount, p.RegexpCount, p.SHA256, &now, ""
 	if err := s.lists.Update(ctx, l); err != nil {
+		return nil, nil, err
+	}
+	if err := runForget(forget); err != nil {
 		return nil, nil, err
 	}
 	return l, &p.Report, nil
@@ -151,6 +158,10 @@ func (s *Service) UpdateRemote(ctx context.Context, id int64, name, rawURL strin
 		return nil, nil, err
 	}
 	now := s.now().UTC()
+	forget, err := s.guardRoutes(ctx, id, p.Entries)
+	if err != nil {
+		return nil, nil, err
+	}
 	l.SourceURL, l.Entries = u.String(), p.Entries
 	l.EntryCount, l.RegexpCount, l.ContentSHA256, l.LastFetchedAt, l.LastError = p.EntryCount, p.RegexpCount, p.SHA256, &now, ""
 	// D5: not an edit that leaves a list an "on" allowlist group holds not ready.
@@ -158,6 +169,9 @@ func (s *Service) UpdateRemote(ctx context.Context, id int64, name, rawURL strin
 		return nil, nil, err
 	}
 	if err := s.lists.Update(ctx, l); err != nil {
+		return nil, nil, err
+	}
+	if err := runForget(forget); err != nil {
 		return nil, nil, err
 	}
 	return l, &p.Report, nil
@@ -200,6 +214,18 @@ func (s *Service) UsedBy(ctx context.Context) (map[int64][]PolicyRef, error) {
 				if id > 0 {
 					out[id] = append(out[id], PolicyRef{Kind: "group", ID: e.GroupID, Name: e.GroupName})
 				}
+			}
+		}
+	}
+	// The nodes whose routes by destination name a list, last.
+	if s.routeUses != nil {
+		uses, err := s.routeUses.ListUses(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for id, nodes := range uses {
+			for _, n := range nodes {
+				out[id] = append(out[id], PolicyRef{Kind: "route", ID: n.NodeID, Name: n.Name})
 			}
 		}
 	}

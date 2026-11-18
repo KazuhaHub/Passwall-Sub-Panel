@@ -16,7 +16,8 @@ import RecordsTab from './RecordsTab'
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...await importOriginal<typeof import('react-i18next')>(),
   useTranslation: () => ({
     t: (k: string, o?: Record<string, unknown>) => {
       const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k

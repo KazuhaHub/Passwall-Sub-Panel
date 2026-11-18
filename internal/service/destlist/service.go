@@ -103,6 +103,7 @@ type Service struct {
 	sourceRules SourceRuleReader
 	state       StateStore
 	groups      GroupAllowlistReader
+	routeUses   RouteUses
 	settings    SettingsReader
 	doer        Doer
 	now         func() time.Time
@@ -167,12 +168,100 @@ func New(d Deps) *Service {
 var ErrListInUse = fmt.Errorf("%w: dest list is in use by a policy", domain.ErrConflict)
 
 // ListInUseError names the policies that hold a list.
-type ListInUseError struct{ PolicyIDs, GroupIDs []int64 }
+type ListInUseError struct {
+	PolicyIDs, GroupIDs []int64
+	// Routes are the nodes whose routes by destination name the list.
+	Routes []RouteRef
+}
 
 func (e *ListInUseError) Error() string {
-	return fmt.Sprintf("%v: policies %v, groups %v", ErrListInUse, e.PolicyIDs, e.GroupIDs)
+	return fmt.Sprintf("%v: policies %v, groups %v, routes of %d node(s)", ErrListInUse, e.PolicyIDs, e.GroupIDs, len(e.Routes))
 }
-func (e *ListInUseError) Unwrap() error { return ErrListInUse }
+
+// RouteRef is a node whose routes by destination name a list.
+type RouteRef struct {
+	NodeID int64
+	Name   string
+}
+
+// RouteUses reads which nodes' routes name each list (service/route.Service).
+// A route is a use of a list like a policy is: the list is not deleted from
+// under it.
+type RouteUses interface {
+	ListUses(ctx context.Context) (map[int64][]RouteRef, error)
+	// Forget drops what the routes keep of a list's last good content: an
+	// administrator confirmed an edit that leaves them with nothing from it.
+	Forget(ctx context.Context, listID int64) error
+}
+
+// ErrListRouteImpact refuses an edit that would leave a list a node's routes
+// name with nothing a route can use: empty, regexp entries only (a route takes
+// none), or a reference to data that is not available. The destinations the
+// routes took from the list would then go through each node's default exit. The
+// edit is made when it is confirmed (WithRouteConfirmation).
+var ErrListRouteImpact = fmt.Errorf("%w: the edit would leave routes by destination with nothing from this list", domain.ErrConflict)
+
+// RouteImpactError names the nodes whose routes the edit would leave without
+// anything from the list.
+type RouteImpactError struct{ Routes []RouteRef }
+
+func (e *RouteImpactError) Error() string {
+	return fmt.Sprintf("%v: %d node(s)", ErrListRouteImpact, len(e.Routes))
+}
+func (e *RouteImpactError) Unwrap() error { return ErrListRouteImpact }
+
+type routeConfirmKey struct{}
+
+// WithRouteConfirmation carries the administrator's go-ahead for an edit that
+// leaves routes with nothing from a list.
+func WithRouteConfirmation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, routeConfirmKey{}, true)
+}
+
+// guardRoutes refuses an edit that would leave the routes naming the list with
+// nothing to match by, unless it was confirmed.
+func (s *Service) guardRoutes(ctx context.Context, id int64, entries []byte) (forget func() error, err error) {
+	if s.routeUses == nil {
+		return nil, nil
+	}
+	confirmed, _ := ctx.Value(routeConfirmKey{}).(bool)
+	uses, err := s.routeUses.ListUses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := uses[id]
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	expanded, err := s.Expand(ctx, &domain.DestList{ID: id, Entries: entries})
+	switch {
+	case err == nil:
+		for _, entry := range expanded.Domains {
+			if !strings.HasPrefix(entry, "regexp:") {
+				return nil, nil
+			}
+		}
+		if len(expanded.CIDRs) > 0 {
+			return nil, nil
+		}
+	case errors.Is(err, ErrGeositeUnavailable), errors.Is(err, ErrGeoIPUnavailable):
+	default:
+		return nil, err
+	}
+	if confirmed {
+		// The administrator chose it: the routes stop matching this list instead
+		// of going on from its last good content. That is forgotten only once the
+		// edit is stored (the caller runs forget after it commits): an edit that
+		// fails must leave the routes as they were.
+		return func() error { return s.routeUses.Forget(ctx, id) }, nil
+	}
+	return nil, &RouteImpactError{Routes: refs}
+}
+
+// SetRouteUses binds the routes' use of lists. Left unbound, no route is known
+// to hold a list.
+func (s *Service) SetRouteUses(r RouteUses) { s.routeUses = r }
+func (e *ListInUseError) Unwrap() error     { return ErrListInUse }
 
 // ErrListNotReady refuses a change that would leave a list an "on" allowlist
 // group holds not ready (HTTP 409 dest_list_not_ready): the allowlist would
@@ -267,9 +356,16 @@ func (s *Service) UpdateCustom(ctx context.Context, id int64, name string, text 
 		return nil, nil, err
 	}
 	now := s.now().UTC()
+	forget, err := s.guardRoutes(ctx, id, p.Entries)
+	if err != nil {
+		return nil, nil, err
+	}
 	l.Name, l.SourceText, l.Entries = name, slices.Clone(text), p.Entries
 	l.EntryCount, l.RegexpCount, l.ContentSHA256, l.LastFetchedAt, l.LastError = p.EntryCount, p.RegexpCount, p.SHA256, &now, ""
 	if err := s.lists.Update(ctx, l); err != nil {
+		return nil, nil, err
+	}
+	if err := runForget(forget); err != nil {
 		return nil, nil, err
 	}
 	return l, &p.Report, nil
@@ -391,14 +487,41 @@ func (s *Service) refreshRemote(ctx context.Context, l *domain.DestList) Refresh
 // DeleteList removes a list no policy uses. The check and the delete are one
 // transaction: a policy cannot pick the list up in between.
 func (s *Service) DeleteList(ctx context.Context, id int64) error {
+	if s.routeUses != nil {
+		uses, err := s.routeUses.ListUses(ctx)
+		if err != nil {
+			return err
+		}
+		if routes := uses[id]; len(routes) > 0 {
+			return &ListInUseError{Routes: routes}
+		}
+	}
 	using, err := s.lists.DeleteUnused(ctx, id)
 	if err != nil {
 		return err
 	}
 	if using.Any() {
-		return &ListInUseError{PolicyIDs: using.PolicyIDs, GroupIDs: using.GroupIDs}
+		return &ListInUseError{PolicyIDs: using.PolicyIDs, GroupIDs: using.GroupIDs, Routes: s.routeRefs(ctx, id, using.NodeIDs)}
 	}
 	return nil
+}
+
+// routeRefs names the nodes whose routes hold a list; a node the names cannot
+// be read for is still listed, by its id.
+func (s *Service) routeRefs(ctx context.Context, listID int64, nodeIDs []int64) []RouteRef {
+	named := map[int64]string{}
+	if s.routeUses != nil {
+		if uses, err := s.routeUses.ListUses(ctx); err == nil {
+			for _, ref := range uses[listID] {
+				named[ref.NodeID] = ref.Name
+			}
+		}
+	}
+	out := make([]RouteRef, 0, len(nodeIDs))
+	for _, id := range nodeIDs {
+		out = append(out, RouteRef{NodeID: id, Name: named[id]})
+	}
+	return out
 }
 
 // GetList reads one list with its entries.
@@ -484,4 +607,19 @@ func (s *Service) Expand(ctx context.Context, l *domain.DestList) (*Expanded, er
 	slices.Sort(cidrs)
 	slices.Sort(domains)
 	return &Expanded{Domains: slices.Compact(domains), CIDRs: cidrs}, nil
+}
+
+// runForget makes the routes forget a list's last good content once the edit that
+// the administrator confirmed is stored. The edit has committed, so a failure here
+// is not the edit's: it is logged (the routes then keep using the old content,
+// which is the safe side) and the edit succeeds.
+func runForget(forget func() error) error {
+	if forget == nil {
+		return nil
+	}
+	if err := forget(); err != nil {
+		log.Warn("list edited, but the routes naming it could not be told to forget its last good content; they keep using it until the next sync that finds the list unusable",
+			"err", err)
+	}
+	return nil
 }

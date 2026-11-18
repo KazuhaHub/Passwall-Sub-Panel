@@ -1,0 +1,1402 @@
+{
+ "source": "passwall-node feat/4.3-transit at commit 1c030bd0aa5276b5d6c81aedcf5b87aff75801a2 (Share a TLS port by SNI), protocol v0.9.0-rc.1. Each expect is core.RouteBudget's entries and rules after the node's own xray applyRoutes / singbox applyRoutes ran on the case (xray Compiler with an audit socket and token set; sing-box with the sniff the policy needs), read from a scratch copy of the node with a getter added to RouteBudget. Regenerate by running the same fixtures through a node checkout.",
+ "cases": [
+  {
+   "name": "xray_hits",
+   "engine": "xray",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24",
+       "203.0.2.0/24",
+       "203.0.3.0/24",
+       "203.0.4.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:ads0.example.com",
+       "domain:ads1.example.com",
+       "domain:ads10.example.com",
+       "domain:ads11.example.com",
+       "domain:ads12.example.com",
+       "domain:ads13.example.com",
+       "domain:ads14.example.com",
+       "domain:ads15.example.com",
+       "domain:ads16.example.com",
+       "domain:ads17.example.com",
+       "domain:ads18.example.com",
+       "domain:ads19.example.com",
+       "domain:ads2.example.com",
+       "domain:ads20.example.com",
+       "domain:ads21.example.com",
+       "domain:ads22.example.com",
+       "domain:ads23.example.com",
+       "domain:ads24.example.com",
+       "domain:ads25.example.com",
+       "domain:ads26.example.com",
+       "domain:ads27.example.com",
+       "domain:ads28.example.com",
+       "domain:ads29.example.com",
+       "domain:ads3.example.com",
+       "domain:ads30.example.com",
+       "domain:ads31.example.com",
+       "domain:ads32.example.com",
+       "domain:ads33.example.com",
+       "domain:ads34.example.com",
+       "domain:ads35.example.com",
+       "domain:ads36.example.com",
+       "domain:ads37.example.com",
+       "domain:ads38.example.com",
+       "domain:ads39.example.com",
+       "domain:ads4.example.com",
+       "domain:ads5.example.com",
+       "domain:ads6.example.com",
+       "domain:ads7.example.com",
+       "domain:ads8.example.com",
+       "domain:ads9.example.com"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "ports": "25,465,587"
+     },
+     {
+      "id": "p4",
+      "action": "block",
+      "cidrs": [
+       "198.51.0.0/24",
+       "198.51.1.0/24",
+       "198.51.10.0/24",
+       "198.51.11.0/24",
+       "198.51.12.0/24",
+       "198.51.13.0/24",
+       "198.51.14.0/24",
+       "198.51.15.0/24",
+       "198.51.16.0/24",
+       "198.51.17.0/24",
+       "198.51.18.0/24",
+       "198.51.19.0/24",
+       "198.51.2.0/24",
+       "198.51.20.0/24",
+       "198.51.21.0/24",
+       "198.51.22.0/24",
+       "198.51.23.0/24",
+       "198.51.24.0/24",
+       "198.51.25.0/24",
+       "198.51.26.0/24",
+       "198.51.27.0/24",
+       "198.51.28.0/24",
+       "198.51.29.0/24",
+       "198.51.3.0/24",
+       "198.51.4.0/24",
+       "198.51.5.0/24",
+       "198.51.6.0/24",
+       "198.51.7.0/24",
+       "198.51.8.0/24",
+       "198.51.9.0/24"
+      ],
+      "ports": "6881-6889",
+      "network": "tcp"
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {},
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 137,
+    "rules": 11
+   }
+  },
+  {
+   "name": "xray_hits_two_groups_default_link",
+   "engine": "xray",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24",
+       "203.0.2.0/24",
+       "203.0.3.0/24",
+       "203.0.4.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:ads0.example.com",
+       "domain:ads1.example.com",
+       "domain:ads10.example.com",
+       "domain:ads11.example.com",
+       "domain:ads12.example.com",
+       "domain:ads13.example.com",
+       "domain:ads14.example.com",
+       "domain:ads15.example.com",
+       "domain:ads16.example.com",
+       "domain:ads17.example.com",
+       "domain:ads18.example.com",
+       "domain:ads19.example.com",
+       "domain:ads2.example.com",
+       "domain:ads20.example.com",
+       "domain:ads21.example.com",
+       "domain:ads22.example.com",
+       "domain:ads23.example.com",
+       "domain:ads24.example.com",
+       "domain:ads25.example.com",
+       "domain:ads26.example.com",
+       "domain:ads27.example.com",
+       "domain:ads28.example.com",
+       "domain:ads29.example.com",
+       "domain:ads3.example.com",
+       "domain:ads30.example.com",
+       "domain:ads31.example.com",
+       "domain:ads32.example.com",
+       "domain:ads33.example.com",
+       "domain:ads34.example.com",
+       "domain:ads35.example.com",
+       "domain:ads36.example.com",
+       "domain:ads37.example.com",
+       "domain:ads38.example.com",
+       "domain:ads39.example.com",
+       "domain:ads4.example.com",
+       "domain:ads5.example.com",
+       "domain:ads6.example.com",
+       "domain:ads7.example.com",
+       "domain:ads8.example.com",
+       "domain:ads9.example.com"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "ports": "25,465,587"
+     },
+     {
+      "id": "p4",
+      "action": "block",
+      "cidrs": [
+       "198.51.0.0/24",
+       "198.51.1.0/24",
+       "198.51.10.0/24",
+       "198.51.11.0/24",
+       "198.51.12.0/24",
+       "198.51.13.0/24",
+       "198.51.14.0/24",
+       "198.51.15.0/24",
+       "198.51.16.0/24",
+       "198.51.17.0/24",
+       "198.51.18.0/24",
+       "198.51.19.0/24",
+       "198.51.2.0/24",
+       "198.51.20.0/24",
+       "198.51.21.0/24",
+       "198.51.22.0/24",
+       "198.51.23.0/24",
+       "198.51.24.0/24",
+       "198.51.25.0/24",
+       "198.51.26.0/24",
+       "198.51.27.0/24",
+       "198.51.28.0/24",
+       "198.51.29.0/24",
+       "198.51.3.0/24",
+       "198.51.4.0/24",
+       "198.51.5.0/24",
+       "198.51.6.0/24",
+       "198.51.7.0/24",
+       "198.51.8.0/24",
+       "198.51.9.0/24"
+      ],
+      "ports": "6881-6889",
+      "network": "tcp"
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {},
+   "present": [
+    "lst_1",
+    "lst_2",
+    "lst_3",
+    "lst_4"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1",
+      "lst_2",
+      "lst_3"
+     ],
+     "default": "lnk_2",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    },
+    {
+     "listeners": [
+      "lst_4"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 294,
+    "rules": 21
+   }
+  },
+  {
+   "name": "xray_usage_exempt_subjects",
+   "engine": "xray",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24",
+       "203.0.2.0/24",
+       "203.0.3.0/24",
+       "203.0.4.0/24"
+      ],
+      "subjects": [
+       "usr_1"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:ads0.example.com",
+       "domain:ads1.example.com",
+       "domain:ads10.example.com",
+       "domain:ads11.example.com",
+       "domain:ads12.example.com",
+       "domain:ads13.example.com",
+       "domain:ads14.example.com",
+       "domain:ads15.example.com",
+       "domain:ads16.example.com",
+       "domain:ads17.example.com",
+       "domain:ads18.example.com",
+       "domain:ads19.example.com",
+       "domain:ads2.example.com",
+       "domain:ads20.example.com",
+       "domain:ads21.example.com",
+       "domain:ads22.example.com",
+       "domain:ads23.example.com",
+       "domain:ads24.example.com",
+       "domain:ads25.example.com",
+       "domain:ads26.example.com",
+       "domain:ads27.example.com",
+       "domain:ads28.example.com",
+       "domain:ads29.example.com",
+       "domain:ads3.example.com",
+       "domain:ads30.example.com",
+       "domain:ads31.example.com",
+       "domain:ads32.example.com",
+       "domain:ads33.example.com",
+       "domain:ads34.example.com",
+       "domain:ads35.example.com",
+       "domain:ads36.example.com",
+       "domain:ads37.example.com",
+       "domain:ads38.example.com",
+       "domain:ads39.example.com",
+       "domain:ads4.example.com",
+       "domain:ads5.example.com",
+       "domain:ads6.example.com",
+       "domain:ads7.example.com",
+       "domain:ads8.example.com",
+       "domain:ads9.example.com"
+      ],
+      "subjects": [
+       "usr_1",
+       "usr_2"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "ports": "25",
+      "inbounds": [
+       "lst_1"
+      ]
+     },
+     {
+      "id": "p4",
+      "action": "block",
+      "domains": [
+       "domain:only0.example.com",
+       "domain:only1.example.com",
+       "domain:only10.example.com",
+       "domain:only11.example.com",
+       "domain:only2.example.com",
+       "domain:only3.example.com",
+       "domain:only4.example.com",
+       "domain:only5.example.com",
+       "domain:only6.example.com",
+       "domain:only7.example.com",
+       "domain:only8.example.com",
+       "domain:only9.example.com"
+      ],
+      "exits": [
+       "lnk_1"
+      ]
+     },
+     {
+      "id": "g1x1",
+      "action": "allow",
+      "domains": [
+       "domain:g0.example.com",
+       "domain:g1.example.com",
+       "domain:g2.example.com",
+       "domain:g3.example.com",
+       "domain:g4.example.com"
+      ],
+      "subjects": [
+       "usr_3"
+      ]
+     },
+     {
+      "id": "g1",
+      "action": "block",
+      "subjects": [
+       "usr_3"
+      ],
+      "catch_all": true
+     }
+    ],
+    "collect": "hits_and_usage",
+    "exempt": [
+     "usr_9"
+    ]
+   },
+   "clients": {
+    "usr_1": 2,
+    "usr_2": 3,
+    "usr_3": 1,
+    "usr_9": 4
+   },
+   "present": [
+    "lst_1",
+    "lst_2"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1",
+      "lst_2"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 206,
+    "rules": 22
+   }
+  },
+  {
+   "name": "xray_keyword_regexp",
+   "engine": "xray",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "domains": [
+       "domain:a.example.com",
+       "regexp:^cdn[0-9]+\\.example\\.com$"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "keyword:ads",
+       "regexp:^x"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "observe",
+      "domains": [
+       "keyword:track"
+      ]
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {},
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:example.com",
+        "keyword:ad"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "lnk_2",
+       "domains": [
+        "keyword:tr"
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 32,
+    "rules": 11
+   }
+  },
+  {
+   "name": "xray_on_demand",
+   "engine": "xray",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "block",
+      "domains": [
+       "domain:h0.example.com",
+       "domain:h1.example.com",
+       "domain:h10.example.com",
+       "domain:h11.example.com",
+       "domain:h12.example.com",
+       "domain:h13.example.com",
+       "domain:h14.example.com",
+       "domain:h15.example.com",
+       "domain:h16.example.com",
+       "domain:h17.example.com",
+       "domain:h18.example.com",
+       "domain:h19.example.com",
+       "domain:h2.example.com",
+       "domain:h3.example.com",
+       "domain:h4.example.com",
+       "domain:h5.example.com",
+       "domain:h6.example.com",
+       "domain:h7.example.com",
+       "domain:h8.example.com",
+       "domain:h9.example.com"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "cidrs": [
+       "192.0.0.0/24",
+       "192.0.1.0/24",
+       "192.0.2.0/24",
+       "192.0.3.0/24",
+       "192.0.4.0/24",
+       "192.0.5.0/24",
+       "192.0.6.0/24",
+       "192.0.7.0/24"
+      ],
+      "private": true
+     }
+    ],
+    "collect": "hits",
+    "resolve": "on_demand"
+   },
+   "clients": {},
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "cidrs": [
+        "192.0.2.0/24"
+       ],
+       "domains": [
+        "domain:h1.example.com"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "lnk_1",
+       "cidrs": [
+        "192.0.3.0/24"
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 164,
+    "rules": 14
+   }
+  },
+  {
+   "name": "singbox_small_sniff",
+   "engine": "sing-box",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24",
+       "203.0.2.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:a0.example.com",
+       "domain:a1.example.com",
+       "domain:a2.example.com",
+       "domain:a3.example.com",
+       "domain:a4.example.com"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "ports": "25,6881-6889",
+      "network": "tcp"
+     },
+     {
+      "id": "p4",
+      "action": "block",
+      "protocols": [
+       "bittorrent"
+      ]
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {},
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 140,
+    "rules": 29
+   }
+  },
+  {
+   "name": "singbox_large_shared_two_groups",
+   "engine": "sing-box",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24",
+       "203.0.10.0/24",
+       "203.0.11.0/24",
+       "203.0.12.0/24",
+       "203.0.13.0/24",
+       "203.0.14.0/24",
+       "203.0.15.0/24",
+       "203.0.16.0/24",
+       "203.0.17.0/24",
+       "203.0.18.0/24",
+       "203.0.19.0/24",
+       "203.0.2.0/24",
+       "203.0.3.0/24",
+       "203.0.4.0/24",
+       "203.0.5.0/24",
+       "203.0.6.0/24",
+       "203.0.7.0/24",
+       "203.0.8.0/24",
+       "203.0.9.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:ads0.example.com",
+       "domain:ads1.example.com",
+       "domain:ads10.example.com",
+       "domain:ads100.example.com",
+       "domain:ads101.example.com",
+       "domain:ads102.example.com",
+       "domain:ads103.example.com",
+       "domain:ads104.example.com",
+       "domain:ads105.example.com",
+       "domain:ads106.example.com",
+       "domain:ads107.example.com",
+       "domain:ads108.example.com",
+       "domain:ads109.example.com",
+       "domain:ads11.example.com",
+       "domain:ads110.example.com",
+       "domain:ads111.example.com",
+       "domain:ads112.example.com",
+       "domain:ads113.example.com",
+       "domain:ads114.example.com",
+       "domain:ads115.example.com",
+       "domain:ads116.example.com",
+       "domain:ads117.example.com",
+       "domain:ads118.example.com",
+       "domain:ads119.example.com",
+       "domain:ads12.example.com",
+       "domain:ads120.example.com",
+       "domain:ads121.example.com",
+       "domain:ads122.example.com",
+       "domain:ads123.example.com",
+       "domain:ads124.example.com",
+       "domain:ads125.example.com",
+       "domain:ads126.example.com",
+       "domain:ads127.example.com",
+       "domain:ads128.example.com",
+       "domain:ads129.example.com",
+       "domain:ads13.example.com",
+       "domain:ads130.example.com",
+       "domain:ads131.example.com",
+       "domain:ads132.example.com",
+       "domain:ads133.example.com",
+       "domain:ads134.example.com",
+       "domain:ads135.example.com",
+       "domain:ads136.example.com",
+       "domain:ads137.example.com",
+       "domain:ads138.example.com",
+       "domain:ads139.example.com",
+       "domain:ads14.example.com",
+       "domain:ads140.example.com",
+       "domain:ads141.example.com",
+       "domain:ads142.example.com",
+       "domain:ads143.example.com",
+       "domain:ads144.example.com",
+       "domain:ads145.example.com",
+       "domain:ads146.example.com",
+       "domain:ads147.example.com",
+       "domain:ads148.example.com",
+       "domain:ads149.example.com",
+       "domain:ads15.example.com",
+       "domain:ads150.example.com",
+       "domain:ads151.example.com",
+       "domain:ads152.example.com",
+       "domain:ads153.example.com",
+       "domain:ads154.example.com",
+       "domain:ads155.example.com",
+       "domain:ads156.example.com",
+       "domain:ads157.example.com",
+       "domain:ads158.example.com",
+       "domain:ads159.example.com",
+       "domain:ads16.example.com",
+       "domain:ads160.example.com",
+       "domain:ads161.example.com",
+       "domain:ads162.example.com",
+       "domain:ads163.example.com",
+       "domain:ads164.example.com",
+       "domain:ads165.example.com",
+       "domain:ads166.example.com",
+       "domain:ads167.example.com",
+       "domain:ads168.example.com",
+       "domain:ads169.example.com",
+       "domain:ads17.example.com",
+       "domain:ads170.example.com",
+       "domain:ads171.example.com",
+       "domain:ads172.example.com",
+       "domain:ads173.example.com",
+       "domain:ads174.example.com",
+       "domain:ads175.example.com",
+       "domain:ads176.example.com",
+       "domain:ads177.example.com",
+       "domain:ads178.example.com",
+       "domain:ads179.example.com",
+       "domain:ads18.example.com",
+       "domain:ads180.example.com",
+       "domain:ads181.example.com",
+       "domain:ads182.example.com",
+       "domain:ads183.example.com",
+       "domain:ads184.example.com",
+       "domain:ads185.example.com",
+       "domain:ads186.example.com",
+       "domain:ads187.example.com",
+       "domain:ads188.example.com",
+       "domain:ads189.example.com",
+       "domain:ads19.example.com",
+       "domain:ads190.example.com",
+       "domain:ads191.example.com",
+       "domain:ads192.example.com",
+       "domain:ads193.example.com",
+       "domain:ads194.example.com",
+       "domain:ads195.example.com",
+       "domain:ads196.example.com",
+       "domain:ads197.example.com",
+       "domain:ads198.example.com",
+       "domain:ads199.example.com",
+       "domain:ads2.example.com",
+       "domain:ads20.example.com",
+       "domain:ads200.example.com",
+       "domain:ads201.example.com",
+       "domain:ads202.example.com",
+       "domain:ads203.example.com",
+       "domain:ads204.example.com",
+       "domain:ads205.example.com",
+       "domain:ads206.example.com",
+       "domain:ads207.example.com",
+       "domain:ads208.example.com",
+       "domain:ads209.example.com",
+       "domain:ads21.example.com",
+       "domain:ads210.example.com",
+       "domain:ads211.example.com",
+       "domain:ads212.example.com",
+       "domain:ads213.example.com",
+       "domain:ads214.example.com",
+       "domain:ads215.example.com",
+       "domain:ads216.example.com",
+       "domain:ads217.example.com",
+       "domain:ads218.example.com",
+       "domain:ads219.example.com",
+       "domain:ads22.example.com",
+       "domain:ads220.example.com",
+       "domain:ads221.example.com",
+       "domain:ads222.example.com",
+       "domain:ads223.example.com",
+       "domain:ads224.example.com",
+       "domain:ads225.example.com",
+       "domain:ads226.example.com",
+       "domain:ads227.example.com",
+       "domain:ads228.example.com",
+       "domain:ads229.example.com",
+       "domain:ads23.example.com",
+       "domain:ads230.example.com",
+       "domain:ads231.example.com",
+       "domain:ads232.example.com",
+       "domain:ads233.example.com",
+       "domain:ads234.example.com",
+       "domain:ads235.example.com",
+       "domain:ads236.example.com",
+       "domain:ads237.example.com",
+       "domain:ads238.example.com",
+       "domain:ads239.example.com",
+       "domain:ads24.example.com",
+       "domain:ads240.example.com",
+       "domain:ads241.example.com",
+       "domain:ads242.example.com",
+       "domain:ads243.example.com",
+       "domain:ads244.example.com",
+       "domain:ads245.example.com",
+       "domain:ads246.example.com",
+       "domain:ads247.example.com",
+       "domain:ads248.example.com",
+       "domain:ads249.example.com",
+       "domain:ads25.example.com",
+       "domain:ads250.example.com",
+       "domain:ads251.example.com",
+       "domain:ads252.example.com",
+       "domain:ads253.example.com",
+       "domain:ads254.example.com",
+       "domain:ads255.example.com",
+       "domain:ads256.example.com",
+       "domain:ads257.example.com",
+       "domain:ads258.example.com",
+       "domain:ads259.example.com",
+       "domain:ads26.example.com",
+       "domain:ads260.example.com",
+       "domain:ads261.example.com",
+       "domain:ads262.example.com",
+       "domain:ads263.example.com",
+       "domain:ads264.example.com",
+       "domain:ads265.example.com",
+       "domain:ads266.example.com",
+       "domain:ads267.example.com",
+       "domain:ads268.example.com",
+       "domain:ads269.example.com",
+       "domain:ads27.example.com",
+       "domain:ads270.example.com",
+       "domain:ads271.example.com",
+       "domain:ads272.example.com",
+       "domain:ads273.example.com",
+       "domain:ads274.example.com",
+       "domain:ads275.example.com",
+       "domain:ads276.example.com",
+       "domain:ads277.example.com",
+       "domain:ads278.example.com",
+       "domain:ads279.example.com",
+       "domain:ads28.example.com",
+       "domain:ads280.example.com",
+       "domain:ads281.example.com",
+       "domain:ads282.example.com",
+       "domain:ads283.example.com",
+       "domain:ads284.example.com",
+       "domain:ads285.example.com",
+       "domain:ads286.example.com",
+       "domain:ads287.example.com",
+       "domain:ads288.example.com",
+       "domain:ads289.example.com",
+       "domain:ads29.example.com",
+       "domain:ads290.example.com",
+       "domain:ads291.example.com",
+       "domain:ads292.example.com",
+       "domain:ads293.example.com",
+       "domain:ads294.example.com",
+       "domain:ads295.example.com",
+       "domain:ads296.example.com",
+       "domain:ads297.example.com",
+       "domain:ads298.example.com",
+       "domain:ads299.example.com",
+       "domain:ads3.example.com",
+       "domain:ads30.example.com",
+       "domain:ads31.example.com",
+       "domain:ads32.example.com",
+       "domain:ads33.example.com",
+       "domain:ads34.example.com",
+       "domain:ads35.example.com",
+       "domain:ads36.example.com",
+       "domain:ads37.example.com",
+       "domain:ads38.example.com",
+       "domain:ads39.example.com",
+       "domain:ads4.example.com",
+       "domain:ads40.example.com",
+       "domain:ads41.example.com",
+       "domain:ads42.example.com",
+       "domain:ads43.example.com",
+       "domain:ads44.example.com",
+       "domain:ads45.example.com",
+       "domain:ads46.example.com",
+       "domain:ads47.example.com",
+       "domain:ads48.example.com",
+       "domain:ads49.example.com",
+       "domain:ads5.example.com",
+       "domain:ads50.example.com",
+       "domain:ads51.example.com",
+       "domain:ads52.example.com",
+       "domain:ads53.example.com",
+       "domain:ads54.example.com",
+       "domain:ads55.example.com",
+       "domain:ads56.example.com",
+       "domain:ads57.example.com",
+       "domain:ads58.example.com",
+       "domain:ads59.example.com",
+       "domain:ads6.example.com",
+       "domain:ads60.example.com",
+       "domain:ads61.example.com",
+       "domain:ads62.example.com",
+       "domain:ads63.example.com",
+       "domain:ads64.example.com",
+       "domain:ads65.example.com",
+       "domain:ads66.example.com",
+       "domain:ads67.example.com",
+       "domain:ads68.example.com",
+       "domain:ads69.example.com",
+       "domain:ads7.example.com",
+       "domain:ads70.example.com",
+       "domain:ads71.example.com",
+       "domain:ads72.example.com",
+       "domain:ads73.example.com",
+       "domain:ads74.example.com",
+       "domain:ads75.example.com",
+       "domain:ads76.example.com",
+       "domain:ads77.example.com",
+       "domain:ads78.example.com",
+       "domain:ads79.example.com",
+       "domain:ads8.example.com",
+       "domain:ads80.example.com",
+       "domain:ads81.example.com",
+       "domain:ads82.example.com",
+       "domain:ads83.example.com",
+       "domain:ads84.example.com",
+       "domain:ads85.example.com",
+       "domain:ads86.example.com",
+       "domain:ads87.example.com",
+       "domain:ads88.example.com",
+       "domain:ads89.example.com",
+       "domain:ads9.example.com",
+       "domain:ads90.example.com",
+       "domain:ads91.example.com",
+       "domain:ads92.example.com",
+       "domain:ads93.example.com",
+       "domain:ads94.example.com",
+       "domain:ads95.example.com",
+       "domain:ads96.example.com",
+       "domain:ads97.example.com",
+       "domain:ads98.example.com",
+       "domain:ads99.example.com",
+       "keyword:k0.example.com",
+       "keyword:k1.example.com",
+       "keyword:k2.example.com"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "cidrs": [
+       "198.51.0.0/24",
+       "198.51.1.0/24",
+       "198.51.10.0/24",
+       "198.51.11.0/24",
+       "198.51.12.0/24",
+       "198.51.13.0/24",
+       "198.51.14.0/24",
+       "198.51.15.0/24",
+       "198.51.2.0/24",
+       "198.51.3.0/24",
+       "198.51.4.0/24",
+       "198.51.5.0/24",
+       "198.51.6.0/24",
+       "198.51.7.0/24",
+       "198.51.8.0/24",
+       "198.51.9.0/24"
+      ],
+      "ports": "25,6881-6889"
+     },
+     {
+      "id": "p4",
+      "action": "block",
+      "domains": [
+       "domain:u0.example.com",
+       "domain:u1.example.com",
+       "domain:u10.example.com",
+       "domain:u11.example.com",
+       "domain:u12.example.com",
+       "domain:u13.example.com",
+       "domain:u14.example.com",
+       "domain:u2.example.com",
+       "domain:u3.example.com",
+       "domain:u4.example.com",
+       "domain:u5.example.com",
+       "domain:u6.example.com",
+       "domain:u7.example.com",
+       "domain:u8.example.com",
+       "domain:u9.example.com"
+      ],
+      "subjects": [
+       "usr_1"
+      ]
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {
+    "usr_1": 2
+   },
+   "present": [
+    "lst_1",
+    "lst_2",
+    "lst_3"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1",
+      "lst_2"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    },
+    {
+     "listeners": [
+      "lst_3"
+     ],
+     "default": "lnk_3",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      },
+      {
+       "id": "r3",
+       "exit": "lnk_2",
+       "domains": [
+        "domain:c0.example.com",
+        "domain:c1.example.com",
+        "domain:c10.example.com",
+        "domain:c11.example.com",
+        "domain:c12.example.com",
+        "domain:c13.example.com",
+        "domain:c14.example.com",
+        "domain:c15.example.com",
+        "domain:c16.example.com",
+        "domain:c17.example.com",
+        "domain:c18.example.com",
+        "domain:c19.example.com",
+        "domain:c2.example.com",
+        "domain:c20.example.com",
+        "domain:c21.example.com",
+        "domain:c22.example.com",
+        "domain:c23.example.com",
+        "domain:c24.example.com",
+        "domain:c3.example.com",
+        "domain:c4.example.com",
+        "domain:c5.example.com",
+        "domain:c6.example.com",
+        "domain:c7.example.com",
+        "domain:c8.example.com",
+        "domain:c9.example.com"
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 816,
+    "rules": 65
+   }
+  },
+  {
+   "name": "singbox_no_sniff",
+   "engine": "sing-box",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "block",
+      "cidrs": [
+       "198.51.0.0/24",
+       "198.51.1.0/24",
+       "198.51.10.0/24",
+       "198.51.11.0/24",
+       "198.51.12.0/24",
+       "198.51.13.0/24",
+       "198.51.14.0/24",
+       "198.51.15.0/24",
+       "198.51.16.0/24",
+       "198.51.17.0/24",
+       "198.51.18.0/24",
+       "198.51.19.0/24",
+       "198.51.2.0/24",
+       "198.51.20.0/24",
+       "198.51.21.0/24",
+       "198.51.22.0/24",
+       "198.51.23.0/24",
+       "198.51.24.0/24",
+       "198.51.25.0/24",
+       "198.51.26.0/24",
+       "198.51.27.0/24",
+       "198.51.28.0/24",
+       "198.51.29.0/24",
+       "198.51.3.0/24",
+       "198.51.30.0/24",
+       "198.51.31.0/24",
+       "198.51.32.0/24",
+       "198.51.33.0/24",
+       "198.51.34.0/24",
+       "198.51.35.0/24",
+       "198.51.36.0/24",
+       "198.51.37.0/24",
+       "198.51.38.0/24",
+       "198.51.39.0/24",
+       "198.51.4.0/24",
+       "198.51.5.0/24",
+       "198.51.6.0/24",
+       "198.51.7.0/24",
+       "198.51.8.0/24",
+       "198.51.9.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "ports": "25,465"
+     }
+    ],
+    "collect": "hits"
+   },
+   "clients": {},
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "lnk_2",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 71,
+    "rules": 9
+   }
+  },
+  {
+   "name": "singbox_exempt_dot_usage",
+   "engine": "sing-box",
+   "policy": {
+    "rules": [
+     {
+      "id": "p1",
+      "action": "allow",
+      "cidrs": [
+       "203.0.0.0/24",
+       "203.0.1.0/24"
+      ]
+     },
+     {
+      "id": "p2",
+      "action": "block",
+      "domains": [
+       "domain:ads0.example.com",
+       "domain:ads1.example.com",
+       "domain:ads10.example.com",
+       "domain:ads11.example.com",
+       "domain:ads12.example.com",
+       "domain:ads13.example.com",
+       "domain:ads14.example.com",
+       "domain:ads15.example.com",
+       "domain:ads16.example.com",
+       "domain:ads17.example.com",
+       "domain:ads18.example.com",
+       "domain:ads19.example.com",
+       "domain:ads2.example.com",
+       "domain:ads20.example.com",
+       "domain:ads21.example.com",
+       "domain:ads22.example.com",
+       "domain:ads23.example.com",
+       "domain:ads24.example.com",
+       "domain:ads25.example.com",
+       "domain:ads26.example.com",
+       "domain:ads27.example.com",
+       "domain:ads28.example.com",
+       "domain:ads29.example.com",
+       "domain:ads3.example.com",
+       "domain:ads4.example.com",
+       "domain:ads5.example.com",
+       "domain:ads6.example.com",
+       "domain:ads7.example.com",
+       "domain:ads8.example.com",
+       "domain:ads9.example.com"
+      ]
+     },
+     {
+      "id": "p3",
+      "action": "block",
+      "protocols": [
+       "bittorrent"
+      ]
+     }
+    ],
+    "collect": "hits_and_usage",
+    "exempt": [
+     "usr_7"
+    ]
+   },
+   "clients": {
+    "usr_7": 3
+   },
+   "present": [
+    "lst_1"
+   ],
+   "groups": [
+    {
+     "listeners": [
+      "lst_1"
+     ],
+     "default": "local",
+     "rules": [
+      {
+       "id": "r1",
+       "exit": "lnk_1",
+       "domains": [
+        "domain:ads1.example.com",
+        "domain:other.org",
+        "keyword:ads"
+       ]
+      },
+      {
+       "id": "r2",
+       "exit": "local",
+       "cidrs": [
+        "10.0.0.0/8",
+        "203.0.1.0/24"
+       ],
+       "ports": "443"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "entries": 145,
+    "rules": 29
+   }
+  }
+ ]
+}

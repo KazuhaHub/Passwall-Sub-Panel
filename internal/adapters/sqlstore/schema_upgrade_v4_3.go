@@ -20,6 +20,25 @@ import (
 // migrateV4_2. A later release line gets its own file and dispatcher beside
 // this one instead of adding another call to EnsureSchema.
 //
+// The SNI-shared ports (transit.sni.v1) add only the transit_fronts table,
+// which autoMigrateCurrentSchema creates on any database that lacks it: there
+// is no data to carry over, so they need no step here. The upgrade test for it
+// lives in transit_front_repo_test.go.
+//
+// Routing by destination (transit.route.v1) likewise adds only the
+// transit_routes table (and the transit_route_lists table beside it): a node has
+// no routes before 4.3, nothing is carried over, and the nodes table is untouched (the routes are deliberately not a
+// column of it, see transitRouteRow). Its upgrade test is in
+// transit_route_repo_test.go. The one exception is a database a 4.3 BETA made
+// the routes table in with a TEXT column; widenRouteSpec carries it over.
+//
+// Tunnel-mode relay lines add two columns to nodes (parent_node_id and
+// parent_line_id, 0 and '' on every ordinary node) and two fields inside the
+// relays JSON (Mode and TunnelNodeID, absent on every existing line). Every
+// existing line is a direct forward, so there is nothing to carry over:
+// autoMigrateCurrentSchema adds the columns and the old lines read as before.
+// Their test is in transit_tunnel_repo_test.go.
+//
 // Delete this file, its test file and the migrateV4_3 call once upgrades from
 // releases before 4.3.0 are no longer supported. Nothing outside this file may
 // depend on a helper defined here, so that deletion stays a deletion.
@@ -42,10 +61,30 @@ func migrateV4_3(db *gorm.DB) error {
 		backfillRawLifetime,
 		dropVLESSRouteState,
 		convertClientsToLines,
+		widenRouteSpec,
+		widenClientLineKey,
 	} {
 		if err := step(db); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// widenClientLineKey replaces the unique key of a client row's line, (user,
+// node, line), by one that also holds the server: a tunnel-mode line's client
+// lives on the entry server while the line belongs to the landing, so switching
+// the line's mode moves the identity to another server and the old server's row
+// stays, detached, until its counters are booked. The new key
+// (uk_psp_client_line_panel) is a superset, so every existing row satisfies it;
+// AutoMigrate has already created it, and this drops the old one. Repeatable.
+func widenClientLineKey(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasIndex("psp_clients", "uk_psp_client_line") {
+		return nil
+	}
+	if err := m.DropIndex("psp_clients", "uk_psp_client_line"); err != nil {
+		return fmt.Errorf("drop the old client line key: %w", err)
 	}
 	return nil
 }
@@ -219,4 +258,51 @@ func convertClientsToLines(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+// retiredRouteSpec names the TEXT column transit_routes.spec of the routes table
+// as the 4.3 betas created it, for the Migrator (SQLite needs a parsed model for
+// column operations). It is not part of the schema and is never migrated.
+type retiredRouteSpec struct {
+	NodeID int64  `gorm:"primaryKey;autoIncrement:false"`
+	Spec   string `gorm:"column:spec"`
+}
+
+func (retiredRouteSpec) TableName() string { return "transit_routes" }
+
+// widenRouteSpec carries a routes table made by a 4.3 beta over to the shape it
+// has now. The beta stored the routes in a TEXT column (spec), which is 64 KiB on
+// MySQL and refuses a node with a few thousand typed entries; they are stored in
+// body, a byte column. Each row's spec is copied to body (where body is still
+// empty) and the old column is dropped. It is a plain copy in Go, because a type
+// change in place needs a cast PostgreSQL will not infer, and it is repeatable: a
+// table without the old column is left alone. A release after the betas has no
+// such table, so this goes with the rest of the file.
+func widenRouteSpec(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable("transit_routes") || !m.HasColumn(&retiredRouteSpec{}, "spec") {
+		return nil
+	}
+	var rows []retiredRouteSpec
+	if err := db.Table("transit_routes").Select("node_id", "spec").Find(&rows).Error; err != nil {
+		return fmt.Errorf("read the beta routes: %w", err)
+	}
+	for _, row := range rows {
+		if row.Spec == "" {
+			continue
+		}
+		if err := db.Table("transit_routes").Where("node_id = ? AND body IS NULL", row.NodeID).Update("body", []byte(row.Spec)).Error; err != nil {
+			return fmt.Errorf("carry the routes of node %d over: %w", row.NodeID, err)
+		}
+	}
+	if err := m.DropColumn(&retiredRouteSpec{}, "spec"); err != nil {
+		return fmt.Errorf("drop transit_routes.spec: %w", err)
+	}
+	// gorm's SQLite DropColumn can silently do nothing (see dropVLESSRouteState).
+	if m.HasColumn(&retiredRouteSpec{}, "spec") {
+		if err := db.Exec("ALTER TABLE transit_routes DROP COLUMN spec").Error; err != nil {
+			return fmt.Errorf("drop transit_routes.spec: %w", err)
+		}
+	}
+	return nil
 }

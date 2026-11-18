@@ -742,6 +742,35 @@
         "major": "Material change"
       },
       "retry": "Retry"
+    },
+    "probe": {
+      "section": "Link probes",
+      "intro": "Entry servers probe each tunnel and managed transit line and report its latency and loss. The result is shown on the node list.",
+      "load_failed": "Failed to load link probe settings",
+      "save": "Save link probes",
+      "saved": "Link probe settings saved",
+      "save_failed": "Failed to save link probe settings",
+      "default_hint": "Leave empty or 0 for the default ({{value}})",
+      "enabled": "Probe links",
+      "enabled_help": "Turns link probing on or off. Turning it off also lifts any withholding immediately; lines and nodes return to subscriptions.",
+      "interval": "Probe interval (seconds)",
+      "interval_help": "How often each link is probed, and the length of one probe window. 30 to 3600; empty or 0 uses the default.",
+      "timeout": "Probe timeout (ms)",
+      "timeout_help": "How long one probe waits for a reply before it counts as lost. 500 to 10000; empty or 0 uses the default.",
+      "url": "Probe URL",
+      "url_help": "The address fetched through each link to measure it end to end. Must start with http:// or https://; a port, if given, is 1 to 65535. Leave it empty for transport-only: nothing is fetched through the tunnel, only the transport connect is tested, so there is no end-to-end result and no end-to-end latency or loss; the quality chip then shows the transport figures.",
+      "url_default_hint": "Default: {{value}}. Empty = transport-only (no end-to-end result)",
+      "url_reset": "Reset to default",
+      "withhold": "Withhold down links",
+      "withhold_help": "When on, a line or node whose link is down for the configured number of consecutive windows is taken out of subscriptions. It never falls back to a direct line. \"No data\" never withholds. Turning this off lifts withholding immediately.",
+      "withhold_after": "Withhold after N down windows",
+      "withhold_after_help": "Consecutive down windows before a link is withheld. 1 to 20; empty or 0 uses the default.",
+      "restore_after": "Restore after N good windows",
+      "restore_after_help": "Consecutive good windows before a withheld link returns to subscriptions. 1 to 20; empty or 0 uses the default.",
+      "err_range": "Enter a whole number from {{min}} to {{max}} (empty or 0 for the default)",
+      "err_url": "Enter an http:// or https:// address with a valid port (1 to 65535)",
+      "err_server": "{{message}}",
+      "info": "Help"
     }
   },
   "traffic": {
@@ -750,6 +779,7 @@
     "retry": "Retry",
     "poll_now": "Poll now",
     "poll_done": "Poll complete",
+    "node_tunnel_line": "{{parent}} · tunnel line {{line}}",
     "scope_user": "By user",
     "scope_node": "By node",
     "node_table": {
@@ -1017,7 +1047,17 @@
       "destination_policy_resolve_not_deployed": "On-demand resolution not applied",
       "task_identity_conflict": "Task identity conflict",
       "task_replay_fenced": "Task replay was prevented",
-      "legacy_task_result_quarantined": "Legacy task result isolated"
+      "legacy_task_result_quarantined": "Legacy task result isolated",
+      "front_withheld": "Shared port not sent",
+      "tunnel_listener_orphan": "Tunnel listener without a line",
+      "roster_identity_capacity": "Large client roster",
+      "cdn_landing_unfit": "CDN line withheld: its node no longer suits a CDN",
+      "tunnel_factor_stale": "Tunnel listener's traffic factor out of date",
+      "routes_not_sent": "Routes not sent",
+      "route_listener_withheld": "Routes withheld from a listener",
+      "route_skipped": "Route not sent",
+      "route_regexp_skipped": "Route regexp entries skipped",
+      "route_policy_approximate": "Policy approximated on a route"
     },
     "code_summaries": {
       "core_telemetry_failed": "The node could not read core state or traffic counters.",
@@ -1034,7 +1074,17 @@
       "destination_policy_resolve_not_deployed": "This node stays as-is (hostnames are not resolved): an inbound whose sniffing is routeOnly:true or unreadable would substitute the name that is resolved. Everything else in the policy runs as usual.",
       "task_identity_conflict": "One task ID was used with different operation inputs.",
       "task_replay_fenced": "The node could not prove a safe fresh task start.",
-      "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity."
+      "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity.",
+      "front_withheld": "A saved SNI shared port was not sent to this server (see the detail for why); the listeners behind it keep their own ports.",
+      "tunnel_listener_orphan": "A tunnel listener's line is gone. Remove the listener from the server's port usage or from its node page.",
+      "roster_identity_capacity": "This server has at least 20,000 client identities. The sync size limit depends on the encoded data, including listener attachments.",
+      "cdn_landing_unfit": "A node's CDN lines are left out of subscriptions because the node's transport no longer works behind a CDN (see the detail for the line and the reason). Change the node back, or remove the line.",
+      "tunnel_factor_stale": "A tunnel listener's copy of its line's traffic factor is out of date. Save the line's traffic factor again.",
+      "routes_not_sent": "A node's saved routes by destination were not sent to this server (see the detail for why); its traffic leaves through the default exit.",
+      "route_listener_withheld": "A listener was sent without its routes because they could not be sent (see the detail for why); its traffic leaves through the default exit.",
+      "route_skipped": "A route has no destination it can send and was left out of the config.",
+      "route_regexp_skipped": "Regexp entries of a list were skipped in a route: routes take no regexp.",
+      "route_policy_approximate": "On Xray, a destination-policy rule with a regexp or keyword cannot be combined exactly with a route and was approximated."
     },
     "filter": {
       "all": "All review states",
@@ -1949,6 +1999,63 @@
     "duplicate": "Duplicate as a new rule set"
   },
   "nodes": {
+    "setup": {
+      "recent": "Recently used",
+      "untagged": "Other servers",
+      "landing": "Landing node",
+      "entries": "Entry servers",
+      "exit": "Default exit",
+      "review": "Review ports",
+      "confirm": "Create node",
+      "next": "Next",
+      "back": "Back",
+      "direct": "Include direct line",
+      "direct_on": "The subscription includes the direct line.",
+      "direct_off": "The subscription uses the additional entries.",
+      "exit_local": "Use the landing server",
+      "invalid_routes": "Check the destination route fields before continuing.",
+      "routes_count": "{{count}} destination routes",
+      "needs_entry": "Include the direct line or add at least one other entry.",
+      "tunnel_landing": "Encrypted tunnel entries require a Passwall Node landing server.",
+      "request_failed": "Could not validate or create the node.",
+      "mode": "Forwarding mode",
+      "mode_help": "Direct forwarding passes the connection through to the landing listener. An encrypted tunnel uses a separate listener on the entry server and sends its traffic to the landing server.",
+      "random_port": "Suggest port",
+      "listen": "Bind address",
+      "sni": "SNI",
+      "target": "REALITY target",
+      "shared": "Shared by SNI",
+      "loopback": "Loopback port",
+      "all_addresses": "All addresses",
+      "link_port": "Transit port",
+      "review_changes": "Review the changed ports before creating the node.",
+      "server": "Server",
+      "binding": "Endpoint and port",
+      "reused": "Existing tunnel",
+      "kind": {
+        "landing": "Direct",
+        "forward": "Direct forward",
+        "tunnel": "Encrypted tunnel",
+        "link": "Transit tunnel",
+        "external": "External entry",
+        "cdn": "CDN"
+      }
+    },
+    "lines": {
+      "title": "Lines",
+      "filter": "Filter by name, server or address",
+      "node": "Landing node",
+      "line": "Subscription line",
+      "entry": "Entry",
+      "exit": "Default exit",
+      "status": "Status",
+      "factor": "Multiplier",
+      "published": "Published",
+      "pending": "Pending",
+      "issue": "Needs attention",
+      "disabled": "Disabled",
+      "empty": "No matching lines."
+    },
     "load_failed": "Nodes are temporarily unavailable",
     "retry": "Retry",
     "cert_source": {
@@ -2004,11 +2111,124 @@
       "entry": "Entry",
       "entry_external": "External entry (forwarding configured outside the panel)",
       "entry_external_hint": "You configure the relay machine's port forwarding outside the panel.",
+      "entry_cdn": "CDN (e.g. Cloudflare)",
       "entry_managed_hint": "The selected Passwall Node server relays the entry port to this node unchanged, published by PSP. The landing sees the relay server as the source address, so IP-based limits do not apply to connections through this line.",
       "port_managed_hint": "Port the relay server listens on",
       "managed_ready": "Relay server applied it; the line is published",
       "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then",
       "name_factor_hint": "Tip: {{placeholder}} is replaced with this line's multiplier (e.g. ×1.5) in subscriptions."
+    },
+    "cdn": {
+      "no_entry": "No entry server and no forward: clients connect to the CDN, which reaches this node. The line is published whenever the node is; PSP cannot see the CDN, so nothing is probed.",
+      "tip": "Cloudflare settings for this line:\n- The DNS record of the domain is proxied (orange cloud).\n- SSL/TLS mode decides the CDN-to-origin hop. Full (strict): the origin has TLS and Cloudflare verifies its certificate for the domain (a public certificate, or a Cloudflare Origin CA certificate). Flexible: Cloudflare reaches the origin over plain HTTP, so the node can be VLESS/VMess over WebSocket or HTTPUpgrade without TLS; that hop is then unencrypted (VLESS content is readable on it; VMess still encrypts its payload).\n- Network: WebSockets is on (WebSocket / HTTPUpgrade) and gRPC is on (gRPC over TLS with HTTP/2 on port 443).\n- Ports: Cloudflare proxies HTTPS on 443, 2053, 2083, 2087, 2096, 8443 and plain HTTP on 80, 8080, 8880, 2052, 2082, 2086, 2095. It connects to the origin on the port the client used unless an Origin Rule changes it.\nOther CDNs differ, so a port outside the lists is a warning, not a refusal.\nThe node needs WebSocket, gRPC (with TLS) or HTTPUpgrade; REALITY, raw TCP, Hysteria2, TUIC, Shadowsocks and Trojan without TLS cannot go through a CDN. Create a TLS + WebSocket (or gRPC) node on the same landing server for that, and issue its certificate under Certificates (Cloudflare DNS-01).",
+      "client_tls": "Clients use TLS to the CDN",
+      "client_tls_tip": "Whether clients connect to the CDN with TLS (SNI, fingerprint). It is independent of the node's own TLS: with Cloudflare Flexible, clients still use TLS to Cloudflare while the node is plain HTTP. It defaults to on for a Cloudflare HTTPS port and off for an HTTP port (80, 8080, 8880, 2052, 2082, 2086, 2095). Without it the connection from the client to the CDN is plaintext. Trojan always needs it.",
+      "domain": "CDN domain",
+      "domain_hint": "The name the CDN proxies, e.g. cdn.example.com. SNI and Host are filled from it.",
+      "domain_required": "A CDN line needs its CDN domain.",
+      "port": "Port",
+      "port_hint": "Empty = 443",
+      "address": "Preferred IP / address (optional)",
+      "address_hint": "What clients dial: an optimised Cloudflare IP, or empty to dial the domain itself.",
+      "host": "Host / authority",
+      "sni_hint": "TLS server name the client presents. The CDN routes by it.",
+      "host_hint": "WebSocket / HTTPUpgrade Host, or gRPC authority. The CDN routes by it.",
+      "entry_hint": "A CDN in front of this node. The kind of a line cannot change once it is saved: remove it and add another.",
+      "saved_warnings": "Saved. CDN line(s) likely to not work as set: {{lines}}. Open the node to see why.",
+      "issue": {
+        "cert_not_covering": "The certificate on this node does not cover {{domain}}. Cloudflare Full (strict) needs a valid certificate for the hostname it connects to. Ignore this if you use an origin certificate that is set up some other way.",
+        "cert_unverifiable": "This node's certificate cannot be read here (it is a file, or not set), so PSP cannot check that it covers {{domain}}. Cloudflare Full (strict) needs a valid origin certificate for it.",
+        "server_name_differs": "This node's TLS server name is {{server_name}}, not {{domain}}.",
+        "origin_port": "This node listens on port {{port}}, which Cloudflare does not proxy for {{kind}} ({{ports}}). Fine for another CDN, or with an Origin Rule that rewrites the port.",
+        "line_port": "The line's port {{port}} is not one Cloudflare proxies for {{kind}} ({{ports}}). Fine for another CDN.",
+        "port_differs": "Clients connect on port {{port}} but this node listens on {{origin_port}}: the CDN must be set to reach the origin on {{origin_port}} (for Cloudflare, an Origin Rule).",
+        "sni_differs": "The SNI {{sni}} is not the CDN domain {{domain}}. The CDN routes by it.",
+        "host_differs": "The Host {{host}} is not the CDN domain {{domain}}. The CDN routes by it.",
+        "origin_plaintext": "This node has no TLS, so the CDN reaches it over plain HTTP (Cloudflare Flexible). That hop is unencrypted: VLESS content is readable on it; {{protocol}} is only safe there if it encrypts its own payload (VMess does).",
+        "cloudflare_grpc": "Cloudflare gRPC requires an HTTPS endpoint on port 443 with HTTP/2. Check client TLS and the edge and origin ports.",
+        "grpc_authority": "mihomo and sing-box use SNI {{sni}} for gRPC authority. URI clients that support a separate authority use {{host}}.",
+        "client_plaintext": "Clients connect to the CDN over plaintext HTTP. The HTTP request and any unencrypted payload are visible on that hop.",
+        "origin_host": "This node expects the Host {{origin_host}} but the line sends {{host}}, so the node would not match the request.",
+        "insecure_ignored": "This node allows insecure TLS. A CDN line never does: the CDN presents its own certificate, which clients verify."
+      },
+      "reason": {
+        "unknown_node": "The landing node is unknown.",
+        "protocol": "This node uses {{protocol}}, which cannot go through a CDN (only VLESS, VMess and Trojan over WebSocket, gRPC or HTTPUpgrade can). Create a TLS + WebSocket (or gRPC) node on the same server and put the line on it.",
+        "unreadable": "This node's transport settings cannot be read yet.",
+        "reality": "This node uses REALITY, which cannot go through a CDN. Create a TLS + WebSocket (or gRPC) node on the same server and put the line on it.",
+        "no_tls_trojan": "This node is Trojan without TLS: Trojan always needs TLS, so it cannot go through a CDN as it is.",
+        "no_tls_grpc": "This node carries gRPC without TLS, which a CDN cannot reach: gRPC needs TLS on the origin.",
+        "no_tls": "This node's security setting is not supported behind a CDN (use TLS, or plain HTTP with VLESS/VMess over WebSocket or HTTPUpgrade).",
+        "raw_tcp": "This node uses raw TCP, which cannot go through a CDN. Create a TLS + WebSocket (or gRPC) node on the same server and put the line on it.",
+        "xhttp": "This node uses XHTTP, which PSP does not support on a CDN line yet.",
+        "transport": "This node uses the {{network}} transport, which cannot go through a CDN (WebSocket, gRPC and HTTPUpgrade can).",
+        "flow": "This node has the xtls-rprx-vision flow, which needs raw TCP and cannot go through a CDN. Clear the flow or use another node."
+      }
+    },
+    "tunnel": {
+      "mode": "Mode",
+      "mode_forward": "Direct forward",
+      "mode_tunnel": "Encrypted tunnel",
+      "mode_tip": "Direct forward: the entry server passes the user's connection to the landing unchanged, with the landing's own encryption end to end. It costs the least.\nEncrypted tunnel: the entry server ends the user's connection with its own REALITY listener and carries it to the landing's server inside the encrypted tunnel between the servers. The entry's network sees only the entry's own fingerprint, never the landing's, at a slight overhead.",
+      "new_hint": "The listener's port and keys are filled in after you save; edit them on the line afterwards.",
+      "switched_tunnel": "The line now runs as an encrypted tunnel. Subscribers must refresh.",
+      "switched_forward": "The line now runs as a direct forward. Subscribers must refresh.",
+      "failed": "The request failed",
+      "saved": "Listener saved",
+      "synced": "Copied from the landing",
+      "sync_none": "The listener already matches the landing",
+      "running": "Running: the line is published",
+      "pending": "Not running yet; the line stays out of subscriptions until it is",
+      "applied": "Listener applied on the entry server",
+      "not_applied": "Waiting for the entry server to apply the listener ({{state}})",
+      "link_ready": "The tunnel runs on both servers",
+      "link_pending": "Waiting for the tunnel to run on both servers",
+      "routes_withheld": "Routes by destination are not being sent: {{why}}",
+      "missing": "The listener of this line is missing. Switch the line to a direct forward and back to create it again.",
+      "port": "Listener port",
+      "server_name": "REALITY server name (SNI)",
+      "target": "REALITY target",
+      "short_id": "Short ID",
+      "public_key": "Public key",
+      "private_key": "Private key",
+      "show_key": "Show the private key",
+      "hide_key": "Hide the private key",
+      "fingerprint": "Fingerprint",
+      "random": "Random",
+      "random_keys": "Random keys",
+      "prefill_hint": "Random only fills the fields in. Nothing is applied until you press Save.",
+      "save": "Save listener",
+      "sync": "Copy from landing",
+      "open_listener": "Listener settings",
+      "routes_note": "Routes by destination are set per listener and are not inherited from the landing ({{count}} set). Access source rules (country, IP) set on the landing do apply to its tunnel listeners.",
+      "routes_open": "Open the listener's settings",
+      "open_discard_title": "Open the listener's settings?",
+      "open_discard_message": "This editor has unsaved changes to the node. Opening the listener's settings discards them.",
+      "listener_banner": "This is the listener of tunnel line {{line}} of {{parent}}. Its name, address, exit and multiplier follow the line.",
+      "listener_banner_no_line": "This is the listener of a tunnel line of {{parent}}. Its name, address, exit and multiplier follow the line.",
+      "listener_inbound": "Edit the inbound configuration",
+      "confirm": {
+        "switch_mode_title": "Switch the line's mode?",
+        "switch_mode_text": "Switching the mode replaces what the line runs on.",
+        "create_line_title": "Create the tunnel line?",
+  "create_line_text": "Create tunnel line: the ports changed, confirm the new ones",
+  "remove_line_title": "Remove the tunnel line?",
+        "remove_line_text": "Removing a tunnel line also removes its listener.",
+        "delete_node_title": "Delete the node and its tunnel listeners?",
+        "delete_node_text": "Deleting this node also removes the listeners of its tunnel lines.",
+        "sync_from_landing_title": "Copy the landing's settings?",
+        "sync_from_landing_text": "These settings of the listener will change to match the landing:",
+        "creates_item": "Creates a listener for line {{line}} of {{landing}}: opens port {{port}} on {{entry}}.",
+  "creates_link": "Opens tunnel port {{port}} on {{exit}}, for the new tunnel between {{entry}} and {{exit}}.",
+  "creates_forward": "Opens forward port {{port}} on {{entry}} for line {{line}} of {{landing}}.",
+  "server_fallback": "server #{{id}}",
+        "removes_item": "Removes listener {{name}} (line {{line}}): closes port {{port}} on {{entry}}.",
+        "removes_item_front": "Removes listener {{name}} (line {{line}}): closes port {{port}} on {{entry}}; it leaves the shared port {{front_port}}.",
+        "diff_item": "{{field}}: {{from}} → {{to}}",
+        "sync_keeps": "The listener keeps its own port, server name, target, keys, short ID and address.",
+        "sync_discards": "Unsaved edits in the listener card are discarded.",
+        "refresh": "Subscribers must refresh their subscription to get the new line parameters."
+      }
     },
     "egress": {
       "server": "Exit server",
@@ -2018,13 +2238,153 @@
       "ready": "The tunnel runs on both servers; the node is published",
       "pending": "Waiting for the tunnel to run on both servers; the node stays out of subscriptions until then",
       "load_failed": "Failed to load the tunnel settings",
+      "advanced": "Advanced tunnel settings",
       "shared_hint": "Tunnel settings are shared by every node between these two servers",
       "protocol": "Tunnel protocol",
       "exit_address": "Exit address",
       "exit_address_default": "Leave empty to use the server address {{address}}",
       "exit_address_unknown": "The exit server has not connected yet; enter an address the entry server can reach",
       "reality_server_name": "Camouflage site (SNI)",
+      "reality_target": "Camouflage target (host:port)",
       "random_site": "Random"
+    },
+    "routes": {
+      "tunnel": {
+        "confirm_title": "Change the tunnel to {{name}}?",
+        "confirm_nodes": "These nodes use this tunnel as their default exit, so all their traffic goes through it: {{nodes}}.",
+        "confirm_protocol": "Changing the protocol makes the tunnel re-handshake: the nodes that use it as their default exit are taken off subscriptions until both servers have applied it again.",
+        "default_users": "Default exit of: {{nodes}}",
+        "title": "Tunnel settings: {{name}}",
+        "save": "Save tunnel",
+        "saved": "Tunnel saved"
+      },
+      "title": "Route by destination",
+      "hint": "Send some destinations out through another server. Routes are checked from top to bottom and the first match wins; everything no route matches leaves through the default exit.",
+      "help": {
+        "what": "Route by destination sends some destinations out through another server instead of this node's default exit. A node holds an ordered list of routes and the first route a connection matches decides where it leaves. A route matches by destination lists (including geosite lists), typed domain entries, CIDRs, ports and TCP/UDP, and sends the matching traffic through the tunnel to another Passwall Node server, or keeps it on this node's own server.",
+        "default_exit": "The default exit is where this node's traffic leaves when no route matches: its own server, or the single tunnel to the server chosen as the exit server above. A route overrides it only for the destinations it matches.\nA routed exit that is down fails those destinations (they do not fall back to the default exit) and only produces a warning. The node is taken off subscriptions only when the default exit's tunnel is not ready.",
+        "local": "Local means leave from this node's own server, ignoring the default exit. It is a real choice, not \"no route\": use it to keep some destinations here while the rest goes out through another server.",
+        "xray": "Xray limits: a destination-policy rule that uses a regexp or a keyword cannot be combined exactly with a route. Its copy is left out of that route's segment when the rule allows or only observes, and widened when the rule blocks, so a blocked destination stays blocked. Typed regexp entries are refused in routes, and the regexp entries of a list are skipped (shown on the route).",
+        "unsupported": "Routes can be edited only for a node on a Passwall Node server whose Node agent supports routing by destination and the tunnels it needs. Saved routes stay visible, and you can still clear them."
+      },
+      "load_failed": "Could not load this node's routes",
+      "saved": "Routes saved",
+      "unsaved": "Unsaved changes",
+      "add": "Add route",
+      "empty": "No routes: everything leaves through the default exit.",
+      "name": "Name (optional)",
+      "move_up": "Move up",
+      "move_down": "Move down",
+      "remove": "Remove route",
+      "lists": "Destination lists",
+      "lists_hint": "Custom, remote and geosite lists; manage them under Access control > Lists.",
+      "list_option": "{{name}} · {{kind}} · {{entries}} entries",
+      "domains": "Typed domains",
+      "domains_hint": "One per line: domain:example.com (the domain and its subdomains), full:www.example.com (exactly this name), keyword:ads. No regexp.",
+      "cidrs": "CIDRs",
+      "ports": "Ports",
+      "ports_hint": "25,465,587 or 6881-6889; empty means any port",
+      "network": "Network",
+      "network_any": "TCP and UDP",
+      "target": {
+        "label": "Leaves through",
+        "local": "Leave from this server (local)",
+        "local_hint": "Leaves from this node's own server, whatever the default exit is"
+      },
+      "entries_one": "{{count}} compiled entry",
+      "entries_other": "{{count}} compiled entries",
+      "sent": {
+        "sent": "In the config sent to the server",
+        "not_sent": "Not sent to the server",
+        "unsaved": "Unsaved"
+      },
+      "link": {
+        "gone": "This server no longer exists: the node is not sent until the route is changed or removed",
+        "missing": "No tunnel to this server yet",
+        "not_ready": "Tunnel not ready",
+        "ready": "Tunnel ready",
+        "in_end": "Exit end",
+        "out_end": "Entry end",
+        "applied": "applied",
+        "waiting": "waiting"
+      },
+      "default_exit": "Default exit: {{name}}",
+      "default_exit_pending": "The exit server above was changed and is not saved yet; routes are checked against the saved default exit.",
+      "exit": {
+        "local": "this server"
+      },
+      "applied": {
+        "not_sent": "Routes not sent to the server yet",
+        "waiting": "Sent, waiting for the server to apply",
+        "running": "Running: the server confirmed the routes",
+        "sent_at": "sent {{time}}",
+        "applied_at": "applied {{time}}"
+      },
+      "budget": {
+        "title": "Budget on {{engine}}",
+        "entries": "Destination entries: {{used}} / {{max}}",
+        "rules": "Rules: {{used}} / {{max}}",
+        "bytes": "Size: {{used}} / {{max}} bytes"
+      },
+      "limit": {
+        "entries": "entries",
+        "rules": "rules",
+        "bytes": "size"
+      },
+      "clear": "Clear all routes",
+      "clear_title": "Clear all routes?",
+      "clear_message": "All {{count}} saved routes of this node are removed and all its traffic leaves through the default exit again.",
+      "revert": "Discard changes",
+      "save": "Save routes",
+      "reason": {
+        "not_node": "This node is not on a Passwall Node server, so it cannot route by destination.",
+        "no_agent": "The Node agent on this server has not connected yet.",
+        "no_capability": "The Node agent on this server is too old for routing by destination (transit.route.v1); update it.",
+        "no_link_capability": "The Node agent on this server cannot build the tunnels routes need; update it.",
+        "unknown": "Routing by destination is not available for this node."
+      },
+      "note": {
+        "list_last_good": "List {{list}} gives nothing right now; this route keeps using its last good content.",
+        "list_not_ready": "List {{list}} has no content yet, so it matches nothing for now.",
+        "list_empty": "List {{list}} is empty and matches nothing.",
+        "list_regexp_skipped": "{{count}} regexp entries of list {{list}} are skipped: routes take no regexp.",
+        "route_skipped": "This route is not in the config sent to the server: it has no destination it can send."
+      },
+      "issue": {
+        "target": "Route {{route}}: choose where it leaves through.",
+        "name_long": "Route {{route}}: the name is longer than 64 bytes.",
+        "no_match": "Route {{route}}: pick at least one list, entry, CIDR, port or network to match.",
+        "regexp": "Route {{route}}: {{entry}} is a regexp, which routes do not take; use domain:, full: or keyword:.",
+        "entry": "Route {{route}}: {{entry}} must start with domain:, full: or keyword:.",
+        "ports": "Route {{route}}: ports must look like 25,465,587 or 6881-6889 (1-65535)."
+      },
+      "error": {
+        "not_node": "This node is not on a Passwall Node server.",
+        "no_agent": "The Node agent on this server has not connected yet.",
+        "no_capability": "The Node agent on this server is too old for routing by destination.",
+        "no_link_capability": "The Node agent on this server cannot build the tunnels routes need.",
+        "separator": "A separator has no routes.",
+        "bad_route": "Route {{route}} is not valid.",
+        "bad_target": "Route {{route}} has no valid target (another Passwall Node server, or local).",
+        "bad_list": "Route {{route}} uses a list that does not exist or is not a destination list.",
+        "bad_entry": "Route {{route}} has a typed entry that cannot be used; use domain:, full: or keyword:.",
+        "regexp_in_route": "Route {{route}}: {{entry}} is a regexp, which routes do not take; use domain:, full: or keyword:.",
+        "exit_no_address": "Route {{route}} goes out through {{server}}, but there is no address to reach it at: the server has not connected to the panel yet and the tunnel has no exit address. Set the exit address on the tunnel first.",
+        "too_many_entries": "Too many entries: {{routes}} / {{max_routes}} routes, {{domains}} / {{max_domains}} typed domains, {{cidrs}} / {{max_cidrs}} CIDRs.",
+        "over_budget": "Listener {{listener}} of node {{node}} would exceed the {{limit}} budget ({{used}} of {{max}}). Remove routes or use smaller lists."
+      },
+      "warning": {
+        "policy_approximate": "On Xray, {{count}} destination-policy rule(s) on {{node}} use a regexp or a keyword and cannot be combined exactly with a route ({{items}}). Allow and report-only copies are left out of the route's segment; blocking copies are widened.",
+        "budget_near_limit": "Listener {{listener}} of node {{node}} is close to its {{limit}} budget: {{used}} of {{max}}.",
+        "list_last_good": "{{route}}: list {{list}} gives nothing right now; the route keeps using its last good content.",
+        "list_not_ready": "{{route}}: list {{list}} has no content yet, so it matches nothing for now.",
+        "list_regexp_skipped": "{{route}}: {{count}} regexp entries of list {{list}} are skipped (routes take no regexp).",
+        "route_skipped": "{{route}} is left out of the config sent to the server: it has no destination it can send.",
+        "exit_not_ready": "The tunnel to {{server}} is not ready on both servers. Destinations routed there fail until it is (they do not fall back to the default exit); the node stays on subscriptions.",
+        "exit_no_link_capability": "The Node agent on {{server}} cannot take the tunnel, so destinations routed there fail.",
+        "redundant_route": "{{route}} sends its destinations the same way the default exit already does, so it changes nothing.",
+        "routes_not_sent": "The saved routes are not being sent to the server: {{reason}}"
+      }
     },
     "line_labels": {
       "region": "Region",
@@ -2326,6 +2686,22 @@
     },
     "hint": {
       "traffic_factor": "This line's traffic is charged at this multiplier whatever servers it passes through. 1 = one-for-one, 0 = free. Only traffic after saving is affected."
+    },
+    "probe": {
+      "title": "Link quality",
+      "state_ok": "Good",
+      "state_degraded": "Degraded",
+      "state_down": "Down",
+      "state_unknown": "No data",
+      "quality": "Quality",
+      "no_link_data": "No quality data for this tunnel",
+      "rtt": "{{ms}} ms",
+      "loss": "{{percent}}% loss",
+      "withheld": "Withheld",
+      "withheld_hint": "Taken out of subscriptions because the link stayed down; it returns once the link recovers. Never falls back to a direct line.",
+      "tip_measured": "Link quality measured by the entry server",
+      "tip_unknown": "No measurement has been reported yet. No data never withholds a line.",
+      "tip_reported": "Reported {{time}}"
     }
   },
   "users": {
@@ -3087,6 +3463,8 @@
     "batch_upgrade_xray": "Upgrade Xray on selected",
     "batch_upgrade_panel": "Upgrade 3X-UI on selected",
     "field": {
+      "region": "Region",
+      "tags": "Tags (comma-separated)",
       "panel_type": "Server type",
       "update_channel": "Passwall Node update channel",
       "name": "Server name",
@@ -3375,7 +3753,8 @@
       "upgrade_xray": "Upgrade Xray",
       "select_core": "Select core and version",
       "rotate_node_credential": "Rotate node credential",
-      "line_factors": "Line multipliers"
+      "line_factors": "Line multipliers",
+      "shared_ports": "Shared ports (SNI)"
     },
     "core_tier": {
       "recommended": "Recommended (broad compatibility)",
@@ -3427,6 +3806,10 @@
     "confirm": {
       "delete_title": "Delete server",
       "delete_message": "Delete server {{name}}? The server must have no nodes referencing it.",
+      "has_nodes_title": "This server still has nodes",
+      "has_nodes_text": "Remove or move these nodes first. Hidden tunnel listeners are removed by removing their lines on the landing nodes.",
+      "has_nodes_item": "{{node}}",
+      "has_nodes_tunnel_item": "Tunnel line {{line}} of {{landing}}",
       "batch_delete_title": "Delete servers",
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
       "batch_upgrade_xray_title": "Upgrade Xray on selected servers",
@@ -3492,6 +3875,193 @@
       "warning": "Near sync limit",
       "warning_tip": "Each user gets one client per line they can see. This server is approaching what one node sync can carry; reduce visible lines or users per server.",
       "count_one": "{{count}} client identity"
+    },
+    "fronts": {
+      "title": "Shared ports — {{name}}",
+      "tab_fronts": "Shared ports",
+      "tab_ports": "Port usage",
+      "loading": "Loading…",
+      "load_failed": "Could not load this server's shared ports.",
+      "empty": "This server has no shared ports yet. A shared port hands each connection to a different use by the SNI of its TLS handshake; ports that are not shared stay as they are.",
+      "add": "Add shared port",
+      "full": "A server holds at most {{max}} shared ports",
+      "unsupported_short": "This server cannot edit shared ports right now",
+      "front_title": "Port {{port}}",
+      "edit_title": "Edit shared port {{port}}",
+      "new_title": "Add shared port",
+      "edit_port": "Edit port {{port}}",
+      "delete_port": "Delete port {{port}}",
+      "delete_title": "Delete shared port {{port}}",
+      "delete_text": "Listeners behind this port return to their own public ports and their users reconnect once; relay lines that enter on this port are no longer sent until they are set up again.",
+      "deleted": "Shared port deleted",
+      "saved": "Shared port saved",
+      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
+      "port": "Shared port",
+      "port_hint": "Any TCP port; 443 by default.",
+      "listeners": "Listeners behind this port",
+      "no_listeners": "No listener uses this port. With none, only relay lines can sit behind it.",
+      "loopback": "Loopback port",
+      "loopback_of": "Loopback port of {{name}}",
+      "random": "Random",
+      "routes": "Routes by SNI",
+      "names": "SNI names",
+      "names_hint": "Separate with commas or spaces. Exact match; no wildcards.",
+      "names_of": "SNI names of route {{route}}",
+      "goes_to": "Goes to",
+      "target_of": "Target of route {{route}}",
+      "add_route": "Add route",
+      "remove_route": "Remove this route",
+      "no_targets": "Tick a listener first, or set a relay line's entry port to this port.",
+      "default": "Where no SNI or an unknown SNI goes",
+      "default_host": "Camouflage site",
+      "default_host_hint": "The name or IP of a real website; a prober that connects sees it.",
+      "default_port": "Port",
+      "confirm_text": "Port {{port}} is in use by {{nodes}}. Sharing it moves those listeners to a loopback port on this machine, and their users reconnect once.",
+      "confirm_label": "I confirm: move these listeners; users reconnect once",
+      "tunnel_listener": "Tunnel line {{line}} of {{parent}}",
+      "target": {
+        "listener": "Listener {{name}}",
+        "forward": "Relay line {{node}} / {{line}}",
+        "forward_short": "Relay line {{node}} / {{line}}"
+      },
+      "refusal": {
+        "no_sni": "No readable SNI (for example Shadowsocks / SS-2022); keeps its own port",
+        "udp": "Runs over UDP and cannot share a TCP port",
+        "no_tls": "TLS or REALITY is not on; keeps its own port",
+        "bad_settings": "Its transport settings cannot be read",
+        "separator": "Separator",
+        "transport": "Its transport is not TCP (WebSocket, gRPC, XHTTP and the like); a front carries only TCP TLS / REALITY",
+        "proxy_protocol": "The listener accepts a PROXY header itself, and the front adds one",
+        "no_name": "It has no server name (SNI): its subscription gives clients no name a front could route by"
+      },
+      "unsupported": {
+        "engine_not_xray": "SNI shared ports need Xray",
+        "no_capability": "This server's node agent does not support SNI shared ports (transit.sni.v1) yet. Upgrade it and wait for it to sync.",
+        "not_node": "SNI shared ports are only for Passwall Node servers.",
+        "no_agent": "This server's node agent has not reported yet.",
+        "not_running_xray": "This server's agent does not report Xray running; SNI shared ports need Xray."
+      },
+      "warning": {
+        "default_unresolved": "The panel could not resolve the camouflage site's name; the node resolves it when it connects, so make sure it works."
+      },
+      "issue": {
+        "port": "The shared port must be a number from 1 to 65535 outside Node's internal probe range",
+        "loopback": "The loopback port of {{node}} must be 1 to 65535 and differ from the shared port",
+        "loopback_probe": "The loopback port of {{node}} cannot be in Node's internal probe range",
+        "loopback_twice": "Loopback port {{port}} is used twice",
+        "route_target": "Route {{route}} has no target yet",
+        "route_names": "Route {{route}} has no SNI names yet",
+        "name_twice": "SNI {{name}} (route {{route}}) already goes to {{owner}}",
+        "listener_unrouted": "{{node}} is moved behind this port but no route sends it an SNI",
+        "default_host": "Enter the camouflage site that connections without an SNI go to",
+        "default_port": "The camouflage site's port must be 1 to 65535"
+      },
+      "error": {
+        "engine_not_xray": "SNI shared ports need Xray",
+        "no_capability": "This server's node agent does not support SNI shared ports yet. Upgrade it and wait for it to sync.",
+        "not_node": "SNI shared ports are only for Passwall Node servers.",
+        "no_agent": "This server's node agent has not reported yet.",
+        "bad_port": "Port {{port}} cannot be shared: it must be 1 to 65535 and outside Node's internal probe range and Node's own ports.",
+        "too_many_fronts": "A server holds at most {{max}} shared ports.",
+        "port_has_front": "This server already shares port {{port}}.",
+        "listener_not_frontable": "Node {{node}} cannot share a port: only a TCP TLS or REALITY listener that does not accept a PROXY header itself can sit behind one. SS-2022 and similar keep their own port.",
+        "listener_port_mismatch": "Node {{node}} listens on {{listen_port}}, not on the shared port {{port}}; a listener behind a front keeps its public port.",
+        "unknown_node": "Node {{node_id}} is not a listener of this server.",
+        "loopback_port_bad": "Loopback port {{port}} of node {{node}} is not usable: it must be 1 to 65535, differ from the shared port, stay out of {{low}}–{{high}} (Node's internal probes) and not be a port Node keeps (such as 10085).",
+        "port_conflict": "Port {{port}} is already used by {{owner}}.",
+        "listener_on_port": "Port {{port}} is used by node {{node}}, which is not behind this shared port: add it, or pick another port.",
+        "confirm_required": "This action needs your confirmation.",
+        "no_routes": "A shared port needs at least one route; sending everything to the default shares nothing.",
+        "bad_server_name": "SNI {{name}} is not usable: {{why}}",
+        "duplicate_server_name": "SNI {{name}} already goes to {{owner}}.",
+        "bad_target": "A route's target is not usable.",
+        "listener_unrouted": "Node {{node}} is moved behind the shared port but no route sends it an SNI.",
+        "link_unsupported": "A tunnel exit cannot share a port yet.",
+        "default_missing": "Choose the camouflage site that connections without an SNI or with an unknown one go to.",
+        "default_not_external": "The default must be an external site.",
+        "default_bad": "The default site {{host}} is not usable.",
+        "default_is_self": "The default site {{host}}:{{port}} is this server's own public address (or resolves to it), so connections would loop back into the shared port. Choose a real external site.",
+        "contract_refused": "The node protocol refused this configuration: {{why}}",
+        "not_running_xray": "This server's agent does not report Xray running; SNI shared ports need Xray.",
+        "name_not_served": "Node {{node}} does not use the SNI {{name}}, so its clients never send it: use one of its own server names.",
+        "landing_not_tls": "Node {{node}} is not a TCP TLS or REALITY listener, so its relay line has no SNI to route by and cannot share a port.",
+        "join_needs_name": "Port {{port}} is a shared port: node {{node}} must name a server name (SNI) before it can join.",
+        "confirm_required_join": "Port {{port}} is a shared port: node {{node}} would join it, moved to loopback port {{loopback_port}} and routed by {{names}}. Its users reconnect once.",
+        "confirm_required_disable": "This node is behind the shared port {{port}}: disabling it sends {{routes}} to the default site.",
+        "confirm_required_engine": "Leaving Xray keeps the shared ports {{ports}} saved but stops sending them: listeners {{leaving_listeners}} are each alone on their port and return to their own public ports (users reconnect once); relay lines {{leaving_lines}} stop being sent.",
+        "confirm_required_delete": "Deleting the shared port {{port}}: listener {{leaving_listeners}} returns to its own public port (it is the only listener behind it; its users reconnect once) and relay lines {{leaving_lines}} stop being sent.",
+        "confirm_required_save": "Saving the shared port {{port}} moves listeners {{nodes}} to loopback ports, returns listeners {{leaving_listeners}} to their public ports and stops sending relay lines {{leaving_lines}}. The users involved reconnect once.",
+        "rendered_name_missing": "The routes to node {{node}} must include {{name}}, the server name its subscription gives its clients; without it they would land on the default site.",
+        "listener_still_on_port": "{{nodes}} still listens on the shared port {{port}}: change that listener's own port first (that save takes it out of the front), then remove it here.",
+        "listeners_share_port": "Listeners {{nodes}} share port {{port}}: Node cannot run two listeners on one port, so change each one but one to its own port first (each such save takes it out of the front), then run \"{{action}}\" on the shared port.",
+        "leave_empties_front": "Node {{node}} is the only thing behind the shared port {{port}}: delete that shared port first.",
+        "confirm_required_leave": "Node {{node}} is behind the shared port {{port}}: continuing takes it out of that front, and {{routes}} go to the default site.",
+        "confirm_required_move": "Node {{node}} leaves the shared port {{leave_port}} ({{routes}} go to that port's default site) and joins the shared port {{port}}, moved to loopback port {{loopback_port}} and routed by {{names}}; its users reconnect once.",
+        "confirm_required_enable": "The shared port {{port}} is not being sent ({{reason}}): enabling the node puts {{nodes}} on one port, and they all stay down until that is fixed."
+      },
+      "help": {
+        "what": "SNI shared port: several TLS / REALITY uses share one TCP port (for example 443). The node reads the SNI in each connection's ClientHello without decrypting it and hands the connection to the matching listener, relay line or camouflage site.\nCaveats: a client must not split its ClientHello across TLS records; a plain HTTP probe waits about 1 second before it reaches the default site. Xray only.",
+        "listeners": "A listener behind a shared port is moved to a loopback port on this machine (127.0.0.1); clients keep using its original public port and subscriptions do not change. Its users reconnect once. Only TLS / REALITY listeners with an SNI can; SS-2022, Hysteria2 and the like keep their own port.",
+        "routes": "Each route hands a set of SNI names (exact match, each name once per port) to one target: a listener on this server, or a relay line (relayed raw to the landing, by the landing's SNI).",
+        "default": "A connection with no SNI, or one no route names, goes to this external site, so a prober sees an ordinary website. It cannot be this server's own public address.",
+        "ports": "Every port in use on this server: listeners, relay lines, tunnel ports, shared ports with what is behind each (SNI → target), loopback ports, and Node's internal probe range. Read only."
+      },
+      "ports": {
+        "hint": "All the ports this server uses.",
+        "load_failed": "Could not load the port usage.",
+        "port": "Port",
+        "bind": "Bound to",
+        "used_by": "Used by",
+        "bind_public": "Public (all addresses)",
+        "bind_loopback": "This machine only (127.0.0.1)",
+        "disabled": "Disabled",
+        "unrouted": "No route names it; not sent yet",
+        "route_arrow": "{{names}} → {{to}}",
+        "default_arrow": "Other / no SNI → {{to}}",
+        "to_listener": "listener on this server (loopback port {{port}})",
+        "orphan": "Orphaned tunnel listener: its line is gone",
+        "orphan_remove": "Remove",
+        "orphan_remove_title": "Remove the orphaned listener?",
+        "orphan_remove_message": "Listener {{name}} on port {{port}} belongs to a tunnel line that no longer exists. Removing it closes the port.",
+        "orphan_removed": "Orphaned listener removed",
+        "to_tunnel_listener": "{{label}} (loopback port {{port}})",
+        "to_external": "external site {{host}}:{{port}}",
+        "kind": {
+          "link_planned": "promised to a tunnel being set up",
+          "tunnel_listener": "{{label}} ({{protocol}})",
+          "tunnel_front_loopback": "{{label}} (behind the shared port)",
+          "listener": "Inbound of node {{name}} ({{protocol}})",
+          "forward": "{{label}}",
+          "link": "Tunnel from server {{peer}}",
+          "front": "Shared port",
+          "front_loopback": "Node {{name}} (behind a shared port)",
+          "probe_range": "Node's internal link probes (loopback; do not use)",
+          "reserved": "Node's own (core API; do not use)"
+        },
+        "inactive": "Not in effect: {{why}}"
+      },
+      "inactive": "Not in effect",
+      "confirm_leaving_listeners": "These listeners return to their own public ports (allowed only when each front has one left) and their users reconnect once: {{nodes}}.",
+      "confirm_leaving_lines": "{{count}} relay line(s) stop being sent.",
+      "confirm": {
+        "join_title": "Join the shared port",
+        "disable_title": "Disable a listener behind a shared port",
+        "engine_title": "Leave Xray",
+        "leave_title": "Leave the shared port",
+        "move_title": "Move to another shared port",
+        "enable_title": "Enable a listener on a shared port"
+      },
+      "withheld": {
+        "text": "Port {{port}} is saved but not being sent: {{why}}. {{detail}}",
+        "reason": {
+          "no_routes": "none of its routes can be sent (their targets are disabled or unavailable)",
+          "listener_unfit": "a listener behind it can no longer be carried by a front",
+          "listener_port": "a listener behind it is no longer on this port",
+          "listener_not_behind": "an enabled listener on this port is not behind it, so Node would refuse the whole config",
+          "contract": "the node protocol refused it"
+        }
+      },
+      "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect"
     }
   },
   "diagnostics": {
@@ -4152,6 +4722,18 @@
         "label": "Node sync reports refused",
         "desc": "Authenticated native-node sync reports this panel refused. \"Incompatible version\" means the node is effectively offline."
       },
+      "psp_node_sync_gzip_refused_total": {
+        "label": "Compressed sync refused",
+        "desc": "Sync requests refused with 415 because of their Content-Encoding: the agent never declared sync.gzip.v1, or used a coding other than gzip."
+      },
+      "psp_node_sync_decode_busy_total": {
+        "label": "Compressed sync busy",
+        "desc": "Compressed sync requests answered 503 because every decode slot was busy; the agent resends on its next poll. Steady growth means decoding is a bottleneck."
+      },
+      "psp_node_sync_gzip_bytes_total": {
+        "label": "Compressed sync bytes",
+        "desc": "Bytes of compressed sync bodies. Compare request wire with request decoded (and response wire with response plain) to see the saving."
+      },
       "psp_dest_list_refresh_total": {
         "label": "Access-control list refreshes",
         "desc": "Results of refreshing the lists the access-control policy matches against (remote lists and geosite updates). Repeated \"Failed\" means a list is serving old entries; any \"Refused: too broad\" needs an admin to look at the list."
@@ -4203,6 +4785,10 @@
       "psp_dest_pruned_rows_total": {
         "label": "Access-control rows pruned",
         "desc": "Access-control rows removed by retention, by table: hits, trial rows, batch markers and orphans (rows left by a deleted account or server)."
+      },
+      "psp_fronts_withheld_total": {
+        "label": "Shared ports not sent",
+        "desc": "Saved SNI shared ports left out of a server's config at sync time, by reason; each has an issue recorded for the server."
       }
     },
     "labels": {
@@ -4291,6 +4877,16 @@
       "node_refused": {
         "protocol_generation": "Incompatible version",
         "report_invalid": "Invalid report"
+      },
+      "node_gzip_refused": {
+        "not_negotiated": "Not negotiated",
+        "unknown_coding": "Unknown coding"
+      },
+      "node_gzip_bytes": {
+        "request_wire": "Request on the wire",
+        "request_decoded": "Request decoded",
+        "response_plain": "Response plain",
+        "response_wire": "Response on the wire"
       },
       "dest_list_refresh": {
         "unchanged": "Unchanged",
@@ -4381,6 +4977,13 @@
         "batches": "Batch markers",
         "exemptions": "Exemptions",
         "orphans": "Orphans"
+      },
+      "front_withheld": {
+        "no_routes": "No route can be sent",
+        "listener_unfit": "A listener cannot be carried",
+        "listener_port": "A listener is off the shared port",
+        "listener_not_behind": "A listener on the port is not behind it",
+        "contract": "Refused by the node protocol"
       }
     }
   },
@@ -4691,6 +5294,11 @@
         "message": "This list is not used, so deleting it does not affect the nodes.",
         "action": "Delete"
       },
+      "route_impact": {
+        "title": "This leaves some routes with nothing",
+        "message": "After this edit the list gives these nodes' routes nothing: {{nodes}}. The destinations those routes took will leave through each node's default exit instead.",
+        "action": "Edit anyway"
+      },
       "list_in_use": {
         "title": "This list is in use",
         "message": "Remove it from these first:",
@@ -4889,6 +5497,8 @@
         "pending_used": "Never downloaded; the parts that use it are not enforced"
       },
       "usage": {
+        "routes_one": "{{count}} node route",
+        "routes_other": "{{count}} node routes",
         "policies_one": "{{count}} policy",
         "policies_other": "{{count}} policies",
         "unused": "Not used",

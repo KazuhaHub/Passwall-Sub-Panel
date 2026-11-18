@@ -157,20 +157,20 @@ func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User,
 			selectorItems = append(selectorItems, it)
 			continue
 		}
-		inb := inboundByNode[it.node.ID]
+		inb := inboundByNode[it.listener().ID]
 		if inb == nil {
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		if _, native := nativePanels[it.node.PanelID]; native {
+		if _, native := nativePanels[it.listener().PanelID]; native {
 			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
 				continue
 			}
 		}
-		if mlkemFirstRealityByPanel[it.node.PanelID] && inboundUsesReality(inb) {
+		if mlkemFirstRealityByPanel[it.listener().PanelID] && inboundUsesReality(inb) {
 			// Xray 26.9.8+ hard-requires the X25519MLKEM768 key share. Current
 			// sing-box filters that key share and has no equivalent opt-in, so
 			// emitting this outbound would produce a green-looking dead node.
@@ -179,7 +179,7 @@ func (s *Service) buildSingBoxLineOutbounds(ctx context.Context, u *domain.User,
 			continue
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it, emailRules, appliedCredentials)
-		block, err := emitSingBoxOutbound(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay)
+		block, err := emitSingBoxOutbound(it.name, it.listener(), renderUser, inb, userEmail, appliedPassword, it.relay)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -211,7 +211,7 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 	_ = json.Unmarshal([]byte(inb.StreamSettings), &stream)
 
 	protocol := crypto.DetectProtocol(inb.Protocol, settings.Method)
-	if protocol == "" {
+	if protocol == "" || !relaySupportsInbound(relay, n, inb, protocol) {
 		return nil, nil
 	}
 	// Relay variant dials the transit front (and overrides SNI / Host on
@@ -386,6 +386,14 @@ func normalizedNaiveCongestion(value string) string {
 
 func applySingBoxTransport(base map[string]any, stream xuiStreamSettings) {
 	switch stream.Network {
+	case "httpupgrade":
+		if h := stream.HTTPUpgradeSettings; h != nil {
+			transport := map[string]any{"type": "httpupgrade", "path": defaultStr(h.Path, "/")}
+			if host := h.host(); host != "" {
+				transport["host"] = host
+			}
+			base["transport"] = transport
+		}
 	case "ws":
 		if stream.WSSettings != nil {
 			transport := map[string]any{
@@ -942,7 +950,7 @@ func marshalJSONString(v string) (string, error) {
 }
 
 func mergePlaceholders(base map[string]string, extra map[string]string) map[string]string {
-	out := make(map[string]string, len(base)+len(extra))
+	out := make(map[string]string, len(base))
 	for k, v := range base {
 		out[k] = v
 	}

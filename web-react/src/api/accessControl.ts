@@ -149,7 +149,8 @@ export interface DestList {
   used_by: DestPolicyRef[]
 }
 
-export interface DestPolicyRef { kind: 'policy' | 'group'; id: number; name: string }
+/** Who uses a list: a policy, an allowlist group, or a node's route by destination (`id` is the node, `name` its name). */
+export interface DestPolicyRef { kind: 'policy' | 'group' | 'route'; id: number; name: string }
 
 export interface DestListsView { items: DestList[]; refresh_hours: number; budget: DestBudget }
 
@@ -862,8 +863,11 @@ export async function createDestList(input: DestListInput): Promise<DestListWrit
   return normWrite(data)
 }
 
-export async function updateDestList(id: number, input: DestListInput): Promise<DestListWrite> {
-  const { data } = await client.put<DestListWrite>(`${BASE}/lists/${id}`, input, quiet)
+/** `confirmRoutes`: the admin's go-ahead after a 409 dest_list_route_impact (the edit leaves a node's routes with nothing). */
+const routesGoAhead = (confirmRoutes?: boolean) => (confirmRoutes ? { ...quiet, params: { confirm_routes: 'true' } } : quiet)
+
+export async function updateDestList(id: number, input: DestListInput, confirmRoutes?: boolean): Promise<DestListWrite> {
+  const { data } = await client.put<DestListWrite>(`${BASE}/lists/${id}`, input, routesGoAhead(confirmRoutes))
   return normWrite(data)
 }
 
@@ -871,8 +875,8 @@ export async function deleteDestList(id: number): Promise<void> {
   await client.delete(`${BASE}/lists/${id}`, quiet)
 }
 
-export async function editDestListEntries(id: number, edit: { add?: string[]; remove?: string[] }): Promise<DestListWrite> {
-  const { data } = await client.post<DestListWrite>(`${BASE}/lists/${id}/entries`, edit, quiet)
+export async function editDestListEntries(id: number, edit: { add?: string[]; remove?: string[] }, confirmRoutes?: boolean): Promise<DestListWrite> {
+  const { data } = await client.post<DestListWrite>(`${BASE}/lists/${id}/entries`, edit, routesGoAhead(confirmRoutes))
   return normWrite(data)
 }
 

@@ -26,8 +26,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
@@ -39,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/registration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
@@ -122,6 +125,10 @@ type Deps struct {
 	Reconcile    *reconcile.Service
 	Geo          *geo.Service
 	NodeSync     handler.NodeSyncService
+	// Fronts is the SNI front service shared with the node saves and the sync.
+	Fronts *front.Service
+	// Routes is the routing-by-destination service shared with the sync.
+	Routes *route.Service
 	// Dest is the access-control API's wiring. Its routes are always
 	// registered, so that "admin only" is provable with nothing wired; a
 	// field left out makes the routes that need it answer 503.
@@ -276,7 +283,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// authentication; the recorder reuses it through a one-method interface so
 		// the sync handler cannot reach the rest of it.
 		nodeSync, err := handler.NewNodeSyncHandler(d.NodeSync, nodeAuth,
-			handler.WithNodeRefusalRecorder(d.Repos.NodeAgent))
+			handler.WithNodeRefusalRecorder(d.Repos.NodeAgent),
+			// Compressed request bodies are taken only from an agent whose
+			// stored declaration includes sync.gzip.v1.
+			handler.WithNodeCapabilityReader(d.Repos.NodeAgent))
 		if err != nil {
 			panic("configure native node sync: " + err.Error())
 		}
@@ -538,6 +548,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 
+		var frontsForServers *front.Service
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel, d.Repos.PSPClient, d.Repos.Certificate)
 		if d.Group != nil {
 			nodes.WithLineVisibility(d.Group)
@@ -564,8 +575,54 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/nodes/separator/:id", nodes.UpdateSeparator)
 		adminGroup.DELETE("/nodes/separator/:id", nodes.DeleteSeparator)
 		adminGroup.POST("/nodes", nodes.CreateInbound)
+		previewPOST(adminGroup, "/nodes/setup-preview", nodes.PreviewSetup)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
+		// Tunnel-mode relay lines: the confirmed mode switch, the listener's own
+		// settings, and the re-copy from the landing.
+		adminGroup.POST("/nodes/:id/lines/:line_id/mode", nodes.SwitchLineMode)
+		adminGroup.PUT("/nodes/:id/lines/:line_id/tunnel", nodes.UpdateTunnelListener)
+		adminGroup.GET("/nodes/:id/lines/:line_id/tunnel/sync", nodes.PreviewTunnelSync)
+		adminGroup.POST("/nodes/:id/lines/:line_id/tunnel/sync", nodes.SyncTunnelFromLanding)
+		if d.Repos.TransitProbe != nil && d.Repos.TransitLinks != nil {
+			var invalidateSubscriptions func()
+			if d.Render != nil {
+				invalidateSubscriptions = func() {
+					if d.Group != nil {
+						d.Group.InvalidateNodeCache()
+					}
+					d.Render.InvalidateAll()
+				}
+			}
+			probes := handler.NewAdminTransitProbeHandler(d.Repos.Settings, linkprobe.New(d.Repos.ScopedSettings, d.Repos.TransitProbe, nil),
+				d.Repos.TransitProbe, d.Repos.TransitLinks, d.Repos.Transit, invalidateSubscriptions)
+			adminGroup.GET("/transit/probe-settings", probes.GetSettings)
+			adminGroup.PUT("/transit/probe-settings", probes.PutSettings)
+			adminGroup.GET("/transit/probes", probes.ListProbes)
+		}
+		if d.Repos.TransitFronts != nil && d.Repos.XUIPanel != nil && d.Repos.NodeAgent != nil {
+			frontSvc := d.Fronts
+			if frontSvc == nil {
+				frontSvc = front.New(d.Repos.TransitFronts, d.Repos.Node, d.Repos.XUIPanel,
+					d.Repos.NodeAgent, d.Repos.Transit, d.Repos.TransitLinks, nil)
+			}
+			frontsForServers = frontSvc
+			fronts := handler.NewAdminFrontHandler(frontSvc, d.Repos.Audit)
+			adminGroup.GET("/servers/:id/fronts", fronts.List)
+			adminGroup.GET("/servers/:id/fronts/options", fronts.Options)
+			adminGroup.GET("/servers/:id/fronts/suggest", fronts.Suggest)
+			adminGroup.POST("/servers/:id/fronts", fronts.Create)
+			adminGroup.PUT("/servers/:id/fronts/:fid", fronts.Update)
+			adminGroup.DELETE("/servers/:id/fronts/:fid", fronts.Delete)
+			adminGroup.GET("/servers/:id/ports", fronts.Ports)
+		}
+		if d.Routes != nil {
+			routes := handler.NewAdminRouteHandler(d.Routes, d.Repos.Audit)
+			adminGroup.GET("/nodes/:id/routes", routes.Get)
+			adminGroup.PUT("/nodes/:id/routes", routes.Put)
+			// A read dressed as a POST: it carries the editor's draft and writes nothing.
+			previewPOST(adminGroup, "/nodes/:id/routes/check", routes.Check)
+		}
 		if d.Repos.TransitLinks != nil {
 			links := handler.NewAdminTransitHandler(transit.New(d.Repos.Node, d.Repos.Transit).WithLinks(d.Repos.TransitLinks, d.Repos.NodeAgent))
 			adminGroup.GET("/transit/links/:entry/:exit", links.GetLink)
@@ -579,6 +636,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes/:id/recreate-inbound", nodes.RecreateInbound)
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
+		adminGroup.POST("/nodes/reality-public-key", nodes.DeriveRealityPublicKey)
 		adminGroup.POST("/nodes/reality-targets/scan", realityScanLimiter.Handler(), nodes.ScanRealityTargets)
 
 		// PSP-managed certificates + DNS credentials (v3.6.4). adminGroup only —
@@ -810,7 +868,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNodeReleaseCatalog(d.NodeReleases).
 			WithNodeInstallTemplate(d.NodeInstallTemplate).
 			WithCoreCatalog(d.CoreCatalog).
-			WithServerMigrationPreviewer(d.ServerMigration)
+			WithServerMigrationPreviewer(d.ServerMigration).
+			WithFronts(d.Repos.TransitFronts, frontsForServers)
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)

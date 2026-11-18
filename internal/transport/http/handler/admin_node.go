@@ -17,9 +17,11 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	certsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
@@ -142,6 +144,16 @@ type nodeDTO struct {
 	// is when the node is published.
 	EgressPanelID int64 `json:"egress_panel_id,omitempty"`
 	EgressReady   bool  `json:"egress_ready,omitempty"`
+	// EgressProbe is the tunnel's link quality (transit.probe.v1) and
+	// EgressWithheld says its probes have taken the node out of subscriptions.
+	EgressProbe    *probeQualityDTO `json:"egress_probe,omitempty"`
+	EgressWithheld bool             `json:"egress_withheld,omitempty"`
+	// ParentNodeID names the landing when this node is the hidden listener of
+	// a tunnel line (ParentLineID the line): it is edited as a node but is not
+	// listed, and its name, labels, exit and factor follow the line.
+	ParentNodeID   int64  `json:"parent_node_id,omitempty"`
+	ParentLineID   string `json:"parent_line_id,omitempty"`
+	ParentNodeName string `json:"parent_node_name,omitempty"`
 }
 
 // relayLineDTO is one transit front. Only the dialed endpoint differs from the
@@ -154,7 +166,13 @@ type relayLineDTO struct {
 	Port         int    `json:"port"`
 	SNI          string `json:"sni,omitempty"`
 	Host         string `json:"host,omitempty"`
-	Enabled      bool   `json:"enabled"`
+	// Domain is a CDN line's CDN domain (mode "cdn"). Address, port, SNI and
+	// Host left empty in a request are filled from it and stored.
+	Domain string `json:"domain,omitempty"`
+	// ClientTLS is whether clients use TLS to the CDN (CDN lines only); omitted
+	// in a request keeps the saved value, or defaults from the port.
+	ClientTLS *bool `json:"client_tls,omitempty"`
+	Enabled   bool  `json:"enabled"`
 	// Region / Tags are line-only subscription labels (ADR 0040). Omitted in a
 	// request keeps the saved value (a new line takes the node's value);
 	// explicit "" / [] clears. Responses always carry both.
@@ -166,10 +184,36 @@ type relayLineDTO struct {
 	// ManagedReady is response-only: the entry server confirmed the forward
 	// this managed line asks for, so the line is published.
 	ManagedReady bool `json:"managed_ready,omitempty"`
+	// Probe is the forward's quality (transit.probe.v1), response-only, and
+	// ProbeWithheld says its probes have taken the line out of subscriptions.
+	Probe         *probeQualityDTO `json:"probe,omitempty"`
+	ProbeWithheld bool             `json:"probe_withheld,omitempty"`
 	// TrafficFactorMilli is this line's traffic multiplier (0..100000). In a
 	// request, omitted keeps the saved value (a new line is one-for-one);
 	// responses always carry it.
 	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
+	// Mode is how the entry carries the line: absent is a raw port forward
+	// (直接转发), "tunnel" a listener of its own on the entry that carries the
+	// traffic through a tunnel to the landing (加密隧道). In a request a new line
+	// may name it; an existing line's mode changes only through the confirmed
+	// mode switch, and omitting it keeps the saved one. For a tunnel line port is
+	// the listener's own port (response), or the one a new listener starts on
+	// (request; 0 picks one).
+	Mode *string `json:"mode,omitempty"`
+	// Tunnel is response-only: the listener of a tunnel line and its state.
+	Tunnel *tunnelDTO `json:"tunnel,omitempty"`
+	// Running is response-only: the line is published, which for a tunnel line
+	// needs its listener applied and its tunnel ready on both servers.
+	Running bool `json:"running,omitempty"`
+	// CDNIssues is response-only: what is likely to keep a CDN line from
+	// working given its landing as it is now (never blocks saving).
+	CDNIssues []cdnIssueDTO `json:"cdn_issues,omitempty"`
+}
+
+type cdnIssueDTO struct {
+	Code   string            `json:"code"`
+	Warn   bool              `json:"warn"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 type inboundDTO struct {
@@ -187,11 +231,12 @@ type inboundDTO struct {
 }
 
 type importNodeRequest struct {
-	PanelID       int64  `json:"panel_id" binding:"required"`
-	InboundID     int    `json:"inbound_id" binding:"required"`
-	DisplayName   string `json:"display_name" binding:"required"`
-	ServerAddress string `json:"server_address" binding:"required"`
-	Flow          string `json:"flow"`
+	FrontConfirm  *frontConfirmDTO `json:"front_confirm,omitempty"`
+	PanelID       int64            `json:"panel_id" binding:"required"`
+	InboundID     int              `json:"inbound_id" binding:"required"`
+	DisplayName   string           `json:"display_name" binding:"required"`
+	ServerAddress string           `json:"server_address" binding:"required"`
+	Flow          string           `json:"flow"`
 	// Protocol of the source inbound (lowercased), cached on the node so the
 	// UI can gate protocol-specific fields. Optional for backward compat.
 	Protocol   string         `json:"protocol"`
@@ -223,7 +268,9 @@ type createNodeRequest struct {
 	CertID        int64          `json:"cert_id"`
 	Inbound       inboundSpecDTO `json:"inbound" binding:"required"`
 	// TrafficFactorMilli is the direct line's multiplier; omitted is 1000.
-	TrafficFactorMilli *int `json:"traffic_factor_milli"`
+	TrafficFactorMilli *int               `json:"traffic_factor_milli"`
+	EgressPanelID      int64              `json:"egress_panel_id"`
+	Setup              *node.SetupOptions `json:"setup"`
 }
 
 type inboundSpecDTO struct {
@@ -239,6 +286,8 @@ type inboundSpecDTO struct {
 	ExpiryTime     int64  `json:"expiry_time"`
 	CertSource     string `json:"cert_source"`
 	CertID         int64  `json:"cert_id"`
+	// FrontConfirm confirms joining the shared port this inbound lands on.
+	FrontConfirm *frontConfirmDTO `json:"front_confirm,omitempty"`
 }
 
 type updateMetadataRequest struct {
@@ -263,6 +312,50 @@ type updateMetadataRequest struct {
 
 type setNodeEnabledRequest struct {
 	Enabled bool `json:"enabled"`
+	// ConfirmFront is the go-ahead for disabling a listener that is behind a
+	// shared port: the names routed to it fall to the default site.
+	ConfirmFront bool `json:"confirm_front"`
+}
+
+// frontConfirmDTO is the administrator's go-ahead for a listener joining a
+// shared port. Its presence is the confirmation; LoopbackPort is the one the
+// 409 offered (0 takes the suggestion).
+type frontConfirmDTO struct {
+	LoopbackPort int `json:"loopback_port"`
+}
+
+// frontContext puts a request's confirmation, if it carries one, in the
+// context the node service reads, and returns what the service reports back.
+func frontContext(c *gin.Context, confirm *frontConfirmDTO, extra bool) (context.Context, *front.Confirmation) {
+	conf := &front.Confirmation{Confirmed: extra}
+	if confirm != nil {
+		conf.Confirmed, conf.LoopbackPort = true, confirm.LoopbackPort
+	}
+	return front.WithConfirmation(c.Request.Context(), conf), conf
+}
+
+// auditFrontJoin records that a save took a listener off a shared port, added it
+// to one, or both (a move), with the front and the SNI it is routed by.
+func (h *AdminNodeHandler) auditFrontJoin(c *gin.Context, conf *front.Confirmation) {
+	if h.audit == nil || conf == nil {
+		return
+	}
+	// A move leaves one front, then joins another: record them in that order.
+	for _, step := range []struct {
+		action string
+		change *front.Joined
+	}{{"transit_front_listener_left", conf.Left}, {"transit_front_listener_joined", conf.Joined}} {
+		action, change := step.action, step.change
+		if change == nil {
+			continue
+		}
+		after, _ := json.Marshal(change)
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor: actorFromGin(c), Action: action,
+			Target:    "server=" + strconv.FormatInt(change.PanelID, 10) + " port=" + strconv.Itoa(change.Port) + " node=" + strconv.FormatInt(change.NodeID, 10),
+			AfterJSON: string(after), IP: c.ClientIP(), At: time.Now(),
+		})
+	}
 }
 
 type reorderRequestItem struct {
@@ -324,13 +417,25 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	// Resolve only this node's panel name (one GetByID) instead of listing every
 	// panel just to look up a single entry.
 	panelNames := h.panelNameOf(c.Request.Context(), n.PanelID)
+	nodeView := func() nodeDTO {
+		dto := h.toNodeDTO(n, panelNames)
+		// An administrator also reads the REALITY private key of each tunnel
+		// listener; an operator never does.
+		dto.Relays = relayDTOsOn(n, n.Relays, isAdmin)
+		if n.IsTunnelChild() {
+			if parent, perr := h.node.Get(c.Request.Context(), n.ParentNodeID); perr == nil {
+				dto.ParentNodeName = parent.DisplayName
+			}
+		}
+		return dto
+	}
 
 	// Bundle the inbound clients so the detail page only needs one round-trip.
 	clients, err := h.node.ListClientsOfInbound(c.Request.Context(), id, h.ownership, h.pspClients)
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
 		out := gin.H{
-			"node":          h.toNodeDTO(n, panelNames),
+			"node":          nodeView(),
 			"clients":       []any{},
 			"clients_error": err.Error(),
 		}
@@ -344,7 +449,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		return
 	}
 	out := gin.H{
-		"node":    h.toNodeDTO(n, panelNames),
+		"node":    nodeView(),
 		"clients": clients,
 	}
 	if inbound != nil {
@@ -547,7 +652,11 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": trafficFactorError})
 		return
 	}
-	if err := h.node.ImportExisting(c.Request.Context(), n); err != nil {
+	ctx, conf := frontContext(c, req.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.ImportExisting(ctx, n)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -555,7 +664,15 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
 }
 
+func (h *AdminNodeHandler) PreviewSetup(c *gin.Context) {
+	h.createInbound(c, true)
+}
+
 func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
+	h.createInbound(c, false)
+}
+
+func (h *AdminNodeHandler) createInbound(c *gin.Context, preview bool) {
 	var req createNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -618,7 +735,30 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	if err := h.node.CreateInbound(c.Request.Context(), n, spec); err != nil {
+	if preview || req.Setup != nil {
+		if req.Setup == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "node setup settings are required"})
+			return
+		}
+		n.EgressPanelID = req.EgressPanelID
+		plan, err := h.node.SetupInbound(c.Request.Context(), n, spec, *req.Setup, preview)
+		if err != nil {
+			mapNodeServiceError(c, err)
+		} else if preview {
+			c.JSON(http.StatusOK, plan)
+		} else {
+			h.auditTunnel(c, "create_node_setup", fmt.Sprintf("node:%d", n.ID), nil, plan.Bindings)
+			dto := h.toNodeDTO(n, h.loadPanelNames(c.Request.Context()))
+			dto.Relays = relayDTOsOn(n, n.Relays, callerIsAdmin(c))
+			c.JSON(http.StatusCreated, dto)
+		}
+		return
+	}
+	ctx, conf := frontContext(c, req.Inbound.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.CreateInbound(ctx, n, spec)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -679,13 +819,26 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.EgressPanelID != nil {
 		n.EgressPanelID = *req.EgressPanelID
 	}
-	if err := h.node.UpdateMetadata(c.Request.Context(), n); err != nil {
+	// Removing a tunnel line removes its listener, which asks first.
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	err = h.node.UpdateMetadata(ctx, n)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
 	h.auditLineFactors(c, node.ChangedLineFactors(&before, n))
+	h.auditTunnelLines(c, n.ID, before.Relays, n.Relays)
+	// Reload: the service settled the tunnel lines (listener ids, ports).
+	saved, err := h.node.Get(c.Request.Context(), id)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
 	panelNames := h.loadPanelNames(c.Request.Context())
-	c.JSON(http.StatusOK, h.toNodeDTO(n, panelNames))
+	dto := h.toNodeDTO(saved, panelNames)
+	dto.Relays = relayDTOsOn(saved, saved.Relays, callerIsAdmin(c))
+	c.JSON(http.StatusOK, dto)
 }
 
 const trafficFactorError = "traffic_factor_milli must be between 0 and 100000 (1000 = one-for-one, 0 = free)"
@@ -812,7 +965,11 @@ func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	if err := h.node.UpdateInboundConfig(c.Request.Context(), id, spec); err != nil {
+	ctx, conf := frontContext(c, req.FrontConfirm, false)
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.UpdateInboundConfig(ctx, id, spec)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -830,7 +987,8 @@ func (h *AdminNodeHandler) SetEnabled(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.node.SetEnabled(c.Request.Context(), id, req.Enabled); err != nil {
+	ctx, _ := frontContext(c, nil, req.ConfirmFront)
+	if err := h.node.SetEnabled(ctx, id, req.Enabled); err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -879,7 +1037,14 @@ func (h *AdminNodeHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	if err := h.node.DeleteAndSync(c.Request.Context(), id); err != nil {
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	if c.Query("confirm_front") == "true" {
+		conf.Confirmed = true
+	}
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.DeleteAndSync(ctx, id)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -896,7 +1061,14 @@ func (h *AdminNodeHandler) Detach(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	if err := h.node.DetachAndSync(c.Request.Context(), id); err != nil {
+	ctx, conf := tunnelContext(c, c.Query("confirm_tunnels") == "true", "")
+	if c.Query("confirm_front") == "true" {
+		conf.Confirmed = true
+	}
+	// Audited whatever happens next: a join or leave that was done stays done.
+	err = h.node.DetachAndSync(ctx, id)
+	h.auditFrontJoin(c, conf)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
@@ -1108,7 +1280,9 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 	var err error
 	for i, d := range dtos {
 		addr := strings.TrimSpace(d.Address)
-		if addr == "" {
+		cdn := d.Mode != nil && *d.Mode == domain.RelayModeCDN
+		// A CDN line's address is the optimised IP and defaults to its domain.
+		if addr == "" && !cdn && !(d.Mode == nil && d.Domain != "") {
 			return nil, fmt.Errorf("relay line %d: address is required", i+1)
 		}
 		if d.Port < 0 || d.Port > 65535 {
@@ -1122,6 +1296,8 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 			Port:         d.Port,
 			SNI:          strings.TrimSpace(d.SNI),
 			Host:         strings.TrimSpace(d.Host),
+			Domain:       strings.TrimSpace(d.Domain),
+			ClientTLS:    d.ClientTLS,
 			Enabled:      d.Enabled,
 			EntryPanelID: d.EntryPanelID,
 			// nil keeps the saved factor (resolved by the node service).
@@ -1133,7 +1309,19 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		if d.EntryPanelID < 0 {
 			return nil, fmt.Errorf("relay line %d: invalid entry server", i+1)
 		}
-		if d.EntryPanelID > 0 && d.Port == 0 {
+		if d.Mode == nil {
+			line.ModeUnresolved = true
+		} else if *d.Mode == domain.RelayModeTunnel {
+			line.Mode = domain.RelayModeTunnel
+		} else if *d.Mode == domain.RelayModeCDN {
+			line.Mode = domain.RelayModeCDN
+		} else if *d.Mode != "" && *d.Mode != "forward" {
+			return nil, fmt.Errorf("relay line %d: unknown mode %q", i+1, *d.Mode)
+		}
+		// A managed forward needs its entry port (a request that omits the mode is
+		// judged by the service, which knows the saved line); a tunnel line's
+		// listener takes the port given, or one the service picks, when it is made.
+		if d.EntryPanelID > 0 && d.Port == 0 && d.Mode != nil && !line.Tunnel() && !line.CDN() {
 			return nil, fmt.Errorf("relay line %d: a managed relay needs an entry port between 1 and 65535", i+1)
 		}
 		if d.Region == nil {
@@ -1152,23 +1340,58 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 }
 
 // relayDTOs maps the domain shape back for the API response.
-func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
+func relayDTOs(relays []domain.RelayLine) []relayLineDTO { return relayDTOsFor(relays, false) }
+
+// relayDTOsFor is relayDTOs; secrets adds the private keys of tunnel listeners,
+// which only an administrator reads.
+func relayDTOsFor(relays []domain.RelayLine, secrets bool) []relayLineDTO {
+	return relayDTOsOn(nil, relays, secrets)
+}
+
+// relayDTOsOn is relayDTOsFor for the lines of a landing node: with the
+// landing it also says what is likely to keep each CDN line from working.
+func relayDTOsOn(landing *domain.Node, relays []domain.RelayLine, secrets bool) []relayLineDTO {
 	out := make([]relayLineDTO, 0, len(relays))
 	for _, r := range relays {
 		region, tags := r.Region, domain.CopyLineTags(r.Tags)
+		mode, port := (*string)(nil), r.Port
+		var tunnel *tunnelDTO
+		if r.Tunnel() {
+			m := domain.RelayModeTunnel
+			mode, tunnel = &m, tunnelDTOOf(r.TunnelNode, secrets)
+			if r.TunnelNode != nil {
+				port = r.TunnelNode.DesiredPort
+			}
+		}
+		var issues []cdnIssueDTO
+		if r.CDN() {
+			m := domain.RelayModeCDN
+			mode = &m
+			for _, issue := range domain.CDNWarnings(landing, r) {
+				issues = append(issues, cdnIssueDTO{Code: issue.Code, Warn: issue.Warn, Params: issue.Params})
+			}
+		}
 		out = append(out, relayLineDTO{
+			CDNIssues:          issues,
+			Domain:             r.Domain,
+			ClientTLS:          r.ClientTLS,
+			Mode:               mode,
+			Tunnel:             tunnel,
+			Running:            r.Gated() && r.ManagedReady,
 			ID:                 r.ID,
 			Name:               r.Name,
 			OnlyLineName:       r.OnlyLineName,
 			Address:            r.Address,
-			Port:               r.Port,
+			Port:               port,
 			SNI:                r.SNI,
 			Host:               r.Host,
 			Enabled:            r.Enabled,
 			Region:             &region,
 			Tags:               &tags,
 			EntryPanelID:       r.EntryPanelID,
-			ManagedReady:       r.Managed() && r.ManagedReady,
+			ManagedReady:       r.Gated() && r.ManagedReady,
+			Probe:              probeQualityOf(r.Probe),
+			ProbeWithheld:      r.ProbeWithheld,
 			TrafficFactorMilli: ptrInt(r.EffectiveTrafficFactor()),
 		})
 	}
@@ -1208,12 +1431,16 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		Kind:               string(n.Kind),
 		CertSource:         string(n.CertSource),
 		CertID:             n.CertID,
-		Relays:             relayDTOs(n.Relays),
+		Relays:             relayDTOsOn(n, n.Relays, false),
 		HideDirect:         n.HideDirect,
 		TrafficFactorMilli: n.EffectiveTrafficFactor(),
 		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 		EgressPanelID:      n.EgressPanelID,
 		EgressReady:        n.EgressPanelID != 0 && n.EgressReady,
+		EgressProbe:        probeQualityOf(n.EgressProbe),
+		EgressWithheld:     n.EgressPanelID != 0 && n.EgressWithheld,
+		ParentNodeID:       n.ParentNodeID,
+		ParentLineID:       n.ParentLineID,
 	}
 }
 
@@ -1257,10 +1484,17 @@ func callerIsAdmin(c *gin.Context) bool {
 }
 
 func mapNodeServiceError(c *gin.Context, err error) {
+	var refusal *front.Refusal
 	switch {
+	case errors.As(err, &refusal):
+		respondFrontError(c, err)
+	case errors.Is(err, transit.ErrReservedPortTaken):
+		// The port promised to a new tunnel was taken before it was made: a
+		// conflict the admin can retry (the retry plans a fresh port).
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": "link_port_taken"})
 	case errors.Is(err, domain.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

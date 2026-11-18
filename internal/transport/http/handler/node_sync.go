@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,9 +57,57 @@ func WithNodeRefusalRecorder(recorder NodeRefusalRecorder) NodeSyncOption {
 	return func(h *NodeSyncHandler) { h.refusals = recorder }
 }
 
+// NodeCapabilityReader reads the capabilities an agent last declared. The sync
+// handler asks it, before reading a compressed body, whether the agent ever
+// declared sync.gzip.v1: a coding is accepted only from a peer that negotiated
+// it, and the negotiation is the agent's declaration followed by the panel's
+// advertisement, so the stored declaration is what decides.
+type NodeCapabilityReader interface {
+	GetByAgentID(ctx context.Context, agentID string) (*domain.NodeAgent, error)
+}
+
+// WithNodeCapabilityReader enables compressed request bodies. Without it every
+// request with a Content-Encoding is refused with 415, so a build that cannot
+// check the negotiation never decodes anything.
+func WithNodeCapabilityReader(reader NodeCapabilityReader) NodeSyncOption {
+	return func(h *NodeSyncHandler) { h.capabilities = reader }
+}
+
+// DefaultSyncDecodeConcurrency bounds how many compressed bodies are decoded
+// and parsed at once. A decoded body can be 64 MiB, held about twice at the
+// join, with the JSON parse on top, so several at once would be an easy way to
+// run the panel out of memory.
+const DefaultSyncDecodeConcurrency = 4
+
+// syncDecodeWait is how long a compressed request waits for a decode slot
+// before it is told to try again.
+const syncDecodeWait = 10 * time.Second
+
+// WithSyncDecodeConcurrency sets how many compressed bodies may be decoded at
+// once (at least 1).
+func WithSyncDecodeConcurrency(n int) NodeSyncOption {
+	return func(h *NodeSyncHandler) {
+		if n < 1 {
+			n = 1
+		}
+		h.decodeSlots = make(chan struct{}, n)
+	}
+}
+
 type NodeSyncHandler struct {
 	service NodeSyncService
 	auth    NodeAuthenticator
+	// capabilities answers whether an agent declared sync.gzip.v1. Optional: nil
+	// refuses every compressed body.
+	capabilities NodeCapabilityReader
+	// decodeSlots is the decode semaphore; a slot is held only while a compressed
+	// body that is already in memory is inflated.
+	decodeSlots chan struct{}
+	// decoding holds the agents that have a compressed body being inflated.
+	decodingMu sync.Mutex
+	decoding   map[string]struct{}
+	// decodeWait is how long a compressed request waits for a slot.
+	decodeWait time.Duration
 	// refusals persists a refused report. Optional: a nil recorder costs the
 	// record, never the response.
 	refusals NodeRefusalRecorder
@@ -107,6 +156,12 @@ func NewNodeSyncHandler(service NodeSyncService, auth NodeAuthenticator, options
 		if option != nil {
 			option(handler)
 		}
+	}
+	if handler.decodeSlots == nil {
+		handler.decodeSlots = make(chan struct{}, DefaultSyncDecodeConcurrency)
+	}
+	if handler.decodeWait <= 0 {
+		handler.decodeWait = syncDecodeWait
 	}
 	return handler, nil
 }
@@ -310,20 +365,62 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		writeNodeError(w, http.StatusUnauthorized, ErrNodeAuthentication)
 		return
 	}
-	limited := http.MaxBytesReader(w, request.Body, nodeprotocol.MaxSyncBodyBytes)
-	defer limited.Close()
-	// Read in full rather than streaming into a decoder. The host subtree's RAW
-	// size has to be measured, and a decoder that produced the struct has already
-	// discarded the bytes that would say how large an unknown additive section
-	// was — which is the only thing the size bound exists to catch.
-	body, err := io.ReadAll(limited)
+	// The coding is read before the body. Only gzip, from an agent that declared
+	// sync.gzip.v1, is taken: anything else with a Content-Encoding is 415 and
+	// nothing is read. A request with no coding is what it always was.
+	encoding, err := nodeprotocol.SyncEncodingFromHeaders(request.Header.Values(nodeprotocol.SyncContentEncodingHeader))
 	if err != nil {
-		status := http.StatusBadRequest
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			status = http.StatusRequestEntityTooLarge
+		metrics.NodeSyncGzipRefusedTotal.With("unknown_coding").Inc()
+		writeNodeError(w, http.StatusUnsupportedMediaType, fmt.Errorf("sync body coding: %w", err))
+		return
+	}
+	limited := http.MaxBytesReader(w, request.Body, nodeprotocol.MaxSyncWireBytes)
+	defer limited.Close()
+	var body []byte
+	if encoding == nodeprotocol.SyncEncodingGzip {
+		if declared, err := h.declaredGzip(request.Context(), agentID); err != nil {
+			log.Error("native node sync capability lookup failed", "agent_id", agentID, "err", err)
+			writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
+			return
+		} else if !declared {
+			metrics.NodeSyncGzipRefusedTotal.With("not_negotiated").Inc()
+			writeNodeError(w, http.StatusUnsupportedMediaType, errors.New("compressed sync body was not negotiated"))
+			return
 		}
-		writeNodeError(w, status, fmt.Errorf("read node report: %w", err))
+		// THE WIRE BODY IS READ BEFORE ANY SLOT IS TAKEN. A slot pays for
+		// inflating, which is CPU and memory; a slow uploader would hold one for as
+		// long as it likes if it were taken first. The read is bounded by the wire
+		// limit.
+		compressed, err := io.ReadAll(limited)
+		if err != nil {
+			h.refuseBody(w, err)
+			return
+		}
+		release, ok := h.acquireDecode(request.Context(), agentID)
+		if !ok {
+			// 503, not 429: nothing is wrong with the request. The agent keeps
+			// its state on a 5xx and sends the same request again on its next
+			// poll; a 400 or 415 would have switched compression off for an hour.
+			metrics.NodeSyncDecodeBusyTotal.Inc()
+			w.Header().Set("Retry-After", "5")
+			writeNodeError(w, http.StatusServiceUnavailable, errors.New("node sync busy"))
+			return
+		}
+		// Both limits are enforced while it inflates: a bomb costs about the
+		// decoded limit, never its size.
+		body, err = nodeprotocol.DecodeSyncBody(bytes.NewReader(compressed), encoding)
+		release()
+		if err == nil {
+			metrics.NodeSyncBytesTotal.With("request_wire").Add(int64(len(compressed)))
+			metrics.NodeSyncBytesTotal.With("request_decoded").Add(int64(len(body)))
+		}
+		compressed = nil
+		if err != nil {
+			h.refuseBody(w, err)
+			return
+		}
+	} else if body, err = io.ReadAll(limited); err != nil {
+		h.refuseBody(w, err)
 		return
 	}
 	var wire nodeReportWire
@@ -371,7 +468,28 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	report.PolicyStatus = h.sanitizePolicyStatus(wire.PolicyStatus, report.Capabilities, agentID)
 	// The audit subtree the same way: after the control half, on its own.
 	report.Audit = h.sanitizeAudit(wire.Audit, report.Capabilities, agentID)
-	response, err := h.service.Sync(request.Context(), report)
+	// The agent's declaration is read from the report that was just validated.
+	declaredGzip := slices.Contains(report.Capabilities, nodeprotocol.CapabilitySyncGzip)
+	if encoding == nodeprotocol.SyncEncodingGzip && !declaredGzip {
+		metrics.NodeSyncGzipRefusedTotal.With("not_negotiated").Inc()
+		writeNodeError(w, http.StatusUnsupportedMediaType, errors.New("compressed sync body without the sync.gzip.v1 capability"))
+		return
+	}
+	body, wire = nil, nodeReportWire{}
+	if declaredGzip {
+		// Every response to an agent that declared the capability varies with
+		// what it asked for, so a cache between the two must not mix them.
+		w.Header().Add("Vary", nodeprotocol.SyncAcceptEncodingHeader)
+	}
+	acceptGzip := declaredGzip && nodeprotocol.AcceptsSyncGzip(strings.Join(request.Header.Values(nodeprotocol.SyncAcceptEncodingHeader), ","))
+	var response nodeprotocol.SyncResponse
+	if service, ok := h.service.(interface {
+		SyncWithResponseEncoding(context.Context, nodeprotocol.NodeReport, string) (nodeprotocol.SyncResponse, error)
+	}); ok && acceptGzip {
+		response, err = service.SyncWithResponseEncoding(request.Context(), report, nodeprotocol.SyncEncodingGzip)
+	} else {
+		response, err = h.service.Sync(request.Context(), report)
+	}
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this
 		// boundary must leave the node's immutable outbox retryable. In particular,
@@ -386,14 +504,94 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		return
 	}
 	payload, err := json.Marshal(response)
-	if err != nil || int64(len(payload)) > nodeprotocol.MaxSyncBodyBytes {
+	if err != nil || int64(len(payload)) > nodeprotocol.MaxSyncDecodedBytes {
 		log.Error("native node sync response encoding failed", "agent_id", agentID, "bytes", len(payload), "err", err)
 		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
 		return
 	}
+	if acceptGzip {
+		if compressed, err := nodeprotocol.EncodeSyncBody(payload); err == nil {
+			w.Header().Set(nodeprotocol.SyncContentEncodingHeader, nodeprotocol.SyncEncodingGzip)
+			metrics.NodeSyncBytesTotal.With("response_plain").Add(int64(len(payload)))
+			metrics.NodeSyncBytesTotal.With("response_wire").Add(int64(len(compressed)))
+			payload = compressed
+		}
+	}
+	if int64(len(payload)) > nodeprotocol.MaxSyncWireBytes {
+		log.Error("native node sync response exceeds wire limit", "agent_id", agentID, "bytes", len(payload))
+		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
+	if declaredGzip {
+		w.Header().Set(nodeprotocol.SyncAcceptEncodingHeader, nodeprotocol.SyncEncodingGzip)
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
+}
+
+// declaredGzip reports whether the agent ever declared sync.gzip.v1. A handler
+// built without a capability reader never decodes anything.
+func (h *NodeSyncHandler) declaredGzip(ctx context.Context, agentID string) (bool, error) {
+	if h.capabilities == nil {
+		return false, nil
+	}
+	agent, err := h.capabilities.GetByAgentID(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return agent != nil && slices.Contains(agent.ObservedCapabilities, nodeprotocol.CapabilitySyncGzip), nil
+}
+
+// refuseBody answers a body that could not be read or decoded.
+func (h *NodeSyncHandler) refuseBody(w http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge), errors.Is(err, nodeprotocol.ErrSyncWireTooLarge), errors.Is(err, nodeprotocol.ErrSyncDecodedTooLarge):
+		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, nodeprotocol.ErrSyncUnknownEncoding):
+		status = http.StatusUnsupportedMediaType
+	}
+	writeNodeError(w, status, fmt.Errorf("read node report: %w", err))
+}
+
+// acquireDecode takes a decode slot for one agent, waiting a bounded time. An
+// agent may hold one slot at a time: a second compressed request of the same
+// agent while its first inflates is refused at once, so one agent cannot take
+// every slot. The returned release is safe to call more than once.
+func (h *NodeSyncHandler) acquireDecode(ctx context.Context, agentID string) (release func(), ok bool) {
+	h.decodingMu.Lock()
+	if h.decoding == nil {
+		h.decoding = map[string]struct{}{}
+	}
+	if _, busy := h.decoding[agentID]; busy {
+		h.decodingMu.Unlock()
+		return nil, false
+	}
+	h.decoding[agentID] = struct{}{}
+	h.decodingMu.Unlock()
+	forget := func() {
+		h.decodingMu.Lock()
+		delete(h.decoding, agentID)
+		h.decodingMu.Unlock()
+	}
+	timer := time.NewTimer(h.decodeWait)
+	defer timer.Stop()
+	select {
+	case h.decodeSlots <- struct{}{}:
+	case <-timer.C:
+		forget()
+		return nil, false
+	case <-ctx.Done():
+		forget()
+		return nil, false
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-h.decodeSlots; forget() }) }, true
 }
 
 func writeNodeError(w http.ResponseWriter, status int, err error) {

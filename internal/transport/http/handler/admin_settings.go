@@ -653,6 +653,9 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	// written back exactly as loaded, so a save here cannot reset a debounce an
 	// admin set there (TestSettingsPut_PreservesEveryDestKey).
 	s.SetAccessControlSettings(prev.AccessControlSettings())
+	// The link-probe keys (transit_probe_*) have their own endpoint the same
+	// way (PUT /transit/probe-settings): written back exactly as loaded.
+	s.SetTransitProbeSettings(prev.TransitProbeSettings())
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})

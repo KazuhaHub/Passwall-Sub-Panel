@@ -423,7 +423,11 @@ type nodeRow struct {
 	// (0 = its own server). See domain.Node.EgressPanelID.
 	EgressPanelID int64           `gorm:"not null;default:0;index"`
 	RelayHealth   jsonRelayHealth `gorm:"column:relay_health"`
-	CreatedAt     time.Time
+	// ParentNodeID / ParentLineID mark the hidden listener of a tunnel-mode
+	// relay line (domain.Node.ParentNodeID); 0 / '' on every ordinary node.
+	ParentNodeID int64  `gorm:"not null;default:0;index"`
+	ParentLineID string `gorm:"size:128;not null;default:''"`
+	CreatedAt    time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -494,6 +498,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		ShowRelayStatus:         r.ShowRelayStatus,
 		EgressPanelID:           r.EgressPanelID,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
+		ParentNodeID:            r.ParentNodeID,
+		ParentLineID:            r.ParentLineID,
 		CreatedAt:               r.CreatedAt,
 	}, nil
 }
@@ -561,6 +567,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		ShowRelayStatus:    n.ShowRelayStatus,
 		EgressPanelID:      n.EgressPanelID,
 		RelayHealth:        jsonRelayHealth(n.RelayHealth),
+		ParentNodeID:       n.ParentNodeID,
+		ParentLineID:       n.ParentLineID,
 		CreatedAt:          n.CreatedAt,
 	}, nil
 }
@@ -986,6 +994,8 @@ type xuiPanelRow struct {
 	Username string `gorm:"size:255"`
 	Password string `gorm:"type:text"`
 	Remark   string `gorm:"size:255"`
+	Region   string `gorm:"size:32"`
+	Tags     jsonStrings
 	// Additive preference; empty legacy values are effectively stable. Keep raw
 	// values so omitted edits cannot erase preferences written by newer builds.
 	UpdateChannel string `gorm:"size:16;not null;default:''"`
@@ -1136,6 +1146,8 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		Username:           r.Username,
 		Password:           password,
 		Remark:             r.Remark,
+		Region:             r.Region,
+		Tags:               []string(r.Tags),
 		UpdateChannel:      domain.PanelUpdateChannel(r.UpdateChannel),
 		AuthMethod:         domain.XUIAuthMethod(r.AuthMethod),
 		InsecureSkipVerify: r.InsecureSkipVerify,
@@ -1170,6 +1182,8 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		Username:           p.Username,
 		Password:           password,
 		Remark:             p.Remark,
+		Region:             p.Region,
+		Tags:               jsonStrings(p.Tags),
 		UpdateChannel:      string(p.UpdateChannel),
 		AuthMethod:         string(p.AuthMethod),
 		InsecureSkipVerify: p.InsecureSkipVerify,
@@ -1679,6 +1693,10 @@ var schemaModels = []any{
 	&legalConsentRow{},
 	&transitForwardRow{},
 	&transitLinkRow{},
+	&transitProbeRow{},
+	&transitFrontRow{},
+	&transitRouteRow{},
+	&transitRouteListRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

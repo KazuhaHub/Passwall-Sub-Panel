@@ -14,6 +14,7 @@ import type { CodeEditorHandle } from '@/components/CodeEditor'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
+import { isRouteImpactCancelled } from '@/utils/destRouteImpact'
 import { useCreateDestList, useDestList, useDestLists, useDestPolicies, useDestStatus, useSaveDestList } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { enforcingNodeCount, limitKindKey } from '@/utils/accessControl'
@@ -185,6 +186,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
       onClose()
       onSaved(out.list.id)
     } catch (err) {
+      if (isRouteImpactCancelled(err)) return
       const e = destErrorOf(err)
       if (!e) { setSaveError(destErrorText(t, err)); return }
       if (e.code === 'dest_list_stale') setStale(true)

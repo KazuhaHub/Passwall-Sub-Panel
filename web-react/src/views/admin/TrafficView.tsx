@@ -357,7 +357,7 @@ export default function TrafficView() {
                       {nodeItems.map((r, i) => (
                         <TableRow key={r.node_id} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}` } }}>
                           <TableCell sx={{ color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</TableCell>
-                          <TableCell sx={{ fontWeight: 500 }}>{r.display_name}</TableCell>
+                          <TableCell sx={{ fontWeight: 500 }}>{r.tunnel_line ? t('traffic.node_tunnel_line', { parent: r.parent_name ?? `#${r.parent_node_id ?? 0}`, line: r.line_name ?? '' }) : r.display_name}</TableCell>
                           <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{r.panel_name}</TableCell>
                           <TableCell sx={{ fontSize: 13 }}>{r.region}</TableCell>
                           <TableCell align="right" sx={{ fontSize: 13 }}>{bytesToHuman(r.period_used_bytes)}</TableCell>

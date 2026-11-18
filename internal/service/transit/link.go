@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -28,6 +30,7 @@ type LinkRepo interface {
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
 	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
+	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
 }
 
@@ -63,6 +66,15 @@ type LinkPlan struct {
 	Out        []nodeprotocol.LinkOut
 	Egress     []nodeprotocol.EgressBinding
 	EgressExit map[int64]int64
+	// RouteKeys is, on an entry server asked for routes, the link from it to
+	// each exit server its nodes' routes name: the key exists as soon as the
+	// link row does, sent or not. RouteOut holds the ones whose outgoing half
+	// is in Out. A route whose exit is in RouteKeys but not RouteOut cannot be
+	// sent: its listener is withheld instead, because sending the route
+	// without the link would be refused and dropping it would leave the
+	// destinations through the default exit.
+	RouteKeys map[int64]nodeprotocol.LinkKey
+	RouteOut  map[int64]nodeprotocol.LinkKey
 	// Changed reports that what is sent differs from the last sync, which
 	// changes which nodes are publishable.
 	Changed bool
@@ -78,7 +90,12 @@ type LinkPlan struct {
 // than leaving from the entry, and the node is withheld from subscriptions by
 // readiness. Leaving locally in the meantime would quietly replace the exit the
 // administrator chose.
-func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]bool) (LinkPlan, error) {
+//
+// routes says the server asked declared transit.route.v1: only then are the
+// links its nodes' routes leave through part of its outgoing half. The exit of
+// such a link takes its incoming half whatever the entry declared, so the link
+// is ready as soon as the entry can use it.
+func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (LinkPlan, error) {
 	if s.links == nil {
 		return LinkPlan{}, nil
 	}
@@ -88,21 +105,42 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 	}
 	type pair struct{ entry, exit int64 }
 	bound := map[pair][]*domain.Node{}
+	// viaRoute are the pairs some route of an enabled node leaves through.
+	viaRoute := map[pair]bool{}
 	for _, node := range nodes {
-		if node == nil || node.EgressPanelID == 0 || !node.Enabled || node.IsSeparator() || node.EgressPanelID == node.PanelID {
+		if node == nil || !node.Enabled || node.IsSeparator() {
 			continue
 		}
-		if node.PanelID != panelID && node.EgressPanelID != panelID {
-			continue
+		if node.EgressPanelID != 0 && node.EgressPanelID != node.PanelID && (node.PanelID == panelID || node.EgressPanelID == panelID) {
+			key := pair{node.PanelID, node.EgressPanelID}
+			bound[key] = append(bound[key], node)
 		}
-		key := pair{node.PanelID, node.EgressPanelID}
-		bound[key] = append(bound[key], node)
+		for _, route := range node.DestRoutes {
+			if route.Target.Kind != domain.DestRouteServer || route.Target.PanelID <= 0 || route.Target.PanelID == node.PanelID {
+				continue
+			}
+			if (node.PanelID == panelID && routes) || route.Target.PanelID == panelID {
+				if s.panelGone != nil && s.panelGone(ctx, route.Target.PanelID) {
+					// A route to a deleted server has no tunnel: its listener is
+					// withheld by the routing plan, and none is made or kept for it.
+					continue
+				}
+				viaRoute[pair{node.PanelID, route.Target.PanelID}] = true
+			}
+		}
 	}
-	if len(bound) == 0 {
+	if len(bound) == 0 && len(viaRoute) == 0 {
 		return LinkPlan{}, nil
 	}
-	pairs := make([]pair, 0, len(bound))
+	pairSet := make(map[pair]bool, len(bound)+len(viaRoute))
 	for key := range bound {
+		pairSet[key] = true
+	}
+	for key := range viaRoute {
+		pairSet[key] = true
+	}
+	pairs := make([]pair, 0, len(pairSet))
+	for key := range pairSet {
 		pairs = append(pairs, key)
 	}
 	sort.Slice(pairs, func(i, j int) bool {
@@ -121,11 +159,20 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 	}
 	plan := LinkPlan{EgressExit: map[int64]int64{}}
 	for _, key := range pairs {
-		link, err := s.links.EnsureLink(ctx, key.entry, key.exit, func() (domain.TransitLink, error) {
-			return s.newLink(ctx, nodes, key.entry, key.exit)
-		})
+		link, ok, err := s.ensurePairLink(ctx, nodes, key.entry, key.exit)
 		if err != nil {
 			return LinkPlan{}, fmt.Errorf("transit: link %d→%d: %w", key.entry, key.exit, err)
+		}
+		if !ok {
+			// Nothing uses the pair any more: it was dropped after the nodes were
+			// read, and is not made again.
+			continue
+		}
+		if key.entry == panelID && viaRoute[key] {
+			if plan.RouteKeys == nil {
+				plan.RouteKeys = map[int64]nodeprotocol.LinkKey{}
+			}
+			plan.RouteKeys[key.exit] = nodeprotocol.NewLinkKey(link.ID)
 		}
 		if key.exit == panelID {
 			in := link.LinkIn()
@@ -176,8 +223,54 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 			plan.EgressExit[node.ID] = key.exit
 		}
 		plan.Out = append(plan.Out, out)
+		if viaRoute[key] {
+			if plan.RouteOut == nil {
+				plan.RouteOut = map[int64]nodeprotocol.LinkKey{}
+			}
+			plan.RouteOut[key.exit] = out.Key
+		}
 	}
 	return plan, nil
+}
+
+// ensurePairLink returns the link of a pair, making it when it does not exist.
+// Making one happens under the locks of both servers, and only if a node of the
+// entry still uses the pair at that moment: a save that has just dropped the
+// tunnel (it removes it under the same locks) must not see it come back because
+// this sync read the nodes a moment earlier.
+func (s *Service) ensurePairLink(ctx context.Context, nodes []*domain.Node, entry, exit int64) (domain.TransitLink, bool, error) {
+	if link, err := s.links.GetLink(ctx, entry, exit); err == nil {
+		return link, true, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return domain.TransitLink{}, false, err
+	}
+	defer s.lockPair(entry, exit)()
+	if s.serverLock != nil {
+		fresh, err := s.nodes.List(ctx)
+		if err != nil {
+			return domain.TransitLink{}, false, err
+		}
+		nodes = fresh
+		used := false
+		for _, node := range nodes {
+			if node == nil || node.PanelID != entry || !node.Enabled || node.IsSeparator() {
+				continue
+			}
+			if node.EgressPanelID == exit {
+				used = true
+			}
+			for _, route := range node.DestRoutes {
+				used = used || (route.Target.Kind == domain.DestRouteServer && route.Target.PanelID == exit)
+			}
+		}
+		if !used {
+			return domain.TransitLink{}, false, nil
+		}
+	}
+	link, err := s.links.EnsureLink(ctx, entry, exit, func() (domain.TransitLink, error) {
+		return s.newLink(ctx, nodes, entry, exit)
+	})
+	return link, err == nil, err
 }
 
 // sent records what one side of a link is being sent; "" records that it is
@@ -258,6 +351,70 @@ func (s *Service) RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Tra
 	return nil
 }
 
+// EnsureLink makes sure the tunnel from entry to exit exists, with fresh
+// credentials and a port on the exit when it does not, and returns it. A route
+// that leaves through another server asks for it when it is saved, so the
+// administrator sees the link before the first sync; the sync creates it the
+// same way when it is missing.
+func (s *Service) EnsureLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, errors.New("transit: tunnels are not enabled")
+	}
+	if entry <= 0 || exit <= 0 || entry == exit {
+		return domain.TransitLink{}, fmt.Errorf("%w: a tunnel joins two different servers", domain.ErrValidation)
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return domain.TransitLink{}, fmt.Errorf("transit: list nodes: %w", err)
+	}
+	return s.links.EnsureLink(ctx, entry, exit, func() (domain.TransitLink, error) {
+		return s.newLink(ctx, nodes, entry, exit)
+	})
+}
+
+// OutUsable says whether the entry's half of the link to exit can be sent: an
+// address to dial exists (the link's own, else the one the exit's sync came
+// from) and the half passes the wire contract. A link that does not exist yet is
+// judged with the credentials it would be made with.
+func (s *Service) OutUsable(ctx context.Context, entry, exit int64) (bool, error) {
+	if s.links == nil {
+		return false, nil
+	}
+	link, err := s.links.GetLink(ctx, entry, exit)
+	if errors.Is(err, domain.ErrNotFound) {
+		link = domain.TransitLink{ID: 1, Protocol: nodeprotocol.LinkProtocolSS2022, Port: 20000,
+			SSMethod: "2022-blake3-aes-128-gcm", SSKey: "AAAAAAAAAAAAAAAAAAAAAA=="}
+	} else if err != nil {
+		return false, err
+	}
+	addresses, err := s.serverAddresses(ctx, []int64{exit})
+	if err != nil {
+		return false, err
+	}
+	out := link.LinkOut(domain.TransitLinkAddress(link, addresses[exit]))
+	return nodeprotocol.ValidateLinkOut(out) == nil, nil
+}
+
+// RemoveLink deletes the tunnel from entry to exit and frees its port. The
+// caller has checked that nothing uses the pair any more: a node's default exit
+// and every route leaving through it.
+func (s *Service) RemoveLink(ctx context.Context, entry, exit int64) error {
+	if s.links == nil {
+		return nil
+	}
+	_, err := s.links.DeleteLink(ctx, entry, exit)
+	return err
+}
+
+// LinkRow returns the link from entry to exit as stored, domain.ErrNotFound
+// when none exists.
+func (s *Service) LinkRow(ctx context.Context, entry, exit int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, domain.ErrNotFound
+	}
+	return s.links.GetLink(ctx, entry, exit)
+}
+
 // ServerAddress is the address PSP last saw a server's sync come from, or "".
 func (s *Service) ServerAddress(ctx context.Context, panelID int64) (string, error) {
 	if s.agents == nil {
@@ -289,13 +446,186 @@ func (s *Service) serverAddresses(ctx context.Context, panelIDs []int64) (map[in
 	return out, nil
 }
 
+// ErrReservedPortTaken is returned when the port promised to a new link was
+// taken by something else before the link was made: the link is not made on
+// another port behind the back of a confirmation that listed this one.
+var ErrReservedPortTaken = fmt.Errorf("%w: the port planned for the tunnel was taken: plan it again", domain.ErrConflict)
+
+func (s *Service) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// liveReservations are the ports promised on an exit server that have not
+// expired (expired ones are forgotten).
+func (s *Service) liveReservations(exit int64) map[int]bool {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	live := map[int]bool{}
+	for key, r := range s.reserved {
+		if !r.expires.After(s.clock()) {
+			delete(s.reserved, key)
+			continue
+		}
+		if key[1] == exit {
+			live[r.port] = true
+		}
+	}
+	return live
+}
+
+// ReservedPorts are the link ports promised on a server and still live. Every
+// allocator of ports on a server reads them, so that none hands one out.
+func (s *Service) ReservedPorts(exit int64) []int {
+	live := s.liveReservations(exit)
+	out := make([]int, 0, len(live))
+	for port := range live {
+		out = append(out, port)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func (s *Service) takeReservation(key [2]int64) (reservation, bool) {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	r, had := s.reserved[key]
+	delete(s.reserved, key)
+	return r, had
+}
+
+func (s *Service) putReservation(key [2]int64, r reservation) {
+	s.reservedMu.Lock()
+	defer s.reservedMu.Unlock()
+	if s.reserved == nil {
+		s.reserved = map[[2]int64]reservation{}
+	}
+	s.reserved[key] = r
+}
+
+// PlanLink says which port on the exit server the tunnel from entry uses: the
+// existing link's, or the one a new link will be made with. Making it reserves
+// the port for the pair for ten minutes, so that a confirmation that lists the
+// port is followed by a link that has it; the reservation is honoured by every
+// other link's allocation. The caller holds the exit server's lock (a node save
+// does), which makes the choice and the use of the port one critical section.
+func (s *Service) PlanLink(ctx context.Context, entry, exit int64) (int, bool, error) {
+	return s.PlanLinkPort(ctx, entry, exit, 0)
+}
+
+// PlanLinkPort reserves the requested port for a new link, or chooses one
+// when requested is zero. Occupied ports may include other listeners in the
+// same setup that have yet to be saved. Existing links keep their port.
+func (s *Service) PlanLinkPort(ctx context.Context, entry, exit int64, requested int, occupied ...int) (int, bool, error) {
+	if s.links == nil {
+		return 0, false, errors.New("transit: tunnels are not enabled")
+	}
+	if link, err := s.links.GetLink(ctx, entry, exit); err == nil {
+		if requested != 0 && link.Port != requested {
+			return 0, true, fmt.Errorf("%w: the transit tunnel from server %d to server %d already uses port %d", domain.ErrConflict, entry, exit, link.Port)
+		}
+		return link.Port, true, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return 0, false, err
+	}
+	if requested < 0 || requested > 65535 {
+		return 0, false, fmt.Errorf("%w: port %d is out of range", domain.ErrValidation, requested)
+	}
+	if owner, reserved := domain.NodeReservedPort(requested); reserved {
+		return 0, false, fmt.Errorf("%w: port %d is reserved for the %s on server %d", domain.ErrValidation, requested, owner, exit)
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	key := [2]int64{entry, exit}
+	r, had := s.takeReservation(key) // so that its own promise does not count against it
+	if requested != 0 {
+		if slices.Contains(occupied, requested) || !s.portFree(ctx, nodes, exit, requested) {
+			if had {
+				s.putReservation(key, r)
+			}
+			return 0, false, fmt.Errorf("%w: transit port %d is unavailable on server %d", domain.ErrValidation, requested, exit)
+		}
+		s.putReservation(key, reservation{port: requested, expires: s.clock().Add(reservationTTL)})
+		return requested, false, nil
+	}
+	if had && r.expires.After(s.clock()) && !slices.Contains(occupied, r.port) && s.portFree(ctx, nodes, exit, r.port) {
+		// Seen again, the same promise is kept (and its ten minutes begin anew).
+		s.putReservation(key, reservation{port: r.port, expires: s.clock().Add(reservationTTL)})
+		return r.port, false, nil
+	}
+	port, err := s.freeExitPortLocked(ctx, nodes, exit, occupied...)
+	if err != nil {
+		return 0, false, err
+	}
+	s.putReservation(key, reservation{port: port, expires: s.clock().Add(reservationTTL)})
+	return port, false, nil
+}
+
+// portFree says nothing holds the port on the exit server: its inbounds,
+// forwards entering it, other links, the fronts' ports and loopbacks, and the
+// other live reservations. The caller holds allocMu.
+func (s *Service) portFree(ctx context.Context, nodes []*domain.Node, exit int64, port int) bool {
+	if s.liveReservations(exit)[port] {
+		return false
+	}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if node.PanelID == exit && node.DesiredPort == port {
+			return false
+		}
+		for _, relay := range node.Relays {
+			if desired, ok := domain.DesiredManagedForward(node, relay); ok && desired.EntryPanelID == exit && desired.Port == port {
+				return false
+			}
+		}
+	}
+	if links, err := s.links.ListLinks(ctx); err != nil {
+		return false
+	} else {
+		for _, link := range links {
+			if link.ExitPanelID == exit && link.Port == port {
+				return false
+			}
+		}
+	}
+	return s.portInUse == nil || !s.portInUse(ctx, exit, port)
+}
+
+// reservedPort takes the port PlanLink reserved for a pair, and reports whether
+// there was one. found with ok false means it was promised and has been taken
+// since.
+func (s *Service) reservedPort(ctx context.Context, nodes []*domain.Node, entry, exit int64) (port int, found, ok bool) {
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	r, has := s.takeReservation([2]int64{entry, exit})
+	if !has || !r.expires.After(s.clock()) {
+		return 0, false, false
+	}
+	// Its own reservation is already gone, so portFree sees only the others.
+	return r.port, true, s.portFree(ctx, nodes, exit, r.port)
+}
+
 // newLink creates a link with fresh credentials for both protocols (so an
 // administrator can switch protocol without new secrets), a free port on the
 // exit and a camouflage site drawn from the defaults.
 func (s *Service) newLink(ctx context.Context, nodes []*domain.Node, entry, exit int64) (domain.TransitLink, error) {
-	port, err := s.freeExitPort(ctx, nodes, exit)
-	if err != nil {
-		return domain.TransitLink{}, err
+	port, promised, usable := s.reservedPort(ctx, nodes, entry, exit)
+	switch {
+	case promised && !usable:
+		return domain.TransitLink{}, ErrReservedPortTaken
+	case !promised:
+		var err error
+		if port, err = s.freeExitPort(ctx, nodes, exit); err != nil {
+			return domain.TransitLink{}, err
+		}
 	}
 	ssKey := make([]byte, 16)
 	if _, err := rand.Read(ssKey); err != nil {
@@ -328,7 +658,19 @@ func (s *Service) newLink(ctx context.Context, nodes []*domain.Node, entry, exit
 // freeExitPort picks a random port in the link range that nothing on the exit
 // server uses: its inbounds, forwards entering it, and its other links.
 func (s *Service) freeExitPort(ctx context.Context, nodes []*domain.Node, exit int64) (int, error) {
-	used := map[int]bool{}
+	s.allocMu.Lock()
+	defer s.allocMu.Unlock()
+	return s.freeExitPortLocked(ctx, nodes, exit)
+}
+
+// freeExitPortLocked is freeExitPort for a caller holding allocMu. The live
+// reservations of other links on the server count as used, and so does anything
+// the port check names (shared ports, loopbacks).
+func (s *Service) freeExitPortLocked(ctx context.Context, nodes []*domain.Node, exit int64, occupied ...int) (int, error) {
+	used := s.liveReservations(exit)
+	for _, port := range occupied {
+		used[port] = true
+	}
 	for _, node := range nodes {
 		if node == nil {
 			continue
@@ -356,7 +698,7 @@ func (s *Service) freeExitPort(ctx context.Context, nodes []*domain.Node, exit i
 		if err != nil {
 			return 0, err
 		}
-		if port := linkPortLow + int(n.Int64()); !used[port] {
+		if port := linkPortLow + int(n.Int64()); !used[port] && (s.portInUse == nil || !s.portInUse(ctx, exit, port)) {
 			return port, nil
 		}
 	}

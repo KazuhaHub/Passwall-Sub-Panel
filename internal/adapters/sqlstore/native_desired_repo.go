@@ -35,6 +35,11 @@ func (r *nativeDesiredRepo) Load(ctx context.Context, panelID int64) (*ports.Nat
 			}
 			result.Nodes[i] = node
 		}
+		// The routes by destination (transit.route.v1) are part of the closure a
+		// config is minted from.
+		if err := attachRouteState(ctx, tx, result.Nodes); err != nil {
+			return err
+		}
 
 		var clientRows []pspClientRow
 		if err := tx.Where("panel_id = ?", panelID).Order("id").Find(&clientRows).Error; err != nil {

@@ -422,13 +422,13 @@ func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, it
 			out = append(out, emitSeparator(it.name))
 			continue
 		}
-		inb := inboundByNode[it.node.ID]
+		inb := inboundByNode[it.listener().ID]
 		if inb == nil {
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		if _, native := nativePanels[it.node.PanelID]; native && !preview {
+		if _, native := nativePanels[it.listener().PanelID]; native && !preview {
 			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
@@ -436,8 +436,8 @@ func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, it
 			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it, emailRules, appliedCredentials)
-		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
-			mlkemFirstRealityByPanel[it.node.PanelID])
+		block, err := emitProxy(it.name, it.listener(), renderUser, inb, userEmail, appliedPassword, it.relay,
+			mlkemFirstRealityByPanel[it.listener().PanelID])
 		if err != nil {
 			log.Warn("render: skip node, emit failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -474,7 +474,7 @@ func (s *Service) nativePanelIDs(ctx context.Context, items []renderItem) map[in
 	wanted := make(map[int64]struct{})
 	for _, item := range items {
 		if !item.isSeparator && item.node != nil {
-			wanted[item.node.PanelID] = struct{}{}
+			wanted[item.listener().PanelID] = struct{}{}
 		}
 	}
 	for panelID := range wanted {
@@ -506,14 +506,14 @@ func (s *Service) mlkemFirstRealityPanels(ctx context.Context, items []renderIte
 		if item.isSeparator || item.node == nil {
 			continue
 		}
-		inbound := inbounds[item.node.ID]
+		inbound := inbounds[item.listener().ID]
 		if inbound == nil {
 			continue
 		}
 		if !inboundUsesReality(inbound) {
 			continue
 		}
-		wanted[item.node.PanelID] = struct{}{}
+		wanted[item.listener().PanelID] = struct{}{}
 	}
 	result := make(map[int64]bool, len(wanted))
 	for panelID := range wanted {
@@ -554,6 +554,7 @@ func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.
 		return nil
 	}
 	out := make(appliedCredentials)
+	tunnelListeners := map[int64]*domain.Node{}
 	for _, client := range clients {
 		if client == nil {
 			continue
@@ -578,6 +579,10 @@ func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.
 			key := domain.DirectLine(attachment.NodeID)
 			if hasLine && attachment.NodeID == line.NodeID {
 				key = line
+			} else if hasLine && !line.IsDirect() && s.isTunnelListenerOf(ctx, attachment.NodeID, line, tunnelListeners) {
+				// A tunnel line's client is attached to the line's own listener
+				// on the entry server, not to its landing node.
+				key = line
 			}
 			out[key] = appliedClientCredential{
 				Email: attachment.AppliedEmail, UUID: attachment.AppliedUUID,
@@ -586,6 +591,23 @@ func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.
 		}
 	}
 	return out
+}
+
+// isTunnelListenerOf reports whether the node is the hidden listener of the
+// tunnel-mode line. Lookups are cached for one resolution.
+func (s *Service) isTunnelListenerOf(ctx context.Context, nodeID int64, line domain.LineKey, cache map[int64]*domain.Node) bool {
+	if s.repos.Node == nil {
+		return false
+	}
+	node, seen := cache[nodeID]
+	if !seen {
+		var err error
+		if node, err = s.repos.Node.GetByID(ctx, nodeID); err != nil {
+			node = nil
+		}
+		cache[nodeID] = node
+	}
+	return node != nil && node.ParentNodeID == line.NodeID && node.ParentLineID == line.LineID
 }
 
 // credentialFor is the applied credential an entry renders with: its own
@@ -599,7 +621,9 @@ func credentialFor(applied appliedCredentials, it renderItem) (appliedClientCred
 	if c, ok := applied[key]; ok {
 		return c, true
 	}
-	if !key.IsDirect() {
+	// A tunnel line is served by a listener of its own, which the direct line's
+	// identity is not accepted on: it has nothing to fall back to.
+	if !key.IsDirect() && !(it.relay != nil && it.relay.Tunnel()) {
 		c, ok := applied[domain.DirectLine(it.node.ID)]
 		return c, ok
 	}
@@ -643,12 +667,12 @@ func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderI
 		if it.isSeparator || it.node == nil {
 			continue
 		}
-		ids, ok := panelInboundIDs[it.node.PanelID]
+		ids, ok := panelInboundIDs[it.listener().PanelID]
 		if !ok {
 			ids = map[int]struct{}{}
-			panelInboundIDs[it.node.PanelID] = ids
+			panelInboundIDs[it.listener().PanelID] = ids
 		}
-		ids[it.node.InboundID] = struct{}{}
+		ids[it.listener().InboundID] = struct{}{}
 	}
 	if len(panelInboundIDs) == 0 {
 		return nil
@@ -744,9 +768,9 @@ recv:
 		if it.isSeparator || it.node == nil {
 			continue
 		}
-		if panel, ok := byPanel[it.node.PanelID]; ok {
-			if inb, found := panel[it.node.InboundID]; found {
-				out[it.node.ID] = inb
+		if panel, ok := byPanel[it.listener().PanelID]; ok {
+			if inb, found := panel[it.listener().InboundID]; found {
+				out[it.listener().ID] = inb
 			}
 		}
 	}

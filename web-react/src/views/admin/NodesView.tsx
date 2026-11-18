@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
 import { useSearchParams } from 'react-router'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Autocomplete,
   Alert,
   Box,
@@ -15,6 +18,9 @@ import {
   DialogTitle,
   IconButton,
   Switch,
+  Step,
+  StepLabel,
+  Stepper,
   Tab,
   Table,
   TableBody,
@@ -33,6 +39,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import CloudSyncIcon from '@mui/icons-material/CloudSync'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +57,10 @@ import {
   deleteSeparator,
   detachNode,
   generateRealityKeypair,
+  previewNodeSetup,
+  type CreateInboundRequest,
+  type NodeSetupOptions,
+  type NodeSetupPlan,
   getNode,
   importNode,
   recreateNodeInbound,
@@ -63,7 +74,6 @@ import {
   getTransitLink,
   updateTransitLink,
   type TransitLink,
-  type TransitLinkProtocol,
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
 import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
@@ -75,17 +85,27 @@ import { previewSeparatorGroups, type LineVisibilityDraft, type SeparatorGroupsP
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
+import { registerServerNames } from '@/utils/tunnelConfirm'
 import { useQueryScope } from '@/query/useQueryScope'
 import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
 import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
+import LinkQualityCell from './LinkQualityCell'
+import TransitLinkFields from './TransitLinkFields'
+import RoutesSection from './routes/RoutesSection'
+import { draftIssues, inputOf, type DraftRoute } from './routes/routeDraft'
+import ProbeQualityChip from './ProbeQualityChip'
+import TunnelLineEditor, { mergeServerLine } from './TunnelLineEditor'
+import CdnLineFields, { CDN_DEFAULT_PORT } from './CdnLineFields'
+import { SetupEntries, SetupReview, type SetupRelay } from './NodeSetupFields'
+import NodeLinesTable from './NodeLinesTable'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
 import { previewHint, useDraftPreview } from '@/hooks/useDraftPreview'
 import PreviewCaption from '@/components/PreviewCaption'
 import { useQueryClient } from '@tanstack/react-query'
-import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
+import { randomRealitySite, xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 
 /** The managed-tab read always covers the whole set, so its key is a constant. */
 const NODES_PARAMS = { page: 1, page_size: 500 } as const
@@ -144,6 +164,8 @@ type RelayDraft = RelayLine & {
   /** The admin changed this line's multiplier in this edit session. */
   _factor_touched?: boolean
 }
+/** The entry select's value for a CDN line (a server id is never negative). */
+const CDN_ENTRY = -1
 let relayDraftSeq = 0
 const newRelayKey = () => `new-${++relayDraftSeq}`
 
@@ -482,9 +504,6 @@ export function serverHost(server?: Pick<Server, 'panel_type' | 'url' | 'address
   return hostFromURL(server.url)
 }
 
-// Camouflage sites a REALITY tunnel draws from when the administrator does
-// not name one; the panel picks one at random for a new tunnel too.
-const TUNNEL_REALITY_SITES = ['www.asus.com', 'www.samsung.com', 'www.nvidia.com', 'www.amd.com', 'www.intel.com']
 // How often the node editor asks whether a pending tunnel now runs on both
 // servers.
 const EGRESS_READY_POLL_MS = 5000
@@ -1085,6 +1104,7 @@ interface FieldsProps {
   servers?: Server[]
   server?: Server
   onGenKeys: () => void | Promise<void>
+  onRandomRealitySite?: () => void
   onGenSSPassword: () => void
   genKeysBusy: boolean
   protocolReadonly?: boolean
@@ -1105,7 +1125,7 @@ interface FieldsProps {
   allowRealityScan?: boolean
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, server, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, server, onGenKeys, onRandomRealitySite, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1342,8 +1362,13 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                   // when the field is still untouched (empty, or equal to the
                   // previously-selected server's host). A manual edit wins.
                   setForm(prev => {
-                    const prevHost = serverHost(servers.find(s => s.id === prev.panel_id))
+                    const previousServer = servers.find(s => s.id === prev.panel_id)
+                    const prevHost = serverHost(previousServer)
                     const next = { ...prev, panel_id: v.id }
+                    if (!prev.display_name || prev.display_name === previousServer?.name) {
+                      next.display_name = v.name
+                    }
+                    if (!prev.region || prev.region === previousServer?.region) next.region = v.region ?? ''
                     if (v.panel_type !== '3xui') {
                       if (next.vless_network === 'xhttp') next.vless_network = 'tcp'
                       next.enable = true
@@ -1692,6 +1717,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, server, onGen
                     <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.reality_dest')}
                       value={form.reality_dest}
                       onChange={e => update('reality_dest', e.target.value)} />
+                    {onRandomRealitySite && <Button type="button" size="small" variant="outlined"
+                      onClick={onRandomRealitySite} sx={{ whiteSpace: 'nowrap' }}>
+                      {t('admin:nodes.egress.random_site')}
+                    </Button>}
                     <Button type="button" size="small" variant="outlined"
                       disabled={!form.panel_id || !canScanReality}
                       onClick={() => setRealityScannerOpen(true)}
@@ -2102,7 +2131,7 @@ export default function NodesView() {
   // tz disclosed when they differ), consistent with the other admin pages.
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'managed' | 'unmanaged'>('tab', 'managed', ['managed', 'unmanaged'])
+  const [tab, setTab] = useTabParam<'managed' | 'unmanaged' | 'lines'>('tab', 'managed', ['managed', 'unmanaged', 'lines'])
   const qScope = useQueryScope()
   const queryClient = useQueryClient()
   // Drag-to-reorder spans the full set, so the query fetches everything; the
@@ -2426,6 +2455,8 @@ export default function NodesView() {
   // has one owner instead of two independent fetchers.
   const serversQuery = useServersList(qScope, { page: 1, page_size: 200 })
   const servers = serversQuery.data?.items ?? []
+  // Tunnel confirmations name the servers whose ports open and close.
+  useEffect(() => { registerServerNames(serversQuery.data?.items ?? []) }, [serversQuery.data])
   const writableServers = useMemo(
     () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
@@ -2436,6 +2467,12 @@ export default function NodesView() {
     () => servers.filter(s => s.panel_type === 'psp' && s.id !== editing?.panel_id),
     [servers, editing?.panel_id],
   )
+  // The editor opened on a tunnel line's hidden listener: the server takes its
+  // name, address, exit and multiplier from the line, so those fields are left out.
+  const isListener = (editing?.parent_node_id ?? 0) > 0
+  const listenerLineName = isListener
+    ? managed.find(n => n.id === editing?.parent_node_id)?.relays?.find(x => x.id === editing?.parent_line_id)?.name
+    : undefined
   // The tunnel of the node being edited, between its server and the chosen
   // exit. Its settings are shared by every node of the pair.
   const [linkForm, setLinkForm] = useState<TransitLink | null>(null)
@@ -2492,6 +2529,21 @@ export default function NodesView() {
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<InboundFormState>(EMPTY_INBOUND)
   const [genKeysBusy, setGenKeysBusy] = useState(false)
+  const createKeyIntent = useRef(0)
+  const [setupStep, setSetupStep] = useState(0)
+  const [setupEntriesBusy, setSetupEntriesBusy] = useState(false)
+  const [setupDirect, setSetupDirect] = useState(true)
+  const [setupEntries, setSetupEntries] = useState<SetupRelay[]>([])
+  const [setupEgress, setSetupEgress] = useState(0)
+  const [setupPlan, setSetupPlan] = useState<NodeSetupPlan | null>(null)
+  const [setupLoopbacks, setSetupLoopbacks] = useState<Record<number, number>>({})
+  const [setupLinkPorts, setSetupLinkPorts] = useState<Record<string, number>>({})
+  const setupPortsChanged = Object.keys(setupLoopbacks).length > 0 || Object.keys(setupLinkPorts).length > 0
+  const [setupError, setSetupError] = useState('')
+  const [setupRoutes, setSetupRoutes] = useState<DraftRoute[]>([])
+  const [recentSetupEntries, setRecentSetupEntries] = useState<number[]>([])
+  const editLineTarget = useRef<string | null>(null)
+
 
   const [editInboundOpen, setEditInboundOpen] = useState(false)
   const [editInboundBusy, setEditInboundBusy] = useState(false)
@@ -2582,9 +2634,8 @@ export default function NodesView() {
     })
   }
 
-  function openEdit(n: Node) {
-    setEditing(n)
-    setEditForm({
+  function editFormOf(n: Node): MetaForm {
+    return {
       display_name: n.display_name,
       server_address: n.server_address,
       flow: n.flow ?? '',
@@ -2595,7 +2646,61 @@ export default function NodesView() {
       hide_direct: !!n.hide_direct,
       traffic_factor_milli: n.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI,
       egress_panel_id: n.egress_panel_id ?? 0,
-    })
+    }
+  }
+
+  // The form as the admin has changed it, without what the server decides
+  // (status, a tunnel line's listener and port), for telling edits from a refresh.
+  const editSnapshot = (f: MetaForm) => JSON.stringify({
+    ...f,
+    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, cdn_issues: _issues, mode: _mode, ...r }) =>
+      (_mode === 'tunnel' ? { ...r, port: 0, sni: '', host: '' } : r)),
+  })
+  // The form as it was opened or last refreshed from the server.
+  const editBaseline = useRef<MetaForm | null>(null)
+  const editFormDirty = () => linkDirty || (editBaseline.current !== null && editSnapshot(editForm) !== editSnapshot(editBaseline.current))
+
+  // The server settled one saved line (a mode switch, a listener edit or sync):
+  // show it on that row, keep every other edit, and keep the list's copy current.
+  function applyServerLine(landingId: number, relays: RelayLine[], lineId: string) {
+    setEditForm(f => ({ ...f, relays: mergeServerLine(f.relays, relays, lineId) }))
+    if (editBaseline.current) editBaseline.current = { ...editBaseline.current, relays: mergeServerLine(editBaseline.current.relays, relays, lineId) }
+    mutateManaged(prev => prev.map(x => (x.id === landingId ? { ...x, relays } : x)))
+  }
+
+  // A tunnel line's listener is a node of its own, hidden from the list: its
+  // settings open in this same editor. Unsaved edits to the landing are not carried over.
+  async function openListener(listenerId: number) {
+    if (editFormDirty()) {
+      const ok = await confirm({
+        title: t('admin:nodes.tunnel.open_discard_title'),
+        message: t('admin:nodes.tunnel.open_discard_message'),
+        destructive: true,
+      })
+      if (!ok) return
+    }
+    try {
+      const { node: listener } = await getNode(listenerId)
+      openEdit(listener)
+    } catch {
+      // The request layer already surfaced the failure.
+    }
+  }
+
+  function openEdit(n: Node, lineId?: string, addLine = false) {
+    editLineTarget.current = lineId ?? null
+    setEditing(n)
+    const form = editFormOf(n)
+    editBaseline.current = form
+    if (addLine) {
+      editLineTarget.current = newRelayKey()
+      setEditForm({
+        ...form,
+        relays: [...form.relays, { _key: editLineTarget.current, name: '', address: '', port: 0, enabled: true }],
+      })
+    } else {
+      setEditForm(form)
+    }
     setLinkForm(null)
     setLinkDirty(false)
     setEditMetaErr({})
@@ -2623,6 +2728,10 @@ export default function NodesView() {
       || editForm.relays.some(r => r._factor_text !== undefined && factorTextToMilli(r._factor_text) === null)) {
       pushSnack(t('admin:nodes.validate.traffic_factor'), 'warning'); return
     }
+    // A CDN line without a domain is not dropped like a blank row: it blocks the save.
+    if (editForm.relays.some(r => r.mode === 'cdn' && !r.domain?.trim())) {
+      pushSnack(t('admin:nodes.cdn.domain_required'), 'warning'); return
+    }
     setEditBusy(true)
     try {
       const egress = editForm.egress_panel_id ?? 0
@@ -2649,8 +2758,9 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
-          .filter(r => r.address),
+          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, cdn_issues: _issues, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), domain: r.mode === 'cdn' ? r.domain?.trim() : undefined, port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          // A CDN line may leave the address empty (it is the domain); every other line needs one.
+          .filter(r => r.address || (r.mode === 'cdn' && r.domain)),
         hide_direct: editForm.hide_direct,
         // Direct factor only when changed; relay lines carry their own value above.
         ...(editForm.traffic_factor_milli !== undefined
@@ -2661,6 +2771,12 @@ export default function NodesView() {
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       setEditing(saved)
       pushSnack(t('admin:nodes.toast.saved'), 'success')
+      // What the saved node says about its CDN lines is shown on the lines when
+      // the editor is opened again; do not let a likely problem pass unseen.
+      const flagged = (saved.relays ?? []).filter(r => r.mode === 'cdn' && r.cdn_issues?.some(i => i.warn))
+      if (flagged.length > 0) {
+        pushSnack(t('admin:nodes.cdn.saved_warnings', { lines: flagged.map(r => r.name || r.domain).join(', ') }), 'warning')
+      }
       setEditOpen(false)
     } catch {
       // The request layer already surfaced the failure.
@@ -3001,22 +3117,57 @@ export default function NodesView() {
       pushSnack(t('admin:nodes.create_dialog.no_writable_servers', { defaultValue: '当前没有支持创建 inbound 的可写面板，请先检查服务器配置与适配器能力。' }), 'warning')
       return
     }
-    setCreateForm({ ...EMPTY_INBOUND, panel_id: writableServers[0].id, server_address: serverHost(writableServers[0]) })
+    const landing = writableServers[0]
+    const site = randomRealitySite()
+    setCreateForm({
+      ...EMPTY_INBOUND, panel_id: landing.id, server_address: serverHost(landing), display_name: landing.name,
+      region: landing.region ?? '', reality_dest: `${site}:443`, reality_server_names_text: site,
+    })
     setCreateAdvanced(false)
+    setSetupStep(0)
+    setSetupEntriesBusy(false)
+    setSetupEntries([])
+    setSetupDirect(true)
+    setSetupEgress(0)
+    setSetupPlan(null)
+    setSetupLoopbacks({})
+    setSetupLinkPorts({})
+    setSetupError('')
+    setSetupRoutes([])
     setCreateOpen(true)
+    void genKeys()
+  }
+
+  function randomizeLandingSite() {
+    setCreateForm(previous => {
+      const site = randomRealitySite(splitList(previous.reality_server_names_text))
+      return { ...previous, reality_dest: `${site}:443`, reality_server_names_text: site }
+    })
+  }
+
+  function closeCreate() {
+    createKeyIntent.current += 1
+    setGenKeysBusy(false)
+    setCreateOpen(false)
   }
 
   async function genKeys() {
+    const intent = ++createKeyIntent.current
     setGenKeysBusy(true)
     try {
       const kp = await generateRealityKeypair()
+      if (intent !== createKeyIntent.current) return
       setCreateForm(f => ({
         ...f,
         private_key: kp.private_key,
         public_key: kp.public_key,
         short_ids_text: kp.short_id,
       }))
-    } finally { setGenKeysBusy(false) }
+    } catch {
+      // The request layer already surfaced the failure.
+    } finally {
+      if (intent === createKeyIntent.current) setGenKeysBusy(false)
+    }
   }
 
   function genSSPasswordCreate() {
@@ -3024,8 +3175,7 @@ export default function NodesView() {
     setCreateForm(f => ({ ...f, ss_password: randomBase64(method?.bytes ?? 32) }))
   }
 
-  async function submitCreate(e: FormEvent) {
-    e.preventDefault()
+  function validateSetupLanding() {
     const f = createForm
     const panelType = servers.find(s => s.id === f.panel_id)?.panel_type ?? '3xui'
     if (createAdvanced) {
@@ -3033,17 +3183,23 @@ export default function NodesView() {
       // fields like reality_dest that the raw JSON path doesn't care
       // about). We only require the metadata + JSON parses below.
       if (!f.display_name || !f.server_address || !f.region) {
-        pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning'); return
+        pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning'); return false
       }
       for (const [label, raw] of [['settings', f.raw_settings], ['streamSettings', f.raw_stream_settings], ['sniffing', f.raw_sniffing]] as const) {
         try { JSON.parse(raw || '{}') }
-        catch { pushSnack(t('admin:nodes.create_dialog.advanced_invalid_json', { field: label, defaultValue: `${label} 不是合法的 JSON` }), 'warning'); return }
+        catch { pushSnack(t('admin:nodes.create_dialog.advanced_invalid_json', { field: label, defaultValue: `${label} 不是合法的 JSON` }), 'warning'); return false }
       }
     } else {
       const err = validateInboundForm(f, panelType, t)
-      if (err) { pushSnack(err, 'warning'); return }
+      if (err) { pushSnack(err, 'warning'); return false }
     }
 
+    return true
+  }
+
+  function setupRequest(options: NodeSetupOptions): CreateInboundRequest {
+    const f = createForm
+    const panelType = servers.find(s => s.id === f.panel_id)?.panel_type ?? '3xui'
     const settings = createAdvanced
       ? (f.raw_settings || '{}')
       : JSON.stringify(settingsBuilderFor(f.protocol)(f))
@@ -3054,40 +3210,101 @@ export default function NodesView() {
       ? (f.raw_sniffing || '{}')
       : panelType === '3xui' ? JSON.stringify(buildSniffing(f)) : '{}'
 
+    return {
+      panel_id: f.panel_id,
+      display_name: f.display_name,
+      server_address: f.server_address,
+      flow: f.protocol === 'vless' ? f.vless_flow.trim() : '',
+      region: f.region,
+      tags: f.tags_text ? f.tags_text.split(',').map(s => s.trim()).filter(Boolean) : [],
+      sort_order: f.sort_order,
+      cert_source: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? 'psp_managed' : undefined,
+      cert_id: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? f.cert_id : undefined,
+      relays: setupEntries.map(({ line }) => ({
+        ...line, name: line.name.trim(), address: line.address.trim(), domain: line.domain?.trim(),
+      })),
+      hide_direct: !setupDirect,
+      egress_panel_id: setupEgress,
+      setup: options,
+      inbound: {
+        remark: f.display_name,
+        enable: panelType === '3xui' ? f.enable : true,
+        listen: f.listen,
+        port: f.port,
+        protocol: canonicalProtocolName(f.protocol),
+        settings,
+        stream_settings: streamSettings,
+        sniffing,
+        allocate: '',
+        expiry_time: 0,
+      },
+    }
+  }
+
+  async function submitCreate(e: FormEvent) {
+    e.preventDefault()
+    if (createBusy || genKeysBusy || setupEntriesBusy) return
+    setSetupError('')
+    if (setupStep === 0) {
+      if (validateSetupLanding()) {
+        setSetupEntries(entries => entries.filter(entry => entry.line.entry_panel_id !== createForm.panel_id))
+        if (setupEgress === createForm.panel_id || servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp') {
+          setSetupEgress(0)
+        }
+        if (servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp') setSetupRoutes([])
+        setSetupStep(1)
+      }
+      return
+    }
+    if (setupStep === 1) {
+      if (!setupDirect && setupEntries.length === 0) {
+        setSetupError(t('admin:nodes.setup.needs_entry'))
+        return
+      }
+      if (servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp' && setupEntries.some(e => e.line.mode === 'tunnel')) {
+        setSetupError(t('admin:nodes.setup.tunnel_landing'))
+        return
+      }
+      setSetupStep(2)
+      return
+    }
+    const tunnels = Object.fromEntries(setupEntries.flatMap(e => e.line.mode === 'tunnel' && e.line.entry_panel_id && e.tunnel
+      ? [[e.line.entry_panel_id, e.tunnel]] : []))
+    const shown = Object.fromEntries((setupPlan?.bindings ?? []).flatMap(b => b.loopback ? [[b.panel_id, b.loopback]] : []))
+    const loopbacks = { ...shown, ...setupLoopbacks }
+    const shownLinkPorts = Object.fromEntries((setupPlan?.bindings ?? []).flatMap(b => b.kind === 'link' && !b.reused
+      ? [[`${b.peer_id}/${b.panel_id}`, b.port]] : []))
+    const link_ports = { ...shownLinkPorts, ...setupLinkPorts }
+    if (draftIssues(setupRoutes).length > 0) {
+      setSetupError(t('admin:nodes.setup.invalid_routes'))
+      return
+    }
+    const options = { loopbacks, tunnels, link_ports, routes: inputOf(setupRoutes) }
     setCreateBusy(true)
     try {
-      const res = await createInbound({
-        panel_id: f.panel_id,
-        display_name: f.display_name,
-        server_address: f.server_address,
-        flow: f.protocol === 'vless' ? f.vless_flow.trim() : '',
-        region: f.region,
-        tags: f.tags_text ? f.tags_text.split(',').map(s => s.trim()).filter(Boolean) : [],
-        sort_order: f.sort_order,
-        cert_source: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? 'psp_managed' : undefined,
-        cert_id: f.tls_cert_mode === 'psp_managed' && f.cert_id > 0 ? f.cert_id : undefined,
-        inbound: {
-          remark: f.display_name,
-          enable: panelType === '3xui' ? f.enable : true,
-          listen: f.listen,
-          port: f.port,
-          protocol: canonicalProtocolName(f.protocol),
-          settings,
-          stream_settings: streamSettings,
-          sniffing,
-          allocate: '',
-          expiry_time: 0,
-        },
-      })
-      pushSnack(
-        'queued' in res
-          ? t('admin:nodes.create_dialog.queued')
-          : t('admin:nodes.create_dialog.created'),
-        'success',
-      )
-      setCreateOpen(false)
+      if (setupStep === 2 || !setupPlan || setupPortsChanged) {
+        const plan = await previewNodeSetup(setupRequest(options))
+        setSetupPlan(plan)
+        setSetupLoopbacks({})
+        setSetupLinkPorts({})
+        setSetupStep(3)
+        return
+      }
+      await createInbound(setupRequest({ ...options, confirm: setupPlan.token }))
+      const selected = setupEntries.flatMap(e => e.line.entry_panel_id ? [e.line.entry_panel_id] : [])
+      setRecentSetupEntries(previous => [...new Set([...selected, ...previous])])
+      pushSnack(t('admin:nodes.create_dialog.created'), 'success')
       setTab('managed')
-      await load()
+      closeCreate()
+      void load()
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: { error?: string } } }).response
+      setSetupError(response?.data?.error ?? t('admin:nodes.setup.request_failed'))
+      if (response?.status === 409 && setupStep === 3) {
+        setSetupPlan(null)
+        setSetupLoopbacks({})
+        setSetupLinkPorts({})
+      }
     } finally { setCreateBusy(false) }
   }
 
@@ -3373,7 +3590,7 @@ export default function NodesView() {
           <Button variant="outlined" startIcon={<AddIcon />} onClick={openSeparatorCreate}>
             {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
           </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate} disabled={serversQuery.isPending}>
             {t('admin:nodes.create')}
           </Button>
         </>}
@@ -3381,6 +3598,7 @@ export default function NodesView() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="managed" label={t('admin:nodes.tab_managed')} />
         <Tab value="unmanaged" label={t('admin:nodes.tab_unmanaged')} />
+        <Tab value="lines" label={t('admin:nodes.lines.title')} />
       </Tabs>
       {tab === 'managed' && selected.size > 0 && (
         <Box sx={{
@@ -3633,6 +3851,9 @@ export default function NodesView() {
           </>
         )}
 
+        {tab === 'lines' && (loading ? <CircularProgress size={24} /> :
+          <NodeLinesTable nodes={managed} servers={servers} canEdit={canConfig}
+            onEdit={(node, line) => openEdit(node, line)} onAdd={node => openEdit(node, undefined, true)} />)}
         {tab === 'unmanaged' && (
           <>
             <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: `1px solid ${md.outlineVariant}`, flexWrap: 'wrap' }}>
@@ -3754,38 +3975,69 @@ export default function NodesView() {
           </>
         )}
       </Card>
-      {/* Create inbound dialog (multi-protocol) */}
-      <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
-        }}>
-        <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
-          {t('admin:nodes.create_dialog.title_dynamic', {
-            protocol: PROTOCOL_OPTIONS.find(o => o.value === createForm.protocol)?.label ?? createForm.protocol,
-          })}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 1 }}>
+      <Dialog open={createOpen} onClose={() => !createBusy && !setupEntriesBusy && closeCreate()}
+        slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 880, maxWidth: '95vw' } } }}>
+        <DialogTitle>{t('admin:nodes.create')}</DialogTitle>
+        <DialogContent dividers>
+          <Stepper activeStep={setupStep} alternativeLabel sx={{ mb: 2 }}>
+            {['landing', 'entries', 'exit', 'review'].map(step => (
+              <Step key={step}><StepLabel>{t(`admin:nodes.setup.${step}`)}</StepLabel></Step>
+            ))}
+          </Stepper>
+          {setupError && <Alert severity="error" sx={{ mb: 2 }}>{setupError}</Alert>}
           <Box component="form" id="create-form" onSubmit={submitCreate}>
-            <InboundFormFields form={createForm} setForm={setCreateForm}
-              showMetadata
-              servers={writableServers}
-              onGenKeys={genKeys}
-              onGenSSPassword={genSSPasswordCreate}
-              genKeysBusy={genKeysBusy}
-              advanced={createAdvanced}
-              onSetAdvanced={setCreateAdvanced}
-              allTags={allTags}
+            {setupStep === 0 && <InboundFormFields form={createForm} setForm={setCreateForm}
+              showMetadata servers={writableServers}
+              onGenKeys={genKeys} onGenSSPassword={genSSPasswordCreate} genKeysBusy={genKeysBusy}
+              onRandomRealitySite={randomizeLandingSite}
+              advanced={createAdvanced} onSetAdvanced={setCreateAdvanced} allTags={allTags}
               panelType={servers.find(s => s.id === createForm.panel_id)?.panel_type}
-              allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')}
-            />
+              allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')} />}
+            {setupStep === 1 && <SetupEntries
+              servers={relayEntryServers.filter(s => s.id !== createForm.panel_id)} recent={recentSetupEntries}
+              canTunnel={servers.find(s => s.id === createForm.panel_id)?.panel_type === 'psp'}
+              entries={setupEntries} onChange={setSetupEntries} useDirect={setupDirect} onDirectChange={setSetupDirect}
+              hostOf={serverHost} newKey={newRelayKey} randomSite={randomRealitySite} onBusyChange={setSetupEntriesBusy}
+              tcpTLS={createForm.vless_network === 'tcp' && createForm.vless_security !== 'none'} />}
+            {setupStep === 2 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TextField select fullWidth label={t('admin:nodes.setup.exit')} value={setupEgress}
+                  disabled={servers.find(s => s.id === createForm.panel_id)?.panel_type !== 'psp'}
+                  onChange={e => setSetupEgress(Number(e.target.value))}>
+                  <MenuItem value={0}>{t('admin:nodes.setup.exit_local')}</MenuItem>
+                  {relayEntryServers.filter(s => s.id !== createForm.panel_id).map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+                </TextField>
+                {servers.find(s => s.id === createForm.panel_id)?.panel_type === 'psp' &&
+                  <Box component="details" sx={{ py: 1 }}>
+                    <Box component="summary" sx={{ cursor: 'pointer', mb: 1 }}>{t('admin:nodes.routes.title')}</Box>
+                    <RoutesSection nodeId={0} entryPanelId={createForm.panel_id} pendingExit={setupEgress}
+                      setup={{ rows: setupRoutes, setRows: setSetupRoutes }}
+                      servers={relayEntryServers.filter(s => s.id !== createForm.panel_id).map(s => ({ id: s.id, name: s.name }))} />
+                  </Box>}
+              </Box>
+            )}
+            {setupStep === 3 && setupPlan && <SetupReview plan={setupPlan} entries={setupEntries} direct={setupDirect}
+              routeCount={setupRoutes.length} peers={servers} landingPort={createForm.port} editingLoopbacks={setupLoopbacks}
+              changed={setupPortsChanged} editingLinkPorts={setupLinkPorts}
+              onLinkPort={(link, port) => setSetupLinkPorts(previous => ({ ...previous, [link]: port }))}
+              onLoopback={(server, port) => setSetupLoopbacks(previous => ({ ...previous, [server]: port }))} />}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateOpen(false)} disabled={createBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="create-form" variant="contained" disabled={createBusy}
-            startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('common:actions.ok')}
-          </Button>
+            <Button onClick={closeCreate} disabled={createBusy || setupEntriesBusy}>{t('common:actions.cancel')}</Button>
+            {setupStep > 0 && <Button onClick={() => {
+              setSetupStep(step => step - 1)
+              setSetupPlan(null)
+              setSetupLoopbacks({})
+              setSetupLinkPorts({})
+              setSetupError('')
+            }} disabled={createBusy || setupEntriesBusy}>{t('admin:nodes.setup.back')}</Button>}
+            <Button type="submit" form="create-form" variant="contained" disabled={createBusy || genKeysBusy || setupEntriesBusy}
+              startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              {t(setupStep < 2 ? 'admin:nodes.setup.next'
+                : setupStep === 2 || !setupPlan || setupPortsChanged
+                  ? 'admin:nodes.setup.review' : 'admin:nodes.setup.confirm')}
+            </Button>
         </DialogActions>
       </Dialog>
       {/* Edit Inbound config dialog (multi-protocol) */}
@@ -3950,6 +4202,10 @@ export default function NodesView() {
       {/* Metadata edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
         slotProps={{
+          transition: { onEntered: () => {
+            const target = editLineTarget.current
+            if (target) document.getElementById(`node-line-${target}`)?.scrollIntoView?.({ block: 'start' })
+          } },
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
         }}>
         <DialogTitle>
@@ -3957,31 +4213,43 @@ export default function NodesView() {
         </DialogTitle>
         <DialogContent>
           <Box component="form" id="node-form" onSubmit={submitEdit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField required fullWidth label={t('admin:nodes.field.display_name')}
+            {isListener && (
+              <Box data-testid="listener-banner" sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography sx={{ fontSize: 13 }}>
+                  {listenerLineName
+                    ? t('admin:nodes.tunnel.listener_banner', { parent: editing?.parent_node_name ?? `#${editing?.parent_node_id}`, line: listenerLineName })
+                    : t('admin:nodes.tunnel.listener_banner_no_line', { parent: editing?.parent_node_name ?? `#${editing?.parent_node_id}` })}
+                </Typography>
+                {editing && panelSupports(editing.panel_id, 'inbound.update') && (
+                  <Button size="small" sx={{ alignSelf: 'flex-start' }} onClick={() => void openEditInbound(editing)}>{t('admin:nodes.tunnel.listener_inbound')}</Button>
+                )}
+              </Box>
+            )}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.display_name')}
               value={editForm.display_name}
               onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editMetaErr.display_name}
-              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />
-            <TextField required fullWidth label={t('admin:nodes.field.server_address')}
+              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.server_address')}
               value={editForm.server_address}
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
               error={!!editMetaErr.server_address}
-              helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />
+              helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />}
             {/* Flow is a VLESS inbound-level setting, configured where the
                 inbound is created / imported — not a node-meta field. It's
                 deliberately NOT editable here; editForm.flow round-trips the
                 node's existing value unchanged on save. */}
-            <TextField required fullWidth label={t('admin:nodes.field.region')}
+            {!isListener && <TextField required fullWidth label={t('admin:nodes.field.region')}
               value={editForm.region}
               onChange={e => setEditForm({ ...editForm, region: e.target.value })}
               error={!!editMetaErr.region}
-              helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />
-            <TagsAutocomplete
+              helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />}
+            {!isListener && <TagsAutocomplete
               label={t('admin:nodes.field.tags')}
               value={editForm.tags_text}
               options={allTags}
-              onChange={v => setEditForm({ ...editForm, tags_text: v })} />
-            {(() => {
+              onChange={v => setEditForm({ ...editForm, tags_text: v })} />}
+            {!isListener && (() => {
               const nodeGroups = nodeGroupsHint(lineVisibility)
               return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: -1.5 }}>
                 <PreviewCaption hint={nodeGroups.now} testId="node-groups"
@@ -3992,11 +4260,11 @@ export default function NodesView() {
                 </Typography>}
               </Box>
             })()}
-            {editForm.relays.length > 0 && (
+            {!isListener && (editForm.relays.length > 0 || editLineTarget.current === 'direct') && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
 
-            {editing && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && relayEntryServers.length > 0 && (
+            {!isListener && editing && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && relayEntryServers.length > 0 && (
               <Box data-testid="egress-section" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <TextField select size="small" label={t('admin:nodes.egress.server')} value={editEgress}
                   onChange={e => {
@@ -4016,54 +4284,47 @@ export default function NodesView() {
                     {egressReady ? t('admin:nodes.egress.ready') : t('admin:nodes.egress.pending')}
                   </Typography>
                 )}
+                {editEgress > 0 && editEgress === (editing.egress_panel_id ?? 0) && (
+                  <ProbeQualityChip probe={editing.egress_probe} withheld={editing.egress_withheld} testId="egress-probe" />
+                )}
                 {editEgress > 0 && linkError && (
                   <Typography sx={{ fontSize: 12, color: md.error }}>{t('admin:nodes.egress.load_failed')}</Typography>
                 )}
                 {editEgress > 0 && linkForm && (
-                  <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.egress.shared_hint')}</Typography>
-                    <TextField select size="small" label={t('admin:nodes.egress.protocol')} value={linkForm.protocol}
-                      onChange={e => {
-                        const protocol = e.target.value as TransitLinkProtocol
-                        // A REALITY tunnel needs a camouflage site; keep the
-                        // tunnel's own, or draw one from the defaults.
-                        const site = linkForm.reality_server_name || TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
-                        patchLink(protocol === 'vless_reality'
-                          ? { protocol, reality_server_name: site, reality_target: linkForm.reality_target || `${site}:443` }
-                          : { protocol })
-                      }}>
-                      <MenuItem value="ss2022">Shadowsocks 2022</MenuItem>
-                      <MenuItem value="vless_reality">VLESS + REALITY</MenuItem>
-                    </TextField>
-                    <TextField size="small" label={t('admin:nodes.egress.exit_address')} value={linkForm.exit_address}
-                      onChange={e => patchLink({ exit_address: e.target.value })}
-                      placeholder={linkForm.server_address}
-                      helperText={linkForm.server_address
-                        ? t('admin:nodes.egress.exit_address_default', { address: linkForm.server_address })
-                        : t('admin:nodes.egress.exit_address_unknown')} />
-                    {linkForm.protocol === 'vless_reality' && (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                        <TextField size="small" label={t('admin:nodes.egress.reality_server_name')} value={linkForm.reality_server_name}
-                          onChange={e => {
-                            const name = e.target.value
-                            patchLink({ reality_server_name: name, reality_target: name.trim() ? `${name.trim()}:443` : '' })
-                          }} sx={{ flex: 1 }} />
-                        <Button size="small" sx={{ mt: 0.5 }} onClick={() => {
-                          const site = TUNNEL_REALITY_SITES[Math.floor(Math.random() * TUNNEL_REALITY_SITES.length)]
-                          patchLink({ reality_server_name: site, reality_target: `${site}:443` })
-                        }}>{t('admin:nodes.egress.random_site')}</Button>
-                      </Box>
-                    )}
-                  </Box>
+                  <>
+                    <LinkQualityCell entry={editing.panel_id} exit={editEgress} />
+                    <Accordion key={editEgress} disableGutters elevation={0} variant="outlined">
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="body2">{t('admin:nodes.egress.advanced')}</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <Typography variant="caption" color="text.secondary">{t('admin:nodes.egress.shared_hint')}</Typography>
+                        <TransitLinkFields link={linkForm} onChange={patchLink} />
+                      </AccordionDetails>
+                    </Accordion>
+                  </>
                 )}
               </Box>
+            )}
+
+            {/* Routing by destination: ordered routes that send some destinations
+                out through another server, or keep them here, while the rest
+                leaves through the default exit above. Saved on its own. */}
+            {editing && editing.kind !== 'separator' && servers.find(s => s.id === editing.panel_id)?.panel_type === 'psp' && (
+              <RoutesSection nodeId={editing.id} entryPanelId={editing.panel_id} servers={relayEntryServers.map(s => ({ id: s.id, name: s.name }))} pendingExit={editEgress}
+                defaultExitNodesOf={exit => {
+                  const names = managed.filter(n => n.panel_id === editing.panel_id && (n.egress_panel_id ?? 0) === exit).map(n => n.display_name)
+                  // The node being edited counts even when the list's copy is older.
+                  if ((editing.egress_panel_id ?? 0) === exit && !managed.some(n => n.id === editing.id)) names.push(editing.display_name)
+                  return names
+                }} />
             )}
 
             {/* Transit / 中转 lines: the same landing offered through extra
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
                 set up outside the panel; here we only record each front's
                 address/port (+ optional CDN SNI/Host). */}
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {!isListener && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
@@ -4078,13 +4339,13 @@ export default function NodesView() {
                 const update = (patch: Partial<RelayDraft>) =>
                   setEditForm(f => ({ ...f, relays: f.relays.map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
                 return (
-                  <Box key={r._key ?? i} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box key={r._key ?? i} id={`node-line-${r.id || r._key}`} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                       <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
                         onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.name_ph')}
                         helperText={t('admin:nodes.relay.name_factor_hint', { placeholder: '{{ factor }}' })} />
-                      <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
+                      <FormControlLabel id="node-line-direct" sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
                         control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
                       <Tooltip title={t('admin:nodes.relay.remove')}>
                         <IconButton size="small" onClick={() => setEditForm(f => ({ ...f, relays: f.relays.filter((_, j) => j !== i) }))}>
@@ -4092,32 +4353,59 @@ export default function NodesView() {
                         </IconButton>
                       </Tooltip>
                     </Box>
-                    <TextField select size="small" label={t('admin:nodes.relay.entry')} value={r.entry_panel_id ?? 0}
-                      onChange={e => {
-                        const entry = Number(e.target.value) || 0
-                        // A managed entry forwards unchanged: no SNI/Host override.
-                        update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0 })
-                      }}
-                      helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
-                      <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
-                      {relayEntryServers.map(server => (
-                        <MenuItem key={server.id} value={server.id}>{server.name}</MenuItem>
-                      ))}
-                    </TextField>
-                    {(r.entry_panel_id ?? 0) > 0 && r.id && (
+                    {/* The kind of line: an external entry, a Passwall Node server (a direct
+                        forward or an encrypted tunnel, chosen below), or a CDN in front of the
+                        landing. A CDN line is never turned into another kind, nor another into it. */}
+                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                      <TextField select size="small" fullWidth label={t('admin:nodes.relay.entry')}
+                        value={r.mode === 'cdn' ? CDN_ENTRY : (r.entry_panel_id ?? 0)}
+                        disabled={r.mode === 'cdn' && !!r.id}
+                        onChange={e => {
+                          const entry = Number(e.target.value) || 0
+                          if (entry === CDN_ENTRY) {
+                            update({ mode: 'cdn', entry_panel_id: 0, domain: '', address: '', sni: '', host: '', port: CDN_DEFAULT_PORT, client_tls: undefined })
+                          } else if (r.mode === 'cdn') {
+                            update({ mode: undefined, domain: undefined, client_tls: undefined, entry_panel_id: entry, address: '', sni: '', host: '', port: 0 })
+                          } else {
+                            // A managed entry forwards unchanged: no SNI/Host override.
+                            update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0, mode: undefined })
+                          }
+                        }}
+                        helperText={r.mode === 'cdn' ? t('admin:nodes.cdn.entry_hint')
+                          : (r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
+                        <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
+                        <MenuItem value={CDN_ENTRY} disabled={!!r.id && r.mode !== 'cdn'}>{t('admin:nodes.relay.entry_cdn')}</MenuItem>
+                        {relayEntryServers.map(server => (
+                          <MenuItem key={server.id} value={server.id} disabled={r.mode === 'cdn' && !!r.id}>{server.name}</MenuItem>
+                        ))}
+                      </TextField>
+                    </Box>
+                    {r.mode === 'cdn' && <CdnLineFields line={r} onPatch={update} />}
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && (
+                      <TunnelLineEditor nodeId={editing?.id ?? 0} line={r}
+                        savedEntry={editing?.relays?.find(x => x.id === r.id)?.entry_panel_id ?? 0}
+                        onPatch={update}
+                        onSwitched={node => applyServerLine(node.id, node.relays ?? [], r.id!)}
+                        onRelays={relays => applyServerLine(editing?.id ?? 0, relays, r.id!)}
+                        onOpenListener={id => void openListener(id)} />
+                    )}
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
                       <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
                         {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
                       </Typography>
                     )}
-                    <Box sx={{ display: 'flex', gap: 1 }}>
+                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
+                      <ProbeQualityChip probe={r.probe} withheld={r.probe_withheld} testId="relay-probe" />
+                    )}
+                    {r.mode !== 'cdn' && <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
                         onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
-                      <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
+                      {r.mode !== 'tunnel' && <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
                         required={(r.entry_panel_id ?? 0) > 0}
                         onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
-                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />
-                    </Box>
-                    {!((r.entry_panel_id ?? 0) > 0) && (
+                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />}
+                    </Box>}
+                    {r.mode !== 'cdn' && !((r.entry_panel_id ?? 0) > 0) && (
                     <Box sx={{ display: 'flex', gap: 1 }}>
                       <TextField size="small" label={t('admin:nodes.relay.sni')} value={r.sni ?? ''}
                         onChange={e => update({ sni: e.target.value })} sx={{ flex: 1 }}
@@ -4141,7 +4429,7 @@ export default function NodesView() {
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
               <TrafficFactorField label={t('admin:nodes.field.traffic_factor_direct')} text={editForm.traffic_factor_text ?? milliToFactorText(editForm.traffic_factor_milli)}
                 onText={(text, m) => setEditForm(f => ({ ...f, traffic_factor_text: text, ...(m !== null ? { traffic_factor_milli: m } : {}) }))} />
-            </Box>
+            </Box>}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

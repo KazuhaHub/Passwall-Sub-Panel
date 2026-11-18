@@ -1755,6 +1755,34 @@ type UISettings struct {
 	// recorded: the rows age out here.
 	DestUsageRetentionDays int `json:"dest_usage_retention_days"`
 
+	// ---- Link probes (transit.probe.v1) ----
+	// Owned by /api/admin/transit/probe-settings, not the system settings page:
+	// UISettings.TransitProbeSettings is the exact set (every transit_probe_
+	// field), and the system settings PUT writes them back as loaded. 0 and ""
+	// are "not configured" and run as the shipped default
+	// (TransitProbeEffectiveOf).
+	//
+	// TransitProbeOff turns probing off; it is stored inverted so that a panel
+	// that never saw the key probes. TransitProbeIntervalSeconds is the time
+	// between rounds (default 60, 30..3600), TransitProbeTimeoutMS one attempt's
+	// timeout (default 5000, 500..10000), TransitProbeURL what each link
+	// fetches (default https://www.gstatic.com/generate_204; http or https, port
+	// 1..65535; empty means transport-only). TransitProbeWithhold lets a line or node whose probes are down
+	// be taken out of subscriptions (default off): after
+	// TransitProbeWithholdAfter consecutive down windows (default 3) and back
+	// after TransitProbeRestoreAfter consecutive ok ones (default 3), both 1..20.
+	TransitProbeOff             bool   `json:"transit_probe_off"`
+	TransitProbeIntervalSeconds int    `json:"transit_probe_interval_seconds"`
+	TransitProbeTimeoutMS       int    `json:"transit_probe_timeout_ms"`
+	TransitProbeURL             string `json:"transit_probe_url"`
+	// TransitProbeURLOff is an explicitly empty URL: links are then probed
+	// transport-only (no end-to-end fetch). Stored apart from the URL so that a
+	// panel that never configured one still gets the default.
+	TransitProbeURLOff        bool `json:"transit_probe_url_off"`
+	TransitProbeWithhold      bool `json:"transit_probe_withhold"`
+	TransitProbeWithholdAfter int  `json:"transit_probe_withhold_after"`
+	TransitProbeRestoreAfter  int  `json:"transit_probe_restore_after"`
+
 	// ---- Privacy and terms ----
 	// LegalEnabled publishes the terms and privacy pages and turns on consent
 	// (the register checkbox, the signed-in prompt). Default off: everything
@@ -2290,6 +2318,9 @@ type Repos struct {
 	// line: forward key, entry confirmation, relayed traffic).
 	Transit                 TransitRepo
 	TransitLinks            TransitLinkRepo
+	TransitProbe            TransitProbeRepo
+	TransitFronts           TransitFrontRepo
+	TransitRoutes           TransitRouteRepo
 	User                    UserRepo
 	Group                   GroupRepo
 	Node                    NodeRepo
@@ -2334,9 +2365,65 @@ type Repos struct {
 type TransitRepo interface {
 	Ensure(ctx context.Context, nodeID int64, relayID string) (domain.TransitForward, error)
 	ListByNodes(ctx context.Context, nodeIDs []int64) ([]domain.TransitForward, error)
+	ListByIDs(ctx context.Context, ids []int64) ([]domain.TransitForward, error)
 	SetApplied(ctx context.Context, id int64, applied domain.ManagedForward, at time.Time) (bool, error)
 	ClearApplied(ctx context.Context, id int64) (bool, error)
 	RecordCounters(ctx context.Context, id int64, up, down int64, epoch uint64) error
+}
+
+// TransitProbeRepo stores the probe windows entry servers report for their
+// links and forwards, with the hysteresis state that decides withholding.
+type TransitProbeRepo interface {
+	// Apply reads one object's row under a lock, passes it (nil when new) to
+	// update and stores the result; update may decline with write=false. It
+	// returns the row before and after.
+	Apply(ctx context.Context, panelID int64, key, kind string,
+		update func(prev *domain.ProbeState) (next domain.ProbeState, write bool, err error)) (prev *domain.ProbeState, next domain.ProbeState, err error)
+	List(ctx context.Context) ([]domain.ProbeState, error)
+	// PruneExcept deletes the rows of a server whose object is not in keep.
+	PruneExcept(ctx context.Context, panelID int64, keep []string) (int64, error)
+	// ClearWithheld clears every withheld flag and reports how many changed.
+	ClearWithheld(ctx context.Context) (int64, error)
+}
+
+// TransitFrontRepo stores the SNI fronts (transit.sni.v1) of Passwall Node
+// servers: one row per shared port.
+type TransitFrontRepo interface {
+	ListByPanel(ctx context.Context, panelID int64) ([]domain.TransitFront, error)
+	List(ctx context.Context) ([]domain.TransitFront, error)
+	Get(ctx context.Context, id int64) (domain.TransitFront, error)
+	// Create stores a front; a second one on the same (server, port) is
+	// domain.ErrAlreadyExists.
+	Create(ctx context.Context, front domain.TransitFront) (domain.TransitFront, error)
+	Update(ctx context.Context, front domain.TransitFront) (domain.TransitFront, error)
+	Delete(ctx context.Context, panelID, id int64) (bool, error)
+}
+
+// TransitRouteRepo stores the routes by destination (transit.route.v1) of
+// nodes, and the digests of what was sent and confirmed.
+type TransitRouteRepo interface {
+	// Get returns a node's routes; a node without any is an empty value.
+	Get(ctx context.Context, nodeID int64) (domain.NodeRoutes, error)
+	// List returns every node that has routes, by node id.
+	List(ctx context.Context) ([]domain.NodeRoutes, error)
+	// Replace stores the node's routes whole and keeps its delivery digests. It
+	// takes the destination state lock first, and routes for a node that no
+	// longer exists are refused (domain.ErrNotFound; clearing is always allowed): the lists the routes name must
+	// exist (domain.ErrNotFound otherwise) and cannot be deleted until the routes
+	// let go of them, and the kept content of lists no route names any more is
+	// dropped in the same transaction.
+	Replace(ctx context.Context, nodeID int64, routes []domain.DestRoute) error
+	// RecordSent stores the digest of the routes put in the node's config ("":
+	// none) and the reason the node is withheld ("": it is sent); SetApplied the digest its server confirmed. Both write only on a
+	// change and report whether they did.
+	RecordSent(ctx context.Context, nodeID int64, digest, withheld string, at time.Time) (bool, error)
+	SetApplied(ctx context.Context, nodeID int64, digest string, at time.Time) (bool, error)
+	// GoodList, SaveGoodList and ForgetGoodList keep the last expansion of a list
+	// that gave a route something to match by, which a route compiles from while
+	// an automatic refresh leaves the list empty or unavailable.
+	GoodList(ctx context.Context, listID int64) (domains, cidrs []string, found bool, err error)
+	SaveGoodList(ctx context.Context, listID int64, digest string, domains, cidrs []string) error
+	ForgetGoodList(ctx context.Context, listID int64) error
 }
 
 // TransitLinkRepo stores the tunnels between Passwall Node servers.
@@ -2347,9 +2434,16 @@ type TransitLinkRepo interface {
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
 	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
+	// DeleteLink removes the link of a pair, which frees its port on the exit
+	// server. It reports whether one existed.
+	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
 	// LinkEnds resolves link ids to their two servers in one read. An unknown
-	// id is absent from the result. Links are never deleted and a link's pair
-	// never changes, so an answer stays true.
+	// id is absent from the result. A link's pair never changes, so an answer
+	// stays true for as long as the link exists. A link IS deleted when nothing
+	// uses its pair any more (routes by destination stop using an exit, and no
+	// node leaves through it by default); audit hits still buffered that name a
+	// deleted link are then dropped as egress_unknown (the receiver cannot tell
+	// which servers they left through), and counted, never mis-attributed.
 	LinkEnds(ctx context.Context, ids []int64) (map[int64]domain.TransitLinkEnds, error)
 }

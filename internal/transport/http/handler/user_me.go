@@ -243,6 +243,11 @@ type userRelayStatus struct {
 	// carries it: "{{ factor }}" resolved with this line's factor, not the
 	// direct line's.
 	NodeName string `json:"node_name"`
+	// Quality is the line's coarse link quality from the entry server's probes
+	// ("ok", "degraded" or "down"; absent when it is not probed or unknown) and
+	// RTTMS its median round trip. Nothing else about the probes crosses.
+	Quality string `json:"quality,omitempty"`
+	RTTMS   int    `json:"rtt_ms,omitempty"`
 }
 
 type userNodeStatus struct {
@@ -290,6 +295,7 @@ func relayStatusForNode(n *domain.Node, index int) userRelayStatus {
 	status := userRelayStatus{Name: render.ReplaceFactorPlaceholder(strings.TrimSpace(relay.Name), factor),
 		OnlyLineName: relay.OnlyLineName, Status: "unknown", TrafficFactorMilli: factor,
 		NodeName: render.ReplaceFactorPlaceholder(n.DisplayName, factor)}
+	status.Quality, status.RTTMS = coarseProbeQuality(relay.Probe)
 	for _, health := range n.RelayHealth {
 		if health.Index == index && health.Address == relay.Address && health.Port == port {
 			status.Status, status.CheckedAt = coarseNodeStatus(health.State), health.CheckedAt

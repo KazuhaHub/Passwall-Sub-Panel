@@ -85,7 +85,7 @@ func (r transitLinkRow) toDomain() (domain.TransitLink, error) {
 		SSMethod: r.SSMethod, SSKey: ssKey,
 		RealityUUID: uuid, RealityPrivateKey: private, RealityPublicKey: r.RealityPublicKey,
 		RealityShortID: r.RealityShortID, RealityServerName: r.RealityServerName, RealityTarget: r.RealityTarget,
-		InApplied: r.InApplied, OutApplied: r.OutApplied,
+		InSent: r.InSent, OutSent: r.OutSent, InApplied: r.InApplied, OutApplied: r.OutApplied,
 		InUpBytes: r.InUpBytes, InDownBytes: r.InDownBytes, InLastRawUp: r.InLastRawUp, InLastRawDown: r.InLastRawDown, InCounterEpoch: r.InCounterEpoch,
 		OutUpBytes: r.OutUpBytes, OutDownBytes: r.OutDownBytes, OutLastRawUp: r.OutLastRawUp, OutLastRawDown: r.OutLastRawDown, OutCounterEpoch: r.OutCounterEpoch,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -202,6 +202,13 @@ func (r *transitLinkRepo) RecordLinkSent(ctx context.Context, id int64, side dom
 		return false, nil
 	}
 	return true, db.Updates(map[string]any{"out_sent": digest, "out_sent_bound": jsonStrings(bound)}).Error
+}
+
+// DeleteLink removes the link of a pair: its credentials and its port go with
+// it, and a link made later for the pair starts from fresh ones.
+func (r *transitLinkRepo) DeleteLink(ctx context.Context, entry, exit int64) (bool, error) {
+	result := r.db.WithContext(ctx).Where("entry_panel_id = ? AND exit_panel_id = ?", entry, exit).Delete(&transitLinkRow{})
+	return result.RowsAffected > 0, result.Error
 }
 
 // SetLinkApplied records what one side confirmed; "" withdraws it. It reports

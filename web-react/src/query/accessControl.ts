@@ -10,6 +10,7 @@ import {
   type DestGroupPut, type DestSettings, type DestSourceRuleInput, type DestState, type DestTestInput,
 } from '@/api/accessControl'
 import { destStatusActive, listsRefreshing } from '@/utils/accessControl'
+import { confirmingRouteImpact } from '@/utils/destRouteImpact'
 import { accessControlKeys, groupKeys, riskCenterKeys, serverKeys, settingsKeys } from './keys'
 import { freshness, policies } from './policies'
 import type { QueryScope } from './session'
@@ -313,7 +314,7 @@ export function useCreateDestList(scope: QueryScope) {
 export function useSaveDestList(scope: QueryScope) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, input }: { id: number; input: DestListInput }) => updateDestList(id, input),
+    mutationFn: ({ id, input }: { id: number; input: DestListInput }) => confirmingRouteImpact((...c) => updateDestList(id, input, ...c)),
     onSettled: () => invalidate(qc, scope, LIST_WRITE),
   })
 }
@@ -330,7 +331,7 @@ export function useDeleteDestList(scope: QueryScope) {
 export function useEditDestListEntries(scope: QueryScope) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, add, remove }: { id: number; add?: string[]; remove?: string[] }) => editDestListEntries(id, { add, remove }),
+    mutationFn: ({ id, add, remove }: { id: number; add?: string[]; remove?: string[] }) => confirmingRouteImpact((...c) => editDestListEntries(id, { add, remove }, ...c)),
     onSettled: () => invalidate(qc, scope, LIST_WRITE),
   })
 }

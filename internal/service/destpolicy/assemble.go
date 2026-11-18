@@ -3,6 +3,7 @@ package destpolicy
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/KazuhaHub/passwall-protocol/protocol"
 
@@ -13,6 +14,11 @@ import (
 type nodeView struct {
 	// nodeIDs are the inbounds (listeners) the node has.
 	nodeIDs map[int64]bool
+	// parents maps the hidden listener of a tunnel-mode line to its landing node:
+	// a source rule set on the landing applies to the landing's tunnel listeners
+	// too (the line belongs to the landing, and a setting applies to the item it
+	// is set on). Empty on a server without any.
+	parents map[int64]int64
 	panelID int64
 	// users are the roster's user ids, and groupOf their groups. Both are only
 	// needed for group-scoped rules; users is read whenever a policy names a
@@ -35,6 +41,20 @@ type nodeView struct {
 	// listener it applies when the exit server is in its scope, whatever this
 	// server's own scope says.
 	egress map[int64]int64
+	// routes maps each listener that routes by destination (transit.route.v1) to
+	// the exits its traffic can leave through: the exit of each of its routes and
+	// its default exit. A panel-scoped policy follows the traffic's exit
+	// listener by listener, and exit by exit on a routed one (see panelCopies).
+	// Empty for a node without routes, which then assembles exactly as before.
+	routes map[int64][]RouteExit
+}
+
+// RouteExit is one exit a routed listener's traffic can leave through: the
+// link's key on the wire (protocol.LocalExit for the server itself) and the
+// server it leaves from.
+type RouteExit struct {
+	Key     protocol.LinkKey
+	PanelID int64
 }
 
 // panelScope answers which of the node's inbounds a policy scoped to panels
@@ -65,6 +85,144 @@ func (v nodeView) panelScope(panels []int64) (all bool, inbounds []protocol.List
 	return false, inbounds
 }
 
+// ruleScope is where one copy of a panel-scoped rule applies. all means every
+// inbound; with all false, inbounds names them. exits, when set, confines the
+// copy to traffic that leaves through one of them (DestinationRule.Exits).
+type ruleScope struct {
+	all      bool
+	inbounds []protocol.ListenerKey
+	exits    []protocol.LinkKey
+}
+
+// panelCopies answers where a policy scoped to panels applies, as the copies of
+// the rule it takes. A node without routes gets what panelScope says: one copy,
+// or none. On a routed listener the policy applies exit by exit: the traffic
+// that leaves through a server in the policy's scope is covered and the rest is
+// not, so a listener whose exits are only partly in scope takes a copy
+// confined to those exits. Listeners that cover the same exits share a copy, and
+// a listener whose every exit is in scope is in the unconfined one.
+func (v nodeView) panelCopies(panels []int64) []ruleScope {
+	if len(v.routes) == 0 {
+		all, inbounds := v.panelScope(panels)
+		if !all && len(inbounds) == 0 {
+			return nil
+		}
+		return []ruleScope{{all: all, inbounds: inbounds}}
+	}
+	here := slices.Contains(panels, v.panelID)
+	var open []protocol.ListenerKey
+	confined := map[string][]protocol.ListenerKey{}
+	exitsOf := map[string][]protocol.LinkKey{}
+	ids := make([]int64, 0, len(v.nodeIDs))
+	for id := range v.nodeIDs {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		key := protocol.NewListenerKey(id)
+		exits, routed := v.routes[id]
+		if !routed {
+			applies := here
+			if exit, bound := v.egress[id]; bound {
+				applies = slices.Contains(panels, exit)
+			}
+			if applies {
+				open = append(open, key)
+			}
+			continue
+		}
+		var allowed []protocol.LinkKey
+		for _, exit := range exits {
+			if slices.Contains(panels, exit.PanelID) {
+				allowed = append(allowed, exit.Key)
+			}
+		}
+		switch {
+		case len(allowed) == 0:
+		case len(allowed) == len(exits):
+			open = append(open, key)
+		default:
+			slices.Sort(allowed)
+			name := strings.Join(linkKeyStrings(allowed), ",")
+			confined[name] = append(confined[name], key)
+			exitsOf[name] = allowed
+		}
+	}
+	var out []ruleScope
+	if len(open) > 0 {
+		out = append(out, ruleScope{all: len(confined) == 0 && len(open) == len(ids), inbounds: open})
+		if out[0].all {
+			out[0].inbounds = nil
+		}
+	}
+	names := make([]string, 0, len(confined))
+	for name := range confined {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		slices.Sort(confined[name])
+		out = append(out, ruleScope{inbounds: confined[name], exits: exitsOf[name]})
+	}
+	return out
+}
+
+// covered narrows a rule of the last policy a node applied, scoped to panels, to
+// the listeners whose traffic that scope still covers through every exit the
+// rule takes: the rule's own Exits when it has them, else every exit of the
+// listener. A listener it no longer fully covers is dropped from the rule, which
+// can only loosen it, and a listener the rule's exits never reach is dropped
+// too.
+func (v nodeView) covered(panels []int64, r protocol.DestinationRule) []protocol.ListenerKey {
+	here := slices.Contains(panels, v.panelID)
+	var kept []protocol.ListenerKey
+	for id := range v.nodeIDs {
+		key := protocol.NewListenerKey(id)
+		if len(r.Inbounds) > 0 && !slices.Contains(r.Inbounds, key) {
+			continue
+		}
+		exits, routed := v.routes[id]
+		if !routed {
+			if len(r.Exits) > 0 {
+				// A copy confined to exits belongs to a routed listener.
+				continue
+			}
+			applies := here
+			if exit, bound := v.egress[id]; bound {
+				applies = slices.Contains(panels, exit)
+			}
+			if applies {
+				kept = append(kept, key)
+			}
+			continue
+		}
+		reached := 0
+		covered := true
+		for _, exit := range exits {
+			if len(r.Exits) > 0 && !slices.Contains(r.Exits, exit.Key) {
+				continue
+			}
+			reached++
+			if !slices.Contains(panels, exit.PanelID) {
+				covered = false
+			}
+		}
+		if reached > 0 && covered {
+			kept = append(kept, key)
+		}
+	}
+	slices.Sort(kept)
+	return kept
+}
+
+func linkKeyStrings(keys []protocol.LinkKey) []string {
+	out := make([]string, len(keys))
+	for i, key := range keys {
+		out[i] = string(key)
+	}
+	return out
+}
+
 // syntheticSubject stands for a group's members in the upper bound, which has
 // no roster: group rules need subjects, and no real account has this id.
 func syntheticSubject(gid int64) protocol.SubjectKey {
@@ -88,7 +246,15 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 				continue
 			}
 			var inbounds []protocol.ListenerKey
-			for _, n := range g.nodes {
+			covered := slices.Clone(g.nodes)
+			if !v.bound {
+				for child, parent := range v.parents {
+					if v.nodeIDs[child] && slices.Contains(g.nodes, parent) {
+						covered = append(covered, child)
+					}
+				}
+			}
+			for _, n := range covered {
 				if v.bound || v.nodeIDs[n] {
 					inbounds = append(inbounds, protocol.NewListenerKey(n))
 				}
@@ -105,6 +271,11 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 						break
 					}
 				}
+				if !v.nodeIDs[first] {
+					// Only listeners of the landing's lines are here: the rule is
+					// named after the landing, the node the rule was set on.
+					first = g.nodes[0]
+				}
 			}
 			action := protocol.RuleBlock
 			if report {
@@ -116,20 +287,33 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 			})
 		}
 	}
+	var used map[string]bool
 	policyRules := func(group []baseRule) {
 		for _, r := range group {
 			rule := protocol.DestinationRule{
 				ID: r.id, Action: r.action, Domains: r.domains, CIDRs: r.cidrs, Ports: r.ports,
 				Network: r.network, Protocols: r.protocols, Private: r.private,
 			}
+			var extras []protocol.DestinationRule
 			if !v.bound {
 				switch r.scope {
 				case domain.DestScopePanels:
-					all, inbounds := v.panelScope(r.panels)
-					if !all && len(inbounds) == 0 {
+					copies := v.panelCopies(r.panels)
+					if len(copies) == 0 {
 						continue
 					}
-					rule.Inbounds = inbounds
+					rule.Inbounds, rule.Exits = copies[0].inbounds, copies[0].exits
+					// The other copies are the same policy for other exits: each
+					// takes the next free x-suffix of its id.
+					for _, more := range copies[1:] {
+						if used == nil {
+							used = usedRuleIDs(b)
+						}
+						extra := rule
+						extra.ID = freeSuffix(used, r.id)
+						extra.Inbounds, extra.Exits = more.inbounds, more.exits
+						extras = append(extras, extra)
+					}
 				case domain.DestScopeGroups:
 					var subjects []protocol.SubjectKey
 					for _, u := range v.users {
@@ -145,6 +329,7 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 				}
 			}
 			policy.Rules = append(policy.Rules, rule)
+			policy.Rules = append(policy.Rules, extras...)
 		}
 	}
 	// groupRules emits the allowlist groups: per group (by id) the allows of its
@@ -211,6 +396,18 @@ func (b *base) assemble(v nodeView) *protocol.DestinationPolicy {
 		sortKeys(policy.Exempt)
 	}
 	return policy
+}
+
+// usedRuleIDs are the ids of every policy rule of the base, for the copies a
+// routed listener's exits make.
+func usedRuleIDs(b *base) map[string]bool {
+	used := map[string]bool{}
+	for _, group := range [][]baseRule{b.allow, b.block, b.watch} {
+		for _, r := range group {
+			used[r.id] = true
+		}
+	}
+	return used
 }
 
 // sortKeys puts subject keys in the wire's bytewise order ("usr_10" before

@@ -41,6 +41,27 @@ export const policies = {
     refetchInterval: 60 * SECOND,
     note: 'One read/minute per visible list instance; hidden tabs paused by refetchIntervalInBackground=false.',
   },
+  /** Link probe results: renewed every probe window (a minute or more). */
+  probes: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Read when a link editor opens; the probe window is a minute or more, so no polling.',
+  },
+  /** Shared ports and the port-usage view: read when their dialog opens, refreshed by every write. */
+  fronts: {
+    staleTime: 0,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'An admin editor, read fresh each time it opens; writes invalidate it, so no polling.',
+  },
+  /** A node's routes: read when the node editor opens; the poll below is conditional (see query/routes.ts). */
+  routes: {
+    staleTime: 0,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'An admin editor, read fresh each time it opens; polled only while the server has not yet confirmed what was sent.',
+  },
   /** Slow-moving dropdown dictionaries; invalidated on write, never polled. */
   dictionaries: {
     staleTime: 5 * MINUTE,

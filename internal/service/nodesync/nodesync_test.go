@@ -200,7 +200,7 @@ func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
 		t.Fatalf("test fixture cannot reach response boundary: filler=%d", fillerBytes)
 	}
 	base.Config.ETag = nodeprotocol.ETag(strings.Repeat("a", fillerBytes))
-	budget, err := availableTaskJSONBytes(base)
+	budget, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes)
 	if err != nil || budget != len(taskArray) {
 		t.Fatalf("task JSON budget = (%d, %v), want %d", budget, err, len(taskArray))
 	}
@@ -215,9 +215,17 @@ func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
 
 	base.Tasks = nil
 	base.Config.ETag += "a"
-	budget, err = availableTaskJSONBytes(base)
+	budget, err = availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes)
 	if err != nil || budget != len(taskArray)-1 {
 		t.Fatalf("one-byte-smaller task budget = (%d, %v), want %d", budget, err, len(taskArray)-1)
+	}
+
+	base.Config.ETag += nodeprotocol.ETag(strings.Repeat("a", len(taskArray)+syncTasksFieldJSONBytes))
+	if _, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncWireBytes); err == nil {
+		t.Fatal("oversize plain response was accepted")
+	}
+	if budget, err := availableTaskJSONBytes(base, nodeprotocol.MaxSyncDecodedBytes); err != nil || budget != 0 {
+		t.Fatalf("large gzip response task budget = (%d, %v), want (0, nil)", budget, err)
 	}
 }
 
@@ -922,3 +930,20 @@ func emptyProtocolHave() map[string]nodeprotocol.StreamState {
 }
 
 var _ ports.NativePanelSnapshotReader = (*Service)(nil)
+
+func TestRosterCapacityWarnsAtTwentyThousandIdentities(t *testing.T) {
+	snapshot := &ports.NativeDesiredSnapshot{
+		Clients: make([]ports.NativeDesiredClient, 20_001),
+	}
+	for i := range 19_999 {
+		snapshot.Clients[i].Client = &domain.PSPClient{ID: int64(i + 1)}
+	}
+	if issues := rosterCapacityIssues(snapshot); len(issues) != 0 {
+		t.Fatalf("below threshold: got %v", issues)
+	}
+	snapshot.Clients[19_999].Client = &domain.PSPClient{ID: 20_000}
+	issues := rosterCapacityIssues(snapshot)
+	if len(issues) != 1 || issues[0].Code != "roster_identity_capacity" {
+		t.Fatalf("at threshold: got %v", issues)
+	}
+}

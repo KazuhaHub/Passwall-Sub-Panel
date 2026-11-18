@@ -167,3 +167,18 @@ func TestRecordCountersBooksDeltaWithinAnEpochAndWholeAcrossOne(t *testing.T) {
 		t.Fatalf("totals = %d / %d, want 170 / 1530", rows[0].UpBytes, rows[0].DownBytes)
 	}
 }
+
+// A tunnel-mode line enters through its own listener: the entry server is never
+// asked to forward for it.
+func TestForwardsForIgnoresTunnelModeLines(t *testing.T) {
+	nodes := fakeNodes{landing(1, 1, "203.0.113.9", 443,
+		domain.RelayLine{ID: "t", Enabled: true, EntryPanelID: 9, Mode: domain.RelayModeTunnel, TunnelNodeID: 7},
+		domain.RelayLine{ID: "f", Port: 20001, Enabled: true, EntryPanelID: 9})}
+	got, err := New(nodes, newFakeRepo()).ForwardsFor(context.Background(), 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Port != 20001 {
+		t.Fatalf("forwards = %+v, want only the direct forward", got)
+	}
+}

@@ -43,10 +43,12 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destgroup"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destlist"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
 	legalsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/legal"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
@@ -59,6 +61,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskcenter"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/riskreview"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
@@ -370,7 +373,35 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
-	nativeSync.SetTransit(transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent))
+	transitSvc := transit.New(repos.Node, repos.Transit).WithLinks(repos.TransitLinks, repos.NodeAgent).
+		WithPanelCheck(func(ctx context.Context, panelID int64) bool {
+			// Only a server that is known not to exist: a failed read is not that.
+			_, err := repos.XUIPanel.GetByID(ctx, panelID)
+			return errors.Is(err, domain.ErrNotFound)
+		})
+	nativeSync.SetTransit(transitSvc)
+	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
+	// ONE front service for the sync, the node saves and the HTTP handlers: it
+	// owns the per-server lock that serializes everything touching a server's
+	// shared ports.
+	frontSvc := front.New(repos.TransitFronts, repos.Node, repos.XUIPanel, repos.NodeAgent, repos.Transit, repos.TransitLinks, nil)
+	transitSvc.WithServerLock(frontSvc.Lock)
+	frontSvc.WithReservations(transitSvc.ReservedPorts)
+	// A link's port also avoids the shared ports and loopbacks of the exit server;
+	// a port that cannot be checked counts as taken.
+	transitSvc.WithPortCheck(func(ctx context.Context, panelID int64, port int) bool {
+		usage, err := frontSvc.Usage(ctx, panelID)
+		if err != nil {
+			return true
+		}
+		for _, entry := range usage {
+			if entry.Port == port || (entry.RangeHigh != 0 && port >= entry.Port && port <= entry.RangeHigh) {
+				return true
+			}
+		}
+		return false
+	})
+	nativeSync.SetFronts(frontSvc)
 	upgradeIDs, err := idgen.NewTaskIDMinter()
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)
@@ -491,6 +522,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	syncSvc.SetNodeRepo(repos.Node) // legacy per-node clients are priced at their direct line
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
+	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
+	nodeSvc.SetTunnelLinks(transitSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
 	// traffic needs user to push the per-client floor into 3X-UI after each
@@ -806,6 +839,17 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("destination allowlist groups: %w", err)
 	}
 	nativeSync.SetPolicies(destPolicy)
+	// Routing by destination (transit.route.v1). Left unbound, no config carries
+	// routes and a list is deleted from under a route.
+	routeSvc := route.New(route.Deps{
+		Routes: repos.TransitRoutes, Nodes: repos.Node, Panels: repos.XUIPanel, Agents: repos.NodeAgent,
+		Links: transitSvc, Lists: destLists, Policies: destPolicy, Desired: repos.NativeDesired,
+		Data: destRepos.State, Probes: repos.TransitProbe, ServerLock: frontSvc.Lock,
+	})
+	nativeSync.SetRoutes(routeSvc)
+	nodeSvc.SetRouteLinks(routeSvc.NodeDeleted, routeSvc.Lock)
+	nodeSvc.SetSetupRouter(routeSvc)
+	destLists.SetRouteUses(routeSvc)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
 	// response is built, and the dest-audit-ingest worker (started in Run,
 	// drained on Shutdown) stores them. An unbound sink silently drops every
@@ -903,6 +947,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile: reconcileSvc,
 		Geo:       geoSvc,
 		NodeSync:  nativeSync,
+		Fronts:    frontSvc,
+		Routes:    routeSvc,
 		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
