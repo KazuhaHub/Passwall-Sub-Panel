@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -55,6 +56,7 @@ type AdminServersHandler struct {
 	coreCatalog       ports.CoreCatalog
 	serverMigration   ServerMigrationPreviewer
 	nodeMetrics       ports.NodeHostMetricRepo
+	retiredRouteLocks keyedmutex.Map[int64]
 	// fronts and frontSvc are the SNI fronts: a server's go with it, and
 	// leaving Xray with some saved asks first.
 	fronts   ports.TransitFrontRepo

@@ -3307,6 +3307,21 @@
     "cred_add_field": "添加字段"
   },
   "servers": {
+    "retired_routes": {
+      "upgrade_notice": "如果升级前用过 3X-UI 的 VLESS 路由线路，可在对应服务器上打开清理入口，预览旧功能留下的规则。",
+      "open": "清理旧 VLESS 路由",
+      "title": "{{server}} 的旧 VLESS 路由",
+      "description": "预览已移除的 3X-UI VLESS 路由线路功能留下的规则。清理会从本服务器的模板中移除列表中的规则。",
+      "preview": "预览规则",
+      "confirm": "移除列出的 {{count}} 条规则？Xray 可能重启并短暂中断连接。",
+      "cleanup": "移除列出的规则",
+      "empty": "未找到旧功能留下的规则。",
+      "removed": "已移除 {{count}} 条规则。",
+      "stale": "模板已变化。请重新预览后再移除规则。",
+      "preview_failed": "无法读取路由模板。",
+      "cleanup_failed": "无法确认更新结果。重试前请重新预览。",
+      "close": "关闭"
+    },
     "install_reinstall": {
       "action": "安装 / 重新安装",
       "title": "安装 / 重新安装 · {{name}}",
