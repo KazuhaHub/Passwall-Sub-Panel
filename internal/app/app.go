@@ -969,9 +969,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile: reconcileSvc,
 		Geo:       geoSvc,
 		NodeSync:  nativeSync,
-		Fronts:    frontSvc,
-		Routes:    routeSvc,
-		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
+		// The line editor's source address panel and the add-a-refused-source action.
+		SourceGuard: sourceguard.NewAdmin(repos.NodeAgent, cloudflareRanges, repos.SourceGuard),
+		Fronts:      frontSvc,
+		Routes:      routeSvc,
+		Legal:       handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.

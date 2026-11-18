@@ -70,6 +70,10 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
+	// SourceGuard is the source guard's administrator view (line editor panel,
+	// Cloudflare ranges, add-a-refused-source). Optional: absent, its routes are
+	// not registered.
+	SourceGuard handler.SourceGuardView
 	OperationGate *operationgate.Gate
 	Cfg           *config.Config
 	Repos         ports.Repos
@@ -580,6 +584,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
 		// Tunnel-mode relay lines: the confirmed mode switch, the listener's own
 		// settings, and the re-copy from the landing.
+		if d.SourceGuard != nil {
+			sourceGuard := handler.NewAdminSourceGuardHandler(d.SourceGuard, d.Node, d.Repos.Settings)
+			adminGroup.GET("/source-guard/cloudflare", sourceGuard.GetCloudflare)
+			adminGroup.GET("/nodes/:id/source-guard", sourceGuard.Get)
+			adminGroup.POST("/nodes/:id/lines/:line_id/source-cidrs", sourceGuard.AddSource)
+		}
 		adminGroup.POST("/nodes/:id/lines/:line_id/mode", nodes.SwitchLineMode)
 		adminGroup.PUT("/nodes/:id/lines/:line_id/tunnel", nodes.UpdateTunnelListener)
 		adminGroup.GET("/nodes/:id/lines/:line_id/tunnel/sync", nodes.PreviewTunnelSync)
