@@ -527,3 +527,29 @@ func TestSaveThatFailsOnASecondNewTunnelRemovesTheFirstOne(t *testing.T) {
 		t.Fatalf("routes = %+v, want the previous ones %+v", w.routes[11].Routes, before)
 	}
 }
+
+// A tunnel whose ends applied what they were sent can still be not ready while
+// they sit on different ports (a move to or from a shared port): the view says so
+// and gives both ports.
+func TestViewSaysWhenTheEndsOfATunnelAreOnDifferentPorts(t *testing.T) {
+	w, s := routedWorld()
+	w.links[[2]int64{1, 2}] = domain.TransitLink{ID: 12, EntryPanelID: 1, ExitPanelID: 2,
+		InSent: "a", InApplied: "a", InSentPort: 443, OutSent: "b", OutApplied: "b", OutSentPort: 23456}
+	w.routes[11] = &domain.NodeRoutes{NodeID: 11, Routes: []domain.DestRoute{serverRoute("r1", 2, "domain:a.com")}}
+	w.nodes[11].DestRoutes = w.routes[11].Routes
+	view, err := s.View(t.Context(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := view.Items[0].Link
+	if link == nil || link.Ready || !link.InApplied || !link.OutApplied || !link.PortsDiffer || link.InPort != 443 || link.OutPort != 23456 {
+		t.Fatalf("link = %+v", link)
+	}
+	l := w.links[[2]int64{1, 2}]
+	l.OutSentPort = 443
+	w.links[[2]int64{1, 2}] = l
+	view, _ = s.View(t.Context(), 11)
+	if link = view.Items[0].Link; !link.Ready || link.PortsDiffer {
+		t.Fatalf("agreeing ports: link = %+v", link)
+	}
+}

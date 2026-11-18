@@ -72,14 +72,18 @@ type routeNoteDTO struct {
 }
 
 type routeLinkDTO struct {
-	PanelID    int64            `json:"panel_id"`
-	ServerName string           `json:"server_name,omitempty"`
-	Gone       bool             `json:"gone,omitempty"`
-	Exists     bool             `json:"exists"`
-	Ready      bool             `json:"ready"`
-	InApplied  bool             `json:"in_applied"`
-	OutApplied bool             `json:"out_applied"`
-	Quality    *probeQualityDTO `json:"quality,omitempty"`
+	PanelID    int64  `json:"panel_id"`
+	ServerName string `json:"server_name,omitempty"`
+	Gone       bool   `json:"gone,omitempty"`
+	Exists     bool   `json:"exists"`
+	Ready      bool   `json:"ready"`
+	InApplied  bool   `json:"in_applied"`
+	OutApplied bool   `json:"out_applied"`
+	// PortsDiffer says the exit and the entry were last sent different ports.
+	PortsDiffer bool             `json:"ports_differ,omitempty"`
+	InPort      int              `json:"in_port,omitempty"`
+	OutPort     int              `json:"out_port,omitempty"`
+	Quality     *probeQualityDTO `json:"quality,omitempty"`
 }
 
 func routeLinkOf(l *route.LinkState) *routeLinkDTO {
@@ -87,7 +91,8 @@ func routeLinkOf(l *route.LinkState) *routeLinkDTO {
 		return nil
 	}
 	return &routeLinkDTO{PanelID: l.PanelID, ServerName: l.ServerName, Gone: l.Gone, Exists: l.Exists, Ready: l.Ready,
-		InApplied: l.InApplied, OutApplied: l.OutApplied, Quality: probeQualityOf(l.Quality)}
+		InApplied: l.InApplied, OutApplied: l.OutApplied,
+		PortsDiffer: l.PortsDiffer, InPort: l.InPort, OutPort: l.OutPort, Quality: probeQualityOf(l.Quality)}
 }
 
 type routeItemDTO struct {

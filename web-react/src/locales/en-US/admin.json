@@ -2340,7 +2340,8 @@
         "in_end": "Exit end",
         "out_end": "Entry end",
         "applied": "applied",
-        "waiting": "waiting"
+        "waiting": "waiting",
+        "ports_differ": "Both ends applied, but the exit listens on port {{inPort}} and the entry dials port {{outPort}}: the tunnel is ready once both are on the same port"
       },
       "default_exit": "Default exit: {{name}}",
       "default_exit_pending": "The exit server above was changed and is not saved yet; routes are checked against the saved default exit.",

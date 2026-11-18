@@ -2336,7 +2336,8 @@
         "in_end": "出口端",
         "out_end": "入口端",
         "applied": "已生效",
-        "waiting": "等待中"
+        "waiting": "等待中",
+        "ports_differ": "两端都已生效，但出口监听端口 {{inPort}}，入口拨向端口 {{outPort}}：两端到同一端口后隧道才就绪"
       },
       "default_exit": "默认出口：{{name}}",
       "default_exit_pending": "上方的出口服务器已修改但尚未保存；路由按已保存的默认出口检查。",

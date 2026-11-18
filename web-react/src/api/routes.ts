@@ -40,6 +40,11 @@ export interface RouteLink {
   ready: boolean
   in_applied: boolean
   out_applied: boolean
+  /** The exit and the entry were last sent different ports (a move to or from a shared port). */
+  ports_differ?: boolean
+  /** The port the exit listens on and the port the entry dials, when they differ. */
+  in_port?: number
+  out_port?: number
   quality?: ProbeQuality
 }
 

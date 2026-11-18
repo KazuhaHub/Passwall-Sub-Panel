@@ -22,6 +22,11 @@ export default function RouteLinkStatus({ link, testId }: { link: RouteLink; tes
           {t(`${K}in_end`)}: {t(link.in_applied ? `${K}applied` : `${K}waiting`)} · {t(`${K}out_end`)}: {t(link.out_applied ? `${K}applied` : `${K}waiting`)}
         </Typography>
       )}
+      {link.exists && link.ports_differ && (
+        <Typography component="span" data-testid={`${testId}-ports`} sx={{ fontSize: 12, color: md.tertiary }}>
+          {t(`${K}ports_differ`, { inPort: link.in_port, outPort: link.out_port })}
+        </Typography>
+      )}
       {link.quality && <ProbeQualityChip probe={link.quality} testId={`${testId}-quality`} />}
     </Box>
   )
