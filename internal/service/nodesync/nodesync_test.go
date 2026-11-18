@@ -922,3 +922,20 @@ func emptyProtocolHave() map[string]nodeprotocol.StreamState {
 }
 
 var _ ports.NativePanelSnapshotReader = (*Service)(nil)
+
+func TestRosterCapacityWarnsAtTwentyThousandIdentities(t *testing.T) {
+	snapshot := &ports.NativeDesiredSnapshot{
+		Clients: make([]ports.NativeDesiredClient, 20_001),
+	}
+	for i := range 19_999 {
+		snapshot.Clients[i].Client = &domain.PSPClient{ID: int64(i + 1)}
+	}
+	if issues := rosterCapacityIssues(snapshot); len(issues) != 0 {
+		t.Fatalf("below threshold: got %v", issues)
+	}
+	snapshot.Clients[19_999].Client = &domain.PSPClient{ID: 20_000}
+	issues := rosterCapacityIssues(snapshot)
+	if len(issues) != 1 || issues[0].Code != "roster_identity_capacity" {
+		t.Fatalf("at threshold: got %v", issues)
+	}
+}

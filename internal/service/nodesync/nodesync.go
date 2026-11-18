@@ -131,6 +131,24 @@ const IssueTunnelFactorStale = "tunnel_factor_stale"
 // or adopted from a panel). The lines are withheld from subscriptions.
 const IssueCDNLandingUnfit = "cdn_landing_unfit"
 
+const rosterIdentityWarningThreshold = 20_000
+
+func rosterCapacityIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
+	count := 0
+	for _, desired := range snapshot.Clients {
+		if desired.Client != nil {
+			count++
+		}
+	}
+	if count < rosterIdentityWarningThreshold {
+		return nil
+	}
+	return []domain.NodeAgentIssue{{
+		Code:   "roster_identity_capacity",
+		Detail: fmt.Sprintf("Server roster reached %d client identities. The sync byte limit still applies.", rosterIdentityWarningThreshold),
+	}}
+}
+
 // cdnUnfitIssues names the CDN lines of the snapshot's nodes that are withheld
 // because their landing cannot go through a CDN, with the reason.
 func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
@@ -883,6 +901,7 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	policyIssues = append(policyIssues, routeIssues...)
 	policyIssues = append(policyIssues, s.orphanTunnelIssues(ctx, snapshot)...)
 	policyIssues = append(policyIssues, cdnUnfitIssues(snapshot)...)
+	policyIssues = append(policyIssues, rosterCapacityIssues(snapshot)...)
 	if len(policyIssues) > 0 {
 		for i := range policyIssues {
 			policyIssues[i].AgentID = agent.AgentID
