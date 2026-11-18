@@ -329,7 +329,29 @@ func frontContractFaults(body nodeprotocol.Transit, plan front.Plan) map[nodepro
 		}
 		return out
 	}
+	fronted := map[nodeprotocol.LinkKey]bool{}
+	for _, in := range plan.LinksIn {
+		fronted[in.Key] = true
+	}
+	links := map[nodeprotocol.LinkKey]nodeprotocol.LinkIn{}
+	for _, in := range body.LinksIn {
+		if fronted[in.Key] {
+			links[in.Key] = in
+		}
+	}
+	linksOf := func(f nodeprotocol.Front) []nodeprotocol.LinkIn {
+		var out []nodeprotocol.LinkIn
+		for _, route := range f.Routes {
+			if in, ok := links[route.Target.Link]; ok {
+				out = append(out, in)
+			}
+		}
+		return out
+	}
 	base := body
+	base.LinksIn = slices.DeleteFunc(slices.Clone(body.LinksIn), func(in nodeprotocol.LinkIn) bool {
+		return fronted[in.Key]
+	})
 	base.Fronts = nil
 	base.Forwards = nil
 	for _, forward := range body.Forwards {
@@ -340,7 +362,7 @@ func frontContractFaults(body nodeprotocol.Transit, plan front.Plan) map[nodepro
 	baseOK := nodeprotocol.ValidateTransit(&base) == nil
 	var remaining []nodeprotocol.Front
 	for _, f := range plan.Fronts {
-		alone := nodeprotocol.Transit{Fronts: []nodeprotocol.Front{f}, Forwards: forwardsOf(f)}
+		alone := nodeprotocol.Transit{Fronts: []nodeprotocol.Front{f}, Forwards: forwardsOf(f), LinksIn: linksOf(f)}
 		if err := nodeprotocol.ValidateTransit(&alone); err != nil {
 			faulty[f.Key] = err.Error()
 			continue
@@ -349,6 +371,7 @@ func frontContractFaults(body nodeprotocol.Transit, plan front.Plan) map[nodepro
 			next := base
 			next.Fronts = []nodeprotocol.Front{f}
 			next.Forwards = append(slices.Clone(base.Forwards), forwardsOf(f)...)
+			next.LinksIn = append(slices.Clone(base.LinksIn), linksOf(f)...)
 			if err := nodeprotocol.ValidateTransit(&next); err != nil {
 				faulty[f.Key] = err.Error()
 				continue
@@ -361,6 +384,7 @@ func frontContractFaults(body nodeprotocol.Transit, plan front.Plan) map[nodepro
 		together.Fronts = remaining
 		for _, f := range remaining {
 			together.Forwards = append(together.Forwards, forwardsOf(f)...)
+			together.LinksIn = append(together.LinksIn, linksOf(f)...)
 		}
 		if err := nodeprotocol.ValidateTransit(&together); err != nil {
 			for _, f := range remaining {
@@ -380,7 +404,8 @@ type TransitPublisher interface {
 	ForwardsWithProbeMethods(ctx context.Context, entryPanelID int64) ([]nodeprotocol.Forward, map[nodeprotocol.ForwardKey]string, error)
 	Confirm(ctx context.Context, entryPanelID int64, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus, now time.Time) (bool, error)
 	RecordCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.ForwardCounters) error
-	LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (transit.LinkPlan, error)
+	LinksForFronts(ctx context.Context, panelID int64, occupied map[int]bool, routes bool, fronted []nodeprotocol.LinkIn) (transit.LinkPlan, error)
+	WithholdIncomingLinks(ctx context.Context, links []nodeprotocol.LinkKey) error
 	ConfirmLinks(ctx context.Context, held *nodeprotocol.Transit, statuses map[string]nodeprotocol.ObjectStatus) (bool, error)
 	RecordLinkCounters(ctx context.Context, sent *nodeprotocol.Transit, counters []nodeprotocol.LinkCounters) error
 }
@@ -726,7 +751,7 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 			}
 		}
 		if slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitLink) {
-			plan, err := s.transit.LinksFor(ctx, agent.PanelID, listening, slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitRoute))
+			plan, err := s.transit.LinksForFronts(ctx, agent.PanelID, listening, slices.Contains(report.Capabilities, nodeprotocol.CapabilityTransitRoute), frontPlan.LinksIn)
 			if err != nil {
 				return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 			}
@@ -757,6 +782,7 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 			late = routePlan.Withheld
 			routeWithheld = append(routeWithheld, late...)
 		}
+		frontPlan = frontPlan.WithServedLinks(transitBody.LinksIn)
 		if len(frontPlan.Fronts) > 0 {
 			transitBody.Forwards = append(transitBody.Forwards, frontPlan.Forwards...)
 			sort.Slice(transitBody.Forwards, func(i, j int) bool { return transitBody.Forwards[i].Key < transitBody.Forwards[j].Key })
@@ -783,7 +809,25 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 						kept = append(kept, forward)
 					}
 				}
+				oldLinks := frontPlan.LinksIn
 				frontPlan = frontPlan.Without(drop)
+				var droppedLinks []nodeprotocol.LinkKey
+				for _, in := range oldLinks {
+					if !slices.ContainsFunc(frontPlan.LinksIn, func(kept nodeprotocol.LinkIn) bool { return kept.Key == in.Key }) {
+						droppedLinks = append(droppedLinks, in.Key)
+					}
+				}
+				if len(droppedLinks) > 0 {
+					transitBody.LinksIn = slices.DeleteFunc(transitBody.LinksIn, func(in nodeprotocol.LinkIn) bool {
+						return slices.Contains(droppedLinks, in.Key)
+					})
+					if err := s.transit.WithholdIncomingLinks(ctx, droppedLinks); err != nil {
+						return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
+					}
+					if s.invalidateRender != nil {
+						s.invalidateRender()
+					}
+				}
 				transitBody.Forwards = append(kept, frontPlan.Forwards...)
 				sort.Slice(transitBody.Forwards, func(i, j int) bool { return transitBody.Forwards[i].Key < transitBody.Forwards[j].Key })
 				transitBody.Fronts = frontPlan.Fronts

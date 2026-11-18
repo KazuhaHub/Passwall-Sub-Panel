@@ -625,3 +625,41 @@ func TestFrontableOfClassifiesListeners(t *testing.T) {
 		}
 	}
 }
+
+func TestIncomingRealityLinkSharesTheFrontPort(t *testing.T) {
+	e := newEnv(realityNode(1, "hk", 443, "a.example.com"))
+	link := domain.TransitLink{
+		ID: 7, EntryPanelID: 3, ExitPanelID: panelID, Port: 23456,
+		Protocol:          nodeprotocol.LinkProtocolVLESSReality,
+		RealityUUID:       "d342d11e-d424-4583-b36e-524ab1f0afa4",
+		RealityPrivateKey: strings.Repeat("A", 43),
+		RealityShortID:    "0123456789abcdef",
+		RealityServerName: "link.example.com", RealityTarget: "link.example.com:443",
+	}
+	e.svc.links = fakeLinks{link}
+	in := simpleInput()
+	in.Routes = append(in.Routes, domain.FrontRoute{
+		ServerNames: []string{link.RealityServerName},
+		Target:      domain.FrontTarget{Kind: domain.FrontTargetLink, LinkID: link.ID},
+	})
+	if _, err := e.svc.Create(t.Context(), panelID, in); err != nil {
+		t.Fatal(err)
+	}
+	ports, err := e.svc.SavedLinkPorts(t.Context(), panelID)
+	if err != nil || ports[link.ID] != in.Port {
+		t.Fatalf("saved port = %v, %v", ports, err)
+	}
+	plan, err := e.svc.PlanFor(t.Context(), panelID, sniCaps, domain.NodeCoreXray, domain.NodeCoreXray, []int64{1})
+	if err != nil || len(plan.Fronts) != 1 || len(plan.LinksIn) != 1 || plan.LinksIn[0].Port != in.Port {
+		t.Fatalf("front plan = %+v, %v", plan, err)
+	}
+	body := nodeprotocol.Transit{Fronts: plan.Fronts, LinksIn: plan.LinksIn}
+	if err := nodeprotocol.ValidateTransit(&body); err != nil {
+		t.Fatal(err)
+	}
+	dormant := plan.WithServedLinks(nil)
+	if len(dormant.LinksIn) != 0 || len(dormant.Fronts) != 1 || len(dormant.Fronts[0].Routes) != 1 ||
+		dormant.Fronts[0].Routes[0].Target.Listener != "lst_1" {
+		t.Fatalf("a dormant tunnel interrupted other routes: %+v", dormant)
+	}
+}

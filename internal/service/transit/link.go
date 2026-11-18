@@ -96,6 +96,11 @@ type LinkPlan struct {
 // such a link takes its incoming half whatever the entry declared, so the link
 // is ready as soon as the entry can use it.
 func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]bool, routes bool) (LinkPlan, error) {
+	return s.LinksForFronts(ctx, panelID, occupied, routes, nil)
+}
+
+// LinksForFronts includes incoming links carried by a compiled front.
+func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied map[int]bool, routes bool, fronted []nodeprotocol.LinkIn) (LinkPlan, error) {
 	if s.links == nil {
 		return LinkPlan{}, nil
 	}
@@ -157,6 +162,23 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 	if err != nil {
 		return LinkPlan{}, err
 	}
+	shared := make(map[int64]map[int64]int)
+	if s.frontPorts != nil {
+		for _, exit := range exits {
+			if _, found := shared[exit]; found {
+				continue
+			}
+			ports, err := s.frontPorts(ctx, exit)
+			if err != nil {
+				return LinkPlan{}, fmt.Errorf("transit: read front ports for server %d: %w", exit, err)
+			}
+			shared[exit] = ports
+		}
+	}
+	active := make(map[nodeprotocol.LinkKey]nodeprotocol.LinkIn, len(fronted))
+	for _, in := range fronted {
+		active[in.Key] = in
+	}
 	plan := LinkPlan{EgressExit: map[int64]int64{}}
 	for _, key := range pairs {
 		link, ok, err := s.ensurePairLink(ctx, nodes, key.entry, key.exit)
@@ -174,8 +196,19 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 			}
 			plan.RouteKeys[key.exit] = nodeprotocol.NewLinkKey(link.ID)
 		}
+		port := shared[key.exit][link.ID]
 		if key.exit == panelID {
 			in := link.LinkIn()
+			if port != 0 {
+				sent, ok := active[in.Key]
+				if !ok || sent.Port != port {
+					if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+						return LinkPlan{}, err
+					}
+					continue
+				}
+				in = sent
+			}
 			if err := nodeprotocol.ValidateLinkIn(in); err != nil {
 				log.Warn("tunnel withheld from its exit: its half is invalid", "link", link.ID, "err", err)
 				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
@@ -183,7 +216,7 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 				}
 				continue
 			}
-			if occupied[in.Port] {
+			if port == 0 && occupied[in.Port] {
 				log.Warn("tunnel withheld from its exit: its port is taken there", "link", link.ID, "port", in.Port)
 				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
 					return LinkPlan{}, err
@@ -199,6 +232,9 @@ func (s *Service) LinksFor(ctx context.Context, panelID int64, occupied map[int]
 		}
 		address := domain.TransitLinkAddress(link, addresses[key.exit])
 		out := link.LinkOut(address)
+		if port != 0 {
+			out.Port = port
+		}
 		if err := nodeprotocol.ValidateLinkOut(out); err != nil {
 			log.Warn("tunnel withheld from its entry: no usable exit address", "link", link.ID, "err", err)
 			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, "", nil); err != nil {
@@ -762,6 +798,7 @@ func (s *Service) UpdateLink(ctx context.Context, entry, exit int64, settings do
 	if entry <= 0 || exit <= 0 || entry == exit {
 		return LinkView{}, fmt.Errorf("%w: a tunnel joins two different servers", domain.ErrValidation)
 	}
+	defer s.lockPair(entry, exit)()
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
 		return LinkView{}, fmt.Errorf("transit: list nodes: %w", err)
@@ -781,8 +818,33 @@ func (s *Service) UpdateLink(ctx context.Context, entry, exit int64, settings do
 	if err := domain.ValidateTransitLinkSettings(settings); err != nil {
 		return LinkView{}, err
 	}
+	if s.frontPorts != nil && (settings.Protocol != link.Protocol || settings.RealityServerName != link.RealityServerName) {
+		ports, err := s.frontPorts(ctx, exit)
+		if err != nil {
+			return LinkView{}, err
+		}
+		if port := ports[link.ID]; port != 0 {
+			return LinkView{}, fmt.Errorf("%w: tunnel %d uses shared port %d; remove its SNI route before changing its protocol or server name", domain.ErrConflict, link.ID, port)
+		}
+	}
 	if err := s.links.UpdateLinkSettings(ctx, link.ID, settings); err != nil {
 		return LinkView{}, err
 	}
 	return s.Link(ctx, entry, exit)
+}
+
+// WithholdIncomingLinks clears readiness for incoming links dropped during
+// front validation.
+func (s *Service) WithholdIncomingLinks(ctx context.Context, links []nodeprotocol.LinkKey) error {
+	var plan LinkPlan
+	for _, key := range links {
+		id, err := key.RowID()
+		if err != nil {
+			return err
+		}
+		if err := s.sent(ctx, &plan, id, domain.LinkSideIn, "", nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }

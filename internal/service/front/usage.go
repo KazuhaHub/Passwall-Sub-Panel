@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
@@ -14,6 +16,7 @@ import (
 const (
 	KindListener      = "listener"       // a node's inbound, on its own port
 	KindForward       = "forward"        // a managed relay line entering on this server
+	KindLinkReserved  = "link_reserved"  // standalone port of a fronted tunnel
 	KindLink          = "link"           // the exit half of a tunnel into this server
 	KindFront         = "front"          // a shared port
 	KindFrontLoopback = "front_loopback" // 127.0.0.1 port of a listener behind a front
@@ -116,12 +119,16 @@ func (s *Service) collectUse(ctx context.Context, panelID int64, onPanel []*doma
 		}
 	}
 	behind := map[int64]bool{}
+	sharedLinks := map[int64]bool{}
 	routed := map[string]bool{}
 	for _, f := range fronts {
 		for _, item := range f.Listeners {
 			behind[item.NodeID] = true
 		}
 		for _, target := range f.Targets() {
+			if target.Kind == domain.FrontTargetLink {
+				sharedLinks[target.LinkID] = true
+			}
 			if target.Kind == domain.FrontTargetForward {
 				routed[fmt.Sprintf("%d/%s", target.NodeID, target.LineID)] = true
 			}
@@ -174,8 +181,12 @@ func (s *Service) collectUse(ctx context.Context, panelID int64, onPanel []*doma
 			if l.ExitPanelID != panelID || l.Port <= 0 {
 				continue
 			}
+			kind := KindLink
+			if sharedLinks[l.ID] {
+				kind = KindLinkReserved
+			}
 			table.entries = append(table.entries, PortUsage{
-				Port: l.Port, Bind: "public", Kind: KindLink, PeerPanelID: l.EntryPanelID, Enabled: true,
+				Port: l.Port, Bind: "public", Kind: kind, PeerPanelID: l.EntryPanelID, Enabled: true,
 				Label: fmt.Sprintf("tunnel from server %d", l.EntryPanelID),
 			})
 		}
@@ -402,10 +413,20 @@ type LineOption struct {
 	FrontID int64
 }
 
+// LinkOption is an incoming REALITY tunnel eligible for a shared port.
+type LinkOption struct {
+	ID           int64  `json:"link_id"`
+	EntryPanelID int64  `json:"entry_panel_id"`
+	ServerName   string `json:"server_name"`
+	Port         int    `json:"port"`
+	FrontID      int64  `json:"front_id,omitempty"`
+}
+
 // Options is what the front editor offers for one server.
 type Options struct {
 	Listeners []ListenerOption
 	Lines     []LineOption
+	Links     []LinkOption
 }
 
 // Options lists the candidates for the editor, with the reason a listener
@@ -420,18 +441,36 @@ func (s *Service) Options(ctx context.Context, panelID int64) (Options, error) {
 		return Options{}, err
 	}
 	behind := map[int64]int64{}
+	linkFronts := map[int64]int64{}
 	routed := map[string]int64{}
 	for _, f := range fronts {
 		for _, item := range f.Listeners {
 			behind[item.NodeID] = f.ID
 		}
 		for _, target := range f.Targets() {
+			if target.Kind == domain.FrontTargetLink {
+				linkFronts[target.LinkID] = f.ID
+			}
 			if target.Kind == domain.FrontTargetForward {
 				routed[fmt.Sprintf("%d/%s", target.NodeID, target.LineID)] = f.ID
 			}
 		}
 	}
-	var out Options
+	out := Options{Links: []LinkOption{}}
+	if s.links != nil {
+		links, err := s.links.ListLinks(ctx)
+		if err != nil {
+			return Options{}, fmt.Errorf("front: list tunnels: %w", err)
+		}
+		for _, link := range links {
+			if link.ExitPanelID == panelID && link.Protocol == nodeprotocol.LinkProtocolVLESSReality && link.RealityServerName != "" {
+				out.Links = append(out.Links, LinkOption{
+					ID: link.ID, EntryPanelID: link.EntryPanelID, ServerName: link.RealityServerName,
+					Port: link.Port, FrontID: linkFronts[link.ID],
+				})
+			}
+		}
+	}
 	byID := make(map[int64]*domain.Node, len(nodes))
 	for _, n := range nodes {
 		if n != nil {

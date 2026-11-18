@@ -14,6 +14,7 @@ export interface FrontTarget {
   node_id?: number
   /** The relay line of a forward target. */
   line_id?: string
+  link_id?: number
   /** External site: a lowercase name or an IP address. */
   host?: string
   port?: number
@@ -92,9 +93,17 @@ export interface FrontLineOption {
   front_id?: number
 }
 
-export interface FrontOptions { listeners: FrontListenerOption[]; lines: FrontLineOption[] }
+export interface FrontLinkOption {
+  link_id: number
+  entry_panel_id: number
+  server_name: string
+  port: number
+  front_id?: number
+}
 
-export type PortKind = 'listener' | 'forward' | 'link' | 'link_planned' | 'front' | 'front_loopback' | 'probe_loopback' | 'probe_range' | 'reserved'
+export interface FrontOptions { listeners: FrontListenerOption[]; lines: FrontLineOption[]; links?: FrontLinkOption[] }
+
+export type PortKind = 'listener' | 'forward' | 'link' | 'link_reserved' | 'link_planned' | 'front' | 'front_loopback' | 'probe_loopback' | 'probe_range' | 'reserved'
 
 export interface PortBehind {
   server_names: string[]
@@ -219,7 +228,7 @@ export function parseServerNames(text: string): string[] {
  */
 export function frontErrorWording(e: FrontError): { key: string; values: Record<string, unknown> } {
   // A list the server leaves out is empty: say so rather than show a bare placeholder.
-  const values: Record<string, unknown> = { nodes: '—', leaving_listeners: '—', leaving_lines: '—', routes: '—', names: '—', ports: '—' }
+  const values: Record<string, unknown> = { nodes: '—', leaving_listeners: '—', leaving_lines: '—', tunnels: '—', routes: '—', names: '—', ports: '—' }
   for (const [k, v] of Object.entries(e.params)) values[k] = Array.isArray(v) ? v.join(', ') : v
   const action = typeof e.params.action === 'string' ? e.params.action : ''
   const code = e.code === 'confirm_required' && action ? `confirm_required_${action}` : e.code

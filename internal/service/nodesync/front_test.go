@@ -11,9 +11,11 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sourceaddr"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/linkprobe"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
 var frontCaps = []string{
@@ -371,5 +373,58 @@ func TestListenersOfAFrontThatIsNotSentAreNotSentTwiceOnOnePort(t *testing.T) {
 	single := f.syncReport(t, f.agentReport([]string{nodeprotocol.CapabilityTransitForward}, 3))
 	if got := listenersOn(single, 444); len(got) != 1 {
 		t.Fatalf("a single listener must fall back to its public port: %v", got)
+	}
+}
+
+func TestSharedTunnelExitSyncsThroughTheFront(t *testing.T) {
+	f := newConfigAppliedFixture(t)
+	exit := f.exitServer(t)
+	if err := f.db.Table("nodes").Where("id = ?", f.node.ID).Update("egress_panel_id", exit.PanelID).Error; err != nil {
+		t.Fatal(err)
+	}
+	fronts := front.New(f.repos.TransitFronts, f.repos.Node, f.repos.XUIPanel, f.repos.NodeAgent, f.repos.Transit, f.repos.TransitLinks, nil)
+	links := transit.New(f.repos.Node, f.repos.Transit).WithLinks(f.repos.TransitLinks, f.repos.NodeAgent)
+	links.WithFrontLinkPorts(fronts.SavedLinkPorts)
+	f.service.SetTransit(links)
+	f.service.SetFronts(fronts)
+	ctx := t.Context()
+	if _, err := links.UpdateLink(ctx, f.agent.PanelID, exit.PanelID, domain.TransitLinkSettings{Protocol: nodeprotocol.LinkProtocolVLESSReality}); err != nil {
+		t.Fatal(err)
+	}
+	link, err := f.repos.TransitLinks.GetLink(ctx, f.agent.PanelID, exit.PanelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sharedPort = 8443
+	if _, err := f.repos.TransitFronts.Create(ctx, domain.TransitFront{
+		PanelID: exit.PanelID, Port: sharedPort,
+		Routes:  []domain.FrontRoute{{ServerNames: []string{link.RealityServerName}, Target: domain.FrontTarget{Kind: domain.FrontTargetLink, LinkID: link.ID}}},
+		Default: domain.FrontTarget{Kind: domain.FrontTargetExternal, Host: "www.example.com", Port: 443},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fromExit := sourceaddr.With(ctx, "198.51.100.7")
+	report := nodeprotocol.NodeReport{
+		AgentID: exit.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		CoreEngine: "xray", Capabilities: frontCaps, ReportedAtMS: f.now.UnixMilli(), Have: emptyProtocolHave(),
+	}
+	in := f.syncAs(t, fromExit, report).Config.Body.Transit
+	if in == nil || len(in.Fronts) != 1 || len(in.LinksIn) != 1 ||
+		in.LinksIn[0].Port != sharedPort || in.Fronts[0].Routes[0].Target.Link != in.LinksIn[0].Key {
+		t.Fatalf("exit transit = %+v", in)
+	}
+	if err := nodeprotocol.ValidateTransit(in); err != nil {
+		t.Fatal(err)
+	}
+	out := f.syncAs(t, ctx, f.frontReport(frontCaps, 2)).Config.Body.Transit
+	if out == nil || len(out.LinksOut) != 1 || out.LinksOut[0].Port != sharedPort ||
+		out.LinksOut[0].Reality.ServerName != link.RealityServerName {
+		t.Fatalf("entry transit = %+v", out)
+	}
+	report.CoreEngine = "sing-box"
+	report.ReportedAtMS++
+	withheld := f.syncAs(t, fromExit, report).Config.Body.Transit
+	if withheld != nil && (len(withheld.LinksIn) > 0 || len(withheld.Fronts) > 0) {
+		t.Fatalf("unsupported exit got a bind: %+v", withheld)
 	}
 }

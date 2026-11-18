@@ -30,6 +30,7 @@ function what(t: (key: string, values?: Record<string, unknown>) => string, u: P
       : t('admin:servers.fronts.ports.kind.listener', { name: u.node_name ?? '', protocol: u.protocol ?? '' })
     case 'forward': return t('admin:servers.fronts.ports.kind.forward', { label: u.label })
     case 'link_planned': return t('admin:servers.fronts.ports.kind.link_planned')
+    case 'link_reserved': return t('admin:servers.fronts.ports.kind.link_reserved', { peer: u.peer_panel_id ?? 0 })
     case 'link': return t('admin:servers.fronts.ports.kind.link', { peer: u.peer_panel_id ?? 0 })
     case 'front': return t('admin:servers.fronts.ports.kind.front')
     case 'front_loopback': return u.parent_node_id

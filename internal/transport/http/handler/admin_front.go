@@ -227,7 +227,7 @@ func (h *AdminFrontHandler) Options(c *gin.Context) {
 			Port: item.Port, Enabled: item.Enabled, ServerNames: names, FrontID: item.FrontID,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "lines": lines})
+	c.JSON(http.StatusOK, gin.H{"listeners": listeners, "lines": lines, "links": options.Links})
 }
 
 // Suggest answers a pre-fill for the editor's "random" buttons: a free

@@ -54,7 +54,8 @@ type Service struct {
 	reserved   map[[2]int64]reservation
 	// portInUse says something on a server holds a port (its listeners, forwards,
 	// shared ports and loopbacks); nil knows only what the nodes and links say.
-	portInUse func(ctx context.Context, panelID int64, port int) bool
+	portInUse  func(ctx context.Context, panelID int64, port int) bool
+	frontPorts func(context.Context, int64) (map[int64]int, error)
 	// now is the clock the reservations expire by.
 	now func() time.Time
 }
@@ -223,4 +224,9 @@ func (s *Service) RecordCounters(ctx context.Context, sent *nodeprotocol.Transit
 		}
 	}
 	return nil
+}
+
+// WithFrontLinkPorts supplies the configured shared ports for tunnel exits.
+func (s *Service) WithFrontLinkPorts(ports func(context.Context, int64) (map[int64]int, error)) {
+	s.frontPorts = ports
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import type { Front, FrontOptions } from '@/api/fronts'
-import { draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newlyMoved, targetKey, type Draft } from './frontDraft'
+import { changedLinkIDs, draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newlyMoved, targetKey, type Draft } from './frontDraft'
 
 const probe = { low: 31000, high: 31999 }
 const describeTarget = (k: string) => `target ${k}`
@@ -41,6 +41,19 @@ describe('front draft', () => {
     expect(input.routes.map(r => r.server_names)).toEqual([['a.example.com'], ['land.example.com']])
     expect(input.routes[1].target).toEqual({ kind: 'forward', node_id: 5, line_id: 'x' })
     expect(input.default).toEqual({ host: 'www.example.com', port: 443 })
+  })
+
+  it('round-trips tunnel targets and confirms endpoint changes', () => {
+    const draft = draftOf(front, 443)
+    draft.routes.push({ key: 'tunnel', names: 'tunnel.example.com', target: targetKey.link(7) })
+    const input = inputOf(draft)
+    expect(input.routes[2].target).toEqual({ kind: 'link', link_id: 7 })
+    expect(changedLinkIDs(draft, front)).toEqual([7])
+    const saved: Front = { ...front, routes: input.routes }
+    expect(draftOf(saved, 443).routes[2].target).toBe(targetKey.link(7))
+    expect(changedLinkIDs(draft, saved)).toEqual([])
+    expect(changedLinkIDs({ ...draft, port: '8443' }, saved)).toEqual([7])
+    expect(changedLinkIDs(draftOf(front, 443), saved)).toEqual([7])
   })
 
   it('has no issue for a complete draft and names each missing piece otherwise', () => {
