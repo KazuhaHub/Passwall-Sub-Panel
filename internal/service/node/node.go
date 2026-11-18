@@ -1260,6 +1260,9 @@ func (s *Service) updateInboundConfigLockedNode(ctx context.Context, n *domain.N
 	if err := domain.ValidateCDNRelays(&next, next.Relays); err != nil {
 		return fmt.Errorf("%w (the change would leave its CDN lines without a transport a CDN can carry: remove those lines first, or keep a TLS + WebSocket, gRPC or HTTPUpgrade transport)", err)
 	}
+	if err := s.checkListenerGuard(ctx, n, &next); err != nil {
+		return err
+	}
 	offer, err := s.checkInboundAgainstFronts(ctx, &next)
 	if err != nil {
 		return err

@@ -41,6 +41,14 @@ const (
 	// CodeSourceGuardTooManyCIDRs refuses a class whose addresses do not fit one
 	// source set.
 	CodeSourceGuardTooManyCIDRs = "source_guard_too_many_cidrs"
+	// CodeSourceGuardListenerTransport refuses a listener or engine change after
+	// which the core would take the source from a header the client controls
+	// (sing-box on a non-TCP transport), while lines at another factor than the
+	// direct line end on the listener.
+	CodeSourceGuardListenerTransport = "source_guard_listener_transport"
+	// CodeSourceGuardListenerTrust is the same for an Xray listener that trusts
+	// X-Forwarded-For or accepts the PROXY protocol.
+	CodeSourceGuardListenerTrust = "source_guard_listener_trust"
 )
 
 // MaxPricedClasses is how many priced classes one listener may have: a
@@ -78,17 +86,36 @@ func ListenerGuardable(n *Node, engines []NodeCoreEngine) bool {
 	if raw := strings.TrimSpace(n.InboundSettings); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &inbound)
 	}
-	network := strings.ToLower(strings.TrimSpace(stringOf(stream, "network")))
+	// Xray reads config keys case-insensitively, so every lookup here does too.
+	// A stream settings object may also arrive wrapped in a streamSettings key.
+	streams := []map[string]any{stream}
+	for _, doc := range []map[string]any{stream, inbound} {
+		for _, v := range ciValues(doc, "streamSettings") {
+			if m, ok := v.(map[string]any); ok {
+				streams = append(streams, m)
+			}
+		}
+	}
 	for _, engine := range engines {
 		switch NormalizeNodeCoreEngine(engine) {
 		case NodeCoreSingBox:
-			switch network {
-			case "", "tcp", "raw":
-			default:
-				return false
+			for _, st := range streams {
+				for _, v := range ciValues(st, "network") {
+					network, _ := v.(string)
+					switch strings.ToLower(strings.TrimSpace(network)) {
+					case "", "tcp", "raw":
+					default:
+						return false
+					}
+				}
 			}
 		default:
-			if trustsForwardedFor(stream) || acceptsProxyAnywhere(stream) || acceptsProxyAnywhere(inbound) {
+			for _, st := range streams {
+				if trustsForwardedFor(st) || acceptsProxyAnywhere(st) {
+					return false
+				}
+			}
+			if acceptsProxyAnywhere(inbound) {
 				return false
 			}
 		}
@@ -96,12 +123,75 @@ func ListenerGuardable(n *Node, engines []NodeCoreEngine) bool {
 	return true
 }
 
+// ciValues returns the values of every key of doc equal to key ignoring case.
+func ciValues(doc map[string]any, key string) []any {
+	var out []any
+	for k, v := range doc {
+		if strings.EqualFold(k, key) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// PricedLines are the lines ending on the node's listener whose factor differs
+// from the direct line's: the ones that need the listener to guard.
+func (n *Node) PricedLines() []RelayLine {
+	if n == nil || n.IsTunnelChild() || n.IsSeparator() {
+		return nil
+	}
+	direct := n.EffectiveTrafficFactor()
+	var out []RelayLine
+	for _, line := range n.Relays {
+		if line.Guarded() && line.ID != "" && line.EffectiveTrafficFactor() != direct {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// ListenerGuardRefusal refuses a change (a listener edit, an engine switch)
+// that makes a listener unguardable while it has priced lines: before and after
+// are the cores the server runs before and after the change. A listener that
+// was not guardable already is not refused again. Nil when the change is fine.
+func ListenerGuardRefusal(previous, next *Node, before, after []NodeCoreEngine) *CodedValidationError {
+	priced := next.PricedLines()
+	if len(priced) == 0 || !ListenerGuardable(previous, before) || ListenerGuardable(next, after) {
+		return nil
+	}
+	labels := make([]string, len(priced))
+	for i, line := range priced {
+		labels[i] = line.Label()
+	}
+	list := strings.Join(labels, ", ")
+	code, why := CodeSourceGuardListenerTrust, "its settings would trust X-Forwarded-For or a PROXY header"
+	for _, engine := range after {
+		if NormalizeNodeCoreEngine(engine) == NodeCoreSingBox && !ListenerGuardable(next, []NodeCoreEngine{NodeCoreSingBox}) {
+			code, why = CodeSourceGuardListenerTransport, "sing-box reads the source address from X-Forwarded-For on this transport"
+		}
+	}
+	return &CodedValidationError{
+		Code: code, Params: map[string]string{"node": next.DisplayName, "lines": list},
+		Msg: fmt.Sprintf("this change would stop %s from telling connections apart by where they come from (%s), while its lines %s cost something other than the direct line and rely on it: give those lines the direct factor or remove them first",
+			next.DisplayName, why, list),
+	}
+}
+
 func trustsForwardedFor(stream map[string]any) bool {
-	switch v := objectOf(stream, "sockopt")["trustedXForwardedFor"].(type) {
-	case []any:
-		return len(v) > 0
-	case string:
-		return strings.TrimSpace(v) != ""
+	for _, sock := range ciValues(stream, "sockopt") {
+		m, _ := sock.(map[string]any)
+		for _, trusted := range ciValues(m, "trustedXForwardedFor") {
+			switch v := trusted.(type) {
+			case []any:
+				if len(v) > 0 {
+					return true
+				}
+			case string:
+				if strings.TrimSpace(v) != "" {
+					return true
+				}
+			}
+		}
 	}
 	return false
 }
@@ -112,7 +202,7 @@ func acceptsProxyAnywhere(v any) bool {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
-			if k == "acceptProxyProtocol" {
+			if strings.EqualFold(k, "acceptProxyProtocol") {
 				if on, _ := x.(bool); on {
 					return true
 				}
@@ -150,10 +240,22 @@ type SourceClass struct {
 	// SourceWithheldLimit), or "" when it is. A class with no addresses has no
 	// set either, but that is unknown, not withheld.
 	Withheld string
+	// OverlapsDirect is set on a priced class whose addresses overlap the direct
+	// class's: refusing the direct class from them would refuse its own lines.
+	OverlapsDirect bool
 }
 
 // Emitted is whether the class's set goes to the landing.
 func (c SourceClass) Emitted() bool { return !c.Direct && c.Withheld == "" && len(c.CIDRs) > 0 }
+
+// Denies is whether direct-class identities are refused from the class's set,
+// which then has to be sent even when the class is withheld (overlapping another
+// priced class): the identity of a direct client must not be usable through a
+// priced forward that keeps running. Not when the set is unknown, does not fit
+// (SourceWithheldLimit), or overlaps the direct class's own addresses.
+func (c SourceClass) Denies() bool {
+	return !c.Direct && len(c.CIDRs) > 0 && c.Withheld != SourceWithheldLimit && !c.OverlapsDirect
+}
 
 // SourceGuardProblem is one refusal of a save, with a stable identity so a
 // refusal that was already true before the save can be told from a new one.
@@ -309,6 +411,9 @@ func (n *Node) AnalyzeSourceGuard(in SourceInputs) SourceGuardAnalysis {
 		for _, b := range []*build{x, y} {
 			if !b.class.Direct && b.class.Withheld == "" {
 				b.class.Withheld = SourceWithheldOverlap
+			}
+			if !b.class.Direct && (x.class.Direct || y.class.Direct) {
+				b.class.OverlapsDirect = true
 			}
 		}
 		a.Problems = append(a.Problems, a.problemOverlap(n, x.class, y.class))

@@ -243,3 +243,63 @@ func TestImportExistingAppliesTheFactorRules(t *testing.T) {
 		t.Fatalf("err %v created %v", err, repo.created)
 	}
 }
+
+func listenerGuardService(repo *captureNodeRepo, capable bool, engines ...domain.NodeCoreEngine) *Service {
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{}}}
+	svc.SetSourceGuardInputs(func(_ context.Context, nodes []*domain.Node) (domain.SourceInputs, error) {
+		in := domain.SourceInputs{Cloudflare: domain.BuiltinCloudflare, Servers: map[int64]domain.SourceGuardServer{}}
+		for _, n := range nodes {
+			in.Servers[n.PanelID] = domain.SourceGuardServer{Capable: capable, Engines: engines}
+		}
+		return in, nil
+	})
+	return svc
+}
+
+// A listener edit that stops a guarding listener from guarding is refused while
+// lines at another factor end on it.
+func TestUpdateInboundConfigRefusesWhatStopsAListenerFromGuarding(t *testing.T) {
+	priced := []domain.RelayLine{{ID: "p", Name: "Priced", Address: "r.example", Port: 1, Enabled: true, SourceCIDRs: []string{"192.0.2.0/24"}, TrafficFactorMilli: milli(2000)}}
+	spec := func(stream string) ports.InboundSpec {
+		return ports.InboundSpec{Protocol: "vless", Port: 443, Settings: `{"clients":[]}`, StreamSettings: stream}
+	}
+	for _, c := range []struct {
+		name    string
+		engines []domain.NodeCoreEngine
+		from    string
+		to      string
+		lines   []domain.RelayLine
+		code    string // "" means accepted
+	}{
+		{"xray trusts a header", nil, `{"network":"tcp"}`, `{"network":"tcp","Sockopt":{"TrustedXForwardedFor":["X-Forwarded-For"]}}`, priced, CodeSourceGuardListenerTrust},
+		{"xray accepts proxy protocol", nil, `{"network":"tcp"}`, `{"network":"tcp","tcpSettings":{"AcceptProxyProtocol":true}}`, priced, CodeSourceGuardListenerTrust},
+		{"sing-box moves to ws", []domain.NodeCoreEngine{domain.NodeCoreSingBox}, `{"network":"tcp"}`, `{"network":"ws"}`, priced, CodeSourceGuardListenerTransport},
+		{"no priced lines", nil, `{"network":"tcp"}`, `{"network":"tcp","sockopt":{"trustedXForwardedFor":["X"]}}`, []domain.RelayLine{{ID: "d", Address: "r.example", Port: 1, Enabled: true}}, ""},
+		{"already not guardable", nil, `{"sockopt":{"trustedXForwardedFor":["X"]}}`, `{"sockopt":{"trustedXForwardedFor":["Y"]}}`, priced, ""},
+		{"harmless edit", nil, `{"network":"tcp"}`, `{"network":"tcp","security":"tls"}`, priced, ""},
+		{"xray ws stays guardable", nil, `{"network":"tcp"}`, `{"network":"ws"}`, priced, ""},
+	} {
+		n := cdnLanding(c.from)
+		n.Relays = c.lines
+		repo := &captureNodeRepo{node: &n}
+		err := listenerGuardService(repo, true, c.engines...).UpdateInboundConfig(context.Background(), 1, spec(c.to))
+		if c.code == "" {
+			if err != nil {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			continue
+		}
+		var coded *domain.CodedValidationError
+		if !errors.As(err, &coded) || coded.Code != c.code || !strings.Contains(coded.Params["lines"], "Priced") || repo.updateCfg != nil {
+			t.Errorf("%s: err = %v written %v", c.name, err, repo.updateCfg)
+		}
+	}
+	// A server that cannot guard is not asked: its priced lines are already refused.
+	n := cdnLanding(`{"network":"tcp"}`)
+	n.Relays = priced
+	repo := &captureNodeRepo{node: &n}
+	err := listenerGuardService(repo, false).UpdateInboundConfig(context.Background(), 1, spec(`{"sockopt":{"trustedXForwardedFor":["X"]}}`))
+	if err != nil {
+		t.Fatalf("incapable server: %v", err)
+	}
+}

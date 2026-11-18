@@ -21,11 +21,13 @@ import (
 // addresses.
 
 const (
-	CodeSourceGuardFactorMismatch = domain.CodeSourceGuardFactorMismatch
-	CodeSourceGuardNeedsCIDRs     = domain.CodeSourceGuardNeedsCIDRs
-	CodeSourceGuardOverlap        = domain.CodeSourceGuardOverlap
-	CodeSourceGuardTooManyClasses = domain.CodeSourceGuardTooManyClasses
-	CodeSourceGuardTooManyCIDRs   = domain.CodeSourceGuardTooManyCIDRs
+	CodeSourceGuardFactorMismatch    = domain.CodeSourceGuardFactorMismatch
+	CodeSourceGuardNeedsCIDRs        = domain.CodeSourceGuardNeedsCIDRs
+	CodeSourceGuardOverlap           = domain.CodeSourceGuardOverlap
+	CodeSourceGuardTooManyClasses    = domain.CodeSourceGuardTooManyClasses
+	CodeSourceGuardTooManyCIDRs      = domain.CodeSourceGuardTooManyCIDRs
+	CodeSourceGuardListenerTransport = domain.CodeSourceGuardListenerTransport
+	CodeSourceGuardListenerTrust     = domain.CodeSourceGuardListenerTrust
 )
 
 // SetSourceGuardCheck binds the question "can a landing on this server check
@@ -115,6 +117,24 @@ func (s *Service) checkSourceGuard(ctx context.Context, previous, next *domain.N
 		if !known[p.ID] {
 			return p.Err
 		}
+	}
+	return nil
+}
+
+// checkListenerGuard refuses a listener edit that would make a listener that
+// guards unable to, while lines at another factor than the direct line end on
+// it: their identities would otherwise keep working at the old price. A server
+// that cannot guard is not asked.
+func (s *Service) checkListenerGuard(ctx context.Context, previous, next *domain.Node) error {
+	if (s.canGuard == nil && s.guardInputs == nil) || previous == nil || next == nil || len(next.PricedLines()) == 0 {
+		return nil
+	}
+	server := s.sourceGuardInputs(ctx, next).Servers[next.PanelID]
+	if !server.Capable {
+		return nil
+	}
+	if err := domain.ListenerGuardRefusal(previous, next, server.Engines, server.Engines); err != nil {
+		return err
 	}
 	return nil
 }

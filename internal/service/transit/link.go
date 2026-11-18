@@ -851,10 +851,53 @@ func (s *Service) pairRealityRefused(ctx context.Context, entry, exit int64) (bo
 // listed tunnels to Shadowsocks 2022 first, so no tunnel's protocol changes
 // without being chosen.
 func (s *Service) EngineSwitchRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	to = domain.NormalizeNodeCoreEngine(to)
+	if err := s.engineSourceGuardRefusal(ctx, panelID, to); err != nil {
+		return err
+	}
+	return s.engineLinkRefusal(ctx, panelID, to)
+}
+
+// engineSourceGuardRefusal refuses an engine switch after which a listener of
+// the server that keeps priced lines apart by source could no longer guard (a
+// sing-box listener on a transport that takes the source from X-Forwarded-For).
+// A server whose agent has not declared the capability is not asked.
+func (s *Service) engineSourceGuardRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	if s.agents == nil || s.nodes == nil {
+		return nil
+	}
+	agents, err := s.agents.ListByPanelIDs(ctx, []int64{panelID})
+	if err != nil {
+		return err
+	}
+	var agent *domain.NodeAgent
+	for _, a := range agents {
+		if a != nil && a.PanelID == panelID {
+			agent = a
+		}
+	}
+	if !agent.CanSourceGuard() {
+		return nil
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if n == nil || n.PanelID != panelID {
+			continue
+		}
+		if err := domain.ListenerGuardRefusal(n, n, agent.GuardEngines(), []domain.NodeCoreEngine{to}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) engineLinkRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
 	if s.links == nil {
 		return nil
 	}
-	to = domain.NormalizeNodeCoreEngine(to)
 	links, err := s.links.ListLinks(ctx)
 	if err != nil {
 		return err

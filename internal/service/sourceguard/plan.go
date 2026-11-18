@@ -49,8 +49,12 @@ type Plan struct {
 	// entirely, which is the fail-closed answer.
 	Allow map[domain.LineKey]nodeprotocol.SourceSetKey
 	// Deny is, per landing, the sets a direct-class identity is refused from:
-	// the priced classes whose set is sent.
+	// the priced classes whose set is known, withheld or not.
 	Deny map[int64][]nodeprotocol.SourceSetKey
+	// Closed are the lines of a priced class that is withheld although its set
+	// is sent (for the direct clients' deny lists): their clients are not given
+	// a guard that would accept them from it, they are refused entirely.
+	Closed map[domain.LineKey]bool
 	// Withheld are the lines the guard keeps out of subscriptions.
 	Withheld []Withheld
 	// Analyses is what each landing's lines came to, by node.
@@ -65,7 +69,9 @@ func (p Plan) Empty() bool { return len(p.Sets) == 0 && len(p.Allow) == 0 && len
 // are the landings the row is attached to.
 //
 //   - A client of a priced class is accepted only from its class's set: allow_from
-//     always names the class, whether or not the set is sent.
+//     always names the class, whether or not the set is sent, and whether or not the
+//     listener can guard (Node then refuses the client there). A class that is
+//     withheld although its set is sent has no usable guard: ok is false.
 //   - A client of the direct class (the direct line, or a relay line that costs
 //     the same) is refused from every sent priced class of every landing it is
 //     attached to (a legacy row can be attached to several). ok is false when
@@ -77,6 +83,9 @@ func (p Plan) Guard(client *domain.PSPClient, nodes []int64) (guard *nodeprotoco
 		return nil, true
 	}
 	if line, has := client.Line(); has && !line.IsDirect() {
+		if p.Closed[line] {
+			return nil, false
+		}
 		if key, priced := p.Allow[line]; priced {
 			return &nodeprotocol.ClientSourceGuard{AllowFrom: key}, true
 		}
@@ -104,7 +113,7 @@ func (p Plan) Guard(client *domain.PSPClient, nodes []int64) (guard *nodeprotoco
 func Compute(nodes []*domain.Node, in domain.SourceInputs) Plan {
 	plan := Plan{
 		Allow: map[domain.LineKey]nodeprotocol.SourceSetKey{}, Deny: map[int64][]nodeprotocol.SourceSetKey{},
-		Analyses: map[int64]domain.SourceGuardAnalysis{},
+		Closed: map[domain.LineKey]bool{}, Analyses: map[int64]domain.SourceGuardAnalysis{},
 	}
 	for _, node := range nodes {
 		if node == nil || node.IsTunnelChild() || node.IsSeparator() {
@@ -117,7 +126,11 @@ func Compute(nodes []*domain.Node, in domain.SourceInputs) Plan {
 				plan.Withheld = append(plan.Withheld, Withheld{Node: node, Line: line, Reason: reason})
 			}
 		}
-		if !analysis.Guards {
+		// A capable server gets allow_from for every priced-class line whether
+		// or not the listener can guard: on one it cannot, Node refuses that
+		// client there (fail closed), so a config issued before the listener
+		// stopped being guardable does not keep working at the old price.
+		if !analysis.Guards && !in.Servers[node.PanelID].Capable {
 			continue
 		}
 		direct := node.EffectiveTrafficFactor()
@@ -126,9 +139,12 @@ func Compute(nodes []*domain.Node, in domain.SourceInputs) Plan {
 				plan.Allow[domain.LineKey{NodeID: node.ID, LineID: line.ID}] = domain.SourceSetKeyOf(node.ID, line.EffectiveTrafficFactor())
 			}
 		}
+		if !analysis.Guards {
+			continue
+		}
 		var keys []nodeprotocol.SourceSetKey
 		for _, class := range analysis.Priced {
-			if !class.Emitted() {
+			if !class.Denies() {
 				continue
 			}
 			if len(plan.Sets) >= nodeprotocol.MaxSourceSets {
@@ -144,6 +160,14 @@ func Compute(nodes []*domain.Node, in domain.SourceInputs) Plan {
 			key := nodeprotocol.SourceSetKey(class.Key)
 			keys = append(keys, key)
 			plan.Sets = append(plan.Sets, nodeprotocol.SourceSet{Key: key, CIDRs: class.CIDRs})
+			if !class.Emitted() {
+				// Sent so that direct identities are refused from it, but its
+				// own clients are not accepted from it: the class cannot be told
+				// apart from another priced one.
+				for _, id := range class.LineIDs {
+					plan.Closed[domain.LineKey{NodeID: node.ID, LineID: id}] = true
+				}
+			}
 		}
 		if len(keys) > 0 {
 			sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })

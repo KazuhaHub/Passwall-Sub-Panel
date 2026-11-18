@@ -48,6 +48,17 @@ func TestListenerGuardable(t *testing.T) {
 		{"xray proxy protocol in sockopt", stream(`{"sockopt":{"acceptProxyProtocol":true}}`), xray, false},
 		{"xray proxy protocol in inbound settings", &Node{InboundSettings: `{"acceptProxyProtocol":true}`}, xray, false},
 		{"xray proxy protocol off", stream(`{"tcpSettings":{"acceptProxyProtocol":false}}`), xray, true},
+		{"xray key case: trustedXForwardedFor", stream(`{"Sockopt":{"TrustedXForwardedFor":["X-Forwarded-For"]}}`), xray, false},
+		{"xray key case: all upper", stream(`{"SOCKOPT":{"TRUSTEDXFORWARDEDFOR":"X-Forwarded-For"}}`), xray, false},
+		{"xray key case: acceptProxyProtocol in transport", stream(`{"TCPSettings":{"AcceptProxyProtocol":true}}`), xray, false},
+		{"xray key case: acceptProxyProtocol in sockopt", stream(`{"sockopt":{"ACCEPTPROXYPROTOCOL":true}}`), xray, false},
+		{"xray key case: inbound settings", &Node{InboundSettings: `{"AcceptProxyProtocol":true}`}, xray, false},
+		{"xray key case: wrapped StreamSettings", stream(`{"StreamSettings":{"Sockopt":{"trustedxforwardedfor":["X"]}}}`), xray, false},
+		{"xray key case: wrapped in inbound", &Node{InboundSettings: `{"StreamSettings":{"sockopt":{"TrustedXForwardedFor":["X"]}}}`}, xray, false},
+		{"xray key case: empty trust still fine", stream(`{"Sockopt":{"TrustedXForwardedFor":[]}}`), xray, true},
+		{"sing-box key case: Network", stream(`{"Network":"WS"}`), singbox, false},
+		{"sing-box key case: wrapped Network", stream(`{"StreamSettings":{"NETWORK":"grpc"}}`), singbox, false},
+		{"sing-box key case: tcp", stream(`{"Network":"TCP"}`), singbox, true},
 		{"both engines, one refuses", stream(`{"network":"ws"}`), append(append([]NodeCoreEngine{}, xray...), singbox...), false},
 	} {
 		if got := ListenerGuardable(c.n, c.engines); got != c.want {

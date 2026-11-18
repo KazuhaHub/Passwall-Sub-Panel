@@ -168,20 +168,72 @@ func TestComputeIsEmptyWhenEveryLineCostsTheDirectFactor(t *testing.T) {
 	}
 }
 
-func TestComputeWithholdsClassesThatOverlapAndKeepsTheirClientsGuarded(t *testing.T) {
+func TestComputeWithholdsClassesThatOverlapButStillDeniesThem(t *testing.T) {
 	n := &domain.Node{ID: 5, PanelID: 1, Relays: []domain.RelayLine{
 		{ID: "a", Enabled: true, Mode: domain.RelayModeCDN, TrafficFactorMilli: milli(2000)},
 		{ID: "b", Enabled: true, Mode: domain.RelayModeCDN, TrafficFactorMilli: milli(3000)},
 	}}
 	plan := Compute([]*domain.Node{n}, capableInputs())
-	if len(plan.Sets) != 0 || len(plan.Deny[5]) != 0 || len(plan.Withheld) != 2 {
+	if len(plan.Withheld) != 2 {
 		t.Fatalf("plan = %+v", plan)
 	}
+	// Their sets are sent and denied to direct identities, so the direct
+	// identity cannot be used through either forward.
+	if len(plan.Sets) != 2 || len(plan.Deny[5]) != 2 {
+		t.Fatalf("sets = %+v deny = %v", plan.Sets, plan.Deny)
+	}
+	g, ok := plan.Guard(&domain.PSPClient{NodeID: 5, LineID: domain.DirectLineID}, []int64{5})
+	if !ok || g == nil || len(g.DenyFrom) != 2 {
+		t.Fatalf("direct guard = %+v", g)
+	}
+	// Their own clients are never accepted from a set shared with another class.
 	for _, id := range []string{"a", "b"} {
+		if g, ok := plan.Guard(&domain.PSPClient{NodeID: 5, LineID: id}, []int64{5}); ok || g != nil {
+			t.Fatalf("%s: %+v %v", id, g, ok)
+		}
+	}
+}
+
+func TestComputeDoesNotDenyAClassThatOverlapsTheDirectOne(t *testing.T) {
+	n := &domain.Node{ID: 5, PanelID: 1, Relays: []domain.RelayLine{
+		{ID: "same", Enabled: true, EntryPanelID: 9},
+		{ID: "fwd", Enabled: true, EntryPanelID: 9, TrafficFactorMilli: milli(2000)},
+	}}
+	plan := Compute([]*domain.Node{n}, capableInputs())
+	if len(plan.Sets) != 0 || len(plan.Deny[5]) != 0 {
+		t.Fatalf("denying the direct class from its own addresses: %+v", plan)
+	}
+	// Its clients still fail closed: the key is referenced and never sent.
+	g, ok := plan.Guard(&domain.PSPClient{NodeID: 5, LineID: "fwd"}, []int64{5})
+	if !ok || g == nil || g.AllowFrom != Key(5, 2000) {
+		t.Fatalf("fwd = %+v", g)
+	}
+}
+
+func TestComputeKeepsPricedClientsGuardedWhenTheListenerStopsGuarding(t *testing.T) {
+	n := landing()
+	n.StreamSettings = `{"network":"ws","sockopt":{"trustedXForwardedFor":["X-Forwarded-For"]}}`
+	plan := Compute([]*domain.Node{n}, capableInputs())
+	if len(plan.Sets) != 0 || len(plan.Deny) != 0 {
+		t.Fatalf("a listener that cannot guard sends no sets or denies: %+v", plan)
+	}
+	for _, id := range []string{"fwd", "ext", "ext-unknown", "cdn"} {
 		g, ok := plan.Guard(&domain.PSPClient{NodeID: 5, LineID: id}, []int64{5})
 		if !ok || g == nil || g.AllowFrom == "" {
-			t.Fatalf("%s: %+v", id, g)
+			t.Fatalf("%s: a priced client must keep allow_from, got %+v", id, g)
 		}
+	}
+	if g, _ := plan.Guard(&domain.PSPClient{NodeID: 5, LineID: domain.DirectLineID}, []int64{5}); g != nil {
+		t.Fatalf("direct = %+v", g)
+	}
+	if len(plan.Withheld) == 0 {
+		t.Fatal("the priced lines stay withheld from subscriptions")
+	}
+	// A server that never declared the capability is sent nothing.
+	in := capableInputs()
+	in.Servers = nil
+	if plan := Compute([]*domain.Node{n}, in); !plan.Empty() {
+		t.Fatalf("incapable server: %+v", plan)
 	}
 }
 
@@ -241,7 +293,7 @@ func TestPlannerDoesNotGuardAListenerTheCoreReadsAHeaderFor(t *testing.T) {
 	p := NewPlanner(fakeAgents{}, nil)
 	facts := AgentFacts{PanelID: 1, Capabilities: []string{nodeprotocol.CapabilitySourceGuard}, Engines: []domain.NodeCoreEngine{domain.NodeCoreSingBox}}
 	plan, err := p.PlanFor(t.Context(), facts, []*domain.Node{n})
-	if err != nil || !plan.Empty() || len(plan.Withheld) == 0 {
+	if err != nil || len(plan.Sets) != 0 || len(plan.Deny) != 0 || len(plan.Allow) == 0 || len(plan.Withheld) == 0 {
 		t.Fatalf("sing-box ws: plan = %+v err=%v", plan, err)
 	}
 	for _, w := range plan.Withheld {

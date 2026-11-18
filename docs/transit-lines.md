@@ -406,15 +406,18 @@ Node 对带分流的编译有硬上限：目的条目 `MaxRoutedEntries` = 1,000
 2. **来源组与约束**：`SourceSet` 的键按（监听器，倍率）确定，形如 `src_<落地节点>_f<倍率千分位>`，放在配置的 transit 段。
    计价类的客户端带 `allow_from` = 本类的键，**总是**带：来源未知或这一类被撤下时仍引用这个键但不下发来源组，
    Node 因此拒绝该客户端的全部连接（失败即关闭）。直连类的客户端（直连线路与同倍率的中转线路）带 `deny_from` = 该监听器上
-   已知且非空的各计价类的键；一行挂在多个监听器上的旧行取各监听器的并集（最多 64 个，放不下则该客户端被禁用而不是少写）。
-   隧道线路不带。
+   已知且非空的各计价类的键，**含因与另一计价类重叠而被撤下的类**（它们的来源组照常下发，用于拒绝直连身份；它们自己的客户端
+   则被禁用，因为这个组无法与另一类区分）；与直连类重叠的类、来源未知的类、超限的类不进 `deny_from`。一行挂在多个监听器上的旧行
+   取各监听器的并集（最多 64 个，放不下则该客户端被禁用而不是少写）。隧道线路不带。
+   **不可执行的监听器上**：计价类客户端仍带 `allow_from`（Node 只在该监听器上拒绝它，失败即关闭，且报告在该客户端名下），
+   `deny_from` 在这种监听器上被 Node 忽略，所以 PSP 不必为此回避；这些线路仍不发布并记为节点问题。
 3. **来源**：托管转发 = 入口服务器的 `interface_addresses`（完整回报）+ PSP 看到的同步来源地址 + 线路的 `source_cidrs`；
    CDN = 线路的 `source_cidrs`，没有则用 Cloudflare 地址段；外部 = 线路的 `source_cidrs`。管理员填写的 CIDR 在所有保存路径
    （元数据、线路、创建向导、导入）统一规范化：拒绝主机位、IPv4 映射、过宽前缀（IPv4 短于 /8、IPv6 短于 /19）。
 4. **可执行的监听器**：落地服务器的 agent 声明 `transit.source_guard.v1`，**并且**监听器的来源是连接本身的地址。核心会从
    客户端可控的头里取来源时不可执行：sing-box 任何传输（ws、httpupgrade、http/h2、grpc；只有纯 TCP，含 TLS/REALITY 可以）；
    Xray 的 `sockopt.trustedXForwardedFor` 非空，或流设置/入站设置里任意位置设了 `acceptProxyProtocol`（Passwall 前端加的
-   PROXY 头不算）。不可执行的监听器适用“所有线路倍率相同”的规则。CDN 线路通常落在 ws/grpc/httpupgrade 上，所以在
+   PROXY 头不算）。不可执行的监听器适用“所有线路倍率相同”的规则。已有计价线路的监听器，保存时若某次监听器编辑或引擎切换会让它变得不可执行，会被拒绝（`source_guard_listener_transport` / `source_guard_listener_trust`，列出受影响的线路）。键名按 Xray 的规则不分大小写匹配。CDN 线路通常落在 ws/grpc/httpupgrade 上，所以在
    sing-box 落地上不能与直连定不同的价。
 5. **Cloudflare 地址段**：内置快照（`internal/domain/cloudflare_builtin.go`，带日期）；每天从
    `https://www.cloudflare.com/ips-v4`、`/ips-v6` 拉取（普通 GET，不带标识部署的头，限时限大小），校验（规范前缀、

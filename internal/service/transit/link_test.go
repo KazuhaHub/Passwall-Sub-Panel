@@ -747,3 +747,51 @@ func TestEngineSwitchRefusedWhenItMakesAnUnusableRealityLink(t *testing.T) {
 		})
 	}
 }
+
+type guardAgents struct{ agent *domain.NodeAgent }
+
+func (f guardAgents) ListByPanelIDs(context.Context, []int64) ([]*domain.NodeAgent, error) {
+	return []*domain.NodeAgent{f.agent}, nil
+}
+
+func TestEngineSwitchRefusedWhenItStopsAListenerFromGuardingPricedLines(t *testing.T) {
+	factor := 2000
+	node := func(stream string, priced bool) *domain.Node {
+		n := &domain.Node{ID: 4, PanelID: 9, DisplayName: "Tokyo", StreamSettings: stream,
+			Relays: []domain.RelayLine{{ID: "p", Name: "Priced", Address: "r.example", Port: 1, Enabled: true, TrafficFactorMilli: &factor}}}
+		if !priced {
+			n.Relays[0].TrafficFactorMilli = nil
+		}
+		return n
+	}
+	for _, c := range []struct {
+		name    string
+		n       *domain.Node
+		capable bool
+		to      domain.NodeCoreEngine
+		code    string
+	}{
+		{"ws listener to sing-box", node(`{"network":"ws"}`, true), true, domain.NodeCoreSingBox, "source_guard_listener_transport"},
+		{"tcp listener to sing-box", node(`{"network":"tcp"}`, true), true, domain.NodeCoreSingBox, ""},
+		{"no priced lines", node(`{"network":"ws"}`, false), true, domain.NodeCoreSingBox, ""},
+		{"stays Xray", node(`{"network":"ws"}`, true), true, domain.NodeCoreXray, ""},
+		{"agent cannot guard", node(`{"network":"ws"}`, true), false, domain.NodeCoreSingBox, ""},
+	} {
+		agent := &domain.NodeAgent{PanelID: 9, DesiredCoreEngine: domain.NodeCoreXray}
+		if c.capable {
+			agent.ObservedCapabilities = []string{nodeprotocol.CapabilitySourceGuard}
+		}
+		service := New(fakeNodes{c.n}, newFakeRepo()).WithLinks(nil, guardAgents{agent})
+		err := service.EngineSwitchRefusal(t.Context(), 9, c.to)
+		var coded *domain.CodedValidationError
+		if c.code == "" {
+			if err != nil {
+				t.Errorf("%s: refused: %v", c.name, err)
+			}
+			continue
+		}
+		if !errors.Is(err, domain.ErrValidation) || !errors.As(err, &coded) || coded.Code != c.code || coded.Params["lines"] != "Priced" {
+			t.Errorf("%s: err = %v", c.name, err)
+		}
+	}
+}
