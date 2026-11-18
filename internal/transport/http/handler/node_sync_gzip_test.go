@@ -416,3 +416,21 @@ func TestSyncLargeResponseRequiresNegotiatedGzip(t *testing.T) {
 		t.Fatalf("decoded response size = %d, err = %v", len(decoded), err)
 	}
 }
+
+// The slot covers parsing as well as inflating: it is still held when the
+// parse starts, and back once the request is done.
+func TestSyncGzipSlotIsHeldUntilTheReportIsParsed(t *testing.T) {
+	f := newGzipFixture(t, storedCapabilities{"agt_expected": {nodeprotocol.CapabilitySyncGzip}}, WithSyncDecodeConcurrency(1))
+	held := -1
+	f.handler.beforeParse = func() { held = len(f.handler.decodeSlots) }
+	body := gzipped(t, reportJSON(nodeprotocol.CapabilitySyncGzip))
+	if response := f.do(bytes.NewReader(body), map[string][]string{"Content-Encoding": {"gzip"}}); response.Code != http.StatusOK {
+		t.Fatalf("status %d", response.Code)
+	}
+	if held != 1 {
+		t.Fatalf("slots held at the start of the parse = %d, want 1", held)
+	}
+	if len(f.handler.decodeSlots) != 0 || len(f.handler.decoding) != 0 {
+		t.Fatal("the slot was not given back")
+	}
+}
