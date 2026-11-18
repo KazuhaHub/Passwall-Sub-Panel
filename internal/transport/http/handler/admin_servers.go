@@ -1602,6 +1602,15 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
 			return
 		}
+		// A native node's core update always installs Xray, so on a sing-box
+		// server it is an engine switch and is refused for the same reasons
+		// select-core refuses one.
+		if h.links != nil {
+			if err := h.links.EngineSwitchRefusal(c.Request.Context(), id, domain.NodeCoreXray); err != nil {
+				respondError(c, err)
+				return
+			}
+		}
 	}
 	updater, ok := client.(ports.CoreUpdater)
 	if !ok {
