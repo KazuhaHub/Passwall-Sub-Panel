@@ -847,7 +847,7 @@ export default function ServersView() {
         const body = (isAxiosError(err) ? err.response?.data : undefined) as { nodes?: BlockingNode[] } | undefined
         if (body?.nodes?.length) { setBlockingNodes(body.nodes); return }
       }
-      pushSnack(e?.message || t('admin:nodes.tunnel.failed'), 'error')
+      pushSnack(e?.message || t('admin:servers.toast.delete_failed'), 'error')
       return
     }
     pushSnack(t('admin:servers.toast.deleted'), 'success')

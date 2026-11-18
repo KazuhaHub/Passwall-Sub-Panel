@@ -3797,6 +3797,7 @@
       "saved": "已保存",
       "created": "已创建",
       "deleted": "已删除",
+      "delete_failed": "无法删除该服务器",
       "test_ok": "连接 OK，3X-UI 有 {{count}} 个 inbound",
       "batch_tested": "已检测 {{count}} 台服务器",
       "batch_deleted": "已删除 {{count}} 台服务器",

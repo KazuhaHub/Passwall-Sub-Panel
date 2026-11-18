@@ -3802,6 +3802,7 @@
       "saved": "Saved",
       "created": "Created",
       "deleted": "Deleted",
+      "delete_failed": "The server could not be deleted",
       "test_ok": "Connected. 3X-UI has {{count}} inbound(s).",
       "batch_tested": "Tested {{count}} servers",
       "batch_deleted": "Deleted {{count}} servers",
