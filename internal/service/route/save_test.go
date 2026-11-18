@@ -498,3 +498,32 @@ func TestSaveThatCannotMakeATunnelKeepsThePreviousRoutes(t *testing.T) {
 		t.Fatal("the tunnel the previous routes use was removed")
 	}
 }
+
+// With two new exits, the first tunnel is made and the second fails: the save is
+// refused as a whole, the tunnel it did make is removed again and the previous
+// routes are back.
+func TestSaveThatFailsOnASecondNewTunnelRemovesTheFirstOne(t *testing.T) {
+	w, s := routedWorld()
+	w.server(4, "paris")
+	w.nodes[11].DestRoutes = []domain.DestRoute{serverRoute("r1", 4, "domain:old.com")}
+	w.routes[11] = &domain.NodeRoutes{NodeID: 11, Routes: w.nodes[11].DestRoutes}
+	w.links[[2]int64{1, 4}] = domain.TransitLink{ID: 14, EntryPanelID: 1, ExitPanelID: 4}
+	before := w.routes[11].Routes
+	w.ensureErr[3] = errors.New("no free port")
+	_, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("r1", 4, "domain:old.com"),
+		serverRoute("", 2, "domain:a.com"), serverRoute("", 3, "domain:b.com")})
+	if err == nil {
+		t.Fatal("the save went through without its second tunnel")
+	}
+	if _, ok := w.links[[2]int64{1, 2}]; ok {
+		t.Fatalf("the first tunnel this save made was left behind: %v", w.links)
+	}
+	if _, ok := w.links[[2]int64{1, 4}]; !ok {
+		t.Fatal("the tunnel the previous routes use was removed")
+	}
+	if !slices.EqualFunc(w.routes[11].Routes, before, func(a, b domain.DestRoute) bool {
+		return a.ID == b.ID && a.Target == b.Target && slices.Equal(a.Domains, b.Domains)
+	}) {
+		t.Fatalf("routes = %+v, want the previous ones %+v", w.routes[11].Routes, before)
+	}
+}
