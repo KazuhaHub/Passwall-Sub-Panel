@@ -97,8 +97,14 @@ func (c *Cloudflare) builtin() Ranges {
 }
 
 // Current returns the ranges in force. It never fails: a store that cannot be
-// read leaves the built-in snapshot.
+// read leaves the built-in snapshot. With auto-fetch turned off the built-in
+// snapshot is what is in force, not the last list fetched: the administrator
+// chose to stop following Cloudflare, and a list that nothing refreshes would
+// go stale without anyone knowing.
 func (c *Cloudflare) Current(ctx context.Context) Ranges {
+	if c.enabled != nil && !c.enabled(ctx) {
+		return c.builtin()
+	}
 	c.mu.RLock()
 	if c.loaded {
 		defer c.mu.RUnlock()

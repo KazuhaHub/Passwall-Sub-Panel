@@ -158,3 +158,27 @@ func TestCloudflareRunHonoursTheSetting(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestCloudflareWithAutoFetchOffUsesTheBuiltinSnapshotNotTheLastFetch(t *testing.T) {
+	v4, v6 := newValue(goodV4), newValue(goodV6)
+	srv := serve(t, v4, v6, nil)
+	var on atomic.Bool
+	on.Store(true)
+	c := NewCloudflare(&memStore{}, func(context.Context) bool { return on.Load() }).
+		WithSource(srv.Client(), srv.URL+"/v4", srv.URL+"/v6")
+	if err := c.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if cur := c.Current(t.Context()); cur.Source != SourceFetched || len(cur.CIDRs) != 7 {
+		t.Fatalf("fetched: %+v", cur)
+	}
+	on.Store(false)
+	cur := c.Current(t.Context())
+	if cur.Source != SourceBuiltin || len(cur.CIDRs) != len(BuiltinCloudflare) {
+		t.Fatalf("auto-fetch off: %+v", cur)
+	}
+	on.Store(true)
+	if cur := c.Current(t.Context()); cur.Source != SourceFetched {
+		t.Fatalf("turned back on: %+v", cur)
+	}
+}
