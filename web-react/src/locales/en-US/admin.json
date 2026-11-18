@@ -2127,9 +2127,9 @@
     },
     "source": {
       "title": "Source addresses",
-      "hint": "The addresses this line's traffic reaches the landing from, one per line (an IP or a CIDR). The landing accepts this line's identity only from them and refuses the direct identity from them, so a user cannot reach a cheaper line's price through another path.",
+      "hint": "The addresses this line's traffic reaches the landing from, one per line (an IP or a CIDR; not wider than /8 for IPv4 or /19 for IPv6). Lines with the same multiplier share their addresses: the landing accepts their identity only from those addresses and refuses the direct identity from them. Lines that arrive from the same addresses must have the same multiplier.",
       "hint_managed": "The entry server's own addresses are added automatically; list more here only if it connects from other addresses.",
-      "hint_external": "Required when this line's multiplier differs from the direct line's, on a node whose server checks sources.",
+      "hint_external": "Required when this line's multiplier differs from the direct line's, on a node whose server checks sources. A line with the direct multiplier needs none.",
       "hint_cdn": "Leave empty to use Cloudflare's ranges.",
       "placeholder": "203.0.113.0/24",
       "effective": "Effective set",
@@ -2137,12 +2137,16 @@
       "cloudflare_fetched": "Cloudflare ranges, fetched {{time}}",
       "cloudflare_builtin": "Cloudflare ranges, built-in snapshot of {{date}}",
       "cloudflare_auto_off": "Automatic fetching is off",
+      "cannot_guard_listener": "This node's listener lets clients choose the source address the core sees (its transport, such as WebSocket, HTTPUpgrade or gRPC on sing-box, or its X-Forwarded-For or PROXY protocol settings), so connections cannot be told apart by where they come from: every line of the node must have the same multiplier as the direct line.",
       "cannot_guard": "This node's server cannot check where connections come from, so every line of the node must have the same multiplier as the direct line.",
       "withheld": {
         "source_guard_factor": "Not published: the multiplier differs from the direct line's and this node's server cannot check sources.",
-        "source_guard_unknown": "Not published: the addresses its traffic comes from are not known yet."
+        "source_guard_unknown": "Not published: the addresses its traffic comes from are not known yet.",
+        "source_guard_overlap": "Not published: lines at another multiplier arrive from the same addresses, so the node cannot tell them apart. Lines that arrive from the same addresses must have the same multiplier.",
+        "source_guard_limit": "Not published: the lines at this multiplier (or the multipliers on this listener) have more addresses or classes than one set can hold."
       },
       "refused_title": "Refused connections",
+      "refused_wrong_line": "Refused connections from {{ip}} ({{count}} times, last {{time}}): an identity used through the wrong line. The address already belongs to another line's set, so adding it here would not help.",
       "refused": "Refused connections from the unregistered address {{ip}} ({{count}} times, last {{time}}).",
       "add": "Add to source addresses",
       "added": "Added {{ip}} to the line's source addresses."

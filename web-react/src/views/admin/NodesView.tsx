@@ -4455,6 +4455,7 @@ export default function NodesView() {
                         onText={text => update({ _source_text: text })}
                         guard={r.id ? sourceGuard?.lines.find(x => x.line_id === r.id) : undefined}
                         canGuard={sourceGuard?.can_guard}
+                        cannotGuardReason={sourceGuard?.cannot_guard_reason}
                         cloudflare={sourceGuard?.cloudflare}
                         busy={sourceBusy}
                         onAdd={ip => { if (r.id) void addSource(r.id, ip) }} />

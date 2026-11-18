@@ -26,7 +26,7 @@ describe('SourceAddressesField', () => {
   })
 
   it('shows the set in force, read-only', () => {
-    const guard: LineSourceGuard = { line_id: 'L1', guarded: true, effective_cidrs: ['93.184.216.34/32', '203.0.113.0/24'], refused: [] }
+    const guard: LineSourceGuard = { line_id: 'L1', guarded: true, direct: false, factor_milli: 2000, effective_cidrs: ['93.184.216.34/32', '203.0.113.0/24'], refused: [] }
     renderField(external, { guard })
     expect(screen.getByTestId('source-effective').textContent).toContain('93.184.216.34/32  203.0.113.0/24')
   })
@@ -43,17 +43,40 @@ describe('SourceAddressesField', () => {
   })
 
   it('says a server that cannot guard needs equal multipliers, and why a line is not published', () => {
-    renderField(external, { canGuard: false, guard: { line_id: 'L1', guarded: true, effective_cidrs: [], withheld: 'source_guard_factor', refused: [] } })
+    renderField(external, { canGuard: false, guard: { line_id: 'L1', guarded: true, direct: false, factor_milli: 2000, effective_cidrs: [], withheld: 'source_guard_factor', refused: [] } })
     expect(screen.getByTestId('source-cannot-guard')).toBeTruthy()
     expect(screen.getByTestId('source-withheld').textContent).toContain('source_guard_factor')
   })
 
   it('adds a refused address with one click', () => {
-    const guard: LineSourceGuard = { line_id: 'L1', guarded: true, effective_cidrs: [], refused: [{ ip: '198.51.100.7', count: 3, last_seen: '2026-11-18T10:00:00Z' }] }
+    const guard: LineSourceGuard = { line_id: 'L1', guarded: true, direct: false, factor_milli: 2000, effective_cidrs: [], refused: [{ ip: '198.51.100.7', count: 3, last_seen: '2026-11-18T10:00:00Z', kind: 'unregistered', addable: true }] }
     const props = renderField(external, { guard })
     expect(screen.getByTestId('source-refused').textContent).toContain('admin:nodes.source.refused')
     fireEvent.click(screen.getByRole('button', { name: 'admin:nodes.source.add' }))
     expect(props.onAdd).toHaveBeenCalledWith('198.51.100.7')
+  })
+})
+
+describe('refused sources', () => {
+  const base: LineSourceGuard = { line_id: 'C1', guarded: true, direct: false, factor_milli: 2000, effective_cidrs: [], refused: [] }
+
+  it('offers no Add on a CDN line that uses the Cloudflare default', () => {
+    const guard = { ...base, refused: [{ ip: '203.0.113.5', count: 1, last_seen: '2026-11-18T10:00:00Z', kind: 'unregistered' as const, addable: false }] }
+    renderField(cdn, { guard })
+    expect(screen.getByTestId('source-refused')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'admin:nodes.source.add' })).toBeNull()
+  })
+
+  it('shows a wrong-line hit as such, without Add', () => {
+    const guard = { ...base, refused: [{ ip: '192.0.2.9', count: 2, last_seen: '2026-11-18T10:00:00Z', kind: 'wrong_line' as const, addable: false }] }
+    renderField(external, { guard })
+    expect(screen.getByTestId('source-refused').textContent).toContain('admin:nodes.source.refused_wrong_line')
+    expect(screen.queryByRole('button', { name: 'admin:nodes.source.add' })).toBeNull()
+  })
+
+  it('says why a listener cannot guard', () => {
+    renderField(external, { canGuard: false, cannotGuardReason: 'listener' })
+    expect(screen.getByTestId('source-cannot-guard').textContent).toContain('cannot_guard_listener')
   })
 })
 

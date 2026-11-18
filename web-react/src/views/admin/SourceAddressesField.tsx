@@ -11,8 +11,10 @@ interface Props {
   onText: (text: string) => void
   /** What the panel says of the saved line; absent for a line that is not saved yet or while it loads. */
   guard?: LineSourceGuard
-  /** Whether the landing's server can check sources; absent while unknown. */
+  /** Whether the landing can check sources; absent while unknown. */
   canGuard?: boolean
+  /** Why it cannot: the server, or the listener's transport and settings. */
+  cannotGuardReason?: 'server' | 'listener'
   cloudflare?: CloudflareRanges
   /** Adds a refused address to the saved line. */
   onAdd: (ip: string) => void
@@ -20,7 +22,7 @@ interface Props {
 }
 
 /** Source addresses of a forward, external or CDN line (ADR 0044): the admin's own list, the set that is in force, and what the landing refused. */
-export default function SourceAddressesField({ line, text, onText, guard, canGuard, cloudflare, onAdd, busy }: Props) {
+export default function SourceAddressesField({ line, text, onText, guard, canGuard, cloudflare, onAdd, busy, cannotGuardReason }: Props) {
   const { t, i18n } = useTranslation(['admin'])
   const md = useTheme().palette.md
   const managed = (line.entry_panel_id ?? 0) > 0
@@ -53,7 +55,7 @@ export default function SourceAddressesField({ line, text, onText, guard, canGua
         </Typography>
       )}
       {canGuard === false && (
-        <Typography data-testid="source-cannot-guard" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.source.cannot_guard')}</Typography>
+        <Typography data-testid="source-cannot-guard" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t(cannotGuardReason === 'listener' ? 'admin:nodes.source.cannot_guard_listener' : 'admin:nodes.source.cannot_guard')}</Typography>
       )}
       {guard?.withheld && (
         <Typography data-testid="source-withheld" sx={{ fontSize: 12, color: md.error }}>{t(`admin:nodes.source.withheld.${guard.withheld}`)}</Typography>
@@ -61,9 +63,11 @@ export default function SourceAddressesField({ line, text, onText, guard, canGua
       {(guard?.refused ?? []).map(r => (
         <Box key={r.ip} data-testid="source-refused" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography sx={{ fontSize: 12, color: md.error, flex: 1, minWidth: 200 }}>
-            {t('admin:nodes.source.refused', { ip: r.ip, count: r.count, time: time(r.last_seen) })}
+            {t(r.kind === 'wrong_line' ? 'admin:nodes.source.refused_wrong_line' : 'admin:nodes.source.refused', { ip: r.ip, count: r.count, time: time(r.last_seen) })}
           </Typography>
-          <Button size="small" variant="outlined" disabled={busy} onClick={() => onAdd(r.ip)}>{t('admin:nodes.source.add')}</Button>
+          {r.kind !== 'wrong_line' && r.addable && (
+            <Button size="small" variant="outlined" disabled={busy} onClick={() => onAdd(r.ip)}>{t('admin:nodes.source.add')}</Button>
+          )}
         </Box>
       ))}
     </Box>

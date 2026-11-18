@@ -19,22 +19,31 @@ export interface RefusedSource {
   ip: string
   count: number
   last_seen: string
+  /** 'unregistered' is an address the line's class does not list; 'wrong_line' an identity used through another line's path (the address already belongs to a class's set). */
+  kind: 'unregistered' | 'wrong_line'
+  /** Whether adding the address to this line is the fix (never for a wrong-line hit or a CDN line on the Cloudflare default). */
+  addable: boolean
 }
 
 export interface LineSourceGuard {
   line_id: string
   /** False for a tunnel line, which has no source set. */
   guarded: boolean
+  /** The line costs what the direct line costs: it needs no source addresses. */
+  direct: boolean
+  factor_milli: number
   /** The set the landing is sent for the line; empty when it is not known yet. */
   effective_cidrs: string[]
   /** Why the guard keeps the line out of subscriptions. */
-  withheld?: 'source_guard_factor' | 'source_guard_unknown'
+  withheld?: 'source_guard_factor' | 'source_guard_unknown' | 'source_guard_overlap' | 'source_guard_limit'
   refused: RefusedSource[]
 }
 
 export interface NodeSourceGuard {
-  /** Whether the landing's server can check where connections come from. */
+  /** Whether the landing can check where connections come from: its server can, and its listener's source address is the connection's own. */
   can_guard: boolean
+  /** Why not: 'server' (no agent with the capability) or 'listener' (the core takes the source from a header the client sends). */
+  cannot_guard_reason?: 'server' | 'listener'
   lines: LineSourceGuard[]
   cloudflare: CloudflareRanges
 }

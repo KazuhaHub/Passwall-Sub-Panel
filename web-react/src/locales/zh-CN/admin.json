@@ -2126,7 +2126,7 @@
       "title": "来源地址",
       "hint": "这条线路的流量到达落地时的来源地址，每行一个（IP 或 CIDR）。落地只接受这条线路的身份来自这些地址，并拒绝直连身份来自这些地址，所以用户无法借另一条路径按更便宜的线路计费。",
       "hint_managed": "入口服务器自己的地址会自动加入；只有它还从其他地址出站时才需要在这里补充。",
-      "hint_external": "在服务器会检查来源的节点上，线路倍率与直连不同时必须填写。",
+      "hint_external": "在服务器会检查来源的节点上，线路倍率与直连不同时必须填写；倍率与直连相同的线路无需填写。",
       "hint_cdn": "留空则使用 Cloudflare 的地址段。",
       "placeholder": "203.0.113.0/24",
       "effective": "实际生效的来源",
@@ -2134,12 +2134,16 @@
       "cloudflare_fetched": "Cloudflare 地址段，{{time}} 拉取",
       "cloudflare_builtin": "Cloudflare 地址段，内置快照（{{date}}）",
       "cloudflare_auto_off": "自动拉取已关闭",
+      "cannot_guard_listener": "这个节点的监听器允许客户端自行决定核心看到的来源地址（它的传输方式，例如 sing-box 上的 WebSocket、HTTPUpgrade、gRPC，或 X-Forwarded-For、PROXY 协议设置），无法按来源区分连接：节点上所有线路的倍率必须与直连相同。",
       "cannot_guard": "这个节点的服务器无法检查连接来源，所以节点上所有线路的倍率必须与直连相同。",
       "withheld": {
         "source_guard_factor": "未发布：倍率与直连不同，而这个节点的服务器无法检查来源。",
-        "source_guard_unknown": "未发布：还不知道它的流量来自哪些地址。"
+        "source_guard_unknown": "未发布：还不知道它的流量来自哪些地址。",
+        "source_guard_overlap": "未发布：另一个倍率的线路与它来自相同的地址，节点无法区分。来自相同地址的线路必须使用相同倍率。",
+        "source_guard_limit": "未发布：这个倍率（或这个监听器上的倍率）的来源地址或类别超过了一个来源组的容量。"
       },
       "refused_title": "被拒绝的连接",
+      "refused_wrong_line": "拒绝了来自 {{ip}} 的连接（{{count}} 次，最近 {{time}}）：身份被用在了错误的线路上。这个地址已属于另一条线路的来源，加入这里也无济于事。",
       "refused": "拒绝了来自未登记地址 {{ip}} 的连接（{{count}} 次，最近 {{time}}）。",
       "add": "加入来源地址",
       "added": "已把 {{ip}} 加入线路的来源地址。"
