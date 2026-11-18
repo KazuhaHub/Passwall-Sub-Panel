@@ -1,6 +1,6 @@
 # ADR 0044：按来源校验线路身份（堵住按线路倍率的绕过）
 
-- 状态：已接受（2026-11-18，所有者批准）；实现于 4.3 beta.5
+- 状态：已接受并已实现（2026-11-18，所有者批准）；实现于 4.3 beta.5（PSP 一侧；Node 一侧见其 README「Source guard」）
 - 关联：[ADR 0043](0043-per-line-client-identity.md)、[流量倍率](../traffic-multiplier.md)、
   [托管中转](../transit-lines.md)
 
