@@ -1503,3 +1503,24 @@ func TestTheListenerDoesNotInheritFallbacksOrADecryptionKey(t *testing.T) {
 		t.Fatalf("redactSecrets left the decryption key: %s", out)
 	}
 }
+
+// A listener's REALITY short id is hex of even length up to 16, and its server
+// name a host name: anything else is refused before it is stored.
+func TestEditingTheListenerRefusesABadShortIDOrServerName(t *testing.T) {
+	env := newTunnelEnv(t, nil)
+	lineID := env.addTunnel(t, 0)
+	before := env.repo.child(1, lineID)
+	ctx := context.Background()
+	for _, edit := range []TunnelListenerEdit{
+		{ShortID: "xyz1"}, {ShortID: "abc"}, {ShortID: "0123456789abcdef01"},
+		{ServerName: "not a host name"}, {ServerName: "bad/name.example.com"},
+	} {
+		if err := env.svc.UpdateTunnelListener(ctx, 1, lineID, edit); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("edit %+v: err = %v, want a validation error", edit, err)
+		}
+	}
+	after := env.repo.child(1, lineID)
+	if after.StreamSettings != before.StreamSettings {
+		t.Fatal("a refused edit changed the listener")
+	}
+}

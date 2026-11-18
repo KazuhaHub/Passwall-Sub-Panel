@@ -1040,6 +1040,11 @@ func (s *Service) UpdateTunnelListener(ctx context.Context, landingID int64, lin
 			return fmt.Errorf("%w: the listener does not use REALITY: edit it as a node", domain.ErrValidation)
 		}
 	} else {
+		// The ids and names go to the entry's Xray as they are, so a bad one would
+		// stop it from starting: check them with the link protocol's own rules.
+		if err := domain.ValidateRealityNames(strings.ToLower(strings.TrimSpace(edit.ServerName)), strings.ToLower(strings.TrimSpace(edit.ShortID))); err != nil {
+			return err
+		}
 		if edit.ServerName != "" {
 			reality["serverNames"] = []string{strings.ToLower(strings.TrimSpace(edit.ServerName))}
 			if edit.Target == "" {

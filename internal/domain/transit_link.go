@@ -125,6 +125,22 @@ func ValidateTransitLinkSettings(settings TransitLinkSettings) error {
 	return nil
 }
 
+// ValidateRealityNames checks a REALITY server name and short id with the rules
+// the link protocol uses for them. An empty one is left unchecked.
+func ValidateRealityNames(serverName, shortID string) error {
+	name := serverName
+	if name == "" {
+		name = "example.com"
+	}
+	probe := protocol.LinkIn{Key: "lnk_1", Port: 1, Protocol: protocol.LinkProtocolVLESSReality, Reality: &protocol.LinkRealityServer{
+		UUID: "00000000-0000-4000-8000-000000000000", PrivateKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		Target: "example.com:443", ServerNames: []string{name}, ShortIDs: []string{shortID}}}
+	if err := protocol.ValidateLinkIn(probe); err != nil {
+		return fmt.Errorf("%w: REALITY server name or short id: %v", ErrValidation, err)
+	}
+	return nil
+}
+
 // LinkIn is the exit's half of the link.
 func (l TransitLink) LinkIn() protocol.LinkIn {
 	in := protocol.LinkIn{Key: protocol.NewLinkKey(l.ID), Port: l.Port, Protocol: l.Protocol}
