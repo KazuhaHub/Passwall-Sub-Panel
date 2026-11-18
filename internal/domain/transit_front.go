@@ -32,10 +32,6 @@ const (
 	// its landing by the landing's SNI.
 	FrontTargetForward FrontTargetKind = "forward"
 	// FrontTargetLink is a tunnel exit (a vless_reality link on this server).
-	// RESERVED: the wire contract has it and the model leaves the seam, but
-	// PSP does not yet let a link share a port, so a save naming it is
-	// refused. Adding it means a per-link port and REALITY server names that
-	// follow the route, in service/transit/link.go.
 	FrontTargetLink FrontTargetKind = "link"
 	// FrontTargetExternal is a real site elsewhere. Only a front's Default may
 	// be one.
@@ -49,6 +45,8 @@ type FrontTarget struct {
 	NodeID int64 `json:"node_id,omitempty"`
 	// LineID is the relay line of a forward target.
 	LineID string `json:"line_id,omitempty"`
+	// LinkID is the tunnel whose exit receives a link target.
+	LinkID int64 `json:"link_id,omitempty"`
 	// Host and Port are the external site: a canonical IP or a lowercase name.
 	Host string `json:"host,omitempty"`
 	Port int    `json:"port,omitempty"`

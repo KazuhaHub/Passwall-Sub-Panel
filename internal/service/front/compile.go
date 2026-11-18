@@ -39,6 +39,8 @@ type Plan struct {
 	Forwards []nodeprotocol.Forward
 	// FrontedForwards are the keys of those forwards.
 	FrontedForwards map[nodeprotocol.ForwardKey]bool
+	// LinksIn are the incoming tunnels using a shared port in this plan.
+	LinksIn []nodeprotocol.LinkIn
 	// FrontIDs maps a sent front's key to its row.
 	FrontIDs map[nodeprotocol.FrontKey]int64
 	// Ports are the shared ports and every loopback port: ports the sync
@@ -89,6 +91,10 @@ func (s *Service) PlanFor(ctx context.Context, panelID int64, capabilities []str
 func (s *Service) compile(ctx context.Context, panelID int64, fronts []domain.TransitFront, byID map[int64]*domain.Node,
 	inConfig map[int64]bool, dry bool) (Plan, error) {
 	plan := Plan{FrontedForwards: map[nodeprotocol.ForwardKey]bool{}, FrontIDs: map[nodeprotocol.FrontKey]int64{}, Ports: map[int]bool{}}
+	links, err := s.linksForFronts(ctx, panelID, fronts)
+	if err != nil {
+		return Plan{}, err
+	}
 	forwardSeen := map[nodeprotocol.ForwardKey]bool{}
 	var placeholder int64 = 1 << 41
 	for _, stored := range fronts {
@@ -144,6 +150,7 @@ func (s *Service) compile(ctx context.Context, panelID int64, fronts []domain.Tr
 			continue
 		}
 		var forwards []nodeprotocol.Forward
+		var linksIn []nodeprotocol.LinkIn
 		for _, route := range stored.Routes {
 			target := nodeprotocol.FrontTarget{}
 			switch route.Target.Kind {
@@ -166,9 +173,19 @@ func (s *Service) compile(ctx context.Context, panelID int64, fronts []domain.Tr
 					forwardSeen[forward.Key] = true
 					forwards = append(forwards, forward)
 				}
+			case domain.FrontTargetLink:
+				link, ok := links[route.Target.LinkID]
+				if !ok || !linkRouteMatches(link, route.ServerNames) {
+					continue
+				}
+				in := link.LinkIn()
+				in.Port = stored.Port
+				if nodeprotocol.ValidateLinkIn(in) != nil {
+					continue
+				}
+				target.Link = in.Key
+				linksIn = append(linksIn, in)
 			default:
-				// A link target is the seam: the model reserves it and nothing
-				// stores one yet, so it is never sent.
 				continue
 			}
 			wire.Routes = append(wire.Routes, nodeprotocol.FrontRoute{ServerNames: slices.Clone(route.ServerNames), Target: target})
@@ -192,6 +209,7 @@ func (s *Service) compile(ctx context.Context, panelID int64, fronts []domain.Tr
 		wire.Listeners = kept
 		wire.Default = nodeprotocol.FrontTarget{External: &nodeprotocol.FrontExternal{Host: stored.Default.Host, Port: stored.Default.Port}}
 		plan.Fronts = append(plan.Fronts, wire)
+		plan.LinksIn = append(plan.LinksIn, linksIn...)
 		plan.FrontIDs[wire.Key] = stored.ID
 		plan.Ports[stored.Port] = true
 		for _, item := range wire.Listeners {
@@ -301,6 +319,7 @@ func (s *Service) Diagnose(ctx context.Context, panelID int64) (Diagnosis, error
 // route to.
 func (p Plan) Without(drop map[nodeprotocol.FrontKey]bool) Plan {
 	out := Plan{FrontedForwards: map[nodeprotocol.ForwardKey]bool{}, FrontIDs: map[nodeprotocol.FrontKey]int64{}, Ports: map[int]bool{}, Withheld: p.Withheld}
+	links := map[nodeprotocol.LinkKey]bool{}
 	for _, f := range p.Fronts {
 		if drop[f.Key] {
 			if id, ok := p.FrontIDs[f.Key]; ok {
@@ -315,6 +334,9 @@ func (p Plan) Without(drop map[nodeprotocol.FrontKey]bool) Plan {
 			out.Ports[item.LoopbackPort] = true
 		}
 		for _, route := range f.Routes {
+			if route.Target.Link != "" {
+				links[route.Target.Link] = true
+			}
 			if route.Target.Forward != "" {
 				out.FrontedForwards[route.Target.Forward] = true
 			}
@@ -325,7 +347,36 @@ func (p Plan) Without(drop map[nodeprotocol.FrontKey]bool) Plan {
 			out.Forwards = append(out.Forwards, forward)
 		}
 	}
+	for _, in := range p.LinksIn {
+		if links[in.Key] {
+			out.LinksIn = append(out.LinksIn, in)
+		}
+	}
 	return out
+}
+
+// WithServedLinks removes routes to incoming links absent from this sync.
+// A dormant tunnel does not interrupt other routes sharing the same port.
+func (p Plan) WithServedLinks(served []nodeprotocol.LinkIn) Plan {
+	if len(p.LinksIn) == 0 {
+		return p
+	}
+	active := make(map[nodeprotocol.LinkKey]int, len(served))
+	for _, in := range served {
+		active[in.Key] = in.Port
+	}
+	p.Fronts = slices.Clone(p.Fronts)
+	drop := make(map[nodeprotocol.FrontKey]bool)
+	for i := range p.Fronts {
+		f := &p.Fronts[i]
+		f.Routes = slices.DeleteFunc(slices.Clone(f.Routes), func(route nodeprotocol.FrontRoute) bool {
+			return route.Target.Link != "" && active[route.Target.Link] != f.Port
+		})
+		if len(f.Routes) == 0 {
+			drop[f.Key] = true
+		}
+	}
+	return p.Without(drop)
 }
 
 // Unserved is a listener the server must not be sent: its front is not being
@@ -392,4 +443,54 @@ func (s *Service) UnservedListeners(ctx context.Context, panelID int64, plan Pla
 		}
 	}
 	return out, nil
+}
+
+// linksForFronts reads the named incoming links only when a configuration
+// actually has a link route. Unrelated links cannot become front targets.
+func (s *Service) linksForFronts(ctx context.Context, panelID int64, fronts []domain.TransitFront) (map[int64]domain.TransitLink, error) {
+	wanted := map[int64]bool{}
+	for _, front := range fronts {
+		for _, route := range front.Routes {
+			if route.Target.Kind == domain.FrontTargetLink {
+				wanted[route.Target.LinkID] = true
+			}
+		}
+	}
+	if len(wanted) == 0 || s.links == nil {
+		return nil, nil
+	}
+	all, err := s.links.ListLinks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("front: list incoming tunnel targets: %w", err)
+	}
+	found := make(map[int64]domain.TransitLink, len(wanted))
+	for _, link := range all {
+		if link.ExitPanelID == panelID && wanted[link.ID] {
+			found[link.ID] = link
+		}
+	}
+	return found, nil
+}
+
+func linkRouteMatches(link domain.TransitLink, names []string) bool {
+	return link.Protocol == nodeprotocol.LinkProtocolVLESSReality &&
+		len(names) == 1 && names[0] == link.RealityServerName
+}
+
+// SavedLinkPorts returns the public entry port of each incoming link assigned
+// to a front on this exit server. The standalone port remains reserved.
+func (s *Service) SavedLinkPorts(ctx context.Context, panelID int64) (map[int64]int, error) {
+	fronts, err := s.fronts.ListByPanel(ctx, panelID)
+	if err != nil {
+		return nil, err
+	}
+	ports := make(map[int64]int)
+	for _, f := range fronts {
+		for _, route := range f.Routes {
+			if route.Target.Kind == domain.FrontTargetLink {
+				ports[route.Target.LinkID] = f.Port
+			}
+		}
+	}
+	return ports, nil
 }

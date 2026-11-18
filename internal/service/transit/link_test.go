@@ -585,3 +585,44 @@ func TestPlanLinkPortReservesTheChosenPort(t *testing.T) {
 		t.Fatalf("planned port %d overlaps a staged listener on %d, error %v", port, automatic, err)
 	}
 }
+
+func TestSharedLinkUsesTheSamePortOnBothHalves(t *testing.T) {
+	repos := linkStore(t)
+	bound := landing(1, 9, "entry.example", 443)
+	bound.EgressPanelID = 3
+	service := New(fakeNodes{bound}, newFakeRepo()).WithLinks(repos.TransitLinks, fakeAgents{3: "198.51.100.7"})
+	ctx := t.Context()
+	if _, err := service.UpdateLink(ctx, 9, 3, domain.TransitLinkSettings{Protocol: nodeprotocol.LinkProtocolVLESSReality}); err != nil {
+		t.Fatal(err)
+	}
+	link, err := repos.TransitLinks.GetLink(ctx, 9, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sharedPort = 8443
+	service.WithFrontLinkPorts(func(_ context.Context, panelID int64) (map[int64]int, error) {
+		if panelID != 3 {
+			t.Errorf("read shared ports of server %d, want exit 3", panelID)
+		}
+		return map[int64]int{link.ID: sharedPort}, nil
+	})
+	entry, err := service.LinksFor(ctx, 9, nil, false)
+	if err != nil || len(entry.Out) != 1 || entry.Out[0].Port != sharedPort {
+		t.Fatalf("outgoing plan = %+v, %v", entry, err)
+	}
+	in := link.LinkIn()
+	in.Port = sharedPort
+	exit, err := service.LinksForFronts(ctx, 3, map[int]bool{sharedPort: true}, false, []nodeprotocol.LinkIn{in})
+	if err != nil || len(exit.In) != 1 || exit.In[0].Port != sharedPort {
+		t.Fatalf("fronted exit plan = %+v, %v", exit, err)
+	}
+	exit, err = service.LinksFor(ctx, 3, map[int]bool{sharedPort: true}, false)
+	if err != nil || len(exit.In) != 0 || !exit.Changed {
+		t.Fatalf("withheld exit plan = %+v, %v", exit, err)
+	}
+	service.WithFrontLinkPorts(nil)
+	exit, err = service.LinksFor(ctx, 3, map[int]bool{}, false)
+	if err != nil || len(exit.In) != 1 || exit.In[0].Port != link.Port {
+		t.Fatalf("unshared exit plan = %+v, %v", exit, err)
+	}
+}

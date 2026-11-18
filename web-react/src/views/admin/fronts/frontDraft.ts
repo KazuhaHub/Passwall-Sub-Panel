@@ -30,6 +30,7 @@ export const newRouteKey = () => `r${++rowSeq}`
 
 export const targetKey = {
   listener: (nodeId: number) => `listener:${nodeId}`,
+  link: (linkId: number) => `link:${linkId}`,
   forward: (nodeId: number, lineId: string) => `forward:${nodeId}:${lineId}`,
 }
 
@@ -40,7 +41,9 @@ export function draftOf(front: Front | null, defaultPort: number): Draft {
     listeners: front.listeners.map(l => ({ node_id: l.node_id, loopback: String(l.loopback_port) })),
     routes: front.routes.map(r => ({
       key: newRouteKey(), names: r.server_names.join(', '),
-      target: r.target.kind === 'listener' ? targetKey.listener(r.target.node_id ?? 0) : targetKey.forward(r.target.node_id ?? 0, r.target.line_id ?? ''),
+      target: r.target.kind === 'listener' ? targetKey.listener(r.target.node_id ?? 0)
+        : r.target.kind === 'link' ? targetKey.link(r.target.link_id ?? 0)
+        : targetKey.forward(r.target.node_id ?? 0, r.target.line_id ?? ''),
     })),
     host: front.default.host ?? '', defaultPort: String(front.default.port ?? 443), confirm: false,
   }
@@ -48,6 +51,7 @@ export function draftOf(front: Front | null, defaultPort: number): Draft {
 
 function routeTarget(target: string): FrontRoute['target'] | null {
   const [kind, node, line] = target.split(':')
+  if (kind === 'link' && Number.isSafeInteger(Number(node)) && Number(node) > 0) return { kind: 'link', link_id: Number(node) }
   if (kind === 'listener' && node) return { kind: 'listener', node_id: Number(node) }
   if (kind === 'forward' && node && line) return { kind: 'forward', node_id: Number(node), line_id: line }
   return null
@@ -78,6 +82,17 @@ export function leaving(draft: Draft, front: Front | null): { listeners: number[
       .filter(r => r.target.kind === 'forward' && (portChanged || !keptLines.has(targetKey.forward(r.target.node_id ?? 0, r.target.line_id ?? ''))))
       .map(r => `${r.target.node_id}/${r.target.line_id}`),
   }
+}
+
+/** Tunnels whose public endpoint this edit changes. */
+export function changedLinkIDs(draft: Draft, front: Front | null): number[] {
+  const before = new Set(front?.routes.flatMap(r => r.target.kind === 'link' && r.target.link_id ? [r.target.link_id] : []))
+  const after = new Set(draft.routes.flatMap(r => {
+    const target = routeTarget(r.target)
+    return target?.kind === 'link' && target.link_id ? [target.link_id] : []
+  }))
+  const portChanged = front != null && front.port !== portOf(draft.port)
+  return [...new Set([...before, ...after])].filter(id => portChanged || before.has(id) !== after.has(id))
 }
 
 /** The listeners that would be moved off a port they hold today: not already behind this front. */

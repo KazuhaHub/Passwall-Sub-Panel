@@ -15,7 +15,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { frontKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import {
-  draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newRouteKey, newlyMoved, targetKey, type Draft,
+  changedLinkIDs, draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newRouteKey, newlyMoved, targetKey, type Draft,
 } from './frontDraft'
 import { frontErrorText, issueText } from './frontErrors'
 import { listenerLabel } from './listenerLabel'
@@ -59,14 +59,23 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
         label: t('admin:servers.fronts.target.forward', { node: line.node_name, line: line.line_name }), names: line.server_names,
       })
     }
+    for (const link of options.links ?? []) {
+      if (link.front_id && link.front_id !== front?.id) continue
+      out.push({
+        key: targetKey.link(link.link_id),
+        label: t('admin:servers.fronts.target.link', { link: link.link_id, entry: link.entry_panel_id, port: link.port }),
+        names: [link.server_name],
+      })
+    }
     return out
-  }, [draft.listeners, lines, options.listeners, t])
+  }, [draft.listeners, lines, options.listeners, options.links, front?.id, t])
   const labelOf = (key: string) => targets.find(x => x.key === key)?.label ?? ''
 
   const issues = draftIssues(draft, options, { low: defaults.probe_low, high: defaults.probe_high }, labelOf)
   const moved = newlyMoved(draft, front)
   const away = leaving(draft, front)
-  const needsConfirm = moved.length + away.listeners.length + away.lines.length > 0
+  const changedLinks = changedLinkIDs(draft, front)
+  const needsConfirm = moved.length + away.listeners.length + away.lines.length + changedLinks.length > 0
   const canSave = !busy && issues.length === 0 && (!needsConfirm || draft.confirm)
 
   const patch = (p: Partial<Draft>) => setDraft(d => ({ ...d, ...p }))
@@ -232,6 +241,7 @@ export default function FrontEditor({ panelId, front, options, defaults, onClose
                   moved.length > 0 && t('admin:servers.fronts.confirm_text', { nodes: moved.map(nodeName).join(', '), port: draft.port }),
                   away.listeners.length > 0 && t('admin:servers.fronts.confirm_leaving_listeners', { nodes: away.listeners.map(nodeName).join(', ') }),
                   away.lines.length > 0 && t('admin:servers.fronts.confirm_leaving_lines', { count: away.lines.length }),
+                  changedLinks.length > 0 && t('admin:servers.fronts.confirm_tunnels', { tunnels: changedLinks.join(', ') }),
                 ].filter(Boolean).join(' ')}
               </Typography>
               <FormControlLabel

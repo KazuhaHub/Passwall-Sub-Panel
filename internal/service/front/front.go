@@ -511,7 +511,7 @@ func TargetLabel(t domain.FrontTarget, nodes map[int64]*domain.Node) string {
 		}
 		return "relay line " + name
 	case domain.FrontTargetLink:
-		return "tunnel exit"
+		return fmt.Sprintf("tunnel exit %d", t.LinkID)
 	case domain.FrontTargetExternal:
 		return fmt.Sprintf("external site %s:%d", t.Host, t.Port)
 	}
@@ -680,6 +680,10 @@ func (s *Service) validate(ctx context.Context, panelID int64, nodes []*domain.N
 	if len(in.Routes) > nodeprotocol.MaxFrontRoutes {
 		return domain.TransitFront{}, nil, refuse(CodeBadTarget, "a front holds at most %d routes", map[string]any{"max": nodeprotocol.MaxFrontRoutes}, nodeprotocol.MaxFrontRoutes)
 	}
+	incoming, err := s.linksForFronts(ctx, panelID, []domain.TransitFront{{Routes: in.Routes}})
+	if err != nil {
+		return domain.TransitFront{}, nil, err
+	}
 	nameOwner := map[string]domain.FrontTarget{}
 	routedNames := map[string][]string{} // target key -> every name that reaches it
 	referenced := map[int64]bool{}
@@ -690,7 +694,7 @@ func (s *Service) validate(ctx context.Context, panelID int64, nodes []*domain.N
 			return domain.TransitFront{}, nil, err
 		}
 		target := route.Target
-		if err := s.validateRouteTarget(panelID, in.Port, &target, names, byID, listenerSeen); err != nil {
+		if err := s.validateRouteTarget(panelID, in.Port, &target, names, byID, listenerSeen, incoming); err != nil {
 			return domain.TransitFront{}, nil, err
 		}
 		for _, name := range names {
@@ -738,7 +742,7 @@ func (s *Service) validate(ctx context.Context, panelID int64, nodes []*domain.N
 	// A change that moves a listener behind the front or back to its own port,
 	// or stops a relay line being served, is its own confirmed action.
 	if !in.ConfirmMoveListeners {
-		var moved, leavingListeners, leavingLines []string
+		var moved, leavingListeners, leavingLines, changedTunnels []string
 		for _, item := range front.Listeners {
 			if existing == nil || !existing.HasListener(item.NodeID) {
 				moved = append(moved, nodeLabel(byID[item.NodeID]))
@@ -757,9 +761,27 @@ func (s *Service) validate(ctx context.Context, panelID int64, nodes []*domain.N
 				}
 			}
 		}
-		if len(moved)+len(leavingListeners)+len(leavingLines) > 0 {
+		linkPorts := []int{in.Port}
+		for _, target := range front.Targets() {
+			if target.Kind != domain.FrontTargetLink {
+				continue
+			}
+			alreadyShared := existing != nil && existing.Port == in.Port && slices.Contains(existing.Targets(), target)
+			if !alreadyShared {
+				changedTunnels = append(changedTunnels, TargetLabel(target, byID))
+				linkPorts = append(linkPorts, incoming[target.LinkID].Port)
+			}
+		}
+		if existing != nil {
+			for _, target := range existing.Targets() {
+				if target.Kind == domain.FrontTargetLink && !slices.Contains(front.Targets(), target) {
+					changedTunnels = append(changedTunnels, TargetLabel(target, byID))
+				}
+			}
+		}
+		if len(moved)+len(leavingListeners)+len(leavingLines)+len(changedTunnels) > 0 {
 			return domain.TransitFront{}, nil, confirmRefusal("saving the shared port %d", Impact{
-				Ports: []int{in.Port}, Moved: moved, Listeners: leavingListeners, Lines: leavingLines,
+				Ports: linkPorts, Moved: moved, Listeners: leavingListeners, Lines: leavingLines, Tunnels: changedTunnels,
 			}, "save")
 		}
 	}
@@ -850,7 +872,7 @@ func validateHostName(name string) error {
 // relay line's are the landing's (a managed line forwards unchanged and cannot
 // override the SNI, so the subscription renders the landing's own name).
 func (s *Service) validateRouteTarget(panelID int64, port int, target *domain.FrontTarget, names []string,
-	byID map[int64]*domain.Node, fronted map[int64]bool) error {
+	byID map[int64]*domain.Node, fronted map[int64]bool, incoming map[int64]domain.TransitLink) error {
 	switch target.Kind {
 	case domain.FrontTargetListener:
 		node := byID[target.NodeID]
@@ -904,7 +926,11 @@ func (s *Service) validateRouteTarget(panelID int64, port int, target *domain.Fr
 		}
 		*target = domain.FrontTarget{Kind: domain.FrontTargetForward, NodeID: target.NodeID, LineID: target.LineID}
 	case domain.FrontTargetLink:
-		return refuse(CodeLinkUnsupported, "a tunnel exit cannot share a port yet", nil)
+		link, ok := incoming[target.LinkID]
+		if !ok || !linkRouteMatches(link, names) {
+			return refuse(CodeLinkUnsupported, "select an incoming VLESS REALITY tunnel and route its configured server name (%s)", map[string]any{"link_id": target.LinkID, "name": link.RealityServerName}, link.RealityServerName)
+		}
+		*target = domain.FrontTarget{Kind: domain.FrontTargetLink, LinkID: link.ID}
 	case domain.FrontTargetExternal:
 		return refuse(CodeBadTarget, "an external site can only be the default, not a route", nil)
 	default:
@@ -1101,7 +1127,7 @@ func (s *Service) contractCheck(ctx context.Context, panelID int64, nodes []*dom
 	if err != nil {
 		return err
 	}
-	body := nodeprotocol.Transit{Fronts: plan.Fronts, Forwards: plan.Forwards}
+	body := nodeprotocol.Transit{Fronts: plan.Fronts, Forwards: plan.Forwards, LinksIn: plan.LinksIn}
 	if err := nodeprotocol.ValidateTransit(&body); err != nil {
 		return refuse(CodeRejectedByContract, "the wire contract refuses this front: %s", map[string]any{"why": err.Error()}, err.Error())
 	}
@@ -1177,10 +1203,14 @@ func (s *Service) SuggestCamouflage() domain.FrontTarget {
 
 // targetKeyOf names a route target for grouping.
 func targetKeyOf(t domain.FrontTarget) string {
-	if t.Kind == domain.FrontTargetListener {
+	switch t.Kind {
+	case domain.FrontTargetListener:
 		return fmt.Sprintf("listener:%d", t.NodeID)
+	case domain.FrontTargetLink:
+		return fmt.Sprintf("link:%d", t.LinkID)
+	default:
+		return fmt.Sprintf("forward:%d/%s", t.NodeID, t.LineID)
 	}
-	return fmt.Sprintf("forward:%d/%s", t.NodeID, t.LineID)
 }
 
 func renderedRefusal(node *domain.Node, rendered string) *Refusal {

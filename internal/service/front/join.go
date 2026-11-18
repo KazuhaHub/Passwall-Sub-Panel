@@ -19,13 +19,15 @@ type Impact struct {
 	Listeners []string
 	// Lines are relay lines that stop being served.
 	Lines []string
+	// Tunnels change their public port or stop until the front is restored.
+	Tunnels []string
 	// Routes are the names that fall to the default site.
 	Routes []string
 }
 
 // Empty reports whether nothing is affected.
 func (i Impact) Empty() bool {
-	return len(i.Moved)+len(i.Listeners)+len(i.Lines)+len(i.Routes) == 0
+	return len(i.Moved)+len(i.Listeners)+len(i.Lines)+len(i.Tunnels)+len(i.Routes) == 0
 }
 
 func (i Impact) params() map[string]any {
@@ -33,7 +35,7 @@ func (i Impact) params() map[string]any {
 	if len(i.Ports) > 0 {
 		out["port"] = i.Ports[0]
 	}
-	for key, values := range map[string][]string{"nodes": i.Moved, "leaving_listeners": i.Listeners, "leaving_lines": i.Lines, "routes": i.Routes} {
+	for key, values := range map[string][]string{"nodes": i.Moved, "leaving_listeners": i.Listeners, "leaving_lines": i.Lines, "tunnels": i.Tunnels, "routes": i.Routes} {
 		if len(values) > 0 {
 			out[key] = values
 		}
@@ -51,6 +53,9 @@ func (i Impact) text() string {
 	}
 	if len(i.Lines) > 0 {
 		parts = append(parts, "stops serving relay lines "+strings.Join(i.Lines, ", "))
+	}
+	if len(i.Tunnels) > 0 {
+		parts = append(parts, "changes the availability or port of "+strings.Join(i.Tunnels, ", "))
 	}
 	if len(i.Routes) > 0 {
 		parts = append(parts, "sends the server names "+strings.Join(i.Routes, ", ")+" to the default site")
@@ -87,6 +92,8 @@ func impactOf(f domain.TransitFront, nodes []*domain.Node) Impact {
 	for _, target := range f.Targets() {
 		if target.Kind == domain.FrontTargetForward {
 			impact.Lines = append(impact.Lines, lineLabel(byID[target.NodeID], target.LineID))
+		} else if target.Kind == domain.FrontTargetLink {
+			impact.Tunnels = append(impact.Tunnels, TargetLabel(target, byID))
 		}
 	}
 	return impact
@@ -110,6 +117,7 @@ func (s *Service) EngineImpact(ctx context.Context, panelID int64) (*Impact, err
 		total.Ports = append(total.Ports, f.Port)
 		total.Listeners = append(total.Listeners, part.Listeners...)
 		total.Lines = append(total.Lines, part.Lines...)
+		total.Tunnels = append(total.Tunnels, part.Tunnels...)
 	}
 	return &total, nil
 }

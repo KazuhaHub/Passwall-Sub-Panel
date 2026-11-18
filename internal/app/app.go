@@ -386,6 +386,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// shared ports.
 	frontSvc := front.New(repos.TransitFronts, repos.Node, repos.XUIPanel, repos.NodeAgent, repos.Transit, repos.TransitLinks, nil)
 	transitSvc.WithServerLock(frontSvc.Lock)
+	transitSvc.WithFrontLinkPorts(frontSvc.SavedLinkPorts)
 	frontSvc.WithReservations(transitSvc.ReservedPorts).WithProbePorts(repos.TransitProbe.ListProbePorts)
 	// A link's port also avoids the shared ports and loopbacks of the exit server;
 	// a port that cannot be checked counts as taken.
