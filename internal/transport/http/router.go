@@ -73,7 +73,7 @@ type Deps struct {
 	// SourceGuard is the source guard's administrator view (line editor panel,
 	// Cloudflare ranges, add-a-refused-source). Optional: absent, its routes are
 	// not registered.
-	SourceGuard handler.SourceGuardView
+	SourceGuard   handler.SourceGuardView
 	OperationGate *operationgate.Gate
 	Cfg           *config.Config
 	Repos         ports.Repos
