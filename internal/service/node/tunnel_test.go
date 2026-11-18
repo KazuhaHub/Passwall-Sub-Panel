@@ -1468,3 +1468,38 @@ func TestASyncConfirmedAgainstAChangedLandingIsAskedAgain(t *testing.T) {
 		t.Fatal("the confirmed sync was not applied")
 	}
 }
+
+// A landing's fallbacks point at its own local ports and a VLESS-encryption
+// decryption string holds its server key: neither belongs on the entry server,
+// on a new listener or on a re-copy, and a diff never shows the string.
+func TestTheListenerDoesNotInheritFallbacksOrADecryptionKey(t *testing.T) {
+	const landingSettings = `{"decryption":"mlkem768x25519plus.native.600s.server-key-secret","fallbacks":[{"dest":8001}],"clients":[{"id":"landing-user-id"}]}`
+	env := newTunnelEnv(t, func(n *domain.Node) {
+		n.StreamSettings = landingWithBinding
+		n.InboundSettings = landingSettings
+	})
+	lineID := env.addTunnel(t, 0)
+	check := func(where string, n *domain.Node) {
+		var settings map[string]any
+		if err := json.Unmarshal([]byte(n.InboundSettings), &settings); err != nil {
+			t.Fatalf("%s: %v", where, err)
+		}
+		if _, has := settings["fallbacks"]; has {
+			t.Fatalf("%s: the landing's fallbacks were copied: %s", where, n.InboundSettings)
+		}
+		if settings["decryption"] != "none" || strings.Contains(n.InboundSettings, "server-key-secret") {
+			t.Fatalf("%s: the landing's decryption was copied: %s", where, n.InboundSettings)
+		}
+	}
+	check("new listener", env.repo.child(1, lineID))
+
+	ctx := context.Background()
+	if _, err := env.svc.SyncTunnelFromLanding(syncConfirmed(t, env, ctx, lineID), 1, lineID); err != nil {
+		t.Fatal(err)
+	}
+	check("re-copy", env.repo.child(1, lineID))
+
+	if out := redactSecrets(landingSettings); strings.Contains(out, "server-key-secret") {
+		t.Fatalf("redactSecrets left the decryption key: %s", out)
+	}
+}
