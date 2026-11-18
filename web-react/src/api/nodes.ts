@@ -298,7 +298,8 @@ export async function createInbound(req: CreateInboundRequest) {
 }
 
 async function createInboundOnce(req: CreateInboundRequest) {
-  const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req)
+  // Quiet: the guided setup shows the error inline, so a toast would say it twice.
+  const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req, { _skipErrorToast: true })
   return data
 }
 
