@@ -76,7 +76,8 @@ func TestSourceSetSuffixIsAValidKey(t *testing.T) {
 	if SourceSetSuffix(3, 1000) == SourceSetSuffix(3, 2000) || SourceSetSuffix(3, 1000) == SourceSetSuffix(4, 1000) {
 		t.Fatal("suffix must depend on node and factor")
 	}
-	if SourceSetSuffix(3, 1000) != SourceSetSuffix(3, 1000) {
+	first, second := SourceSetSuffix(3, 1000), SourceSetSuffix(3, 1000)
+	if first != second {
 		t.Fatal("suffix must be deterministic")
 	}
 	id, factor, ok := ParseSourceSetKey(string(SourceSetKeyOf(42, 2500)))

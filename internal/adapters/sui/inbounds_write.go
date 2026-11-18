@@ -129,7 +129,7 @@ func (c *Client) UpdateInbound(ctx context.Context, id int, input ports.InboundS
 // Without this read-modify-write step, editing an imported inbound silently
 // erased those options even when the admin changed only its port or TLS data.
 func mergeSUIInboundUpdate(current, desired map[string]any) map[string]any {
-	out := make(map[string]any, len(current)+len(desired))
+	out := make(map[string]any, len(current))
 	for key, value := range current {
 		if key != "users" {
 			out[key] = value
