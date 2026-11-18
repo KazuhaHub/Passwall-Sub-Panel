@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -227,7 +228,91 @@ func attachTransitState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) 
 			}
 		}
 	}
+	if err := attachSourceGuardState(ctx, db, nodes); err != nil {
+		return err
+	}
 	return attachProbeState(ctx, db, nodes, forwardIDs)
+}
+
+// cloudflareRanges supplies the Cloudflare ranges a CDN line is checked against
+// when it names none of its own; unset, the built-in snapshot.
+var cloudflareRanges atomic.Pointer[func(ctx context.Context) []string]
+
+// SetCloudflareRanges binds where the current Cloudflare ranges come from, so
+// that the lines a loaded node withholds (attachSourceGuardState) are judged
+// against the same ranges the landing is sent.
+func SetCloudflareRanges(current func(ctx context.Context) []string) {
+	if current == nil {
+		cloudflareRanges.Store(nil)
+		return
+	}
+	cloudflareRanges.Store(&current)
+}
+
+// attachSourceGuardState fills RelayLine.SourceWithheld (ADR 0044): the lines a
+// landing must not publish because it cannot tell them from the direct line, or
+// because it guards and the line's class cannot be guarded (its addresses are
+// unknown, overlap another class's, or do not fit a set). Only a node with a
+// line of another factor than the direct line costs the agent read: a line
+// that costs what the direct line costs needs no sources.
+func attachSourceGuardState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	panels := map[int64]bool{}
+	for _, node := range nodes {
+		if node == nil || node.IsTunnelChild() || node.IsSeparator() {
+			continue
+		}
+		for i := range node.Relays {
+			node.Relays[i].SourceWithheld = ""
+			line := node.Relays[i]
+			if !line.Guarded() || line.EffectiveTrafficFactor() == node.EffectiveTrafficFactor() {
+				continue
+			}
+			panels[node.PanelID] = true
+		}
+	}
+	if len(panels) == 0 {
+		return nil
+	}
+	for _, node := range nodes {
+		if node == nil || node.IsTunnelChild() || node.IsSeparator() || !panels[node.PanelID] {
+			continue
+		}
+		for _, line := range node.Relays {
+			if line.Guarded() && line.Managed() {
+				panels[line.EntryPanelID] = true
+			}
+		}
+	}
+	ids := make([]int64, 0, len(panels))
+	for id := range panels {
+		ids = append(ids, id)
+	}
+	var rows []nodeAgentRow
+	if err := db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id IN ?", ids).Find(&rows).Error; err != nil {
+		return fmt.Errorf("load source guard state: %w", err)
+	}
+	in := domain.SourceInputs{
+		Cloudflare: domain.BuiltinCloudflare, EntryAddresses: map[int64][]string{},
+		Servers: map[int64]domain.SourceGuardServer{},
+	}
+	if current := cloudflareRanges.Load(); current != nil {
+		in.Cloudflare = (*current)(ctx)
+	}
+	for i := range rows {
+		agent := rowToNodeAgent(&rows[i])
+		in.EntryAddresses[agent.PanelID] = agent.SourceAddresses()
+		in.Servers[agent.PanelID] = domain.SourceGuardServer{Capable: agent.CanSourceGuard(), Engines: agent.GuardEngines()}
+	}
+	for _, node := range nodes {
+		if node == nil || node.IsTunnelChild() || node.IsSeparator() || !panels[node.PanelID] {
+			continue
+		}
+		withheld := node.AnalyzeSourceGuard(in).Withheld
+		for i := range node.Relays {
+			node.Relays[i].SourceWithheld = withheld[node.Relays[i].ID]
+		}
+	}
+	return nil
 }
 
 // tunnelNodes are the listener nodes of the tunnel lines of a set of loaded

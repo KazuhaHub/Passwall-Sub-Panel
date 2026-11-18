@@ -544,7 +544,7 @@ func newTunnelSettings(landing *domain.Node, name string, port int, sni, target 
 					// starts on every address, and the administrator can change that.
 					spec.Remark, spec.Port, spec.Enable, spec.ExpiryTime = name, port, true, 0
 					spec.Listen, spec.Allocate = "", ""
-					spec.Settings = inboundcfg.StripClients(spec.Settings)
+					spec.Settings = tunnelListenerSettings(spec.Settings)
 					return tunnelSettings{Spec: spec, Flow: landing.Flow, Copied: true}, nil
 				}
 			}
@@ -1040,6 +1040,14 @@ func (s *Service) UpdateTunnelListener(ctx context.Context, landingID int64, lin
 			return fmt.Errorf("%w: the listener does not use REALITY: edit it as a node", domain.ErrValidation)
 		}
 	} else {
+		// The ids and names go to the entry's Xray as they are, so a bad one would
+		// stop it from starting: check them with the link protocol's own rules.
+		if err := domain.ValidateRealityNames(strings.ToLower(strings.TrimSpace(edit.ServerName)), strings.ToLower(strings.TrimSpace(edit.ShortID))); err != nil {
+			return err
+		}
+		if err := domain.ValidateRealityTarget(strings.TrimSpace(edit.Target)); err != nil {
+			return err
+		}
 		if edit.ServerName != "" {
 			reality["serverNames"] = []string{strings.ToLower(strings.TrimSpace(edit.ServerName))}
 			if edit.Target == "" {
@@ -1089,6 +1097,27 @@ type TunnelSyncDiff struct {
 	Field string `json:"field"`
 	From  string `json:"from"`
 	To    string `json:"to"`
+}
+
+// tunnelListenerSettings is the landing's protocol settings as the entry's
+// listener gets them: no clients, no fallbacks (they point at ports of the
+// landing's own server) and no decryption (a VLESS-encryption string holds the
+// landing's server key). Decryption is "none", like a fresh listener's.
+func tunnelListenerSettings(settingsJSON string) string {
+	settingsJSON = inboundcfg.StripClients(settingsJSON)
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(settingsJSON), &m) != nil || m == nil {
+		return settingsJSON
+	}
+	delete(m, "fallbacks")
+	if _, has := m["decryption"]; has {
+		m["decryption"] = json.RawMessage(`"none"`)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return settingsJSON
+	}
+	return string(out)
 }
 
 // tunnelFromLanding is the listener's spec as a re-copy from the landing makes
@@ -1145,7 +1174,7 @@ func tunnelFromLanding(landing, child *domain.Node) (spec ports.InboundSpec, flo
 	entryBinding(theirs)
 	encoded, _ := json.Marshal(theirs)
 	spec.StreamSettings = string(encoded)
-	spec.Settings = inboundcfg.StripClients(spec.Settings)
+	spec.Settings = tunnelListenerSettings(spec.Settings)
 	spec.Allocate = child.Allocate
 	spec.Remark, spec.Port, spec.Listen, spec.Enable, spec.ExpiryTime = child.InboundRemark, child.DesiredPort, child.InboundListen, child.Enabled, 0
 	return spec, landing.Flow, true, nil
@@ -1204,6 +1233,11 @@ func redactSecrets(raw string) string {
 		case map[string]any:
 			for k, x := range t {
 				switch k {
+				case "decryption":
+					if str, ok := x.(string); ok && (str == "" || str == "none") {
+						continue
+					}
+					t[k] = "***"
 				case "privateKey", "mldsa65Seed", "mldsa65Verify", "password", "psk", "key", "secret", "clients", "id", "auth", "uuid":
 					if str, ok := x.(string); ok && str == "" {
 						continue

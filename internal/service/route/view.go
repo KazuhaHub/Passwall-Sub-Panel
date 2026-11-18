@@ -29,7 +29,13 @@ type LinkState struct {
 	// and the entry.
 	InApplied  bool
 	OutApplied bool
-	Quality    *domain.ProbeQuality
+	// PortsDiffer says the exit listens on one port and the entry dials another
+	// (InPort, OutPort: what each end was last sent): the tunnel is not ready
+	// even though both ends applied, until the end that is behind syncs.
+	PortsDiffer bool
+	InPort      int
+	OutPort     int
+	Quality     *domain.ProbeQuality
 }
 
 // RouteState is what is known of one route's delivery.
@@ -115,6 +121,8 @@ func (s *Service) View(ctx context.Context, nodeID int64) (View, error) {
 			state.Exists, state.ID, state.Ready = true, link.ID, link.Ready()
 			state.InApplied = link.InSent != "" && link.InApplied == link.InSent
 			state.OutApplied = link.OutSent != "" && link.OutApplied == link.OutSent
+			state.InPort, state.OutPort = link.InSentPort, link.OutSentPort
+			state.PortsDiffer = !domain.TransitLinkPortsAgree(link.InSentPort, link.OutSentPort)
 			key := string(nodeprotocol.NewLinkKey(link.ID))
 			var rows []domain.ProbeState
 			for _, row := range probes {

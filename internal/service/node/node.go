@@ -101,6 +101,12 @@ type Service struct {
 	// planned are the ports picked for listeners about to be made, by line.
 	plannedMu sync.Mutex
 	planned   map[string]int
+	// canGuard says whether a landing on a server can check where connections come
+	// from (SetSourceGuardCheck).
+	canGuard func(ctx context.Context, panelID int64) bool
+	// guardInputs are the facts the source guard rules are judged by
+	// (SetSourceGuardInputs).
+	guardInputs func(ctx context.Context, nodes []*domain.Node) (domain.SourceInputs, error)
 }
 
 // GroupEligibility is the one test of "does this group include this node"
@@ -480,6 +486,14 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 		return fmt.Errorf("%w: display_name and region required", domain.ErrValidation)
 	}
 	defer s.lockFronts(relayPanels(n)...)()
+	if err := domain.ReconcileRelayIDs(nil, n.Relays); err != nil {
+		return err
+	}
+	// The same normalisation as the editor's save: an imported line's source
+	// addresses are held to the same rules (host bits, IPv4-mapped, too broad).
+	if err := resolveSourceCIDRs(nil, n); err != nil {
+		return err
+	}
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if err := s.validateManagedRelays(ctx, n); err != nil {
 		return err
@@ -525,6 +539,11 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 			log.Warn("import: could not parse inbound settings for flow default",
 				"panel_id", n.PanelID, "inbound_id", n.InboundID, "err", perr)
 		}
+	}
+	// The factor rules are judged against the node as it is now stored: the
+	// transport of the adopted inbound decides whether its listener can guard.
+	if err := s.checkSourceGuard(ctx, nil, n); err != nil {
+		return err
 	}
 	// The CDN lines are judged against the node as it is now stored, flow included.
 	if err := settleCDN(nil, n, n.Relays); err != nil {
@@ -572,6 +591,14 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 // createInboundLocked is CreateInbound for a caller that already holds the
 // locks of the node's server and of the entry servers of its lines.
 func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec ports.InboundSpec) error {
+	if !n.IsTunnelChild() {
+		if err := domain.ReconcileRelayIDs(nil, n.Relays); err != nil {
+			return err
+		}
+		if err := resolveSourceCIDRs(nil, n); err != nil {
+			return err
+		}
+	}
 	domain.ResolveRelayLabels(nil, n.Relays, n.Region, n.Tags)
 	if err := s.validateManagedRelays(ctx, n); err != nil {
 		return err
@@ -580,6 +607,9 @@ func (s *Service) createInboundLocked(ctx context.Context, n *domain.Node, spec 
 	// the spec's.
 	probe := *n
 	inboundcfg.ApplySpec(&probe, spec)
+	if err := s.checkSourceGuard(ctx, nil, &probe); err != nil {
+		return err
+	}
 	if err := settleCDN(nil, &probe, n.Relays); err != nil {
 		return err
 	}
@@ -907,6 +937,14 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	if err := resolveLineFactors(previous, n); err != nil {
 		return err
 	}
+	if err := resolveSourceCIDRs(previous, n); err != nil {
+		return err
+	}
+	checked := *previous
+	checked.Relays, checked.TrafficFactorMilli = n.Relays, n.TrafficFactorMilli
+	if err := s.checkSourceGuard(ctx, previous, &checked); err != nil {
+		return err
+	}
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
@@ -942,9 +980,9 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	}
 	// A line switched off or on moves its listener the same way: settle what
 	// that does to a shared port before anything is written.
-	checked := *previous
-	checked.Relays, checked.Enabled = n.Relays, previous.Enabled
-	if err := s.tunnelEnabledRefusal(ctx, &checked); err != nil {
+	enabledCheck := *previous
+	enabledCheck.Relays, enabledCheck.Enabled = n.Relays, previous.Enabled
+	if err := s.tunnelEnabledRefusal(ctx, &enabledCheck); err != nil {
 		return err
 	}
 	if err := s.makeTunnels(ctx, previous, n, work); err != nil {
@@ -1133,6 +1171,11 @@ func (s *Service) setLineFactorsLocked(ctx context.Context, panelID int64, chang
 			}
 		}
 	}
+	for _, id := range order {
+		if err := s.checkSourceGuard(ctx, original[id], byNode[id]); err != nil {
+			return nil, err
+		}
+	}
 	// One write per node. A failure puts the nodes already written back the
 	// way they were, so the request stays all or nothing.
 	for i, id := range order {
@@ -1216,6 +1259,9 @@ func (s *Service) updateInboundConfigLockedNode(ctx context.Context, n *domain.N
 	inboundcfg.ApplySpec(&next, spec)
 	if err := domain.ValidateCDNRelays(&next, next.Relays); err != nil {
 		return fmt.Errorf("%w (the change would leave its CDN lines without a transport a CDN can carry: remove those lines first, or keep a TLS + WebSocket, gRPC or HTTPUpgrade transport)", err)
+	}
+	if err := s.checkListenerGuard(ctx, n, &next); err != nil {
+		return err
 	}
 	offer, err := s.checkInboundAgainstFronts(ctx, &next)
 	if err != nil {

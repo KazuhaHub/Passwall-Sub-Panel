@@ -15,6 +15,9 @@ func TestACDNLineRoundTripsAndIsPublishedWithItsLanding(t *testing.T) {
 	landing := &domain.Node{
 		PanelID: 7, InboundID: 1, DisplayName: "JP", ServerAddress: "land.example.com",
 		DesiredProtocol: "vless", DesiredPort: 443, Region: "JP", Enabled: true,
+		// A landing that cannot guard by source publishes only lines that cost the
+		// same as its direct line (ADR 0044).
+		TrafficFactorMilli: &factor,
 		Relays: []domain.RelayLine{
 			{ID: "fwd", Name: "gz", Address: "gz.relay.cn", Port: 20001, Enabled: true, Tags: []string{}},
 			{ID: "cdn-1", Name: "CF", Mode: domain.RelayModeCDN, Domain: "cdn.example.com", Address: "104.16.1.1", Port: 8443,

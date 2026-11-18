@@ -108,6 +108,13 @@ function categoriseError(err: AxiosError<{ error?: string }>): { key: string; ms
     return { key: 'network', msg: t('common:errors.network', { defaultValue: '网络异常，请检查连接' }) }
   }
   const status = err.response.status
+  // A refusal that carries a stable code is worded in the reader's language when
+  // the locale has the code; its English text stays the fallback.
+  const body = err.response.data as { code?: unknown; params?: unknown } | undefined
+  if (status >= 400 && status < 500 && typeof body?.code === 'string' && i18n.exists(`common:errors.codes.${body.code}`)) {
+    const params = typeof body.params === 'object' && body.params !== null ? body.params as Record<string, unknown> : {}
+    return { key: `4xx:${status}:${body.code}:${JSON.stringify(params)}`, msg: t(`common:errors.codes.${body.code}`, params) }
+  }
   // Prefer the server-provided error text when it's present; that
   // string is already localised by the backend's error mapping.
   const serverMsg = err.response.data?.error

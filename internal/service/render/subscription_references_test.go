@@ -244,7 +244,18 @@ func lineRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User) {
 	n.DisplayName = "A"
 	n.Relays = []domain.RelayLine{{ID: "relay-B", Name: "B", Address: "relay.example", Port: 8443, Enabled: true}}
 	u := &domain.User{ID: 5, UUID: "87654321-4321-4def-8abc-cba987654321"}
-	repo := renderCredentialRepo{client: &domain.PSPClient{ID: 11, UserID: 5, UUID: u.UUID}, attachments: []domain.PSPClientInbound{{ClientID: 11, NodeID: n.ID, AppliedUUID: "12345678-1234-4abc-8def-123456789abc", AppliedEmail: "u5@example.test"}}}
+	// A relay line renders only with its own applied identity (ADR 0044), so the
+	// line has a client row of its own next to the direct one.
+	repo := lineCredentialRepo{
+		clients: []*domain.PSPClient{
+			{ID: 11, UserID: 5, UUID: u.UUID},
+			{ID: 12, UserID: 5, NodeID: n.ID, LineID: "relay-B", UUID: "12345678-1234-4abc-8def-123456789abc"},
+		},
+		attachments: map[int64][]domain.PSPClientInbound{
+			11: {{ClientID: 11, NodeID: n.ID, AppliedUUID: "12345678-1234-4abc-8def-123456789abc", AppliedEmail: "u5@example.test"}},
+			12: {{ClientID: 12, NodeID: n.ID, AppliedUUID: "12345678-1234-4abc-8def-123456789abc", AppliedEmail: "u5-lb@example.test"}},
+		},
+	}
 	s := &Service{repos: ports.Repos{Settings: fakeSettings{}, PSPClient: repo}, pool: panicPool{}}
 	return s, n, u
 }

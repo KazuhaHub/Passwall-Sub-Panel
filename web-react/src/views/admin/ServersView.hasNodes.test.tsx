@@ -41,4 +41,13 @@ describe('ServersView delete refused for nodes', () => {
     await waitFor(() => expect(snack).toHaveBeenCalledWith('cannot delete', 'error'))
     expect(screen.queryByTestId('blocking-nodes')).toBeNull()
   })
+
+  it('says the server could not be deleted when the failure has no message', async () => {
+    installReads({ '/admin/servers': list([server]) })
+    confirmation.mockResolvedValue(true)
+    api.delete.mockRejectedValue(new Error(''))
+    mount(<ServersView />)
+    await deleteRow()
+    await waitFor(() => expect(snack).toHaveBeenCalledWith('admin:servers.toast.delete_failed', 'error'))
+  })
 })

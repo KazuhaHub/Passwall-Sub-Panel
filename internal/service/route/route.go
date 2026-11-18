@@ -73,6 +73,8 @@ type Links interface {
 	// OutUsable says whether the entry's half of the link to exit can be sent:
 	// there is an address to dial and the half passes the wire contract.
 	OutUsable(ctx context.Context, entry, exit int64) (bool, error)
+	// LinkByID reads a link by its id, domain.ErrNotFound when none exists.
+	LinkByID(ctx context.Context, id int64) (domain.TransitLink, error)
 	// RemoveLink deletes the link of a pair no node uses any more.
 	RemoveLink(ctx context.Context, entry, exit int64) error
 }

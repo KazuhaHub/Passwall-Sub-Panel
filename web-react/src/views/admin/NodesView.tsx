@@ -82,6 +82,8 @@ import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { ListResponse, Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
 import { previewSeparatorGroups, type LineVisibilityDraft, type SeparatorGroupsPreview, type Separator } from '@/api/nodes'
+import { addRefusedSource, getNodeSourceGuard, parseSourceCIDRs, type NodeSourceGuard } from '@/api/sourceGuard'
+import SourceAddressesField from './SourceAddressesField'
 import { nodeKeys } from '@/query/keys'
 import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
@@ -163,6 +165,8 @@ type RelayDraft = RelayLine & {
   _factor_text?: string
   /** The admin changed this line's multiplier in this edit session. */
   _factor_touched?: boolean
+  /** Source addresses as typed; absent until edited. */
+  _source_text?: string
 }
 /** The entry select's value for a CDN line (a server id is never negative). */
 const CDN_ENTRY = -1
@@ -2479,6 +2483,36 @@ export default function NodesView() {
   const [linkDirty, setLinkDirty] = useState(false)
   const [linkError, setLinkError] = useState(false)
   const editEgress = editForm.egress_panel_id ?? 0
+  // What the panel says of the saved node's lines' source addresses (ADR 0044):
+  // the set in force, the Cloudflare ranges, and the sources its landing refused.
+  const [sourceGuard, setSourceGuard] = useState<NodeSourceGuard | null>(null)
+  const [sourceBusy, setSourceBusy] = useState(false)
+  const editingId = editing?.id ?? 0
+  useEffect(() => {
+    setSourceGuard(null)
+    if (!editOpen || editingId <= 0) return
+    const controller = new AbortController()
+    getNodeSourceGuard(editingId, { signal: controller.signal })
+      .then(setSourceGuard)
+      .catch(() => { /* The editor works without it. */ })
+    return () => controller.abort()
+  }, [editOpen, editingId])
+  async function addSource(lineId: string, ip: string) {
+    setSourceBusy(true)
+    try {
+      const saved = await addRefusedSource(editingId, lineId, ip)
+      // The address is saved; the line's own list in the form follows it.
+      setEditForm(f => ({ ...f, relays: f.relays.map(x => (x.id === lineId ? { ...x, source_cidrs: saved, _source_text: undefined } : x)) }))
+      editBaseline.current = editBaseline.current && {
+        ...editBaseline.current,
+        relays: editBaseline.current.relays.map(x => (x.id === lineId ? { ...x, source_cidrs: saved } : x)),
+      }
+      pushSnack(t('admin:nodes.source.added', { ip }), 'success')
+      setSourceGuard(await getNodeSourceGuard(editingId))
+    } catch {
+      // The request layer already surfaced the failure.
+    } finally { setSourceBusy(false) }
+  }
   useEffect(() => {
     if (!editOpen || !editing || editEgress <= 0) return
     let cancelled = false
@@ -2653,7 +2687,7 @@ export default function NodesView() {
   // (status, a tunnel line's listener and port), for telling edits from a refresh.
   const editSnapshot = (f: MetaForm) => JSON.stringify({
     ...f,
-    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, cdn_issues: _issues, mode: _mode, ...r }) =>
+    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, cdn_issues: _issues, source_withheld: _sourceWithheld, mode: _mode, ...r }) =>
       (_mode === 'tunnel' ? { ...r, port: 0, sni: '', host: '' } : r)),
   })
   // The form as it was opened or last refreshed from the server.
@@ -2758,7 +2792,7 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, cdn_issues: _issues, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), domain: r.mode === 'cdn' ? r.domain?.trim() : undefined, port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, cdn_issues: _issues, source_withheld: _sourceWithheld, _source_text, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(r.mode === 'tunnel' ? { source_cidrs: undefined } : _source_text !== undefined ? { source_cidrs: parseSourceCIDRs(_source_text) } : {}), ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), domain: r.mode === 'cdn' ? r.domain?.trim() : undefined, port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           // A CDN line may leave the address empty (it is the domain); every other line needs one.
           .filter(r => r.address || (r.mode === 'cdn' && r.domain)),
         hide_direct: editForm.hide_direct,
@@ -4414,6 +4448,17 @@ export default function NodesView() {
                         onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.cdn_optional')} />
                     </Box>
+                    )}
+                    {r.mode !== 'tunnel' && (
+                      <SourceAddressesField line={r}
+                        text={r._source_text ?? (r.source_cidrs ?? []).join('\n')}
+                        onText={text => update({ _source_text: text })}
+                        guard={r.id ? sourceGuard?.lines.find(x => x.line_id === r.id) : undefined}
+                        canGuard={sourceGuard?.can_guard}
+                        cannotGuardReason={sourceGuard?.cannot_guard_reason}
+                        cloudflare={sourceGuard?.cloudflare}
+                        busy={sourceBusy}
+                        onAdd={ip => { if (r.id) void addSource(r.id, ip) }} />
                     )}
                     <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
                       visibility={lineVisibilityHint(lineVisibility, 'relays', i)}

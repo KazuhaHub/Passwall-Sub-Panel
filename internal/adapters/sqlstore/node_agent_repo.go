@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +37,11 @@ type nodeAgentRow struct {
 	AllowRestrictedReality  bool   `gorm:"not null;default:false"`
 	ObservedCoreEngine      string `gorm:"size:16;not null;default:''"`
 	ObservedAddress         string `gorm:"size:64;not null;default:''"`
-	LastSeen                *time.Time
+	// InterfaceAddresses are the public addresses the agent reported for its own
+	// interfaces (source guard, ADR 0044). Nullable text: a column added by
+	// AutoMigrate to rows that never had it reads as none.
+	InterfaceAddresses jsonStrings `gorm:"type:text"`
+	LastSeen           *time.Time
 	// Refusal columns are separate from the observation columns on purpose; see
 	// domain.NodeAgent. Nullable so "never refused" is distinguishable from
 	// "refused reporting generation 0", which is the legacy spelling of v1.
@@ -186,6 +191,7 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 		AllowRestrictedReality:  row.AllowRestrictedReality,
 		ObservedCoreEngine:      domain.NodeCoreEngine(row.ObservedCoreEngine),
 		ObservedAddress:         row.ObservedAddress,
+		InterfaceAddresses:      append([]string(nil), row.InterfaceAddresses...),
 		LastSeen:                row.LastSeen,
 		RefusedProtocolVersion:  row.RefusedProtocolVersion,
 		RefusedReason:           row.RefusedReason,
@@ -542,4 +548,21 @@ func (r *nodeAgentRepo) RecordObservedAddress(ctx context.Context, agentID, addr
 	return r.db.WithContext(ctx).Model(&nodeAgentRow{}).
 		Where("agent_id = ? AND observed_address <> ?", agentID, address).
 		Update("observed_address", address).Error
+}
+
+// RecordInterfaceAddresses stores the public addresses an agent reported for
+// its own interfaces. It writes only on a change, like RecordObservedAddress.
+func (r *nodeAgentRepo) RecordInterfaceAddresses(ctx context.Context, agentID string, addresses []string) error {
+	if agentID == "" {
+		return errors.New("record node agent interface addresses: agent ID required")
+	}
+	var row nodeAgentRow
+	if err := r.db.WithContext(ctx).Select("id", "interface_addresses").Where("agent_id = ?", agentID).First(&row).Error; err != nil {
+		return err
+	}
+	if slices.Equal([]string(row.InterfaceAddresses), addresses) {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("id = ?", row.ID).
+		Update("interface_addresses", jsonStrings(addresses)).Error
 }

@@ -24,10 +24,11 @@ func (r RelayLine) Gated() bool { return r.Managed() || r.Tunnel() }
 // forward (or whose state was never loaded) is withheld: it fails closed. A
 // line whose probes have been down long enough to be withheld (ProbeWithheld,
 // only ever set while withholding is on) is left out too, and never replaced
-// by a direct line. A tunnel line is gated the same way (ManagedReady is the
+// by a direct line, and so is one the source guard withholds (SourceWithheld,
+// ADR 0044). A tunnel line is gated the same way (ManagedReady is the
 // state of its listener and link, see TunnelReady).
 func (r RelayLine) Publishable() bool {
-	return r.Enabled && !r.ProbeWithheld && (!r.Gated() || r.ManagedReady)
+	return r.Enabled && !r.ProbeWithheld && r.SourceWithheld == "" && (!r.Gated() || r.ManagedReady)
 }
 
 // ManagedForward is what an entry server must relay for one managed line. It

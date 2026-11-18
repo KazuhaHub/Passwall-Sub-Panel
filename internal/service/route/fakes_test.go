@@ -35,13 +35,15 @@ type world struct {
 	good    map[int64]goodList
 	// expandErr makes a list fail to expand.
 	expandErr map[int64]error
+	// ensureErr makes the tunnel to an exit server fail.
+	ensureErr map[int64]error
 }
 
 func newWorld() *world {
 	return &world{
 		nodes: map[int64]*domain.Node{}, panels: map[int64]*domain.Panel{}, agents: map[int64]*domain.NodeAgent{},
 		routes: map[int64]*domain.NodeRoutes{}, links: map[[2]int64]domain.TransitLink{}, address: map[int64]string{},
-		lists: map[int64]*domain.DestList{}, expand: map[int64]*destlist.Expanded{}, nextLnk: 10, good: map[int64]goodList{}, expandErr: map[int64]error{},
+		lists: map[int64]*domain.DestList{}, expand: map[int64]*destlist.Expanded{}, nextLnk: 10, good: map[int64]goodList{}, expandErr: map[int64]error{}, ensureErr: map[int64]error{},
 	}
 }
 
@@ -124,6 +126,9 @@ func (f fakeAgents) GetByPanelID(_ context.Context, id int64) (*domain.NodeAgent
 type fakeLinks struct{ w *world }
 
 func (f fakeLinks) EnsureLink(_ context.Context, entry, exit int64) (domain.TransitLink, error) {
+	if err := f.w.ensureErr[exit]; err != nil {
+		return domain.TransitLink{}, err
+	}
 	key := [2]int64{entry, exit}
 	if l, ok := f.w.links[key]; ok {
 		return l, nil
@@ -137,6 +142,15 @@ func (f fakeLinks) EnsureLink(_ context.Context, entry, exit int64) (domain.Tran
 func (f fakeLinks) LinkRow(_ context.Context, entry, exit int64) (domain.TransitLink, error) {
 	if l, ok := f.w.links[[2]int64{entry, exit}]; ok {
 		return l, nil
+	}
+	return domain.TransitLink{}, domain.ErrNotFound
+}
+
+func (f fakeLinks) LinkByID(_ context.Context, id int64) (domain.TransitLink, error) {
+	for _, l := range f.w.links {
+		if l.ID == id {
+			return l, nil
+		}
 	}
 	return domain.TransitLink{}, domain.ErrNotFound
 }

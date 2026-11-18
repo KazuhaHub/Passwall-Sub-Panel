@@ -10,6 +10,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sourceaddr"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sourceguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 )
 
@@ -28,7 +29,7 @@ func tunnelSnapshot(factor int) (*ports.NativeDesiredSnapshot, *domain.PSPClient
 
 func TestTheEntryServersRosterCarriesTheLinesDerivedIdentityOnTheListener(t *testing.T) {
 	snapshot, client := tunnelSnapshot(1500)
-	roster := buildRoster(snapshot, nodeprotocol.Version{Epoch: 1, Version: 1})
+	roster := buildRoster(snapshot, nodeprotocol.Version{Epoch: 1, Version: 1}, sourceguard.Plan{})
 	if len(roster.Clients) != 1 {
 		t.Fatalf("clients = %d", len(roster.Clients))
 	}

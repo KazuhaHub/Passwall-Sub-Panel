@@ -69,6 +69,8 @@ export interface TransitLink {
   server_address: string
   up_bytes: number
   down_bytes: number
+  /** True when REALITY cannot be used: the entry runs sing-box and the exit Xray. */
+  reality_refused?: boolean
 }
 
 export interface UpdateTransitLinkRequest {
@@ -298,7 +300,8 @@ export async function createInbound(req: CreateInboundRequest) {
 }
 
 async function createInboundOnce(req: CreateInboundRequest) {
-  const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req)
+  // Quiet: the guided setup shows the error inline, so a toast would say it twice.
+  const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req, { _skipErrorToast: true })
   return data
 }
 

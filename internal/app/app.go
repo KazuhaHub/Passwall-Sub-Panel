@@ -64,6 +64,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/route"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sourceguard"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
@@ -144,10 +145,12 @@ type App struct {
 	mail          *mailer.Service
 	health        *health.Service
 	geo           *geo.Service
-	render        *render.Service
-	risk          *risk.Service
-	settings      ports.SettingsRepo
-	syncTasks     ports.SyncTaskRepo
+	// cloudflareRanges keeps Cloudflare's address ranges current (source guard).
+	cloudflareRanges *sourceguard.Cloudflare
+	render           *render.Service
+	risk             *risk.Service
+	settings         ports.SettingsRepo
+	syncTasks        ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -380,6 +383,20 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			return errors.Is(err, domain.ErrNotFound)
 		})
 	nativeSync.SetTransit(transitSvc)
+	// SOURCE GUARD (ADR 0044): the Cloudflare ranges a CDN line defaults to, the
+	// sets and guards a landing that can enforce them is sent, and where the
+	// sources it refused are kept. Auto-fetch is read from settings before every
+	// attempt, so the switch takes effect without a restart; a settings outage
+	// leaves it on, the default.
+	cloudflareRanges := sourceguard.NewCloudflare(repos.SourceGuard, func(ctx context.Context) bool {
+		set, err := repos.Settings.Load(ctx, ports.UISettings{})
+		return err != nil || !set.SourceGuardCloudflareFetchOff
+	})
+	guardPlanner := sourceguard.NewPlanner(repos.NodeAgent, cloudflareRanges)
+	nativeSync.SetSourceGuard(guardPlanner)
+	// A loaded node withholds a line by the same ranges the landing is sent.
+	sqlstore.SetCloudflareRanges(func(ctx context.Context) []string { return cloudflareRanges.Current(ctx).CIDRs })
+	nativeSync.SetSourceGuardHits(repos.SourceGuard)
 	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
 	// ONE front service for the sync, the node saves and the HTTP handlers: it
 	// owns the per-server lock that serializes everything touching a server's
@@ -524,6 +541,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
+	// A landing can check where connections come from only on a Passwall Node
+	// server whose agent declared it; 3X-UI and S-UI servers have no agent. A read
+	// that fails counts as "cannot": the stricter rule is the safe one to save by.
+	nodeSvc.SetSourceGuardCheck(func(ctx context.Context, panelID int64) bool {
+		agents, err := repos.NodeAgent.ListByPanelIDs(ctx, []int64{panelID})
+		return err == nil && len(agents) > 0 && agents[0].CanSourceGuard()
+	})
+	// The save rules are judged by what the planner would send: Cloudflare, the
+	// entry servers' addresses, each landing's agent and engine, the fronts.
+	nodeSvc.SetSourceGuardInputs(guardPlanner.Inputs)
 	nodeSvc.SetTunnelLinks(transitSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
@@ -849,6 +876,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	})
 	nativeSync.SetRoutes(routeSvc)
 	nodeSvc.SetRouteLinks(routeSvc.NodeDeleted, routeSvc.Lock)
+	// A tunnel a front stops routing to goes once its entry no longer uses it.
+	frontSvc.WithLinkRelease(routeSvc.LinksReleased)
 	nodeSvc.SetSetupRouter(routeSvc)
 	destLists.SetRouteUses(routeSvc)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
@@ -948,9 +977,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile: reconcileSvc,
 		Geo:       geoSvc,
 		NodeSync:  nativeSync,
-		Fronts:    frontSvc,
-		Routes:    routeSvc,
-		Legal:     handler.LegalWiring{Service: legalSvc, Store: legalRepo},
+		// The line editor's source address panel and the add-a-refused-source action.
+		SourceGuard: sourceguard.NewAdmin(repos.NodeAgent, cloudflareRanges, repos.SourceGuard),
+		Fronts:      frontSvc,
+		Routes:      routeSvc,
+		Legal:       handler.LegalWiring{Service: legalSvc, Store: legalRepo},
 		// The access-control API. Optional in the sense that every field left
 		// out turns its routes into 503s, so an omission compiles and fails
 		// only when the page is opened: TestBuildWiresTheAccessControlAPI.
@@ -998,6 +1029,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.mail = mailSvc
 	a.health = healthSvc
 	a.geo = geoSvc
+	a.cloudflareRanges = cloudflareRanges
 	a.settings = repos.Settings
 	a.syncTasks = repos.SyncTask
 	a.trafficRepo = repos.Traffic
@@ -1188,6 +1220,10 @@ func (a *App) Run() error {
 	})
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
+	if a.cloudflareRanges != nil {
+		// Once a day; a restart within a day of the last fetch waits out the rest.
+		safego.GoTracked(&a.bgWG, "cloudflare-ranges-loop", func() { a.cloudflareRanges.Run(bgCtx, time.Minute) })
+	}
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "infra-address-loop", func() { a.runInfraAddressLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "risk-signal-loop", func() { a.runRiskLoop(bgCtx, a.riskFirstDelay(bgCtx)) })

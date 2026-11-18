@@ -183,6 +183,15 @@ describe('RoutesSection', () => {
     expect(api.put).not.toHaveBeenCalled()
   })
 
+  it('says why a tunnel whose ends both applied is still not ready: they are on different ports', async () => {
+    const differing = route({ link: { panel_id: 2, server_name: 'tokyo', exists: true, ready: false, in_applied: true, out_applied: true, ports_differ: true, in_port: 443, out_port: 23456 } })
+    setup(view({ routes: [differing, view().routes[1]] }))
+    mount(ui)
+    await rows()
+    const note = await screen.findByTestId('route-link-ports')
+    expect(note.textContent).toContain('admin:nodes.routes.link.ports_differ')
+  })
+
   it('says the exit server above is changed but not saved', async () => {
     setup(view())
     mount(<RoutesSection nodeId={1} entryPanelId={1} servers={servers} pendingExit={2} />)

@@ -18,6 +18,16 @@ describe('fronts api', () => {
     expect(await api.getServerPorts(4)).toEqual([])
   })
 
+  it('keeps the incoming tunnels among the target options and treats null lists as empty', async () => {
+    const link = { link_id: 7, entry_panel_id: 2, port: 31443, server_name: 'tunnel.example' }
+    http.get.mockResolvedValue({ data: { listeners: null, lines: null, links: [link] } })
+    const options = await api.getFrontOptions(4)
+    expect(http.get).toHaveBeenCalledWith('/admin/servers/4/fronts/options', expect.objectContaining({ _skipErrorToast: true }))
+    expect(options).toEqual({ listeners: [], lines: [], links: [link] })
+    http.get.mockResolvedValue({ data: { listeners: null, lines: null, links: null } })
+    expect((await api.getFrontOptions(4)).links).toEqual([])
+  })
+
   it('asks for suggestions as reads, never as writes', async () => {
     http.get.mockResolvedValue({ data: { port: 30012 } })
     expect(await api.suggestLoopbackPort(4)).toBe(30012)

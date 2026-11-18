@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     baseAdapter,
     pushSnack: vi.fn(),
     translate: vi.fn((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key),
+    exists: vi.fn((key: string) => key === 'common:errors.codes.source_guard_needs_cidrs'),
   }
 })
 
@@ -39,7 +40,7 @@ vi.mock('axios', () => ({
     getAdapter: vi.fn(() => mocks.baseAdapter),
   },
 }))
-vi.mock('@/i18n', () => ({ default: { t: mocks.translate } }))
+vi.mock('@/i18n', () => ({ default: { t: mocks.translate, exists: mocks.exists } }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: mocks.pushSnack }))
 vi.mock('@/panelPath', () => ({
   panelAPIBase: '/panel/api',
@@ -192,6 +193,17 @@ describe('shared API client interceptors', () => {
     await expect(mocks.state.responseError?.(timeout)).rejects.toBe(timeout)
     expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
     expect(mocks.pushSnack).toHaveBeenCalledWith(expect.any(String), 'error')
+  })
+
+  it('words a refusal that carries a known code from the locale, and keeps the server text otherwise', async () => {
+    const refusal = (code: string) => ({
+      config: {}, message: 'x',
+      response: { status: 400, data: { error: 'validation failed: english', code, params: { line: 'L', node: 'N' } } },
+    })
+    await expect(mocks.state.responseError?.(refusal('source_guard_needs_cidrs'))).rejects.toBeTruthy()
+    expect(mocks.translate).toHaveBeenCalledWith('common:errors.codes.source_guard_needs_cidrs', { line: 'L', node: 'N' })
+    await expect(mocks.state.responseError?.(refusal('some_unknown_code'))).rejects.toBeTruthy()
+    expect(mocks.pushSnack).toHaveBeenLastCalledWith('validation failed: english', 'error')
   })
 })
 

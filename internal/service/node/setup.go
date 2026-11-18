@@ -117,6 +117,12 @@ func (s *Service) planSetup(ctx context.Context, n *domain.Node, spec ports.Inbo
 	if err := s.validateEgress(n, n.EgressPanelID); err != nil {
 		return nil, err
 	}
+	if err := resolveSourceCIDRs(nil, n); err != nil {
+		return nil, err
+	}
+	if err := s.checkSourceGuard(ctx, nil, n); err != nil {
+		return nil, err
+	}
 	if err := domain.ValidateTunnelRelays(n, n.Relays); err != nil {
 		return nil, err
 	}

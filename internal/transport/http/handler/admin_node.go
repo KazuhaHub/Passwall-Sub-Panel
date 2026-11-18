@@ -192,6 +192,14 @@ type relayLineDTO struct {
 	// request, omitted keeps the saved value (a new line is one-for-one);
 	// responses always carry it.
 	TrafficFactorMilli *int `json:"traffic_factor_milli,omitempty"`
+	// SourceCIDRs are the source addresses the administrator adds to this line's
+	// source set (ADR 0044): where the line's traffic reaches the landing from.
+	// In a request, omitted keeps the saved list and [] clears it; responses
+	// always carry it. Not for tunnel lines.
+	SourceCIDRs *[]string `json:"source_cidrs,omitempty"`
+	// SourceWithheld is response-only: why the source guard keeps the line out
+	// of subscriptions (source_guard_factor, source_guard_unknown).
+	SourceWithheld string `json:"source_withheld,omitempty"`
 	// Mode is how the entry carries the line: absent is a raw port forward
 	// (直接转发), "tunnel" a listener of its own on the entry that carries the
 	// traffic through a tunnel to the landing (加密隧道). In a request a new line
@@ -1309,6 +1317,13 @@ func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
 		if d.EntryPanelID < 0 {
 			return nil, fmt.Errorf("relay line %d: invalid entry server", i+1)
 		}
+		// nil keeps the saved addresses (resolved by the node service, which also
+		// validates and normalises them).
+		if d.SourceCIDRs == nil {
+			line.SourceCIDRsUnresolved = true
+		} else {
+			line.SourceCIDRs = *d.SourceCIDRs
+		}
 		if d.Mode == nil {
 			line.ModeUnresolved = true
 		} else if *d.Mode == domain.RelayModeTunnel {
@@ -1393,9 +1408,21 @@ func relayDTOsOn(landing *domain.Node, relays []domain.RelayLine, secrets bool) 
 			Probe:              probeQualityOf(r.Probe),
 			ProbeWithheld:      r.ProbeWithheld,
 			TrafficFactorMilli: ptrInt(r.EffectiveTrafficFactor()),
+			SourceCIDRs:        sourceCIDRsOf(r),
+			SourceWithheld:     r.SourceWithheld,
 		})
 	}
 	return out
+}
+
+// sourceCIDRsOf is a line's own source addresses for a response; a tunnel line
+// has none and carries nothing.
+func sourceCIDRsOf(r domain.RelayLine) *[]string {
+	if r.Tunnel() {
+		return nil
+	}
+	cidrs := append([]string{}, r.SourceCIDRs...)
+	return &cidrs
 }
 
 func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string) nodeDTO {
@@ -1485,9 +1512,12 @@ func callerIsAdmin(c *gin.Context) bool {
 
 func mapNodeServiceError(c *gin.Context, err error) {
 	var refusal *front.Refusal
+	var coded *domain.CodedValidationError
 	switch {
 	case errors.As(err, &refusal):
 		respondFrontError(c, err)
+	case errors.As(err, &coded):
+		respondError(c, err)
 	case errors.Is(err, transit.ErrReservedPortTaken):
 		// The port promised to a new tunnel was taken before it was made: a
 		// conflict the admin can retry (the retry plans a fresh port).

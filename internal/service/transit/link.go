@@ -28,7 +28,7 @@ type LinkRepo interface {
 	GetLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error)
 	ListLinks(ctx context.Context) ([]domain.TransitLink, error)
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
-	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
+	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, port int, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
 	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
@@ -202,7 +202,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			if port != 0 {
 				sent, ok := active[in.Key]
 				if !ok || sent.Port != port {
-					if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+					if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 						return LinkPlan{}, err
 					}
 					continue
@@ -211,20 +211,20 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			}
 			if err := nodeprotocol.ValidateLinkIn(in); err != nil {
 				log.Warn("tunnel withheld from its exit: its half is invalid", "link", link.ID, "err", err)
-				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 					return LinkPlan{}, err
 				}
 				continue
 			}
 			if port == 0 && occupied[in.Port] {
 				log.Warn("tunnel withheld from its exit: its port is taken there", "link", link.ID, "port", in.Port)
-				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 					return LinkPlan{}, err
 				}
 				continue
 			}
 			occupied[in.Port] = true
-			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, domain.TransitLinkDigest(in, nil), nil); err != nil {
+			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, domain.TransitLinkDigest(in, nil), in.Port, nil); err != nil {
 				return LinkPlan{}, err
 			}
 			plan.In = append(plan.In, in)
@@ -237,7 +237,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 		}
 		if err := nodeprotocol.ValidateLinkOut(out); err != nil {
 			log.Warn("tunnel withheld from its entry: no usable exit address", "link", link.ID, "err", err)
-			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, "", nil); err != nil {
+			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, "", 0, nil); err != nil {
 				return LinkPlan{}, err
 			}
 			continue
@@ -252,7 +252,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			names = append(names, string(listener))
 			plan.Egress = append(plan.Egress, nodeprotocol.EgressBinding{Listener: listener, Link: out.Key})
 		}
-		if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, domain.TransitLinkDigest(out, listeners), names); err != nil {
+		if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, domain.TransitLinkDigest(out, listeners), out.Port, names); err != nil {
 			return LinkPlan{}, err
 		}
 		for _, node := range bound[key] {
@@ -311,8 +311,8 @@ func (s *Service) ensurePairLink(ctx context.Context, nodes []*domain.Node, entr
 
 // sent records what one side of a link is being sent; "" records that it is
 // withheld, so an earlier confirmation cannot keep its nodes published.
-func (s *Service) sent(ctx context.Context, plan *LinkPlan, id int64, side domain.LinkSide, digest string, bound []string) error {
-	changed, err := s.links.RecordLinkSent(ctx, id, side, digest, bound)
+func (s *Service) sent(ctx context.Context, plan *LinkPlan, id int64, side domain.LinkSide, digest string, port int, bound []string) error {
+	changed, err := s.links.RecordLinkSent(ctx, id, side, digest, port, bound)
 	if err != nil {
 		return fmt.Errorf("transit: record link %d sent: %w", id, err)
 	}
@@ -431,15 +431,51 @@ func (s *Service) OutUsable(ctx context.Context, entry, exit int64) (bool, error
 	return nodeprotocol.ValidateLinkOut(out) == nil, nil
 }
 
-// RemoveLink deletes the tunnel from entry to exit and frees its port. The
-// caller has checked that nothing uses the pair any more: a node's default exit
-// and every route leaving through it.
+// RemoveLink deletes the tunnel from entry to exit, once nothing of the entry
+// uses it (the callers check that). A tunnel an SNI front on the exit still
+// routes to is kept: deleting it would leave the front's route pointing at
+// nothing, and the pair's next tunnel would be a new one on a new port. It goes
+// once the front no longer routes to it and the entry drops it again.
 func (s *Service) RemoveLink(ctx context.Context, entry, exit int64) error {
 	if s.links == nil {
 		return nil
 	}
+	if s.frontPorts != nil {
+		link, err := s.links.GetLink(ctx, entry, exit)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ports, err := s.frontPorts(ctx, exit)
+		if err != nil {
+			return err
+		}
+		if ports[link.ID] != 0 {
+			log.Info("tunnel kept: an SNI front on its exit still routes to it", "link", link.ID, "port", ports[link.ID])
+			return nil
+		}
+	}
 	_, err := s.links.DeleteLink(ctx, entry, exit)
 	return err
+}
+
+// LinkByID returns the link with this id, domain.ErrNotFound when none exists.
+func (s *Service) LinkByID(ctx context.Context, id int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, domain.ErrNotFound
+	}
+	all, err := s.links.ListLinks(ctx)
+	if err != nil {
+		return domain.TransitLink{}, err
+	}
+	for _, link := range all {
+		if link.ID == id {
+			return link, nil
+		}
+	}
+	return domain.TransitLink{}, domain.ErrNotFound
 }
 
 // LinkRow returns the link from entry to exit as stored, domain.ErrNotFound
@@ -756,6 +792,153 @@ type LinkView struct {
 	ServerAddress string
 	UpBytes       int64
 	DownBytes     int64
+	// RealityRefused says REALITY cannot be chosen for this pair: the entry runs
+	// sing-box and the exit Xray.
+	RealityRefused bool
+}
+
+const (
+	// CodeLinkRealityEngines refuses a REALITY tunnel from a sing-box entry to an
+	// Xray exit.
+	CodeLinkRealityEngines = "link_reality_engines"
+	// CodeEngineRealityLinks refuses an engine switch that would leave a REALITY
+	// tunnel between a sing-box entry and an Xray exit.
+	CodeEngineRealityLinks = "engine_reality_links"
+)
+
+// realityRefused is true for a sing-box entry and an Xray exit: a sing-box
+// REALITY client cannot connect to an Xray 26.9 or later REALITY server (the
+// core catalog records the handshake as an expected failure), so the tunnel
+// would simply be down. An Xray client works against a sing-box server.
+func realityRefused(entry, exit domain.NodeCoreEngine) bool {
+	return entry == domain.NodeCoreSingBox && exit == domain.NodeCoreXray
+}
+
+// desiredEngines maps each server that has an agent to the engine it is meant
+// to run; a server PSP has no agent for is absent (unknown).
+func (s *Service) desiredEngines(ctx context.Context, panelIDs ...int64) (map[int64]domain.NodeCoreEngine, error) {
+	out := map[int64]domain.NodeCoreEngine{}
+	if s.agents == nil {
+		return out, nil
+	}
+	agents, err := s.agents.ListByPanelIDs(ctx, panelIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, agent := range agents {
+		if agent != nil {
+			out[agent.PanelID] = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
+		}
+	}
+	return out, nil
+}
+
+// pairRealityRefused reports whether REALITY is refused between two servers;
+// unknown engines do not refuse.
+func (s *Service) pairRealityRefused(ctx context.Context, entry, exit int64) (bool, error) {
+	engines, err := s.desiredEngines(ctx, entry, exit)
+	if err != nil {
+		return false, err
+	}
+	entryEngine, okEntry := engines[entry]
+	exitEngine, okExit := engines[exit]
+	return okEntry && okExit && realityRefused(entryEngine, exitEngine), nil
+}
+
+// EngineSwitchRefusal refuses switching a server's desired engine when that
+// would make it one end of a REALITY tunnel between a sing-box entry and an Xray
+// exit. It is a refusal, not a confirmation: the administrator changes the
+// listed tunnels to Shadowsocks 2022 first, so no tunnel's protocol changes
+// without being chosen.
+func (s *Service) EngineSwitchRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	to = domain.NormalizeNodeCoreEngine(to)
+	if err := s.engineSourceGuardRefusal(ctx, panelID, to); err != nil {
+		return err
+	}
+	return s.engineLinkRefusal(ctx, panelID, to)
+}
+
+// engineSourceGuardRefusal refuses an engine switch after which a listener of
+// the server that keeps priced lines apart by source could no longer guard (a
+// sing-box listener on a transport that takes the source from X-Forwarded-For).
+// A server whose agent has not declared the capability is not asked.
+func (s *Service) engineSourceGuardRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	if s.agents == nil || s.nodes == nil {
+		return nil
+	}
+	agents, err := s.agents.ListByPanelIDs(ctx, []int64{panelID})
+	if err != nil {
+		return err
+	}
+	var agent *domain.NodeAgent
+	for _, a := range agents {
+		if a != nil && a.PanelID == panelID {
+			agent = a
+		}
+	}
+	if !agent.CanSourceGuard() {
+		return nil
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if n == nil || n.PanelID != panelID {
+			continue
+		}
+		if err := domain.ListenerGuardRefusal(n, n, agent.GuardEngines(), []domain.NodeCoreEngine{to}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) engineLinkRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error {
+	if s.links == nil {
+		return nil
+	}
+	links, err := s.links.ListLinks(ctx)
+	if err != nil {
+		return err
+	}
+	var affected []domain.TransitLink
+	for _, link := range links {
+		if link.Protocol != nodeprotocol.LinkProtocolVLESSReality || (link.EntryPanelID != panelID && link.ExitPanelID != panelID) {
+			continue
+		}
+		other := link.ExitPanelID
+		if link.ExitPanelID == panelID {
+			other = link.EntryPanelID
+		}
+		engines, err := s.desiredEngines(ctx, other)
+		if err != nil {
+			return err
+		}
+		otherEngine, known := engines[other]
+		if !known {
+			continue
+		}
+		entryEngine, exitEngine := to, otherEngine
+		if link.ExitPanelID == panelID {
+			entryEngine, exitEngine = otherEngine, to
+		}
+		if realityRefused(entryEngine, exitEngine) {
+			affected = append(affected, link)
+		}
+	}
+	if len(affected) == 0 {
+		return nil
+	}
+	labels := make([]string, len(affected))
+	for i, link := range affected {
+		labels[i] = fmt.Sprintf("#%d -> #%d", link.EntryPanelID, link.ExitPanelID)
+	}
+	list := strings.Join(labels, ", ")
+	return &domain.CodedValidationError{
+		Code: CodeEngineRealityLinks, Params: map[string]string{"links": list},
+		Msg: fmt.Sprintf("this change would leave REALITY tunnels (entry -> exit server) from a sing-box entry to an Xray exit, which cannot connect: %s; change those tunnels to Shadowsocks 2022 first", list),
+	}
 }
 
 // Link returns the link from entry to exit as the administrator sees it.
@@ -767,9 +950,13 @@ func (s *Service) Link(ctx context.Context, entry, exit int64) (LinkView, error)
 	if err != nil {
 		return LinkView{}, err
 	}
+	refused, err := s.pairRealityRefused(ctx, entry, exit)
+	if err != nil {
+		return LinkView{}, err
+	}
 	link, err := s.links.GetLink(ctx, entry, exit)
 	if errors.Is(err, domain.ErrNotFound) {
-		return LinkView{Protocol: nodeprotocol.LinkProtocolSS2022, ServerAddress: address}, nil
+		return LinkView{Protocol: nodeprotocol.LinkProtocolSS2022, ServerAddress: address, RealityRefused: refused}, nil
 	}
 	if err != nil {
 		return LinkView{}, err
@@ -784,7 +971,7 @@ func (s *Service) Link(ctx context.Context, entry, exit int64) (LinkView, error)
 	return LinkView{
 		Exists: true, Protocol: link.Protocol, ExitAddress: link.ExitAddress,
 		RealityServerName: link.RealityServerName, RealityTarget: link.RealityTarget,
-		Port: link.Port, ServerAddress: address, UpBytes: up, DownBytes: down,
+		Port: link.Port, ServerAddress: address, UpBytes: up, DownBytes: down, RealityRefused: refused,
 	}, nil
 }
 
@@ -797,6 +984,18 @@ func (s *Service) UpdateLink(ctx context.Context, entry, exit int64, settings do
 	}
 	if entry <= 0 || exit <= 0 || entry == exit {
 		return LinkView{}, fmt.Errorf("%w: a tunnel joins two different servers", domain.ErrValidation)
+	}
+	if settings.Protocol == nodeprotocol.LinkProtocolVLESSReality {
+		refused, err := s.pairRealityRefused(ctx, entry, exit)
+		if err != nil {
+			return LinkView{}, err
+		}
+		if refused {
+			return LinkView{}, &domain.CodedValidationError{
+				Code: CodeLinkRealityEngines, Params: map[string]string{"entry": fmt.Sprint(entry), "exit": fmt.Sprint(exit)},
+				Msg: "a sing-box entry cannot use a REALITY tunnel to an Xray exit; use Shadowsocks 2022",
+			}
+		}
 	}
 	defer s.lockPair(entry, exit)()
 	nodes, err := s.nodes.List(ctx)
@@ -842,7 +1041,7 @@ func (s *Service) WithholdIncomingLinks(ctx context.Context, links []nodeprotoco
 		if err != nil {
 			return err
 		}
-		if err := s.sent(ctx, &plan, id, domain.LinkSideIn, "", nil); err != nil {
+		if err := s.sent(ctx, &plan, id, domain.LinkSideIn, "", 0, nil); err != nil {
 			return err
 		}
 	}

@@ -52,3 +52,17 @@ var (
 	ErrClientNotOwnedByPanel      = errors.New("client not owned by panel")
 	ErrInboundHasUnmanagedClients = errors.New("inbound has unmanaged clients")
 )
+
+// CodedValidationError is a validation failure that also carries a stable code
+// and the values its message is built from, so that a client can word it in
+// the reader's language. It is ErrValidation to every caller that only asks
+// that, and its English message is what everyone else sees.
+type CodedValidationError struct {
+	Code   string
+	Params map[string]string
+	Msg    string
+}
+
+func (e *CodedValidationError) Error() string { return ErrValidation.Error() + ": " + e.Msg }
+
+func (e *CodedValidationError) Unwrap() error { return ErrValidation }

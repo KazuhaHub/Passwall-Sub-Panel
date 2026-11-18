@@ -140,6 +140,21 @@ WHERE charged_lifetime_bytes = 0 AND lifetime_total_bytes > 0`).Error; err != ni
 	})
 }
 
+// dropColumnInPlace drops one column, if it is there, through dropLegacyColumn.
+// It must not call gorm's Migrator().DropColumn directly: on SQLite that
+// rebuilds the table from a rewritten CREATE TABLE, which loses every index on
+// it (the unique keys included) and resets the AUTOINCREMENT sequence, so
+// deleted ids are handed out again. dropLegacyColumn uses ALTER TABLE there.
+func dropColumnInPlace(db *gorm.DB, model any, column string) error {
+	if !db.Migrator().HasColumn(model, column) {
+		return nil
+	}
+	if err := dropLegacyColumn(db, model, column); err != nil {
+		return fmt.Errorf("drop column %s: %w", column, err)
+	}
+	return nil
+}
+
 // retiredRouteColumns names the two dropped nodes columns for the Migrator,
 // which needs a parsed model for column operations on SQLite. It is not part of
 // the schema and is never migrated.
@@ -161,20 +176,8 @@ func (retiredRouteColumns) TableName() string { return "nodes" }
 func dropVLESSRouteState(db *gorm.DB) error {
 	m := db.Migrator()
 	for _, column := range []string{"route_state", "route_revision"} {
-		if !m.HasColumn(&retiredRouteColumns{}, column) {
-			continue
-		}
-		if err := m.DropColumn(&retiredRouteColumns{}, column); err != nil {
-			return fmt.Errorf("drop nodes.%s: %w", column, err)
-		}
-		// gorm's SQLite DropColumn rewrites the CREATE TABLE text with a regular
-		// expression and silently does nothing for a column that ALTER TABLE
-		// appended last. Check, and fall back to the statement every supported
-		// engine understands (SQLite 3.35+, MySQL, PostgreSQL).
-		if m.HasColumn(&retiredRouteColumns{}, column) {
-			if err := db.Exec("ALTER TABLE nodes DROP COLUMN " + column).Error; err != nil {
-				return fmt.Errorf("drop nodes.%s: %w", column, err)
-			}
+		if err := dropColumnInPlace(db, &retiredRouteColumns{}, column); err != nil {
+			return err
 		}
 	}
 	if m.HasTable("vless_route_leases") {
@@ -295,14 +298,5 @@ func widenRouteSpec(db *gorm.DB) error {
 			return fmt.Errorf("carry the routes of node %d over: %w", row.NodeID, err)
 		}
 	}
-	if err := m.DropColumn(&retiredRouteSpec{}, "spec"); err != nil {
-		return fmt.Errorf("drop transit_routes.spec: %w", err)
-	}
-	// gorm's SQLite DropColumn can silently do nothing (see dropVLESSRouteState).
-	if m.HasColumn(&retiredRouteSpec{}, "spec") {
-		if err := db.Exec("ALTER TABLE transit_routes DROP COLUMN spec").Error; err != nil {
-			return fmt.Errorf("drop transit_routes.spec: %w", err)
-		}
-	}
-	return nil
+	return dropColumnInPlace(db, &retiredRouteSpec{}, "spec")
 }

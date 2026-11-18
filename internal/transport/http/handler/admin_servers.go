@@ -61,6 +61,8 @@ type AdminServersHandler struct {
 	// leaving Xray with some saved asks first.
 	fronts   ports.TransitFrontRepo
 	frontSvc *front.Service
+	// links refuses an engine switch that leaves a REALITY tunnel unusable.
+	links EngineLinkGuard
 
 	// startedAt is when THIS PSP process began listening. It exists because a
 	// node's silence during the panel's own downtime is not evidence about the
@@ -69,6 +71,18 @@ type AdminServersHandler struct {
 	// reads as "up long enough", which keeps the pre-existing verdict for any
 	// handler built without the constructor.
 	startedAt time.Time
+}
+
+// EngineLinkGuard says whether switching a server's engine is allowed given the
+// tunnels it is part of.
+type EngineLinkGuard interface {
+	EngineSwitchRefusal(ctx context.Context, panelID int64, to domain.NodeCoreEngine) error
+}
+
+// WithEngineLinkGuard binds the tunnel check run before an engine switch.
+func (h *AdminServersHandler) WithEngineLinkGuard(g EngineLinkGuard) *AdminServersHandler {
+	h.links = g
+	return h
 }
 
 // WithFronts binds the SNI front store and service.
@@ -1446,6 +1460,12 @@ func (h *AdminServersHandler) SelectCore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
 		return
 	}
+	if h.links != nil {
+		if err := h.links.EngineSwitchRefusal(c.Request.Context(), id, engine); err != nil {
+			respondError(c, err)
+			return
+		}
+	}
 	if engine != domain.NodeCoreXray && h.frontSvc != nil && !req.ConfirmFronts {
 		refusal, err := h.frontSvc.EngineChangeRefusal(c.Request.Context(), id)
 		if err != nil {
@@ -1581,6 +1601,15 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 		if !release.RequiresConfirmation && req.ConfirmRestricted {
 			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
 			return
+		}
+		// A native node's core update always installs Xray, so on a sing-box
+		// server it is an engine switch and is refused for the same reasons
+		// select-core refuses one.
+		if h.links != nil {
+			if err := h.links.EngineSwitchRefusal(c.Request.Context(), id, domain.NodeCoreXray); err != nil {
+				respondError(c, err)
+				return
+			}
 		}
 	}
 	updater, ok := client.(ports.CoreUpdater)

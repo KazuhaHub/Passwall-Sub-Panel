@@ -26,6 +26,12 @@ describe('tunnel line api', () => {
     expect(confirmMock).toHaveBeenCalledTimes(1)
   })
 
+  it('creates an inbound without a global error toast, the setup shows its own error', async () => {
+    http.post.mockResolvedValue({ data: { id: 1 } })
+    await api.createInbound({} as never)
+    expect(http.post).toHaveBeenCalledWith('/admin/nodes', {}, expect.objectContaining({ _skipErrorToast: true }))
+  })
+
   it('changes nothing when the switch is declined', async () => {
     confirmMock.mockResolvedValue(false)
     http.post.mockRejectedValue(tunnelRefusal('switch_mode'))

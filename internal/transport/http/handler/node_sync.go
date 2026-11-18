@@ -108,6 +108,8 @@ type NodeSyncHandler struct {
 	decoding   map[string]struct{}
 	// decodeWait is how long a compressed request waits for a slot.
 	decodeWait time.Duration
+	// beforeParse, when set, runs just before the report is parsed (tests only).
+	beforeParse func()
 	// refusals persists a refused report. Optional: a nil recorder costs the
 	// record, never the response.
 	refusals NodeRefusalRecorder
@@ -377,6 +379,10 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	limited := http.MaxBytesReader(w, request.Body, nodeprotocol.MaxSyncWireBytes)
 	defer limited.Close()
 	var body []byte
+	// A decode slot covers inflating AND parsing: the parse of a body that large
+	// is as heavy as the inflate. release is safe to call twice.
+	releaseDecode := func() {}
+	defer func() { releaseDecode() }()
 	if encoding == nodeprotocol.SyncEncodingGzip {
 		if declared, err := h.declaredGzip(request.Context(), agentID); err != nil {
 			log.Error("native node sync capability lookup failed", "agent_id", agentID, "err", err)
@@ -397,6 +403,11 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 			return
 		}
 		release, ok := h.acquireDecode(request.Context(), agentID)
+		releaseDecode = func() {
+			if release != nil {
+				release()
+			}
+		}
 		if !ok {
 			// 503, not 429: nothing is wrong with the request. The agent keeps
 			// its state on a 5xx and sends the same request again on its next
@@ -409,7 +420,6 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		// Both limits are enforced while it inflates: a bomb costs about the
 		// decoded limit, never its size.
 		body, err = nodeprotocol.DecodeSyncBody(bytes.NewReader(compressed), encoding)
-		release()
 		if err == nil {
 			metrics.NodeSyncBytesTotal.With("request_wire").Add(int64(len(compressed)))
 			metrics.NodeSyncBytesTotal.With("request_decoded").Add(int64(len(body)))
@@ -427,7 +437,12 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	// Unmarshal rather than a streaming decoder: this makes a trailing second
 	// document a syntax error, instead of something a following Decode has to be
 	// remembered to notice.
-	if err := json.Unmarshal(body, &wire); err != nil {
+	if h.beforeParse != nil {
+		h.beforeParse()
+	}
+	err = json.Unmarshal(body, &wire)
+	releaseDecode()
+	if err != nil {
 		writeNodeError(w, http.StatusBadRequest, fmt.Errorf("decode node report: %w", err))
 		return
 	}

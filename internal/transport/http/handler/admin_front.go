@@ -95,7 +95,7 @@ func respondFrontError(c *gin.Context, err error) {
 	var refusal *front.Refusal
 	if errors.As(err, &refusal) {
 		status := http.StatusBadRequest
-		if refusal.Code == front.CodeConfirmRequired {
+		if refusal.Code == front.CodeConfirmRequired || refusal.Code == front.CodeLinkOnAnotherFront {
 			status = http.StatusConflict
 		}
 		c.JSON(status, gin.H{"error": refusal.Message, "code": refusal.Code, "params": refusal.Params})

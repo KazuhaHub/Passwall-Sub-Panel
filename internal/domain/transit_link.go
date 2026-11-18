@@ -58,6 +58,12 @@ type TransitLink struct {
 	OutSent    string
 	InApplied  string
 	OutApplied string
+	// InSentPort / OutSentPort are the port in what was last sent each side:
+	// the port the exit listens on and the port the entry dials. They differ
+	// while a move to or from a shared port has reached one side only; 0 on a
+	// row no sync has written since they were added.
+	InSentPort  int
+	OutSentPort int
 
 	// Traffic per side, carried across counter resets. Transit traffic: the
 	// users are charged once, on the entry's listener.
@@ -70,11 +76,19 @@ type TransitLink struct {
 	UpdatedAt time.Time
 }
 
-// Ready reports whether both ends hold exactly what was last sent them. It is
-// the state of the tunnel itself; whether a node is published also needs the
-// node to be bound to it (see attachEgressState).
+// Ready reports whether both ends hold exactly what was last sent them, on the
+// same port. It is the state of the tunnel itself; whether a node is published
+// also needs the node to be bound to it (see attachEgressState).
 func (l TransitLink) Ready() bool {
-	return l.InSent != "" && l.InApplied == l.InSent && l.OutSent != "" && l.OutApplied == l.OutSent
+	return l.InSent != "" && l.InApplied == l.InSent && l.OutSent != "" && l.OutApplied == l.OutSent &&
+		TransitLinkPortsAgree(l.InSentPort, l.OutSentPort)
+}
+
+// TransitLinkPortsAgree reports whether the exit listens where the entry dials.
+// A port of 0 is unknown (a row written before the ports were recorded) and
+// does not hold a tunnel back: the next sync of that side records it.
+func TransitLinkPortsAgree(in, out int) bool {
+	return in == 0 || out == 0 || in == out
 }
 
 // TransitLinkSettings is what an administrator may change on a link. The
@@ -107,6 +121,37 @@ func ValidateTransitLinkSettings(settings TransitLinkSettings) error {
 		if err := protocol.ValidateLinkIn(probe); err != nil {
 			return fmt.Errorf("%w: REALITY camouflage site: %v", ErrValidation, err)
 		}
+	}
+	return nil
+}
+
+// ValidateRealityNames checks a REALITY server name and short id with the rules
+// the link protocol uses for them. An empty one is left unchecked.
+func ValidateRealityNames(serverName, shortID string) error {
+	return validateRealityProbe(serverName, shortID, "")
+}
+
+// ValidateRealityTarget checks a REALITY dest/target (host:port) with the rules
+// the link protocol uses for it. An empty one is left unchecked.
+func ValidateRealityTarget(target string) error {
+	return validateRealityProbe("", "", target)
+}
+
+// validateRealityProbe runs the link protocol's own check over a probe link whose
+// REALITY fields are the ones given, the others being valid placeholders.
+func validateRealityProbe(serverName, shortID, target string) error {
+	name := serverName
+	if name == "" {
+		name = "example.com"
+	}
+	if target == "" {
+		target = "example.com:443"
+	}
+	probe := protocol.LinkIn{Key: "lnk_1", Port: 1, Protocol: protocol.LinkProtocolVLESSReality, Reality: &protocol.LinkRealityServer{
+		UUID: "00000000-0000-4000-8000-000000000000", PrivateKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		Target: target, ServerNames: []string{name}, ShortIDs: []string{shortID}}}
+	if err := protocol.ValidateLinkIn(probe); err != nil {
+		return fmt.Errorf("%w: REALITY server name, short id or target: %v", ErrValidation, err)
 	}
 	return nil
 }

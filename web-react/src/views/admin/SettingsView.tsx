@@ -1052,6 +1052,16 @@ export default function SettingsView() {
               helperText={t('settings.general.emergency_access_quota_gb_hint')} />
           </Section>
 
+          <Section title={t('settings.general.section_source_guard')} md={md}>
+            <FormControlLabel label={t('settings.general.cloudflare_auto_fetch')}
+              control={<Switch checked={settings.cloudflare_ips_auto_fetch ?? true}
+                onChange={(_, c) => patch('cloudflare_ips_auto_fetch', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.general.cloudflare_auto_fetch_hint')}
+            </Typography>
+          </Section>
+
           {/* ACME certificate automation settings moved to the Certificates page
               (its own "ACME settings" tab) — the cert_* / acme_* fields still
               round-trip through this PUT untouched so they aren't reset. */}

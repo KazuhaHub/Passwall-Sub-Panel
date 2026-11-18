@@ -17,6 +17,8 @@ const categories: Readonly<Record<string, NodeIssueCategory>> = {
   tunnel_listener_orphan: 'sync',
   tunnel_factor_stale: 'sync',
   cdn_landing_unfit: 'sync',
+  source_guard_withheld: 'sync',
+  source_guard_refused: 'sync',
   roster_identity_capacity: 'sync',
   routes_not_sent: 'sync',
   route_listener_withheld: 'sync',

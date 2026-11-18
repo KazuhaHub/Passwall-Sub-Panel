@@ -146,6 +146,34 @@ func TestNodeDeletedRemovesTheTunnelsOnlyItsRoutesUsed(t *testing.T) {
 	}
 }
 
+// A front that stops routing to a tunnel hands the decision here: the tunnel
+// goes when nothing of its entry server uses the pair, under the entry's route
+// lock and then both servers' locks.
+func TestLinksReleasedByAFrontAreDroppedOnlyWhenTheEntryDoesNotUseThem(t *testing.T) {
+	w, s := routedWorld()
+	var locked []int64
+	s.ServerLock = func(panel int64) func() { locked = append(locked, panel); return func() {} }
+	w.links[[2]int64{1, 2}] = domain.TransitLink{ID: 12, EntryPanelID: 1, ExitPanelID: 2}
+	w.links[[2]int64{1, 3}] = domain.TransitLink{ID: 13, EntryPanelID: 1, ExitPanelID: 3}
+	w.nodes[10].EgressPanelID = 3 // still leaves through server 3 by default
+	s.LinksReleased(t.Context(), []int64{12, 13, 99})
+	if _, ok := w.links[[2]int64{1, 2}]; ok {
+		t.Fatal("an unused tunnel was kept")
+	}
+	if _, ok := w.links[[2]int64{1, 3}]; !ok {
+		t.Fatal("a tunnel the entry leaves through by default was removed")
+	}
+	w.nodes[11].DestRoutes = []domain.DestRoute{serverRoute("r1", 3, "domain:a.com")}
+	w.nodes[10].EgressPanelID = 0
+	s.LinksReleased(t.Context(), []int64{13})
+	if _, ok := w.links[[2]int64{1, 3}]; !ok {
+		t.Fatal("a tunnel a route of the entry targets was removed")
+	}
+	if want := []int64{1, 2, 1, 3, 1, 3}; len(locked) != len(want) || locked[0] != 1 || locked[1] != 2 || locked[2] != 1 || locked[3] != 3 || locked[4] != 1 || locked[5] != 3 {
+		t.Fatalf("locks taken = %v, want %v", locked, want)
+	}
+}
+
 func TestSaveRefusesWhatTheServerCannotRun(t *testing.T) {
 	w, s := routedWorld()
 	route := []domain.DestRoute{serverRoute("", 2, "domain:a.com")}
@@ -446,5 +474,82 @@ func TestSaveMakesTunnelsUnderTheExitServersLock(t *testing.T) {
 	}
 	if len(locked) != 4 || locked[0] != 1 || locked[1] != 2 || locked[2] != 1 || locked[3] != 3 || len(w.links) != 2 {
 		t.Fatalf("locked %v links %v", locked, w.links)
+	}
+}
+
+// When a tunnel cannot be made the save fails as a whole: the routes that were
+// there stay, and the tunnels the failed save made are not left behind.
+func TestSaveThatCannotMakeATunnelKeepsThePreviousRoutes(t *testing.T) {
+	w, s := routedWorld()
+	if _, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("", 2, "domain:a.com")}); err != nil {
+		t.Fatal(err)
+	}
+	before := w.routes[11].Routes
+	w.ensureErr[3] = errors.New("no free port")
+	if _, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("r1", 2, "domain:a.com"), serverRoute("", 3, "domain:b.com")}); err == nil {
+		t.Fatal("the save went through without the tunnel")
+	}
+	if !slices.EqualFunc(w.routes[11].Routes, before, func(a, b domain.DestRoute) bool {
+		return a.ID == b.ID && a.Target == b.Target && slices.Equal(a.Domains, b.Domains)
+	}) {
+		t.Fatalf("routes = %+v, want the previous ones %+v", w.routes[11].Routes, before)
+	}
+	if _, ok := w.links[[2]int64{1, 2}]; !ok {
+		t.Fatal("the tunnel the previous routes use was removed")
+	}
+}
+
+// With two new exits, the first tunnel is made and the second fails: the save is
+// refused as a whole, the tunnel it did make is removed again and the previous
+// routes are back.
+func TestSaveThatFailsOnASecondNewTunnelRemovesTheFirstOne(t *testing.T) {
+	w, s := routedWorld()
+	w.server(4, "paris")
+	w.nodes[11].DestRoutes = []domain.DestRoute{serverRoute("r1", 4, "domain:old.com")}
+	w.routes[11] = &domain.NodeRoutes{NodeID: 11, Routes: w.nodes[11].DestRoutes}
+	w.links[[2]int64{1, 4}] = domain.TransitLink{ID: 14, EntryPanelID: 1, ExitPanelID: 4}
+	before := w.routes[11].Routes
+	w.ensureErr[3] = errors.New("no free port")
+	_, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("r1", 4, "domain:old.com"),
+		serverRoute("", 2, "domain:a.com"), serverRoute("", 3, "domain:b.com")})
+	if err == nil {
+		t.Fatal("the save went through without its second tunnel")
+	}
+	if _, ok := w.links[[2]int64{1, 2}]; ok {
+		t.Fatalf("the first tunnel this save made was left behind: %v", w.links)
+	}
+	if _, ok := w.links[[2]int64{1, 4}]; !ok {
+		t.Fatal("the tunnel the previous routes use was removed")
+	}
+	if !slices.EqualFunc(w.routes[11].Routes, before, func(a, b domain.DestRoute) bool {
+		return a.ID == b.ID && a.Target == b.Target && slices.Equal(a.Domains, b.Domains)
+	}) {
+		t.Fatalf("routes = %+v, want the previous ones %+v", w.routes[11].Routes, before)
+	}
+}
+
+// A tunnel whose ends applied what they were sent can still be not ready while
+// they sit on different ports (a move to or from a shared port): the view says so
+// and gives both ports.
+func TestViewSaysWhenTheEndsOfATunnelAreOnDifferentPorts(t *testing.T) {
+	w, s := routedWorld()
+	w.links[[2]int64{1, 2}] = domain.TransitLink{ID: 12, EntryPanelID: 1, ExitPanelID: 2,
+		InSent: "a", InApplied: "a", InSentPort: 443, OutSent: "b", OutApplied: "b", OutSentPort: 23456}
+	w.routes[11] = &domain.NodeRoutes{NodeID: 11, Routes: []domain.DestRoute{serverRoute("r1", 2, "domain:a.com")}}
+	w.nodes[11].DestRoutes = w.routes[11].Routes
+	view, err := s.View(t.Context(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := view.Items[0].Link
+	if link == nil || link.Ready || !link.InApplied || !link.OutApplied || !link.PortsDiffer || link.InPort != 443 || link.OutPort != 23456 {
+		t.Fatalf("link = %+v", link)
+	}
+	l := w.links[[2]int64{1, 2}]
+	l.OutSentPort = 443
+	w.links[[2]int64{1, 2}] = l
+	view, _ = s.View(t.Context(), 11)
+	if link = view.Items[0].Link; !link.Ready || link.PortsDiffer {
+		t.Fatalf("agreeing ports: link = %+v", link)
 	}
 }

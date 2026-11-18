@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -52,7 +53,11 @@ type NodeAgent struct {
 	// addresses an administrator would otherwise type (a node's connection
 	// address, a link's exit address), never used without being shown.
 	ObservedAddress string
-	LastSeen        *time.Time
+	// InterfaceAddresses are the public addresses of the server's own
+	// interfaces, as its last full report listed them (CapabilitySourceGuard):
+	// where a managed relay line's traffic leaves this server from (ADR 0044).
+	InterfaceAddresses []string
+	LastSeen           *time.Time
 	// Refused* record the most recent authenticated report this panel REFUSED at
 	// the wire boundary, which is a different fact from an observation and is
 	// stored in different columns for that reason.
@@ -203,4 +208,21 @@ type NodeAgentStream struct {
 // A/B/A rollback as converged when the agent still holds byte-identical A.
 func (s *NodeAgentStream) Converged() bool {
 	return s != nil && nodeprotocol.Converged(nodeprotocol.ETag(s.AppliedETag), nodeprotocol.ETag(s.DesiredETag))
+}
+
+// GuardEngines are the cores a landing on this server runs or is about to run:
+// the observed one and the desired one. A listener must suit all of them for
+// the source guard to mean anything on it.
+func (a *NodeAgent) GuardEngines() []NodeCoreEngine {
+	if a == nil {
+		return nil
+	}
+	var out []NodeCoreEngine
+	for _, e := range []NodeCoreEngine{NormalizeNodeCoreEngine(a.DesiredCoreEngine), a.ObservedCoreEngine} {
+		if e == "" || slices.Contains(out, e) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

@@ -44,7 +44,15 @@
     "server": "Server error — please try again later.",
     "rate_limited": "Too many requests; please wait a moment and try again.",
     "copy_failed": "Copy failed; please select the text and press Ctrl+C.",
-    "copied": "Copied to clipboard."
+    "copied": "Copied to clipboard.",
+    "codes": {
+      "source_guard_factor_mismatch": "Line \"{{line}}\" of {{node}} costs {{line_factor}} but the direct line costs {{direct_factor}}. This node's server cannot check where connections come from, so every line of the node must cost the same. Use a Passwall Node that supports source checks to price lines apart.",
+      "source_guard_needs_cidrs": "External line \"{{line}}\" of {{node}} costs {{line_factor}} but the direct line costs {{direct_factor}}. List the addresses its traffic comes from in the line's source addresses, so the two can be told apart.",
+      "source_guard_listener_transport": "This change would make the listener of {{node}} read connection sources from X-Forwarded-For (sing-box does this on every transport except plain TCP), so connections could no longer be told apart by where they come from. These lines cost something other than the direct line and rely on that: {{lines}}. Give them the direct factor or remove them first.",
+      "source_guard_listener_trust": "This change would make the listener of {{node}} trust X-Forwarded-For or a PROXY header, so connections could no longer be told apart by where they come from. These lines cost something other than the direct line and rely on that: {{lines}}. Give them the direct factor or remove them first.",
+      "link_reality_engines": "A sing-box entry cannot use a REALITY tunnel to an Xray exit. Use Shadowsocks 2022.",
+      "engine_reality_links": "This change would leave REALITY tunnels from a sing-box entry to an Xray exit, which cannot connect: {{links}}. Change those tunnels to Shadowsocks 2022 first."
+    }
   },
   "auth": {
     "logout": "Sign out"

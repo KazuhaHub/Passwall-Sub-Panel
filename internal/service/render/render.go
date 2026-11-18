@@ -611,23 +611,14 @@ func (s *Service) isTunnelListenerOf(ctx context.Context, nodeID int64, line dom
 }
 
 // credentialFor is the applied credential an entry renders with: its own
-// line's, or — for a relay line whose own identity is not applied yet — the
-// direct line's, which the landing's listener accepts too (the line is then
-// counted, and charged, as the direct line until its own identity lands).
-// A line on a listener of its own would have nothing to fall back to and is
-// withheld until applied.
+// line's, and nothing else. A relay line whose own identity is not applied yet
+// is not published, because the landing refuses the direct identity when it
+// arrives through a relay's source (ADR 0044): borrowing it would hand out a
+// line that does not connect, and where the guard cannot run it would bill the
+// traffic at the wrong line's factor.
 func credentialFor(applied appliedCredentials, it renderItem) (appliedClientCredential, bool) {
-	key := domain.LineKey{NodeID: it.node.ID, LineID: it.lineID()}
-	if c, ok := applied[key]; ok {
-		return c, true
-	}
-	// A tunnel line is served by a listener of its own, which the direct line's
-	// identity is not accepted on: it has nothing to fall back to.
-	if !key.IsDirect() && !(it.relay != nil && it.relay.Tunnel()) {
-		c, ok := applied[domain.DirectLine(it.node.ID)]
-		return c, ok
-	}
-	return appliedClientCredential{}, false
+	c, ok := applied[domain.LineKey{NodeID: it.node.ID, LineID: it.lineID()}]
+	return c, ok
 }
 
 // renderIdentityForNode freezes subscription credentials at the last applied

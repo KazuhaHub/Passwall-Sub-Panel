@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"gorm.io/gorm"
@@ -191,20 +192,55 @@ func TestMigrateV4_3DropsVLESSRouteState(t *testing.T) {
 	if err := db.Exec(`ALTER TABLE nodes ADD COLUMN route_revision BIGINT NOT NULL DEFAULT 0`).Error; err != nil {
 		t.Fatalf("add route_revision: %v", err)
 	}
+	// In a real 4.2 table the route columns sit in the middle, not last: a
+	// column after them is what makes gorm's SQLite DropColumn rebuild the
+	// table instead of doing nothing.
+	if err := db.Exec(`ALTER TABLE nodes ADD COLUMN after_route BIGINT NOT NULL DEFAULT 0`).Error; err != nil {
+		t.Fatalf("add a column after the route state: %v", err)
+	}
 	if err := db.Exec(`CREATE TABLE vless_route_leases (id BIGINT NOT NULL PRIMARY KEY, node_id BIGINT NOT NULL)`).Error; err != nil {
 		t.Fatalf("create leases: %v", err)
 	}
+	ctx := context.Background()
+	nodes := NewRepos(db).Node
 	n := &domain.Node{PanelID: 1, InboundID: 1, DisplayName: "keep"}
-	if err := NewRepos(db).Node.Create(context.Background(), n); err != nil {
+	if err := nodes.Create(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	gone := &domain.Node{PanelID: 1, InboundID: 2, DisplayName: "deleted"}
+	if err := nodes.Create(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`DELETE FROM nodes WHERE id = ?`, gone.ID).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec(`UPDATE nodes SET route_state = '{"revision":2}', route_revision = 2 WHERE id = ?`, n.ID).Error; err != nil {
 		t.Fatalf("seed route state: %v", err)
 	}
+	indexesBefore := nodeIndexNames(t, db)
 	for i := 0; i < 2; i++ {
 		if err := migrateV4_3(db); err != nil {
 			t.Fatalf("drop run %d: %v", i, err)
 		}
+	}
+	// Dropping the columns keeps every index of nodes, the unique
+	// (panel_id, inbound_id) key above all, and keeps the id sequence: a
+	// deleted node's id is never handed out again.
+	if got := nodeIndexNames(t, db); !equalStrings(got, indexesBefore) {
+		t.Fatalf("nodes indexes after the drop = %v, want %v", got, indexesBefore)
+	}
+	if err := db.Exec(`ALTER TABLE nodes DROP COLUMN after_route`).Error; err != nil {
+		t.Fatalf("drop the test column: %v", err)
+	}
+	if err := nodes.Create(ctx, &domain.Node{PanelID: 1, InboundID: 1, DisplayName: "duplicate"}); err == nil {
+		t.Fatal("a second node on panel 1 / inbound 1 was accepted after the drop")
+	}
+	next := &domain.Node{PanelID: 1, InboundID: 3, DisplayName: "next"}
+	if err := nodes.Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	if next.ID <= gone.ID {
+		t.Fatalf("new node id %d reuses the deleted node's id %d", next.ID, gone.ID)
 	}
 	for _, column := range []string{"route_state", "route_revision"} {
 		if m.HasColumn("nodes", column) {
@@ -214,10 +250,43 @@ func TestMigrateV4_3DropsVLESSRouteState(t *testing.T) {
 	if m.HasTable("vless_route_leases") {
 		t.Fatal("vless_route_leases survived the migration")
 	}
-	got, err := NewRepos(db).Node.GetByID(context.Background(), n.ID)
+	got, err := nodes.GetByID(ctx, n.ID)
 	if err != nil || got.DisplayName != "keep" {
 		t.Fatalf("node lost by the drop: %+v %v", got, err)
 	}
+}
+
+// nodeIndexNames lists the secondary indexes of nodes, sorted.
+func nodeIndexNames(t *testing.T, db *gorm.DB) []string {
+	t.Helper()
+	indexes, err := db.Migrator().GetIndexes("nodes")
+	if err != nil {
+		t.Fatalf("list nodes indexes: %v", err)
+	}
+	var names []string
+	for _, index := range indexes {
+		if primary, ok := index.PrimaryKey(); ok && primary {
+			continue
+		}
+		names = append(names, index.Name())
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		t.Fatal("nodes has no secondary index to compare")
+	}
+	return names
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // The upgrade turns each shared client of 4.2 into the direct line of the

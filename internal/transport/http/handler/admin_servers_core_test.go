@@ -124,6 +124,46 @@ func TestNativeCoreUpgradeRequiresRestrictedConfirmationAndReturnsAccepted(t *te
 	}
 }
 
+// refusingEngineGuard refuses every switch to one engine, recording the ask.
+type refusingEngineGuard struct {
+	refuse domain.NodeCoreEngine
+	asked  []domain.NodeCoreEngine
+}
+
+func (g *refusingEngineGuard) EngineSwitchRefusal(_ context.Context, _ int64, to domain.NodeCoreEngine) error {
+	g.asked = append(g.asked, to)
+	if to == g.refuse {
+		return &domain.CodedValidationError{Code: domain.CodeSourceGuardListenerTrust, Msg: "refused"}
+	}
+	return nil
+}
+
+// A native node's core update installs Xray, so on a sing-box server it is an
+// engine switch: the same refusal select-core runs applies, and nothing is
+// installed when it refuses.
+func TestNativeCoreUpgradeRunsTheEngineSwitchRefusal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	client := &nativeCoreClientStub{}
+	guard := &refusingEngineGuard{refuse: domain.NodeCoreXray}
+	handler := (&AdminServersHandler{
+		repo:        nativeCorePanelRepo{panel: &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP}},
+		pool:        fakeWebCertPool{client: client},
+		coreCatalog: corefixtures.Static{},
+	}).WithEngineLinkGuard(guard)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "9"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/admin/servers/9/upgrade-xray", strings.NewReader(`{"version":"26.9.9","confirm_restricted":true}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	handler.UpgradeXray(ctx)
+	if recorder.Code != http.StatusBadRequest || client.installed != "" {
+		t.Fatalf("refused upgrade = %d %s, installed=%q", recorder.Code, recorder.Body.String(), client.installed)
+	}
+	if len(guard.asked) != 1 || guard.asked[0] != domain.NodeCoreXray {
+		t.Fatalf("engine switch refusal asked = %v", guard.asked)
+	}
+}
+
 func TestNativeCoreUpgradeRejectsLatest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	client := &nativeCoreClientStub{}

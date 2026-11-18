@@ -1468,3 +1468,83 @@ func TestASyncConfirmedAgainstAChangedLandingIsAskedAgain(t *testing.T) {
 		t.Fatal("the confirmed sync was not applied")
 	}
 }
+
+// A landing's fallbacks point at its own local ports and a VLESS-encryption
+// decryption string holds its server key: neither belongs on the entry server,
+// on a new listener or on a re-copy, and a diff never shows the string.
+func TestTheListenerDoesNotInheritFallbacksOrADecryptionKey(t *testing.T) {
+	const landingSettings = `{"decryption":"mlkem768x25519plus.native.600s.server-key-secret","fallbacks":[{"dest":8001}],"clients":[{"id":"landing-user-id"}]}`
+	env := newTunnelEnv(t, func(n *domain.Node) {
+		n.StreamSettings = landingWithBinding
+		n.InboundSettings = landingSettings
+	})
+	lineID := env.addTunnel(t, 0)
+	check := func(where string, n *domain.Node) {
+		var settings map[string]any
+		if err := json.Unmarshal([]byte(n.InboundSettings), &settings); err != nil {
+			t.Fatalf("%s: %v", where, err)
+		}
+		if _, has := settings["fallbacks"]; has {
+			t.Fatalf("%s: the landing's fallbacks were copied: %s", where, n.InboundSettings)
+		}
+		if settings["decryption"] != "none" || strings.Contains(n.InboundSettings, "server-key-secret") {
+			t.Fatalf("%s: the landing's decryption was copied: %s", where, n.InboundSettings)
+		}
+	}
+	check("new listener", env.repo.child(1, lineID))
+
+	ctx := context.Background()
+	if _, err := env.svc.SyncTunnelFromLanding(syncConfirmed(t, env, ctx, lineID), 1, lineID); err != nil {
+		t.Fatal(err)
+	}
+	check("re-copy", env.repo.child(1, lineID))
+
+	if out := redactSecrets(landingSettings); strings.Contains(out, "server-key-secret") {
+		t.Fatalf("redactSecrets left the decryption key: %s", out)
+	}
+}
+
+// A listener's REALITY short id is hex of even length up to 16, and its server
+// name a host name: anything else is refused before it is stored.
+func TestEditingTheListenerRefusesABadShortIDOrServerName(t *testing.T) {
+	env := newTunnelEnv(t, nil)
+	lineID := env.addTunnel(t, 0)
+	before := env.repo.child(1, lineID)
+	ctx := context.Background()
+	for _, edit := range []TunnelListenerEdit{
+		{ShortID: "xyz1"}, {ShortID: "abc"}, {ShortID: "0123456789abcdef01"},
+		{ServerName: "not a host name"}, {ServerName: "bad/name.example.com"},
+	} {
+		if err := env.svc.UpdateTunnelListener(ctx, 1, lineID, edit); !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("edit %+v: err = %v, want a validation error", edit, err)
+		}
+	}
+	after := env.repo.child(1, lineID)
+	if after.StreamSettings != before.StreamSettings {
+		t.Fatal("a refused edit changed the listener")
+	}
+}
+
+// The REALITY target goes to the entry's Xray as it is, so a bad one is refused
+// by the link protocol's own rules and the stored listener stays as it was.
+func TestEditingTheListenerChecksItsRealityTarget(t *testing.T) {
+	env := newTunnelEnv(t, nil)
+	lineID := env.addTunnel(t, 0)
+	before := env.repo.child(1, lineID)
+	ctx := context.Background()
+	for _, target := range []string{"no-port", "example.com:0", "example.com:99999", "bad host:443", ":443", "example.com:abc"} {
+		err := env.svc.UpdateTunnelListener(ctx, 1, lineID, TunnelListenerEdit{Target: target})
+		if err == nil || !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("target %q: err = %v, want a validation error", target, err)
+		}
+	}
+	if env.repo.child(1, lineID).StreamSettings != before.StreamSettings {
+		t.Fatal("a refused target changed the listener")
+	}
+	if err := env.svc.UpdateTunnelListener(ctx, 1, lineID, TunnelListenerEdit{Target: "www.example.org:8443"}); err != nil {
+		t.Fatalf("a good target was refused: %v", err)
+	}
+	if got := realityOf(t, env.repo.child(1, lineID))["target"]; got != "www.example.org:8443" {
+		t.Fatalf("target = %v", got)
+	}
+}

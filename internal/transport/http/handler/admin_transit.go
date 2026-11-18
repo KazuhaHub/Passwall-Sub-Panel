@@ -32,6 +32,8 @@ type transitLinkDTO struct {
 	ServerAddress     string `json:"server_address"`
 	UpBytes           int64  `json:"up_bytes"`
 	DownBytes         int64  `json:"down_bytes"`
+	// RealityRefused: a sing-box entry cannot use REALITY to an Xray exit.
+	RealityRefused bool `json:"reality_refused"`
 }
 
 type updateTransitLinkRequest struct {
@@ -45,7 +47,7 @@ func linkDTO(view transit.LinkView) transitLinkDTO {
 	return transitLinkDTO{
 		Exists: view.Exists, Protocol: view.Protocol, ExitAddress: view.ExitAddress,
 		RealityServerName: view.RealityServerName, RealityTarget: view.RealityTarget,
-		Port: view.Port, ServerAddress: view.ServerAddress, UpBytes: view.UpBytes, DownBytes: view.DownBytes,
+		Port: view.Port, ServerAddress: view.ServerAddress, UpBytes: view.UpBytes, DownBytes: view.DownBytes, RealityRefused: view.RealityRefused,
 	}
 }
 
