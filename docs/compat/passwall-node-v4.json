@@ -275,6 +275,17 @@
       "tag": "v4.2.0-beta.9"
     },
     {
+      "version": "4.2.0-rc.1",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.2.0-rc.1"
+    },
+    {
       "version": "4.2.0",
       "protocol_version": 1,
       "base_sync": "supported",
