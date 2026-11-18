@@ -2,8 +2,8 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -69,56 +69,54 @@ func TestEffectiveSourceCIDRs(t *testing.T) {
 }
 
 func TestSourceSetSuffixIsAValidKey(t *testing.T) {
-	key := nodeprotocol.SourceSetKey("src_" + SourceSetSuffix(9223372036854775807, strings.Repeat("x", 200)))
+	key := nodeprotocol.SourceSetKey("src_" + SourceSetSuffix(9223372036854775807, 1<<30))
 	if err := key.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if SourceSetSuffix(3, "a") == SourceSetSuffix(3, "b") || SourceSetSuffix(3, "a") == SourceSetSuffix(4, "a") {
-		t.Fatal("suffix must depend on node and line")
+	if SourceSetSuffix(3, 1000) == SourceSetSuffix(3, 2000) || SourceSetSuffix(3, 1000) == SourceSetSuffix(4, 1000) {
+		t.Fatal("suffix must depend on node and factor")
 	}
-	if SourceSetSuffix(3, "a") != SourceSetSuffix(3, "a") {
+	if SourceSetSuffix(3, 1000) != SourceSetSuffix(3, 1000) {
 		t.Fatal("suffix must be deterministic")
+	}
+	id, factor, ok := ParseSourceSetKey(string(SourceSetKeyOf(42, 2500)))
+	if !ok || id != 42 || factor != 2500 {
+		t.Fatalf("round trip = %d %d %v", id, factor, ok)
+	}
+	for _, bad := range []string{"src_x_f1", "src_7", "src_7_f", "src_7_f-1", "src_07_f1", "cli_3", "src_7_abcdef0123"} {
+		if _, _, ok := ParseSourceSetKey(bad); ok {
+			t.Errorf("%q parsed", bad)
+		}
 	}
 }
 
-func TestSourceGuardWithheld(t *testing.T) {
-	two := 2000
-	n := &Node{}
-	cheap := RelayLine{Enabled: true}
-	dear := RelayLine{Enabled: true, TrafficFactorMilli: &two}
-	managedDear := RelayLine{Enabled: true, EntryPanelID: 5, TrafficFactorMilli: &two}
-	managed := RelayLine{Enabled: true, EntryPanelID: 5}
-	cdnDear := RelayLine{Enabled: true, Mode: RelayModeCDN, TrafficFactorMilli: &two}
-	tunnelDear := RelayLine{Mode: RelayModeTunnel, EntryPanelID: 5, TrafficFactorMilli: &two}
-	for _, c := range []struct {
-		name               string
-		line               RelayLine
-		canGuard, entryKnn bool
-		want               string
-	}{
-		{"cannot guard same factor", cheap, false, false, ""},
-		{"cannot guard differing", dear, false, false, SourceWithheldFactor},
-		{"cannot guard differing cdn", cdnDear, false, false, SourceWithheldFactor},
-		{"tunnel exempt", tunnelDear, false, false, ""},
-		{"can guard external without addresses, same factor", cheap, true, false, ""},
-		{"can guard external without addresses, differing", dear, true, false, SourceWithheldUnknown},
-		{"can guard external with addresses", RelayLine{SourceCIDRs: []string{"192.0.2.1/32"}, TrafficFactorMilli: &two}, true, false, ""},
-		{"can guard cdn differing", cdnDear, true, false, ""},
-		{"managed unknown", managed, true, false, SourceWithheldUnknown},
-		{"managed known", managedDear, true, true, ""},
-		{"managed unknown but own addresses", RelayLine{EntryPanelID: 5, SourceCIDRs: []string{"192.0.2.1/32"}}, true, false, ""},
-	} {
-		if got := n.SourceGuardWithheld(c.line, c.canGuard, c.entryKnn); got != c.want {
-			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+func TestNormalizeSourceCIDRsRefusesTooBroadPrefixes(t *testing.T) {
+	for _, bad := range []string{"0.0.0.0/0", "::/0", "10.0.0.0/7", "128.0.0.0/1", "2000::/18", "198.18.0.1/24"} {
+		if _, err := NormalizeSourceCIDRs([]string{bad}); !errors.Is(err, ErrValidation) {
+			t.Errorf("%s: err = %v, want ErrValidation", bad, err)
 		}
 	}
-	n.Relays = []RelayLine{cheap, dear}
-	if line, bad := n.SourceGuardFactorProblem(); !bad || line.EffectiveTrafficFactor() != 2000 {
-		t.Fatalf("factor problem not found: %v %v", line, bad)
+	for _, ok := range []string{"10.0.0.0/8", "2000::/19", "2001:db8::1/128"} {
+		if _, err := NormalizeSourceCIDRs([]string{ok}); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
 	}
-	n.Relays = []RelayLine{cheap, tunnelDear}
-	if _, bad := n.SourceGuardFactorProblem(); bad {
-		t.Fatal("a tunnel line does not count")
+	// A stored prefix that is too broad is not a source address either.
+	line := RelayLine{SourceCIDRs: []string{"0.0.0.0/0", "192.0.2.0/24"}}
+	if got := line.EffectiveSourceCIDRs(SourceInputs{}); !reflect.DeepEqual(got, []string{"192.0.2.0/24"}) {
+		t.Fatalf("effective = %v", got)
+	}
+}
+
+func TestEffectiveSourceCIDRsIsNeverTruncated(t *testing.T) {
+	many := make([]string, 0, MaxSourceCIDRs)
+	for i := 0; i < MaxSourceCIDRs; i++ {
+		many = append(many, fmt.Sprintf("10.%d.%d.0/24", i/256, i%256))
+	}
+	line := RelayLine{EntryPanelID: 7, SourceCIDRs: many}
+	got := line.EffectiveSourceCIDRs(SourceInputs{EntryAddresses: map[int64][]string{7: {"93.184.216.34"}}})
+	if len(got) != MaxSourceCIDRs+1 {
+		t.Fatalf("got %d entries, want %d: nothing may be dropped", len(got), MaxSourceCIDRs+1)
 	}
 }
 

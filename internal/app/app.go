@@ -392,7 +392,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		set, err := repos.Settings.Load(ctx, ports.UISettings{})
 		return err != nil || !set.SourceGuardCloudflareFetchOff
 	})
-	nativeSync.SetSourceGuard(sourceguard.NewPlanner(repos.NodeAgent, cloudflareRanges))
+	guardPlanner := sourceguard.NewPlanner(repos.NodeAgent, cloudflareRanges)
+	nativeSync.SetSourceGuard(guardPlanner)
+	// A loaded node withholds a line by the same ranges the landing is sent.
+	sqlstore.SetCloudflareRanges(func(ctx context.Context) []string { return cloudflareRanges.Current(ctx).CIDRs })
 	nativeSync.SetSourceGuardHits(repos.SourceGuard)
 	nativeSync.SetProbes(linkprobe.New(repos.ScopedSettings, repos.TransitProbe, nil))
 	// ONE front service for the sync, the node saves and the HTTP handlers: it
@@ -545,6 +548,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		agents, err := repos.NodeAgent.ListByPanelIDs(ctx, []int64{panelID})
 		return err == nil && len(agents) > 0 && agents[0].CanSourceGuard()
 	})
+	// The save rules are judged by what the planner would send: Cloudflare, the
+	// entry servers' addresses, each landing's agent and engine, the fronts.
+	nodeSvc.SetSourceGuardInputs(guardPlanner.Inputs)
 	nodeSvc.SetTunnelLinks(transitSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)

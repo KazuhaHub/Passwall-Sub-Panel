@@ -84,11 +84,12 @@ func TestSourceGuardRepoHitsAreReplacedPrunedAndCleared(t *testing.T) {
 
 // A landing publishes a relay line only when the source guard allows it: a
 // landing that cannot guard keeps only lines that cost what the direct line
-// does, a landing that can guard needs a managed line's entry to be known.
+// does, a landing that can guard needs the addresses of a priced class to be
+// known (a line that costs what the direct line costs needs none).
 func TestRelayLinesAreWithheldBySourceGuardState(t *testing.T) {
 	nodes, ctx := newNodeTestRepo(t)
 	agents := &nodeAgentRepo{db: nodes.db}
-	two := 2000
+	two, three := 2000, 3000
 	mk := func(panel int64, inbound int, lines ...domain.RelayLine) *domain.Node {
 		n := &domain.Node{PanelID: panel, InboundID: inbound, DisplayName: "n", ServerAddress: "land.example.com",
 			DesiredProtocol: "vless", DesiredPort: 443, Region: "JP", Enabled: true, Relays: lines}
@@ -105,7 +106,7 @@ func TestRelayLinesAreWithheldBySourceGuardState(t *testing.T) {
 	same := domain.RelayLine{ID: "same", Name: "s", Address: "s.example", Port: 2, Enabled: true, Tags: []string{}}
 	extWith := ext
 	extWith.ID, extWith.SourceCIDRs = "ext2", []string{"192.0.2.0/24"}
-	fwd := domain.RelayLine{ID: "fwd", Name: "f", Address: "f.example", Port: 3, Enabled: true, Tags: []string{}, EntryPanelID: 21}
+	fwd := domain.RelayLine{ID: "fwd", Name: "f", Address: "f.example", Port: 3, Enabled: true, Tags: []string{}, EntryPanelID: 21, TrafficFactorMilli: &three}
 
 	// No agent: it cannot guard.
 	got := mk(20, 1, ext, same)
@@ -138,5 +139,28 @@ func TestRelayLinesAreWithheldBySourceGuardState(t *testing.T) {
 	again, _ := nodes.GetByID(ctx, got.ID)
 	if again.Relays[3].SourceWithheld != "" {
 		t.Fatalf("the entry's address is known now: %+v", again.Relays[3])
+	}
+}
+
+// A managed forward at the direct factor needs no entry address: it is in the
+// direct class, which is reachable from anywhere.
+func TestDirectClassManagedLineIsNotWithheldWhenItsEntryIsUnknown(t *testing.T) {
+	nodes, ctx := newNodeTestRepo(t)
+	agents := &nodeAgentRepo{db: nodes.db}
+	if err := agents.Create(ctx, &domain.NodeAgent{AgentID: "agt_l2", PanelID: 40, Epoch: 1, CredentialSHA256: strings.Repeat("c", 64), DesiredCoreEngine: domain.NodeCoreXray}); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.UpdateProtocolObservation(ctx, "agt_l2", 1, []string{"transit.source_guard.v1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	n := &domain.Node{PanelID: 40, InboundID: 1, DisplayName: "n", ServerAddress: "land.example.com",
+		DesiredProtocol: "vless", DesiredPort: 443, Region: "JP", Enabled: true,
+		Relays: []domain.RelayLine{{ID: "fwd", Name: "f", Address: "f.example", Port: 3, Enabled: true, Tags: []string{}, EntryPanelID: 99}}}
+	if err := nodes.Create(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	got, err := nodes.GetByID(ctx, n.ID)
+	if err != nil || got.Relays[0].SourceWithheld != "" {
+		t.Fatalf("withheld = %+v err=%v", got.Relays, err)
 	}
 }

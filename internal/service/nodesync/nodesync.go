@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -195,6 +196,16 @@ func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIss
 	return out
 }
 
+// guardFacts is what the source guard needs to know of the agent: what it just
+// declared and the cores it runs or is asked to run.
+func guardFacts(agent *domain.NodeAgent, report nodeprotocol.NodeReport) sourceguard.AgentFacts {
+	engines := agent.GuardEngines()
+	if running := domain.NodeCoreEngine(report.CoreEngine); running != "" && !slices.Contains(engines, running) {
+		engines = append(engines, running)
+	}
+	return sourceguard.AgentFacts{PanelID: agent.PanelID, Capabilities: report.Capabilities, Engines: engines}
+}
+
 // sourceGuardIssues names the relay lines the source guard withholds, with the
 // reason.
 func sourceGuardIssues(withheld []sourceguard.Withheld) []domain.NodeAgentIssue {
@@ -207,6 +218,12 @@ func sourceGuardIssues(withheld []sourceguard.Withheld) []domain.NodeAgentIssue 
 				w.Line.Label(), w.Node.DisplayName, w.Line.EffectiveTrafficFactor(), w.Node.EffectiveTrafficFactor())
 		case domain.SourceWithheldUnknown:
 			detail = fmt.Sprintf("line %q of %s is withheld from subscriptions: the addresses its traffic reaches this server from are not known yet. Add them to the line's source addresses.",
+				w.Line.Label(), w.Node.DisplayName)
+		case domain.SourceWithheldOverlap:
+			detail = fmt.Sprintf("line %q of %s is withheld from subscriptions: it costs %d and arrives from addresses another line at a different factor also arrives from, so the node cannot tell them apart. Lines that arrive from the same addresses must have the same factor.",
+				w.Line.Label(), w.Node.DisplayName, w.Line.EffectiveTrafficFactor())
+		case domain.SourceWithheldLimit:
+			detail = fmt.Sprintf("line %q of %s is withheld from subscriptions: the lines at its factor (or the factors on this listener) have more addresses or classes than one source set or deny list can hold. Remove addresses or give lines the same factor.",
 				w.Line.Label(), w.Node.DisplayName)
 		default:
 			continue
@@ -467,8 +484,7 @@ type RoutePlanner interface {
 // SourceGuardPlanner decides the source sets and client guards of a landing
 // server (service/sourceguard.Planner).
 type SourceGuardPlanner interface {
-	PlanFor(ctx context.Context, capabilities []string, nodes []*domain.Node) (sourceguard.Plan, error)
-	WithheldLines(ctx context.Context, capabilities []string, nodes []*domain.Node) ([]sourceguard.Withheld, error)
+	PlanFor(ctx context.Context, agent sourceguard.AgentFacts, nodes []*domain.Node) (sourceguard.Plan, error)
 }
 
 // SetSourceGuard binds the source guard planner. Left unbound, no config
@@ -1021,16 +1037,12 @@ func (s *Service) SyncWithResponseEncoding(ctx context.Context, report nodeproto
 	// has no set and none of its clients a guard.
 	var guardPlan sourceguard.Plan
 	if s.guard != nil {
-		guardPlan, err = s.guard.PlanFor(ctx, report.Capabilities, snapshot.Nodes)
+		guardPlan, err = s.guard.PlanFor(ctx, guardFacts(agent, report), snapshot.Nodes)
 		if err != nil {
 			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
 		}
 		transitBody.SourceSets = guardPlan.Sets
-		withheld, err := s.guard.WithheldLines(ctx, report.Capabilities, snapshot.Nodes)
-		if err != nil {
-			return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: %w", err)
-		}
-		policyIssues = append(policyIssues, sourceGuardIssues(withheld)...)
+		policyIssues = append(policyIssues, sourceGuardIssues(guardPlan.Withheld)...)
 	}
 	if len(transitBody.Forwards) > 0 || len(transitBody.LinksIn) > 0 || len(transitBody.LinksOut) > 0 || len(transitBody.Fronts) > 0 || len(transitBody.Routes) > 0 || len(transitBody.SourceSets) > 0 {
 		configBody.Transit = &transitBody
@@ -1361,14 +1373,28 @@ func buildRoster(snapshot *ports.NativeDesiredSnapshot, configVersion nodeprotoc
 			}
 		}
 		sort.Slice(listeners, func(i, j int) bool { return listeners[i] < listeners[j] })
+		guardNodes := make([]int64, 0, len(listeners))
+		for _, attachment := range desired.Inbounds {
+			if _, exists := nodeIDs[attachment.NodeID]; exists {
+				guardNodes = append(guardNodes, attachment.NodeID)
+			}
+		}
+		sourceGuard, guardable := guard.Guard(client, guardNodes)
+		enabled := client.DesiredEnable
+		if !guardable {
+			// A guard that cannot be written whole (a legacy row attached to
+			// listeners whose deny lists together exceed a client's) is not
+			// weakened: the client is refused until it has a guard.
+			enabled = false
+		}
 		body.Clients = append(body.Clients, nodeprotocol.Client{
 			Key: nodeprotocol.NewClientKey(client.ID), Subject: nodeprotocol.NewSubjectKey(client.UserID),
-			Listeners: listeners, Enabled: client.DesiredEnable,
+			Listeners: listeners, Enabled: enabled,
 			ExpiresAtMS: client.DesiredExpiryTime,
 			Credentials: nodeprotocol.Credential{
 				Username: client.Email, UUID: client.UUID, Password: client.Password, Flow: flow,
 			},
-			SourceGuard: guard.Guard(client, len(listeners)),
+			SourceGuard: sourceGuard,
 		})
 		subjects[client.UserID] = struct{}{}
 	}
@@ -1515,15 +1541,29 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		for _, client := range appliedRoster.Clients {
 			appliedClients[client.Key] = client
 		}
-		// The guard is left out of this comparison on purpose: it restricts where an
-		// identity may connect from, not what the identity is, so it does not decide
-		// whether the credentials a client holds are the applied ones.
+		// The guard is left out of the comparison of the credentials: it restricts
+		// where an identity may connect from, not what the identity is.
 		currentRoster := buildRoster(snapshot, appliedRoster.MinConfigVersion, sourceguard.Plan{})
+		// A priced-class line is published (render reads the credentials recorded
+		// here) only once its identity is applied TOGETHER WITH its guard: the
+		// direct identity is refused through a priced path only when the guard is
+		// in force, and a priced identity is accepted from its own set only when
+		// the set is there too. Publishing earlier would hand out a line whose
+		// guard is not enforced yet.
+		pricedGuards, err := s.pricedGuards(ctx, agent, snapshot, report, appliedRoster.MinConfigVersion, streams)
+		if err != nil {
+			return err
+		}
 		statuses := objectStatuses(report.Objects, nodeprotocol.StreamRoster)
 		for _, currentClient := range currentRoster.Clients {
 			appliedClient, existed := appliedClients[currentClient.Key]
 			if !existed || !sameProtocolClient(appliedClient, currentClient) {
 				continue
+			}
+			if want, priced := pricedGuards.guards[currentClient.Key]; priced {
+				if !reflect.DeepEqual(appliedClient.SourceGuard, want) || !pricedGuards.setApplied(want.AllowFrom) {
+					continue
+				}
 			}
 			clientID, parseErr := currentClient.Key.RowID()
 			if parseErr != nil {
@@ -2457,6 +2497,8 @@ func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeA
 	}
 	hits := make([]domain.SourceGuardHit, 0, len(report.SourceGuardHits))
 	var issues []domain.NodeAgentIssue
+	var plan sourceguard.Plan
+	planned := false
 	for _, hit := range report.SourceGuardHits {
 		listener, err := hit.Listener.RowID()
 		if err != nil || !own[sourceguard.NodeIDOf(string(hit.Set))] || !own[listener] {
@@ -2466,21 +2508,19 @@ func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeA
 			PanelID: agent.PanelID, Set: string(hit.Set), ListenerNodeID: listener, IP: hit.SourceIP,
 			Count: hit.Count, LastSeen: time.UnixMilli(hit.LastSeenMS).UTC(),
 		})
-		// The issue names the line and the address and nothing that changes with
-		// the count, so a source that keeps being refused is one issue whose last
-		// seen time moves, not a new one at every report.
-		for _, node := range snapshot.Nodes {
-			if node == nil || node.ID != sourceguard.NodeIDOf(string(hit.Set)) {
-				continue
+		if s.guard == nil {
+			continue
+		}
+		if !planned {
+			planned = true
+			var err error
+			if plan, err = s.guard.PlanFor(ctx, guardFacts(agent, report), snapshot.Nodes); err != nil {
+				return fmt.Errorf("nodesync: %w", err)
 			}
-			for _, line := range node.Relays {
-				if sourceguard.Key(node.ID, line.ID) == hit.Set {
-					issues = append(issues, domain.NodeAgentIssue{
-						AgentID: agent.AgentID, Code: IssueSourceGuardRefused, Key: string(hit.Set),
-						Detail: fmt.Sprintf("line %q of %s refused connections from %s, which is not one of its source addresses", line.Label(), node.DisplayName, hit.SourceIP),
-					})
-				}
-			}
+		}
+		if issue, ok := sourceGuardHitIssue(plan, snapshot.Nodes, hit); ok {
+			issue.AgentID = agent.AgentID
+			issues = append(issues, issue)
 		}
 	}
 	if len(issues) > 0 {
@@ -2492,4 +2532,110 @@ func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeA
 		return fmt.Errorf("nodesync: record source guard hits: %w", err)
 	}
 	return nil
+}
+
+// sourceGuardHitIssue is the issue a refused source raises: it names the class
+// (the lines that cost what its set is for) and the address, and nothing that
+// changes with the count, so a source that keeps being refused is one issue whose
+// last seen time moves, not a new one at every report.
+func sourceGuardHitIssue(plan sourceguard.Plan, nodes []*domain.Node, hit nodeprotocol.SourceGuardHit) (domain.NodeAgentIssue, bool) {
+	nodeID, factor, ok := domain.ParseSourceSetKey(string(hit.Set))
+	if !ok {
+		return domain.NodeAgentIssue{}, false
+	}
+	analysis, found := plan.Analyses[nodeID]
+	if !found {
+		return domain.NodeAgentIssue{}, false
+	}
+	class, priced := analysis.PricedClassOf(factor)
+	if !priced {
+		return domain.NodeAgentIssue{}, false
+	}
+	for _, node := range nodes {
+		if node == nil || node.ID != nodeID {
+			continue
+		}
+		var labels []string
+		for _, line := range node.Relays {
+			if slices.Contains(class.LineIDs, line.ID) {
+				labels = append(labels, fmt.Sprintf("%q", line.Label()))
+			}
+		}
+		if len(labels) == 0 {
+			return domain.NodeAgentIssue{}, false
+		}
+		detail := fmt.Sprintf("lines %s of %s (factor %d) refused connections from %s, which is not one of their source addresses",
+			strings.Join(labels, ", "), node.DisplayName, factor, hit.SourceIP)
+		if sourceguard.ClassifyRefused(analysis, class, hit.SourceIP) == sourceguard.RefusedWrongLine {
+			detail = fmt.Sprintf("a connection from %s to %s was refused: an identity was used through the wrong line (lines %s cost %d)",
+				hit.SourceIP, node.DisplayName, strings.Join(labels, ", "), factor)
+		}
+		return domain.NodeAgentIssue{Code: IssueSourceGuardRefused, Key: string(hit.Set), Detail: detail}, true
+	}
+	return domain.NodeAgentIssue{}, false
+}
+
+// appliedGuards is what a priced-class client must have applied before its line
+// is published.
+type appliedGuards struct {
+	// guards are the guards of the clients of priced classes now (allow_from).
+	guards map[nodeprotocol.ClientKey]*nodeprotocol.ClientSourceGuard
+	// sent are the sets the current plan sends, and applied the sets of the config
+	// the agent has applied.
+	sent    map[nodeprotocol.SourceSetKey][]string
+	applied map[nodeprotocol.SourceSetKey][]string
+}
+
+// setApplied is whether the class a guard allows from is in force on the
+// agent: a set that is not sent (unknown addresses) never is, and the line is
+// withheld anyway; one that is sent must be in the applied config with the
+// addresses it has now.
+func (g appliedGuards) setApplied(key nodeprotocol.SourceSetKey) bool {
+	want, sent := g.sent[key]
+	if !sent {
+		return false
+	}
+	got, ok := g.applied[key]
+	return ok && slices.Equal(got, want)
+}
+
+// pricedGuards works out the guards the priced-class clients should carry now
+// and which sets the agent has applied. Without a source guard planner, or with
+// a plan that guards nobody, nothing is gated.
+func (s *Service) pricedGuards(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, report nodeprotocol.NodeReport, version nodeprotocol.Version, streams map[string]*domain.NodeAgentStream) (appliedGuards, error) {
+	out := appliedGuards{
+		guards: map[nodeprotocol.ClientKey]*nodeprotocol.ClientSourceGuard{},
+		sent:   map[nodeprotocol.SourceSetKey][]string{}, applied: map[nodeprotocol.SourceSetKey][]string{},
+	}
+	if s.guard == nil {
+		return out, nil
+	}
+	plan, err := s.guard.PlanFor(ctx, guardFacts(agent, report), snapshot.Nodes)
+	if err != nil {
+		return out, fmt.Errorf("nodesync: %w", err)
+	}
+	if plan.Empty() {
+		return out, nil
+	}
+	for _, set := range plan.Sets {
+		out.sent[set.Key] = set.CIDRs
+	}
+	for _, client := range buildRoster(snapshot, version, plan).Clients {
+		if client.SourceGuard != nil && client.SourceGuard.AllowFrom != "" {
+			out.guards[client.Key] = client.SourceGuard
+		}
+	}
+	configHave := report.Have[nodeprotocol.StreamConfig]
+	if current := streams[nodeprotocol.StreamConfig]; current != nil && configHave.Applied.Epoch == agent.Epoch && string(configHave.ETag) == current.DesiredETag {
+		var body nodeprotocol.ConfigBody
+		if err := json.Unmarshal(current.DesiredBody, &body); err != nil {
+			return out, fmt.Errorf("nodesync: decode applied config: %w", err)
+		}
+		if body.Transit != nil {
+			for _, set := range body.Transit.SourceSets {
+				out.applied[set.Key] = set.CIDRs
+			}
+		}
+	}
+	return out, nil
 }

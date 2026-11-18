@@ -52,12 +52,12 @@ func newSourceGuardFixture(t *testing.T) *sourceGuardFixture {
 	if err := repos.NodeAgent.UpdateProtocolObservation(t.Context(), "land", 1, []string{"transit.source_guard.v1"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	two := 2000
+	two, three := 2000, 3000
 	landing := &domain.Node{PanelID: panel.ID, InboundID: 1, DisplayName: "JP", ServerAddress: "land.example.com", StreamSettings: `{"network":"ws","security":"tls"}`,
 		DesiredProtocol: "vless", DesiredPort: 443, Region: "JP", Enabled: true,
 		Relays: []domain.RelayLine{
 			{ID: "ext", Name: "ext", Address: "e.example", Port: 443, Enabled: true, Tags: []string{}, TrafficFactorMilli: &two, SourceCIDRs: []string{"192.0.2.0/24"}},
-			{ID: "cdn", Name: "cdn", Mode: domain.RelayModeCDN, Domain: "c.example.com", Address: "104.16.1.1", Port: 8443, Enabled: true, Tags: []string{}},
+			{ID: "cdn", Name: "cdn", Mode: domain.RelayModeCDN, Domain: "c.example.com", Address: "104.16.1.1", Port: 8443, Enabled: true, Tags: []string{}, TrafficFactorMilli: &three},
 		}}
 	if err := repos.Node.Create(t.Context(), landing); err != nil {
 		t.Fatal(err)
@@ -90,9 +90,17 @@ func (f *sourceGuardFixture) do(method, path string, body any) *httptest.Respons
 func TestSourceGuardEditorViewAndAddRefusedSource(t *testing.T) {
 	f := newSourceGuardFixture(t)
 	ctx := t.Context()
-	set := string(sourceguard.Key(f.nodeID, "ext"))
+	set := string(sourceguard.Key(f.nodeID, 2000))
+	cdnSet := string(sourceguard.Key(f.nodeID, 3000))
 	if err := f.repos.SourceGuard.RecordHits(ctx, f.panel, []domain.SourceGuardHit{
 		{PanelID: f.panel, Set: set, ListenerNodeID: f.nodeID, IP: "198.51.100.77", Count: 5, LastSeen: time.Now()},
+		// Inside the ext set: an identity used through the wrong line.
+		{PanelID: f.panel, Set: set, ListenerNodeID: f.nodeID, IP: "192.0.2.9", Count: 2, LastSeen: time.Now()},
+		// Inside Cloudflare's ranges, which the CDN default class owns: the ext
+		// class's identity came through the CDN.
+		{PanelID: f.panel, Set: set, ListenerNodeID: f.nodeID, IP: "173.245.48.5", Count: 1, LastSeen: time.Now()},
+		// An unregistered source of the CDN class, whose line has no addresses of its own.
+		{PanelID: f.panel, Set: cdnSet, ListenerNodeID: f.nodeID, IP: "203.0.113.5", Count: 3, LastSeen: time.Now()},
 	}, time.Now().Add(-time.Hour), 100); err != nil {
 		t.Fatal(err)
 	}
@@ -109,11 +117,36 @@ func TestSourceGuardEditorViewAndAddRefusedSource(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 	ext, cdn := view.Lines[0], view.Lines[1]
-	if len(ext.Effective) != 1 || ext.Effective[0] != "192.0.2.0/24" || len(ext.Refused) != 1 || ext.Refused[0].IP != "198.51.100.77" || ext.Refused[0].Count != 5 {
+	if len(ext.Effective) != 1 || ext.Effective[0] != "192.0.2.0/24" || len(ext.Refused) != 3 {
 		t.Fatalf("ext = %+v", ext)
+	}
+	for _, r := range ext.Refused {
+		switch r.IP {
+		case "198.51.100.77":
+			if r.Kind != "unregistered" || !r.Addable || r.Count != 5 {
+				t.Fatalf("unregistered source: %+v", r)
+			}
+		default:
+			if r.Kind != "wrong_line" || r.Addable {
+				t.Fatalf("%s must be a wrong-line hit with no Add: %+v", r.IP, r)
+			}
+		}
+	}
+	if len(cdn.Refused) != 1 || cdn.Refused[0].Kind != "unregistered" || cdn.Refused[0].Addable {
+		t.Fatalf("a CDN line on the Cloudflare default offers no Add: %+v", cdn.Refused)
 	}
 	if len(cdn.Effective) != len(sourceguard.BuiltinCloudflare) {
 		t.Fatalf("a CDN line without addresses takes Cloudflare's: %+v", cdn)
+	}
+
+	// The one-click addition is refused for the CDN default line and for a
+	// wrong-line hit, whatever the client sends.
+	for name, c := range map[string]struct{ line, ip string }{
+		"cdn default": {"cdn", "203.0.113.5"}, "wrong line": {"ext", "192.0.2.9"},
+	} {
+		if rec := f.do(http.MethodPost, fmt.Sprintf("/nodes/%d/lines/%s/source-cidrs", f.nodeID, c.line), map[string]string{"ip": c.ip}); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d: %s", name, rec.Code, rec.Body)
+		}
 	}
 
 	// One click adds the address through the node save.
@@ -128,8 +161,10 @@ func TestSourceGuardEditorViewAndAddRefusedSource(t *testing.T) {
 	if got := stored.Relays[0].SourceCIDRs; len(got) != 2 || got[0] != "192.0.2.0/24" || got[1] != "198.51.100.77/32" {
 		t.Fatalf("source cidrs = %v", got)
 	}
-	if hits, _ := f.repos.SourceGuard.ListHits(ctx, []int64{f.panel}); len(hits) != 0 {
-		t.Fatalf("the warning stayed: %+v", hits)
+	for _, hit := range func() []domain.SourceGuardHit { h, _ := f.repos.SourceGuard.ListHits(ctx, []int64{f.panel}); return h }() {
+		if hit.IP == "198.51.100.77" {
+			t.Fatalf("the warning stayed: %+v", hit)
+		}
 	}
 
 	for name, c := range map[string]struct {

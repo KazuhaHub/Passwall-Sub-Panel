@@ -1,8 +1,6 @@
 package domain
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -87,7 +85,32 @@ func parseSourcePrefix(text string) (netip.Prefix, error) {
 	if prefix.Masked() != prefix {
 		return netip.Prefix{}, fmt.Errorf("has host bits set (want %s)", prefix.Masked())
 	}
+	if min := minSourceBits(prefix.Addr()); prefix.Bits() < min {
+		return netip.Prefix{}, fmt.Errorf("is too broad: a source prefix is at least /%d for %s", min, family(prefix.Addr()))
+	}
 	return prefix, nil
+}
+
+// Source prefixes shorter than these are refused: a prefix that wide is not a
+// set of servers but most of the internet, and a guard built from one would
+// either block everyone or let everyone through.
+const (
+	MinSourceBitsIPv4 = 8
+	MinSourceBitsIPv6 = 19
+)
+
+func minSourceBits(addr netip.Addr) int {
+	if addr.Is4() {
+		return MinSourceBitsIPv4
+	}
+	return MinSourceBitsIPv6
+}
+
+func family(addr netip.Addr) string {
+	if addr.Is4() {
+		return "IPv4"
+	}
+	return "IPv6"
 }
 
 func prefixStrings(prefixes []netip.Prefix) []string {
@@ -114,11 +137,35 @@ type SourceInputs struct {
 	// Cloudflare are the current Cloudflare ranges, used by a CDN line that
 	// names no addresses of its own.
 	Cloudflare []string
+	// Servers are what the agent of each landing server declared, by server.
+	// A server not listed cannot guard.
+	Servers map[int64]SourceGuardServer
+}
+
+// SourceGuardServer is what a landing server's agent can do.
+type SourceGuardServer struct {
+	// Capable is whether the agent declared transit.source_guard.v1.
+	Capable bool
+	// Engines are the cores the server runs or is about to run (observed and
+	// desired). Empty reads as Xray.
+	Engines []NodeCoreEngine
+}
+
+// CanGuard is whether a landing can enforce source guards: its server's agent
+// declares the capability AND the listener is one the core takes the
+// connection's own address for (ListenerGuardable).
+func (in SourceInputs) CanGuard(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	server := in.Servers[n.PanelID]
+	return server.Capable && ListenerGuardable(n, server.Engines)
 }
 
 // EffectiveSourceCIDRs is the set of source addresses the landing should accept
-// the line's identity from, canonical, sorted and unique; empty means unknown
-// (the line is then not guarded).
+// the line's identity from, canonical, sorted and unique; empty means unknown.
+// It is never truncated: a class whose union does not fit a set is refused
+// (see AnalyzeSourceGuard), not cut.
 //
 //   - managed direct forward: the entry server's addresses plus the line's own;
 //   - CDN: the line's own when it has any, otherwise Cloudflare's;
@@ -158,70 +205,18 @@ func (r RelayLine) EffectiveSourceCIDRs(in SourceInputs) []string {
 			unique = append(unique, p)
 		}
 	}
-	if len(unique) > MaxSourceCIDRs {
-		// The line's own addresses come first, so what is dropped is the tail of
-		// the entry's: a set the landing would refuse as a whole is worse.
-		unique = unique[:MaxSourceCIDRs]
-	}
 	if len(unique) == 0 {
 		return nil
 	}
 	return prefixStrings(unique)
 }
 
-// SourceSetSuffix is the suffix of a line's source set key: the landing and a hash
-// of the line id, so that a key is stable, short and never reveals a line id.
-// The protocol's SourceSetKey is "src_" + this.
-func SourceSetSuffix(nodeID int64, lineID string) string {
-	sum := sha256.Sum256([]byte(lineID))
-	return strconv.FormatInt(nodeID, 10) + "_" + hex.EncodeToString(sum[:])[:10]
-}
-
-// SourceGuardFactorProblem is the first line ending on the landing's listener
-// whose traffic factor differs from the direct line's, or false when they all
-// agree. A landing that cannot guard needs them to; a landing that can needs it
-// of nothing but an external line without addresses (it must name addresses, see SourceGuardWithheld).
-func (n *Node) SourceGuardFactorProblem() (RelayLine, bool) {
-	if n == nil {
-		return RelayLine{}, false
-	}
-	direct := n.EffectiveTrafficFactor()
-	for _, line := range n.Relays {
-		if line.Guarded() && line.EffectiveTrafficFactor() != direct {
-			return line, true
-		}
-	}
-	return RelayLine{}, false
-}
-
-// SourceGuardWithheld says why a relay line must not be published on a landing,
-// or "" when it may. canGuard is whether the landing enforces source guards.
-//
-//   - A landing that cannot guard cannot tell the lines apart: a line whose
-//     factor differs from the direct line's would be billable at the wrong one.
-//   - A landing that can guard still has nothing to check an external line
-//     against when it names no addresses, and a managed forward whose entry is
-//     not yet known would be unguarded, so the line is not published until the
-//     address is known (ADR 0044 section 4).
-func (n *Node) SourceGuardWithheld(line RelayLine, canGuard, entryKnown bool) string {
-	if n == nil || !line.Guarded() {
-		return ""
-	}
-	differs := line.EffectiveTrafficFactor() != n.EffectiveTrafficFactor()
-	if !canGuard {
-		if differs {
-			return SourceWithheldFactor
-		}
-		return ""
-	}
-	known := len(line.SourceCIDRs) > 0 || line.CDN() || (line.Managed() && entryKnown)
-	switch {
-	case line.Managed() && !known:
-		return SourceWithheldUnknown
-	case differs && !known:
-		return SourceWithheldUnknown
-	}
-	return ""
+// SourceSetSuffix is the suffix of a factor class's source set key on a landing
+// listener: "<node id>_f<milli>". It is deterministic from the listener and the
+// factor, short, and a valid key suffix for any id and factor. The protocol's
+// SourceSetKey is "src_" + this.
+func SourceSetSuffix(nodeID int64, factorMilli int) string {
+	return strconv.FormatInt(nodeID, 10) + "_f" + strconv.Itoa(factorMilli)
 }
 
 // Reasons a relay line is withheld by the source guard.
@@ -232,6 +227,12 @@ const (
 	// SourceWithheldUnknown: the landing guards and the line's source addresses
 	// are not known.
 	SourceWithheldUnknown = "source_guard_unknown"
+	// SourceWithheldOverlap: the landing guards and the line's factor class
+	// shares addresses with another class, so the two cannot be told apart.
+	SourceWithheldOverlap = "source_guard_overlap"
+	// SourceWithheldLimit: the landing guards and the line's class (or the
+	// listener's classes) do not fit the limits of a source set.
+	SourceWithheldLimit = "source_guard_limit"
 )
 
 // SourceGuardHit is the latest report of connections a landing refused because

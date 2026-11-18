@@ -3,7 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"slices"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -12,19 +12,20 @@ import (
 //
 // A direct line, a direct forward, an external line and a CDN line all end on
 // the landing's own listener. A landing that can check where a connection comes
-// from keeps their identities apart; one that cannot (3X-UI, S-UI, a Passwall
-// Node without transit.source_guard.v1) would let a user bill traffic at
-// whichever of those lines is cheapest. So on such a landing they must all
-// cost the same, and on a landing that can guard an external line that costs
-// something else must say which addresses its traffic comes from.
+// from keeps the identities of different factors apart; one that cannot (3X-UI,
+// S-UI, a Passwall Node without transit.source_guard.v1, a listener whose core
+// would take the source from a client-sent header) would let a user bill traffic
+// at whichever of those lines is cheapest. So on such a landing they must all
+// cost the same. On a landing that can guard, lines are grouped by factor
+// (domain.AnalyzeSourceGuard) and the classes must arrive from distinct
+// addresses.
 
 const (
-	// CodeSourceGuardFactorMismatch refuses a line whose factor differs from the
-	// direct line's on a landing that cannot guard.
-	CodeSourceGuardFactorMismatch = "source_guard_factor_mismatch"
-	// CodeSourceGuardNeedsCIDRs refuses an external line whose factor differs
-	// from the direct line's and that names no source addresses.
-	CodeSourceGuardNeedsCIDRs = "source_guard_needs_cidrs"
+	CodeSourceGuardFactorMismatch = domain.CodeSourceGuardFactorMismatch
+	CodeSourceGuardNeedsCIDRs     = domain.CodeSourceGuardNeedsCIDRs
+	CodeSourceGuardOverlap        = domain.CodeSourceGuardOverlap
+	CodeSourceGuardTooManyClasses = domain.CodeSourceGuardTooManyClasses
+	CodeSourceGuardTooManyCIDRs   = domain.CodeSourceGuardTooManyCIDRs
 )
 
 // SetSourceGuardCheck binds the question "can a landing on this server check
@@ -32,6 +33,14 @@ const (
 // (tests that do not exercise them).
 func (s *Service) SetSourceGuardCheck(canGuard func(ctx context.Context, panelID int64) bool) {
 	s.canGuard = canGuard
+}
+
+// SetSourceGuardInputs binds where the facts of the rules come from (the
+// planner's inputs: Cloudflare, entry addresses, each server's agent, fronts).
+// Left unbound, only the capability check applies, on the built-in Cloudflare
+// ranges.
+func (s *Service) SetSourceGuardInputs(inputs func(ctx context.Context, nodes []*domain.Node) (domain.SourceInputs, error)) {
+	s.guardInputs = inputs
 }
 
 // resolveSourceCIDRs normalises each line's own source addresses. A line whose
@@ -63,70 +72,97 @@ func resolveSourceCIDRs(previous *domain.Node, n *domain.Node) error {
 	return nil
 }
 
-// sourceGuardProblems are the lines of the landing the rules above refuse, by
-// line id, in the form they would be refused with.
-func sourceGuardProblems(n *domain.Node, canGuard bool) map[string]*domain.CodedValidationError {
-	out := map[string]*domain.CodedValidationError{}
-	direct := n.EffectiveTrafficFactor()
-	for _, line := range n.Relays {
-		factor := line.EffectiveTrafficFactor()
-		if !line.Guarded() || factor == direct {
-			continue
+// sourceGuardInputs are the facts the rules are judged by for one landing: the
+// ranges Cloudflare publishes, the entry servers' addresses and what the
+// landing's server can do. A failed read leaves them out, so the landing counts
+// as unable to guard: the stricter rule is the safe one to save by.
+func (s *Service) sourceGuardInputs(ctx context.Context, n *domain.Node) domain.SourceInputs {
+	if s.guardInputs != nil {
+		if in, err := s.guardInputs(ctx, []*domain.Node{n}); err == nil {
+			return in
 		}
-		params := map[string]string{
-			"node": n.DisplayName, "line": line.Label(),
-			"line_factor": strconv.Itoa(factor), "direct_factor": strconv.Itoa(direct),
-		}
-		switch {
-		case !canGuard:
-			out[line.ID] = &domain.CodedValidationError{
-				Code: CodeSourceGuardFactorMismatch, Params: params,
-				Msg: fmt.Sprintf("line %q of %s costs %d but the direct line costs %d: this server cannot check where connections come from, so every line ending on the node must cost the same (use a Passwall Node that supports source checks to price lines apart)",
-					line.Label(), n.DisplayName, factor, direct),
-			}
-		case !line.Managed() && !line.CDN() && len(line.SourceCIDRs) == 0:
-			out[line.ID] = &domain.CodedValidationError{
-				Code: CodeSourceGuardNeedsCIDRs, Params: params,
-				Msg: fmt.Sprintf("external line %q of %s costs %d but the direct line costs %d: list the addresses its traffic comes from in the line's source addresses, so the two can be told apart",
-					line.Label(), n.DisplayName, factor, direct),
-			}
-		}
+		return domain.SourceInputs{}
 	}
-	return out
+	in := domain.SourceInputs{Cloudflare: domain.BuiltinCloudflare, Servers: map[int64]domain.SourceGuardServer{}}
+	if s.canGuard != nil {
+		in.Servers[n.PanelID] = domain.SourceGuardServer{Capable: s.canGuard(ctx, n.PanelID)}
+	}
+	return in
 }
 
-// checkSourceGuard refuses a save that introduces or changes a line the rules
-// refuse. A refusal that was already true before the save (a landing that lost
-// the capability, factors saved before the rules existed) does not block an
-// unrelated edit: such a line is withheld from subscriptions instead.
+// checkSourceGuard refuses a save that introduces or changes something the
+// rules refuse (domain.AnalyzeSourceGuard: a price a landing that cannot guard
+// cannot keep apart, factor classes that arrive from the same addresses, more
+// classes or addresses than a set holds). A refusal that was already true
+// before the save (a landing that lost the capability, factors saved before the
+// rules existed) does not block an unrelated edit: the lines it affects are
+// withheld from subscriptions instead.
 func (s *Service) checkSourceGuard(ctx context.Context, previous, next *domain.Node) error {
-	if s.canGuard == nil || next == nil || next.IsTunnelChild() || next.IsSeparator() {
+	if (s.canGuard == nil && s.guardInputs == nil) || next == nil || next.IsTunnelChild() || next.IsSeparator() {
 		return nil
 	}
-	canGuard := s.canGuard(ctx, next.PanelID)
-	after := sourceGuardProblems(next, canGuard)
+	after := next.AnalyzeSourceGuard(s.sourceGuardInputs(ctx, next)).Problems
 	if len(after) == 0 {
 		return nil
 	}
-	var before map[string]*domain.CodedValidationError
+	known := map[string]bool{}
 	if previous != nil {
-		before = sourceGuardProblems(previous, s.canGuard(ctx, previous.PanelID))
+		for _, p := range previous.AnalyzeSourceGuard(s.sourceGuardInputs(ctx, previous)).Problems {
+			known[p.ID] = true
+		}
 	}
-	for _, line := range next.Relays {
-		problem, bad := after[line.ID]
-		if !bad {
-			continue
+	for _, p := range after {
+		if !known[p.ID] {
+			return p.Err
 		}
-		if was, existed := before[line.ID]; existed && sameProblem(was, problem) {
-			continue
-		}
-		return problem
 	}
 	return nil
 }
 
-// sameProblem is whether two refusals are about the same prices: names are
-// not, so renaming a node or a line is not a new problem.
-func sameProblem(a, b *domain.CodedValidationError) bool {
-	return a.Code == b.Code && a.Params["line_factor"] == b.Params["line_factor"] && a.Params["direct_factor"] == b.Params["direct_factor"]
+// AddLineSourceCIDR adds one prefix to one line's own source addresses and
+// returns the line's addresses after. It is a targeted update: the node is read
+// under the same server locks every node save takes and only that line's
+// addresses change, so an edit that was saved a moment ago is not written back
+// over by a copy read before it. The save rules apply as they do to an edit.
+//
+// A CDN line that names no addresses of its own uses the Cloudflare ranges;
+// adding one address would replace the whole default, so it is refused.
+func (s *Service) AddLineSourceCIDR(ctx context.Context, nodeID int64, lineID, cidr string) ([]string, error) {
+	previous, unlock, err := s.lockAndLoad(ctx, nodeID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if previous.IsTunnelChild() {
+		return nil, domain.ErrNotFound
+	}
+	index := slices.IndexFunc(previous.Relays, func(r domain.RelayLine) bool { return r.ID == lineID })
+	if index < 0 || !previous.Relays[index].Guarded() {
+		return nil, domain.ErrNotFound
+	}
+	line := previous.Relays[index]
+	if line.CDN() && len(line.SourceCIDRs) == 0 {
+		return nil, fmt.Errorf("%w: the CDN line %q uses the Cloudflare ranges; adding one address would replace all of them. Give the line its own list of addresses in the editor instead", domain.ErrValidation, line.Label())
+	}
+	added, err := domain.NormalizeSourceCIDRs([]string{cidr})
+	if err != nil {
+		return nil, err
+	}
+	if slices.Contains(line.SourceCIDRs, added[0]) {
+		return slices.Clone(line.SourceCIDRs), nil
+	}
+	merged, err := domain.NormalizeSourceCIDRs(append(slices.Clone(line.SourceCIDRs), added[0]))
+	if err != nil {
+		return nil, err
+	}
+	next := *previous
+	next.Relays = slices.Clone(previous.Relays)
+	next.Relays[index].SourceCIDRs = merged
+	if err := s.checkSourceGuard(ctx, previous, &next); err != nil {
+		return nil, err
+	}
+	if err := s.nodes.UpdateMetadata(ctx, &next); err != nil {
+		return nil, err
+	}
+	return merged, nil
 }

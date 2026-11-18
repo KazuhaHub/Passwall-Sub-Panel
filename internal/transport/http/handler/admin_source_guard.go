@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -20,6 +21,7 @@ type SourceGuardView interface {
 	Cloudflare(ctx context.Context) sourceguard.Ranges
 	NodeView(ctx context.Context, n *domain.Node) (sourceguard.NodeView, error)
 	Forget(ctx context.Context, n *domain.Node, line domain.RelayLine, ip string) error
+	CheckAddable(ctx context.Context, n *domain.Node, lineID, ip string) error
 }
 
 // AdminSourceGuardHandler serves the line editor's source address panel and the
@@ -48,20 +50,33 @@ type refusedSourceDTO struct {
 	IP       string    `json:"ip"`
 	Count    int64     `json:"count"`
 	LastSeen time.Time `json:"last_seen"`
+	// Kind is "unregistered" (an address the line's class does not list) or
+	// "wrong_line" (an identity used through the wrong line: the address is in a
+	// class's set already).
+	Kind string `json:"kind"`
+	// Addable is whether adding the address to this line is the fix.
+	Addable bool `json:"addable"`
 }
 
 type sourceGuardLineDTO struct {
-	LineID    string             `json:"line_id"`
-	Guarded   bool               `json:"guarded"`
+	LineID  string `json:"line_id"`
+	Guarded bool   `json:"guarded"`
+	// Direct is whether the line costs what the direct line costs (it needs no
+	// source addresses); Factor is its factor in thousandths.
+	Direct    bool               `json:"direct"`
+	Factor    int                `json:"factor_milli"`
 	Effective []string           `json:"effective_cidrs"`
 	Withheld  string             `json:"withheld,omitempty"`
 	Refused   []refusedSourceDTO `json:"refused"`
 }
 
 type sourceGuardNodeDTO struct {
-	CanGuard   bool                 `json:"can_guard"`
-	Lines      []sourceGuardLineDTO `json:"lines"`
-	Cloudflare cloudflareRangesDTO  `json:"cloudflare"`
+	CanGuard bool `json:"can_guard"`
+	// CannotGuardReason is "server" (no agent that declared the capability) or
+	// "listener" (the core would take the source from a client-sent header).
+	CannotGuardReason string               `json:"cannot_guard_reason,omitempty"`
+	Lines             []sourceGuardLineDTO `json:"lines"`
+	Cloudflare        cloudflareRangesDTO  `json:"cloudflare"`
 }
 
 func (h *AdminSourceGuardHandler) cloudflare(ctx context.Context) cloudflareRangesDTO {
@@ -103,11 +118,11 @@ func (h *AdminSourceGuardHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	out := sourceGuardNodeDTO{CanGuard: view.CanGuard, Lines: make([]sourceGuardLineDTO, 0, len(view.Lines)), Cloudflare: h.cloudflare(c.Request.Context())}
+	out := sourceGuardNodeDTO{CanGuard: view.CanGuard, CannotGuardReason: view.Reason, Lines: make([]sourceGuardLineDTO, 0, len(view.Lines)), Cloudflare: h.cloudflare(c.Request.Context())}
 	for _, line := range view.Lines {
-		dto := sourceGuardLineDTO{LineID: line.LineID, Guarded: line.Guarded, Effective: append([]string{}, line.Effective...), Withheld: line.Withheld, Refused: []refusedSourceDTO{}}
+		dto := sourceGuardLineDTO{LineID: line.LineID, Guarded: line.Guarded, Direct: line.Direct, Factor: line.Factor, Effective: append([]string{}, line.Effective...), Withheld: line.Withheld, Refused: []refusedSourceDTO{}}
 		for _, r := range line.Refused {
-			dto.Refused = append(dto.Refused, refusedSourceDTO{IP: r.IP, Count: r.Count, LastSeen: r.LastSeen})
+			dto.Refused = append(dto.Refused, refusedSourceDTO{IP: r.IP, Count: r.Count, LastSeen: r.LastSeen, Kind: r.Kind, Addable: r.Addable})
 		}
 		out.Lines = append(out.Lines, dto)
 	}
@@ -119,8 +134,11 @@ type addSourceRequest struct {
 }
 
 // AddSource is POST /admin/nodes/:id/lines/:line_id/source-cidrs: the address a
-// landing refused is added to the line's source addresses through the ordinary
-// save of the node, so every rule of that save applies.
+// landing refused is added to the line's source addresses. Only an unregistered
+// source of the line's class can be added, and only to a line with addresses of
+// its own (a CDN line on the Cloudflare default has none); the write changes
+// that line's addresses alone, under the locks of a node save, and the rules of
+// that save apply.
 func (h *AdminSourceGuardHandler) AddSource(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -143,41 +161,26 @@ func (h *AdminSourceGuardHandler) AddSource(c *gin.Context) {
 		mapNodeServiceError(c, err)
 		return
 	}
-	index := -1
-	for i, line := range n.Relays {
-		if line.ID == c.Param("line_id") {
-			index = i
-		}
-	}
+	lineID := c.Param("line_id")
+	index := slices.IndexFunc(n.Relays, func(r domain.RelayLine) bool { return r.ID == lineID })
 	if index < 0 || !n.Relays[index].Guarded() {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 		return
 	}
-	line := n.Relays[index]
-	n.Relays[index].SourceCIDRs = append(append([]string{}, line.SourceCIDRs...), cidr)
-	if err := h.node.UpdateMetadata(ctx, n); err != nil {
+	if err := h.view.CheckAddable(ctx, n, lineID, req.IP); err != nil {
+		respondError(c, err)
+		return
+	}
+	cidrs, err := h.node.AddLineSourceCIDR(ctx, id, lineID, cidr)
+	if err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}
-	if err := h.view.Forget(ctx, n, line, req.IP); err != nil {
+	if err := h.view.Forget(ctx, n, n.Relays[index], req.IP); err != nil {
 		// The address is added; a warning that outlives it clears itself when the
 		// landing stops refusing it.
 		respondError(c, err)
 		return
 	}
-	saved, err := h.node.Get(ctx, id)
-	if err != nil {
-		mapNodeServiceError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"source_cidrs": sourceCIDRsOfLine(saved, line.ID)})
-}
-
-func sourceCIDRsOfLine(n *domain.Node, lineID string) []string {
-	for _, line := range n.Relays {
-		if line.ID == lineID {
-			return append([]string{}, line.SourceCIDRs...)
-		}
-	}
-	return []string{}
+	c.JSON(http.StatusOK, gin.H{"source_cidrs": cidrs})
 }

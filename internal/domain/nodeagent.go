@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
@@ -207,4 +208,21 @@ type NodeAgentStream struct {
 // A/B/A rollback as converged when the agent still holds byte-identical A.
 func (s *NodeAgentStream) Converged() bool {
 	return s != nil && nodeprotocol.Converged(nodeprotocol.ETag(s.AppliedETag), nodeprotocol.ETag(s.DesiredETag))
+}
+
+// GuardEngines are the cores a landing on this server runs or is about to run:
+// the observed one and the desired one. A listener must suit all of them for
+// the source guard to mean anything on it.
+func (a *NodeAgent) GuardEngines() []NodeCoreEngine {
+	if a == nil {
+		return nil
+	}
+	var out []NodeCoreEngine
+	for _, e := range []NodeCoreEngine{NormalizeNodeCoreEngine(a.DesiredCoreEngine), a.ObservedCoreEngine} {
+		if e == "" || slices.Contains(out, e) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
