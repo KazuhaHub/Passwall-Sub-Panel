@@ -626,3 +626,30 @@ func TestSharedLinkUsesTheSamePortOnBothHalves(t *testing.T) {
 		t.Fatalf("unshared exit plan = %+v, %v", exit, err)
 	}
 }
+
+// A tunnel an SNI front on its exit still routes to is kept when the entry's
+// last user of it goes: deleting it would leave the front's route dangling and
+// make the pair a new tunnel, on a new port, the next time it is used.
+func TestRemoveLinkKeepsATunnelAFrontRoutesTo(t *testing.T) {
+	f := newLinkFixture(t)
+	ctx := t.Context()
+	f.service.WithFrontLinkPorts(func(_ context.Context, panelID int64) (map[int64]int, error) {
+		if panelID != 3 {
+			return nil, nil
+		}
+		return map[int64]int{f.id: 443}, nil
+	})
+	if err := f.service.RemoveLink(ctx, 9, 3); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if link, err := f.repos.TransitLinks.GetLink(ctx, 9, 3); err != nil || link.ID != f.id {
+		t.Fatalf("a tunnel a front routes to was deleted: %+v %v", link, err)
+	}
+	f.service.WithFrontLinkPorts(nil)
+	if err := f.service.RemoveLink(ctx, 9, 3); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := f.repos.TransitLinks.GetLink(ctx, 9, 3); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("an unused tunnel survived: %v", err)
+	}
+}

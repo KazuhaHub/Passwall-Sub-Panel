@@ -431,12 +431,31 @@ func (s *Service) OutUsable(ctx context.Context, entry, exit int64) (bool, error
 	return nodeprotocol.ValidateLinkOut(out) == nil, nil
 }
 
-// RemoveLink deletes the tunnel from entry to exit and frees its port. The
-// caller has checked that nothing uses the pair any more: a node's default exit
-// and every route leaving through it.
+// RemoveLink deletes the tunnel from entry to exit, once nothing of the entry
+// uses it (the callers check that). A tunnel an SNI front on the exit still
+// routes to is kept: deleting it would leave the front's route pointing at
+// nothing, and the pair's next tunnel would be a new one on a new port. It goes
+// once the front no longer routes to it and the entry drops it again.
 func (s *Service) RemoveLink(ctx context.Context, entry, exit int64) error {
 	if s.links == nil {
 		return nil
+	}
+	if s.frontPorts != nil {
+		link, err := s.links.GetLink(ctx, entry, exit)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		ports, err := s.frontPorts(ctx, exit)
+		if err != nil {
+			return err
+		}
+		if ports[link.ID] != 0 {
+			log.Info("tunnel kept: an SNI front on its exit still routes to it", "link", link.ID, "port", ports[link.ID])
+			return nil
+		}
 	}
 	_, err := s.links.DeleteLink(ctx, entry, exit)
 	return err
