@@ -162,7 +162,7 @@ export async function getFronts(panelId: number, opts: ReadOptions = {}): Promis
 
 export async function getFrontOptions(panelId: number, opts: ReadOptions = {}): Promise<FrontOptions> {
   const { data } = await client.get<FrontOptions>(`${base(panelId)}/fronts/options`, { signal: opts.signal, ...quiet })
-  return { listeners: data.listeners ?? [], lines: data.lines ?? [] }
+  return { listeners: data.listeners ?? [], lines: data.lines ?? [], links: data.links ?? [] }
 }
 
 export async function getServerPorts(panelId: number, opts: ReadOptions = {}): Promise<PortUsage[]> {
