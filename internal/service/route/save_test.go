@@ -448,3 +448,23 @@ func TestSaveMakesTunnelsUnderTheExitServersLock(t *testing.T) {
 		t.Fatalf("locked %v links %v", locked, w.links)
 	}
 }
+
+// When a tunnel cannot be made the save fails as a whole: the routes that were
+// there stay, and the tunnels the failed save made are not left behind.
+func TestSaveThatCannotMakeATunnelKeepsThePreviousRoutes(t *testing.T) {
+	w, s := routedWorld()
+	if _, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("", 2, "domain:a.com")}); err != nil {
+		t.Fatal(err)
+	}
+	before := w.routes[11].Routes
+	w.ensureErr[3] = errors.New("no free port")
+	if _, err := s.Save(t.Context(), 11, []domain.DestRoute{serverRoute("r1", 2, "domain:a.com"), serverRoute("", 3, "domain:b.com")}); err == nil {
+		t.Fatal("the save went through without the tunnel")
+	}
+	if !slices.EqualFunc(w.routes[11].Routes, before, func(a, b domain.DestRoute) bool { return a.ID == b.ID && a.Target == b.Target && slices.Equal(a.Domains, b.Domains) }) {
+		t.Fatalf("routes = %+v, want the previous ones %+v", w.routes[11].Routes, before)
+	}
+	if _, ok := w.links[[2]int64{1, 2}]; !ok {
+		t.Fatal("the tunnel the previous routes use was removed")
+	}
+}

@@ -92,6 +92,14 @@ func (s *Service) save(ctx context.Context, nodeID int64, in []domain.DestRoute,
 		}
 		for _, panel := range sortedPanels(exits) {
 			if err := s.ensureLink(ctx, node.PanelID, panel); err != nil {
+				// The save is refused as a whole, so the routes that were there
+				// come back, and a tunnel this save made for them goes again. The
+				// order stays routes first: the other way round, a route that
+				// cannot be stored would leave a tunnel behind.
+				if rerr := s.Routes.Replace(ctx, node.ID, node.DestRoutes); rerr != nil {
+					return Saved{}, fmt.Errorf("route: make the tunnel to server %d: %w (and the previous routes were not restored: %v)", panel, err, rerr)
+				}
+				_ = s.dropUnusedLinks(ctx, node, checked.Routes, node.DestRoutes)
 				return Saved{}, fmt.Errorf("route: make the tunnel to server %d: %w", panel, err)
 			}
 		}
