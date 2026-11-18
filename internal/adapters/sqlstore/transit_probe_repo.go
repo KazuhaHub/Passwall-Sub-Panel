@@ -103,7 +103,7 @@ func (r *transitProbeRepo) Apply(ctx context.Context, panelID int64, key, kind s
 			if err != nil {
 				return err
 			}
-			prev, next = before, after
+			prev = before
 			if !write {
 				next = domain.ProbeState{}
 				if before != nil {

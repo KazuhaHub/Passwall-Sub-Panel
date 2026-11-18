@@ -1237,13 +1237,14 @@ func compactJSON(raw string) string {
 // listener of a tunnel line, keeping its port, names and keys. It is explicit:
 // without the administrator's confirmation it refuses with the differences.
 func (s *Service) SyncTunnelFromLanding(ctx context.Context, landingID int64, lineID string) ([]TunnelSyncDiff, error) {
-	landing, line, child, err := s.tunnelOf(ctx, landingID, lineID)
+	landing, _, child, err := s.tunnelOf(ctx, landingID, lineID)
 	if err != nil {
 		return nil, err
 	}
 	defer s.lockFronts(landing.PanelID, child.PanelID)()
 	// Read again under the locks: the diff is of what is stored now.
-	if landing, line, child, err = s.tunnelOf(ctx, landingID, lineID); err != nil {
+	landing, line, child, err := s.tunnelOf(ctx, landingID, lineID)
+	if err != nil {
 		return nil, err
 	}
 	spec, flow, ok, err := tunnelFromLanding(landing, child)
