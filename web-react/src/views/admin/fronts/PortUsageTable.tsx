@@ -89,7 +89,7 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
               <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                 {u.range_high ? `${u.port}–${u.range_high}` : u.port}
               </TableCell>
-              <TableCell>{t(`admin:servers.fronts.ports.bind_${u.bind}`)}</TableCell>
+              <TableCell>{u.listen || t(`admin:servers.fronts.ports.bind_${u.bind}`)}</TableCell>
               <TableCell>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span>{what(t, u)}</span>

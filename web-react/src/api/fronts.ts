@@ -113,6 +113,7 @@ export interface PortUsage {
   /** Last port of a range entry (Node's internal probe sockets). */
   range_high?: number
   bind: 'public' | 'loopback'
+  listen?: string
   kind: PortKind
   node_id?: number
   node_name?: string

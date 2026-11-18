@@ -44,7 +44,9 @@ type PortUsage struct {
 	Port int
 	// Bind is "public" (every address) or "loopback" (127.0.0.1 only).
 	Bind string
-	Kind string
+	// Listen is the explicitly configured bind address, when present.
+	Listen string
+	Kind   string
 	// NodeID and NodeName identify the node whose listener or line it is;
 	// LineID the relay line of a forward.
 	NodeID   int64
@@ -132,7 +134,7 @@ func (s *Service) collectUse(ctx context.Context, panelID int64, onPanel []*doma
 			continue
 		}
 		entry := PortUsage{
-			Port: n.DesiredPort, Bind: "public", Kind: KindListener, NodeID: n.ID, NodeName: n.DisplayName,
+			Port: n.DesiredPort, Bind: "public", Listen: n.InboundListen, Kind: KindListener, NodeID: n.ID, NodeName: n.DisplayName,
 			Protocol: n.DesiredProtocol, Enabled: n.Enabled, Label: "inbound of node " + nodeLabel(n),
 		}
 		if n.IsTunnelChild() {

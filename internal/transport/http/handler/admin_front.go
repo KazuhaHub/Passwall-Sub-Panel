@@ -393,6 +393,7 @@ type portUsageDTO struct {
 	Port        int             `json:"port"`
 	RangeHigh   int             `json:"range_high,omitempty"`
 	Bind        string          `json:"bind"`
+	Listen      string          `json:"listen,omitempty"`
 	Kind        string          `json:"kind"`
 	NodeID      int64           `json:"node_id,omitempty"`
 	NodeName    string          `json:"node_name,omitempty"`
@@ -430,7 +431,7 @@ func (h *AdminFrontHandler) Ports(c *gin.Context) {
 	out := make([]portUsageDTO, 0, len(usage))
 	for _, item := range usage {
 		dto := portUsageDTO{
-			Port: item.Port, RangeHigh: item.RangeHigh, Bind: item.Bind, Kind: item.Kind, NodeID: item.NodeID,
+			Port: item.Port, RangeHigh: item.RangeHigh, Bind: item.Bind, Listen: item.Listen, Kind: item.Kind, NodeID: item.NodeID,
 			NodeName: item.NodeName, LineID: item.LineID, PeerPanelID: item.PeerPanelID, FrontID: item.FrontID,
 			Protocol: item.Protocol, Label: item.Label, Enabled: item.Enabled, Unrouted: item.Unrouted, Inactive: item.Inactive,
 			ParentNodeID: item.ParentNodeID, ParentName: item.ParentName, LineName: item.LineName, Orphan: item.Orphan,

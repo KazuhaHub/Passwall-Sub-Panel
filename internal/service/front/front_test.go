@@ -502,6 +502,7 @@ func TestPlanForWithholdsWhatCannotBeSent(t *testing.T) {
 
 func TestUsageListsEveryPort(t *testing.T) {
 	e := newEnv(realityNode(1, "hk", 443, "a.example.com"), realityNode(2, "us", 8443, "b.example.com"), forwardLanding(443))
+	e.nodes[1].InboundListen = "192.0.2.20"
 	e.svc.links = fakeLinks{{ID: 1, EntryPanelID: 3, ExitPanelID: panelID, Port: 22222}}
 	in := simpleInput()
 	in.Routes = append(in.Routes, domain.FrontRoute{ServerNames: []string{"land.example.com"},
@@ -517,6 +518,9 @@ func TestUsageListsEveryPort(t *testing.T) {
 	var front PortUsage
 	for _, u := range usage {
 		seen[fmt.Sprintf("%s:%d", u.Kind, u.Port)]++
+		if u.Kind == KindListener && u.Port == 8443 && u.Listen != "192.0.2.20" {
+			t.Errorf("listen address = %q", u.Listen)
+		}
 		if u.Kind == KindFront {
 			front = u
 		}
