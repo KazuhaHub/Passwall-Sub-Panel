@@ -2,6 +2,7 @@ package noderelease
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -27,7 +28,19 @@ func TestLiveThePanelDiscoversThePublishedRelease(t *testing.T) {
 	if !ok {
 		t.Fatalf("%q is not a release tag this build can read", tag)
 	}
-	catalog, err := New(Options{})
+	opts := Options{}
+	if token := os.Getenv("PSP_LIVE_NODE_GITHUB_TOKEN"); token != "" {
+		// CI runners share the anonymous API quota. Scope the workflow's
+		// read-only token to GitHub's API. The catalog refuses redirects.
+		opts.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Scheme == "https" && req.URL.Host == "api.github.com" {
+				req = req.Clone(req.Context())
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			return http.DefaultTransport.RoundTrip(req)
+		})}
+	}
+	catalog, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
