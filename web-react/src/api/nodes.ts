@@ -1,4 +1,4 @@
-import { withFrontConfirm } from '@/utils/frontConfirm'
+import { withFrontConfirm, type FrontConfirmation } from '@/utils/frontConfirm'
 import { withTunnelConfirm, type TunnelConfirmation } from '@/utils/tunnelConfirm'
 import { client } from './client'
 import type { RouteInput } from './routes'
@@ -333,13 +333,13 @@ function confirmParams(tunnels?: TunnelConfirmation, front?: { confirm_front?: b
 
 export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequest) {
   // Removing a tunnel line removes its listener: the server asks first.
-  return withTunnelConfirm(tunnels => withFrontConfirm(async front => {
+  return withBothConfirms(async (tunnels, front) => {
     const params = confirmParams(tunnels, front)
     const { data } = params
       ? await client.put<Node>(`/admin/nodes/${id}/metadata`, req, { params })
       : await client.put<Node>(`/admin/nodes/${id}/metadata`, req)
     return data
-  }))
+  })
 }
 
 /** The public key that belongs to a REALITY private key; a malformed key answers 400. */
@@ -359,10 +359,10 @@ export async function setNodeEnabled(id: number, enabled: boolean) {
 
 export async function deleteNode(id: number) {
   // A listener behind a shared port leaves it when deleted, and a landing's tunnel listeners go with it: the server asks first.
-  await withTunnelConfirm(tunnels => withFrontConfirm(c => {
+  await withBothConfirms((tunnels, c) => {
     const params = confirmParams(tunnels, c)
     return client.delete(`/admin/nodes/${id}`, params ? { params } : undefined)
-  }))
+  })
 }
 
 // recreateNodeInbound rebuilds the node's inbound on its (repointed/empty) server
@@ -377,13 +377,23 @@ export async function recreateNodeInbound(id: number) {
 // burn retries against a dead panel; any clients PSP previously created
 // stay on 3X-UI for the admin to clean up there.
 export async function detachNode(id: number) {
-  await withTunnelConfirm(tunnels => withFrontConfirm(c => {
+  await withBothConfirms((tunnels, c) => {
     const params = confirmParams(tunnels, c)
     return client.post(`/admin/nodes/${id}/detach`, undefined, params ? { params } : undefined)
-  }))
+  })
 }
 
 const quiet = { _skipErrorToast: true } as const
+
+/**
+ * withTunnelConfirm around withFrontConfirm. The front agreement is kept across
+ * the tunnel retry: when a changed tunnel plan makes the outer loop run again,
+ * the admin is not asked about the same shared port a second time.
+ */
+function withBothConfirms<T>(run: (tunnels: TunnelConfirmation | undefined, front: FrontConfirmation | undefined) => Promise<T>, note?: string): Promise<T> {
+  const held: { confirmation?: FrontConfirmation } = {}
+  return withTunnelConfirm(tunnels => withFrontConfirm(front => run(tunnels, front), held), note)
+}
 
 /**
  * Switches a saved line between a direct forward and an encrypted tunnel. This
@@ -393,11 +403,11 @@ const quiet = { _skipErrorToast: true } as const
  */
 export async function switchLineMode(nodeId: number, lineId: string, mode: 'tunnel' | 'forward', port = 0): Promise<Node> {
   // A listener joining or leaving a shared port is asked about too, in the server's words.
-  return withTunnelConfirm(confirmed => withFrontConfirm(async front => {
+  return withBothConfirms(async (confirmed, front) => {
     const body = { mode, ...(port > 0 ? { port } : {}), ...(confirmed ? { confirm: true, ...(confirmed.plan ? { confirm_plan: confirmed.plan } : {}) } : {}), ...(front?.confirm_front ? { confirm_front: true } : {}) }
     const { data } = await client.post<Node>(`/admin/nodes/${nodeId}/lines/${lineId}/mode`, body, quiet)
     return data
-  }))
+  })
 }
 
 /** What the admin edits on a tunnel line's listener; empty or 0 keeps the saved value. */
@@ -432,14 +442,14 @@ export async function previewTunnelSync(nodeId: number, lineId: string): Promise
 /** Copies the landing's protocol settings onto the listener once the admin confirmed the diff (asked here, `note` is added to the question); its own port, names and keys stay. */
 export async function syncTunnelFromLanding(nodeId: number, lineId: string, note?: string): Promise<RelayLine[]> {
   // The first request is refused with the diff; it is shown, and the plan it carries is echoed on the confirmed one.
-  return withTunnelConfirm(confirmed => withFrontConfirm(async front => {
+  return withBothConfirms(async (confirmed, front) => {
     const body = {
       ...(confirmed ? { confirm: true, ...(confirmed.plan ? { confirm_plan: confirmed.plan } : {}) } : {}),
       ...(front?.confirm_front ? { confirm_front: true } : {}),
     }
     const { data } = await client.post<{ diff: TunnelDiffEntry[]; relays: RelayLine[] }>(`/admin/nodes/${nodeId}/lines/${lineId}/tunnel/sync`, body, quiet)
     return data.relays ?? []
-  }), note)
+  }, note)
 }
 
 export interface NodeReorderItem {

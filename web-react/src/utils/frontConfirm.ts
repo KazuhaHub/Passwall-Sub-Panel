@@ -17,9 +17,12 @@ export interface FrontConfirmation {
  * sends the same save again with the confirmation. Declining throws the
  * original refusal, so nothing is saved and nothing is changed silently.
  */
-export async function withFrontConfirm<T>(run: (confirmation?: FrontConfirmation) => Promise<T>): Promise<T> {
+export async function withFrontConfirm<T>(run: (confirmation?: FrontConfirmation) => Promise<T>, held?: { confirmation?: FrontConfirmation }): Promise<T> {
   try {
-    return await run()
+    // `held` carries an agreement across calls: a caller that retries this whole
+    // function (a tunnel confirmation around it) does not ask about the same shared
+    // port twice. A stale one is refused again, and the admin is asked again.
+    return await run(held?.confirmation)
   } catch (err) {
     const e = frontErrorOf(err)
     if (!e || e.status !== 409 || e.code !== 'confirm_required') throw err
@@ -31,6 +34,8 @@ export async function withFrontConfirm<T>(run: (confirmation?: FrontConfirmation
       destructive: true,
     })
     if (!ok) throw err
-    return run({ loopback_port: Number(e.params.loopback_port) || 0, confirm_front: true })
+    const confirmation = { loopback_port: Number(e.params.loopback_port) || 0, confirm_front: true }
+    if (held) held.confirmation = confirmation
+    return run(confirmation)
   }
 }

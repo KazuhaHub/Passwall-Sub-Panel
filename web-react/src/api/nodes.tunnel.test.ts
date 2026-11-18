@@ -26,6 +26,21 @@ describe('tunnel line api', () => {
     expect(confirmMock).toHaveBeenCalledTimes(1)
   })
 
+  it('does not ask about a shared port again when the tunnel plan changes in between', async () => {
+    confirmMock.mockResolvedValue(true)
+    const tunnel = (plan: string) => refusal({ code: 'confirm_required', params: { kind: 'tunnel', action: 'switch_mode', removes: [], creates: [], refresh_needed: true, plan } })
+    const front = refusal({ code: 'confirm_required', params: { action: 'join', loopback_port: 30010 } })
+    http.post.mockImplementation(async (_url: string, body: Record<string, unknown>) => {
+      if (!body.confirm) throw tunnel('A')
+      if (!body.confirm_front) throw body.confirm_plan === 'A' ? front : tunnel('B')
+      if (body.confirm_plan === 'A') throw tunnel('B')
+      return { data: { id: 1, relays: [] } }
+    })
+    await api.switchLineMode(1, 'L1', 'tunnel')
+    // One question for each tunnel plan and one for the shared port, never two for the port.
+    expect(confirmMock).toHaveBeenCalledTimes(3)
+  })
+
   it('changes nothing when the switch is declined', async () => {
     confirmMock.mockResolvedValue(false)
     http.post.mockRejectedValue(tunnelRefusal('switch_mode'))
