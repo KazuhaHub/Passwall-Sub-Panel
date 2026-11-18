@@ -95,6 +95,46 @@ type Service struct {
 	// (transit.Service.ReservedPorts); nil knows none.
 	reserved   func(panelID int64) []int
 	probePorts func(context.Context, int64, time.Time) ([]domain.ProbeState, error)
+	// release is told, with no lock held, which tunnels a save or delete stopped
+	// routing to; nil tells nobody.
+	release func(ctx context.Context, linkIDs []int64)
+}
+
+// WithLinkRelease supplies what is told which incoming tunnels a front no
+// longer routes to. It runs after the server's lock is released, so it may take
+// the locks of any server (the front never deletes a tunnel itself).
+func (s *Service) WithLinkRelease(release func(ctx context.Context, linkIDs []int64)) *Service {
+	s.release = release
+	return s
+}
+
+// linkIDs lists the tunnels a front's routes target.
+func linkIDs(f domain.TransitFront) map[int64]bool {
+	out := map[int64]bool{}
+	for _, route := range f.Routes {
+		if route.Target.Kind == domain.FrontTargetLink {
+			out[route.Target.LinkID] = true
+		}
+	}
+	return out
+}
+
+// released tells the owner of the tunnels in before that are not in after.
+func (s *Service) released(ctx context.Context, before, after map[int64]bool) {
+	if s.release == nil {
+		return
+	}
+	var ids []int64
+	for id := range before {
+		if !after[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	s.release(ctx, ids)
 }
 
 // WithReservations lets the port views and pickers see the link ports promised
@@ -276,21 +316,38 @@ func (s *Service) Create(ctx context.Context, panelID int64, in Input) (Saved, e
 
 // Update replaces a front. The port is editable like everything else.
 func (s *Service) Update(ctx context.Context, panelID, frontID int64, in Input) (Saved, error) {
+	saved, before, err := s.update(ctx, panelID, frontID, in)
+	if err == nil {
+		s.released(ctx, before, linkIDs(saved.Front))
+	}
+	return saved, err
+}
+
+func (s *Service) update(ctx context.Context, panelID, frontID int64, in Input) (Saved, map[int64]bool, error) {
 	defer s.Lock(panelID)()
 	existing, err := s.fronts.Get(ctx, frontID)
 	if err != nil {
-		return Saved{}, err
+		return Saved{}, nil, err
 	}
 	if existing.PanelID != panelID {
-		return Saved{}, domain.ErrNotFound
+		return Saved{}, nil, domain.ErrNotFound
 	}
-	return s.save(ctx, panelID, &existing, in, saveOpts{})
+	saved, err := s.save(ctx, panelID, &existing, in, saveOpts{})
+	return saved, linkIDs(existing), err
 }
 
 // Delete removes a front. Its listeners return to their public ports and the
 // relay lines that enter on it stop being sent, so a delete that affects any is
 // a confirmed action that names them.
 func (s *Service) Delete(ctx context.Context, panelID, frontID int64, confirmed bool) (domain.TransitFront, error) {
+	deleted, err := s.deleteLocked(ctx, panelID, frontID, confirmed)
+	if err == nil {
+		s.released(ctx, linkIDs(deleted), nil)
+	}
+	return deleted, err
+}
+
+func (s *Service) deleteLocked(ctx context.Context, panelID, frontID int64, confirmed bool) (domain.TransitFront, error) {
 	defer s.Lock(panelID)()
 	existing, err := s.fronts.Get(ctx, frontID)
 	if err != nil {

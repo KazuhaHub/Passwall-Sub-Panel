@@ -146,6 +146,15 @@ func (f fakeLinks) LinkRow(_ context.Context, entry, exit int64) (domain.Transit
 	return domain.TransitLink{}, domain.ErrNotFound
 }
 
+func (f fakeLinks) LinkByID(_ context.Context, id int64) (domain.TransitLink, error) {
+	for _, l := range f.w.links {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return domain.TransitLink{}, domain.ErrNotFound
+}
+
 func (f fakeLinks) OutUsable(_ context.Context, _, exit int64) (bool, error) {
 	l, ok := f.w.links[[2]int64{1, exit}]
 	return f.w.address[exit] != "" || (ok && l.ExitAddress != ""), nil

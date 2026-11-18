@@ -11,6 +11,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/destpolicy"
 )
 
@@ -789,19 +790,25 @@ func (s *Service) dropUnusedLinks(ctx context.Context, node *domain.Node, old, c
 // save holds while it binds a default exit: a binding made after the read would
 // otherwise have its tunnel deleted from under it.
 func (s *Service) dropLinkIfUnused(ctx context.Context, node *domain.Node, exit int64) error {
-	defer s.lockServers(node.PanelID, exit)()
+	return s.dropPairIfUnused(ctx, node.PanelID, node.ID, exit)
+}
+
+// dropPairIfUnused is dropLinkIfUnused for the pair (entry, exit); skip is a node
+// of the entry that does not count as a user (0 skips none).
+func (s *Service) dropPairIfUnused(ctx context.Context, entry, skip, exit int64) error {
+	defer s.lockServers(entry, exit)()
 	fleet, err := s.Nodes.List(ctx)
 	if err != nil {
 		return err
 	}
 	for _, other := range fleet {
-		if other == nil || other.PanelID != node.PanelID {
+		if other == nil || other.PanelID != entry {
 			continue
 		}
 		if other.EgressPanelID == exit {
 			return nil
 		}
-		if other.ID == node.ID {
+		if skip != 0 && other.ID == skip {
 			continue
 		}
 		for _, route := range other.DestRoutes {
@@ -810,7 +817,32 @@ func (s *Service) dropLinkIfUnused(ctx context.Context, node *domain.Node, exit 
 			}
 		}
 	}
-	return s.Links.RemoveLink(ctx, node.PanelID, exit)
+	return s.Links.RemoveLink(ctx, entry, exit)
+}
+
+// LinksReleased is told by the front service which tunnels (by id) no SNI front
+// routes to any more. The tunnel service keeps such a tunnel while a front uses
+// it, and nothing else would ever delete it once the entry has dropped the pair,
+// so each is removed here when nothing of its entry server uses it. It takes the
+// entry's route lock before the servers' locks, like a save, and so must be
+// called with none of them held. Failures are logged: the front change this
+// follows is already stored.
+func (s *Service) LinksReleased(ctx context.Context, ids []int64) {
+	for _, id := range ids {
+		link, err := s.Links.LinkByID(ctx, id)
+		if err != nil {
+			if !errors.Is(err, domain.ErrNotFound) {
+				log.Warn("route: read a tunnel a front stopped routing to", "link", id, "err", err)
+			}
+			continue
+		}
+		unlock := s.Lock(link.EntryPanelID)
+		err = s.dropPairIfUnused(ctx, link.EntryPanelID, 0, link.ExitPanelID)
+		unlock()
+		if err != nil {
+			log.Warn("route: remove a tunnel no front or node uses", "link", id, "err", err)
+		}
+	}
 }
 
 // NodeDeleted removes the tunnels only the deleted node's routes used, by the

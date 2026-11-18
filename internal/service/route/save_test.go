@@ -146,6 +146,34 @@ func TestNodeDeletedRemovesTheTunnelsOnlyItsRoutesUsed(t *testing.T) {
 	}
 }
 
+// A front that stops routing to a tunnel hands the decision here: the tunnel
+// goes when nothing of its entry server uses the pair, under the entry's route
+// lock and then both servers' locks.
+func TestLinksReleasedByAFrontAreDroppedOnlyWhenTheEntryDoesNotUseThem(t *testing.T) {
+	w, s := routedWorld()
+	var locked []int64
+	s.ServerLock = func(panel int64) func() { locked = append(locked, panel); return func() {} }
+	w.links[[2]int64{1, 2}] = domain.TransitLink{ID: 12, EntryPanelID: 1, ExitPanelID: 2}
+	w.links[[2]int64{1, 3}] = domain.TransitLink{ID: 13, EntryPanelID: 1, ExitPanelID: 3}
+	w.nodes[10].EgressPanelID = 3 // still leaves through server 3 by default
+	s.LinksReleased(t.Context(), []int64{12, 13, 99})
+	if _, ok := w.links[[2]int64{1, 2}]; ok {
+		t.Fatal("an unused tunnel was kept")
+	}
+	if _, ok := w.links[[2]int64{1, 3}]; !ok {
+		t.Fatal("a tunnel the entry leaves through by default was removed")
+	}
+	w.nodes[11].DestRoutes = []domain.DestRoute{serverRoute("r1", 3, "domain:a.com")}
+	w.nodes[10].EgressPanelID = 0
+	s.LinksReleased(t.Context(), []int64{13})
+	if _, ok := w.links[[2]int64{1, 3}]; !ok {
+		t.Fatal("a tunnel a route of the entry targets was removed")
+	}
+	if want := []int64{1, 2, 1, 3, 1, 3}; len(locked) != len(want) || locked[0] != 1 || locked[1] != 2 || locked[2] != 1 || locked[3] != 3 || locked[4] != 1 || locked[5] != 3 {
+		t.Fatalf("locks taken = %v, want %v", locked, want)
+	}
+}
+
 func TestSaveRefusesWhatTheServerCannotRun(t *testing.T) {
 	w, s := routedWorld()
 	route := []domain.DestRoute{serverRoute("", 2, "domain:a.com")}

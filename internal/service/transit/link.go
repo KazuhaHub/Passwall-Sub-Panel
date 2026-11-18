@@ -461,6 +461,23 @@ func (s *Service) RemoveLink(ctx context.Context, entry, exit int64) error {
 	return err
 }
 
+// LinkByID returns the link with this id, domain.ErrNotFound when none exists.
+func (s *Service) LinkByID(ctx context.Context, id int64) (domain.TransitLink, error) {
+	if s.links == nil {
+		return domain.TransitLink{}, domain.ErrNotFound
+	}
+	all, err := s.links.ListLinks(ctx)
+	if err != nil {
+		return domain.TransitLink{}, err
+	}
+	for _, link := range all {
+		if link.ID == id {
+			return link, nil
+		}
+	}
+	return domain.TransitLink{}, domain.ErrNotFound
+}
+
 // LinkRow returns the link from entry to exit as stored, domain.ErrNotFound
 // when none exists.
 func (s *Service) LinkRow(ctx context.Context, entry, exit int64) (domain.TransitLink, error) {

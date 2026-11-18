@@ -876,6 +876,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	})
 	nativeSync.SetRoutes(routeSvc)
 	nodeSvc.SetRouteLinks(routeSvc.NodeDeleted, routeSvc.Lock)
+	// A tunnel a front stops routing to goes once its entry no longer uses it.
+	frontSvc.WithLinkRelease(routeSvc.LinksReleased)
 	nodeSvc.SetSetupRouter(routeSvc)
 	destLists.SetRouteUses(routeSvc)
 	// The hit ingest: nodesync hands each validated batch to the queue after the
