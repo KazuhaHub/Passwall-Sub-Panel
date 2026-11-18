@@ -66,5 +66,10 @@
   "release.unknown": "通道未知",
   "release.rc": "候选版",
   "release.beta": "测试版",
-  "release.pending": "等待正式发布"
+  "release.pending": "等待正式发布",
+  "traffic_factor": {
+    "free": "不计流量",
+    "badge_title": "流量倍率 ×{{factor}}",
+    "free_title": "此线路的流量不计入配额"
+  }
 }

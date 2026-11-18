@@ -219,6 +219,7 @@ describe('locale coverage', () => {
       // The summary carries only the number — the panel names are what the
       // detail exists for.
       expect(f.cap_multiplied_short).toContain('{{total}}')
+      expect(f.cap_multiplied_short).toContain('{{rows}}')
     }
   })
 })

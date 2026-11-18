@@ -24,6 +24,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -70,6 +71,8 @@ import InsightsIcon from '@mui/icons-material/Insights'
 import UpgradeIcon from '@mui/icons-material/UploadOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import TroubleshootIcon from '@mui/icons-material/Troubleshoot'
+import PercentIcon from '@mui/icons-material/Percent'
+import { LineMultipliersDialog } from './LineMultipliersDialog'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -236,6 +239,7 @@ export default function ServersView() {
 	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
   const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
   const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
+  const [lineFactorsTarget, setLineFactorsTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1573,7 +1577,19 @@ export default function ServersView() {
                       onChange={(_, c) => toggleOne(s.id, c)}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}</TableCell>
+                  <TableCell sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}
+                    {s.client_identities_warning && (
+                      <Tooltip title={t('admin:servers.identities.warning_tip')}>
+                        <Chip size="small" color="warning" variant="outlined" data-testid="client-identities-warning"
+                          label={t('admin:servers.identities.warning')} sx={{ ml: 0.75, height: 20, fontSize: 11 }} />
+                      </Tooltip>
+                    )}
+                    {typeof s.client_identities === 'number' && (
+                      <Typography variant="caption" color="text.secondary" component="div" data-testid="client-identities">
+                        {t('admin:servers.identities.count', { count: s.client_identities })}
+                      </Typography>
+                    )}
+                  </TableCell>
                   {/* URL is the admin's reference, not subscription-critical
                       — clip aggressively so the table stays scannable and
                       keeps space for status / actions. Full URL shows in a
@@ -1601,6 +1617,11 @@ export default function ServersView() {
                     >
                       {t('admin:servers.action.test')}
                     </Button>
+                    <Tooltip title={t('admin:servers.action.line_factors')}>
+                      <IconButton size="small" onClick={() => setLineFactorsTarget(s)} aria-label={t('admin:servers.action.line_factors')}>
+                        <PercentIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <IconButton size="small" onClick={() => openEdit(s)} aria-label={t('admin:servers.action.edit')}>
                       <EditIcon fontSize="small" />
                     </IconButton>
@@ -2018,6 +2039,7 @@ export default function ServersView() {
       />
       <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
+      {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
         onClose={() => setReinstallTarget(null)}
         onNativeInstall={server => { setReinstallTarget(null); openNativeInstallation(server) }}

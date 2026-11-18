@@ -11,7 +11,7 @@ export function useLineVisibility(nodeId: number, draft: LineVisibilityDraft | n
 }
 
 /** The group names that would see one draft line. */
-export function lineVisibilityHint(state: LineVisibilityState, kind: 'relays' | 'routes', index: number): PreviewHint | undefined {
+export function lineVisibilityHint(state: LineVisibilityState, kind: 'relays', index: number): PreviewHint | undefined {
   return previewHint(state, data => {
     const ids = data[kind][index]
     if (!ids) return undefined

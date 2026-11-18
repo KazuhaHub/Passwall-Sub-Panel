@@ -14,7 +14,7 @@ import (
 )
 
 func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
-	for _, scenario := range []string{"single", "both", "repeat", "node", "hidden_direct", "disabled_relay", "drift", "literal", "template_collision"} {
+	for _, scenario := range []string{"single", "both", "repeat", "node", "hidden_direct", "disabled_relay", "literal", "template_collision"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, node, user, rule := collidingNameFixture(t)
 			user.GroupID = 1
@@ -28,12 +28,11 @@ func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
 				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
 			case "hidden_direct":
 				node.HideDirect = true
+				rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: "relay"}}
 			case "disabled_relay":
 				node.Relays[0].Enabled = false
-			case "drift":
-				node.RouteState.Status = "drift"
 			case "literal":
-				node.RouteState.Lines[0].Name = "日本 [literal]"
+				node.DisplayName = "日本 [literal]"
 			case "template_collision":
 				s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: strings.Replace(referenceMihomoTemplate, "  {{ proxies }}", "  {{ proxies }}\n  - {name: same, type: direct}", 1)}}
 			}
@@ -56,7 +55,7 @@ func TestGroupPreviewUsesSharedNamesWithinRuleSetScope(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario == "template_collision" {
-				if !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) || !reflect.DeepEqual(config.Groups[0].Members, []string{"same [VLESS 路由]"}) {
+				if !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) || !reflect.DeepEqual(config.Groups[0].Members, []string{"same [直连]"}) {
 					t.Fatalf("preview must ignore external names; subscription must avoid them: %+v vs %+v", preview.Groups, config.Groups)
 				}
 			} else if len(preview.Groups) != len(config.Groups) {
@@ -184,7 +183,6 @@ func TestGroupPreviewUsesScopedFlagsLayoutAndNoUserCredentialReads(t *testing.T)
 	s, node, u, rule := collidingNameFixture(t)
 	node.HideDirect = false
 	node.Relays = nil
-	node.RouteState.Lines = nil
 	node.DisplayName = "A"
 	node.Region = "JP"
 	other := *node
@@ -210,7 +208,6 @@ func TestGroupPreviewUsesScopedFlagsLayoutAndNoUserCredentialReads(t *testing.T)
 		}
 	}
 	s.repos.PSPClient = noPreviewCredentials{}
-	node.RouteState = domain.NodeRouteState{Status: "applied", Binding: domain.RouteBinding("https://panel.example", node), Lines: []domain.VlessRouteLine{{ID: "route-B", Name: "route", Route: 1001, Enabled: true, OutboundTag: "direct"}}}
 	if _, err := s.PreviewMihomoGroup(context.Background(), 1, rule); err != nil {
 		t.Fatal(err)
 	}
@@ -226,26 +223,27 @@ func TestGroupPreviewSimulationDoesNotWeakenUserPublicationGates(t *testing.T) {
 	s, _, u, rule := collidingNameFixture(t)
 	u.GroupID = 1
 	s.repos.PSPClient = nil
+	s.repos.XUIPanel = renderPanelRepo{kind: domain.PanelKindPSP}
 	preview, err := s.PreviewMihomoGroup(context.Background(), 1, rule)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(preview.Groups[0].Members, []string{"same"}) {
-		t.Fatalf("simulation omitted route: %+v", preview)
+		t.Fatalf("simulation omitted the line: %+v", preview)
 	}
 	output, err := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(namedVLESSProxies(t, output, domain.ClientMihomo)) != 0 {
-		t.Fatal("user route bypassed applied credential gate")
+		t.Fatal("user line bypassed applied credential gate")
 	}
 }
 
 func TestGroupPreviewKeepsNestedGroupsButIgnoresExternalProviderGroups(t *testing.T) {
 	s, _, _, rule := collidingNameFixture(t)
 	rule.Content = "- DOMAIN,nested.example,Nested\n- MATCH,Outer"
-	rule.ProxyGroupMembers = map[string][]domain.ProxyGroupMember{"Outer": {{Kind: "proxy_group", Value: "Nested"}}, "Nested": {{Kind: "line", NodeID: 7, LineID: "route-B"}}}
+	rule.ProxyGroupMembers = map[string][]domain.ProxyGroupMember{"Outer": {{Kind: "proxy_group", Value: "Nested"}}, "Nested": {{Kind: "line", NodeID: 7, LineID: "direct"}}}
 	tpl := strings.Replace(referenceMihomoTemplate, "  {{ proxy_groups }}", "  {{ proxy_groups }}\n  - name: ProviderOnly\n    type: select\n    use: [remote]", 1) + "\nproxy-providers:\n  remote: {type: file, path: remote.yaml}\n"
 	s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: tpl}}
 	got, err := s.PreviewMihomoGroup(context.Background(), 1, rule)
@@ -294,7 +292,7 @@ func TestGroupPreviewIgnoresLinesReferencedOnlyByOtherRuleSets(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := namedVLESSProxies(t, output, domain.ClientMihomo)
-	if len(names) != 2 || names["same [中转]"] == nil || names["same [VLESS 路由]"] == nil {
+	if len(names) != 2 || names["same [中转]"] == nil || names["same [直连]"] == nil {
 		t.Fatalf("subscription lost other rule-set dependencies: %+v", names)
 	}
 }

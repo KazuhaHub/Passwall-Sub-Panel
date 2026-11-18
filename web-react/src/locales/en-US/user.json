@@ -16,7 +16,6 @@
     "empty": "No nodes to show",
     "relay_fallback": "Relay {{index}}",
     "relay_hint": "Relay status only reflects whether the relay entry is reachable, not that the full relay path works.",
-    "route_hint": "VLESS routing lines reuse their selected entry's reachability result; this does not verify the outbound.",
     "checked_at": "Last checked: {{time}}"
   },
   "service": {
@@ -52,7 +51,8 @@
       "monthly": "Monthly",
       "quarterly": "Quarterly",
       "yearly": "Yearly"
-    }
+    },
+    "traffic_used_charged": "Period used (charged)"
   },
   "sub": {
     "title": "Subscription URL",

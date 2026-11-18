@@ -30,7 +30,7 @@ import (
 //
 // The whole document is then standard-base64 encoded (no line breaks) so it
 // matches what these clients fetch with their built-in subscription updater.
-func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, appliedCredentials map[int64]appliedClientCredential) (*Output, error) {
+func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, appliedCredentials appliedCredentials) (*Output, error) {
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 	nativePanels := s.nativePanelIDs(ctx, items)
 
@@ -58,17 +58,13 @@ func (s *Service) renderURIListWithCredentials(ctx context.Context, u *domain.Us
 			continue
 		}
 		if _, native := nativePanels[it.node.PanelID]; native {
-			if _, applied := appliedCredentials[it.node.ID]; !applied {
+			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("uri-list: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
 				continue
 			}
 		}
-		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
-		renderUser, lineErr := it.userForLine(renderUser)
-		if lineErr != nil {
-			continue
-		}
+		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it, emailRules, appliedCredentials)
 		// it.name (not DisplayName) carries the layout-applied name — the
 		// region-flag prefix and, for relay variants, the per-line suffix —
 		// so each transit entry gets a distinct fragment.

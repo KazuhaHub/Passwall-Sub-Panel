@@ -184,6 +184,43 @@ func (s *Service) SetConfigPusher(p UserConfigPusher) {
 // repo is wired the shared-client metering pass runs (no-op pre-migration).
 func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClient = r }
 
+// lineFactors reads every line's traffic factor once for a poll cycle, with
+// the direct line of each (panel, inbound) for the legacy per-node rows. No
+// node repository (tests, early start) is one-for-one everywhere.
+func (s *Service) lineFactors(ctx context.Context) (lineFactors, error) {
+	if s.nodes == nil {
+		return lineFactors{}, nil
+	}
+	nodes, err := s.nodes.List(ctx)
+	if err != nil {
+		return lineFactors{}, err
+	}
+	out := lineFactors{byLine: domain.LineFactors(nodes), byInbound: make(map[inboundKey]int, len(nodes))}
+	for _, n := range nodes {
+		if n != nil {
+			out.byInbound[inboundKey{panelID: n.PanelID, inboundID: n.InboundID}] = n.EffectiveTrafficFactor()
+		}
+	}
+	return out, nil
+}
+
+// lineFactors is one cycle's view of every line's factor.
+type lineFactors struct {
+	byLine    map[domain.LineKey]int
+	byInbound map[inboundKey]int
+}
+
+// client is the factor a shared client row is booked at.
+func (f lineFactors) client(c *domain.PSPClient) int { return domain.ClientTrafficFactor(f.byLine, c) }
+
+// legacy is the factor of a legacy per-node row: its node's direct line.
+func (f lineFactors) legacy(panelID int64, inboundID int) int {
+	if milli, ok := f.byInbound[inboundKey{panelID: panelID, inboundID: inboundID}]; ok {
+		return milli
+	}
+	return domain.TrafficFactorDefault
+}
+
 // errPanelNotRead marks a panel whose fetch produced no result at all this
 // cycle, so its users count as unread rather than as idle.
 var errPanelNotRead = errors.New("panel was not read this cycle")
@@ -470,6 +507,15 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			sharedClients = nil
 		}
 	}
+	// Every line's traffic factor, read once for the cycle. A failed read
+	// abandons the cycle before anything is booked: charging one-for-one in
+	// its place would bill a free line and under-bill a weighted one, and
+	// nothing is lost by waiting — the counters keep counting and the next
+	// cycle books the whole delta at the right price.
+	factors, ferr := s.lineFactors(ctx)
+	if ferr != nil {
+		return fmt.Errorf("traffic poll: read line traffic factors: %w", ferr)
+	}
 	panelsToFetch := make(map[int64]struct{}, len(byPanel)+len(sharedClients))
 	for pid := range byPanel {
 		panelsToFetch[pid] = struct{}{}
@@ -695,19 +741,25 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 						"email", ref.email,
 						"err", derr)
 				} else {
+					// recordClientStats booked the RAW delta on the row; the
+					// charge is this server's factor applied to it. The row's
+					// pointer is already queued on the sink, so its charged
+					// ledger lands in the same batched write.
+					charged := delta.charged(factors.legacy(panelID, inboundID))
+					ref.entry.ChargedLifetimeBytes += charged.total
 					if delta.hadPrev {
-						total.deltaUp += delta.up
-						total.deltaDown += delta.down
-						total.deltaTotal += delta.total
+						total.addDelta(charged, delta)
 					} else {
 						total.bootstrap = append(total.bootstrap, bootstrapClientDelta{
-							delta:     delta,
+							delta:     charged,
+							raw:       delta,
 							createdAt: ref.createdAt,
 						})
 					}
 					// Remember this client's delta so the rollover baseline pass
 					// can subtract it (this cycle's traffic belongs to the NEW
 					// period, exactly as the user-level rollover treats it).
+					// Raw, like the per-client baselines it feeds.
 					sink.clientDeltas[ref.entry.ID] = delta
 				}
 				totals[ref.userID] = total
@@ -818,10 +870,12 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				if delta.up == 0 && delta.down == 0 && delta.total == 0 {
 					continue
 				}
+				factor := factors.client(c)
+				charged := delta.charged(factor)
+				c.ChargedLifetimeBytes += charged.total // queued on the sink with the raw delta
+				c.LastFactorMilli = &factor
 				tot := totals[c.UserID]
-				tot.deltaUp += delta.up
-				tot.deltaDown += delta.down
-				tot.deltaTotal += delta.total
+				tot.addDelta(charged, delta)
 				tot.hits++ // ensure recordAndEnforceWith advances lifetime for shared-only users
 				totals[c.UserID] = tot
 			}
@@ -845,7 +899,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// the gap between the two is diagnostic on its own.
 	activeUsers := 0
 	for _, t := range totals {
-		if t.deltaTotal != 0 {
+		if t.deltaTotal != 0 || t.rawTotal != 0 {
 			activeUsers++
 		}
 	}
@@ -966,7 +1020,32 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		}
 		if err := s.users.BatchUpdateTrafficState(ctx, pending); err != nil {
 			log.Warn("traffic poll flush user traffic state", "count", len(pending), "err", err)
+			countersStale = true
 		}
+	}
+	// A row whose line was dropped is detached, not deleted, so this cycle
+	// could still book what its counter held. Once the counters and the
+	// users' ledgers of a cycle that read its server have landed, it goes.
+	if !countersStale {
+		s.deleteBookedDetachedClients(ctx, sharedClients, func(panelID int64, email string) bool {
+			pd, ok := panelData[panelID]
+			if !ok || pd.err != nil {
+				return false
+			}
+			// Still reported by its server: the panel-side client has not
+			// been removed yet (the removal is skipped while any of the
+			// user's other panels is unreachable). The row stays, so the
+			// client keeps being booked and remains visible to every later
+			// cleanup and lifecycle pass.
+			for _, traffics := range pd.stats {
+				for _, t := range traffics {
+					if t.Email == email {
+						return false
+					}
+				}
+			}
+			return true
+		}, pollStartedAt)
 	}
 	// v3.6.0-beta.4: convert per-user ms-since-epoch → time.Time on the way
 	// to the repo so callers don't need to know 3X-UI's wire unit. Done as
@@ -1002,6 +1081,39 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	return nil
 }
 
+// detachedRowGrace keeps a row that was created moments before a cycle out of
+// the deletion below: a planner creates a row and attaches it in two writes,
+// and a cycle that lists between them must not take the row for a dropped one.
+const detachedRowGrace = time.Minute
+
+// deleteBookedDetachedClients deletes the shared-client rows that have no
+// attachment left, whose server this cycle read and no longer reports them,
+// after the cycle's booking has been written.
+func (s *Service) deleteBookedDetachedClients(ctx context.Context, clients []*domain.PSPClient, gone func(panelID int64, email string) bool, cycleStart time.Time) {
+	lister, ok := s.pspClient.(ports.DetachedClientLister)
+	if !ok || len(clients) == 0 {
+		return
+	}
+	detached, err := lister.DetachedClientIDs(ctx)
+	if err != nil {
+		log.Warn("traffic poll: list detached clients", "err", err)
+		return
+	}
+	if len(detached) == 0 {
+		return
+	}
+	for _, c := range clients {
+		if c == nil || !detached[c.ID] || !gone(c.PanelID, c.Email) || !c.CreatedAt.Before(cycleStart.Add(-detachedRowGrace)) {
+			continue
+		}
+		// Conditional on the row still being detached: a resync may have
+		// given the line back between the listing and this delete.
+		if err := lister.DeleteIfDetached(ctx, c.ID); err != nil {
+			log.Warn("traffic poll: delete booked detached client", "client_id", c.ID, "err", err)
+		}
+	}
+}
+
 func markSkippedUsers(skipUsers map[int64]bool, refs []ownershipRef) {
 	for _, ref := range refs {
 		skipUsers[ref.userID] = true
@@ -1029,13 +1141,30 @@ func (s *Service) listAllUsers(ctx context.Context) ([]*domain.User, error) {
 }
 
 type trafficTotals struct {
-	up         int64
-	down       int64
+	up   int64
+	down int64
+	// delta* are CHARGED bytes: each server's raw delta weighted by its
+	// traffic factor. They are what the user's quota ledger books.
 	deltaUp    int64
 	deltaDown  int64
 	deltaTotal int64
-	bootstrap  []bootstrapClientDelta
-	hits       int
+	// raw* are the same deltas unweighted, for the raw lifetime columns.
+	rawUp     int64
+	rawDown   int64
+	rawTotal  int64
+	bootstrap []bootstrapClientDelta
+	hits      int
+}
+
+// addDelta books one client's delta: charged into the quota totals, raw
+// beside it.
+func (t *trafficTotals) addDelta(charged, raw trafficDelta) {
+	t.deltaUp += charged.up
+	t.deltaDown += charged.down
+	t.deltaTotal += charged.total
+	t.rawUp += raw.up
+	t.rawDown += raw.down
+	t.rawTotal += raw.total
 }
 
 type trafficDelta struct {
@@ -1046,8 +1175,22 @@ type trafficDelta struct {
 }
 
 type bootstrapClientDelta struct {
-	delta     trafficDelta
+	delta     trafficDelta // charged
+	raw       trafficDelta
 	createdAt time.Time
+}
+
+// charged weights a raw delta by a server's traffic factor (thousandths).
+// Each direction is rounded on its own and the total is their sum, so a
+// charged ledger keeps up + down == total exactly like the raw one. At the
+// default factor it returns d unchanged.
+func (d trafficDelta) charged(factorMilli int) trafficDelta {
+	if factorMilli == domain.TrafficFactorDefault {
+		return d
+	}
+	up := domain.ChargeBytes(d.up, factorMilli)
+	down := domain.ChargeBytes(d.down, factorMilli)
+	return trafficDelta{up: up, down: down, total: up + down, hadPrev: d.hadPrev}
 }
 
 // pollSink collects per-poll snapshot writes so PollOnce can flush them
@@ -1388,15 +1531,11 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		for _, b := range totals.bootstrap {
 			if cutoff == nil {
 				// Truly fresh user — count every cumulative read as new.
-				totals.deltaUp += b.delta.up
-				totals.deltaDown += b.delta.down
-				totals.deltaTotal += b.delta.total
+				totals.addDelta(b.delta, b.raw)
 				continue
 			}
 			if !b.createdAt.IsZero() && b.createdAt.After(*cutoff) {
-				totals.deltaUp += b.delta.up
-				totals.deltaDown += b.delta.down
-				totals.deltaTotal += b.delta.total
+				totals.addDelta(b.delta, b.raw)
 			}
 			// else: ownership predates the cutoff → already in lifetime.
 		}
@@ -1408,10 +1547,17 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 			u.LifetimeUpBytes = prev.UpBytes
 			u.LifetimeDownBytes = prev.DownBytes
 			u.LifetimeTotalBytes = prev.TotalBytes
+			// Before 4.3 raw and charged were one figure.
+			u.RawLifetimeUpBytes = prev.UpBytes
+			u.RawLifetimeDownBytes = prev.DownBytes
+			u.RawLifetimeTotalBytes = prev.TotalBytes
 		}
 		u.LifetimeUpBytes += totals.deltaUp
 		u.LifetimeDownBytes += totals.deltaDown
 		u.LifetimeTotalBytes += totals.deltaTotal
+		u.RawLifetimeUpBytes += totals.rawUp
+		u.RawLifetimeDownBytes += totals.rawDown
+		u.RawLifetimeTotalBytes += totals.rawTotal
 		// Always advance the baseline once we've written a successful snapshot
 		// — that's the cutoff for the next poll's bootstrap-delta logic. If we
 		// only updated it on dirty cycles, an ownership added during a
@@ -1743,6 +1889,31 @@ type NodeUsageRow struct {
 	TodayUpBytes       int64
 	TodayDownBytes     int64
 	TodayTotalBytes    int64
+
+	// The byte counts above are RAW. Charged* are what the user's quota was
+	// charged for them, and TrafficFactorMilli the server's current factor.
+	// ChargedLifetimeBytes is exact (booked delta by delta); ChargedPeriodBytes
+	// is the period share of it (see chargedShare).
+	TrafficFactorMilli   int
+	ChargedLifetimeBytes int64
+	ChargedPeriodBytes   int64
+}
+
+// chargedShare estimates the charged part of rawPart, a slice of a row whose
+// whole lifetime is rawLifetime raw and chargedLifetime charged. Per-row period
+// baselines are raw, so a period's charge is the lifetime's average price
+// applied to it: exact while the server's factor has not changed, and never
+// more than the row was charged in total.
+func chargedShare(rawPart, rawLifetime, chargedLifetime int64) int64 {
+	switch {
+	case rawPart <= 0 || rawLifetime <= 0 || chargedLifetime <= 0:
+		return 0
+	case chargedLifetime == rawLifetime:
+		return rawPart
+	case rawPart >= rawLifetime:
+		return chargedLifetime
+	}
+	return int64(float64(rawPart) * (float64(chargedLifetime) / float64(rawLifetime)))
 }
 
 // UserNodeUsage returns one row per node the user is provisioned on, each with
@@ -1798,18 +1969,24 @@ func (s *Service) UserNodeUsage(ctx context.Context, userID int64) ([]NodeUsageR
 
 	rows := make([]NodeUsageRow, 0, len(entries))
 	for _, e := range entries {
+		periodTotal := nonNeg(e.LifetimeTotalBytes - e.PeriodBaselineTotalBytes)
 		row := NodeUsageRow{
-			PanelID:            e.PanelID,
-			InboundID:          e.InboundID,
-			ClientEmail:        e.ClientEmail,
-			LifetimeUpBytes:    e.LifetimeUpBytes,
-			LifetimeDownBytes:  e.LifetimeDownBytes,
-			LifetimeTotalBytes: e.LifetimeTotalBytes,
-			PeriodUpBytes:      nonNeg(e.LifetimeUpBytes - e.PeriodBaselineUpBytes),
-			PeriodDownBytes:    nonNeg(e.LifetimeDownBytes - e.PeriodBaselineDownBytes),
-			PeriodTotalBytes:   nonNeg(e.LifetimeTotalBytes - e.PeriodBaselineTotalBytes),
+			TrafficFactorMilli:   domain.TrafficFactorDefault,
+			ChargedLifetimeBytes: e.ChargedLifetimeBytes,
+			ChargedPeriodBytes:   chargedShare(periodTotal, e.LifetimeTotalBytes, e.ChargedLifetimeBytes),
+			PanelID:              e.PanelID,
+			InboundID:            e.InboundID,
+			ClientEmail:          e.ClientEmail,
+			LifetimeUpBytes:      e.LifetimeUpBytes,
+			LifetimeDownBytes:    e.LifetimeDownBytes,
+			LifetimeTotalBytes:   e.LifetimeTotalBytes,
+			PeriodUpBytes:        nonNeg(e.LifetimeUpBytes - e.PeriodBaselineUpBytes),
+			PeriodDownBytes:      nonNeg(e.LifetimeDownBytes - e.PeriodBaselineDownBytes),
+			PeriodTotalBytes:     nonNeg(e.LifetimeTotalBytes - e.PeriodBaselineTotalBytes),
 		}
 		if n := nodeByPI[nodePI{panelID: e.PanelID, inboundID: e.InboundID}]; n != nil {
+			// A legacy per-node row is that node's direct line.
+			row.TrafficFactorMilli = n.EffectiveTrafficFactor()
 			row.NodeID = n.ID
 			row.DisplayName = n.DisplayName
 			row.Region = n.Region
@@ -1852,6 +2029,25 @@ type ServerUsageRow struct {
 	TodayUpBytes       int64
 	TodayDownBytes     int64
 	TodayTotalBytes    int64
+
+	// Raw above, charged here; see NodeUsageRow. TrafficFactorMilli is the
+	// factor shared by every line the user has on this server, nil when the
+	// lines are priced differently.
+	TrafficFactorMilli   *int
+	ChargedLifetimeBytes int64
+	ChargedPeriodBytes   int64
+}
+
+// sameFactor folds one more line's factor into a server row: the factor while
+// every line agrees, nil once two differ.
+func sameFactor(first bool, current *int, next int) *int {
+	if first {
+		return &next
+	}
+	if current == nil || *current != next {
+		return nil
+	}
+	return current
 }
 
 // UserServerUsage returns one user's usage broken down per SERVER (3X-UI panel):
@@ -1890,6 +2086,9 @@ func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUs
 			order = append(order, r.PanelID)
 		}
 		sr.NodeCount++
+		sr.TrafficFactorMilli = sameFactor(sr.NodeCount == 1, sr.TrafficFactorMilli, r.TrafficFactorMilli)
+		sr.ChargedLifetimeBytes += r.ChargedLifetimeBytes
+		sr.ChargedPeriodBytes += r.ChargedPeriodBytes
 		sr.LifetimeUpBytes += r.LifetimeUpBytes
 		sr.LifetimeDownBytes += r.LifetimeDownBytes
 		sr.LifetimeTotalBytes += r.LifetimeTotalBytes
@@ -1924,13 +2123,17 @@ func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUs
 // is written (recordSharedClientStats), so a per-server "today" isn't reconstructable.
 // NodeCount = the distinct nodes attached to the user's clients on that panel.
 func (s *Service) serverUsageFromShared(ctx context.Context, clients []*domain.PSPClient) []ServerUsageRow {
+	// Display only: a failed read falls back to each row's last booked factor.
+	factors, _ := s.lineFactors(ctx)
 	byPanel := map[int64]*ServerUsageRow{}
 	nodeSet := map[int64]map[int64]struct{}{}
+	first := map[int64]bool{}
 	order := make([]int64, 0, len(clients))
 	for _, c := range clients {
 		sr := byPanel[c.PanelID]
 		if sr == nil {
 			sr = &ServerUsageRow{PanelID: c.PanelID}
+			first[c.PanelID] = true
 			byPanel[c.PanelID] = sr
 			nodeSet[c.PanelID] = map[int64]struct{}{}
 			order = append(order, c.PanelID)
@@ -1940,7 +2143,12 @@ func (s *Service) serverUsageFromShared(ctx context.Context, clients []*domain.P
 		sr.LifetimeTotalBytes += c.LifetimeTotalBytes
 		sr.PeriodUpBytes += nonNeg(c.LifetimeUpBytes - c.PeriodBaselineUpBytes)
 		sr.PeriodDownBytes += nonNeg(c.LifetimeDownBytes - c.PeriodBaselineDownBytes)
-		sr.PeriodTotalBytes += nonNeg(c.LifetimeTotalBytes - c.PeriodBaselineTotalBytes)
+		sr.TrafficFactorMilli = sameFactor(first[c.PanelID], sr.TrafficFactorMilli, factors.client(c))
+		first[c.PanelID] = false
+		periodTotal := nonNeg(c.LifetimeTotalBytes - c.PeriodBaselineTotalBytes)
+		sr.PeriodTotalBytes += periodTotal
+		sr.ChargedLifetimeBytes += c.ChargedLifetimeBytes
+		sr.ChargedPeriodBytes += chargedShare(periodTotal, c.LifetimeTotalBytes, c.ChargedLifetimeBytes)
 		if atts, err := s.pspClient.ListInbounds(ctx, c.ID); err == nil {
 			for _, a := range atts {
 				nodeSet[c.PanelID][a.NodeID] = struct{}{}
@@ -2681,6 +2889,12 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 		u.LifetimeUpBytes += dUp
 		u.LifetimeDownBytes += dDown
 		u.LifetimeTotalBytes = currentTotal
+		// The raw ledger moves with it: an admin correction is not traffic
+		// through any server, so there is no factor to apply, and leaving raw
+		// behind would make a one-for-one panel show raw < charged.
+		u.RawLifetimeUpBytes += dUp
+		u.RawLifetimeDownBytes += dDown
+		u.RawLifetimeTotalBytes += deltaTotal
 	}
 	// Move the bootstrap-delta cutoff forward — without this, ownerships added
 	// between the admin override and the next poll would be classified
@@ -2752,6 +2966,17 @@ func (s *Service) reseedClientBaselines(ctx context.Context, userID, usedBytes i
 	s.reseedSharedBaselines(ctx, userID, usedBytes)
 }
 
+// reseedLedger picks the per-row ledger a usage override is distributed over:
+// the charged one, unless the user's rows carry no charged history at all —
+// every server free, or rows nothing has been booked on since the 4.3
+// backfill — where the raw lifetime is the only proportion there is.
+func reseedLedger(charged, raw int64) int64 {
+	if charged > 0 {
+		return charged
+	}
+	return raw
+}
+
 // reseedFraction returns f = (Σlifetime - used)/Σlifetime, clamped so a user
 // can't have used more this period than their total lifetime. 0 when lifetime
 // is 0 (everything below scales to a zero baseline). float64 keeps the
@@ -2775,11 +3000,15 @@ func (s *Service) reseedOwnershipBaselines(ctx context.Context, userID, usedByte
 	if err != nil || len(entries) == 0 {
 		return
 	}
-	var clientLifetime int64
+	// usedBytes is CHARGED (the user's quota ledger), so the fraction is taken
+	// against the charged per-row ledgers and then applied to the raw
+	// baselines the rows keep.
+	var charged, raw int64
 	for _, e := range entries {
-		clientLifetime += e.LifetimeTotalBytes
+		charged += e.ChargedLifetimeBytes
+		raw += e.LifetimeTotalBytes
 	}
-	f := reseedFraction(clientLifetime, usedBytes)
+	f := reseedFraction(reseedLedger(charged, raw), usedBytes)
 	for _, e := range entries {
 		e.PeriodBaselineUpBytes = int64(float64(e.LifetimeUpBytes) * f)
 		e.PeriodBaselineDownBytes = int64(float64(e.LifetimeDownBytes) * f)
@@ -2798,11 +3027,13 @@ func (s *Service) reseedSharedBaselines(ctx context.Context, userID, usedBytes i
 	if err != nil || len(clients) == 0 {
 		return
 	}
-	var clientLifetime int64
+	// Charged, as in reseedOwnershipBaselines.
+	var charged, raw int64
 	for _, c := range clients {
-		clientLifetime += c.LifetimeTotalBytes
+		charged += c.ChargedLifetimeBytes
+		raw += c.LifetimeTotalBytes
 	}
-	f := reseedFraction(clientLifetime, usedBytes)
+	f := reseedFraction(reseedLedger(charged, raw), usedBytes)
 	for _, c := range clients {
 		c.PeriodBaselineUpBytes = int64(float64(c.LifetimeUpBytes) * f)
 		c.PeriodBaselineDownBytes = int64(float64(c.LifetimeDownBytes) * f)

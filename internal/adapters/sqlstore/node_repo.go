@@ -50,9 +50,7 @@ func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	if err != nil {
 		return err
 	}
-	// Route synchronization has its own CAS writer. A stale full node snapshot
-	// must never overwrite a newer applied/unknown route state.
-	return r.db.WithContext(ctx).Omit("RouteState", "RouteRevision").Save(row).Error
+	return r.db.WithContext(ctx).Save(row).Error
 }
 
 // UpdateMetadata writes ONLY the admin-editable identity columns, leaving the
@@ -79,6 +77,9 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 			"hide_direct":       n.HideDirect,
 			"show_relay_status": n.ShowRelayStatus,
 			"egress_panel_id":   n.EgressPanelID,
+			// The service resolves an omitted factor to the stored one
+			// before it calls here.
+			"traffic_factor_milli": n.EffectiveTrafficFactor(),
 		}).Error
 }
 

@@ -32,6 +32,8 @@ type Service struct {
 	// migrated user's shared client — which has no ownership row — is recognised as
 	// PSP-managed rather than an operator's hand-made client.
 	pspClients ports.PSPClientRepo
+	// nodes resolves a legacy per-node client's line factor (SetNodeRepo).
+	nodes ports.NodeRepo
 }
 
 func New(pool ports.XUIPool, ownership ports.OwnershipRepo) *Service {
@@ -40,6 +42,25 @@ func New(pool ports.XUIPool, ownership ports.OwnershipRepo) *Service {
 
 // SetPSPClientRepo late-binds the v3.9.0 shared-client repo. Until set, the
 // inbound-deletable guard falls back to ownership-only (pre-migration behaviour).
+// panelWant converts the lifecycle's period headroom, in CHARGED bytes, into
+// the RAW bytes this legacy per-node client's own counter should allow
+// (domain.RawHeadroom). A legacy per-node client is its node's direct line, so
+// it is priced at that line's factor.
+func (s *Service) panelWant(ctx context.Context, panelID int64, inboundID int, want domain.UserLifecycle) domain.UserLifecycle {
+	factor := domain.TrafficFactorDefault
+	if s.nodes != nil {
+		if n, err := s.nodes.GetByPanelInbound(ctx, panelID, inboundID); err == nil {
+			factor = n.EffectiveTrafficFactor()
+		}
+	}
+	want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, factor)
+	return want
+}
+
+// SetNodeRepo lets the legacy per-node paths price a client at its node's
+// direct-line factor. Unset, every node is one-for-one.
+func (s *Service) SetNodeRepo(nodes ports.NodeRepo) { s.nodes = nodes }
+
 func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClients = r }
 
 // ensureClientOwned returns nil only when (panelID, inboundID, email) is
@@ -140,6 +161,7 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(ctx, panelID, inboundID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	if err := c.AddClient(ctx, inboundID, spec); err != nil {
 		// A duplicate-email error means the client already exists in 3X-UI. If
@@ -198,6 +220,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(ctx, panelID, inboundID, want)
 	spec := buildClientSpec(protocol, ssMethod, newUUID, email, flow, want, panelLifetime)
 	if err := c.UpdateClient(ctx, spec); err != nil {
 		return fmt.Errorf("xui rotate uuid: %w", err)
@@ -221,6 +244,7 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(ctx, panelID, inboundID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	return c.UpdateClient(ctx, spec)
 }
@@ -245,6 +269,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	if err != nil {
 		return err
 	}
+	want = s.panelWant(ctx, panelID, inb.ID, want)
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	// No-op skip: if the inbound we already hold shows this client matching the
 	// spec on every PSP-controlled field, UpdateClient would push byte-identical

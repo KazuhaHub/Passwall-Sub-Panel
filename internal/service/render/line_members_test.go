@@ -40,19 +40,18 @@ func TestLineCatalogAndPreviewUseExpandedRelays(t *testing.T) {
 	if len(inspection.Lines) != 3 || inspection.Lines[0].Available || inspection.Lines[2].Available {
 		t.Fatalf("bad availability: %+v", inspection.Lines)
 	}
-	if got := resolveConfiguredMembers([]domain.ProxyGroupMember{{Kind: "line", NodeID: 7, LineID: "r1"}}, expandNodeLines([]renderItem{{node: n, name: "A"}})); !reflect.DeepEqual(got, []string{"A R1"}) {
+	if got := resolveConfiguredMembers([]domain.ProxyGroupMember{{Kind: "line", NodeID: 7, LineID: "r1"}}, expandRelays([]renderItem{{node: n, name: "A"}})); !reflect.DeepEqual(got, []string{"A R1"}) {
 		t.Fatalf("expanded members: %+v", got)
 	}
 }
 
 func TestLineCatalogKeepsOwnNamesSeparateFromSubscriptionLabels(t *testing.T) {
 	n := &domain.Node{ID: 7, DisplayName: "Parent Node", Enabled: true,
-		Relays:     []domain.RelayLine{{ID: "relay", Name: "Parent Node relay", Enabled: true}, {ID: "fallback", Address: "relay.example", Enabled: true}},
-		RouteState: domain.NodeRouteState{Lines: []domain.VlessRouteLine{{ID: "route", Name: "my-vlessroute-line", Enabled: true}}},
+		Relays: []domain.RelayLine{{ID: "relay", Name: "Parent Node relay", Enabled: true}, {ID: "fallback", Address: "relay.example", Enabled: true}},
 	}
 	got := inspectNodeLines([]*domain.Node{n})
-	wantNames := []string{"Parent Node", "Parent Node relay", "relay.example", "my-vlessroute-line"}
-	wantLabels := []string{"Parent Node", "Parent Node Parent Node relay", "Parent Node relay.example", "Parent Node my-vlessroute-line"}
+	wantNames := []string{"Parent Node", "Parent Node relay", "relay.example"}
+	wantLabels := []string{"Parent Node", "Parent Node Parent Node relay", "Parent Node relay.example"}
 	if len(got) != len(wantNames) {
 		t.Fatal(got)
 	}

@@ -40,6 +40,7 @@ type AdminServersHandler struct {
 	audit             ports.AuditRepo
 	async             AsyncDispatcher
 	invalidateRender  func()
+	clientCounts      ClientIdentityCounter
 	realityNormalizer RealityFingerprintNormalizer
 	native            ports.NativeAgentProvisioningRepo
 	agents            ports.NodeAgentRepo
@@ -251,6 +252,28 @@ type serverDTO struct {
 	// would be noise an admin has to learn to ignore.
 	IPLimitEnforcement string     `json:"ip_limit_enforcement,omitempty"`
 	IPLimitProbedAt    *time.Time `json:"ip_limit_probed_at,omitempty"`
+	// ClientIdentities is how many client identities (one per user and line,
+	// ADR 0043) this server holds; ClientIdentitiesWarning is set on a
+	// Passwall Node server approaching what one sync exchange can carry.
+	ClientIdentities        *int64 `json:"client_identities,omitempty"`
+	ClientIdentitiesWarning bool   `json:"client_identities_warning,omitempty"`
+}
+
+// ClientIdentityWarnAt is where a Passwall Node server's client count starts
+// to be flagged. One roster entry is a few hundred bytes and one sync
+// exchange carries at most protocol.MaxSyncBodyBytes (16 MiB) together with
+// the report, so the ceiling is a few tens of thousands; this leaves room.
+const ClientIdentityWarnAt = 20000
+
+// ClientIdentityCounter counts the attached client identities per server.
+type ClientIdentityCounter interface {
+	CountAttachedClientsByPanel(ctx context.Context) (map[int64]int64, error)
+}
+
+// WithClientIdentityCounts wires the per-server identity counts of the list.
+func (h *AdminServersHandler) WithClientIdentityCounts(counter ClientIdentityCounter) *AdminServersHandler {
+	h.clientCounts = counter
+	return h
 }
 
 type serverCreateRequest struct {
@@ -378,10 +401,23 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 		}
 	}
 	policy := h.compatPolicy(ctx)
+	var identities map[int64]int64
+	if h.clientCounts != nil {
+		if counts, countErr := h.clientCounts.CountAttachedClientsByPanel(ctx); countErr != nil {
+			log.Warn("server list: client identity counts", "err", countErr)
+		} else {
+			identities = counts
+		}
+	}
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
 		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID], policy)
 		applyNodeMetrics(&out[i], agentsByPanel[panel.ID], metricsByPanel[panel.ID])
+		if identities != nil {
+			n := identities[panel.ID]
+			out[i].ClientIdentities = &n
+			out[i].ClientIdentitiesWarning = domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP && n >= ClientIdentityWarnAt
+		}
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }

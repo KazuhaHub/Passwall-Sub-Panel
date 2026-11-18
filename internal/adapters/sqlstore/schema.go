@@ -61,6 +61,11 @@ type userRow struct {
 	LifetimeUpBytes    int64 `gorm:"default:0"`
 	LifetimeDownBytes  int64 `gorm:"default:0"`
 	LifetimeTotalBytes int64 `gorm:"default:0"`
+	// RawLifetime*: the same deltas before the per-server traffic factor; the
+	// Lifetime* columns above are the charged ledger. Display only.
+	RawLifetimeUpBytes    int64 `gorm:"not null;default:0"`
+	RawLifetimeDownBytes  int64 `gorm:"not null;default:0"`
+	RawLifetimeTotalBytes int64 `gorm:"not null;default:0"`
 	// PeriodBaselineBytes: LifetimeTotalBytes at the start of the current
 	// period. periodUsage simplifies to lifetime - baseline (O(1)). Pre-v3
 	// derived from a LastBefore(period_start) snapshot query on every read.
@@ -149,6 +154,9 @@ func (r *userRow) toDomain() *domain.User {
 		LifetimeUpBytes:        r.LifetimeUpBytes,
 		LifetimeDownBytes:      r.LifetimeDownBytes,
 		LifetimeTotalBytes:     r.LifetimeTotalBytes,
+		RawLifetimeUpBytes:     r.RawLifetimeUpBytes,
+		RawLifetimeDownBytes:   r.RawLifetimeDownBytes,
+		RawLifetimeTotalBytes:  r.RawLifetimeTotalBytes,
 		LifetimeBaselineAt:     r.LifetimeBaselineAt,
 		PeriodBaselineBytes:    r.PeriodBaselineBytes,
 		DisplayName:            r.DisplayName,
@@ -200,6 +208,9 @@ func userFromDomain(u *domain.User) *userRow {
 		LifetimeUpBytes:        u.LifetimeUpBytes,
 		LifetimeDownBytes:      u.LifetimeDownBytes,
 		LifetimeTotalBytes:     u.LifetimeTotalBytes,
+		RawLifetimeUpBytes:     u.RawLifetimeUpBytes,
+		RawLifetimeDownBytes:   u.RawLifetimeDownBytes,
+		RawLifetimeTotalBytes:  u.RawLifetimeTotalBytes,
 		LifetimeBaselineAt:     u.LifetimeBaselineAt,
 		PeriodBaselineBytes:    u.PeriodBaselineBytes,
 		DisplayName:            u.DisplayName,
@@ -401,11 +412,13 @@ type nodeRow struct {
 	// additionally offered through. HideDirect drops the direct entry when at
 	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
 	// rows, no backfill.
-	Relays          jsonRelays     `gorm:"column:relays"`
-	RouteState      jsonRouteState `gorm:"column:route_state"`
-	RouteRevision   int64          `gorm:"not null;default:0"`
-	HideDirect      bool           `gorm:"default:false"`
-	ShowRelayStatus bool           `gorm:"default:false"`
+	Relays     jsonRelays `gorm:"column:relays"`
+	HideDirect bool       `gorm:"default:false"`
+	// TrafficFactorMilli: the direct line's traffic multiplier (ADR 0043).
+	// Relay lines carry theirs inside relays. A pointer so 0 (free) is
+	// storable: GORM replaces a zero value with the default on INSERT.
+	TrafficFactorMilli *int `gorm:"not null;default:1000"`
+	ShowRelayStatus    bool `gorm:"default:false"`
 	// EgressPanelID: the Passwall Node server this node's users leave through
 	// (0 = its own server). See domain.Node.EgressPanelID.
 	EgressPanelID int64           `gorm:"not null;default:0;index"`
@@ -476,8 +489,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		CertSource:              domain.CertSource(r.CertSource),
 		CertID:                  r.CertID,
 		Relays:                  []domain.RelayLine(r.Relays),
-		RouteState:              domain.NodeRouteState(r.RouteState),
 		HideDirect:              r.HideDirect,
+		TrafficFactorMilli:      r.TrafficFactorMilli,
 		ShowRelayStatus:         r.ShowRelayStatus,
 		EgressPanelID:           r.EgressPanelID,
 		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
@@ -541,13 +554,14 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		CertSource:              string(n.CertSource),
 		CertID:                  n.CertID,
 		Relays:                  jsonRelays(n.Relays),
-		RouteState:              jsonRouteState(n.RouteState),
-		RouteRevision:           n.RouteState.Revision,
 		HideDirect:              n.HideDirect,
-		ShowRelayStatus:         n.ShowRelayStatus,
-		EgressPanelID:           n.EgressPanelID,
-		RelayHealth:             jsonRelayHealth(n.RelayHealth),
-		CreatedAt:               n.CreatedAt,
+		// Never NULL into the NOT NULL column: a node built in code without
+		// a factor is one-for-one.
+		TrafficFactorMilli: ptrInt(n.EffectiveTrafficFactor()),
+		ShowRelayStatus:    n.ShowRelayStatus,
+		EgressPanelID:      n.EgressPanelID,
+		RelayHealth:        jsonRelayHealth(n.RelayHealth),
+		CreatedAt:          n.CreatedAt,
 	}, nil
 }
 
@@ -582,6 +596,9 @@ type ownershipRow struct {
 	PeriodBaselineUpBytes    int64 `gorm:"default:0"`
 	PeriodBaselineDownBytes  int64 `gorm:"default:0"`
 	PeriodBaselineTotalBytes int64 `gorm:"default:0"`
+	// ChargedLifetimeBytes: lifetime_total_bytes weighted by the server's
+	// traffic factor, delta by delta. The other counters stay raw.
+	ChargedLifetimeBytes int64 `gorm:"not null;default:0"`
 }
 
 // user_xui_clients (renamed from xui_clients in v3): per-local-user ownership
@@ -609,6 +626,7 @@ func (r *ownershipRow) toDomain() *domain.XUIClientEntry {
 		PeriodBaselineUpBytes:    r.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  r.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: r.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     r.ChargedLifetimeBytes,
 	}
 }
 
@@ -631,6 +649,7 @@ func ownershipFromDomain(e *domain.XUIClientEntry) *ownershipRow {
 		PeriodBaselineUpBytes:    e.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  e.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: e.PeriodBaselineTotalBytes,
+		ChargedLifetimeBytes:     e.ChargedLifetimeBytes,
 	}
 }
 
@@ -1588,7 +1607,6 @@ var schemaModels = []any{
 	&roleAssignmentRow{},
 	&groupRow{},
 	&nodeRow{},
-	&routeLeaseRow{},
 	// ownershipRow (user_xui_clients) is intentionally NOT here: v3.9.0 retired the
 	// per-node ownership model. A fresh install never creates the table; an upgrade
 	// keeps its existing one (AutoMigrate leaves untracked tables alone) until the
@@ -1685,6 +1703,9 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	if err := migrateV4_2(db); err != nil {
+		return err
+	}
+	if err := migrateV4_3(db); err != nil {
 		return err
 	}
 	return seedBuiltinRoles(db)
@@ -1858,3 +1879,5 @@ func applyOnce(db *gorm.DB, id string, fn func(tx *gorm.DB) error) error {
 		return tx.Create(&schemaMigrationRow{ID: id, AppliedAt: time.Now().UTC()}).Error
 	})
 }
+
+func ptrInt(v int) *int { return &v }

@@ -7,13 +7,13 @@ const { base, browser, context, page, errors, output } = await mockBrowserFixtur
 const writes = [], previews = []
 page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`))
 const draft = { slug: 'test', name: '预览验收', sort: 1, enabled: true, direct_subscription_domain: false,
-  content: '- MATCH,Pick', proxy_group_order: ['Pick'], proxy_group_members: { Pick: [{ kind: 'line', node_id: 3, line_id: 'route' }] }, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [] }
+  content: '- MATCH,Pick', proxy_group_order: ['Pick'], proxy_group_members: { Pick: [{ kind: 'line', node_id: 3, line_id: 'relay' }] }, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [] }
 const layout = { separators: [], sort: [], default_sort_strategy: 'by_region_then_id' }
 const groups = [{ id: 1, slug: 'first', name: '其他分组', tag_filter: { all: true, tags: [] }, layout }, { id: 2, slug: 'admin', name: '管理员所属分组', tag_filter: { all: true, tags: [] }, layout }]
 const envelope = items => ({ items, total: items.length, page: 1, page_size: 200 })
 const inspection = { groups: [{ name: 'Pick', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: draft.proxy_group_members.Pick }], builtins: ['DIRECT'],
   nodes: [{ id: 3, display_name: '日本节点', region: 'JP', tags: [], enabled: true, server_address: 'fixture.invalid' }],
-  lines: [{ node_id: 3, line_id: 'route', kind: 'vless_route', name: '专线', display_name: '专线', available: true }], regions: ['JP'], tags: [], issues: [] }
+  lines: [{ node_id: 3, line_id: 'relay', kind: 'relay', name: '专线', display_name: '专线', available: true }], regions: ['JP'], tags: [], issues: [] }
 let fail = false
 await context.route('**/api/**', async route => {
   const request = route.request(), path = new URL(request.url()).pathname
@@ -23,7 +23,7 @@ await context.route('**/api/**', async route => {
     const req = request.postDataJSON(); previews.push(req)
     if (fail) return route.fulfill({ status: 400, json: { error: 'fixture ambiguous line' } })
     const id = req.preview_group_id || 2
-    data = { group_id: id, status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]', '🇯🇵专线 [VLESS 路由]'] }] }
+    data = { group_id: id, status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]'] }] }
   } else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
   else if (path.endsWith('/admin/groups')) data = envelope(groups)
@@ -51,7 +51,6 @@ try {
   await page.getByRole('option', { name: '其他分组', exact: true }).click()
   await dialog.getByText('1. 🇯🇵专线 [中转:52787c21]', { exact: true }).waitFor()
   await dialog.getByText('2. 🇯🇵专线 [中转:6b752549]', { exact: true }).waitFor()
-  await dialog.getByText('3. 🇯🇵专线 [VLESS 路由]', { exact: true }).waitFor()
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1100 })
     await dialog.getByText('成员顺序预览', { exact: true }).scrollIntoViewIfNeeded()
@@ -64,7 +63,6 @@ try {
   await dialog.getByText('fixture ambiguous line', { exact: true }).waitFor()
   assert.equal(await dialog.getByText('1. 🇯🇵专线 [中转:52787c21]', { exact: true }).count(), 0)
   assert.equal(await dialog.getByText('2. 🇯🇵专线 [中转:6b752549]', { exact: true }).count(), 0)
-  assert.equal(await dialog.getByText('3. 🇯🇵专线 [VLESS 路由]', { exact: true }).count(), 0)
   assert.equal(await dialog.getByText('1. 🇯🇵专线', { exact: true }).count(), 0)
   assert.deepEqual(errors, [])
   assert.ok(writes.every(path => path.endsWith('/inspect-proxy-groups') || path.endsWith('/preview-proxy-groups')), JSON.stringify(writes))

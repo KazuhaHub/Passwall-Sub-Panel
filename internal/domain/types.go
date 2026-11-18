@@ -83,9 +83,18 @@ type User struct {
 	// deltas against the previous snapshot and treats negative deltas (counter
 	// reset on Xray restart) as "delta = current value", so these counters
 	// never go backwards.
+	//
+	// They are CHARGED bytes: each server's delta is weighted by its traffic
+	// factor before it is added, so every quota reader agrees on one figure.
+	// At the default factor charged and raw are the same.
 	LifetimeUpBytes    int64
 	LifetimeDownBytes  int64
 	LifetimeTotalBytes int64
+	// RawLifetimeXxx accumulate the same deltas unweighted, for display only.
+	// Nothing enforces against them.
+	RawLifetimeUpBytes    int64
+	RawLifetimeDownBytes  int64
+	RawLifetimeTotalBytes int64
 	// PeriodBaselineBytes is LifetimeTotalBytes at the moment TrafficPeriodStart
 	// last advanced. Subtracting it from current LifetimeTotalBytes gives the
 	// bytes used this period — O(1) memory math, no DB lookup. Pre-v3 this
@@ -605,8 +614,9 @@ type Node struct {
 	// server/port (and optionally the TLS SNI / WS Host for CDN fronting). The
 	// relay machine's actual forwarding is configured outside the panel.
 	Relays []RelayLine
-	// RouteState is written only by the vlessRoute synchronization service.
-	RouteState NodeRouteState
+	// TrafficFactorMilli is the multiplier of this node's DIRECT line, in
+	// thousandths; each relay line carries its own. nil is one-for-one.
+	TrafficFactorMilli *int
 	// HideDirect suppresses only the standalone direct subscription entry.
 	HideDirect bool
 	// ShowRelayStatus is retained for storage compatibility only. Relay status
@@ -721,6 +731,10 @@ type RelayLine struct {
 	// Passwall Node server relays Port to this node, and PSP publishes the
 	// forward and gates the line on the server confirming it.
 	EntryPanelID int64 `json:",omitempty"`
+	// TrafficFactorMilli is this line's traffic multiplier in thousandths
+	// (traffic_factor.go): what a user is charged per byte through this line,
+	// whatever servers it passes. Absent is one-for-one; 0 is free.
+	TrafficFactorMilli *int `json:",omitempty"`
 	// ManagedReady is loaded state, never stored: the entry server has applied
 	// exactly the forward this line now asks for. Read it through Publishable.
 	ManagedReady bool `json:"-"`
@@ -914,6 +928,10 @@ type XUIClientEntry struct {
 	PeriodBaselineUpBytes    int64
 	PeriodBaselineDownBytes  int64
 	PeriodBaselineTotalBytes int64
+	// ChargedLifetimeBytes is LifetimeTotalBytes weighted by the server's
+	// traffic factor delta by delta. The Lifetime / PeriodBaseline fields above
+	// stay RAW.
+	ChargedLifetimeBytes int64
 }
 
 // TrafficSnapshot captures the monotonic lifetime traffic of a panel user at

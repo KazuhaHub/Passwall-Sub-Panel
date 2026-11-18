@@ -14,7 +14,6 @@ const inspection: ProxyGroupInspection = {
   lines: [
     { node_id: 1, line_id: 'direct', kind: 'direct', name: 'Alpha', display_name: 'Alpha', available: true },
     { node_id: 1, line_id: 'relay-a', kind: 'relay', name: 'my-relay-line', display_name: 'Alpha my-relay-line', available: true },
-    { node_id: 1, line_id: 'route-a', kind: 'vless_route', name: 'my-vlessroute-line', display_name: 'Alpha my-vlessroute-line', available: true },
     { node_id: 2, line_id: 'relay-b', kind: 'relay', name: 'beta-only', display_name: 'Beta beta-only', available: false },
   ],
 }
@@ -153,21 +152,20 @@ it('first chooses a node, then lists only its own named lines and saves stable r
   expect(await screen.findByRole('option', { name: '[admin:rules.members.line_type_direct]' })).toBeTruthy()
   expect(screen.queryByRole('option', { name: /Alpha \[/ })).toBeNull()
   fireEvent.change(line, { target: { value: 'my-' } })
-  expect(await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' })).toBeTruthy()
-  const route = screen.getByRole('option', { name: 'my-vlessroute-line [admin:rules.members.line_type_vless_route]' })
+  const relay = await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' })
   expect(screen.queryByRole('option', { name: /beta-only/ })).toBeNull()
   expect(screen.queryByRole('option', { name: /Alpha my-/ })).toBeNull()
-  fireEvent.click(route)
+  fireEvent.click(relay)
   fireEvent.click(screen.getByRole('button', { name: 'admin:rules.members.add' }))
-  await waitFor(() => expect(changed).toHaveBeenCalledWith({ Pick: [...initialMembers.Pick, { kind: 'line', node_id: 1, line_id: 'route-a' }] }))
+  await waitFor(() => expect(changed).toHaveBeenCalledWith({ Pick: [...initialMembers.Pick, { kind: 'line', node_id: 1, line_id: 'relay-a' }] }))
   expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement).value).toBe('Alpha')
-  expect(screen.queryByText('line:1:route-a')).toBeNull()
-  const memberName = screen.getByText('admin:rules.members.member_label_vless_route')
+  expect(screen.queryByText('line:1:relay-a')).toBeNull()
+  const memberName = screen.getByText('admin:rules.members.member_label_relay')
   expect(memberName.tagName).toBe('SPAN')
   expect(memberName.classList.contains('MuiTypography-noWrap')).toBe(true)
-  expect(memberName.getAttribute('title')).toBe('line:1:route-a')
+  expect(memberName.getAttribute('title')).toBe('line:1:relay-a')
   fireEvent.mouseOver(memberName)
-  expect((await screen.findByRole('tooltip')).textContent).toBe('line:1:route-a')
+  expect((await screen.findByRole('tooltip')).textContent).toBe('line:1:relay-a')
   fireEvent.mouseLeave(memberName)
 })
 
@@ -176,7 +174,6 @@ it('prefixes sortable cards by member type without changing identities or inspec
     { kind: 'node', node_id: 1 },
     { kind: 'line', node_id: 1, line_id: 'direct' },
     { kind: 'line', node_id: 1, line_id: 'relay-a' },
-    { kind: 'line', node_id: 1, line_id: 'route-a' },
     { kind: 'node_set', value: 'remaining' },
     { kind: 'node_set', value: 'region:HK' },
     { kind: 'node_set', value: 'tag:fast' },
@@ -189,8 +186,8 @@ it('prefixes sortable cards by member type without changing identities or inspec
   const changed = vi.fn()
   mount(<ProxyGroupMembersEditor content="- MATCH,Pick" groupOrder={[]} initialGroupOrder={[]} onGroupOrderChange={() => {}}
     members={members} initialMembers={members} onChange={changed} options={{}} initialOptions={{}} onOptionsChange={() => {}} previewGroups={[]} />)
-  await screen.findByText('admin:rules.members.member_label_vless_route')
-  for (const key of ['node', 'direct', 'relay', 'vless_route', 'builtin', 'proxy_group', 'rematch', 'line']) {
+  await screen.findByText('admin:rules.members.member_label_relay')
+  for (const key of ['node', 'direct', 'relay', 'builtin', 'proxy_group', 'rematch', 'line']) {
     const name = screen.getByText(`admin:rules.members.member_label_${key}`)
     expect(name.tagName).toBe('SPAN')
     expect(name.getAttribute('title')).toBeTruthy()

@@ -10,11 +10,7 @@ func TestLegacyLinesDefaultToCombinedNames(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"Name":"relay","Address":"relay.example","Enabled":true}`), &relay); err != nil {
 		t.Fatal(err)
 	}
-	var route VlessRouteLine
-	if err := json.Unmarshal([]byte(`{"id":"route","name":"route","outbound_tag":"direct","enabled":true}`), &route); err != nil {
-		t.Fatal(err)
-	}
-	if relay.OnlyLineName || route.OnlyLineName || route.EntryRelayID != "" {
+	if relay.OnlyLineName {
 		t.Fatal("legacy data unexpectedly enabled line-only names")
 	}
 }

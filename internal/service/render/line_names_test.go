@@ -18,8 +18,11 @@ import (
 func collidingNameFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *domain.RuleSet) {
 	t.Helper()
 	s, node, user, rule := referenceRenderFixture(t)
+	// Two lines of different kinds share one public name: the direct entry
+	// (the group's default member) and a relay line.
+	node.DisplayName = "same"
 	node.Relays = []domain.RelayLine{{ID: "relay", Name: "same", OnlyLineName: true, Address: "relay.example", Enabled: true}}
-	node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = "same", true
+	rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: "direct"}}
 	return s, node, user, rule
 }
 
@@ -40,37 +43,31 @@ func namedVLESSProxies(t *testing.T, output *Output, ct domain.ClientType) map[s
 
 func TestFinalLineNamesOnlyCountEmittedReferencedLines(t *testing.T) {
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
-		for _, scenario := range []string{"one", "both", "repeat", "disabled", "deleted", "drift", "entry_missing", "node", "literal_brackets", "fallback"} {
+		for _, scenario := range []string{"one", "both", "repeat", "disabled", "relay_only", "node", "literal_brackets", "fallback"} {
 			t.Run(string(ct)+"/"+scenario, func(t *testing.T) {
 				s, node, user, rule := collidingNameFixture(t)
 				want := []string{"same"}
 				switch scenario {
 				case "both":
 					rule.ProxyGroupMembers["国外媒体"] = append(rule.ProxyGroupMembers["国外媒体"], domain.ProxyGroupMember{Kind: "line", NodeID: node.ID, LineID: "relay"})
-					want = []string{"same [中转]", "same [VLESS 路由]"}
+					want = []string{"same [中转]", "same [直连]"}
 				case "repeat":
 					rule.Content = "- DOMAIN,example.com,Second\n- MATCH,国外媒体"
 					rule.ProxyGroupMembers["Second"] = rule.ProxyGroupMembers["国外媒体"]
 				case "disabled":
 					node.Relays[0].Enabled = false
-				case "deleted", "drift", "entry_missing":
+				case "relay_only":
 					rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: "relay"}}
-					if scenario == "deleted" {
-						node.RouteState.Lines[0].Deleted = true
-					} else if scenario == "drift" {
-						node.RouteState.Status = "drift"
-					} else {
-						node.RouteState.Lines[0].EntryRelayID = "missing"
-					}
 				case "node":
 					rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "node", NodeID: node.ID}}
-					want = []string{"A", "same [中转]", "same [VLESS 路由]"}
+					want = []string{"same [直连]", "same [中转]"}
 				case "literal_brackets":
-					node.RouteState.Lines[0].Name = "user name [7:route-B]"
-					want = []string{"user name [7:route-B]"}
+					node.DisplayName = "user name [7:direct]"
+					want = []string{"user name [7:direct]"}
 				case "fallback":
-					node.RouteState.Lines[0].Name = ""
-					node.RouteState.Lines[0].OutboundTag = "same"
+					// A relay with no name is labelled by its address.
+					rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: "relay"}}
+					node.Relays[0].Name, node.Relays[0].Address = "", "same"
 				}
 				output, err := s.RenderForUser(context.Background(), user, ct)
 				if err != nil {
@@ -96,13 +93,13 @@ func TestFinalLineNamesOnlyCountEmittedReferencedLines(t *testing.T) {
 func TestFinalNameAllocationStableAndAvoidsSecondaryCollisions(t *testing.T) {
 	c := &lineNameCatalog{lines: map[string]subscriptionLineName{
 		"one":   {nodeID: 1, lineID: "direct", kind: "直连", base: "same", token: "one"},
-		"two":   {nodeID: 2, lineID: "route", kind: "VLESS 路由", base: "same", token: "two"},
+		"two":   {nodeID: 2, lineID: "relay", kind: "中转", base: "same", token: "two"},
 		"three": {nodeID: 3, lineID: "direct", kind: "直连", base: "same [直连]", token: "three"},
 		"four":  {nodeID: 4, lineID: "direct", kind: "直连", base: "DIRECT", token: "four"},
 	}}
 	kept := map[string]bool{"one": true, "two": true, "three": true, "four": true}
 	fixed := map[string]bool{"DIRECT": true, "same [直连:1]": true, "same [直连:1] [2]": true}
-	want := map[string]string{"one": "same [直连:1] [3]", "two": "same [VLESS 路由]", "three": "same [直连]", "four": "DIRECT [直连]"}
+	want := map[string]string{"one": "same [直连:1] [3]", "two": "same [中转]", "three": "same [直连]", "four": "DIRECT [直连]"}
 	for i := 0; i < 20; i++ {
 		if got := c.allocate(kept, fixed); !reflect.DeepEqual(got, want) {
 			t.Fatalf("unstable collision allocation: %v want %v", got, want)
@@ -119,7 +116,7 @@ func TestFinalLineNamesCompareCompleteFlagsAndIgnoreUnrenderableNodes(t *testing
 		for _, scenario := range []string{"different_flags", "same_flags", "flags_off", "unsupported", "outside_scope"} {
 			t.Run(string(ct)+"/"+scenario, func(t *testing.T) {
 				s, node, user, rule := referenceRenderFixture(t)
-				node.RouteState = domain.NodeRouteState{}
+				node.Relays = nil
 				node.DisplayName, node.Region = "same", "US"
 				other := *node
 				other.ID, other.Region = 8, "JP"
@@ -170,19 +167,19 @@ func TestFinalNamesBindLegacyAndUniqueHandwrittenReferences(t *testing.T) {
 				s, node, user, rule := collidingNameFixture(t)
 				switch scenario {
 				case "legacy_personal":
-					user.PersonalRules = "- DOMAIN,example.com,same [7:route-B],no-resolve"
+					user.PersonalRules = "- DOMAIN,example.com,same [7:direct],no-resolve"
 				case "legacy_rule":
-					rule.Content = "- MATCH,same [7:route-B]"
+					rule.Content = "- MATCH,same [7:direct]"
 				case "typed_rule":
-					rule.Content = "- MATCH,same [VLESS 路由]"
+					rule.Content = "- MATCH,same [直连]"
 				case "unique_rule":
-					node.RouteState.Lines[0].Name = "unique"
+					node.DisplayName = "unique"
 					rule.Content = "- MATCH,unique"
 				case "ambiguous_rule":
 					rule.Content = "- MATCH,same"
 				case "unavailable_legacy":
-					node.RouteState.Lines[0].Enabled = false
-					rule.Content = "- MATCH,same [7:route-B]"
+					node.HideDirect = true
+					rule.Content = "- MATCH,same [7:direct]"
 				case "ambiguous_template":
 					template := referenceMihomoTemplate + "dns:\n  nameserver: ['https://1.1.1.1/dns-query#same']\n"
 					if ct == domain.ClientSingBox {
@@ -205,7 +202,7 @@ func TestFinalNamesBindLegacyAndUniqueHandwrittenReferences(t *testing.T) {
 					want = "unique"
 				}
 				got := namedVLESSProxies(t, output, ct)
-				if len(got) != 1 || got[want] == nil || got[want]["uuid"] != "12345678-1234-03e9-8def-123456789abc" {
+				if len(got) != 1 || got[want] == nil || got[want]["uuid"] != "12345678-1234-4abc-8def-123456789abc" {
 					t.Fatalf("reference changed identity: %v", got)
 				}
 			})
@@ -226,17 +223,17 @@ func TestFixedObjectsKeepNamesWhileGeneratedLinesAvoidThem(t *testing.T) {
 				if ct == domain.ClientSingBox {
 					template = referenceSingBoxTemplate
 				}
-				want := "same [VLESS 路由]"
+				want := "same [直连]"
 				switch scenario {
 				case "group":
 					name = "国外媒体"
-					want = name + " [VLESS 路由]"
+					want = name + " [直连]"
 				case "builtin":
 					name = "DIRECT"
 					if ct == domain.ClientSingBox {
 						name = "direct"
 					}
-					want = name + " [VLESS 路由]"
+					want = name + " [直连]"
 				case "custom":
 					if ct == domain.ClientMihomo {
 						template = strings.Replace(template, "  {{ proxies }}", "  {{ proxies }}\n  - {name: same, type: direct}", 1)
@@ -254,7 +251,7 @@ func TestFixedObjectsKeepNamesWhileGeneratedLinesAvoidThem(t *testing.T) {
 					template = strings.Replace(template, "    {{ rule_sets }}", `    [{"tag":"same","type":"inline","rules":[]}]`, 1)
 					want = "same"
 				}
-				node.RouteState.Lines[0].Name = name
+				node.DisplayName = name
 				s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{ct: template}}
 				output, err := s.RenderForUser(context.Background(), user, ct)
 				if err != nil {
@@ -264,7 +261,7 @@ func TestFixedObjectsKeepNamesWhileGeneratedLinesAvoidThem(t *testing.T) {
 				if len(got) != 1 || got[want] == nil {
 					t.Fatalf("fixed object collision changed incorrectly: %v want %q", got, want)
 				}
-				if scenario == "group" && !strings.Contains(string(output.Body), "国外媒体") || rule.ProxyGroupMembers["国外媒体"][0].LineID != "route-B" {
+				if scenario == "group" && !strings.Contains(string(output.Body), "国外媒体") || rule.ProxyGroupMembers["国外媒体"][0].LineID != "direct" {
 					t.Fatal("persisted group or stable reference was changed")
 				}
 			})
@@ -293,7 +290,7 @@ func TestURINamingRemainsLegacyAndRenderDoesNotMutateSavedData(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain, _ := base64.StdEncoding.DecodeString(string(uri.Body))
-	if !strings.Contains(string(plain), "same%20%5B7:relay%5D") || !strings.Contains(string(plain), "same%20%5B7:route-B%5D") {
+	if !strings.Contains(string(plain), "same%20%5B7:relay%5D") || !strings.Contains(string(plain), "same%20%5B7:direct%5D") {
 		t.Fatalf("URI legacy labels changed: %s", plain)
 	}
 	afterUser, _ := json.Marshal(user)
@@ -368,7 +365,7 @@ func TestFinalNameSeparatorCollisionsAndImmutableDuplicates(t *testing.T) {
 				key = "tag"
 			}
 			names := emittedProxyNames(subscriptionProxyMaps(t, output, ct), key)
-			if !names["same"] || !names["same [VLESS 路由]"] || !names["same [中转]"] {
+			if !names["same"] || !names["same [直连]"] || !names["same [中转]"] {
 				t.Fatalf("separator renamed or real lines not disambiguated: %v", names)
 			}
 			s.repos.Separator = lineNameSeparatorRepo{entries: []*domain.SeparatorEntry{
@@ -482,7 +479,7 @@ func TestFinalSpecialNamesAndRenderScopeAreStable(t *testing.T) {
 		for _, name := range []string{"中文 专线", "name [existing]", "line, comma", "line & + # /", `line "quoted"`, "false", "123"} {
 			t.Run(string(ct)+"/"+name, func(t *testing.T) {
 				s, node, user, rule := collidingNameFixture(t)
-				node.Relays[0].Name, node.RouteState.Lines[0].Name = name, name
+				node.Relays[0].Name, node.DisplayName = name, name
 				first, err := s.RenderForUser(context.Background(), user, ct)
 				if err != nil {
 					t.Fatal(err)
@@ -495,7 +492,7 @@ func TestFinalSpecialNamesAndRenderScopeAreStable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got := namedVLESSProxies(t, both, ct); len(got) != 2 || got[name+" [中转]"] == nil || got[name+" [VLESS 路由]"] == nil {
+				if got := namedVLESSProxies(t, both, ct); len(got) != 2 || got[name+" [中转]"] == nil || got[name+" [直连]"] == nil {
 					t.Fatalf("special collision names changed: %v", got)
 				}
 				rule.ProxyGroupMembers["国外媒体"] = rule.ProxyGroupMembers["国外媒体"][:1]
@@ -522,8 +519,7 @@ func TestNameMapsDoNotCrossUsersOrCacheInvalidations(t *testing.T) {
 			rule.ProxyGroupMembers["国外媒体"] = rule.ProxyGroupMembers["国外媒体"][:1]
 			secondUser := *user
 			secondUser.ID++
-			// Remove the route (it requires an applied UUID for this user), and
-			// select a relay so this second scope has one publishable same name.
+			// Select the relay so this second scope has one publishable same name.
 			rule.ProxyGroupMembers["国外媒体"] = []domain.ProxyGroupMember{{Kind: "line", NodeID: node.ID, LineID: "relay"}}
 			second, err := s.RenderForUserCached(context.Background(), &secondUser, ct)
 			if err != nil || namedVLESSProxies(t, second, ct)["same"] == nil {
@@ -543,10 +539,10 @@ func TestYAMLAndPolicyQuotingKeepTargetsAndFlagsDistinct(t *testing.T) {
 		for _, name := range []string{"no-resolve", "src", `line "quoted"`, `"quoted"`, "线路: 专线"} {
 			t.Run(string(ct)+"/"+name, func(t *testing.T) {
 				s, node, user, rule := referenceRenderFixture(t)
-				node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = name, true
+				node.Relays[0].Name, node.Relays[0].OnlyLineName = name, true
 				// The legacy identity alias is unambiguous even when the public
 				// name resembles a rule option or contains literal quote marks.
-				raw, err := yaml.Marshal([]string{"DOMAIN,example.com," + name + " [7:route-B],no-resolve", "MATCH,DIRECT"})
+				raw, err := yaml.Marshal([]string{"DOMAIN,example.com," + name + " [7:relay-B],no-resolve", "MATCH,DIRECT"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -567,7 +563,7 @@ func TestMihomoDNSSpecialOptionsAreNotLineReferences(t *testing.T) {
 	for _, name := range []string{"RULES", "h3=true", "ecs=1.1.1.1/24"} {
 		t.Run(name, func(t *testing.T) {
 			s, node, user, rule := referenceRenderFixture(t)
-			node.RouteState.Lines[0].Name, node.RouteState.Lines[0].OnlyLineName = name, true
+			node.Relays[0].Name, node.Relays[0].OnlyLineName = name, true
 			rule.Content = "- MATCH,DIRECT"
 			template := referenceMihomoTemplate + "dns:\n  nameserver: ['https://1.1.1.1/dns-query#" + name + "']\n"
 			s.repos.Template = referenceTemplateRepo{content: map[domain.ClientType]string{domain.ClientMihomo: template}}
@@ -586,7 +582,7 @@ func TestFinalNameIdentityDoesNotFollowNodeOrder(t *testing.T) {
 	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
 		t.Run(string(ct), func(t *testing.T) {
 			s, node, user, rule := referenceRenderFixture(t)
-			node.RouteState = domain.NodeRouteState{}
+			node.Relays = nil
 			node.DisplayName = "same"
 			other := *node
 			other.ID, other.ServerAddress = 8, "other.example"

@@ -1,6 +1,10 @@
 package render
 
-import "github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+import (
+	"fmt"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
 
 // expandRelays turns each real node that carries relay lines into multiple
 // render items: the direct entry (unless the node hides it) followed by one
@@ -113,4 +117,20 @@ func relaySNIOverride(relay *domain.RelayLine) string {
 		return ""
 	}
 	return relay.SNI
+}
+
+// applyLegacyLineNames keeps URI lists on their legacy naming before
+// publication filtering and flagging: a name shared by several entries gains a
+// "[node:line]" suffix. Configuration subscriptions instead allocate names
+// after reference pruning.
+func applyLegacyLineNames(out []renderItem) {
+	counts := map[string]int{}
+	for i := range out {
+		counts[out[i].name]++
+	}
+	for i := range out {
+		if counts[out[i].name] > 1 && out[i].node != nil && !out[i].isSeparator {
+			out[i].name = fmt.Sprintf("%s [%d:%s]", out[i].name, out[i].node.ID, out[i].lineID())
+		}
+	}
 }

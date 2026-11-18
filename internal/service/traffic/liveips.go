@@ -261,7 +261,7 @@ func (s *Service) observeLiveIPs(ctx context.Context, in liveIPInput) []geoBan {
 
 	owners := make(map[domain.ClientKey]int64, len(in.clients))
 	for _, c := range in.clients {
-		if c == nil || c.Email == "" {
+		if c == nil || c.Email == "" || !c.CountsSourceIPs() {
 			continue
 		}
 		owners[domain.NewClientKey(c.PanelID, c.Email)] = c.UserID

@@ -828,7 +828,7 @@ func TestPendingUsageRejectsCrossPanelCounterSpoofing(t *testing.T) {
 		{AgentID: "agent-b", PanelID: 20},
 	}
 
-	usage := service.pendingUsage(clients, agents)
+	usage := service.pendingUsage(clients, agents, nil)
 	if usage[101] != 30 || usage[202] != 50 {
 		t.Fatalf("scoped pending usage = %+v, want user 101=30 and user 202=50", usage)
 	}

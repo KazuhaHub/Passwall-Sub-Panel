@@ -237,6 +237,12 @@ type userRelayStatus struct {
 	OnlyLineName bool       `json:"only_line_name"`
 	Status       string     `json:"status"` // "ok" | "down" | "unknown"
 	CheckedAt    *time.Time `json:"checked_at,omitempty"`
+	// TrafficFactorMilli is this relay line's multiplier (1000 = one-for-one).
+	TrafficFactorMilli int `json:"traffic_factor_milli"`
+	// NodeName is the node's display name as this line's subscription entry
+	// carries it: "{{ factor }}" resolved with this line's factor, not the
+	// direct line's.
+	NodeName string `json:"node_name"`
 }
 
 type userNodeStatus struct {
@@ -246,16 +252,23 @@ type userNodeStatus struct {
 	CheckedAt     *time.Time        `json:"checked_at,omitempty"`
 	ShowDirect    bool              `json:"show_direct"`
 	RelayStatuses []userRelayStatus `json:"relay_statuses,omitempty"`
-	RouteStatuses []userRelayStatus `json:"route_statuses,omitempty"`
+	// TrafficFactorMilli is the multiplier of the node's direct line, in
+	// thousandths (1000 = one-for-one): the portal shows a badge otherwise.
+	// Each relay line carries its own.
+	TrafficFactorMilli int `json:"traffic_factor_milli"`
 }
 
 // userStatusForNode produces the sanitized presentation model. Relay endpoint
 // addresses/ports and failure details intentionally never cross this boundary.
 func userStatusForNode(n *domain.Node) userNodeStatus {
+	direct := n.EffectiveTrafficFactor()
 	out := userNodeStatus{
-		Name: n.DisplayName, Region: n.Region,
+		// Names resolve the opt-in "{{ factor }}" placeholder, so the portal
+		// lists the names the subscription carries.
+		Name: render.ReplaceFactorPlaceholder(n.DisplayName, direct), Region: n.Region,
 		Status: coarseNodeStatus(n.HealthState), CheckedAt: n.HealthCheckedAt,
-		ShowDirect: !n.EffectiveHideDirect(),
+		ShowDirect:         !n.EffectiveHideDirect(),
+		TrafficFactorMilli: direct,
 	}
 	for relayIndex, relay := range n.Relays {
 		if !relay.Publishable() {
@@ -263,23 +276,6 @@ func userStatusForNode(n *domain.Node) userNodeStatus {
 		}
 		status := relayStatusForNode(n, relayIndex)
 		out.RelayStatuses = append(out.RelayStatuses, status)
-	}
-	for _, line := range n.RouteState.Lines {
-		relay, available := line.AvailableEntry(n)
-		if !available {
-			continue
-		}
-		status := userRelayStatus{Status: out.Status, CheckedAt: out.CheckedAt}
-		if relay != nil {
-			for i := range n.Relays {
-				if n.Relays[i].ID == relay.ID {
-					status = relayStatusForNode(n, i)
-					break
-				}
-			}
-		}
-		status.Name, status.OnlyLineName = line.Label(), line.OnlyLineName
-		out.RouteStatuses = append(out.RouteStatuses, status)
 	}
 	return out
 }
@@ -290,7 +286,10 @@ func relayStatusForNode(n *domain.Node, index int) userRelayStatus {
 	if port <= 0 {
 		port = n.DesiredPort
 	}
-	status := userRelayStatus{Name: strings.TrimSpace(relay.Name), OnlyLineName: relay.OnlyLineName, Status: "unknown"}
+	factor := relay.EffectiveTrafficFactor()
+	status := userRelayStatus{Name: render.ReplaceFactorPlaceholder(strings.TrimSpace(relay.Name), factor),
+		OnlyLineName: relay.OnlyLineName, Status: "unknown", TrafficFactorMilli: factor,
+		NodeName: render.ReplaceFactorPlaceholder(n.DisplayName, factor)}
 	for _, health := range n.RelayHealth {
 		if health.Index == index && health.Address == relay.Address && health.Port == port {
 			status.Status, status.CheckedAt = coarseNodeStatus(health.State), health.CheckedAt
@@ -336,18 +335,12 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		return
 	}
 	out := make([]userNodeStatus, 0, len(nodes))
-	var routes map[int64][]domain.VlessRouteLine
-	if h.render != nil {
-		routes = h.render.PublishedRouteLines(c.Request.Context(), u, nodes)
-	}
 	for _, n := range nodes {
 		if n == nil || n.Kind == domain.NodeKindSeparator || !n.Enabled {
 			continue
 		}
-		visible := *n
-		visible.RouteState.Lines = routes[n.ID]
-		status := userStatusForNode(&visible)
-		if status.ShowDirect || len(status.RelayStatuses) > 0 || len(status.RouteStatuses) > 0 {
+		status := userStatusForNode(n)
+		if status.ShowDirect || len(status.RelayStatuses) > 0 {
 			out = append(out, status)
 		}
 	}

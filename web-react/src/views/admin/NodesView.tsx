@@ -78,9 +78,7 @@ import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import SourceRulesSection, { type SourceDraftHandle } from './accessControl/SourceRulesSection'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
-import { useVlessRouteDraft } from '@/query/vlessRoute'
-import { lineLabelsInput, splitTagsText } from '@/api/vlessRoute'
-import VlessRouteLinesEditor from './VlessRouteLinesEditor'
+import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
 import TagsAutocomplete from './TagsAutocomplete'
 import LineLabelsFields from './LineLabelsFields'
 import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from './useLineVisibility'
@@ -92,6 +90,8 @@ import { xrayRequiresMLKEMFirst } from '@/utils/xrayReality'
 /** The managed-tab read always covers the whole set, so its key is a constant. */
 const NODES_PARAMS = { page: 1, page_size: 500 } as const
 import { confirm } from '@/components/ConfirmHost'
+import { TrafficFactorField } from '@/components/TrafficFactorField'
+import { DEFAULT_TRAFFIC_FACTOR_MILLI, factorTextToMilli, milliToFactorText } from '@/utils/trafficFactor'
 import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -135,6 +135,18 @@ function defaultAlpn(p: CreateProtocol): string {
   return p === 'hysteria2' || p === 'tuic' ? ALPN_HY2 : ALPN_TLS
 }
 
+/** A relay row in the editor: the line plus client-only edit state. */
+type RelayDraft = RelayLine & {
+  /** Stable React key (the line id, or a client key for new rows). */
+  _key?: string
+  /** Multiplier as typed; absent until edited. */
+  _factor_text?: string
+  /** The admin changed this line's multiplier in this edit session. */
+  _factor_touched?: boolean
+}
+let relayDraftSeq = 0
+const newRelayKey = () => `new-${++relayDraftSeq}`
+
 interface MetaForm {
   display_name: string
   server_address: string
@@ -142,8 +154,12 @@ interface MetaForm {
   region: string
   tags_text: string
   sort_order: number
-  relays: RelayLine[]
+  relays: RelayDraft[]
   hide_direct: boolean
+  /** Direct line multiplier in thousandths. */
+  traffic_factor_milli?: number
+  /** Direct multiplier as typed; absent until edited. */
+  traffic_factor_text?: string
   /** Exit server of the node's traffic; 0 is its own. Edit dialog only. */
   egress_panel_id?: number
 }
@@ -2295,9 +2311,6 @@ export default function NodesView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
   const [editForm, setEditForm] = useState<MetaForm>(EMPTY_META)
-  const [lineTab, setLineTab] = useState<'relay' | 'route'>('relay')
-  const [lineSession, setLineSession] = useState(0)
-  const routeDraft = useVlessRouteDraft(qScope, editing?.id || 0, lineSession, editOpen && lineTab === 'route')
   // Which groups would see each line with the unsaved labels (ADR 0041). Rows
   // keep editor order, including rows the save would drop for a blank address.
   const lineVisibilityDraft = useMemo<LineVisibilityDraft | null>(() => {
@@ -2308,9 +2321,8 @@ export default function NodesView() {
       region: editForm.region,
       tags: splitTagsText(editForm.tags_text),
       relays: editForm.relays.map(r => ({ id: r.id, ...labels(r) })),
-      routes: routeDraft.lines.map(line => ({ id: line.id, entry_relay_id: line.entry_relay_id || '', ...labels(line) })),
     }
-  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text, editForm.relays, routeDraft.lines])
+  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text, editForm.relays])
   const lineVisibility = useLineVisibility(editing?.id || 0, lineVisibilityDraft)
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
@@ -2571,8 +2583,6 @@ export default function NodesView() {
   }
 
   function openEdit(n: Node) {
-    setLineTab('relay')
-    setLineSession(previous => previous + 1)
     setEditing(n)
     setEditForm({
       display_name: n.display_name,
@@ -2581,8 +2591,9 @@ export default function NodesView() {
       region: n.region,
       tags_text: (n.tags ?? []).join(', '),
       sort_order: n.sort_order,
-      relays: (n.relays ?? []).map(r => ({ ...r, only_line_name: !!r.only_line_name })),
+      relays: (n.relays ?? []).map((r, i) => ({ ...r, only_line_name: !!r.only_line_name, _key: r.id ?? `saved-${i}` })),
       hide_direct: !!n.hide_direct,
+      traffic_factor_milli: n.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI,
       egress_panel_id: n.egress_panel_id ?? 0,
     })
     setLinkForm(null)
@@ -2601,13 +2612,18 @@ export default function NodesView() {
 
   async function submitEdit(e: FormEvent) {
     e.preventDefault()
-    if (!editing || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError) return
+    if (!editing) return
     const errs = validateMeta(editForm)
     setEditMetaErr(errs)
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
+    // An invalid or empty multiplier keeps the last valid value in the form, so
+    // saving would silently write the old number: block instead.
+    if ((editForm.traffic_factor_text !== undefined && factorTextToMilli(editForm.traffic_factor_text) === null)
+      || editForm.relays.some(r => r._factor_text !== undefined && factorTextToMilli(r._factor_text) === null)) {
+      pushSnack(t('admin:nodes.validate.traffic_factor'), 'warning'); return
+    }
     setEditBusy(true)
-    let metadataSaved = false
     try {
       const egress = editForm.egress_panel_id ?? 0
       if (egress > 0 && linkForm && linkDirty) {
@@ -2633,25 +2649,21 @@ export default function NodesView() {
         // Drop blank-address lines, trim, and coerce port to a number so a
         // half-filled row never reaches the backend (which would 400).
         relays: editForm.relays
-          .map(({ managed_ready: _ready, ...r }) => ({ ...r, name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
+          .map(({ managed_ready: _ready, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
+        // Direct factor only when changed; relay lines carry their own value above.
+        ...(editForm.traffic_factor_milli !== undefined
+          && editForm.traffic_factor_milli !== (editing.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI)
+          ? { traffic_factor_milli: editForm.traffic_factor_milli } : {}),
         egress_panel_id: egress,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
-      metadataSaved = true
       setEditing(saved)
-      const routed = await routeDraft.save()
-      if (routed) {
-        if (routed.state.status !== 'applied') {
-          pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
-          return
-        }
-      }
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
     } catch {
-      if (metadataSaved) pushSnack(t('admin:nodes.vless_route.partial_failure'), 'warning')
+      // The request layer already surfaced the failure.
     } finally { setEditBusy(false) }
   }
 
@@ -3949,7 +3961,7 @@ export default function NodesView() {
               value={editForm.display_name}
               onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editMetaErr.display_name}
-              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : ''} />
+              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : t('admin:nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} />
             <TextField required fullWidth label={t('admin:nodes.field.server_address')}
               value={editForm.server_address}
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
@@ -3980,7 +3992,7 @@ export default function NodesView() {
                 </Typography>}
               </Box>
             })()}
-            {(editForm.relays.length > 0 || routeDraft.lines.length > 0 || (editing?.route_state?.lines ?? []).some(line => !line.deleted)) && (
+            {editForm.relays.length > 0 && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
 
@@ -4051,15 +4063,11 @@ export default function NodesView() {
                 relay fronts. Server-side forwarding (realm/gost/iptables) is
                 set up outside the panel; here we only record each front's
                 address/port (+ optional CDN SNI/Host). */}
-            <Tabs value={lineTab} onChange={(_, value: 'relay' | 'route') => setLineTab(value)} aria-label={t('admin:nodes.vless_route.tabs')}>
-              <Tab value="relay" label={t('admin:nodes.relay.title')} />
-              <Tab value="route" label={t('admin:nodes.vless_route.title')} />
-            </Tabs>
-            <Box hidden={lineTab !== 'relay'} sx={{ display: lineTab === 'relay' ? 'flex' : 'none', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
                 <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true, region: f.region.trim(), tags: splitTagsText(f.tags_text) }] }))}>
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { _key: newRelayKey(), name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true, region: f.region.trim(), tags: splitTagsText(f.tags_text) }] }))}>
                   {t('admin:nodes.relay.add')}
                 </Button>
               </Box>
@@ -4067,14 +4075,15 @@ export default function NodesView() {
               {editForm.relays.length === 0 ? (
                 <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t('admin:nodes.relay.empty')}</Typography>
               ) : editForm.relays.map((r, i) => {
-                const update = (patch: Partial<RelayLine>) =>
+                const update = (patch: Partial<RelayDraft>) =>
                   setEditForm(f => ({ ...f, relays: f.relays.map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
                 return (
-                  <Box key={i} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box key={r._key ?? i} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                       <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
                         onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
-                        placeholder={t('admin:nodes.relay.name_ph')} />
+                        placeholder={t('admin:nodes.relay.name_ph')}
+                        helperText={t('admin:nodes.relay.name_factor_hint', { placeholder: '{{ factor }}' })} />
                       <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
                         control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
                       <Tooltip title={t('admin:nodes.relay.remove')}>
@@ -4121,6 +4130,8 @@ export default function NodesView() {
                     <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
                       visibility={lineVisibilityHint(lineVisibility, 'relays', i)}
                       onChange={patch => update(patch)} />
+                    <TrafficFactorField compact text={r._factor_text ?? milliToFactorText(r.traffic_factor_milli)}
+                      onText={(text, m) => update({ _factor_text: text, _factor_touched: true, ...(m !== null ? { traffic_factor_milli: m } : {}) })} />
                     <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
                       control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
                   </Box>
@@ -4128,16 +4139,15 @@ export default function NodesView() {
               })}
               <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
                 control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
+              <TrafficFactorField label={t('admin:nodes.field.traffic_factor_direct')} text={editForm.traffic_factor_text ?? milliToFactorText(editForm.traffic_factor_milli)}
+                onText={(text, m) => setEditForm(f => ({ ...f, traffic_factor_text: text, ...(m !== null ? { traffic_factor_milli: m } : {}) }))} />
             </Box>
-            {lineTab === 'route' && <VlessRouteLinesEditor draft={routeDraft} busy={editBusy} relays={editForm.relays}
-              nodeRegion={editForm.region.trim()} nodeTags={splitTagsText(editForm.tags_text)} tagOptions={allTags}
-              visibility={lineVisibility} />}
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="node-form" variant="contained" disabled={editBusy || routeDraft.loading || routeDraft.refreshing || routeDraft.conflict || routeDraft.readError}
+          <Button type="submit" form="node-form" variant="contained" disabled={editBusy}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
             {t('common:actions.ok')}
           </Button>

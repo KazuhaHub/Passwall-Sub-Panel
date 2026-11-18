@@ -178,8 +178,6 @@ export interface Node {
    *  that reuses the landing's protocol/credentials and only swaps the dialed
    *  server/port (+ optional CDN-fronting SNI/Host). */
   relays?: RelayLine[]
-  /** Included in detail/write responses, omitted from node lists. */
-  route_state?: import('./vlessRoute').RouteState
   /** Hide only the standalone direct entry, not derived routing entries. */
   hide_direct?: boolean
   /** Read-only derived value: true whenever an enabled relay exists. */
@@ -189,6 +187,8 @@ export interface Node {
   egress_panel_id?: number
   /** Response-only: the tunnel runs on both servers, so the node is published. */
   egress_ready?: boolean
+  /** Traffic multiplier of the node's DIRECT line, in thousandths (1000 = one-for-one, 0 = free). Optional so fixtures may omit it. */
+  traffic_factor_milli?: number
 }
 
 /** One transit front for a Node. See domain.RelayLine. */
@@ -219,6 +219,8 @@ export interface RelayLine {
   /** Response-only: the entry server confirmed this managed line's forward,
    *  so the line is published. */
   managed_ready?: boolean
+  /** This line's traffic multiplier in thousandths. Responses always carry it; send it back unchanged to keep it. A new line defaults to 1000. */
+  traffic_factor_milli?: number
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'

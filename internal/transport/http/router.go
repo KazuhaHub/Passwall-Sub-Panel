@@ -44,7 +44,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/transit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/service/vlessroute"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -68,7 +67,6 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
-	VlessRoute    *vlessroute.Service
 	OperationGate *operationgate.Gate
 	Cfg           *config.Config
 	Repos         ports.Repos
@@ -500,10 +498,6 @@ func NewRouter(d Deps) stdhttp.Handler {
 		middleware.RequireRole(domain.RoleAdmin),
 		require2FAGate,
 	)
-	routeLines := handler.NewAdminVlessRouteHandler(d.VlessRoute)
-	staffGroup.GET("/nodes/:id/vless-route-lines", routeLines.Get)
-	adminGroup.GET("/nodes/:id/vless-route-editor", routeLines.Editor)
-	adminGroup.PUT("/nodes/:id/vless-route-lines", routeLines.Save)
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc).
 			WithLimitEnforcement(d.SharedClients, d.Repos.XUIPanel)
@@ -548,6 +542,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		if d.Group != nil {
 			nodes.WithLineVisibility(d.Group)
 		}
+		nodes.WithAudit(d.Repos.Audit)
 		// A batch scan can fan out to hundreds of bounded TLS probes on the
 		// selected node. Keep it admin-only and rate-limit repeated launches per
 		// source IP; 3X-UI applies its own task/concurrency/SSRF caps downstream.
@@ -631,7 +626,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/groups/:id/scope-settings", scopeSettings.SetOverride)
 		adminGroup.DELETE("/groups/:id/scope-settings/:type/:name", scopeSettings.DeleteOverride)
 
-		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template).WithRoutePanels(d.Repos.XUIPanel).WithGroupPreview(d.Render, d.Repos.User)
+		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template).WithGroupPreview(d.Render, d.Repos.User)
 		staffGroup.GET("/rules", rules.List)
 		adminGroup.POST("/rules/inspect-proxy-groups", rules.InspectProxyGroups)
 		adminGroup.POST("/rules/preview-proxy-groups", rules.PreviewProxyGroups)
@@ -800,6 +795,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 			invalidateRender = d.Render.InvalidateAll
 		}
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender)
+		if counter, ok := d.Repos.PSPClient.(handler.ClientIdentityCounter); ok {
+			servers.WithClientIdentityCounts(counter)
+		}
 		if d.Node != nil {
 			servers.WithRealityFingerprintNormalizer(d.Node)
 		}
@@ -821,6 +819,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers/compat-status", servers.CompatStatus)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
+		adminGroup.PUT("/servers/:id/line-factors", nodes.SetServerLineFactors)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/:id/rotate-node-credential", servers.RotateNativeCredential)
 		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)

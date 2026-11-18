@@ -21,7 +21,6 @@ function reads(nodeDetail: () => unknown, listed: unknown) {
     '/admin/nodes': list([listed]),
     '/admin/servers': list([entry, exit]),
     '/admin/transit/links/1/2': link,
-    '/admin/nodes/1/vless-route-editor': { lines: [], revision: 0 },
   })
   const listReads = api.get.getMockImplementation()!
   api.get.mockImplementation(async (url: string, ...rest: unknown[]) =>

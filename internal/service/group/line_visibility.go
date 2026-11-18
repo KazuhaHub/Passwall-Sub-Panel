@@ -7,7 +7,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-// Line visibility (ADR 0041). A relay or VLESS route line reaches a group's
+// Line visibility (ADR 0041). A relay line reaches a group's
 // subscriptions only when the group already passes the node (Eligible: the
 // tag_filter on the node's labels plus allowlist eligibility) AND the same
 // tag_filter also holds on the line's own Region / Tags. It only narrows: a
@@ -28,34 +28,17 @@ func lineMatches(n *domain.Node, region string, tags []string, filter domain.Tag
 	return matchFilter(&view, filter)
 }
 
-// visibleLineIndexes reports, per relay and per VLESS route line of n, whether
-// g may see it, assuming g already passes the node. A route line that enters
-// through a relay is visible only when that relay is too; a hidden entry never
-// falls back to the direct inbound. Deleted route lines are reported visible:
-// they are never published and only reserve identities.
-func visibleLineIndexes(n *domain.Node, g *domain.Group) (relays, routes []bool) {
-	relays = make([]bool, len(n.Relays))
-	visibleRelay := make(map[string]bool, len(n.Relays))
+// visibleLineIndexes reports, per relay of n, whether g may see it, assuming g
+// already passes the node.
+func visibleLineIndexes(n *domain.Node, g *domain.Group) []bool {
+	relays := make([]bool, len(n.Relays))
 	for i, relay := range n.Relays {
 		relays[i] = lineMatches(n, relay.Region, relay.Tags, g.TagFilter)
-		if relays[i] && relay.ID != "" {
-			visibleRelay[relay.ID] = true
-		}
 	}
-	routes = make([]bool, len(n.RouteState.Lines))
-	for i, line := range n.RouteState.Lines {
-		if line.Deleted {
-			routes[i] = true
-			continue
-		}
-		routes[i] = lineMatches(n, line.Region, line.Tags, g.TagFilter) &&
-			(line.EntryRelayID == "" || visibleRelay[line.EntryRelayID])
-	}
-	return relays, routes
+	return relays
 }
 
-// VisibleLines returns nodes with every relay and VLESS route line g may not
-// see removed. Nodes that lose a line are shallow copies with fresh slices, so
+// VisibleLines returns nodes with every relay line g may not see removed. Nodes that lose a line are shallow copies with fresh slices, so
 // the shared (cached) originals are never modified; relay health snapshots are
 // re-indexed to the surviving relays because consumers match them by index.
 // The nodes must already be the ones g passes (NodesFor).
@@ -66,8 +49,8 @@ func VisibleLines(g *domain.Group, nodes []*domain.Node) []*domain.Node {
 			out = append(out, n)
 			continue
 		}
-		relays, routes := visibleLineIndexes(n, g)
-		if !slices.Contains(relays, false) && !slices.Contains(routes, false) {
+		relays := visibleLineIndexes(n, g)
+		if !slices.Contains(relays, false) {
 			out = append(out, n)
 			continue
 		}
@@ -87,12 +70,6 @@ func VisibleLines(g *domain.Group, nodes []*domain.Node) []*domain.Node {
 				copied.RelayHealth = append(copied.RelayHealth, health)
 			}
 		}
-		copied.RouteState.Lines = make([]domain.VlessRouteLine, 0, len(n.RouteState.Lines))
-		for i, line := range n.RouteState.Lines {
-			if routes[i] {
-				copied.RouteState.Lines = append(copied.RouteState.Lines, line)
-			}
-		}
 		out = append(out, &copied)
 	}
 	return out
@@ -110,6 +87,19 @@ func (s *Service) SubscriptionNodesFor(ctx context.Context, g *domain.Group) ([]
 	return VisibleLines(g, withoutUnreadyEgress(nodes)), nil
 }
 
+// ClientLinesFor is the set of lines a group's users hold a client for (ADR
+// 0043): every node the group passes, narrowed to the lines the group may see.
+// Unlike SubscriptionNodesFor it keeps a node whose tunnel is not ready yet:
+// that node is withheld from the subscription for a while, not taken away, and
+// its clients must stay in place for when it comes back.
+func (s *Service) ClientLinesFor(ctx context.Context, g *domain.Group) ([]*domain.Node, error) {
+	nodes, err := s.NodesFor(ctx, g)
+	if err != nil {
+		return nil, err
+	}
+	return VisibleLines(g, nodes), nil
+}
+
 // withoutUnreadyEgress drops nodes whose traffic leaves through a tunnel that
 // is not yet running on both servers. Such a node is withheld, never shown
 // as working: its users' traffic would fail, and leaving from the entry
@@ -125,13 +115,11 @@ func withoutUnreadyEgress(nodes []*domain.Node) []*domain.Node {
 
 // LineVisibility answers the node editor's "who would see each line" for a
 // draft node, by group ID. NodeGroups are the groups that pass the node;
-// Relays[i] / Routes[i] are the groups that see that draft line. Deleted route
-// lines are not part of a draft and are never reported.
+// Relays[i] are the groups that see that draft line.
 type LineVisibility struct {
 	Groups     []*domain.Group
 	NodeGroups []int64
 	Relays     [][]int64
-	Routes     [][]int64
 }
 
 // PreviewLineVisibility evaluates a draft node (its own and its lines' unsaved
@@ -146,13 +134,9 @@ func (s *Service) PreviewLineVisibility(ctx context.Context, draft *domain.Node)
 		Groups:     groups,
 		NodeGroups: []int64{},
 		Relays:     make([][]int64, len(draft.Relays)),
-		Routes:     make([][]int64, len(draft.RouteState.Lines)),
 	}
 	for i := range result.Relays {
 		result.Relays[i] = []int64{}
-	}
-	for i := range result.Routes {
-		result.Routes[i] = []int64{}
 	}
 	for _, g := range groups {
 		ok, err := s.Eligible(ctx, draft, g)
@@ -163,15 +147,10 @@ func (s *Service) PreviewLineVisibility(ctx context.Context, draft *domain.Node)
 			continue
 		}
 		result.NodeGroups = append(result.NodeGroups, g.ID)
-		relays, routes := visibleLineIndexes(draft, g)
+		relays := visibleLineIndexes(draft, g)
 		for i, visible := range relays {
 			if visible {
 				result.Relays[i] = append(result.Relays[i], g.ID)
-			}
-		}
-		for i, visible := range routes {
-			if visible && !draft.RouteState.Lines[i].Deleted {
-				result.Routes[i] = append(result.Routes[i], g.ID)
 			}
 		}
 	}

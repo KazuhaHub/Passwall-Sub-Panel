@@ -12,171 +12,136 @@ const testUUID = "a265b1ec-cd81-43e7-8239-09f322ef22d6"
 
 var testRules = domain.EmailRules{Domain: "psp.local"}
 
-// The common case: VLESS (no flow) / Trojan / SS / Hysteria2 collapse to ONE
-// shared client whose password is the RAW UUID — byte-identical to the legacy
-// per-node derivation, so the migration is silent.
-func TestBuild_MixedProtocolsCollapseToOneClient(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS}, // no flow → default class
-		{NodeID: 2, Protocol: domain.ProtoTrojan},
-		{NodeID: 3, Protocol: domain.ProtoSS},
-		{NodeID: 5, Protocol: domain.ProtoHysteria2},
-	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 1 {
-		t.Fatalf("want 1 shared client, got %d", len(got))
-	}
-	c := got[0]
-	if c.Client.CredClass != 0 || c.Client.Email != "u42@psp.local" {
-		t.Fatalf("client identity = %+v", c.Client)
-	}
-	if c.Client.UUID != testUUID {
-		t.Fatalf("uuid = %q, want user uuid", c.Client.UUID)
-	}
-	if c.Client.Password != testUUID {
-		t.Fatalf("default-class password must be the raw UUID (silent), got %q", c.Client.Password)
-	}
-	if len(c.Inbounds) != 4 {
-		t.Fatalf("attachment set size = %d, want 4", len(c.Inbounds))
-	}
+func direct(nodeID int64, p domain.Protocol) LineCred {
+	return LineCred{Line: domain.DirectLine(nodeID), ListenerNodeID: nodeID, Protocol: p}
 }
 
-// HOLE #8: a client carries a single flow and 3X-UI has no per-inbound
-// flowOverride API, so VLESS nodes with DIFFERENT flow can't share a client. A
-// user with a VLESS-vision node + (VLESS-noflow + Trojan) gets TWO clients: the
-// default (u{uid}@) and a flow-split one (stable -k{hash} email). Both keep the
-// raw-UUID password — flow never changes the credential.
-func TestBuild_VLESSFlowSplitsClient(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS, Flow: "xtls-rprx-vision"}, // vision → its own client
-		{NodeID: 2, Protocol: domain.ProtoVLESS},                           // no flow → default
-		{NodeID: 3, Protocol: domain.ProtoTrojan},                          // no flow → default
-	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 2 {
-		t.Fatalf("want 2 clients (flow split), got %d", len(got))
-	}
-	// Sorted by (pwClass, flow): default (flow "") first, vision second.
-	def, vis := got[0], got[1]
-	if def.Client.Email != "u42@psp.local" {
-		t.Fatalf("default client email = %q, want u42@psp.local", def.Client.Email)
-	}
-	if len(def.Inbounds) != 2 || def.Inbounds[0].NodeID != 2 || def.Inbounds[1].NodeID != 3 {
-		t.Fatalf("default client should hold the no-flow nodes 2,3: %+v", def.Inbounds)
-	}
-	if vis.Client.CredClass != 0 {
-		t.Fatalf("flow split keeps pwClass 0, got %d", vis.Client.CredClass)
-	}
-	if vis.Client.Email == def.Client.Email || vis.Client.Email[:5] != "u42-k" {
-		t.Fatalf("flow-split client needs a distinct -k email: %q", vis.Client.Email)
-	}
-	if len(vis.Inbounds) != 1 || vis.Inbounds[0].NodeID != 1 || vis.Inbounds[0].FlowOverride != "xtls-rprx-vision" {
-		t.Fatalf("vision client should hold node 1 with vision flow: %+v", vis.Inbounds)
-	}
-	if def.Client.Password != testUUID || vis.Client.Password != testUUID {
-		t.Fatal("flow split must keep the raw-UUID password (silent)")
-	}
+func relay(nodeID int64, id string, p domain.Protocol) LineCred {
+	return LineCred{Line: domain.LineKey{NodeID: nodeID, LineID: id}, ListenerNodeID: nodeID, Protocol: p}
 }
 
-// SS-2022's two key lengths need DIFFERENT PSKs in the single password slot, so
-// they can't share a client. But a password-agnostic VLESS node MERGES into one of
-// them (VLESS uses id, SS-2022 uses password — different fields). So a user with
-// VLESS + SS-2022-256 + SS-2022-128 gets TWO clients (256+VLESS, 128) — not three.
-func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS},
-		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // 32B → pwClass256
-		{NodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}, // 16B → pwClass128
+// One row per line, each on the line's listener. The direct line keeps the
+// user's UUID (subscriptions of direct-only users do not change); a relay line
+// gets its derived identity, pinned here as a golden.
+func TestBuild_OneRowPerLine(t *testing.T) {
+	got := Build(42, testUUID, 10, testRules, []LineCred{
+		direct(7, domain.ProtoVLESS), relay(7, "r1", domain.ProtoVLESS), direct(8, domain.ProtoTrojan),
+	}, nil, nil)
+	if len(got) != 3 {
+		t.Fatalf("rows = %d, want 3", len(got))
 	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 2 {
-		t.Fatalf("want 2 clients (256+VLESS merged, 128), got %d", len(got))
+	want := []struct {
+		line  domain.LineKey
+		uuid  string
+		email string
+	}{
+		{domain.DirectLine(7), testUUID, "u42-l9719921a84@psp.local"},
+		{domain.LineKey{NodeID: 7, LineID: "r1"}, "c4b0e7f9-05eb-40ce-a204-5a443f2ef4e3", "u42-l4163395866@psp.local"},
+		{domain.DirectLine(8), testUUID, ""},
 	}
-	// Sorted by pwClass: preq=[1(256), 2(128)] → client0=256, client1=128.
-	ss256, ss128 := got[0], got[1]
-	if ss256.Client.CredClass != 1 || ss256.Client.Password != crypto.NewProxyPassword(testUUID) {
-		t.Fatalf("ss256 class wrong: %+v", ss256.Client)
-	}
-	assertPSKLen(t, ss256.Client.Password, 32)
-	// The password-agnostic VLESS node (1) merges into the 256 client (different field).
-	if len(ss256.Inbounds) != 2 {
-		t.Fatalf("ss256 client should also hold the VLESS node (merge): %+v", ss256.Inbounds)
-	}
-	if ss128.Client.CredClass != 2 {
-		t.Fatalf("ss128 class wrong: %+v", ss128.Client)
-	}
-	assertPSKLen(t, ss128.Client.Password, 16)
-	if len(ss128.Inbounds) != 1 || ss128.Inbounds[0].NodeID != 3 {
-		t.Fatalf("ss128 should hold node 3: %+v", ss128.Inbounds)
-	}
-	if ss256.Client.Email == ss128.Client.Email {
-		t.Fatal("256 and 128 clients must have distinct emails")
-	}
-}
-
-// The merge the user asked for: VLESS-vision (uses id+flow) + SS-2022 (uses
-// password) are DIFFERENT fields, so they collapse to ONE client carrying
-// {id=uuid, password=PSK, flow=vision} attached to BOTH inbounds.
-func TestBuild_VLESSVisionAndSS2022MergeToOne(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS, Flow: "xtls-rprx-vision"},
-		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
-	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 1 {
-		t.Fatalf("VLESS-vision + SS-2022 must merge to ONE client, got %d: %+v", len(got), got)
-	}
-	c := got[0].Client
-	if c.CredClass != 1 || c.Password != crypto.NewProxyPassword(testUUID) {
-		t.Fatalf("merged client must carry the SS-2022 PSK, got CredClass %d pw %q", c.CredClass, c.Password)
-	}
-	if c.UUID != testUUID {
-		t.Fatalf("merged client must carry the UUID for VLESS, got %q", c.UUID)
-	}
-	// Single client on the panel → bare email (no partition-hash suffix), even though
-	// its partition is (SS-2022, vision). The suffix is only for multi-client panels.
-	if c.Email != "u42@psp.local" {
-		t.Fatalf("a lone client must use the bare email u42@psp.local, got %q", c.Email)
-	}
-	ins := got[0].Inbounds
-	if len(ins) != 2 {
-		t.Fatalf("merged client must attach BOTH inbounds, got %d", len(ins))
-	}
-	for _, in := range ins {
-		if in.FlowOverride != "xtls-rprx-vision" {
-			t.Fatalf("merged client carries the vision flow on every attachment, got %q", in.FlowOverride)
+	for i, w := range want {
+		c := got[i].Client
+		if c.NodeID != w.line.NodeID || c.LineID != w.line.LineID || c.UUID != w.uuid || c.ID != 0 {
+			t.Fatalf("row %d = %+v, want line %+v uuid %s", i, c, w.line, w.uuid)
+		}
+		if w.email != "" && c.Email != w.email {
+			t.Fatalf("row %d email = %s, want %s", i, c.Email, w.email)
+		}
+		if len(got[i].Inbounds) != 1 || got[i].Inbounds[0].NodeID != w.line.NodeID {
+			t.Fatalf("row %d attachments = %+v, want only node %d", i, got[i].Inbounds, w.line.NodeID)
 		}
 	}
-}
-
-// A genuine SAME-field conflict still splits: plain-SS (password=UUID) and SS-2022
-// (password=PSK) both need the single password slot with DIFFERENT values, so they
-// can't share — TWO clients, the physical limit.
-func TestBuild_PasswordConflictStillSplits(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},                 // plain SS → password=UUID (class 0)
-		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // SS-2022 → PSK (class 1)
-	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 2 {
-		t.Fatalf("plain-SS (UUID pw) + SS-2022 (PSK pw) must stay 2 clients, got %d", len(got))
+	if got[2].Client.Password != testUUID {
+		t.Fatalf("trojan direct password = %s, want the raw UUID", got[2].Client.Password)
 	}
 }
 
-// A user with only SS-2022-128 nodes gets a single pwClass128 (CredClass 2)
-// client, since there is nothing in the default class.
-func TestBuild_OnlySS2022_128(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 7, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"},
+// A line served by a listener of its own is attached there, and its identity
+// is still derived from the line.
+func TestBuild_LineOnItsOwnListener(t *testing.T) {
+	lc := relay(7, "t1", domain.ProtoVLESS)
+	lc.ListenerNodeID = 99
+	got := Build(42, testUUID, 10, testRules, []LineCred{lc}, nil, nil)
+	if got[0].Inbounds[0].NodeID != 99 || got[0].Client.NodeID != 7 || got[0].Client.LineID != "t1" {
+		t.Fatalf("row = %+v / %+v", got[0].Client, got[0].Inbounds)
 	}
-	got := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(got) != 1 || got[0].Client.CredClass != 2 {
-		t.Fatalf("want a single pwClass128 (CredClass 2) client, got %+v", got)
+	if got[0].Client.UUID != domain.DeriveLineUUID(testUUID, lc.Line, 1) {
+		t.Fatalf("uuid = %s", got[0].Client.UUID)
+	}
+}
+
+// SS-2022 takes its PSK from the ROW's UUID, so a relay line's key differs
+// from the direct line's; flow follows the node.
+func TestBuild_PasswordAndFlowPerRow(t *testing.T) {
+	ss := LineCred{Line: domain.DirectLine(3), ListenerNodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}
+	ssRelay := ss
+	ssRelay.Line = domain.LineKey{NodeID: 3, LineID: "r"}
+	vision := LineCred{Line: domain.DirectLine(4), ListenerNodeID: 4, Protocol: domain.ProtoVLESS, Flow: flowVision}
+	got := Build(42, testUUID, 10, testRules, []LineCred{ss, ssRelay, vision}, nil, nil)
+	if got[0].Client.CredClass != pwClass128 || got[0].Client.Password != passwordForClass(pwClass128, testUUID) {
+		t.Fatalf("direct ss row = %+v", got[0].Client)
 	}
 	assertPSKLen(t, got[0].Client.Password, 16)
-	// Lone client → bare email even for the SS-2022-128 partition.
-	if got[0].Client.Email != "u42@psp.local" {
-		t.Fatalf("a lone client must use the bare email, got %q", got[0].Client.Email)
+	if got[1].Client.Password != passwordForClass(pwClass128, got[1].Client.UUID) || got[1].Client.Password == got[0].Client.Password {
+		t.Fatalf("relay ss password must derive from its own UUID: %+v", got[1].Client)
+	}
+	if got[2].Inbounds[0].FlowOverride != flowVision || got[2].Client.CredClass != pwClassDefault {
+		t.Fatalf("vision row = %+v %+v", got[2].Client, got[2].Inbounds)
+	}
+	if crypto.NewProxyPassword(testUUID) == "" {
+		t.Fatal("crypto sanity")
+	}
+}
+
+// Existing rows are kept by their line with their ID and email; a legacy row
+// becomes the direct line of the lowest-ID node.
+func TestBuild_KeepsRowsByLineAndAdoptsLegacy(t *testing.T) {
+	existing := []ExistingClient{
+		{ClientID: 50, Email: "u42@psp.local"}, // legacy shared row
+		{ClientID: 61, Line: domain.LineKey{NodeID: 9, LineID: "r1"}, Email: "u42-old@psp.local"},
+	}
+	got := Build(42, testUUID, 10, testRules, []LineCred{
+		direct(9, domain.ProtoVLESS), relay(9, "r1", domain.ProtoVLESS), direct(4, domain.ProtoVLESS),
+	}, existing, nil)
+	byLine := map[domain.LineKey]domain.PSPClient{}
+	for _, d := range got {
+		byLine[domain.LineKey{NodeID: d.Client.NodeID, LineID: d.Client.LineID}] = d.Client
+	}
+	if c := byLine[domain.DirectLine(4)]; c.ID != 50 || c.Email != "u42@psp.local" {
+		t.Fatalf("legacy row should be node 4's direct line: %+v", c)
+	}
+	if c := byLine[domain.LineKey{NodeID: 9, LineID: "r1"}]; c.ID != 61 || c.Email != "u42-old@psp.local" {
+		t.Fatalf("relay row not kept: %+v", c)
+	}
+	if c := byLine[domain.DirectLine(9)]; c.ID != 0 {
+		t.Fatalf("node 9 direct should be new: %+v", c)
+	}
+}
+
+// A derived identity that collides on its listener is re-derived; the row's
+// own current UUID never counts as a collision.
+func TestBuild_ReDerivesOnListenerCollision(t *testing.T) {
+	line := domain.LineKey{NodeID: 7, LineID: "r1"}
+	first := domain.DeriveLineUUID(testUUID, line, 1)
+	taken := func(listener int64, uuid string, except int64) bool {
+		return listener == 7 && domain.LineUUIDKey(uuid) == domain.LineUUIDKey(first) && except != 61
+	}
+	got := Build(42, testUUID, 10, testRules, []LineCred{relay(7, "r1", domain.ProtoVLESS)}, nil, taken)
+	if got[0].Client.UUID != "d94e0af3-a2e2-49c4-a3b7-50ef6ad8c3ec" {
+		t.Fatalf("re-derived uuid = %s, want attempt 2", got[0].Client.UUID)
+	}
+	kept := Build(42, testUUID, 10, testRules, []LineCred{relay(7, "r1", domain.ProtoVLESS)},
+		[]ExistingClient{{ClientID: 61, Line: line, UUID: first}}, taken)
+	if kept[0].Client.UUID != first {
+		t.Fatalf("the row holding the identity lost it: %s", kept[0].Client.UUID)
+	}
+	// A row on attempt 2 keeps it after attempt 1 frees up: identities do not
+	// move on their own.
+	second := domain.DeriveLineUUID(testUUID, line, 2)
+	stays := Build(42, testUUID, 10, testRules, []LineCred{relay(7, "r1", domain.ProtoVLESS)},
+		[]ExistingClient{{ClientID: 62, Line: line, UUID: second}}, func(int64, string, int64) bool { return false })
+	if stays[0].Client.UUID != second {
+		t.Fatalf("kept identity moved back to attempt 1: %s", stays[0].Client.UUID)
 	}
 }
 
@@ -186,19 +151,22 @@ func TestIsSharedClientEmail(t *testing.T) {
 		userID int64
 		want   bool
 	}{
-		{"u18@psp.local", 18, true},             // bare / merged
-		{"u18-kf2d62608@psp.local", 18, true},   // content-hash
-		{"u18-c1@psp.local", 18, true},          // retired SS-2022-128 literal
-		{"u18-c12@example.com", 18, true},       // -c{digits}, any domain
-		{"u18-n5@psp.local", 18, false},         // legacy PER-NODE fallback — must NOT match
-		{"u18-nodes@psp.local", 18, false},      // -n… is never a shared client
-		{"u1@psp.local", 18, false},             // different user
-		{"u180@psp.local", 18, false},           // u18 is NOT a prefix of u180
-		{"u18-kf2d6260@psp.local", 18, false},   // 7 hex, not 8
-		{"u18-kf2d62608g@psp.local", 18, false}, // 9 chars / non-hex
-		{"Kazuha Home 0", 18, false},            // operator client, no @ / no scheme
-		{"u18", 18, false},                      // no @
-		{"u18-k49f8cae4@psp.local", 14, false},  // belongs to u18, reconciling u14
+		{"u18@psp.local", 18, true},              // bare / merged
+		{"u18-kf2d62608@psp.local", 18, true},    // content-hash
+		{"u18-c1@psp.local", 18, true},           // retired SS-2022-128 literal
+		{"u18-c12@example.com", 18, true},        // -c{digits}, any domain
+		{"u18-n5@psp.local", 18, false},          // legacy PER-NODE fallback — must NOT match
+		{"u18-nodes@psp.local", 18, false},       // -n… is never a shared client
+		{"u1@psp.local", 18, false},              // different user
+		{"u180@psp.local", 18, false},            // u18 is NOT a prefix of u180
+		{"u18-kf2d6260@psp.local", 18, false},    // 7 hex, not 8
+		{"u18-kf2d62608g@psp.local", 18, false},  // 9 chars / non-hex
+		{"Kazuha Home 0", 18, false},             // operator client, no @ / no scheme
+		{"u18", 18, false},                       // no @
+		{"u18-k49f8cae4@psp.local", 14, false},   // belongs to u18, reconciling u14
+		{"u18-l4163395866@psp.local", 18, true},  // per-line (4.3)
+		{"u18-l416339586@psp.local", 18, false},  // 9 hex
+		{"u18-l416339586g@psp.local", 18, false}, // non-hex
 	}
 	for _, c := range cases {
 		if got := IsSharedClientEmail(c.email, c.userID); got != c.want {
@@ -207,83 +175,40 @@ func TestIsSharedClientEmail(t *testing.T) {
 	}
 }
 
-func TestBuild_EmptyNodesYieldsNoClients(t *testing.T) {
-	if got := Build(42, testUUID, 10, testRules, nil, nil); got != nil {
-		t.Fatalf("empty nodes should yield no clients, got %+v", got)
+// A new row records its line's factor, so a delta booked after the line is
+// deleted keeps the line's price; a kept row is left to the poll.
+func TestBuild_NewRowRecordsLineFactor(t *testing.T) {
+	free := 0
+	lc := relay(7, "r1", domain.ProtoVLESS)
+	lc.FactorMilli = &free
+	got := Build(42, testUUID, 10, testRules, []LineCred{lc, direct(8, domain.ProtoVLESS)}, nil, nil)
+	if got[0].Client.LastFactor() != 0 || got[1].Client.LastFactorMilli != nil {
+		t.Fatalf("rows = %+v / %+v", got[0].Client, got[1].Client)
+	}
+	kept := Build(42, testUUID, 10, testRules, []LineCred{lc}, []ExistingClient{{ClientID: 3, Line: lc.Line}}, nil)
+	if kept[0].Client.LastFactorMilli != nil {
+		t.Fatal("a kept row's booked factor was overwritten by the planner")
 	}
 }
 
-func TestBuild_Deterministic(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoVLESS},
-		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"},
-	}
-	a := Build(42, testUUID, 10, testRules, nodes, nil)
-	b := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(a) != len(b) {
-		t.Fatalf("non-deterministic length")
-	}
-	for i := range a {
-		if a[i].Client.Email != b[i].Client.Email || a[i].Client.Password != b[i].Client.Password {
-			t.Fatalf("non-deterministic at %d", i)
-		}
+func TestBuild_EmptyLinesYieldNoClients(t *testing.T) {
+	if got := Build(42, testUUID, 10, testRules, nil, nil, nil); got != nil {
+		t.Fatalf("want nil, got %+v", got)
 	}
 }
 
-func TestBuild_CarriesStableIDAcrossOneToTwoPartitionSplit(t *testing.T) {
-	// The existing SS-2022 client is alone, so its rendered email is bare.
-	// Adding a plain-SS node creates a password conflict and changes the old
-	// client's email to a -k suffix. Its durable row must follow node 1 rather
-	// than the email or the new partition position.
-	existing := []ExistingClient{{ClientID: 77, CredClass: 1, NodeIDs: []int64{1}}}
-	got := Build(42, testUUID, 10, testRules, []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
-		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
-	}, existing)
-	if len(got) != 2 {
-		t.Fatalf("want split into two clients, got %+v", got)
+func TestLineCredsFromNodes(t *testing.T) {
+	nodes := []*domain.Node{
+		{ID: 1, DesiredProtocol: "vless", Relays: []domain.RelayLine{
+			{ID: "a", Enabled: true}, {ID: "off", Enabled: false}, {ID: "", Enabled: true},
+		}},
+		{ID: 2, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"},
+		{ID: 3, DesiredProtocol: ""},
 	}
-	for _, d := range got {
-		for _, in := range d.Inbounds {
-			if in.NodeID == 1 {
-				if d.Client.ID != 77 {
-					t.Fatalf("old node moved from stable client 77 to %d", d.Client.ID)
-				}
-				if d.Client.Email == "u42@psp.local" {
-					t.Fatalf("test did not cross the rendered-email boundary: %+v", d.Client)
-				}
-				return
-			}
-		}
-	}
-	t.Fatal("old node missing from split plan")
-}
-
-func TestBuild_CarriesStableIDsAcrossDomainChange(t *testing.T) {
-	nodes := []NodeCred{
-		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
-		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
-	}
-	before := Build(42, testUUID, 10, testRules, nodes, nil)
-	if len(before) != 2 {
-		t.Fatalf("precondition: want two clients, got %+v", before)
-	}
-	existing := make([]ExistingClient, len(before))
-	for i, d := range before {
-		nodeIDs := make([]int64, len(d.Inbounds))
-		for j, in := range d.Inbounds {
-			nodeIDs[j] = in.NodeID
-		}
-		existing[i] = ExistingClient{ClientID: int64(100 + i), CredClass: d.Client.CredClass, NodeIDs: nodeIDs}
-	}
-	after := Build(42, testUUID, 10, domain.EmailRules{Domain: "new.example"}, nodes, existing)
-	for i, d := range after {
-		if d.Client.ID != int64(100+i) {
-			t.Fatalf("partition %d ID = %d, want %d", i, d.Client.ID, 100+i)
-		}
-		if d.Client.Email == before[i].Client.Email {
-			t.Fatalf("partition %d email did not change domains: %q", i, d.Client.Email)
-		}
+	got := LineCredsFromNodes(nodes)
+	if len(got) != 2 || got[0].Line != domain.DirectLine(1) || got[1].Line != (domain.LineKey{NodeID: 1, LineID: "a"}) ||
+		got[1].ListenerNodeID != 1 {
+		t.Fatalf("lines = %+v", got)
 	}
 }
 

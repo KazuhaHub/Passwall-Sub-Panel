@@ -113,21 +113,10 @@ func (s *Service) PreviewGroupNodes(ctx context.Context, draft, saved *domain.Gr
 	return result, nil
 }
 
-// previewNode counts the lines g would see on n (ADR 0041) out of its
-// undeleted lines.
+// previewNode counts the lines g would see on n (ADR 0041) out of its lines.
 func previewNode(n *domain.Node, g *domain.Group) GroupPreviewNode {
-	relays, routes := visibleLineIndexes(n, g)
 	node := GroupPreviewNode{Node: n}
-	for _, visible := range relays {
-		node.TotalLines++
-		if visible {
-			node.VisibleLines++
-		}
-	}
-	for i, visible := range routes {
-		if n.RouteState.Lines[i].Deleted {
-			continue
-		}
+	for _, visible := range visibleLineIndexes(n, g) {
 		node.TotalLines++
 		if visible {
 			node.VisibleLines++

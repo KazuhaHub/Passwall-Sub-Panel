@@ -283,6 +283,13 @@ type userNodeUsageRow struct {
 	TodayUpBytes       int64 `json:"today_up_bytes"`
 	TodayDownBytes     int64 `json:"today_down_bytes"`
 	TodayTotalBytes    int64 `json:"today_total_bytes"`
+
+	// The byte counts above are raw. traffic_factor_milli is the server's
+	// current factor (1000 = one-for-one); charged_* are what the user's quota
+	// was charged.
+	TrafficFactorMilli   int   `json:"traffic_factor_milli"`
+	ChargedLifetimeBytes int64 `json:"charged_lifetime_bytes"`
+	ChargedPeriodBytes   int64 `json:"charged_period_bytes"`
 }
 
 // UserNodeUsage returns one user's usage broken down per node (lifetime /
@@ -307,20 +314,23 @@ func (h *AdminTrafficHandler) UserNodeUsage(c *gin.Context) {
 	rows := make([]userNodeUsageRow, 0, len(usage))
 	for _, u := range usage {
 		rows = append(rows, userNodeUsageRow{
-			NodeID:             u.NodeID,
-			DisplayName:        u.DisplayName,
-			PanelName:          panelNames[u.PanelID],
-			Region:             u.Region,
-			ClientEmail:        u.ClientEmail,
-			LifetimeUpBytes:    u.LifetimeUpBytes,
-			LifetimeDownBytes:  u.LifetimeDownBytes,
-			LifetimeTotalBytes: u.LifetimeTotalBytes,
-			PeriodUpBytes:      u.PeriodUpBytes,
-			PeriodDownBytes:    u.PeriodDownBytes,
-			PeriodTotalBytes:   u.PeriodTotalBytes,
-			TodayUpBytes:       u.TodayUpBytes,
-			TodayDownBytes:     u.TodayDownBytes,
-			TodayTotalBytes:    u.TodayTotalBytes,
+			NodeID:               u.NodeID,
+			DisplayName:          u.DisplayName,
+			PanelName:            panelNames[u.PanelID],
+			Region:               u.Region,
+			ClientEmail:          u.ClientEmail,
+			LifetimeUpBytes:      u.LifetimeUpBytes,
+			LifetimeDownBytes:    u.LifetimeDownBytes,
+			LifetimeTotalBytes:   u.LifetimeTotalBytes,
+			PeriodUpBytes:        u.PeriodUpBytes,
+			PeriodDownBytes:      u.PeriodDownBytes,
+			PeriodTotalBytes:     u.PeriodTotalBytes,
+			TodayUpBytes:         u.TodayUpBytes,
+			TodayDownBytes:       u.TodayDownBytes,
+			TodayTotalBytes:      u.TodayTotalBytes,
+			TrafficFactorMilli:   u.TrafficFactorMilli,
+			ChargedLifetimeBytes: u.ChargedLifetimeBytes,
+			ChargedPeriodBytes:   u.ChargedPeriodBytes,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -346,6 +356,15 @@ type userServerUsageRow struct {
 	TodayUpBytes       int64 `json:"today_up_bytes"`
 	TodayDownBytes     int64 `json:"today_down_bytes"`
 	TodayTotalBytes    int64 `json:"today_total_bytes"`
+
+	// The byte counts above are raw. traffic_factor_milli is the server's
+	// current factor (1000 = one-for-one); charged_* are what the user's quota
+	// was charged.
+	// traffic_factor_milli is null when the user's lines on this server are
+	// priced differently.
+	TrafficFactorMilli   *int  `json:"traffic_factor_milli"`
+	ChargedLifetimeBytes int64 `json:"charged_lifetime_bytes"`
+	ChargedPeriodBytes   int64 `json:"charged_period_bytes"`
 }
 
 // UserServerUsage returns one user's usage broken down per SERVER (3X-UI panel)
@@ -369,18 +388,21 @@ func (h *AdminTrafficHandler) UserServerUsage(c *gin.Context) {
 	rows := make([]userServerUsageRow, 0, len(usage))
 	for _, u := range usage {
 		rows = append(rows, userServerUsageRow{
-			PanelID:            u.PanelID,
-			ServerName:         u.ServerName,
-			NodeCount:          u.NodeCount,
-			LifetimeUpBytes:    u.LifetimeUpBytes,
-			LifetimeDownBytes:  u.LifetimeDownBytes,
-			LifetimeTotalBytes: u.LifetimeTotalBytes,
-			PeriodUpBytes:      u.PeriodUpBytes,
-			PeriodDownBytes:    u.PeriodDownBytes,
-			PeriodTotalBytes:   u.PeriodTotalBytes,
-			TodayUpBytes:       u.TodayUpBytes,
-			TodayDownBytes:     u.TodayDownBytes,
-			TodayTotalBytes:    u.TodayTotalBytes,
+			PanelID:              u.PanelID,
+			ServerName:           u.ServerName,
+			NodeCount:            u.NodeCount,
+			LifetimeUpBytes:      u.LifetimeUpBytes,
+			LifetimeDownBytes:    u.LifetimeDownBytes,
+			LifetimeTotalBytes:   u.LifetimeTotalBytes,
+			PeriodUpBytes:        u.PeriodUpBytes,
+			PeriodDownBytes:      u.PeriodDownBytes,
+			PeriodTotalBytes:     u.PeriodTotalBytes,
+			TodayUpBytes:         u.TodayUpBytes,
+			TodayDownBytes:       u.TodayDownBytes,
+			TodayTotalBytes:      u.TodayTotalBytes,
+			TrafficFactorMilli:   u.TrafficFactorMilli,
+			ChargedLifetimeBytes: u.ChargedLifetimeBytes,
+			ChargedPeriodBytes:   u.ChargedPeriodBytes,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {

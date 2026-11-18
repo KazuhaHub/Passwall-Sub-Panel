@@ -149,19 +149,19 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	}
 
 	items := applyLayout(nodes, separators, g.Layout)
-	// Expand each node into its direct entry + one entry per enabled relay and
-	// published VLESS route line BEFORE the flag prefix, so each entry is
+	// Expand each node into its direct entry + one entry per enabled relay
+	// BEFORE the flag prefix, so each entry is
 	// flagged by its own Region (ADR 0040). Lines the group may not see were
 	// already removed by SubscriptionNodesFor (ADR 0041).
-	items = expandNodeLines(items)
+	items = expandRelays(items)
+	applyFactorPlaceholder(items)
 	if ct == domain.ClientURIList {
 		applyLegacyLineNames(items)
 	}
-	var applied map[int64]appliedClientCredential
+	var applied appliedCredentials
 	if preview == nil {
 		applied = s.appliedClientCredentialsByNode(ctx, u)
 	}
-	items = s.filterRouteItemsForContext(ctx, items, preview != nil, applied)
 	if st.SubRegionFlagPrefix {
 		applyRegionFlagPrefix(items)
 	}
@@ -403,7 +403,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	return s.buildProxiesForContext(ctx, u, items, st, false, s.appliedClientCredentialsByNode(ctx, u))
 }
 
-func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool, appliedCredentials map[int64]appliedClientCredential) []map[string]any {
+func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings, preview bool, appliedCredentials appliedCredentials) []map[string]any {
 	// Pre-resolve EmailRules once per render. ClientEmail is per-(user,
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
@@ -429,17 +429,13 @@ func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, it
 			continue
 		}
 		if _, native := nativePanels[it.node.PanelID]; native && !preview {
-			if _, applied := appliedCredentials[it.node.ID]; !applied {
+			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",
 					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
 				continue
 			}
 		}
-		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
-		renderUser, lineErr := it.userForLine(renderUser)
-		if lineErr != nil {
-			continue
-		}
+		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it, emailRules, appliedCredentials)
 		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
 			mlkemFirstRealityByPanel[it.node.PanelID])
 		if err != nil {
@@ -538,11 +534,17 @@ type appliedClientCredential struct {
 	Password string
 }
 
+// appliedCredentials maps each line to the credential snapshot the backend
+// has confirmed for that line's client (ADR 0043).
+type appliedCredentials = map[domain.LineKey]appliedClientCredential
+
 // appliedClientCredentialsByNode resolves the credential snapshot the backend
-// has actually confirmed on each node. PSPClient contains desired credentials
-// and may already have advanced to a new rotation; reading it here would let a
-// subscription publish the new credential before the node can accept it.
-func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.User) map[int64]appliedClientCredential {
+// has actually confirmed for each of the user's lines. PSPClient contains
+// desired credentials and may already have advanced to a new rotation; reading
+// it here would let a subscription publish the new credential before the node
+// can accept it. A legacy row (no line) still attached to several nodes is the
+// direct line of each.
+func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.User) appliedCredentials {
 	if u == nil || s.repos.PSPClient == nil {
 		return nil
 	}
@@ -551,7 +553,7 @@ func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.
 		log.Warn("render: list PSP clients for email resolution", "user_id", u.ID, "err", err)
 		return nil
 	}
-	out := make(map[int64]appliedClientCredential)
+	out := make(appliedCredentials)
 	for _, client := range clients {
 		if client == nil {
 			continue
@@ -561,28 +563,56 @@ func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.
 			log.Warn("render: list PSP client attachments for email resolution", "client_id", client.ID, "err", err)
 			continue
 		}
+		line, hasLine := client.Line()
 		for _, attachment := range attachments {
 			// The current convergence state may already be pending/rejected for
 			// a newer desired roster. Keep serving the last confirmed snapshot;
 			// replacing it with current desired credentials would bypass the
 			// version gate precisely while the newer apply is outstanding.
-			if attachment.AppliedUUID != "" || attachment.AppliedPassword != "" {
-				out[attachment.NodeID] = appliedClientCredential{
-					Email: attachment.AppliedEmail, UUID: attachment.AppliedUUID,
-					Password: attachment.AppliedPassword,
-				}
+			if attachment.AppliedUUID == "" && attachment.AppliedPassword == "" {
+				continue
+			}
+			// A row converted at upgrade keeps its old attachments until its
+			// resync narrows it to its own line: until then it is the direct
+			// line of every node it is attached to.
+			key := domain.DirectLine(attachment.NodeID)
+			if hasLine && attachment.NodeID == line.NodeID {
+				key = line
+			}
+			out[key] = appliedClientCredential{
+				Email: attachment.AppliedEmail, UUID: attachment.AppliedUUID,
+				Password: attachment.AppliedPassword,
 			}
 		}
 	}
 	return out
 }
 
+// credentialFor is the applied credential an entry renders with: its own
+// line's, or — for a relay line whose own identity is not applied yet — the
+// direct line's, which the landing's listener accepts too (the line is then
+// counted, and charged, as the direct line until its own identity lands).
+// A line on a listener of its own would have nothing to fall back to and is
+// withheld until applied.
+func credentialFor(applied appliedCredentials, it renderItem) (appliedClientCredential, bool) {
+	key := domain.LineKey{NodeID: it.node.ID, LineID: it.lineID()}
+	if c, ok := applied[key]; ok {
+		return c, true
+	}
+	if !key.IsDirect() {
+		c, ok := applied[domain.DirectLine(it.node.ID)]
+		return c, ok
+	}
+	return appliedClientCredential{}, false
+}
+
 // renderIdentityForNode freezes subscription credentials at the last applied
 // roster version. UUID is the source for every currently rendered credential;
 // Password is retained in the snapshot as the exact server-side value for
 // future independently-rotatable password fields.
-func renderIdentityForNode(u *domain.User, nodeID int64, rules domain.EmailRules, applied map[int64]appliedClientCredential) (*domain.User, string, string) {
-	credential, ok := applied[nodeID]
+func renderIdentityForNode(u *domain.User, it renderItem, rules domain.EmailRules, applied appliedCredentials) (*domain.User, string, string) {
+	nodeID := it.node.ID
+	credential, ok := credentialFor(applied, it)
 	if !ok {
 		return u, u.ClientEmail(nodeID, rules), ""
 	}

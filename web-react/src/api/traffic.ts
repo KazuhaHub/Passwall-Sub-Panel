@@ -153,6 +153,11 @@ export interface UserNodeUsageRow {
   today_up_bytes: number
   today_down_bytes: number
   today_total_bytes: number
+  /** The node's direct-line multiplier in thousandths. The byte fields above are RAW. */
+  traffic_factor_milli: number
+  /** Totals after applying the multiplier; there is no charged up/down split or charged "today". */
+  charged_lifetime_bytes: number
+  charged_period_bytes: number
 }
 
 export async function getUserNodeUsage(userId: number, opts: { signal?: AbortSignal } = {}) {
@@ -177,6 +182,11 @@ export interface UserServerUsageRow {
   today_up_bytes: number
   today_down_bytes: number
   today_total_bytes: number
+  /** Multiplier in thousandths when every line of the user on this server is priced the same; null = mixed. The byte fields above are RAW. */
+  traffic_factor_milli: number | null
+  /** Totals after applying the multiplier; there is no charged up/down split or charged "today". */
+  charged_lifetime_bytes: number
+  charged_period_bytes: number
 }
 
 export async function getUserServerUsage(userId: number, opts: { signal?: AbortSignal } = {}) {

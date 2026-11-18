@@ -17,19 +17,16 @@ type renderItem struct {
 	// Host override) instead of the node's own ServerAddress. nil = direct.
 	// Populated by expandRelays.
 	relay *domain.RelayLine
-	route *domain.VlessRouteLine
 }
 
-// region and tags are the entry's effective subscription labels: a VLESS
-// route or relay line uses its own values (ADR 0040), the direct entry uses
+// region and tags are the entry's effective subscription labels: a relay
+// line uses its own values (ADR 0040), the direct entry uses
 // the node's. Rendering must read labels only through these two methods;
 // authorization and ordering keep reading the node.
 func (it renderItem) region() string {
 	switch {
 	case it.node == nil || it.isSeparator:
 		return ""
-	case it.route != nil:
-		return it.route.Region
 	case it.relay != nil:
 		return it.relay.Region
 	}
@@ -40,8 +37,6 @@ func (it renderItem) tags() []string {
 	switch {
 	case it.node == nil || it.isSeparator:
 		return nil
-	case it.route != nil:
-		return it.route.Tags
 	case it.relay != nil:
 		return it.relay.Tags
 	}
@@ -49,9 +44,6 @@ func (it renderItem) tags() []string {
 }
 
 func (it renderItem) lineID() string {
-	if it.route != nil {
-		return it.route.ID
-	}
 	if it.relay != nil {
 		return it.relay.ID
 	}

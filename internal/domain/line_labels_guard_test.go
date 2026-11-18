@@ -24,7 +24,7 @@ const modulePath = "github.com/KazuhaHub/passwall-sub-panel"
 // lineLabelReaders lists the only production code allowed to touch a line's
 // own Region / Tags (ADR 0040 invariant 1, amended by ADR 0041): the domain
 // model, subscription rendering, line storage and backfill, the node API's line
-// DTOs, the VLESS route line editor, and the one file that narrows which lines
+// DTOs, and the one file that narrows which lines
 // a group's subscriptions publish. Credentials and mounting, allowlist
 // eligibility, traffic, risk, 3X-UI routing rules and the Passwall Node
 // protocol must keep reading the node's labels only; so must the rest of the
@@ -32,7 +32,6 @@ const modulePath = "github.com/KazuhaHub/passwall-sub-panel"
 var lineLabelReaders = []string{
 	"internal/domain/",
 	"internal/service/render/",
-	"internal/service/vlessroute/",
 	"internal/adapters/sqlstore/",
 	"internal/transport/http/handler/admin_node.go",
 	"internal/service/group/line_visibility.go",
@@ -94,7 +93,7 @@ func TestLineLabelsAreReadOnlyByDisplayCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	guarded := map[types.Object]string{}
-	for _, typeName := range []string{"RelayLine", "VlessRouteLine"} {
+	for _, typeName := range []string{"RelayLine"} {
 		st := domainPkg.Scope().Lookup(typeName).Type().Underlying().(*types.Struct)
 		for i := 0; i < st.NumFields(); i++ {
 			if name := st.Field(i).Name(); name == "Region" || name == "Tags" {
@@ -102,8 +101,8 @@ func TestLineLabelsAreReadOnlyByDisplayCode(t *testing.T) {
 			}
 		}
 	}
-	if len(guarded) != 4 {
-		t.Fatalf("expected Region/Tags on both line types, found %d fields", len(guarded))
+	if len(guarded) != 2 {
+		t.Fatalf("expected Region/Tags on the relay line type, found %d fields", len(guarded))
 	}
 	var offenders []string
 	checked := 0

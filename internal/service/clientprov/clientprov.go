@@ -41,15 +41,15 @@ func New(clients ports.PSPClientRepo) *Service { return &Service{clients: client
 // This is the DB-only shadow dual-write, so the caller must remove those emails
 // from the panel. A retired email either belongs to a stale row pruned after a
 // non-empty repartition, or to a retained row whose attachments became empty.
-func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) ([]string, error) {
-	retired, _, err := s.sync(ctx, userID, userUUID, panelID, rules, nodes)
+func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, lines []clientplan.LineCred) ([]string, error) {
+	retired, _, err := s.sync(ctx, userID, userUUID, panelID, rules, lines)
 	return retired, err
 }
 
 // sync is Sync that also says whether the retired clients were retired because
 // the user has no node left on the panel (true) or because another client on
 // the panel replaced them (false).
-func (s *Service) sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) (retired []string, panelRemoved bool, err error) {
+func (s *Service) sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, lines []clientplan.LineCred) (retired []string, panelRemoved bool, err error) {
 	allExisting, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
 		return nil, false, fmt.Errorf("list existing clients: %w", err)
@@ -60,22 +60,11 @@ func (s *Service) sync(ctx context.Context, userID int64, userUUID string, panel
 		if c.PanelID != panelID {
 			continue
 		}
-		inbounds, ierr := s.clients.ListInbounds(ctx, c.ID)
-		if ierr != nil {
-			return nil, false, fmt.Errorf("list inbounds for stable client %d: %w", c.ID, ierr)
-		}
-		nodeIDs := make([]int64, len(inbounds))
-		for i, in := range inbounds {
-			nodeIDs[i] = in.NodeID
-		}
 		existing = append(existing, c)
-		stable = append(stable, clientplan.ExistingClient{
-			ClientID:  c.ID,
-			CredClass: c.CredClass,
-			NodeIDs:   nodeIDs,
-		})
+		line, _ := c.Line()
+		stable = append(stable, clientplan.ExistingClient{ClientID: c.ID, Line: line, UUID: c.UUID, Email: c.Email})
 	}
-	desired := clientplan.Build(userID, userUUID, panelID, rules, nodes, stable)
+	desired := clientplan.Build(userID, userUUID, panelID, rules, lines, stable, s.uuidTaken(ctx))
 	if len(desired) == 0 {
 		retired := make([]string, 0, len(existing))
 		for _, e := range existing {
@@ -110,27 +99,37 @@ func (s *Service) sync(ctx context.Context, userID int64, userUUID string, panel
 		keep[id] = struct{}{}
 	}
 
-	var pruned []string
+	// A line the user no longer has is detached, not deleted: its counters
+	// may still hold traffic the poll has not booked. The traffic poll deletes
+	// a detached row once a successful read of its server has booked it.
+	var dropped []string
 	for _, e := range existing {
 		if _, ok := keep[e.ID]; ok {
 			continue
 		}
-		if err := s.clients.DeleteByID(ctx, e.ID); err != nil {
-			return pruned, false, fmt.Errorf("prune stale client %s: %w", e.Email, err)
+		if err := s.clients.SetInbounds(ctx, e.ID, nil); err != nil {
+			return dropped, false, fmt.Errorf("detach dropped client %s: %w", e.Email, err)
 		}
-		pruned = append(pruned, e.Email)
+		dropped = append(dropped, e.Email)
 	}
-	return pruned, false, nil
+	return dropped, false, nil
 }
 
-// SyncUser reconciles ALL of a user's psp_clients across every panel from their
-// desired nodes (the group selector's output). It buckets nodes by panel and
-// calls Sync per panel; it ALSO calls Sync (with no nodes) for any panel where
-// the user still holds a client but now has zero desired nodes, so access is
-// retired upstream while the stable counter rows survive for a later re-add.
-// Separators and undeterminable-protocol nodes are dropped by NodeCredsFromNodes.
-// Returns, per panel, the emails to remove upstream, plus the first per-panel
-// error (it attempts every panel regardless).
+// uuidTaken checks a derived line identity against the other clients on the
+// same listener, when the repository can answer that.
+func (s *Service) uuidTaken(ctx context.Context) clientplan.UUIDTaken {
+	checker, ok := s.clients.(ports.LineUUIDChecker)
+	if !ok {
+		return nil
+	}
+	return func(listenerNodeID int64, uuid string, exceptClientID int64) bool {
+		taken, err := checker.LineUUIDTaken(ctx, listenerNodeID, domain.LineUUIDKey(uuid), exceptClientID)
+		// An unreadable answer is treated as taken: the next attempt is as
+		// good an identity, and a duplicate on one listener is not.
+		return err != nil || taken
+	}
+}
+
 func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (map[int64][]string, error) {
 	retired, err := s.SyncUserRetirements(ctx, userID, userUUID, rules, desiredNodes)
 	return retired.All(), err
@@ -165,7 +164,7 @@ func (s *Service) SyncUserRetirements(ctx context.Context, userID int64, userUUI
 	retired := domain.RetiredClients{PanelRemoved: map[int64][]string{}, Regrouped: map[int64][]string{}}
 	var firstErr error
 	for panelID := range panels {
-		creds := clientplan.NodeCredsFromNodes(byPanel[panelID]) // empty slice → retires live access
+		creds := clientplan.LineCredsFromNodes(byPanel[panelID]) // empty slice → retires live access
 		p, removed, serr := s.sync(ctx, userID, userUUID, panelID, rules, creds)
 		if len(p) > 0 {
 			if removed {

@@ -51,22 +51,64 @@ describe('MeView server status lines', () => {
       throw new Error(`Unexpected GET ${url}`)
     })
   }
-  it('renders relay and route names with independent only-line options and shared entry statuses', async () => {
+  it('renders relay names with independent only-line options and shared entry statuses', async () => {
     serveStatus([{ name: 'Parent', region: 'JP', status: 'ok', show_direct: false,
       relay_statuses: [{ name: 'Relay only', only_line_name: true, status: 'down' }, { name: 'Relay combined', status: 'ok' }],
-      route_statuses: [{ name: 'warp', only_line_name: true, status: 'down' }, { name: 'Route combined', only_line_name: false, status: 'ok' }],
     }])
     mount('/?tab=status')
     await screen.findByText('Relay only')
     expect(screen.getByText('Parent Relay combined')).toBeTruthy()
-    expect(screen.getByText('warp')).toBeTruthy()
-    expect(screen.getByText('Parent Route combined')).toBeTruthy()
     expect(screen.queryByText('Parent')).toBeNull()
     expect(screen.queryByText('Parent Relay only')).toBeNull()
-    expect(screen.queryByText('Parent warp')).toBeNull()
-    expect(screen.getAllByText('离线')).toHaveLength(2)
-    expect(screen.getAllByText('正常')).toHaveLength(2)
-    expect(screen.getByText(/VLESS 路由线路复用所选入口/)).toBeTruthy()
+    expect(screen.getAllByText('离线')).toHaveLength(1)
+    expect(screen.getAllByText('正常')).toHaveLength(1)
+  })
+  it('badges only nodes whose factor differs from 1000 and labels used traffic as charged', async () => {
+    serveStatus([
+      { name: 'Plain', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000 },
+      { name: 'Pricey', region: 'US', status: 'ok', show_direct: true, traffic_factor_milli: 1500 },
+      { name: 'Gratis', region: 'DE', status: 'ok', show_direct: true, traffic_factor_milli: 0 },
+    ])
+    mount('/?tab=status')
+    await screen.findByText('Pricey')
+    expect(screen.getAllByTestId('traffic-factor-badge').map(b => b.textContent)).toEqual(['×1.5', '不计流量'])
+  })
+  it('badges each direct and relay line by its own factor and ignores hidden direct lines for the charged label', async () => {
+    serveStatus([{ name: 'Parent', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000,
+      relay_statuses: [{ name: 'Cheap', status: 'ok', traffic_factor_milli: 0 }, { name: 'Dear', status: 'ok', traffic_factor_milli: 2000 }, { name: 'Same', status: 'ok', traffic_factor_milli: 1000 }] }])
+    mount('/?tab=status')
+    await screen.findByText('Parent Cheap')
+    expect(screen.getAllByTestId('traffic-factor-badge').map(b => b.textContent)).toEqual(['不计流量', '×2'])
+  })
+  it('labels used traffic as charged when only a relay line has a custom factor', async () => {
+    serveStatus([{ name: 'P', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000,
+      relay_statuses: [{ name: 'R', status: 'ok', traffic_factor_milli: 1500 }] }])
+    mount('/')
+    await screen.findByText('profile.traffic_used_charged')
+  })
+  it('labels used traffic as charged when a hidden direct line has a custom factor', async () => {
+    serveStatus([{ name: 'P', region: 'JP', status: 'ok', show_direct: false, traffic_factor_milli: 1500,
+      relay_statuses: [{ name: 'R', status: 'ok', traffic_factor_milli: 1000 }] }])
+    mount('/')
+    await screen.findByText('profile.traffic_used_charged')
+  })
+  it('names a relay row with the backend-resolved node name', async () => {
+    serveStatus([{ name: 'P ×1', region: 'JP', status: 'ok', show_direct: false, traffic_factor_milli: 1000,
+      relay_statuses: [{ name: 'R', node_name: 'P ×2', status: 'ok', traffic_factor_milli: 2000 }] }])
+    mount('/?tab=status')
+    await screen.findByText('P ×2 R')
+  })
+  it('uses the plain used-traffic label when every factor is default', async () => {
+    serveStatus([{ name: 'Plain', region: 'JP', status: 'ok', show_direct: true, traffic_factor_milli: 1000 }])
+    mount('/')
+    await screen.findByText('profile.traffic_used')
+    expect(screen.queryByText('profile.traffic_used_charged')).toBeNull()
+  })
+  it('labels used traffic as charged when a visible node has a custom factor', async () => {
+    serveStatus([{ name: 'Pricey', region: 'US', status: 'ok', show_direct: true, traffic_factor_milli: 1500 }])
+    mount('/')
+    await screen.findByText('profile.traffic_used_charged')
+    expect(screen.queryByText('profile.traffic_used')).toBeNull()
   })
   it('shows the empty state when every entry is hidden or inactive', async () => {
     serveStatus([{ name: 'Hidden', region: 'JP', status: 'ok', show_direct: false }])
@@ -79,7 +121,6 @@ describe('MeView server status lines', () => {
     mount('/?tab=status')
     await screen.findByText('Old Relay')
     expect(screen.getByText('Old')).toBeTruthy()
-    expect(screen.queryByText(/VLESS 路由线路复用所选入口/)).toBeNull()
   })
 })
 afterEach(cleanup)

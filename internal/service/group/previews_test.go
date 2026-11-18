@@ -13,16 +13,14 @@ func previewEnv() (*Service, *eligGroups) {
 	hk := &domain.Group{ID: 1, Name: "HK", TagFilter: domain.TagFilter{Tags: []string{"region:HK"}}}
 	jp := &domain.Group{ID: 2, Name: "JP", TagFilter: domain.TagFilter{Tags: []string{"region:JP"}}}
 	nodes := []*domain.Node{
-		{ID: 1, Enabled: true, Region: "HK", Relays: []domain.RelayLine{{ID: "a", Region: "HK"}, {ID: "b", Region: "CN"}},
-			RouteState: domain.NodeRouteState{Lines: []domain.VlessRouteLine{{ID: "gone", Deleted: true, Region: "HK"}}}},
+		{ID: 1, Enabled: true, Region: "HK", Relays: []domain.RelayLine{{ID: "a", Region: "HK"}, {ID: "b", Region: "CN"}}},
 		{ID: 2, Enabled: true, Region: "JP"},
 	}
 	groups := &eligGroups{groups: []*domain.Group{hk, jp}, members: map[int64]int64{}}
 	return New(groups, &eligNodes{nodes: nodes}, nil), groups
 }
 
-// Moving HK -> JP loses HK-1 (its lines counted under HK: 1 of 2, the deleted
-// route line not counted) and gains JP-1.
+// Moving HK -> JP loses HK-1 (its lines counted under HK: 1 of 2) and gains JP-1.
 func TestPreviewGroupChangeCountsEachSideUnderItsGroup(t *testing.T) {
 	svc, _ := previewEnv()
 	got, err := svc.PreviewGroupChange(context.Background(), 1, 2)
