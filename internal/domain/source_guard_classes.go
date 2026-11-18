@@ -63,8 +63,9 @@ const MaxPricedClasses = nodeprotocol.MaxSourceGuardDenyFrom
 //   - sing-box takes it from X-Forwarded-For on every transport (ws, httpupgrade,
 //     http, grpc) and cannot be told not to: only plain TCP, with or without
 //     TLS or REALITY, is guardable;
-//   - Xray listeners whose stream settings trust X-Forwarded-For
-//     (sockopt.trustedXForwardedFor non-empty);
+//   - Xray listeners that carry a non-empty trustedXForwardedFor anywhere in
+//     their stream or inbound settings (Xray reads it from sockopt; the node
+//     refuses it at any depth, keys matched ignoring case);
 //   - Xray listeners that set acceptProxyProtocol anywhere in their stream or
 //     inbound settings. The PROXY header a Passwall front adds is not counted: fronts
 //     refuse listeners that set it themselves.
@@ -192,11 +193,12 @@ func trustsForwardedFor(v any) bool {
 						return true
 					}
 				case string:
-					if strings.TrimSpace(trusted) != "" {
+					// Any non-empty string, as the node reads it: trimming
+					// here would call guardable a listener it refuses.
+					if trusted != "" {
 						return true
 					}
 				}
-				continue
 			}
 			if trustsForwardedFor(x) {
 				return true
@@ -222,7 +224,6 @@ func acceptsProxyAnywhere(v any) bool {
 				if on, _ := x.(bool); on {
 					return true
 				}
-				continue
 			}
 			if acceptsProxyAnywhere(x) {
 				return true

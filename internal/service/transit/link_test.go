@@ -748,6 +748,25 @@ func TestEngineSwitchRefusedWhenItMakesAnUnusableRealityLink(t *testing.T) {
 	}
 }
 
+// A REALITY link from a sing-box entry to an Xray exit made before the check
+// existed must not hold back a routine Xray version update on its exit:
+// staying on Xray is no switch. Moving the exit's entry side further still is.
+func TestEngineSwitchRefusalLetsAServerStayOnItsEngine(t *testing.T) {
+	repos := linkStore(t)
+	agents := engineAgents{9: domain.NodeCoreXray, 3: domain.NodeCoreXray}
+	service := New(fakeNodes{}, newFakeRepo()).WithLinks(repos.TransitLinks, agents)
+	if _, err := service.UpdateLink(t.Context(), 9, 3, domain.TransitLinkSettings{Protocol: nodeprotocol.LinkProtocolVLESSReality}); err != nil {
+		t.Fatal(err)
+	}
+	agents[9] = domain.NodeCoreSingBox // the entry moved before the refusal existed
+	if err := service.EngineSwitchRefusal(t.Context(), 3, domain.NodeCoreXray); err != nil {
+		t.Fatalf("a routine Xray update on the exit was refused: %v", err)
+	}
+	if err := service.EngineSwitchRefusal(t.Context(), 9, domain.NodeCoreSingBox); err != nil {
+		t.Fatalf("the entry staying on sing-box was refused: %v", err)
+	}
+}
+
 type guardAgents struct{ agent *domain.NodeAgent }
 
 func (f guardAgents) ListByPanelIDs(context.Context, []int64) ([]*domain.NodeAgent, error) {
