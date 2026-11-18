@@ -62,12 +62,12 @@ func TestRenderEachLineWithItsOwnAppliedIdentity(t *testing.T) {
 	}
 }
 
-// Until its own identity is applied, a relay line renders with the direct
-// line's, which the landing's listener accepts: the line works from the start
-// and is counted as the direct line meanwhile.
-func TestRenderRelayLineFallsBackToDirectUntilApplied(t *testing.T) {
+// Until its own identity is applied, a relay line is not published: the
+// landing refuses the direct identity from a relay's source (ADR 0044), so
+// borrowing it would hand out a line that cannot connect.
+func TestRenderRelayLineWaitsForItsOwnIdentity(t *testing.T) {
 	out := renderLines(t, false)
-	if len(out) != 2 || out[1]["uuid"] != "uuid-of-user-5" || out[1]["server"] != "relay.example" {
+	if len(out) != 1 || out[0]["uuid"] != "uuid-of-user-5" || out[0]["server"] == "relay.example" {
 		t.Fatalf("proxies = %#v", out)
 	}
 }

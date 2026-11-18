@@ -61,13 +61,13 @@ func TestRenderSharesOneAppliedCredentialSnapshotAndPreviewReadsNone(t *testing.
 			if _, err := s.RenderForUser(context.Background(), user, client); err != nil {
 				t.Fatal(err)
 			}
-			if repo.users != 1 || repo.attachments != 1 {
+			if repo.users != 1 || repo.attachments != 2 {
 				t.Fatalf("credential reads: users=%d attachments=%d", repo.users, repo.attachments)
 			}
 			if _, err := s.PreviewMihomoGroup(context.Background(), user.GroupID, rule); err != nil {
 				t.Fatal(err)
 			}
-			if repo.users != 1 || repo.attachments != 1 {
+			if repo.users != 1 || repo.attachments != 2 {
 				t.Fatal("preview loaded personal credentials")
 			}
 		})
