@@ -101,6 +101,9 @@ type Service struct {
 	// planned are the ports picked for listeners about to be made, by line.
 	plannedMu sync.Mutex
 	planned   map[string]int
+	// canGuard says whether a landing on a server can check where connections come
+	// from (SetSourceGuardCheck).
+	canGuard func(ctx context.Context, panelID int64) bool
 }
 
 // GroupEligibility is the one test of "does this group include this node"
@@ -907,6 +910,14 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	if err := resolveLineFactors(previous, n); err != nil {
 		return err
 	}
+	if err := resolveSourceCIDRs(previous, n); err != nil {
+		return err
+	}
+	checked := *previous
+	checked.Relays, checked.TrafficFactorMilli = n.Relays, n.TrafficFactorMilli
+	if err := s.checkSourceGuard(ctx, previous, &checked); err != nil {
+		return err
+	}
 	// Omitted line labels keep their saved value; new lines take the node's
 	// value after this save. Lines never follow later node edits (ADR 0040).
 	domain.ResolveRelayLabels(previous.Relays, n.Relays, n.Region, n.Tags)
@@ -942,9 +953,9 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	}
 	// A line switched off or on moves its listener the same way: settle what
 	// that does to a shared port before anything is written.
-	checked := *previous
-	checked.Relays, checked.Enabled = n.Relays, previous.Enabled
-	if err := s.tunnelEnabledRefusal(ctx, &checked); err != nil {
+	enabledCheck := *previous
+	enabledCheck.Relays, enabledCheck.Enabled = n.Relays, previous.Enabled
+	if err := s.tunnelEnabledRefusal(ctx, &enabledCheck); err != nil {
 		return err
 	}
 	if err := s.makeTunnels(ctx, previous, n, work); err != nil {
@@ -1131,6 +1142,11 @@ func (s *Service) setLineFactorsLocked(ctx context.Context, panelID int64, chang
 				}
 				n.Relays[i].TrafficFactorMilli = &milli
 			}
+		}
+	}
+	for _, id := range order {
+		if err := s.checkSourceGuard(ctx, original[id], byNode[id]); err != nil {
+			return nil, err
 		}
 	}
 	// One write per node. A failure puts the nodes already written back the

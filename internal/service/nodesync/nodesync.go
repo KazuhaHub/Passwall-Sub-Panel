@@ -142,6 +142,12 @@ const IssueCDNLandingUnfit = "cdn_landing_unfit"
 // come from), or because it can and the line's source addresses are not known.
 const IssueSourceGuardWithheld = "source_guard_withheld"
 
+// IssueSourceGuardRefused is the issue recorded for a source address a landing
+// refused for a line (a connection the line's identity made from an address
+// that is not among the line's source addresses). The administrator can add
+// the address to the line.
+const IssueSourceGuardRefused = "source_guard_refused"
+
 const rosterIdentityWarningThreshold = 20_000
 
 func rosterCapacityIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
@@ -2450,6 +2456,7 @@ func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeA
 		}
 	}
 	hits := make([]domain.SourceGuardHit, 0, len(report.SourceGuardHits))
+	var issues []domain.NodeAgentIssue
 	for _, hit := range report.SourceGuardHits {
 		listener, err := hit.Listener.RowID()
 		if err != nil || !own[sourceguard.NodeIDOf(string(hit.Set))] || !own[listener] {
@@ -2459,6 +2466,27 @@ func (s *Service) recordSourceGuardHits(ctx context.Context, agent *domain.NodeA
 			PanelID: agent.PanelID, Set: string(hit.Set), ListenerNodeID: listener, IP: hit.SourceIP,
 			Count: hit.Count, LastSeen: time.UnixMilli(hit.LastSeenMS).UTC(),
 		})
+		// The issue names the line and the address and nothing that changes with
+		// the count, so a source that keeps being refused is one issue whose last
+		// seen time moves, not a new one at every report.
+		for _, node := range snapshot.Nodes {
+			if node == nil || node.ID != sourceguard.NodeIDOf(string(hit.Set)) {
+				continue
+			}
+			for _, line := range node.Relays {
+				if sourceguard.Key(node.ID, line.ID) == hit.Set {
+					issues = append(issues, domain.NodeAgentIssue{
+						AgentID: agent.AgentID, Code: IssueSourceGuardRefused, Key: string(hit.Set),
+						Detail: fmt.Sprintf("line %q of %s refused connections from %s, which is not one of its source addresses", line.Label(), node.DisplayName, hit.SourceIP),
+					})
+				}
+			}
+		}
+	}
+	if len(issues) > 0 {
+		if err := s.issues.RecordBatch(ctx, agent.AgentID, issues, now); err != nil {
+			return fmt.Errorf("nodesync: record source guard issues: %w", err)
+		}
 	}
 	if err := s.hits.RecordHits(ctx, agent.PanelID, hits, now.Add(-sourceGuardHitRetention), sourceGuardHitLimit); err != nil {
 		return fmt.Errorf("nodesync: record source guard hits: %w", err)

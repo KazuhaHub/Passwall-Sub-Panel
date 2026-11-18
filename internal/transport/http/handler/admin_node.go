@@ -1485,9 +1485,12 @@ func callerIsAdmin(c *gin.Context) bool {
 
 func mapNodeServiceError(c *gin.Context, err error) {
 	var refusal *front.Refusal
+	var coded *domain.CodedValidationError
 	switch {
 	case errors.As(err, &refusal):
 		respondFrontError(c, err)
+	case errors.As(err, &coded):
+		respondError(c, err)
 	case errors.Is(err, transit.ErrReservedPortTaken):
 		// The port promised to a new tunnel was taken before it was made: a
 		// conflict the admin can retry (the retry plans a fresh port).

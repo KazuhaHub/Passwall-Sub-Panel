@@ -212,6 +212,22 @@ func TestRefusedSourcesAreKeptFromFullReportsOfOwnLandingsOnly(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].IP != "203.0.113.50" || got[0].Count != 4 || got[0].Set != string(ours) {
 		t.Fatalf("hits = %+v err=%v", got, err)
 	}
+	issues, _, err := f.repos.NodeAgentIssue.List(t.Context(), ports.NodeAgentIssueFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, issue := range issues {
+		if issue.Code == IssueSourceGuardRefused {
+			count++
+			if issue.Key != string(ours) || !strings.Contains(issue.Detail, "203.0.113.50") || !strings.Contains(issue.Detail, `"ext"`) {
+				t.Fatalf("issue = %+v", issue)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("issues = %+v", issues)
+	}
 	// Without the capability the hits are not read.
 	report.Capabilities = nil
 	report.SourceGuardHits = []nodeprotocol.SourceGuardHit{hit(ours, node.ID, "203.0.113.52")}

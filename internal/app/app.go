@@ -538,6 +538,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
+	// A landing can check where connections come from only on a Passwall Node
+	// server whose agent declared it; 3X-UI and S-UI servers have no agent. A read
+	// that fails counts as "cannot": the stricter rule is the safe one to save by.
+	nodeSvc.SetSourceGuardCheck(func(ctx context.Context, panelID int64) bool {
+		agents, err := repos.NodeAgent.ListByPanelIDs(ctx, []int64{panelID})
+		return err == nil && len(agents) > 0 && agents[0].CanSourceGuard()
+	})
 	nodeSvc.SetTunnelLinks(transitSvc)
 	nativeSync.SetRealityFingerprintNormalizer(nodeSvc.NormalizeRealityFingerprintsForPanel)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)

@@ -56,7 +56,10 @@ func respondErrorDetail(c *gin.Context, err error, leakDetail bool) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
+	var coded *domain.CodedValidationError
 	switch {
+	case errors.As(err, &coded):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": coded.Code, "params": coded.Params})
 	case errors.Is(err, domain.ErrValidation):
 		// Validation messages are author-controlled (no GORM/SMTP leakage)
 		// and the caller wants the user to see them.
