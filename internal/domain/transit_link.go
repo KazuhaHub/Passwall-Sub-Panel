@@ -58,6 +58,12 @@ type TransitLink struct {
 	OutSent    string
 	InApplied  string
 	OutApplied string
+	// InSentPort / OutSentPort are the port in what was last sent each side:
+	// the port the exit listens on and the port the entry dials. They differ
+	// while a move to or from a shared port has reached one side only; 0 on a
+	// row no sync has written since they were added.
+	InSentPort  int
+	OutSentPort int
 
 	// Traffic per side, carried across counter resets. Transit traffic: the
 	// users are charged once, on the entry's listener.
@@ -70,11 +76,19 @@ type TransitLink struct {
 	UpdatedAt time.Time
 }
 
-// Ready reports whether both ends hold exactly what was last sent them. It is
-// the state of the tunnel itself; whether a node is published also needs the
-// node to be bound to it (see attachEgressState).
+// Ready reports whether both ends hold exactly what was last sent them, on the
+// same port. It is the state of the tunnel itself; whether a node is published
+// also needs the node to be bound to it (see attachEgressState).
 func (l TransitLink) Ready() bool {
-	return l.InSent != "" && l.InApplied == l.InSent && l.OutSent != "" && l.OutApplied == l.OutSent
+	return l.InSent != "" && l.InApplied == l.InSent && l.OutSent != "" && l.OutApplied == l.OutSent &&
+		TransitLinkPortsAgree(l.InSentPort, l.OutSentPort)
+}
+
+// TransitLinkPortsAgree reports whether the exit listens where the entry dials.
+// A port of 0 is unknown (a row written before the ports were recorded) and
+// does not hold a tunnel back: the next sync of that side records it.
+func TransitLinkPortsAgree(in, out int) bool {
+	return in == 0 || out == 0 || in == out
 }
 
 // TransitLinkSettings is what an administrator may change on a link. The

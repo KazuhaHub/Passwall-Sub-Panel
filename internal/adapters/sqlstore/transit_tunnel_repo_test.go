@@ -44,6 +44,14 @@ func tunnelLanding(t *testing.T, repo *nodeRepo) (landing, child *domain.Node) {
 // with the listener bound in the entry's half.
 func readyLink(t *testing.T, repo *nodeRepo, child *domain.Node) {
 	t.Helper()
+	applyLinkSide(t, repo, child, domain.LinkSideIn, "in-1", 30001)
+	applyLinkSide(t, repo, child, domain.LinkSideOut, "out-1", 30001)
+}
+
+// applyLinkSide records one side of the link from server 9 to 7 as sent on
+// port and confirmed by that side.
+func applyLinkSide(t *testing.T, repo *nodeRepo, child *domain.Node, side domain.LinkSide, digest string, port int) {
+	t.Helper()
 	ctx := t.Context()
 	links := &transitLinkRepo{db: repo.db}
 	link, err := links.EnsureLink(ctx, 9, 7, func() (domain.TransitLink, error) {
@@ -52,18 +60,15 @@ func readyLink(t *testing.T, repo *nodeRepo, child *domain.Node) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound := []string{fmt.Sprintf("lst_%d", child.ID)}
-	for _, step := range []struct {
-		side   domain.LinkSide
-		digest string
-		bound  []string
-	}{{domain.LinkSideIn, "in-1", nil}, {domain.LinkSideOut, "out-1", bound}} {
-		if _, err := links.RecordLinkSent(ctx, link.ID, step.side, step.digest, step.bound); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := links.SetLinkApplied(ctx, link.ID, step.side, step.digest); err != nil {
-			t.Fatal(err)
-		}
+	var bound []string
+	if side == domain.LinkSideOut {
+		bound = []string{fmt.Sprintf("lst_%d", child.ID)}
+	}
+	if _, err := links.RecordLinkSent(ctx, link.ID, side, digest, port, bound); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := links.SetLinkApplied(ctx, link.ID, side, digest); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -124,6 +129,20 @@ func TestATunnelLineIsReadyOnlyWhenItsListenerIsAppliedAndItsLinkIsReadyOnBothSi
 	}
 	if !running() {
 		t.Fatal("a line is withheld after its listener was applied")
+	}
+	// The tunnel moves to a shared port and the entry applies its half first:
+	// it dials 8443 while the exit still listens on 30001. Each side holds what
+	// it was sent, but the line is withheld until both agree on the port.
+	applyLinkSide(t, nodes, child, domain.LinkSideOut, "out-shared", 8443)
+	if running() {
+		t.Fatal("a line is published while its entry dials a port its exit does not listen on")
+	}
+	if link, err := (&transitLinkRepo{db: nodes.db}).GetLink(ctx, 9, 7); err != nil || link.Ready() {
+		t.Fatalf("the link reads ready with its ports apart: %+v %v", link, err)
+	}
+	applyLinkSide(t, nodes, child, domain.LinkSideIn, "in-shared", 8443)
+	if !running() {
+		t.Fatal("a line is withheld after both sides moved to the shared port")
 	}
 	// Disabling the line (or the landing) withdraws it.
 	if err := nodes.UpdateEnabled(ctx, landing.ID, false); err != nil {

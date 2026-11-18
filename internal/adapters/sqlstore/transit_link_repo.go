@@ -48,6 +48,9 @@ type transitLinkRow struct {
 	OutApplied string `gorm:"size:64;not null;default:''"`
 	// OutSentBound is the listeners bound to the link in what was last sent.
 	OutSentBound jsonStrings `gorm:"type:text"`
+	// InSentPort / OutSentPort: see domain.TransitLink.
+	InSentPort  int `gorm:"not null;default:0"`
+	OutSentPort int `gorm:"not null;default:0"`
 
 	InUpBytes       int64  `gorm:"not null;default:0"`
 	InDownBytes     int64  `gorm:"not null;default:0"`
@@ -86,6 +89,7 @@ func (r transitLinkRow) toDomain() (domain.TransitLink, error) {
 		RealityUUID: uuid, RealityPrivateKey: private, RealityPublicKey: r.RealityPublicKey,
 		RealityShortID: r.RealityShortID, RealityServerName: r.RealityServerName, RealityTarget: r.RealityTarget,
 		InSent: r.InSent, OutSent: r.OutSent, InApplied: r.InApplied, OutApplied: r.OutApplied,
+		InSentPort: r.InSentPort, OutSentPort: r.OutSentPort,
 		InUpBytes: r.InUpBytes, InDownBytes: r.InDownBytes, InLastRawUp: r.InLastRawUp, InLastRawDown: r.InLastRawDown, InCounterEpoch: r.InCounterEpoch,
 		OutUpBytes: r.OutUpBytes, OutDownBytes: r.OutDownBytes, OutLastRawUp: r.OutLastRawUp, OutLastRawDown: r.OutLastRawDown, OutCounterEpoch: r.OutCounterEpoch,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -186,22 +190,24 @@ func (r *transitLinkRepo) UpdateLinkSettings(ctx context.Context, id int64, sett
 	}).Error
 }
 
-// RecordLinkSent stores what PSP put in one side's config. bound is nil for
-// the exit. It writes only on a change.
-func (r *transitLinkRepo) RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error) {
+// RecordLinkSent stores what PSP put in one side's config and the port in it
+// (0 with a withheld half). bound is nil for the exit. It writes only on a
+// change.
+func (r *transitLinkRepo) RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, port int, bound []string) (bool, error) {
 	db := r.db.WithContext(ctx).Model(&transitLinkRow{}).Where("id = ?", id)
 	if side == domain.LinkSideIn {
-		result := db.Where("in_sent <> ?", digest).Update("in_sent", digest)
+		result := db.Where("in_sent <> ? OR in_sent_port <> ?", digest, port).
+			Updates(map[string]any{"in_sent": digest, "in_sent_port": port})
 		return result.RowsAffected > 0, result.Error
 	}
 	var row transitLinkRow
-	if err := r.db.WithContext(ctx).Select("out_sent", "out_sent_bound").First(&row, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Select("out_sent", "out_sent_bound", "out_sent_port").First(&row, id).Error; err != nil {
 		return false, wrapNotFound(err)
 	}
-	if row.OutSent == digest && slices.Equal([]string(row.OutSentBound), bound) {
+	if row.OutSent == digest && row.OutSentPort == port && slices.Equal([]string(row.OutSentBound), bound) {
 		return false, nil
 	}
-	return true, db.Updates(map[string]any{"out_sent": digest, "out_sent_bound": jsonStrings(bound)}).Error
+	return true, db.Updates(map[string]any{"out_sent": digest, "out_sent_port": port, "out_sent_bound": jsonStrings(bound)}).Error
 }
 
 // DeleteLink removes the link of a pair: its credentials and its port go with
@@ -273,7 +279,7 @@ func attachEgressState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) e
 		return nil
 	}
 	var rows []transitLinkRow
-	if err := db.Select("entry_panel_id", "exit_panel_id", "in_sent", "in_applied", "out_sent", "out_applied", "out_sent_bound").
+	if err := db.Select("entry_panel_id", "exit_panel_id", "in_sent", "in_applied", "out_sent", "out_applied", "out_sent_bound", "in_sent_port", "out_sent_port").
 		Find(&rows).Error; err != nil {
 		return fmt.Errorf("load egress state: %w", err)
 	}
@@ -288,6 +294,7 @@ func attachEgressState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) e
 		row, ok := byPair[[2]int64{node.PanelID, node.EgressPanelID}]
 		node.EgressReady = ok && row.InSent != "" && row.InApplied == row.InSent &&
 			row.OutSent != "" && row.OutApplied == row.OutSent &&
+			domain.TransitLinkPortsAgree(row.InSentPort, row.OutSentPort) &&
 			slices.Contains([]string(row.OutSentBound), "lst_"+fmt.Sprint(node.ID))
 	}
 	return nil

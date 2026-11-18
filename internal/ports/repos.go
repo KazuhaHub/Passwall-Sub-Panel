@@ -2433,7 +2433,7 @@ type TransitLinkRepo interface {
 	GetLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error)
 	ListLinks(ctx context.Context) ([]domain.TransitLink, error)
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
-	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
+	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, port int, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
 	// DeleteLink removes the link of a pair, which frees its port on the exit
 	// server. It reports whether one existed.

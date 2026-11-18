@@ -28,7 +28,7 @@ type LinkRepo interface {
 	GetLink(ctx context.Context, entry, exit int64) (domain.TransitLink, error)
 	ListLinks(ctx context.Context) ([]domain.TransitLink, error)
 	UpdateLinkSettings(ctx context.Context, id int64, settings domain.TransitLinkSettings) error
-	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, bound []string) (bool, error)
+	RecordLinkSent(ctx context.Context, id int64, side domain.LinkSide, digest string, port int, bound []string) (bool, error)
 	SetLinkApplied(ctx context.Context, id int64, side domain.LinkSide, digest string) (bool, error)
 	DeleteLink(ctx context.Context, entry, exit int64) (bool, error)
 	RecordLinkCounters(ctx context.Context, id int64, side domain.LinkSide, up, down int64, epoch uint64) error
@@ -202,7 +202,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			if port != 0 {
 				sent, ok := active[in.Key]
 				if !ok || sent.Port != port {
-					if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+					if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 						return LinkPlan{}, err
 					}
 					continue
@@ -211,20 +211,20 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			}
 			if err := nodeprotocol.ValidateLinkIn(in); err != nil {
 				log.Warn("tunnel withheld from its exit: its half is invalid", "link", link.ID, "err", err)
-				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 					return LinkPlan{}, err
 				}
 				continue
 			}
 			if port == 0 && occupied[in.Port] {
 				log.Warn("tunnel withheld from its exit: its port is taken there", "link", link.ID, "port", in.Port)
-				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", nil); err != nil {
+				if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, "", 0, nil); err != nil {
 					return LinkPlan{}, err
 				}
 				continue
 			}
 			occupied[in.Port] = true
-			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, domain.TransitLinkDigest(in, nil), nil); err != nil {
+			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideIn, domain.TransitLinkDigest(in, nil), in.Port, nil); err != nil {
 				return LinkPlan{}, err
 			}
 			plan.In = append(plan.In, in)
@@ -237,7 +237,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 		}
 		if err := nodeprotocol.ValidateLinkOut(out); err != nil {
 			log.Warn("tunnel withheld from its entry: no usable exit address", "link", link.ID, "err", err)
-			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, "", nil); err != nil {
+			if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, "", 0, nil); err != nil {
 				return LinkPlan{}, err
 			}
 			continue
@@ -252,7 +252,7 @@ func (s *Service) LinksForFronts(ctx context.Context, panelID int64, occupied ma
 			names = append(names, string(listener))
 			plan.Egress = append(plan.Egress, nodeprotocol.EgressBinding{Listener: listener, Link: out.Key})
 		}
-		if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, domain.TransitLinkDigest(out, listeners), names); err != nil {
+		if err := s.sent(ctx, &plan, link.ID, domain.LinkSideOut, domain.TransitLinkDigest(out, listeners), out.Port, names); err != nil {
 			return LinkPlan{}, err
 		}
 		for _, node := range bound[key] {
@@ -311,8 +311,8 @@ func (s *Service) ensurePairLink(ctx context.Context, nodes []*domain.Node, entr
 
 // sent records what one side of a link is being sent; "" records that it is
 // withheld, so an earlier confirmation cannot keep its nodes published.
-func (s *Service) sent(ctx context.Context, plan *LinkPlan, id int64, side domain.LinkSide, digest string, bound []string) error {
-	changed, err := s.links.RecordLinkSent(ctx, id, side, digest, bound)
+func (s *Service) sent(ctx context.Context, plan *LinkPlan, id int64, side domain.LinkSide, digest string, port int, bound []string) error {
+	changed, err := s.links.RecordLinkSent(ctx, id, side, digest, port, bound)
 	if err != nil {
 		return fmt.Errorf("transit: record link %d sent: %w", id, err)
 	}
@@ -842,7 +842,7 @@ func (s *Service) WithholdIncomingLinks(ctx context.Context, links []nodeprotoco
 		if err != nil {
 			return err
 		}
-		if err := s.sent(ctx, &plan, id, domain.LinkSideIn, "", nil); err != nil {
+		if err := s.sent(ctx, &plan, id, domain.LinkSideIn, "", 0, nil); err != nil {
 			return err
 		}
 	}
