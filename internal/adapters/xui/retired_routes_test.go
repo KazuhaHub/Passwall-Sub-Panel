@@ -28,7 +28,7 @@ func TestRetiredRouteCleanupKeepsCustomRulesAndTemplateValues(t *testing.T) {
 	out := string(next)
 	if strings.Contains(out, "psp-target") || !strings.Contains(out, "9007199254740993") ||
 		!strings.Contains(out, "IPIfNonMatch") || !strings.Contains(out, "missing-match") ||
-		strings.Index(out, "custom") < 0 || strings.Index(out, "custom") >= strings.Index(out, "operator") {
+		!strings.Contains(out, "custom") || strings.Index(out, "custom") >= strings.Index(out, "operator") {
 		t.Fatalf("cleanup changed the retained template: %s", next)
 	}
 	again, rules, err := retiredRouteCleanup(next)
