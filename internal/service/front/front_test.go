@@ -683,3 +683,34 @@ func TestIncomingRealityLinkSharesTheFrontPort(t *testing.T) {
 		t.Fatalf("a dormant tunnel interrupted other routes: %+v", dormant)
 	}
 }
+
+// An incoming tunnel listens on one shared port: a second front of the same
+// server that routes to it is refused at save, and an edit of the first front
+// that keeps its own route is not.
+func TestATunnelIsRoutedByOnlyOneFrontOfAServer(t *testing.T) {
+	e := newEnv(realityNode(1, "hk", 443, "a.example.com"))
+	link := domain.TransitLink{
+		ID: 7, EntryPanelID: 3, ExitPanelID: panelID, Port: 23456,
+		Protocol:          nodeprotocol.LinkProtocolVLESSReality,
+		RealityUUID:       "d342d11e-d424-4583-b36e-524ab1f0afa4",
+		RealityPrivateKey: strings.Repeat("A", 43),
+		RealityShortID:    "0123456789abcdef",
+		RealityServerName: "link.example.com", RealityTarget: "link.example.com:443",
+	}
+	e.svc.links = fakeLinks{link}
+	linkRoute := domain.FrontRoute{ServerNames: []string{link.RealityServerName}, Target: domain.FrontTarget{Kind: domain.FrontTargetLink, LinkID: link.ID}}
+	first := simpleInput()
+	first.Routes = append(first.Routes, linkRoute)
+	saved, err := e.svc.Create(t.Context(), panelID, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := Input{Port: 8443, Routes: []domain.FrontRoute{linkRoute}, Default: external("camouflage.example", 443), ConfirmMoveListeners: true}
+	err = mustFail(e.svc.Create(t.Context(), panelID, second))
+	if code := refusalCode(t, err); code != CodeLinkOnAnotherFront || !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("second front: code %s, err %v", code, err)
+	}
+	if _, err := e.svc.Update(t.Context(), panelID, saved.Front.ID, first); err != nil {
+		t.Fatalf("a front's own tunnel route was refused on edit: %v", err)
+	}
+}

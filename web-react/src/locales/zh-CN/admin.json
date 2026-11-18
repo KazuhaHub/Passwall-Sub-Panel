@@ -3988,6 +3988,7 @@
         "bad_target": "路由的去向不可用。",
         "listener_unrouted": "节点 {{node}} 被移到了共用端口后面，但没有路由把 SNI 交给它。",
         "link_unsupported": "请选择入站 VLESS REALITY 隧道，并使用该隧道配置的服务器名。",
+        "link_on_another_front": "该隧道已被本服务器的共用端口 {{port}} 使用：一条隧道只能经一个共用端口进入。",
         "default_missing": "请选择没有 SNI 或未知 SNI 时去的伪装站点。",
         "default_not_external": "默认去向必须是外部站点。",
         "default_bad": "默认站点 {{host}} 不可用。",

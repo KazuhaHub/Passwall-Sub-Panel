@@ -139,7 +139,7 @@ func (r *Refusal) Error() string { return r.Message }
 // Is lets a refusal be matched as a validation error, and the one that asks
 // for a confirmation as a conflict.
 func (r *Refusal) Is(target error) bool {
-	if r.Code == CodeConfirmRequired {
+	if r.Code == CodeConfirmRequired || r.Code == CodeLinkOnAnotherFront {
 		return target == domain.ErrConflict
 	}
 	return target == domain.ErrValidation
@@ -170,6 +170,7 @@ const (
 	CodeLandingUnfit         = "landing_not_tls"
 	CodeListenerUnrouted     = "listener_unrouted"
 	CodeLinkUnsupported      = "link_unsupported"
+	CodeLinkOnAnotherFront   = "link_on_another_front"
 	CodeDefaultMissing       = "default_missing"
 	CodeDefaultNotExternal   = "default_not_external"
 	CodeDefaultBad           = "default_bad"
@@ -712,6 +713,20 @@ func (s *Service) validate(ctx context.Context, panelID int64, nodes []*domain.N
 			forwardTargets[fmt.Sprintf("%d/%s", target.NodeID, target.LineID)] = true
 		}
 		front.Routes = append(front.Routes, domain.FrontRoute{ServerNames: names, Target: target})
+	}
+	// An incoming tunnel listens on one shared port. The contract check only
+	// compiles the fronts that are not withheld, so this is held here, where every
+	// saved front of the server is known.
+	for _, target := range front.Targets() {
+		if target.Kind != domain.FrontTargetLink {
+			continue
+		}
+		for _, other := range others {
+			if slices.Contains(other.Targets(), target) {
+				return domain.TransitFront{}, nil, refuse(CodeLinkOnAnotherFront, "%s is already routed by the shared port %d: a tunnel can only enter through one shared port",
+					map[string]any{"link_id": target.LinkID, "port": other.Port}, TargetLabel(target, byID), other.Port)
+			}
+		}
 	}
 	for _, item := range front.Listeners {
 		if !referenced[item.NodeID] {

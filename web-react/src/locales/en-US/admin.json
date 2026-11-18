@@ -3995,6 +3995,7 @@
         "bad_target": "A route's target is not usable.",
         "listener_unrouted": "Node {{node}} is moved behind the shared port but no route sends it an SNI.",
         "link_unsupported": "Choose an incoming VLESS REALITY tunnel and use its configured server name.",
+        "link_on_another_front": "This tunnel is already routed by shared port {{port}} of this server: a tunnel can enter through one shared port only.",
         "default_missing": "Choose the camouflage site that connections without an SNI or with an unknown one go to.",
         "default_not_external": "The default must be an external site.",
         "default_bad": "The default site {{host}} is not usable.",
