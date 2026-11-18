@@ -798,6 +798,18 @@ type RelayLine struct {
 	// (traffic_factor.go): what a user is charged per byte through this line,
 	// whatever servers it passes. Absent is one-for-one; 0 is free.
 	TrafficFactorMilli *int `json:",omitempty"`
+	// SourceCIDRs are source addresses (canonical prefixes) the administrator
+	// adds to this line's source set (source_guard.go): where a direct forward,
+	// an external line or a CDN line's traffic reaches the landing from. Empty
+	// adds nothing. A tunnel line has none.
+	SourceCIDRs []string `json:",omitempty"`
+	// SourceCIDRsUnresolved marks a request that omitted source_cidrs: the saved
+	// line keeps its own, so an editor that does not know the field cannot clear
+	// it.
+	SourceCIDRsUnresolved bool `json:"-"`
+	// SourceWithheld is loaded state, never stored: why the source guard keeps
+	// this line out of subscriptions (domain.SourceWithheld*), or "".
+	SourceWithheld string `json:"-"`
 	// ManagedReady is loaded state, never stored: the entry server has applied
 	// exactly the forward this line now asks for. Read it through Publishable.
 	ManagedReady bool `json:"-"`
