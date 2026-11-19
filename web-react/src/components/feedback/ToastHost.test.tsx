@@ -12,7 +12,7 @@ vi.mock('@/i18n', async () => {
 import SnackbarHost, { pushSnack } from '../SnackbarHost'
 import { useAuthStore } from '@/stores/auth'
 import { notifySyncPending, setSyncPendingNavigator } from './syncPendingToast'
-import { pushToast } from './toasts'
+import { openToastLog, pushToast } from './toasts'
 
 const DURATION = 4000
 
@@ -799,5 +799,95 @@ describe('a change of signed-in identity', () => {
     act(() => pushSnack('keep'))
     act(() => { useAuthStore.setState({ upn: 'same' }) })
     expect(texts()).toEqual(['keep'])
+  })
+})
+
+// A REAL BROWSER KEEPS THE PANEL ON SCREEN WHILE IT ANIMATES OUT, and jsdom does not: Base UI
+// asks the element for its running animations (getAnimations) and unmounts only once they have
+// finished, and jsdom has no getAnimations, so there the panel left in the same tick. Code that
+// restores focus "after the panel closed" therefore passed in jsdom and failed in Chrome, where
+// it ran while the panel, and the focus inside it, were still there. This gives the closing
+// panel a 150ms animation so the tests see the same order of events.
+function delayPanelExit(ms = 150) {
+  Object.defineProperty(Element.prototype, 'getAnimations', {
+    configurable: true,
+    value(this: Element) {
+      if (!this.hasAttribute('data-ending-style')) return []
+      return [{ finished: new Promise<void>(res => setTimeout(res, ms)), effect: { getTiming: () => ({ duration: ms, iterations: 1 }) } }]
+    },
+  })
+}
+afterEach(() => { delete (Element.prototype as unknown as Record<string, unknown>).getAnimations })
+const settle = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+const panel = () => document.querySelector('[data-slot="toast-log"]')
+
+describe('focus when the log panel leaves, as a browser animates it out', () => {
+  afterEach(() => { useAuthStore.setState({ userId: null, authEpoch: 0 }) })
+
+  it('puts focus on the main landmark AFTER the panel has actually left, when the identity changes', async () => {
+    delayPanelExit()
+    const main = document.createElement('main')
+    document.body.appendChild(main)
+    render(<SnackbarHost />)
+    act(() => { openToastLog() })
+    await settle(20)
+    const inside = panel()!.querySelector('button') as HTMLElement
+    act(() => inside.focus())
+    act(() => { useAuthStore.setState({ userId: 77 }) })
+    await settle(50)
+    // The model is honest: the panel is still mounted, still holding focus, halfway through its exit.
+    expect(panel()).not.toBeNull()
+    expect(document.activeElement).toBe(inside)
+    await settle(400)
+    expect(panel()).toBeNull()
+    expect(document.activeElement).toBe(main)
+    main.remove()
+  })
+
+  it('falls back to the account-menu button when the button that opened the log is gone', async () => {
+    delayPanelExit()
+    const account = document.createElement('button')
+    account.setAttribute('data-psp-account-menu', '')
+    document.body.appendChild(account)
+    function Page() {
+      // The bar button that opened the log; a resize below the breakpoint takes it out.
+      const [bar, setBar] = useState(true)
+      return (
+        <>
+          <SnackbarHost />
+          {bar && <button id="bar-open" onClick={openToastLog}>open</button>}
+          <button id="narrow" onClick={() => setBar(false)}>narrow</button>
+        </>
+      )
+    }
+    render(<Page />)
+    const opener = document.getElementById('bar-open')!
+    act(() => opener.focus())
+    fireEvent.click(opener)
+    await settle(20)
+    expect(panel()).not.toBeNull()
+    fireEvent.click(document.getElementById('narrow')!)
+    expect(document.getElementById('bar-open')).toBeNull()
+    fireEvent.click(within(panel() as HTMLElement).getByRole('button', { name: '关闭' }))
+    await settle(400)
+    expect(panel()).toBeNull()
+    expect(document.activeElement).toBe(account)
+    account.remove()
+  })
+
+  it('returns to the opener when it is still there', async () => {
+    delayPanelExit()
+    const account = document.createElement('button')
+    account.setAttribute('data-psp-account-menu', '')
+    document.body.appendChild(account)
+    render(<><SnackbarHost /><button id="bar-open" onClick={openToastLog}>open</button></>)
+    const opener = document.getElementById('bar-open')!
+    act(() => opener.focus())
+    fireEvent.click(opener)
+    await settle(20)
+    fireEvent.click(within(panel() as HTMLElement).getByRole('button', { name: '关闭' }))
+    await settle(400)
+    expect(document.activeElement).toBe(opener)
+    account.remove()
   })
 })

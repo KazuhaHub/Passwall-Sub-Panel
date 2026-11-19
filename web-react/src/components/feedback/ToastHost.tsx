@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import { focusFallbackTarget, focusIsLost } from './focusFallback'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 
 import { TONE_STYLE, type Tone } from '@/components/common/tones'
@@ -112,7 +113,14 @@ function LogPanel({ open, onClose, entries, omitted, returnFocus, language }: {
     <DialogPrimitive.Root
       open={open}
       onOpenChange={o => { if (!o) onClose() }}
-      onOpenChangeComplete={o => { if (!o) { const el = returnFocus(); if (el) el.focus() } }}
+      onOpenChangeComplete={o => {
+        if (o) return
+        const el = returnFocus()
+        if (el) { el.focus(); return }
+        // Nowhere proper to go back to. Only step in when focus really is lost: if something
+        // else already holds it, it is not ours to move.
+        if (focusIsLost()) focusFallbackTarget()?.focus({ preventScroll: true })
+      }}
     >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className={cn('fixed inset-0 isolate bg-black/10 duration-100 data-open:animate-in data-open:fade-in-0', PANEL_Z)} />
@@ -368,17 +376,14 @@ export default function ToastHost() {
     placements.current.clear()
     store.setPaused('hover', false)
     setLeaving([])
-    // Closing the panel under someone's focus would drop it on <body>: hand it to the page's
-    // main landmark instead (the old layouts' <main> has no tabindex, so it gets one).
-    const hadFocusInPanel = document.activeElement?.closest('[data-slot="toast-log"]') != null
+    // The panel is closed here but focus is NOT moved here: in a browser the panel animates out
+    // and its focused button is still in the DOM for a few frames, so a frame-delayed focus call
+    // ran too early and found focus "still somewhere". LogPanel's onOpenChangeComplete restores
+    // focus once the panel has really left; with no return target (the previous user's page is
+    // gone) it lands on the account button or the main landmark, never on <body>.
+    panelReturn.current = null
+    restoreTo.current = null
     setPanelOpen(false)
-    if (hadFocusInPanel) {
-      requestAnimationFrame(() => {
-        if (document.activeElement && document.activeElement !== document.body) return
-        const main = document.querySelector<HTMLElement>('#main-content, main')
-        if (main) { if (!main.hasAttribute('tabindex')) main.tabIndex = -1; main.focus({ preventScroll: true }) }
-      })
-    }
   }, [identity, store])
 
   // When a modal dialog opens on a phone, toasts already at the bottom move to the top stack
