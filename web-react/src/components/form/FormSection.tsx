@@ -1,7 +1,8 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useId, useState, type ReactNode } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
+import { SectionRevealContext } from './editorContext'
 
 /** localStorage key for an advanced section's remembered open state. */
 export function formSectionKey(sectionKey: string): string {
@@ -44,6 +45,11 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
   const bodyId = `${uid}-body`
   const [remembered, setRemembered] = useState(() => readOpen(sectionKey, false))
   const open = !advanced || forceOpen === true || remembered
+  // A field inside that has a problem asks for this section (and any it sits in) to open so
+  // the person can be taken to it. It opens for this visit only: what the person chose to
+  // remember is not rewritten by a validation error.
+  const outerReveal = useContext(SectionRevealContext)
+  const reveal = useCallback(() => { setRemembered(true); outerReveal?.() }, [outerReveal])
 
   const toggle = () => {
     const next = !remembered
@@ -81,7 +87,9 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
         )}
         {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
       </header>
-      <div id={bodyId} hidden={!open} className="grid gap-4">{children}</div>
+      <SectionRevealContext.Provider value={reveal}>
+        <div id={bodyId} hidden={!open} className="grid gap-4">{children}</div>
+      </SectionRevealContext.Provider>
     </section>
   )
 }

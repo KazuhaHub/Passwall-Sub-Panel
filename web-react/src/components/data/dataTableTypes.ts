@@ -70,6 +70,17 @@ export interface RowOptions {
 
 interface DataTableBase<T> {
   data: readonly T[]
+  /**
+   * MUST BE REFERENTIALLY STABLE: define the array at module level, or memoise it
+   * (`useMemo`) with dependencies that really change the columns. TanStack rebuilds
+   * its column model, and DataTable its row context, whenever this identity changes,
+   * and the rows are memoised on that context. An array literal written in the render
+   * body therefore works, but every render re-derives every column, header and cell
+   * and redraws every row: a list that re-renders often (typing in the search box,
+   * a poll) gets slow as it grows. Selection, sorting and paging live in state, not in
+   * the columns, so they are not lost. Only the FIRST render's `meta.defaultHidden` flags decide the
+   * starting column visibility, whatever the identity does later.
+   */
   // The column helper produces differently-typed columns in one array.
   columns: ColumnDef<T, any>[]
   getRowId: (row: T) => string

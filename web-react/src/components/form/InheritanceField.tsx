@@ -1,4 +1,4 @@
-import { useId, type CSSProperties, type ReactNode } from 'react'
+import { useId, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
@@ -98,6 +98,14 @@ export interface InheritanceFieldProps<T> {
   renderEditor: (p: InheritanceEditorProps<T>) => ReactNode
   /** What "set here" starts from when no level above defines a value. */
   defaultValue: T
+  /**
+   * What the editor can actually hold of an inherited value (rounded to a whole number,
+   * clamped to its range). Give it whenever the editor is narrower than the level above.
+   * If the result differs from the inherited value, "set here" does NOT write it: that would
+   * store a number nobody chose and make the form dirty. The editor starts from the adjusted
+   * value, a note says so, and nothing is written until the person edits it.
+   */
+  fitInherited?: (inherited: T) => T
   hint?: ReactNode
   error?: ReactNode
   className?: string
@@ -113,7 +121,7 @@ export interface InheritanceFieldProps<T> {
  * on an empty or zero box and saves it by accident.
  */
 export function InheritanceField<T>({
-  label, levels, editLevel, onChange, renderValue, renderEditor, defaultValue, hint, error, className,
+  label, levels, editLevel, onChange, renderValue, renderEditor, defaultValue, hint, error, className, fitInherited,
 }: InheritanceFieldProps<T>) {
   const { t } = useSpacedT()
   const uid = useId()
@@ -121,12 +129,23 @@ export function InheritanceField<T>({
   const own = idx >= 0 ? levels[idx] : undefined
   const above = effectiveLevel(levels.slice(0, Math.max(idx, 0)))
   const isSet = own?.value !== undefined
+  // "Set here" chosen, but the value to start from had to be adjusted: shown in the editor,
+  // not yet written. Dropped as soon as a real value exists (an edit) or the mode goes back.
+  const [pending, setPending] = useState<{ value: T; parent: T } | null>(null)
+  if (isSet && pending) setPending(null)
+  const adjusting = !isSet && pending !== null
   const noteId = `${uid}-note`
   const labelId = `${uid}-label`
 
   const setMode = (mode: 'follow' | 'set') => {
-    if (mode === 'follow') onChange(undefined)
-    else onChange(above?.value !== undefined ? above.value : defaultValue)
+    setPending(null)
+    if (mode === 'follow') { onChange(undefined); return }
+    const inherited = above?.value
+    if (inherited !== undefined && fitInherited) {
+      const fitted = fitInherited(inherited)
+      if (!Object.is(fitted, inherited)) { setPending({ value: fitted, parent: inherited }); return }
+    }
+    onChange(inherited !== undefined ? inherited : defaultValue)
   }
 
   return (
@@ -139,7 +158,7 @@ export function InheritanceField<T>({
           <SegmentedControl
             aria-label={t('ui.form.inherit_mode', { label, level: own.label })}
             size="sm"
-            value={isSet ? 'set' : 'follow'}
+            value={isSet || adjusting ? 'set' : 'follow'}
             onChange={setMode}
             options={[
               { value: 'follow', label: t('ui.form.inherit_follow') },
@@ -147,18 +166,25 @@ export function InheritanceField<T>({
             ]}
           />
           </div>
-          {isSet ? (
+          {isSet || adjusting ? (
             // The editor is told it is inside an inheritance field: an empty box is
             // invalid-until-filled there, and "follow" is the mode control's alone.
+            <>
             <InheritEditorContext.Provider value>
               {renderEditor({
                 id: `${uid}-editor`,
-                value: own.value as T,
-                onChange,
+                value: isSet ? own.value as T : pending!.value,
+                onChange: next => { setPending(null); onChange(next) },
                 'aria-labelledby': labelId,
                 'aria-describedby': error || hint ? noteId : undefined,
               })}
             </InheritEditorContext.Provider>
+            {adjusting && (
+              <p className="text-xs text-muted-foreground">
+                {t('ui.form.inherit_adjusted', { parent: renderValue(pending!.parent), value: renderValue(pending!.value) })}
+              </p>
+            )}
+            </>
           ) : (
             <p className="text-xs text-muted-foreground">
               {above?.value !== undefined

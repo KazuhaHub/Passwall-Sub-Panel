@@ -93,7 +93,7 @@ describe('SaveBar and the form validity (item 6)', () => {
     render(<Form onSave={onSave} />)
     fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
     expect(save().getAttribute('aria-disabled')).toBe('true')
-    expect(within(screen.getByRole('region')).getByText('Allowed range is 1 to 600')).toBeTruthy()
+    expect(within(screen.getByRole('region')).getByText('Timeout: Allowed range is 1 to 600')).toBeTruthy()
     // the press that would have stored a clamped 600
     fireEvent.blur(screen.getByLabelText('Timeout'))
     fireEvent.click(save())
@@ -115,7 +115,7 @@ describe('SaveBar and the form validity (item 6)', () => {
   it('counts the problems when there are several', () => {
     render(<Form onSave={() => {}} tags />)
     fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
-    expect(within(screen.getByRole('region')).getByText('2 inputs need fixing before you can save')).toBeTruthy()
+    expect(within(screen.getByRole('region')).getByText('2 inputs need fixing: Timeout, Tags')).toBeTruthy()
   })
 
   it('keeps the bar the same height when its message changes, so the Save button does not move', () => {

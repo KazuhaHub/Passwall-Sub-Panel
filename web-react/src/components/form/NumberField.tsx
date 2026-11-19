@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useContext, useEffect, useId, useRef, useState, type ComponentProps, type Ref } from 'react'
 import { RotateCcwIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
@@ -112,16 +112,31 @@ export function NumberField({
   const [touched, setTouched] = useState(false)
   const [rejected, setRejected] = useState<string | null>(null)
   const afterCommit = useRef<{ expected: number | null } | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  // The last value that was settled on: what the box held when it arrived, or what the person
+  // last committed (blur / Enter) while it was in range. Escape goes back to THIS, not to
+  // "whatever the parent holds now", because the parent is told every complete number as it is
+  // typed (an out-of-range "9999" is held by the parent too until it is fixed or abandoned).
+  const committed = useRef<number | null>(value)
+  // The caller may pass a ref of its own; both get the element.
+  const outerRef = (rest as { ref?: Ref<HTMLInputElement> }).ref
+  const setInput = useCallback((node: HTMLInputElement | null) => {
+    inputRef.current = node
+    if (typeof outerRef === 'function') outerRef(node)
+    else if (outerRef) (outerRef as { current: HTMLInputElement | null }).current = node
+  }, [outerRef])
+  const draftNow = useRef(draft)
+  draftNow.current = draft
   // Bumped by a commit so the check below runs once the parent's answer has rendered, even if its value did not change.
   const [commitTick, setCommitTick] = useState(0)
 
   // A value changed from outside (follow again, reset, load) replaces the text;
   // a value that merely echoes what was typed leaves it alone.
   useEffect(() => {
-    setDraft(prev => {
-      const r = readNumberText(prev, integer === true)
-      return r.kind === 'number' && r.value === value ? prev : fmt(value)
-    })
+    const r = readNumberText(draftNow.current, integer === true)
+    if (r.kind === 'number' && r.value === value) return
+    committed.current = value
+    setDraft(fmt(value))
     // `integer` only changes how the draft is read, not whether it matches.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
@@ -133,6 +148,7 @@ export function NumberField({
     if (!check) return
     afterCommit.current = null
     if (check.expected !== value) {
+      committed.current = value
       setDraft(fmt(value))
       setRejected(t('ui.form.number_rejected', { value: value === null ? '—' : value }))
     }
@@ -151,11 +167,17 @@ export function NumberField({
   if (reading.kind === 'exponent') problem = { message: t('ui.form.number_exponent'), showNow: true }
   else if (reading.kind === 'invalid') problem = { message: t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid'), showNow: true }
   else if (reading.kind === 'partial') problem = { message: t('ui.form.number_incomplete'), showNow: touched }
-  else if (reading.kind === 'empty' && !emptyOk) problem = { message: t(inheritEditor ? 'ui.form.number_required_inherit' : 'ui.form.number_required'), showNow: true }
+  else if (reading.kind === 'empty' && !emptyOk) {
+    // Says what to enter, not only that something is missing.
+    const needs = inheritEditor ? 'ui.form.number_required_inherit'
+      : min !== undefined && max !== undefined ? 'ui.form.number_required_range' : 'ui.form.number_required'
+    problem = { message: t(needs, { min, max }), showNow: true }
+  }
   else if (out) problem = { message: rangeText, showNow: true }
-  else if (reading.kind === 'empty' && value !== null) problem = { message: t('ui.form.number_incomplete'), showNow: false }
+  // An empty box on a field that allows empty is a complete answer, not a problem: the empty
+  // commit (blur or Enter) is what tells the parent, and both come before any click on Save.
 
-  useReportValidity(problem?.message ?? null)
+  useReportValidity(problem?.message ?? null, inputRef)
   const message = (problem?.showNow ? problem.message : null) ?? rejected
   const inField = useFieldMessage(message)
 
@@ -171,6 +193,7 @@ export function NumberField({
     const r = readNumberText(draft, integer === true)
     if (r.kind === 'number') {
       setDraft(String(r.value))
+      if (!out) committed.current = r.value
       if (r.value !== value) { onChange(r.value) }
       // Even when the parent already holds it: a refusal during typing shows up here.
       afterCommit.current = { expected: r.value }
@@ -178,6 +201,7 @@ export function NumberField({
       return
     }
     if (r.kind === 'empty' && emptyOk) {
+      committed.current = null
       if (value !== null) onChange(null)
       afterCommit.current = { expected: null }
       setCommitTick(n => n + 1)
@@ -187,13 +211,22 @@ export function NumberField({
     // The text stays, the problem stays visible, and the form cannot be saved.
   }
 
-  const revert = () => { setDraft(fmt(value)); setRejected(null); setTouched(false) }
+  const revert = () => {
+    const back = committed.current
+    setDraft(fmt(back))
+    setRejected(null)
+    setTouched(false)
+    // The parent was told the abandoned number as it was typed; tell it the settled one.
+    // Never null on a field that does not allow empty: that event means "cleared on purpose".
+    if (value !== back && (back !== null || emptyOk)) onChange(back)
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <InputGroup>
         <InputGroupInput
           {...rest}
+          ref={setInput}
           inputMode={integer ? 'numeric' : 'decimal'}
           autoComplete="off"
           value={draft}
@@ -205,7 +238,7 @@ export function NumberField({
           onKeyDown={e => {
             rest.onKeyDown?.(e)
             if (e.key === 'Enter') commit()
-            else if (e.key === 'Escape' && draft !== fmt(value)) { e.stopPropagation(); revert() }
+            else if (e.key === 'Escape' && (draft !== fmt(committed.current) || value !== committed.current)) { e.stopPropagation(); revert() }
           }}
           className="tabular-nums"
         />

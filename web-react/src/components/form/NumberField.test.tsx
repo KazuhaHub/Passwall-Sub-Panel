@@ -18,6 +18,11 @@ const box = () => screen.getByLabelText('Limit') as HTMLInputElement
 const type = (text: string) => fireEvent.change(box(), { target: { value: text } })
 const leave = () => fireEvent.blur(box())
 
+function Blocked() {
+  const { issues, blocked } = useFormValidity()
+  return <output data-testid="blocked">{blocked ? issues.map(i => i.message).join('|') : 'ok'}</output>
+}
+
 describe('NumberField', () => {
   it('shows the unit as a suffix and reports numbers as they are typed', () => {
     const onValue = vi.fn()
@@ -67,7 +72,7 @@ describe('NumberField', () => {
       leave()
       expect(box().value).toBe('')
       expect(box().getAttribute('aria-invalid')).toBe('true')
-      expect(screen.getByText('Fill in a number')).toBeTruthy()
+      expect(screen.getByText('Enter a number, such as 1000')).toBeTruthy()
       expect(onValue).not.toHaveBeenCalledWith(null)
     })
 
@@ -88,6 +93,39 @@ describe('NumberField', () => {
       expect(box().getAttribute('aria-invalid')).toBeNull()
     })
 
+    it('Escape on an out-of-range draft goes back to the last committed value and clears the invalid state', () => {
+      const onValue = vi.fn()
+      render(<Harness initial={5} min={1} max={600} onValue={onValue} />)
+      type('9999')
+      // the parent was told the number as it was typed
+      expect(onValue).toHaveBeenLastCalledWith(9999)
+      expect(box().getAttribute('aria-invalid')).toBe('true')
+      fireEvent.keyDown(box(), { key: 'Escape' })
+      expect(box().value).toBe('5')
+      expect(box().getAttribute('aria-invalid')).toBeNull()
+      // and the parent no longer holds the abandoned number
+      expect(onValue).toHaveBeenLastCalledWith(5)
+    })
+
+    it('Escape goes back to the value last committed with Enter, not to the one the box started with', () => {
+      render(<Harness initial={5} min={1} max={600} />)
+      type('20')
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      type('9999')
+      fireEvent.keyDown(box(), { key: 'Escape' })
+      expect(box().value).toBe('20')
+    })
+
+    it('Escape on an unreadable draft of an allow-empty field with nothing set goes back to empty and tells the parent nothing', () => {
+      const onValue = vi.fn()
+      render(<Harness initial={null} allowEmpty onValue={onValue} />)
+      type('abc')
+      fireEvent.keyDown(box(), { key: 'Escape' })
+      expect(box().value).toBe('')
+      expect(box().getAttribute('aria-invalid')).toBeNull()
+      expect(onValue).not.toHaveBeenCalled()
+    })
+
     it('typing "-" or "." over a value does not wipe it from the parent, and is flagged until finished', () => {
       const onValue = vi.fn()
       render(<Harness initial={5} onValue={onValue} />)
@@ -98,7 +136,7 @@ describe('NumberField', () => {
       leave()
       // left unfinished: the text stays and now says so
       expect(box().value).toBe('-')
-      expect(screen.getByText('The number is not finished')).toBeTruthy()
+      expect(screen.getByText('The number is incomplete; finish typing it, such as 1000')).toBeTruthy()
       type('-3')
       expect(onValue).toHaveBeenLastCalledWith(-3)
     })
@@ -128,7 +166,7 @@ describe('NumberField', () => {
       type('1')
       type('1,')
       expect(screen.queryByText(/Enter digits only/)).toBeNull()
-      expect(screen.queryByText('The number is not finished')).toBeNull()
+      expect(screen.queryByText('The number is incomplete; finish typing it, such as 1000')).toBeNull()
       type('1,0')
       type('1,00')
       type('1,000')
@@ -197,7 +235,7 @@ describe('NumberField', () => {
       expect(box().value).toBe('7')
       leave()
       expect(box().value).toBe('5')
-      expect(screen.getByText('That value was not accepted; changed back to 5')).toBeTruthy()
+      expect(screen.getByText('That value was not accepted and was changed back to 5; enter a different number')).toBeTruthy()
     })
 
     it('the same for an empty commit that is refused', () => {
@@ -205,7 +243,7 @@ describe('NumberField', () => {
       type('')
       leave()
       expect(box().value).toBe('5')
-      expect(screen.getByText('That value was not accepted; changed back to 5')).toBeTruthy()
+      expect(screen.getByText('That value was not accepted and was changed back to 5; enter a different number')).toBeTruthy()
     })
   })
 
@@ -269,6 +307,34 @@ describe('NumberField', () => {
     })
   })
 
+  describe('empty drafts', () => {
+    it('with allowEmpty an empty draft is valid: not flagged, not reported, and committed as null on leaving', () => {
+      const onValue = vi.fn()
+      render(<FormValidityProvider><Harness initial={5} allowEmpty emptyLabel="Follows the group" onValue={onValue} /><Blocked /></FormValidityProvider>)
+      type('')
+      expect(box().getAttribute('aria-invalid')).toBeNull()
+      expect(screen.getByTestId('blocked').textContent).toBe('ok')
+      expect(onValue).not.toHaveBeenCalledWith(null)
+      leave()
+      expect(onValue).toHaveBeenLastCalledWith(null)
+      expect(screen.getByTestId('blocked').textContent).toBe('ok')
+    })
+
+    it('without allowEmpty an empty draft is invalid and says what to enter', () => {
+      render(<FormValidityProvider><Harness initial={5} /><Blocked /></FormValidityProvider>)
+      type('')
+      expect(box().getAttribute('aria-invalid')).toBe('true')
+      expect(screen.getAllByText('Enter a number, such as 1000').length).toBeGreaterThan(0)
+      expect(screen.getByTestId('blocked').textContent).toBe('Enter a number, such as 1000')
+    })
+
+    it('without allowEmpty but with a range it says the range to enter', () => {
+      render(<Harness initial={5} min={1} max={600} />)
+      type('')
+      expect(screen.getByText('Enter a number from 1 to 600')).toBeTruthy()
+    })
+  })
+
   describe('it reports its validity to the form', () => {
     function Status() {
       const { issues, blocked } = useFormValidity()
@@ -290,7 +356,7 @@ describe('NumberField', () => {
       type('abc')
       expect(status()).toContain('Enter digits only')
       type('')
-      expect(status()).toBe('Fill in a number')
+      expect(status()).toBe('Enter a number from 1 to 600')
       type('50')
       expect(status()).toBe('ok')
     })
@@ -298,7 +364,7 @@ describe('NumberField', () => {
     it('blocks while a number is half-typed, before the box is left', () => {
       mount(5)
       type('-')
-      expect(status()).toBe('The number is not finished')
+      expect(status()).toBe('The number is incomplete; finish typing it, such as 1000')
     })
 
     it('stops blocking when the field leaves the form', () => {

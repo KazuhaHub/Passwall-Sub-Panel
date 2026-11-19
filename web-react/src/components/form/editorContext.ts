@@ -8,3 +8,11 @@ import { createContext } from 'react'
  * invalid until it is filled.
  */
 export const InheritEditorContext = createContext(false)
+
+/**
+ * Set by FormSection around its body. A field inside it that reports a problem hands
+ * this to the form's validity registry, so "go to the first problem" can open the
+ * section(s) the field is hidden in before it focuses it. Nested sections chain: the
+ * inner `reveal` opens the outer ones too.
+ */
+export const SectionRevealContext = createContext<(() => void) | null>(null)

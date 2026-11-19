@@ -150,4 +150,64 @@ describe('InheritanceField', () => {
       expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
     })
   })
+
+  describe('a level above that this editor cannot hold exactly', () => {
+    // 1.25 above, a whole-number editor: the starting value has to change to be usable.
+    function Wired({ onWrite }: { onWrite: (v: number | undefined) => void }) {
+      const [user, setUser] = useState<number | undefined>(undefined)
+      return (
+        <InheritanceField
+          label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
+          levels={lv(100, 1.25, user)}
+          onChange={v => { onWrite(v); setUser(v) }}
+          fitInherited={v => Math.round(v)}
+          renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} integer min={0} />}
+        />
+      )
+    }
+    const editorBox = () => screen.getByRole('textbox', { name: 'Traffic limit' }) as HTMLInputElement
+
+    it('starts from the adjusted value without writing anything, so the form is not dirty', () => {
+      const onWrite = vi.fn()
+      render(<Wired onWrite={onWrite} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(onWrite).not.toHaveBeenCalled()
+      expect(editorBox().value).toBe('1')
+      expect(editorBox().getAttribute('aria-invalid')).toBeNull()
+    })
+
+    it('says the starting value was adjusted, and that nothing applies until it is edited', () => {
+      render(<Wired onWrite={() => {}} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(screen.getByText('The level above is 1.25 GB, which this field cannot use. Starting from 1 GB; edit it to apply')).toBeTruthy()
+    })
+
+    it('leaving the box untouched commits nothing; only an edit writes, and the note goes away', () => {
+      const onWrite = vi.fn()
+      render(<Wired onWrite={onWrite} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      fireEvent.focus(editorBox())
+      fireEvent.blur(editorBox())
+      expect(onWrite).not.toHaveBeenCalled()
+      fireEvent.change(editorBox(), { target: { value: '3' } })
+      expect(onWrite).toHaveBeenCalledWith(3)
+      expect(screen.queryByText(/which this field cannot use/)).toBeNull()
+    })
+
+    it('going back to follow drops the pending start', () => {
+      const onWrite = vi.fn()
+      render(<Wired onWrite={onWrite} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      fireEvent.click(screen.getByRole('radio', { name: 'Follow the level above' }))
+      expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
+      expect(screen.queryByText(/which this field cannot use/)).toBeNull()
+    })
+
+    it('a value the editor can hold is still written at once, as before', () => {
+      const onWrite = vi.fn()
+      render(<InheritanceField label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10} levels={lv(100, 50, undefined)} onChange={onWrite} fitInherited={v => Math.round(v)} renderEditor={editor} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(onWrite).toHaveBeenCalledWith(50)
+    })
+  })
 })

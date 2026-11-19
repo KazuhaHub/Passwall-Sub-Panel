@@ -69,14 +69,14 @@ export function FormsDemoSection() {
       <div className="flex max-w-2xl flex-col gap-8 rounded-xl border bg-card p-5">
         <FormSection title="基本信息" description="名称和地址，列表和订阅里都会用到。">
           <Field label="名称" required hint="显示在节点列表和订阅里" error={fe.errors.name}>
-            <Input value={d.name} placeholder="Irvine Home" onChange={e => { set('name', e.target.value); fe.change('name', { ...d, name: e.target.value }) }} onBlur={() => fe.blur('name', d)} />
+            <Input id="ui-kit-form-name" value={d.name} placeholder="Irvine Home" onChange={e => { set('name', e.target.value); fe.change('name', { ...d, name: e.target.value }) }} onBlur={() => fe.blur('name', d)} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
             <Field label="地址" required hint="域名或 IP" error={fe.errors.host}>
-              <Input value={d.host} placeholder="irvine.example.com" onChange={e => { set('host', e.target.value); fe.change('host', { ...d, host: e.target.value }) }} onBlur={() => fe.blur('host', d)} />
+              <Input id="ui-kit-form-host" value={d.host} placeholder="irvine.example.com" onChange={e => { set('host', e.target.value); fe.change('host', { ...d, host: e.target.value }) }} onBlur={() => fe.blur('host', d)} />
             </Field>
             <Field label="端口" required error={fe.errors.port}>
-              <Input inputMode="numeric" value={d.port} placeholder="443" onChange={e => { set('port', e.target.value); fe.change('port', { ...d, port: e.target.value }) }} onBlur={() => fe.blur('port', d)} />
+              <Input id="ui-kit-form-port" inputMode="numeric" value={d.port} placeholder="443" onChange={e => { set('port', e.target.value); fe.change('port', { ...d, port: e.target.value }) }} onBlur={() => fe.blur('port', d)} />
             </Field>
           </div>
           <Field label="区域" hint="用于订阅里的国旗和分组">
@@ -131,8 +131,11 @@ export function FormsDemoSection() {
         <SaveBar
           dirty={dirty}
           pending={pending}
-          disabled={fe.count > 0}
-          message={fe.count > 0 ? `修正 ${fe.count} 处错误后才能保存` : undefined}
+          // The page's own rules are counted and named together with what NumberField / TagsField
+          // report, so neither hides the other.
+          errors={(['name', 'host', 'port'] as const).flatMap(k => fe.errors[k]
+            ? [{ label: { name: '名称', host: '地址', port: '端口' }[k], message: fe.errors[k], focus: () => document.getElementById(`ui-kit-form-${k}`)?.focus() }]
+            : [])}
           onSave={save}
           onDiscard={() => { setD(saved); fe.reset() }}
         />
@@ -211,6 +214,7 @@ export function ControlsDemoSection() {
             onChange={setUser}
             renderValue={show}
             defaultValue={100}
+            fitInherited={Math.round}
             hint="选择「在此设置」后可以填 0，表示不限量。要回到上一级的取值，请选「跟随上级」"
             renderEditor={({ id, value, onChange, ...aria }) => (
               // Inside an InheritanceField the NumberField never reports an empty value (an empty box is
