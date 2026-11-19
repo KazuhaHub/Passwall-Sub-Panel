@@ -17,10 +17,3 @@ export interface InheritEditorApi {
 }
 
 export const InheritEditorContext = createContext<false | InheritEditorApi>(false)
-
-/**
- * Collapsed form sections by their <section> element, so that something that only has
- * an element in hand (a problem to focus) can open every section the element is hidden
- * in. FormSection registers itself here.
- */
-export const sectionReveals = new WeakMap<Element, () => void>()

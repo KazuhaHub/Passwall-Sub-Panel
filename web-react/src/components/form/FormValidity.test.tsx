@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
 import { useState } from 'react'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Field } from './Field'
 import { FormSection } from './FormSection'
@@ -412,5 +412,178 @@ describe('a discard reaches the fields that keep state of their own', () => {
     render(<FormValidityProvider><Listener /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
     expect(seen).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---- second review round ----
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TagsField } from './TagsField'
+import { useFieldErrors } from './useFieldErrors'
+
+function Radios({ labelId }: { labelId: string }) {
+  return (
+    <div role="radiogroup" aria-labelledby={labelId}>
+      <button type="button" role="radio" aria-checked="false" tabIndex={-1}>One</button>
+      <button type="button" role="radio" aria-checked="true" tabIndex={0}>Two</button>
+    </div>
+  )
+}
+
+describe('a Field names and focuses itself without a control id', () => {
+  it('names a group control by its own label when there is another problem, and focuses the checked radio', () => {
+    render(
+      <FormValidityProvider>
+        <Field label="Mode" error="Pick one">{p => <Radios labelId={p.labelId} />}</Field>
+        <Num label="Timeout" />
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Mode, Timeout')
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Two' }))
+  })
+
+  it('alone it reads "Mode: Pick one"', () => {
+    render(
+      <FormValidityProvider>
+        <Field label="Mode" error="Pick one">{p => <Radios labelId={p.labelId} />}</Field>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    expect(summary().textContent).toBe('Mode: Pick one')
+  })
+})
+
+describe('one problem per control', () => {
+  it('a Field error and its own NumberField report are one entry, the control\'s reason first', () => {
+    function Form() {
+      const [v, setV] = useState<number | null>(5)
+      return (
+        <FormValidityProvider>
+          <Field label="Timeout" error="Server says no"><NumberField value={v} onChange={setV} min={1} max={600} /></Field>
+          <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+        </FormValidityProvider>
+      )
+    }
+    render(<Form />)
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('Timeout: Allowed range is 1 to 600')
+  })
+
+  it('a page error naming a field that reports itself is not counted twice', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <SaveBar dirty errors={[{ label: 'Timeout', message: 'Bad', id: 'will-be-set' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    const input = screen.getByLabelText('Timeout')
+    input.id = 'will-be-set'
+    fireEvent.change(input, { target: { value: '9999' } })
+    expect(summary().textContent).toBe('Timeout: Allowed range is 1 to 600')
+  })
+})
+
+describe('an error on a disabled control does not block, and is still shown', () => {
+  it('Field', () => {
+    render(
+      <FormValidityProvider>
+        <Field label="Name" error="Taken"><input disabled /></Field>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    expect(screen.getByText('Taken')).toBeTruthy()
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+
+  it('TagsField that is required, empty and disabled', () => {
+    render(<FormValidityProvider><TagsField aria-label="Tags" required value={[]} onChange={() => {}} disabled /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>)
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+})
+
+describe('one blocking rule for every kind of error', () => {
+  it('a ReactNode error blocks like a string', () => {
+    render(
+      <FormValidityProvider>
+        <Field label="Name" error={<span>Taken <b>already</b></span>}><input /></Field>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    expect(save().getAttribute('aria-disabled')).toBe('true')
+    expect(summary().textContent).toBe('Name: Taken already')
+  })
+
+  it('an error marked non-blocking does not stop Save, and still reads as a notice naming the field', () => {
+    const onSave = vi.fn()
+    render(
+      <FormValidityProvider>
+        <Field label="Name" error="Already taken" errorBlocksSave={false}><input /></Field>
+        <SaveBar dirty onSave={onSave} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+    expect(summary().textContent).toBe('Name: Already taken')
+    fireEvent.click(save())
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  it('two non-blocking messages read as a notice, not as a count of things to fix', () => {
+    render(
+      <FormValidityProvider>
+        <Field label="Name" error="Taken" errorBlocksSave={false}><input /></Field>
+        <Field label="Host" error="Unreachable" errorBlocksSave={false}><input /></Field>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+    expect(summary().textContent).toBe('2 inputs have messages to review: Name, Host')
+  })
+
+  it('useFieldErrors: setError (a refusal from a failed save) does not block by default, a blur does', () => {
+    const { result } = renderHook(() => useFieldErrors<{ a: string; b: string }>({ b: d => (d.b ? null : 'Enter b') }))
+    act(() => { result.current.setError('a', 'Server refused') })
+    expect(result.current.blocks('a')).toBe(false)
+    act(() => { result.current.setError('a', 'Hard', { blocking: true }) })
+    expect(result.current.blocks('a')).toBe(true)
+    act(() => { result.current.blur('b', { a: '', b: '' }) })
+    expect(result.current.blocks('b')).toBe(true)
+    expect(result.current.saveBarErrors({ a: 'A', b: 'B' }).map(e => e.blocking)).toEqual([true, true])
+  })
+})
+
+describe('a problem in a part of the page that is not shown', () => {
+  function Tabbed() {
+    return (
+      <FormValidityProvider>
+        <Tabs defaultValue="one">
+          <TabsList><TabsTrigger value="one">One</TabsTrigger><TabsTrigger value="two">Two</TabsTrigger></TabsList>
+          <TabsContent value="one" keepMounted><input aria-label="First" /></TabsContent>
+          <TabsContent value="two" keepMounted><Num label="Second" initial={9999} /></TabsContent>
+        </Tabs>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>
+    )
+  }
+
+  it('shows the tab it is in before focusing it', () => {
+    render(<Tabbed />)
+    expect(screen.getByRole('tab', { name: 'Two' }).getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(summary())
+    expect(screen.getByRole('tab', { name: 'Two' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByLabelText('Second'))
+  })
+
+  it('says so when nothing can be reached, instead of doing nothing', () => {
+    // a container that takes no focus and has no way to be revealed: what a browser does with a hidden input
+    render(
+      <FormValidityProvider>
+        <div id="nowhere" />
+        <SaveBar dirty errors={[{ label: 'Second', message: 'Bad', id: 'nowhere' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.click(summary())
+    expect(screen.getAllByText('Second is in a part of the page that is not shown').length).toBeGreaterThan(0)
   })
 })

@@ -168,7 +168,12 @@ export function NumberField({
   // appears on a field that ends at 600.
   const lo = min !== undefined ? (integer ? Math.ceil(min) : min) : undefined
   const hi = max !== undefined ? (integer ? Math.floor(max) : max) : undefined
-  const example = lo !== undefined && hi !== undefined ? (lo <= 1000 && 1000 <= hi ? 1000 : lo) : lo ?? hi ?? 1000
+  const fits = (n: number) => (lo === undefined || n >= lo) && (hi === undefined || n <= hi)
+  const settled = committed.current
+  // The value the box holds when it is usable (what the person knows), else a round number, else a bound.
+  const example = settled !== null && fits(settled) ? settled
+    : integer ? (fits(1000) ? 1000 : lo ?? hi ?? 1000)
+      : fits(1.5) ? 1.5 : lo !== undefined && fits(lo + 0.5) ? lo + 0.5 : lo ?? hi ?? 1.5
   if (reading.kind === 'exponent') problem = { message: t('ui.form.number_exponent', { example }), showNow: true }
   else if (reading.kind === 'invalid') problem = { message: t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid', { example }), showNow: true }
   else if (reading.kind === 'partial') problem = { message: t('ui.form.number_incomplete', { example }), showNow: touched }
@@ -217,6 +222,9 @@ export function NumberField({
     // The text stays, the problem stays visible, and the form cannot be saved.
   }
 
+  // A field that is switched off cannot be corrected, and a form must not save something other
+  // than what its boxes show: so a draft that is not usable goes back to the committed value now
+  // (and the parent is told, which is what holds the value that will be saved).
   const revert = () => {
     const back = committed.current
     setDraft(fmt(back))
@@ -226,6 +234,12 @@ export function NumberField({
     // Never null on a field that does not allow empty: that event means "cleared on purpose".
     if (value !== back && (back !== null || emptyOk) && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
   }
+
+  useEffect(() => {
+    if (rest.disabled && problem !== null) revert()
+    // Only the moment the box becomes disabled matters; `revert` and `problem` are read as they are then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rest.disabled])
 
   return (
     <div className="flex min-w-0 flex-col gap-1">

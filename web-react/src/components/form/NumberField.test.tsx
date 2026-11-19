@@ -40,7 +40,7 @@ describe('NumberField', () => {
     unmount()
     render(<Harness initial={4} integer />)
     type('1.5')
-    expect(screen.getByText('Enter a whole number, such as 1000')).toBeTruthy()
+    expect(screen.getByText('Enter a whole number, such as 4')).toBeTruthy()
   })
 
   describe('editing is separate from committing', () => {
@@ -72,7 +72,7 @@ describe('NumberField', () => {
       leave()
       expect(box().value).toBe('')
       expect(box().getAttribute('aria-invalid')).toBe('true')
-      expect(screen.getByText('Enter a number, such as 1000')).toBeTruthy()
+      expect(screen.getByText('Enter a number, such as 5')).toBeTruthy()
       expect(onValue).not.toHaveBeenCalledWith(null)
     })
 
@@ -87,7 +87,7 @@ describe('NumberField', () => {
     it('Escape puts the box back to the current value and takes the problem away', () => {
       render(<Harness initial={5} />)
       type('abc')
-      expect(screen.getByText(/Enter digits only/)).toBeTruthy()
+      expect(screen.getByText(/Enter a number, such as/)).toBeTruthy()
       fireEvent.keyDown(box(), { key: 'Escape' })
       expect(box().value).toBe('5')
       expect(box().getAttribute('aria-invalid')).toBeNull()
@@ -136,7 +136,7 @@ describe('NumberField', () => {
       leave()
       // left unfinished: the text stays and now says so
       expect(box().value).toBe('-')
-      expect(screen.getByText('The number is incomplete; finish typing it, such as 1000')).toBeTruthy()
+      expect(screen.getByText('The number is incomplete; finish typing it, such as 5')).toBeTruthy()
       type('-3')
       expect(onValue).toHaveBeenLastCalledWith(-3)
     })
@@ -165,8 +165,8 @@ describe('NumberField', () => {
       render(<Harness initial={null} onValue={onValue} />)
       type('1')
       type('1,')
-      expect(screen.queryByText(/Enter digits only/)).toBeNull()
-      expect(screen.queryByText('The number is incomplete; finish typing it, such as 1000')).toBeNull()
+      expect(screen.queryByText(/Enter a number, such as/)).toBeNull()
+      expect(screen.queryByText('The number is incomplete; finish typing it, such as 5')).toBeNull()
       type('1,0')
       type('1,00')
       type('1,000')
@@ -178,10 +178,10 @@ describe('NumberField', () => {
       render(<Harness initial={7} onValue={onValue} />)
       type('abc')
       expect(box().value).toBe('abc')
-      expect(screen.getByText('Enter digits only, such as 1000')).toBeTruthy()
+      expect(screen.getByText('Enter a number, such as 7')).toBeTruthy()
       expect(onValue).not.toHaveBeenCalled()
       type('8')
-      expect(screen.queryByText(/Enter digits only/)).toBeNull()
+      expect(screen.queryByText(/Enter a number, such as/)).toBeNull()
       expect(onValue).toHaveBeenLastCalledWith(8)
     })
 
@@ -291,7 +291,7 @@ describe('NumberField', () => {
       expect(live.className).toContain('min-h-4')
       type('abc')
       expect(container.querySelector('[role="status"]')).toBe(live)
-      expect(live.textContent).toContain('Enter digits only')
+      expect(live.textContent).toContain('Enter a number, such as')
     })
 
     it('inside a Field, the message goes to the Field\'s reserved line and describes the box', () => {
@@ -300,7 +300,7 @@ describe('NumberField', () => {
       expect(live.parentElement!.className).toContain('min-h-4')
       const input = screen.getByLabelText('Limit') as HTMLInputElement
       fireEvent.change(input, { target: { value: 'abc' } })
-      expect(live.textContent).toContain('Enter digits only')
+      expect(live.textContent).toContain('Enter a number, such as')
       expect(input.getAttribute('aria-describedby')).toBe(live.id)
       // and nothing else on the page carries the message
       expect(container.querySelectorAll('[role="status"]')).toHaveLength(0)
@@ -308,19 +308,23 @@ describe('NumberField', () => {
   })
 
   describe('the example in a message is a number the field would accept', () => {
-    it('is 1000 when there are no bounds', () => {
-      render(<Harness initial={5} />)
-      type('')
-      expect(screen.getAllByText('Enter a number, such as 1000').length).toBeGreaterThan(0)
+    it('is 1000 for a whole-number field with no bounds and no value, 1.5 for a decimal one', () => {
+      const { unmount } = render(<Harness initial={null} integer />)
+      type('abc')
+      expect(screen.getAllByText('Enter a whole number, such as 1000').length).toBeGreaterThan(0)
+      unmount()
+      render(<Harness initial={null} />)
+      type('abc')
+      expect(screen.getAllByText('Enter a number, such as 1.5').length).toBeGreaterThan(0)
     })
 
     it('is the max when only a max is set', () => {
-      render(<Harness initial={5} max={600} />)
+      render(<Harness initial={null} integer max={600} />)
       type('-')
       leave()
       expect(screen.getAllByText('The number is incomplete; finish typing it, such as 600').length).toBeGreaterThan(0)
       type('')
-      expect(screen.getAllByText('Enter a number, such as 600').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Enter a whole number, such as 600'.replace('whole number', 'number')).length).toBeGreaterThan(0)
     })
 
     it('is the min when only a min is set, even above 1000', () => {
@@ -344,6 +348,74 @@ describe('NumberField', () => {
     })
   })
 
+  describe('a field that becomes disabled shows exactly what will be saved', () => {
+    it('puts an out-of-range draft back to the committed value, tells the parent, and has nothing to report', () => {
+      const onValue = vi.fn()
+      const ui = (disabled: boolean) => <FormValidityProvider><Harness initial={5} min={1} max={600} onValue={onValue} disabled={disabled} /><Blocked /></FormValidityProvider>
+      const { rerender } = render(ui(false))
+      type('9999')
+      leave()
+      expect(screen.getByTestId('blocked').textContent).toBe('Allowed range is 1 to 600')
+      rerender(ui(true))
+      expect(box().value).toBe('5')
+      expect(box().getAttribute('aria-invalid')).toBeNull()
+      expect(onValue).toHaveBeenLastCalledWith(5)
+      expect(screen.getByTestId('blocked').textContent).toBe('ok')
+      // enabled again: the box holds the value that was saved, nothing is red
+      rerender(ui(false))
+      expect(box().value).toBe('5')
+      expect(screen.getByTestId('blocked').textContent).toBe('ok')
+    })
+
+    it('puts unreadable text back over a number the parent still holds', () => {
+      const ui = (disabled: boolean) => <FormValidityProvider><Harness initial={5} disabled={disabled} /><Blocked /></FormValidityProvider>
+      const { rerender } = render(ui(false))
+      type('abc')
+      rerender(ui(true))
+      expect(box().value).toBe('5')
+      expect(screen.getByTestId('blocked').textContent).toBe('ok')
+    })
+
+    it('never sends null for a field that does not allow empty', () => {
+      const onValue = vi.fn()
+      const ui = (disabled: boolean) => <Harness initial={null} min={10} max={600} onValue={onValue} disabled={disabled} />
+      const { rerender } = render(ui(false))
+      type('5')
+      rerender(ui(true))
+      expect(box().value).toBe('')
+      expect(onValue).not.toHaveBeenCalledWith(null)
+    })
+
+    it('leaves a valid draft alone', () => {
+      const onValue = vi.fn()
+      const ui = (disabled: boolean) => <Harness initial={5} min={1} max={600} onValue={onValue} disabled={disabled} />
+      const { rerender } = render(ui(false))
+      type('20')
+      rerender(ui(true))
+      expect(box().value).toBe('20')
+    })
+  })
+
+  describe('messages say what to enter, with an example the field accepts', () => {
+    it('a decimal field is told a number, not digits only, and its example may have a decimal', () => {
+      render(<Harness initial={null} min={0} />)
+      type('abc')
+      expect(screen.getAllByText('Enter a number, such as 1.5').length).toBeGreaterThan(0)
+    })
+
+    it('an integer field is told a whole number', () => {
+      render(<Harness initial={null} integer min={0} max={600} />)
+      type('1.5')
+      expect(screen.getAllByText('Enter a whole number, such as 0').length).toBeGreaterThan(0)
+    })
+
+    it('prefers the current value when it is usable', () => {
+      render(<Harness initial={42} min={1} max={600} integer />)
+      type('abc')
+      expect(screen.getAllByText('Enter a whole number, such as 42').length).toBeGreaterThan(0)
+    })
+  })
+
   describe('empty drafts', () => {
     it('with allowEmpty an empty draft is valid: not flagged, not reported, and committed as null on leaving', () => {
       const onValue = vi.fn()
@@ -361,8 +433,8 @@ describe('NumberField', () => {
       render(<FormValidityProvider><Harness initial={5} /><Blocked /></FormValidityProvider>)
       type('')
       expect(box().getAttribute('aria-invalid')).toBe('true')
-      expect(screen.getAllByText('Enter a number, such as 1000').length).toBeGreaterThan(0)
-      expect(screen.getByTestId('blocked').textContent).toBe('Enter a number, such as 1000')
+      expect(screen.getAllByText('Enter a number, such as 5').length).toBeGreaterThan(0)
+      expect(screen.getByTestId('blocked').textContent).toBe('Enter a number, such as 5')
     })
 
     it('without allowEmpty but with a range it says the range to enter', () => {
@@ -391,7 +463,7 @@ describe('NumberField', () => {
       type('9999')
       expect(status()).toBe('Allowed range is 1 to 600')
       type('abc')
-      expect(status()).toContain('Enter digits only')
+      expect(status()).toContain('Enter a number, such as')
       type('')
       expect(status()).toBe('Enter a number from 1 to 600')
       type('50')
@@ -401,7 +473,7 @@ describe('NumberField', () => {
     it('blocks while a number is half-typed, before the box is left', () => {
       mount(5)
       type('-')
-      expect(status()).toBe('The number is incomplete; finish typing it, such as 1000')
+      expect(status()).toBe('The number is incomplete; finish typing it, such as 5')
     })
 
     it('stops blocking when the field leaves the form', () => {

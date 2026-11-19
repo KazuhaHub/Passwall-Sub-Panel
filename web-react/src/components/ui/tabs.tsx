@@ -1,5 +1,7 @@
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
+import { useRef } from "react"
 import { cn } from "@/lib/utils"
+import { useRevealOnProblem } from "@/lib/reveal"
 
 function Tabs({ className, ...props }: TabsPrimitive.Root.Props) {
   return <TabsPrimitive.Root data-slot="tabs" className={cn("flex flex-col gap-4", className)} {...props} />
@@ -42,7 +44,15 @@ function TabsIndicator({ className, ...props }: TabsPrimitive.Indicator.Props) {
 }
 
 function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
-  return <TabsPrimitive.Panel data-slot="tabs-content" className={cn("outline-none", className)} {...props} />
+  // A panel kept mounted while inactive still holds fields that can have problems. Registering
+  // it lets "go to the first problem" switch to its tab: the panel names its tab through
+  // aria-labelledby, and activating that tab works the same whether the tabs are controlled or not.
+  const ref = useRef<HTMLDivElement>(null)
+  useRevealOnProblem(ref, () => {
+    const tab = document.getElementById(ref.current?.getAttribute("aria-labelledby") ?? "")
+    tab?.click()
+  })
+  return <TabsPrimitive.Panel ref={ref} data-slot="tabs-content" className={cn("outline-none", className)} {...props} />
 }
 
 export { Tabs, TabsList, TabsTrigger, TabsIndicator, TabsContent }

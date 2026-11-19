@@ -1,7 +1,14 @@
-import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { useReportValidity } from './FormValidity'
+import { useReportValidity, visibleText } from './FormValidity'
+
+// Where focus goes inside a Field whose control has no id, most specific first: the checked radio, any radio, then fields and buttons.
+const FOCUSABLE = [
+  '[role="radio"][aria-checked="true"]', '[role="radio"]',
+  'input:not([disabled]):not([type="hidden"])', 'select:not([disabled])', 'textarea:not([disabled])',
+  'button:not([disabled])', '[tabindex]:not([tabindex="-1"])',
+]
 
 interface FieldMessageApi { set: (message: string | null) => void }
 const FieldMessageContext = createContext<FieldMessageApi | null>(null)
@@ -39,6 +46,12 @@ export interface FieldProps {
   hint?: ReactNode
   /** How to fix it, not just what is wrong (copy rule 5). Shown below the control, instead of the hint. */
   error?: ReactNode
+  /**
+   * false: the error is a message to show, not a reason the form cannot be saved (a refusal that
+   * came back from a failed save: the person may only need to retry). Default true: an error
+   * blocks Save until the page clears it, whether it is text or markup. See FormValidityProvider.
+   */
+  errorBlocksSave?: boolean
   required?: boolean
   /** `horizontal` puts the control beside the label, for switches and checkboxes. */
   orientation?: 'vertical' | 'horizontal'
@@ -56,7 +69,7 @@ export interface FieldProps {
  * any id it already has) or a function for controls that are not a single
  * element, such as TagsField or a group of radios.
  */
-export function Field({ label, hint, error, required, orientation = 'vertical', className, children }: FieldProps) {
+export function Field({ label, hint, error, errorBlocksSave, required, orientation = 'vertical', className, children }: FieldProps) {
   const auto = useId()
   const own = isValidElement(children) ? (children.props as { id?: string }).id : undefined
   const id = own ?? `${auto}-control`
@@ -65,11 +78,33 @@ export function Field({ label, hint, error, required, orientation = 'vertical', 
   const errorId = `${auto}-error`
   const [inner, setInner] = useState<string | null>(null)
   const shown = error ?? inner
-  // The page's own error is a problem the form cannot be saved with, in the place where the
-  // control sits, so the SaveBar can name this field and take the person to it. (`inner` is a
-  // control's own message: it reports for itself.)
-  const findControl = useCallback(() => document.getElementById(id), [id])
-  useReportValidity(typeof error === 'string' ? error : null, findControl)
+  // The page's own error is a problem the form cannot be saved with (unless marked otherwise),
+  // in the place where the control sits, so the SaveBar can name this field and take the person
+  // to it. (`inner` is a control's own message: it reports for itself.)
+  const wrapper = useRef<HTMLDivElement>(null)
+  // The control by its id; a group control that takes only aria-labelledby (radios, option cards)
+  // has none, so the first thing inside that can take focus, and failing that the Field itself.
+  const findControl = useCallback((): HTMLElement | null => {
+    const byId = document.getElementById(id)
+    if (byId) return byId
+    const w = wrapper.current
+    if (!w) return null
+    for (const sel of FOCUSABLE) { const el = w.querySelector<HTMLElement>(sel); if (el) return el }
+    return w
+  }, [id])
+  const ownLabel = useCallback(() => visibleText(document.getElementById(labelId)) || undefined, [labelId])
+  // What is only known from the page after it rendered: the control's disabled state, and the
+  // text of an error given as markup. Read after every render; setting the same value renders nothing.
+  const [off, setOff] = useState(false)
+  const [errorText, setErrorText] = useState<string | null>(null)
+  // No dependency list on purpose: the control is the caller's and changes without Field knowing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setOff((findControl() as HTMLInputElement | null)?.disabled === true)
+    setErrorText(error && typeof error !== 'string' ? (visibleText(document.getElementById(errorId)) || null) : null)
+  })
+  const reported = off || !error ? null : typeof error === 'string' ? error : errorText
+  useReportValidity(reported, findControl, { label: ownLabel, blocking: errorBlocksSave !== false, weak: true })
   const describedBy = shown ? errorId : hint ? hintId : undefined
   const messageApi = useMemo<FieldMessageApi>(() => ({ set: setInner }), [])
 
@@ -111,14 +146,14 @@ export function Field({ label, hint, error, required, orientation = 'vertical', 
   const wrap = (node: ReactElement) => <FieldMessageContext.Provider value={messageApi}>{node}</FieldMessageContext.Provider>
   if (orientation === 'horizontal') {
     return wrap(
-      <div data-slot="field" className={cn('flex items-start justify-between gap-4', className)}>
+      <div ref={wrapper} data-slot="field" className={cn('flex items-start justify-between gap-4', className)}>
         <div className="flex min-w-0 flex-col gap-1">{labelEl}{note}</div>
         <div className="shrink-0 pt-0.5">{control}</div>
       </div>
     )
   }
   return wrap(
-    <div data-slot="field" className={cn('flex min-w-0 flex-col gap-1.5', className)}>
+    <div ref={wrapper} data-slot="field" className={cn('flex min-w-0 flex-col gap-1.5', className)}>
       {labelEl}
       {control}
       {note}

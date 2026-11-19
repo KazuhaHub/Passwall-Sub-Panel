@@ -108,7 +108,7 @@ describe('SaveBar and the form validity (item 6)', () => {
     render(<Form onSave={() => {}} />)
     fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
     const reason = document.getElementById(save().getAttribute('aria-describedby')!)!
-    expect(reason.textContent).toContain('Enter digits only')
+    expect(reason.textContent).toContain('Enter a number, such as')
     expect((save() as HTMLButtonElement).disabled).toBe(false)
   })
 

@@ -1,15 +1,17 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { Loader2Icon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { focusProblem, sectionTitleOf, useFormValidity } from './FormValidity'
+import { focusProblem, mergeByElement, sectionTitleOf, useFormValidity } from './FormValidity'
 
 /** A problem the page found itself (a rule on its own draft, a server refusal). */
 export interface SaveBarError {
   /** The field's name; without it the problem is counted but cannot be named. */
   label?: string
   message: string
+  /** false: a message to show, not a reason Save is off (see FormValidityProvider). Default true. */
+  blocking?: boolean
   /**
    * Where the problem is. `id` is the id of the field's control (what a Field puts on it;
    * `useFieldErrors().saveBarErrors` fills it in), `el` the element itself. With either,
@@ -31,8 +33,10 @@ export interface SaveBarProps {
   /** Replaces "有未保存的修改" when there is something more useful to say, such as how many fields to fix. */
   message?: ReactNode
   /**
-   * Problems the page holds that no field reported. A Field given an `error` already
-   * reports it, so this is for the rest (a rule across fields, a server refusal). They are
+   * Problems the page holds that no field reported. A Field given an `error` reports it
+   * itself, so a page does NOT pass the same error here again (if it names the same element
+   * by `id` the two are merged into one anyway); this is for the rest (a rule across fields,
+   * a refusal with no field of its own). They are
    * ordered TOGETHER with the fields' own, by position in the page, and the first one in
    * that order is where Save and the message take the person. (`disabled` with a `message`
    * still works and counts, and is named, as one problem, last.)
@@ -44,7 +48,7 @@ export interface SaveBarProps {
   className?: string
 }
 
-interface Problem { label?: string; message: string; el: HTMLElement | null; focus?: () => void }
+interface Problem { label?: string; message: string; el: HTMLElement | null; focus?: () => void; blocking: boolean; weak?: boolean }
 
 /** In page order; a problem with no element goes last, in the order it came. */
 function inPageOrder(list: Problem[]): Problem[] {
@@ -77,16 +81,18 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
   const { issues, discard } = useFormValidity()
   const reasonId = useId()
   // Built again at click time: an element named by id may not have been in the page when this rendered.
-  const gather = () => inPageOrder([
-    ...issues.map(i => ({ label: i.label, message: i.message, el: i.el ?? null })),
-    ...(errors ?? []).map(e => ({ label: e.label, message: e.message, el: e.el ?? (e.id ? document.getElementById(e.id) : null), focus: e.focus })),
-  ])
+  const gather = () => inPageOrder(mergeByElement<Problem>([
+    ...issues.map(i => ({ label: i.label, message: i.message, el: i.el ?? null, blocking: i.blocking !== false, weak: i.weak })),
+    ...(errors ?? []).map(e => ({ label: e.label, message: e.message, el: e.el ?? (e.id ? document.getElementById(e.id) : null), focus: e.focus, blocking: e.blocking !== false })),
+  ]))
   const problems = gather()
   // `disabled` with a message is one more problem, not a replacement for the others.
   const legacy = disabled === true && message != null
-  const all: Problem[] = legacy ? [...problems, { label: typeof message === 'string' ? message : undefined, message: '', el: null }] : problems
+  const all: Problem[] = legacy ? [...problems, { label: typeof message === 'string' ? message : undefined, message: '', el: null, blocking: true }] : problems
   const count = all.length
-  const blocked = disabled === true || problems.length > 0
+  // Only problems that block switch Save off; a message that does not is named like the others but reads as a notice.
+  const blocked = disabled === true || problems.some(p => p.blocking)
+  const [hidden, setHidden] = useState<{ name?: string } | null>(null)
 
   // Two fields called "Port" read as "Port, Port": tell them apart by their section, then by position.
   const named = all.map(p => p.label)
@@ -96,7 +102,7 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
     all.forEach((p, i) => {
       if (!p.label || !dup(p.label, original)) return
       const section = sectionTitleOf(p.el)
-      if (section) named[i] = `${section} › ${p.label}`
+      if (section) named[i] = t('ui.form.invalid_in_section', { section, label: p.label })
     })
     const base = [...named]
     const seen: Record<string, number> = {}
@@ -104,18 +110,24 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
       if (l && dup(l, base)) { seen[l] = (seen[l] ?? 0) + 1; named[i] = t('ui.form.invalid_nth', { label: l, n: seen[l] }) }
     })
   }
+  const kind = blocked ? 'invalid' : 'notice'
   const reason = problems.length === 0 ? null
     : count === 1 ? (problems[0].label ? t('ui.form.invalid_field', { label: problems[0].label, message: problems[0].message }) : problems[0].message)
-      : named.every(Boolean) ? t('ui.form.invalid_named', { count, names: named.join(t('ui.form.name_sep')) })
-        : t('ui.form.invalid_count', { count })
+      : named.every(Boolean) ? t(kind === 'invalid' ? 'ui.form.invalid_named' : 'ui.form.notice_named', { count, names: named.join(t('ui.form.name_sep')) })
+        : t(kind === 'invalid' ? 'ui.form.invalid_count' : 'ui.form.notice_count', { count })
   const canGo = problems.length > 0
   const goToFirst = () => {
-    for (const p of gather()) {
-      if (p.el && focusProblem(p.el)) return
-      if (p.focus) { p.focus(); return }
+    const list = gather()
+    for (const p of list) {
+      if (p.el && focusProblem(p.el)) { setHidden(null); return }
+      if (p.focus) { p.focus(); setHidden(null); return }
     }
+    // Nothing could take focus (what holds them is not shown, and cannot be asked to show them):
+    // say so rather than do nothing.
+    setHidden({ name: list[0]?.label })
   }
-  const spoken = pending ? t('ui.form.saving') : dirty ? (blocked && count > 0 ? t('ui.form.invalid_status', { count }) : t('ui.form.unsaved')) : ''
+  const hiddenText = hidden && canGo ? (hidden.name ? t('ui.form.invalid_hidden', { name: hidden.name }) : t('ui.form.invalid_hidden_unnamed')) : null
+  const spoken = pending ? t('ui.form.saving') : hiddenText ?? (dirty ? (blocked && count > 0 ? t('ui.form.invalid_status', { count }) : t('ui.form.unsaved')) : '')
   return (
     <>
       {/* Always in the page: a live region announces a change in its text, not its own arrival. */}
@@ -139,6 +151,7 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
             className="-mx-1 rounded-md px-1 text-left underline decoration-dotted underline-offset-4 outline-none hover:decoration-solid focus-visible:ring-3 focus-visible:ring-ring/50"
           >{reason}</button>
         ) : (reason ?? message ?? t('ui.form.unsaved'))}
+        {hiddenText && <span className="mt-0.5 block text-xs font-normal">{hiddenText}</span>}
       </p>
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={() => { discard(); onDiscard() }} disabled={pending}>{t('ui.form.discard')}</Button>

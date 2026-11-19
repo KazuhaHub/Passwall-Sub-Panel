@@ -1,8 +1,8 @@
-import { useCallback, useId, useState, type ReactNode } from 'react'
+import { useCallback, useId, useRef, useState, type ReactNode } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
-import { sectionReveals } from './editorContext'
+import { useRevealOnProblem } from '@/lib/reveal'
 
 /** localStorage key for an advanced section's remembered open state. */
 export function formSectionKey(sectionKey: string): string {
@@ -49,7 +49,8 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
   // to it (focusProblem finds sections by element). It opens for this visit only: what the
   // person chose to remember is not rewritten by a validation error.
   const reveal = useCallback(() => setRemembered(true), [])
-  const register = useCallback((el: HTMLElement | null) => { if (el) sectionReveals.set(el, reveal) }, [reveal])
+  const sectionRef = useRef<HTMLElement>(null)
+  useRevealOnProblem(sectionRef, reveal)
 
   const toggle = () => {
     const next = !remembered
@@ -60,7 +61,7 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
   }
 
   return (
-    <section ref={register} aria-labelledby={titleId} data-slot="form-section" className={cn('flex flex-col gap-3', className)}>
+    <section ref={sectionRef} aria-labelledby={titleId} data-slot="form-section" className={cn('flex flex-col gap-3', className)}>
       <header className="flex items-start justify-between gap-3">
         {advanced ? (
           <button
