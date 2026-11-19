@@ -55,4 +55,34 @@ describe('the one status dot', () => {
     expect(dot.className).toContain(TONE_STYLE.warning.ink)
     expect(dot.getAttribute('aria-hidden')).toBe('true')
   })
+
+  // The most urgent tone must not be the faintest: compare how much of the 8-unit box each shape inks.
+  it('inks danger at least as much as every other tone, and every shape stays visible at 8px', () => {
+    const num = (el: Element, name: string) => Number(el.getAttribute(name))
+    function area(tone: (typeof TONES)[number]): number {
+      const { container, unmount } = render(<ToneDot tone={tone} />)
+      const svg = container.querySelector('svg')!
+      const shape = svg.firstElementChild!
+      let a = 0
+      if (shape.tagName === 'polygon') {
+        const pts = shape.getAttribute('points')!.trim().split(/\s+/).map(p => p.split(',').map(Number))
+        for (let i = 0; i < pts.length; i++) { const [x1, y1] = pts[i]; const [x2, y2] = pts[(i + 1) % pts.length]; a += x1 * y2 - x2 * y1 }
+        a = Math.abs(a) / 2
+      } else if (shape.tagName === 'rect') {
+        a = num(shape, 'width') * num(shape, 'height')
+      } else if (shape.getAttribute('fill') === 'none') {
+        const r = num(shape, 'r'); const w = num(shape, 'stroke-width')
+        a = Math.PI * ((r + w / 2) ** 2 - (r - w / 2) ** 2)
+      } else {
+        a = Math.PI * num(shape, 'r') ** 2
+      }
+      unmount()
+      return a
+    }
+    const areas = Object.fromEntries(TONES.map(t => [t, area(t)])) as Record<(typeof TONES)[number], number>
+    for (const t of TONES) {
+      expect(areas.danger, `danger vs ${t}`).toBeGreaterThanOrEqual(areas[t])
+      expect(areas[t], t).toBeGreaterThan(25)
+    }
+  })
 })

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import type { SaveBarError } from './SaveBar'
 
 /** One rule per field: returns the message that says how to fix it, or null when the value is fine. */
 export type FieldRules<D> = { [K in keyof D]?: (draft: D) => string | null }
@@ -58,5 +59,17 @@ export function useFieldErrors<D>(rules: FieldRules<D>) {
 
   const reset = useCallback(() => setErrors({}), [])
 
-  return { errors, count: Object.keys(errors).length, blur, change, validateAll, setError: put as (name: keyof D, message: string | null) => void, reset }
+  /**
+   * The current errors as SaveBar errors, for the ones no Field shows (a Field given its
+   * `error` reports itself). `labels` names each field; `idOf` gives the id of its control,
+   * which is what orders the error among the other problems by its place in the page and
+   * lets Save take the person to it.
+   */
+  const saveBarErrors = useCallback((labels: { [K in keyof D]?: string }, idOf?: (name: keyof D) => string): SaveBarError[] =>
+    (Object.keys(errors) as (keyof D)[]).flatMap(name => {
+      const message = errors[name]
+      return message === undefined ? [] : [{ label: labels[name], message, ...(idOf ? { id: idOf(name) } : {}) }]
+    }), [errors])
+
+  return { errors, count: Object.keys(errors).length, blur, change, validateAll, setError: put as (name: keyof D, message: string | null) => void, reset, saveBarErrors }
 }

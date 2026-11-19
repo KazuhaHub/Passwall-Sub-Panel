@@ -178,7 +178,7 @@ describe('NumberField', () => {
       render(<Harness initial={7} onValue={onValue} />)
       type('abc')
       expect(box().value).toBe('abc')
-      expect(screen.getByText('Enter digits only, such as 1000 or 1.5')).toBeTruthy()
+      expect(screen.getByText('Enter digits only, such as 1000')).toBeTruthy()
       expect(onValue).not.toHaveBeenCalled()
       type('8')
       expect(screen.queryByText(/Enter digits only/)).toBeNull()
@@ -304,6 +304,43 @@ describe('NumberField', () => {
       expect(input.getAttribute('aria-describedby')).toBe(live.id)
       // and nothing else on the page carries the message
       expect(container.querySelectorAll('[role="status"]')).toHaveLength(0)
+    })
+  })
+
+  describe('the example in a message is a number the field would accept', () => {
+    it('is 1000 when there are no bounds', () => {
+      render(<Harness initial={5} />)
+      type('')
+      expect(screen.getAllByText('Enter a number, such as 1000').length).toBeGreaterThan(0)
+    })
+
+    it('is the max when only a max is set', () => {
+      render(<Harness initial={5} max={600} />)
+      type('-')
+      leave()
+      expect(screen.getAllByText('The number is incomplete; finish typing it, such as 600').length).toBeGreaterThan(0)
+      type('')
+      expect(screen.getAllByText('Enter a number, such as 600').length).toBeGreaterThan(0)
+    })
+
+    it('is the min when only a min is set, even above 1000', () => {
+      render(<Harness initial={5000} min={5000} integer />)
+      type('')
+      expect(screen.getAllByText('Enter a number, such as 5000').length).toBeGreaterThan(0)
+      type('1.5')
+      expect(screen.getAllByText('Enter a whole number, such as 5000').length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('Escape never tells a field that does not allow empty that it was cleared', () => {
+    it('goes back to an empty box without sending null', () => {
+      const onValue = vi.fn()
+      render(<Harness initial={null} min={10} max={600} onValue={onValue} />)
+      type('5')
+      expect(onValue).toHaveBeenLastCalledWith(5)
+      fireEvent.keyDown(box(), { key: 'Escape' })
+      expect(box().value).toBe('')
+      expect(onValue).not.toHaveBeenCalledWith(null)
     })
   })
 

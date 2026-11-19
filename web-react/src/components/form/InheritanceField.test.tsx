@@ -4,7 +4,9 @@ import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InheritanceField, SourceTrail, effectiveLevel } from './InheritanceField'
+import { FormValidityProvider } from './FormValidity'
 import { NumberField } from './NumberField'
+import { SaveBar } from './SaveBar'
 
 afterEach(cleanup)
 
@@ -179,7 +181,7 @@ describe('InheritanceField', () => {
     it('says the starting value was adjusted, and that nothing applies until it is edited', () => {
       render(<Wired onWrite={() => {}} />)
       fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
-      expect(screen.getByText('The level above is 1.25 GB, which this field cannot use. Starting from 1 GB; edit it to apply')).toBeTruthy()
+      expect(screen.getByText('The level above is 1.25 GB, which this field cannot hold. Starting from 1 GB instead. Nothing is saved until you edit it.')).toBeTruthy()
     })
 
     it('leaving the box untouched commits nothing; only an edit writes, and the note goes away', () => {
@@ -201,6 +203,65 @@ describe('InheritanceField', () => {
       fireEvent.click(screen.getByRole('radio', { name: 'Follow the level above' }))
       expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
       expect(screen.queryByText(/which this field cannot use/)).toBeNull()
+    })
+
+    it('Escape after an edit goes back to "pending, nothing written", not to a stored 1', () => {
+      const onWrite = vi.fn()
+      render(<Wired onWrite={onWrite} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      fireEvent.change(editorBox(), { target: { value: '9' } })
+      expect(onWrite).toHaveBeenLastCalledWith(9)
+      fireEvent.keyDown(editorBox(), { key: 'Escape' })
+      // the page was told to forget the edit, never to store the fitted start as the person's own value
+      expect(onWrite).toHaveBeenLastCalledWith(undefined)
+      expect(onWrite).not.toHaveBeenCalledWith(1)
+      expect(editorBox().value).toBe('1')
+      expect(screen.getByText(/Starting from 1 GB instead/)).toBeTruthy()
+    })
+
+    it('typing the same number as the start is still the person\'s own choice and is written', () => {
+      const onWrite = vi.fn()
+      render(<Wired onWrite={onWrite} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      fireEvent.change(editorBox(), { target: { value: '2' } })
+      fireEvent.change(editorBox(), { target: { value: '1' } })
+      expect(onWrite).toHaveBeenLastCalledWith(1)
+    })
+
+    it('describes the editor by the note, so it is read with the box', () => {
+      render(<Wired onWrite={() => {}} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      const note = screen.getByText(/Starting from 1 GB instead/)
+      expect(note.id).toBeTruthy()
+      expect(editorBox().getAttribute('aria-describedby') ?? '').toContain(note.id)
+    })
+
+    it('announces the note when it appears (it sits in a polite live region)', () => {
+      render(<Wired onWrite={() => {}} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(screen.getByText(/Starting from 1 GB instead/).closest('[aria-live="polite"]')).not.toBeNull()
+    })
+
+    it('the form\'s Discard returns it to "follows above"', () => {
+      function Page() {
+        const [user, setUser] = useState<number | undefined>(undefined)
+        return (
+          <FormValidityProvider>
+            <InheritanceField
+              label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
+              levels={lv(100, 1.25, user)} onChange={setUser} fitInherited={v => Math.round(v)}
+              renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} integer min={0} />}
+            />
+            <SaveBar dirty onSave={() => {}} onDiscard={() => setUser(undefined)} />
+          </FormValidityProvider>
+        )
+      }
+      render(<Page />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(screen.getByRole('textbox', { name: 'Traffic limit' })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
+      expect(screen.getByRole('radio', { name: 'Follow the level above' }).getAttribute('aria-checked')).toBe('true')
     })
 
     it('a value the editor can hold is still written at once, as before', () => {

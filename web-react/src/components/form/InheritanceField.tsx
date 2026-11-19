@@ -1,8 +1,9 @@
-import { useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
-import { InheritEditorContext } from './editorContext'
+import { InheritEditorContext, type InheritEditorApi } from './editorContext'
+import { useOnFormDiscard } from './FormValidity'
 
 /**
  * One level of "全局 → 分组 → 本人". `value` is what is stored AT this level:
@@ -132,18 +133,37 @@ export function InheritanceField<T>({
   // "Set here" chosen, but the value to start from had to be adjusted: shown in the editor,
   // not yet written. Dropped as soon as a real value exists (an edit) or the mode goes back.
   const [pending, setPending] = useState<{ value: T; parent: T } | null>(null)
+  // The start that was shown, kept after the person's first edit has cleared `pending`, so that
+  // Escape (which returns an editor to the value it started from) lands back on "nothing written
+  // yet" instead of storing that start as the person's own choice.
+  const startRef = useRef<{ value: T; parent: T } | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const api = useMemo<InheritEditorApi>(() => ({
+    revert: back => {
+      const start = startRef.current
+      if (!start || !Object.is(back, start.value)) return false
+      onChangeRef.current(undefined)
+      setPending(start)
+      return true
+    },
+  }), [])
+  // The page's Discard puts its draft back, which this field cannot see; the form tells it.
+  useOnFormDiscard(() => { startRef.current = null; setPending(null) })
   if (isSet && pending) setPending(null)
   const adjusting = !isSet && pending !== null
   const noteId = `${uid}-note`
+  const adjustId = `${uid}-adjusted`
   const labelId = `${uid}-label`
 
   const setMode = (mode: 'follow' | 'set') => {
     setPending(null)
+    startRef.current = null
     if (mode === 'follow') { onChange(undefined); return }
     const inherited = above?.value
     if (inherited !== undefined && fitInherited) {
       const fitted = fitInherited(inherited)
-      if (!Object.is(fitted, inherited)) { setPending({ value: fitted, parent: inherited }); return }
+      if (!Object.is(fitted, inherited)) { startRef.current = { value: fitted, parent: inherited }; setPending(startRef.current); return }
     }
     onChange(inherited !== undefined ? inherited : defaultValue)
   }
@@ -169,22 +189,15 @@ export function InheritanceField<T>({
           {isSet || adjusting ? (
             // The editor is told it is inside an inheritance field: an empty box is
             // invalid-until-filled there, and "follow" is the mode control's alone.
-            <>
-            <InheritEditorContext.Provider value>
+            <InheritEditorContext.Provider value={api}>
               {renderEditor({
                 id: `${uid}-editor`,
                 value: isSet ? own.value as T : pending!.value,
                 onChange: next => { setPending(null); onChange(next) },
                 'aria-labelledby': labelId,
-                'aria-describedby': error || hint ? noteId : undefined,
+                'aria-describedby': [adjusting ? adjustId : undefined, error || hint ? noteId : undefined].filter(Boolean).join(' ') || undefined,
               })}
             </InheritEditorContext.Provider>
-            {adjusting && (
-              <p className="text-xs text-muted-foreground">
-                {t('ui.form.inherit_adjusted', { parent: renderValue(pending!.parent), value: renderValue(pending!.value) })}
-              </p>
-            )}
-            </>
           ) : (
             <p className="text-xs text-muted-foreground">
               {above?.value !== undefined
@@ -192,6 +205,11 @@ export function InheritanceField<T>({
                 : t('ui.form.inherit_not_set')}
             </p>
           )}
+          {/* Always in the page, only its text changes: a region that arrives together with its
+                text is skipped by many screen readers. Read with the box through aria-describedby. */}
+          <p id={adjustId} aria-live="polite" className={adjusting ? 'text-xs text-muted-foreground' : 'sr-only'}>
+            {adjusting ? t('ui.form.inherit_adjusted', { parent: renderValue(pending!.parent), value: renderValue(pending!.value) }) : ''}
+          </p>
         </div>
       )}
       {error

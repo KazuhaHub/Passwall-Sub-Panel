@@ -21,13 +21,17 @@ export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
  * in the light theme the warning, danger and neutral hues are close in lightness, so each
  * tone also has its own silhouette, readable at 8px. See ToneDot for the drawings.
  */
+/**
+ * Danger is the heaviest: a square filling the box (about 56 of 64 units), over the circle (44),
+ * triangle and diamond (32 each) and ring (31). The most urgent tone must not be the faintest.
+ */
 export type ToneShape = 'circle' | 'triangle' | 'diamond' | 'square' | 'ring'
 
 export const TONE_SHAPE: Record<Tone, ToneShape> = {
   success: 'circle',
   warning: 'triangle',
-  danger: 'diamond',
-  info: 'square',
+  danger: 'square',
+  info: 'diamond',
   neutral: 'ring',
 }
 

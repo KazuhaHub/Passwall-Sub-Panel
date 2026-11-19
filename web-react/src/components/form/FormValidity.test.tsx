@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Field } from './Field'
 import { FormSection } from './FormSection'
-import { FormValidityProvider } from './FormValidity'
+import { FormValidityProvider, useOnFormDiscard } from './FormValidity'
 import { NumberField } from './NumberField'
 import { SaveBar } from './SaveBar'
 
@@ -206,5 +206,211 @@ describe('nested providers', () => {
     )
     fireEvent.change(screen.getByLabelText('Outer value'), { target: { value: 'abc' } })
     expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+})
+
+// ---- review round: one page order for every source of problems ----
+
+function Plain({ label, error, id }: { label: string; error?: string; id?: string }) {
+  return <Field label={label} error={error}><input id={id} /></Field>
+}
+
+describe('fields and page errors are one list, in page order', () => {
+  it('a Field error ABOVE an invalid number: named first, focused first', () => {
+    render(
+      <FormValidityProvider>
+        <Plain label="Name" error="Enter a name" />
+        <Num label="Timeout" />
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Name, Timeout')
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(screen.getByLabelText('Name'))
+  })
+
+  it('a Field error BELOW an invalid number: the number is first', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <Plain label="Name" error="Enter a name" />
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Timeout, Name')
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(screen.getByLabelText('Timeout'))
+  })
+
+  it('a field error clears when the page clears it, and unblocks saving', () => {
+    const { rerender } = render(
+      <FormValidityProvider><Plain label="Name" error="Enter a name" /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>,
+    )
+    expect(save().getAttribute('aria-disabled')).toBe('true')
+    rerender(<FormValidityProvider><Plain label="Name" /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>)
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+
+  it('SaveBar errors that name an element by id sort with the fields, above or below', () => {
+    const errors = [{ label: 'Name', message: 'Enter a name', id: 'page-name' }]
+    const { unmount } = render(
+      <FormValidityProvider>
+        <input id="page-name" aria-label="Name" />
+        <Num label="Timeout" />
+        <SaveBar dirty errors={errors} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Name, Timeout')
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(document.getElementById('page-name'))
+    unmount()
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <input id="page-name" aria-label="Name" />
+        <SaveBar dirty errors={errors} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Timeout, Name')
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(screen.getByLabelText('Timeout'))
+  })
+
+  it('an error with no element sorts last and is still named', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <SaveBar dirty errors={[{ label: 'Whole form', message: 'Conflict' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Timeout, Whole form')
+  })
+
+  it('opens the collapsed section of a page error that names an element in it', () => {
+    render(
+      <FormValidityProvider>
+        <FormSection title="Advanced" advanced>
+          <input id="deep" aria-label="MTU" />
+        </FormSection>
+        <SaveBar dirty errors={[{ label: 'MTU', message: 'Too big', id: 'deep' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.click(within(bar()).getByTitle('Go to the first input that needs fixing'))
+    expect(screen.getByRole('button', { name: /Advanced/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(document.getElementById('deep'))
+  })
+})
+
+describe('focus has to land, or the next problem is tried', () => {
+  it('skips a problem whose element cannot take focus', () => {
+    render(
+      <FormValidityProvider>
+        <input id="stuck" aria-label="Stuck" disabled />
+        <Num label="Timeout" />
+        <SaveBar dirty errors={[{ label: 'Stuck', message: 'Bad', id: 'stuck' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    fireEvent.click(summary())
+    expect(document.activeElement).toBe(screen.getByLabelText('Timeout'))
+  })
+})
+
+describe('a disabled field cannot be fixed, so it never blocks saving', () => {
+  it('NumberField', () => {
+    render(<FormValidityProvider><Num label="Timeout" initial={9999} disabled /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>)
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+
+  it('stops blocking when an invalid field becomes disabled, and blocks again when it is enabled', () => {
+    function Form({ disabled }: { disabled: boolean }) {
+      return <FormValidityProvider><Num label="Timeout" initial={9999} disabled={disabled} /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>
+    }
+    const { rerender } = render(<Form disabled={false} />)
+    expect(save().getAttribute('aria-disabled')).toBe('true')
+    rerender(<Form disabled />)
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+    rerender(<Form disabled={false} />)
+    expect(save().getAttribute('aria-disabled')).toBe('true')
+  })
+})
+
+describe('the status line speaks the blocked state and its count, not every wording change', () => {
+  it('does not change while the count stays the same, changes when it does', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <Num label="Retries" />
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    const sr = () => document.querySelector('p[role="status"].sr-only') as HTMLElement
+    expect(sr().textContent).toBe('You have unsaved changes')
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
+    const one = sr().textContent
+    expect(one).not.toBe('You have unsaved changes')
+    // a different message for the same single problem: nothing new to announce
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: '9999' } })
+    expect(sr().textContent).toBe(one)
+    fireEvent.change(screen.getByLabelText('Retries'), { target: { value: 'abc' } })
+    expect(sr().textContent).not.toBe(one)
+  })
+})
+
+describe('two fields with the same label are told apart', () => {
+  it('by the title of the section they are in', () => {
+    render(
+      <FormValidityProvider>
+        <FormSection title="Inbound"><Num label="Port" /></FormSection>
+        <FormSection title="Outbound"><Num label="Port" /></FormSection>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    const ports = screen.getAllByLabelText('Port')
+    fireEvent.change(ports[0], { target: { value: 'abc' } })
+    fireEvent.change(ports[1], { target: { value: 'abc' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Inbound › Port, Outbound › Port')
+  })
+
+  it('by position when there is no section to name', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Port" />
+        <Num label="Port" />
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    const ports = screen.getAllByLabelText('Port')
+    fireEvent.change(ports[0], { target: { value: 'abc' } })
+    fireEvent.change(ports[1], { target: { value: 'abc' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Port (#1), Port (#2)')
+  })
+})
+
+describe('disabled + message next to field problems', () => {
+  it('the message is named in the list as one of the problems', () => {
+    render(
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <SaveBar dirty disabled message="Name is missing" onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Timeout, Name is missing')
+  })
+})
+
+describe('a discard reaches the fields that keep state of their own', () => {
+  it('notifies subscribers of the provider', () => {
+    const seen = vi.fn()
+    function Listener() { useOnFormDiscard(seen); return null }
+    render(<FormValidityProvider><Listener /><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(seen).toHaveBeenCalledTimes(1)
   })
 })

@@ -164,20 +164,26 @@ export function NumberField({
 
   // The state, not its wording: what is wrong, whether to say it already, and the text.
   let problem: { message: string; showNow: boolean } | null = null
-  if (reading.kind === 'exponent') problem = { message: t('ui.form.number_exponent'), showNow: true }
-  else if (reading.kind === 'invalid') problem = { message: t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid'), showNow: true }
-  else if (reading.kind === 'partial') problem = { message: t('ui.form.number_incomplete'), showNow: touched }
+  // An example the field would itself accept: inside the bounds, so "such as 1000" never
+  // appears on a field that ends at 600.
+  const lo = min !== undefined ? (integer ? Math.ceil(min) : min) : undefined
+  const hi = max !== undefined ? (integer ? Math.floor(max) : max) : undefined
+  const example = lo !== undefined && hi !== undefined ? (lo <= 1000 && 1000 <= hi ? 1000 : lo) : lo ?? hi ?? 1000
+  if (reading.kind === 'exponent') problem = { message: t('ui.form.number_exponent', { example }), showNow: true }
+  else if (reading.kind === 'invalid') problem = { message: t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid', { example }), showNow: true }
+  else if (reading.kind === 'partial') problem = { message: t('ui.form.number_incomplete', { example }), showNow: touched }
   else if (reading.kind === 'empty' && !emptyOk) {
     // Says what to enter, not only that something is missing.
     const needs = inheritEditor ? 'ui.form.number_required_inherit'
       : min !== undefined && max !== undefined ? 'ui.form.number_required_range' : 'ui.form.number_required'
-    problem = { message: t(needs, { min, max }), showNow: true }
+    problem = { message: t(needs, { min, max, example }), showNow: true }
   }
   else if (out) problem = { message: rangeText, showNow: true }
   // An empty box on a field that allows empty is a complete answer, not a problem: the empty
   // commit (blur or Enter) is what tells the parent, and both come before any click on Save.
 
-  useReportValidity(problem?.message ?? null, inputRef)
+  // A disabled box cannot be fixed, so it must not hold the form hostage.
+  useReportValidity(rest.disabled ? null : problem?.message ?? null, inputRef)
   const message = (problem?.showNow ? problem.message : null) ?? rejected
   const inField = useFieldMessage(message)
 
@@ -218,7 +224,7 @@ export function NumberField({
     setTouched(false)
     // The parent was told the abandoned number as it was typed; tell it the settled one.
     // Never null on a field that does not allow empty: that event means "cleared on purpose".
-    if (value !== back && (back !== null || emptyOk)) onChange(back)
+    if (value !== back && (back !== null || emptyOk) && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
   }
 
   return (

@@ -1,6 +1,7 @@
-import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useState, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { useReportValidity } from './FormValidity'
 
 interface FieldMessageApi { set: (message: string | null) => void }
 const FieldMessageContext = createContext<FieldMessageApi | null>(null)
@@ -64,6 +65,11 @@ export function Field({ label, hint, error, required, orientation = 'vertical', 
   const errorId = `${auto}-error`
   const [inner, setInner] = useState<string | null>(null)
   const shown = error ?? inner
+  // The page's own error is a problem the form cannot be saved with, in the place where the
+  // control sits, so the SaveBar can name this field and take the person to it. (`inner` is a
+  // control's own message: it reports for itself.)
+  const findControl = useCallback(() => document.getElementById(id), [id])
+  useReportValidity(typeof error === 'string' ? error : null, findControl)
   const describedBy = shown ? errorId : hint ? hintId : undefined
   const messageApi = useMemo<FieldMessageApi>(() => ({ set: setInner }), [])
 

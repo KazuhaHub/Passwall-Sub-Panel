@@ -62,7 +62,8 @@ export function TagsField({
   const [active, setActive] = useState(-1)
   const isComposing = useRef(false)
   const [note, setNote] = useState<string | null>(null)
-  useReportValidity(required && value.length === 0 ? t('ui.form.tags_required') : null, input)
+  // A disabled box cannot be filled, so it must not hold the form hostage.
+  useReportValidity(required && value.length === 0 && !disabled ? t('ui.form.tags_required') : null, input)
 
   const typed = text.trim()
   const options = useMemo(() => {

@@ -69,14 +69,14 @@ export function FormsDemoSection() {
       <div className="flex max-w-2xl flex-col gap-8 rounded-xl border bg-card p-5">
         <FormSection title="基本信息" description="名称和地址，列表和订阅里都会用到。">
           <Field label="名称" required hint="显示在节点列表和订阅里" error={fe.errors.name}>
-            <Input id="ui-kit-form-name" value={d.name} placeholder="Irvine Home" onChange={e => { set('name', e.target.value); fe.change('name', { ...d, name: e.target.value }) }} onBlur={() => fe.blur('name', d)} />
+            <Input value={d.name} placeholder="Irvine Home" onChange={e => { set('name', e.target.value); fe.change('name', { ...d, name: e.target.value }) }} onBlur={() => fe.blur('name', d)} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
             <Field label="地址" required hint="域名或 IP" error={fe.errors.host}>
-              <Input id="ui-kit-form-host" value={d.host} placeholder="irvine.example.com" onChange={e => { set('host', e.target.value); fe.change('host', { ...d, host: e.target.value }) }} onBlur={() => fe.blur('host', d)} />
+              <Input value={d.host} placeholder="irvine.example.com" onChange={e => { set('host', e.target.value); fe.change('host', { ...d, host: e.target.value }) }} onBlur={() => fe.blur('host', d)} />
             </Field>
             <Field label="端口" required error={fe.errors.port}>
-              <Input id="ui-kit-form-port" inputMode="numeric" value={d.port} placeholder="443" onChange={e => { set('port', e.target.value); fe.change('port', { ...d, port: e.target.value }) }} onBlur={() => fe.blur('port', d)} />
+              <Input inputMode="numeric" value={d.port} placeholder="443" onChange={e => { set('port', e.target.value); fe.change('port', { ...d, port: e.target.value }) }} onBlur={() => fe.blur('port', d)} />
             </Field>
           </div>
           <Field label="区域" hint="用于订阅里的国旗和分组">
@@ -131,11 +131,8 @@ export function FormsDemoSection() {
         <SaveBar
           dirty={dirty}
           pending={pending}
-          // The page's own rules are counted and named together with what NumberField / TagsField
-          // report, so neither hides the other.
-          errors={(['name', 'host', 'port'] as const).flatMap(k => fe.errors[k]
-            ? [{ label: { name: '名称', host: '地址', port: '端口' }[k], message: fe.errors[k], focus: () => document.getElementById(`ui-kit-form-${k}`)?.focus() }]
-            : [])}
+          // The Fields above are given their `error`, so they report it themselves: the bar names them in
+          // page order together with the numbers and tags, and Save takes the person to the first.
           onSave={save}
           onDiscard={() => { setD(saved); fe.reset() }}
         />
