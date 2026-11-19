@@ -63,24 +63,31 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if n == nil || n.ID == 0 {
 		return fmt.Errorf("UpdateMetadata requires a non-zero node ID; got %+v", n)
 	}
-	return r.db.WithContext(ctx).
-		Model(&nodeRow{}).
-		Where("id = ?", n.ID).
-		Updates(map[string]any{
-			"display_name":      n.DisplayName,
-			"server_address":    n.ServerAddress,
-			"flow":              n.Flow,
-			"region":            n.Region,
-			"tags":              jsonStrings(n.Tags),
-			"sort_order":        n.SortOrder,
-			"relays":            jsonRelays(n.Relays),
-			"hide_direct":       n.HideDirect,
-			"show_relay_status": n.ShowRelayStatus,
-			"egress_panel_id":   n.EgressPanelID,
-			// The service resolves an omitted factor to the stored one
-			// before it calls here.
-			"traffic_factor_milli": n.EffectiveTrafficFactor(),
-		}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&nodeRow{}).
+			Where("id = ?", n.ID).
+			Updates(map[string]any{
+				"display_name":      n.DisplayName,
+				"server_address":    n.ServerAddress,
+				"flow":              n.Flow,
+				"region":            n.Region,
+				"tags":              jsonStrings(n.Tags),
+				"sort_order":        n.SortOrder,
+				"relays":            jsonRelays(n.Relays),
+				"hide_direct":       n.HideDirect,
+				"show_relay_status": n.ShowRelayStatus,
+				"egress_panel_id":   n.EgressPanelID,
+				// The service resolves an omitted factor to the stored one
+				// before it calls here.
+				"traffic_factor_milli": n.EffectiveTrafficFactor(),
+			}).Error; err != nil {
+			return err
+		}
+		// A line this save removed takes its position with it (a re-created
+		// line gets a new ID, so a stale row could never apply again). Lines that
+		// stay keep theirs: positions are written only by ApplySubscriptionOrder.
+		return pruneLinePositionsTx(tx, n.ID, n.Relays)
+	})
 }
 
 // UpdateTrafficCounters writes only the lifetime + last-raw counter columns.
@@ -379,6 +386,9 @@ func (r *nodeRepo) Delete(ctx context.Context, id int64) error {
 			return err
 		}
 		if err := tx.Delete(&nodeRow{}, id).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("node_id = ?", id).Delete(&subscriptionLinePositionRow{}).Error; err != nil {
 			return err
 		}
 		if err := deleteNodeRoutesTx(tx, id); err != nil {

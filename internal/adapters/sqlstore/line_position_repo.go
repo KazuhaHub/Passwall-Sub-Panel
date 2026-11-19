@@ -2,11 +2,13 @@ package sqlstore
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // subscriptionLinePositionRow is the explicit place of one RELAY line on the
@@ -73,4 +75,64 @@ func attachLinePositions(ctx context.Context, db *gorm.DB, nodes []*domain.Node)
 		}
 	}
 	return nil
+}
+
+// pruneLinePositionsTx drops the position rows of lines that are no longer in
+// relays. Inert orphans would be harmless, but they are never read again and
+// would otherwise accumulate.
+func pruneLinePositionsTx(tx *gorm.DB, nodeID int64, relays []domain.RelayLine) error {
+	q := tx.Where("node_id = ?", nodeID)
+	if len(relays) > 0 {
+		keep := make([]string, len(relays))
+		for i, r := range relays {
+			keep[i] = r.ID
+		}
+		q = q.Where("line_id NOT IN ?", keep)
+	}
+	return q.Delete(&subscriptionLinePositionRow{}).Error
+}
+
+// ApplySubscriptionOrder is the one-transaction subscription reorder (see
+// ports.NodeRepo). Order of work inside the transaction: node and separator
+// sort_order first, then the old line rows are cleared and the new set is
+// inserted, so a failure anywhere (a duplicate key on the last insert, a lost
+// connection) rolls the whole thing back and the previous order stays intact.
+//
+// It never checks that an ID exists: UPDATE ... RowsAffected is not portable
+// (MySQL reports 0 for an unchanged value), and the service has already
+// validated the set against the current rows. An insert for a node that was
+// deleted in the meantime is an inert orphan.
+func (r *nodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.SubscriptionOrderWrite) error {
+	for _, line := range w.Lines {
+		// The direct line is the node row, whose place is nodes.sort_order. A
+		// row for it would be a second copy that could disagree.
+		if line.LineID == "" || line.LineID == domain.DirectLineID || len(line.LineID) > 128 {
+			return fmt.Errorf("%w: invalid line id %q for a position row", domain.ErrValidation, line.LineID)
+		}
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, u := range w.Nodes {
+			if err := tx.Model(&nodeRow{}).Where("id = ?", u.NodeID).
+				Update("sort_order", u.SortOrder).Error; err != nil {
+				return err
+			}
+		}
+		for _, u := range w.Separators {
+			if err := tx.Model(&separatorRow{}).Where("id = ?", u.SeparatorID).
+				Update("sort_order", u.SortOrder).Error; err != nil {
+				return err
+			}
+		}
+		// Every reorder rewrites the whole set, so stale and orphan rows go too.
+		if err := tx.Where("1 = 1").Delete(&subscriptionLinePositionRow{}).Error; err != nil {
+			return err
+		}
+		for _, line := range w.Lines {
+			row := subscriptionLinePositionRow{NodeID: line.NodeID, LineID: line.LineID, SortOrder: line.SortOrder}
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

@@ -2,6 +2,10 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -110,5 +114,174 @@ func TestNodeReadsAttachPositions(t *testing.T) {
 	}
 	if p := relayPosition(one, "A-r2"); p == nil || *p != 15 {
 		t.Errorf("GetByID: A-r2 position = %v, want 15", p)
+	}
+}
+
+func allPositions(t *testing.T, repo *nodeRepo) map[string]int {
+	t.Helper()
+	var rows []subscriptionLinePositionRow
+	if err := repo.db.Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int{}
+	for _, r := range rows {
+		out[fmt.Sprintf("%d/%s", r.NodeID, r.LineID)] = r.SortOrder
+	}
+	return out
+}
+
+func seedSeparator(t *testing.T, repo *nodeRepo, order int) *domain.SeparatorEntry {
+	t.Helper()
+	sep := &domain.SeparatorEntry{DisplayName: "----", Enabled: true, Mode: domain.SeparatorModeGlobal, SortOrder: order}
+	if err := (&separatorRepo{db: repo.db}).Create(context.Background(), sep); err != nil {
+		t.Fatal(err)
+	}
+	return sep
+}
+
+// One call moves nodes, separators and lines together and replaces the whole
+// set of line rows: a line missing from the write loses its old position.
+func TestApplySubscriptionOrderWritesNodesSeparatorsAndLines(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	sep := seedSeparator(t, repo, 5)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 999) // replaced
+	putPosition(t, repo, nodes[1].ID, "B-r2", 888) // absent from the write: dropped
+
+	err := repo.ApplySubscriptionOrder(ctx, ports.SubscriptionOrderWrite{
+		Nodes:      []ports.NodeSortUpdate{{NodeID: nodes[0].ID, SortOrder: 20}, {NodeID: nodes[1].ID, SortOrder: 40}},
+		Separators: []ports.SeparatorSortUpdate{{SeparatorID: sep.ID, SortOrder: 10}},
+		Lines: []ports.LinePositionWrite{
+			{NodeID: nodes[1].ID, LineID: "B-r1", SortOrder: 30},
+			{NodeID: nodes[0].ID, LineID: "A-r1", SortOrder: 50},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := repo.GetByID(ctx, nodes[0].ID)
+	b, _ := repo.GetByID(ctx, nodes[1].ID)
+	if a.SortOrder != 20 || b.SortOrder != 40 {
+		t.Fatalf("node orders = %d,%d", a.SortOrder, b.SortOrder)
+	}
+	got, _ := (&separatorRepo{db: repo.db}).GetByID(ctx, sep.ID)
+	if got.SortOrder != 10 || !got.Enabled || got.DisplayName != "----" {
+		t.Fatalf("separator = %+v (only sort_order may change)", got)
+	}
+	want := map[string]int{fmt.Sprintf("%d/B-r1", nodes[1].ID): 30, fmt.Sprintf("%d/A-r1", nodes[0].ID): 50}
+	if !reflect.DeepEqual(allPositions(t, repo), want) {
+		t.Fatalf("positions = %v, want %v", allPositions(t, repo), want)
+	}
+	// Column-scoped: nothing else on the node moved.
+	if len(a.Relays) != 2 || a.DisplayName != "A" || !a.Enabled {
+		t.Fatalf("node row clobbered: %+v", a)
+	}
+}
+
+// A failure on the last insert leaves everything as it was: the node and
+// separator updates and the delete of the old rows roll back with it.
+func TestApplySubscriptionOrderIsAtomic(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	sep := seedSeparator(t, repo, 5)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 77)
+	before := allPositions(t, repo)
+
+	err := repo.ApplySubscriptionOrder(ctx, ports.SubscriptionOrderWrite{
+		Nodes:      []ports.NodeSortUpdate{{NodeID: nodes[0].ID, SortOrder: 20}},
+		Separators: []ports.SeparatorSortUpdate{{SeparatorID: sep.ID, SortOrder: 10}},
+		Lines: []ports.LinePositionWrite{
+			{NodeID: nodes[0].ID, LineID: "A-r2", SortOrder: 30},
+			{NodeID: nodes[0].ID, LineID: "A-r2", SortOrder: 31}, // duplicate key: the last insert fails
+		},
+	})
+	if err == nil {
+		t.Fatal("expected the duplicate to fail the write")
+	}
+	a, _ := repo.GetByID(ctx, nodes[0].ID)
+	got, _ := (&separatorRepo{db: repo.db}).GetByID(ctx, sep.ID)
+	if a.SortOrder == 20 || got.SortOrder != 5 {
+		t.Fatalf("partial write survived: node=%d separator=%d", a.SortOrder, got.SortOrder)
+	}
+	if !reflect.DeepEqual(allPositions(t, repo), before) {
+		t.Fatalf("positions changed by a failed write: %v", allPositions(t, repo))
+	}
+}
+
+// The direct line is the node row: a position for it would be a second copy.
+func TestApplySubscriptionOrderRefusesDirectAndEmptyLineIDs(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	for _, id := range []string{domain.DirectLineID, ""} {
+		err := repo.ApplySubscriptionOrder(ctx, ports.SubscriptionOrderWrite{
+			Lines: []ports.LinePositionWrite{{NodeID: nodes[0].ID, LineID: id, SortOrder: 10}},
+		})
+		if !errors.Is(err, domain.ErrValidation) {
+			t.Fatalf("line %q: err = %v, want ErrValidation", id, err)
+		}
+	}
+	if len(allPositions(t, repo)) != 0 {
+		t.Fatal("a refused write left rows behind")
+	}
+}
+
+func TestNodeDeleteRemovesLinePositions(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 10)
+	putPosition(t, repo, nodes[1].ID, "B-r1", 20)
+	if err := repo.Delete(ctx, nodes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := allPositions(t, repo), map[string]int{fmt.Sprintf("%d/B-r1", nodes[1].ID): 20}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("positions = %v, want %v", got, want)
+	}
+}
+
+// A line removed in a metadata save takes its position with it; the ones that
+// remain keep theirs, and the write does not touch positions otherwise.
+func TestUpdateMetadataPrunesRemovedLinePositions(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 10)
+	putPosition(t, repo, nodes[0].ID, "A-r2", 20)
+	putPosition(t, repo, nodes[1].ID, "B-r1", 30)
+
+	edit := *nodes[0]
+	edit.Relays = []domain.RelayLine{nodes[0].Relays[1]} // A-r1 removed
+	if err := repo.UpdateMetadata(ctx, &edit); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{fmt.Sprintf("%d/A-r2", nodes[0].ID): 20, fmt.Sprintf("%d/B-r1", nodes[1].ID): 30}
+	if got := allPositions(t, repo); !reflect.DeepEqual(got, want) {
+		t.Fatalf("positions = %v, want %v", got, want)
+	}
+
+	edit.Relays = nil // every line removed
+	if err := repo.UpdateMetadata(ctx, &edit); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := allPositions(t, repo), map[string]int{fmt.Sprintf("%d/B-r1", nodes[1].ID): 30}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("positions = %v, want %v", got, want)
+	}
+}
+
+// A save that edits a line in place (the ID is kept, the way a mode switch or a
+// rename does) keeps its position.
+func TestUpdateMetadataKeepsPositionOfEditedLine(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 10)
+	edit := *nodes[0]
+	edit.Relays = []domain.RelayLine{nodes[0].Relays[0], nodes[0].Relays[1]}
+	edit.Relays[0].Name, edit.Relays[0].Mode = "renamed", domain.RelayModeTunnel
+	if err := repo.UpdateMetadata(ctx, &edit); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetByID(ctx, nodes[0].ID)
+	if p := relayPosition(got, "A-r1"); p == nil || *p != 10 {
+		t.Fatalf("position = %v, want 10", p)
+	}
+	// The position never leaks into the stored relays JSON.
+	var raw string
+	if err := repo.db.Raw("SELECT relays FROM nodes WHERE id = ?", nodes[0].ID).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(raw), "position") {
+		t.Fatalf("position serialised into relays: %s", raw)
 	}
 }
