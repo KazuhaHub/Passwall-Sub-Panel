@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkGlobalRules, checkPreloads, checkVendorImports } from '../../scripts/dist-guards.mjs'
+import { checkGlobalRules, checkPlaceholders, checkPreloads, checkVendorImports } from '../../scripts/dist-guards.mjs'
 
 describe('checkPreloads', () => {
   it('flags a preloaded new-stack chunk', () => {
@@ -83,5 +83,15 @@ describe('checkGlobalRules', () => {
   it('allows scoped selectors and at-rules', () => {
     const css = '@layer base{:where(.psp-ui,[data-slot]) *{margin:0}}@keyframes a{from{opacity:0}to{opacity:1}}@font-face{font-family:x;src:url(a)}.psp-ui{margin:0}'
     expect(checkGlobalRules(css)).toEqual([])
+  })
+})
+
+describe('checkPlaceholders', () => {
+  it('flags a :psp-* placeholder that survived the build', () => {
+    expect(checkPlaceholders('a:psp-new{x:y}')).toHaveLength(1)
+    expect(checkPlaceholders('b:where(:psp-new-root){x:y}')).toHaveLength(1)
+  })
+  it('allows the .psp-legacy class and ordinary css', () => {
+    expect(checkPlaceholders('.psp-legacy{x:y}.psp-ui a{x:y}')).toEqual([])
   })
 })

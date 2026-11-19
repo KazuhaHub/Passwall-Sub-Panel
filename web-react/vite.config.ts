@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { expandScope } from './scripts/psp-scope.mjs'
+import { assertNoPlaceholderImports, expandScope } from './scripts/psp-scope.mjs'
 import path from 'node:path'
 
 // Chunk assignment is by EXACT npm package name, taken from the last
@@ -66,6 +66,7 @@ function pspScope(): Plugin {
     enforce: 'pre',
     transform(code, id) {
       if (!/[\\/]styles[\\/]ui\.css$/.test(id.split('?')[0])) return
+      assertNoPlaceholderImports(code, path.dirname(id.split('?')[0]))
       return { code: expandScope(code), map: null }
     },
   }

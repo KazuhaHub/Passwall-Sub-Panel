@@ -14,33 +14,49 @@
  * 3. NEW scope. Markers: `.psp-ui` (a page wrapper) and `[data-slot]` (every
  *    shadcn component, including portaled popups) are NEW; `.psp-legacy`
  *    (rendered by components/LegacyBoundary) means "old MUI content, even though
- *    an ancestor is new". An element is in new scope when its NEAREST marker is
- *    new. Markers nest at most THREE deep by construction: new shell -> legacy
- *    page -> new shared component re-entering. Shared components (page header
- *    ...) are migrated first and then rendered inside old pages; new components
- *    never contain legacy content except at the shell's outlet.
- *    Plain descendant selectors (`.psp-ui *`) would also reach MUI content under
- *    a new ancestor, so every rule below uses `:psp-new` instead. It is NOT CSS:
- *    vite.config.ts expands it (scripts/psp-scope.mjs, the one place the four
- *    member selectors are written) to `:where(...)` (zero specificity) or, for
- *    the shim, `:is(...)`. `@scope` is deliberately not used: older iOS Safari
- *    lacks it, and a dropped @scope block would unstyle the whole new UI.
+ *    an ancestor is new". The rule is simply: an element is in new scope iff the
+ *    NEAREST marker at or above it is new. Markers alternate to arbitrary
+ *    practical depth, shell > legacy page > new component > legacy slot > new
+ *    component ..., and runs of the same kind collapse (new inside new costs
+ *    nothing). The selector is GENERATED for NEW_SCOPE_LEVELS = 4 alternation
+ *    levels (scripts/psp-scope-chain.mjs): a chain may go U L U L U L U, no
+ *    deeper. In development LegacyBoundary console.errors when nesting would
+ *    exceed that. Plain descendant selectors (`.psp-ui *`) would also reach MUI
+ *    content under a new ancestor, so every rule below uses a placeholder
+ *    instead: `:psp-new` (zero specificity), `:psp-new-root` (entry points: new
+ *    scope whose parent is not new) and `:psp-new-strong` (the shim). They are
+ *    NOT CSS: vite.config.ts expands them through scripts/psp-scope.mjs, the one
+ *    place the selector is written, and fails on any unknown `:psp-*` token.
+ *    `@scope` is deliberately not used: older iOS Safari lacks it, and a dropped
+ *    @scope block would unstyle the whole new UI.
+ *    WHO IS RESPONSIBLE: a new component that accepts arbitrary children or
+ *    slots from a not-yet-migrated caller (PageHeader `actions`, dialog bodies,
+ *    card content) wraps that slot in LegacyBoundary, during the migration. The
+ *    shell wraps its page outlet.
  * 4. Inheritance crosses any boundary, so LegacyBoundary also re-states, from the
  *    live MUI theme, what CssBaseline puts on body and what new scope sets on its
- *    roots that inherits (font, colour, line-height, ...).
+ *    entry points that inherits (font, colour, line-height, ...). It is
+ *    `display: contents`, so it adds no box. Properties that inherit are set on
+ *    ENTRY POINTS only (like the document root on a plain page), so a `text-sm`
+ *    or `font-mono` parent still reaches its new children.
  * 5. The MUI coexistence shim (end of file) answers MUI's unlayered globals on
- *    new elements. It matches new scope only, so it can no longer match a MUI
- *    element and does not depend on emotion's insertion order.
- * The shim, `.psp-legacy`, LegacyBoundary and the `:psp-new` expansion are
- * deleted together with MUI.
+ *    new elements. It matches new scope only, at any supported depth, so it can
+ *    never match an MUI element and does not depend on emotion's insertion order.
+ * The shim, `.psp-legacy`, LegacyBoundary, the placeholders and their expansion
+ * are deleted together with MUI.
  *
- * VERIFY (needs the dev server; not run in CI):
- *   cd web-react && npm run dev          # in one terminal
- *   node scripts/check-coexistence.mjs   # in another; see the script header
- * It renders the same MUI sample outside the shell and inside
- * SidebarProvider > SidebarInset > LegacyBoundary on /__ui-kit and fails on any
- * computed-style difference (light and dark, both densities).
- * `npm run smoke:dist` separately guards the built CSS.
+ * VERIFY
+ *   - `npm run smoke:dist` runs scripts/check-scope.mjs (headless Chrome, no dev
+ *     server): every marker chain up to length 8 against the generated selector,
+ *     plus the shim against emotion-like rules before and after it. It also
+ *     guards the built CSS (no global rules, no leftover placeholders).
+ *   - scripts/check-coexistence.mjs (needs the dev server; not run in CI):
+ *       cd web-react && PSP_DEV_NO_PROXY=1 npm run dev     # one terminal
+ *       node scripts/check-coexistence.mjs                 # another
+ *     It renders the same MUI sample outside the shell and at three legacy depths
+ *     inside it, and new components in the shell and re-entering, on
+ *     /__ui-kit/mixed, and fails on any computed-style difference (light and
+ *     dark, both densities).
  *
  * WHAT THIS FILE EMITS GLOBALLY (unlayered or on a global selector), and why each
  * item is harmless to un-migrated pages (guarded by smoke:dist):
@@ -264,25 +280,48 @@
    * Scoped preflight: a trimmed copy of tailwindcss/preflight.css, every rule
    * restricted to new scope (see the contract above) at zero specificity so any
    * utility or component class wins. Dropped from the original: Firefox-only
-   * fixes, the date-input pseudo-element patches and `:host`. Re-diff against
-   * preflight.css when bumping Tailwind.
+   * fixes, the date-input pseudo-element patches, `::backdrop` and `:host`.
+   * Re-diff against preflight.css when bumping Tailwind.
+   *
+   * SOURCE ORDER MATTERS among these zero-specificity rules; where two can hit
+   * the same element, the later one wins and the order below is deliberate:
+   *   - reset (border: 0 solid) -> border-color default -> hr / table borders
+   *   - form controls (`font: inherit`) -> entry-point font and line-height, so a
+   *     button or input that is itself an entry point keeps Geist
+   *   - code/kbd/samp/pre mono font: entry points exclude them from the
+   *     font-family rule instead of relying on order
+   *   - known, accepted: an entry point that is a <sub>/<sup> gets line-height 1.5
+   *     (the entry-point rule comes later than the sub/sup rule)
+   * Universal rules are merged into as few rules as possible, and none targets
+   * ::before/::after, and pseudo-elements that only form controls have lead with a
+   * type test (cheap, fails first): each universal selector evaluates the (long) scope selector
+   * once per element in the document, pseudo-elements included (dropping those two
+   * saved ~40% of style recalculation on a 36,000-element page). Pseudo-elements of
+   * new elements inherit border-box from their element, and MUI's own
+   * `*::before { box-sizing: inherit }` agrees.
    */
-  *:psp-new, *:psp-new::before, *:psp-new::after, *:psp-new::backdrop, *:psp-new::file-selector-button {
+  *:psp-new {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
     border: 0 solid;
-  }
-  /* Border/outline colour defaults from the shadcn setup (after the reset above:
-     equal specificity, later wins). */
-  *:psp-new {
+    /* shadcn defaults, after the reset above (equal specificity, later wins) */
     border-color: var(--border);
     outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+    /* Thin themed scrollbars, as the MUI theme has. Base layer, so a utility
+       (`no-scrollbar`) overrides it; the shim stops MUI's `*` rule beating that.
+       scrollbar-width does not inherit, so it goes on every new element. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
   }
+  :where(input):psp-new::file-selector-button { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
   .psp-ui {
     @apply bg-background text-foreground;
   }
-  *:psp-new-root::selection, *:psp-new-root ::selection {
+  /* Selection colour. Highlight pseudo-elements inherit down the DOM tree, so a
+     rule on an element that contains a LegacyBoundary would recolour MUI text
+     inside it; those elements are skipped. (Their own text keeps the default.) */
+  *:psp-new:not(:has(.psp-legacy))::selection {
     background: color-mix(in oklch, var(--ring) 35%, transparent);
   }
   :where(hr):psp-new { height: 0; color: inherit; border-top-width: 1px; }
@@ -301,7 +340,7 @@
   :where(ol, ul, menu):psp-new { list-style: none; }
   :where(img, svg, video, canvas, audio, iframe, embed, object):psp-new { display: block; vertical-align: middle; }
   :where(img, video):psp-new { max-width: 100%; height: auto; }
-  :where(button, input, select, optgroup, textarea):psp-new, *:psp-new::file-selector-button {
+  :where(button, input, select, optgroup, textarea):psp-new, :where(input):psp-new::file-selector-button {
     font: inherit;
     font-feature-settings: inherit;
     font-variation-settings: inherit;
@@ -311,39 +350,51 @@
     background-color: transparent;
     opacity: 1;
   }
-  *:psp-new::file-selector-button { margin-inline-end: 4px; }
-  /* Properties that INHERIT go on the scope roots only: setting them on every
-     element would override a parent's `text-sm` line-height for its children.
-     Declared AFTER the form-control rule above on purpose: a button or input that
-     is itself a root (a re-entering component inside legacy content) must keep
-     this font instead of `font: inherit` taking its parent's. Same zero
-     specificity, so source order decides. */
+  :where(input):psp-new::file-selector-button { margin-inline-end: 4px; }
+  /*
+   * ENTRY POINTS: new scope whose parent is not new. Properties that INHERIT are
+   * set here and only here, as the document root does on a plain page, so a
+   * `text-sm` / `font-mono` parent still reaches its new children (setting them
+   * on every new element would override that). They also pull an entry point out
+   * of whatever it was dropped into: a re-entering component inside MUI content
+   * must not inherit MUI's colour, size or letter-spacing. Declared AFTER the
+   * form-control rule above (see the order note).
+   */
   *:psp-new-root {
     line-height: 1.5;
     -webkit-text-size-adjust: 100%;
     tab-size: 4;
     -webkit-tap-highlight-color: transparent;
-    /* Font: Geist for Latin, system CJK after it (--font-sans). Never on
-       html/body: MUI's CssBaseline owns those. */
-    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    color: var(--foreground);
+    font-weight: 400;
+    font-style: normal;
+    letter-spacing: normal;
+  }
+  /* Text properties the browser itself sets on form controls (text-rendering,
+     text-align, white-space ...) must be left to it: on a plain page a button
+     keeps its own, and overriding them on a re-entering <button>/<select> would
+     make it differ from the same control inside the shell. */
+  *:psp-new-root:not(:where(button, input, select, optgroup, textarea)) {
     text-rendering: optimizeLegibility;
+    text-align: start;
+    text-transform: none;
+    text-indent: 0;
+    white-space: normal;
+    word-spacing: normal;
   }
-  *:psp-new::placeholder { opacity: 1; color: color-mix(in oklab, currentcolor 50%, transparent); }
+  /* Font: Geist for Latin, system CJK after it (--font-sans). Never on html/body:
+     MUI's CssBaseline owns those. Code-like entry points keep their mono font. */
+  *:psp-new-root:not(:where(code, kbd, samp, pre)) {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+  }
+  :where(input, textarea):psp-new::placeholder { opacity: 1; color: color-mix(in oklab, currentcolor 50%, transparent); }
   :where(textarea):psp-new { resize: vertical; }
-  *:psp-new::-webkit-search-decoration { -webkit-appearance: none; }
-  :where(button, input:where([type='button'], [type='reset'], [type='submit'])):psp-new, *:psp-new::file-selector-button { appearance: button; }
-  *:psp-new::-webkit-inner-spin-button, *:psp-new::-webkit-outer-spin-button { height: auto; }
+  :where(input):psp-new::-webkit-search-decoration { -webkit-appearance: none; }
+  :where(button, input:where([type='button'], [type='reset'], [type='submit'])):psp-new, :where(input):psp-new::file-selector-button { appearance: button; }
+  :where(input):psp-new::-webkit-inner-spin-button, :where(input):psp-new::-webkit-outer-spin-button { height: auto; }
   :where([hidden]:where(:not([hidden='until-found']))):psp-new { display: none !important; }
-
-  /* Thin themed scrollbars on new elements, matching the MUI theme's look. In the
-     base layer so any utility (`no-scrollbar`) overrides it; the shim below stops
-     MUI's unlayered `*` rule from beating that. scrollbar-width does not inherit,
-     so it goes on every new element. */
-  *:psp-new {
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
-  }
 }
 
 /*
@@ -358,9 +409,11 @@
  * layered rules (utilities > components > base), as if the MUI rule were absent,
  * so the shim does not itself outrank utilities. `:psp-new-strong` expands to
  * `:is(...)`, whose specificity (at least 0,1,0) beats MUI's globals (0,0,0 -
- * 0,0,1), and it matches NEW scope only: it can never match an MUI element, so
- * emotion's insertion order and any `injectFirst` / cache insertion point /
- * `enableCssLayer` change are irrelevant to it.
+ * 0,0,1), and it matches NEW scope only, at every supported nesting depth: it
+ * can never match an MUI element (scripts/check-scope.mjs checks an
+ * `.MuiX{box-sizing:content-box}` rule at every depth, before and after this
+ * stylesheet), so emotion's insertion order and any `injectFirst` / cache
+ * insertion point / `enableCssLayer` change are irrelevant to it.
  *
  * Every global rule the app emits (read from the live emotion sheets on the built
  * login page) and its decision:
@@ -391,21 +444,18 @@
  * (list the data-emotion sheets' selectors that are not `.css-*` / `.Mui*`) when
  * the theme's MuiCssBaseline overrides change, and re-run check-coexistence.
  */
-*:psp-new-strong, *:psp-new-strong::before, *:psp-new-strong::after {
+*:psp-new-strong {
   box-sizing: revert-layer;
+  scrollbar-width: revert-layer;
+  scrollbar-color: revert-layer;
 }
 :is(b, strong):psp-new-strong {
   font-weight: revert-layer;
 }
-*:psp-new-strong {
-  scrollbar-width: revert-layer;
-  scrollbar-color: revert-layer;
-}
-*:psp-new-strong::-webkit-scrollbar { width: revert-layer; height: revert-layer; }
-*:psp-new-strong::-webkit-scrollbar-track { background-color: revert-layer; }
-*:psp-new-strong::-webkit-scrollbar-thumb {
-  background-color: revert-layer; border-radius: revert-layer; border: revert-layer; background-clip: revert-layer;
+*:psp-new-strong::-webkit-scrollbar, *:psp-new-strong::-webkit-scrollbar-track,
+*:psp-new-strong::-webkit-scrollbar-thumb, *:psp-new-strong::-webkit-scrollbar-corner {
+  width: revert-layer; height: revert-layer; background-color: revert-layer;
+  border-radius: revert-layer; border: revert-layer; background-clip: revert-layer;
 }
 *:psp-new-strong::-webkit-scrollbar-thumb:hover { background-color: revert-layer; }
-*:psp-new-strong::-webkit-scrollbar-corner { background-color: revert-layer; }
 /* ===== end MUI coexistence shim ===== */

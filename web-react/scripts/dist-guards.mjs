@@ -113,6 +113,12 @@ export function checkGlobalRules(css) {
   return problems
 }
 
+// The build expands `:psp-*` placeholders (scripts/psp-scope.mjs). One that
+// survives would be an invalid selector, silently dropping its whole rule.
+export function checkPlaceholders(css) {
+  return [...new Set(css.match(/:psp-[A-Za-z0-9_-]+/g) ?? [])].map(t => `unexpanded placeholder ${t} in built CSS`)
+}
+
 export function checkDist(dist) {
   const assets = join(dist, 'assets')
   const names = readdirSync(assets)
@@ -122,7 +128,8 @@ export function checkDist(dist) {
     ...checkVendorImports(js),
   ]
   for (const n of names.filter(n => n.endsWith('.css'))) {
-    problems.push(...checkGlobalRules(readFileSync(join(assets, n), 'utf8')).map(p => `${n}: ${p}`))
+    const css = readFileSync(join(assets, n), 'utf8')
+    problems.push(...[...checkGlobalRules(css), ...checkPlaceholders(css)].map(p => `${n}: ${p}`))
   }
   return problems
 }

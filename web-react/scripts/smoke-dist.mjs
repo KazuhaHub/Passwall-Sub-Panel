@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createReadStream, existsSync } from 'node:fs'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -12,6 +12,14 @@ const dist = resolve(import.meta.dirname, '../../internal/web/dist')
 const staticProblems = checkDist(dist)
 if (staticProblems.length) {
   throw new Error(`dist static checks failed:\n  ${staticProblems.join('\n  ')}`)
+}
+
+// The generated new-scope selector, proven exhaustively in Chrome (no server).
+// It drives its own browser, so it runs here as a child process.
+{
+  const r = spawnSync(process.execPath, [join(import.meta.dirname, 'check-scope.mjs')], { encoding: 'utf8', env: process.env })
+  if (r.status !== 0) throw new Error(`check-scope failed:\n${r.stdout}${r.stderr}`)
+  console.log(r.stdout.split('\n').filter(l => /^A\.|within supported|^OK/.test(l)).join('\n'))
 }
 
 const profile = await mkdtemp(join(tmpdir(), 'psp-web-smoke-'))

@@ -9,14 +9,21 @@
 // Chromium binary; common macOS and Linux names are tried otherwise).
 //
 // It loads /__ui-kit/mixed, which renders (src/views/admin/UiMixedTree.tsx):
-//   #mix-outside    one MUI sample outside any new wrapper
-//   #mix-inside     the same sample inside SidebarProvider > SidebarInset >
-//                   LegacyBoundary
-//   #mix-new-shell  new Button/Input/Badge directly in the shell
-//   #mix-new-reenter the same three inside the legacy content (re-entry)
+//   #mix-outside      one MUI sample outside any new wrapper
+//   #mix-inside / #mix-deep / #mix-deeper
+//                     the same sample inside the shell (.psp-ui SidebarProvider >
+//                     SidebarInset > LegacyBoundary), then inside a new
+//                     PageHeaderLike's legacy slot, then one level deeper
+//   #mix-new-shell    new components (button, input, badge, select, card, table,
+//                     dialog trigger) directly in the shell
+//   #mix-new-reenter / #mix-new-reenter2
+//                     the same components re-entering inside legacy content, at
+//                     two depths
 // and asserts, for light and dark and both densities, that every element (and
-// its ::before / ::after) of each pair has identical computed style for every
-// property except the geometry ones listed below. Exit code 1 on any mismatch.
+// its ::before / ::after / ::marker / ::placeholder / ::selection) of each pair
+// has identical computed style for every property except the geometry ones
+// listed below, AND that each side has at least the expected number of elements
+// (so an empty or broken fixture cannot pass). Exit code 1 on any mismatch.
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,9 +33,16 @@ const base = process.env.PSP_DEV_URL || 'http://localhost:5174'
 
 // Used-value properties that legitimately differ because the two copies sit at
 // different places and widths. Everything else must match.
+// Minimum numbers of compared nodes (elements plus pseudo-elements), so the
+// check cannot pass on an empty or broken fixture.
+const MIN_LEGACY = 150 // measured 189
+const MIN_NEW = 80 // measured 92
+
 const GEOMETRY = new Set([
   'width', 'height', 'inline-size', 'block-size', 'perspective-origin', 'transform-origin',
   'min-width', 'min-height', 'min-inline-size', 'min-block-size',
+  // resolved to used track sizes, which follow the container width
+  'grid-template-columns', 'grid-template-rows',
 ])
 
 const chromeCandidates = [
@@ -78,7 +92,7 @@ async function launch() {
 
 // Runs in the page: returns { pair: [{path, props}...] } for the four roots.
 const COLLECT = `(() => {
-  const roots = ['mix-outside', 'mix-inside', 'mix-new-shell', 'mix-new-reenter']
+  const roots = ['mix-outside', 'mix-inside', 'mix-deep', 'mix-deeper', 'mix-new-shell', 'mix-new-reenter', 'mix-new-reenter2']
   const out = {}
   for (const id of roots) {
     const root = document.getElementById(id)
@@ -89,9 +103,9 @@ const COLLECT = `(() => {
     if (id.startsWith('mix-new')) els = els.filter(el => { const c = el.closest('[data-slot]'); return c && root.contains(c) })
     out[id] = els.flatMap(el => {
       const rows = []
-      for (const pseudo of [null, '::before', '::after']) {
+      for (const pseudo of [null, '::before', '::after', '::marker', '::placeholder', '::selection']) {
         const cs = getComputedStyle(el, pseudo)
-        if (pseudo && cs.content === 'none') continue
+        if ((pseudo === '::before' || pseudo === '::after') && cs.content === 'none') continue
         const props = {}
         for (const p of cs) props[p] = cs.getPropertyValue(p)
         rows.push({ tag: el.tagName.toLowerCase() + (pseudo || ''), props })
@@ -117,6 +131,26 @@ function comparePair(name, a, b) {
   }
   return { elements: Math.min(a.length, b.length), props, mismatches }
 }
+
+// Entry points only: a new child of a `text-sm` / `font-mono` parent must inherit
+// from it exactly like a plain child does (line-height and font-family are set on
+// entry points, not on every [data-slot] element).
+const INHERIT = `(() => {
+  const host = document.createElement('div')
+  host.innerHTML = '<div class="psp-ui text-sm" id="t1"><p id="p1">x</p><p data-slot="x" id="s1">x</p></div>'
+    + '<div class="psp-ui font-mono" id="t2"><p id="p2">x</p><p data-slot="x" id="s2">x</p></div>'
+    + '<div class="psp-ui"><code data-slot="x" id="c1">x</code></div>'
+  document.body.appendChild(host)
+  const g = (id, prop) => getComputedStyle(document.getElementById(id))[prop]
+  const out = {
+    parentSmSize: g('t1', 'fontSize'), plainLH: g('p1', 'lineHeight'), slotLH: g('s1', 'lineHeight'),
+    plainSize: g('p1', 'fontSize'), slotSize: g('s1', 'fontSize'),
+    codeFamily: g('c1', 'fontFamily'),
+    parentMonoFamily: g('t2', 'fontFamily'), plainFamily: g('p2', 'fontFamily'), slotFamily: g('s2', 'fontFamily'),
+  }
+  host.remove()
+  return out
+})()`
 
 const { child, endpoint, profile } = await launch()
 const browser = connect(endpoint)
@@ -146,10 +180,22 @@ try {
         await sleep(200)
       }
       await sleep(500)
+      const inh = await evaluate(INHERIT)
+      const inhOk = inh.parentSmSize === '14px' && inh.plainLH === inh.slotLH && inh.plainSize === inh.slotSize
+        && /mono/i.test(inh.parentMonoFamily) && /Geist Mono/.test(inh.codeFamily) && inh.plainFamily === inh.slotFamily && inh.slotFamily === inh.parentMonoFamily
+      console.log(`${mode}/${density}  entry points only: text-sm parent line-height plain ${inh.plainLH} vs data-slot child ${inh.slotLH}; font-mono parent reaches data-slot child: ${inh.slotFamily === inh.parentMonoFamily}; <code data-slot> is Geist Mono: ${/Geist Mono/.test(inh.codeFamily)}${inhOk ? '' : '  MISMATCH ' + JSON.stringify(inh)}`)
+      if (!inhOk) failed = true
       const dump = await evaluate(COLLECT)
-      const legacy = comparePair('old content', dump['mix-outside'], dump['mix-inside'])
-      const reenter = comparePair('new components', dump['mix-new-shell'], dump['mix-new-reenter'])
-      for (const [label, r] of [['old content outside vs inside shell', legacy], ['new components in shell vs re-entered', reenter]]) {
+      const pairs = [
+        ['old content outside vs inside shell', 'mix-outside', 'mix-inside', MIN_LEGACY],
+        ['old content outside vs in a legacy slot (depth 2)', 'mix-outside', 'mix-deep', MIN_LEGACY],
+        ['old content outside vs in a legacy slot (depth 3)', 'mix-outside', 'mix-deeper', MIN_LEGACY],
+        ['new components in shell vs re-entered', 'mix-new-shell', 'mix-new-reenter', MIN_NEW],
+        ['new components in shell vs re-entered (depth 2)', 'mix-new-shell', 'mix-new-reenter2', MIN_NEW],
+      ]
+      for (const [label, a, b, min] of pairs.map(([l, a, b, m]) => [l, a, b, m])) {
+        const r = comparePair(label, dump[a], dump[b])
+        if (r.elements < min) r.mismatches.push(`${label}: only ${r.elements} elements compared, expected at least ${min} (fixture broken?)`)
         console.log(`${mode}/${density}  ${label}: ${r.elements} elements, ${r.props} properties compared, ${r.mismatches.length} mismatches`)
         for (const m of r.mismatches.slice(0, 15)) console.log(`    ${m}`)
         if (r.mismatches.length > 15) console.log(`    ... and ${r.mismatches.length - 15} more`)
