@@ -73,3 +73,25 @@ describe('chartBaseOption', () => {
     expect(o.backgroundColor).toBe('transparent')
   })
 })
+
+describe('useChartTokens repaint control', () => {
+  it('keeps the same object when the attribute that changed did not change any colour', async () => {
+    root.style.setProperty('--brand', '#112233')
+    const { result } = renderHook(() => useChartTokens())
+    const first = result.current
+    await act(async () => {
+      root.dataset.density = 'comfortable'
+      root.classList.add('unrelated')
+      await Promise.resolve()
+    })
+    expect(result.current).toBe(first)
+  })
+
+  it('hands out a new object when a colour changed', async () => {
+    root.style.setProperty('--brand', '#112233')
+    const { result } = renderHook(() => useChartTokens())
+    const first = result.current
+    await act(async () => { root.style.setProperty('--brand', '#445566'); await Promise.resolve() })
+    expect(result.current).not.toBe(first)
+  })
+})

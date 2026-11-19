@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { TipButton } from '@/components/data/TipButton'
 
@@ -17,7 +17,7 @@ export interface SecretFieldProps extends Omit<ComponentProps<'input'>, 'value' 
 
 /** Masked by default; reveal and copy are explicit, and both have tooltips and labels. */
 export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...rest }: SecretFieldProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const [shown, setShown] = useState(false)
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -41,7 +41,13 @@ export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...
         readOnly={readOnly}
         onChange={e => onChange?.(e.target.value)}
         placeholder={isSet && !value ? t('ui.form.secret_is_set') : placeholder}
-        autoComplete="off"
+        // autocomplete="off" is ignored by Chrome on a password input, which then offers
+        // to save an API token as a login. "new-password" is honoured; the data-* flags
+        // are the opt-outs 1Password, LastPass and Bitwarden check for.
+        autoComplete="new-password"
+        data-1p-ignore=""
+        data-lpignore="true"
+        data-bwignore="true"
         spellCheck={false}
         className="font-mono"
       />

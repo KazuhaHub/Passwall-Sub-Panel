@@ -66,11 +66,15 @@ export function Field({ label, hint, error, required, orientation = 'vertical', 
       {required && <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>}
     </Label>
   )
-  const note = error
-    ? <p id={errorId} aria-live="polite" className="text-xs text-destructive">{error}</p>
-    : hint
-      ? <p id={hintId} className="text-xs text-muted-foreground">{hint}</p>
-      : null
+  // The live region is ALWAYS mounted and only its text changes: a region that
+  // appears together with its text is skipped by many screen readers, one whose
+  // text changes is announced.
+  const note = (
+    <>
+      <p id={errorId} aria-live="polite" className={cn('text-xs text-destructive', !error && 'hidden')}>{error}</p>
+      {!error && hint && <p id={hintId} className="text-xs text-muted-foreground">{hint}</p>}
+    </>
+  )
 
   if (orientation === 'horizontal') {
     return (

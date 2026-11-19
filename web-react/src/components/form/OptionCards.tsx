@@ -92,9 +92,11 @@ export function OptionCards<V extends string>({
               <span id={titleId} className={cn('text-sm font-medium', o.disabled && 'text-muted-foreground')}>{o.title}</span>
               {checked && <CheckIcon className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden="true" />}
             </div>
-            <p id={descId} className="text-xs text-muted-foreground">{o.description}</p>
+            <p id={descId} className="text-xs text-foreground/70">{o.description}</p>
             {o.disabled && o.disabledReason && (
-              <p id={reasonId} className="text-xs font-medium text-warning">{o.disabledReason}</p>
+              <p id={reasonId} className="flex items-start gap-1.5 text-xs font-medium text-foreground">
+                <span aria-hidden="true" className="mt-1 size-1.5 shrink-0 rounded-full bg-warning" />{o.disabledReason}
+              </p>
             )}
           </div>
         )

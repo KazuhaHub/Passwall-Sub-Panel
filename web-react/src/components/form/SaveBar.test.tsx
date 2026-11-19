@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SaveBar } from './SaveBar'
 
@@ -16,7 +16,7 @@ describe('SaveBar', () => {
     const onSave = vi.fn()
     const onDiscard = vi.fn()
     render(<SaveBar dirty onSave={onSave} onDiscard={onDiscard} />)
-    expect(screen.getByText('You have unsaved changes')).toBeTruthy()
+    expect(within(screen.getByRole('region')).getByText('You have unsaved changes')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
     expect(onSave).toHaveBeenCalledTimes(1)
@@ -41,5 +41,22 @@ describe('SaveBar', () => {
   it('stays visible while a save that cleared the dirty flag is still pending', () => {
     render(<SaveBar dirty={false} pending onSave={() => {}} onDiscard={() => {}} />)
     expect(screen.getByRole('region')).toBeTruthy()
+  })
+})
+
+describe('SaveBar live announcement', () => {
+  it('keeps a status region in the page so its appearance is announced, empty while clean', () => {
+    const { rerender } = render(<SaveBar dirty={false} onSave={() => {}} onDiscard={() => {}} />)
+    const status = screen.getByRole('status')
+    expect(status.textContent).toBe('')
+    rerender(<SaveBar dirty onSave={() => {}} onDiscard={() => {}} />)
+    // the same node, with new text: screen readers announce a change in an existing live region
+    expect(screen.getByRole('status')).toBe(status)
+    expect(status.textContent).toBe('You have unsaved changes')
+  })
+
+  it('says it is saving while pending', () => {
+    render(<SaveBar dirty pending onSave={() => {}} onDiscard={() => {}} />)
+    expect(screen.getByRole('status').textContent).toBe('Saving')
   })
 })

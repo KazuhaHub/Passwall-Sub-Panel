@@ -1,8 +1,9 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { TOUCH_TARGET } from '@/components/data/touchTarget'
 
 export interface TagsFieldProps {
   value: string[]
@@ -21,6 +22,16 @@ export interface TagsFieldProps {
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
+// Half- and full-width commas, semicolons, the enumeration comma and newlines all
+// separate tags: a list pasted from a spreadsheet or typed on a Chinese keyboard
+// must not become one tag with punctuation in it.
+const SEPARATORS = /[,，;；、\n\r]/
+const SPLIT = /[,，;；、\n\r]+/
+// During an IME composition the keys belong to the IME: Enter confirms a
+// candidate, it is not "add this tag". keyCode 229 is how browsers that report
+// isComposing late still mark those events.
+const composing = (e: { nativeEvent: globalThis.KeyboardEvent; keyCode: number }) => e.nativeEvent.isComposing || e.keyCode === 229
+
 /**
  * Free tags with suggestions (replaces TagsAutocomplete). Chosen tags are
  * chips; the box adds a tag on Enter or comma, and the typed text is ALSO
@@ -34,13 +45,14 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 export function TagsField({
   value, onChange, suggestions = [], placeholder, id, disabled, className, ...aria
 }: TagsFieldProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const uid = useId()
   const listId = `${uid}-list`
   const input = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
+  const isComposing = useRef(false)
 
   const typed = text.trim()
   const options = useMemo(() => {
@@ -53,16 +65,31 @@ export function TagsField({
     ]
   }, [suggestions, value, typed])
 
-  const add = (raw: string) => {
-    const tag = raw.trim()
-    setText('')
+  // Adds several tags at once: trimmed, empties dropped, duplicates (any case)
+  // against the existing tags and within the batch dropped.
+  const addMany = (raws: string[], rest = '') => {
+    const next = [...value]
+    for (const raw of raws) {
+      const tag = raw.trim()
+      if (tag && !next.some(v => same(v, tag))) next.push(tag)
+    }
+    setText(rest)
     setActive(-1)
-    if (!tag || value.some(v => same(v, tag))) return
-    onChange([...value, tag])
+    if (next.length !== value.length) onChange(next)
+  }
+  const add = (raw: string) => addMany([raw])
+
+  // Text containing a separator is split: every complete piece becomes a tag and
+  // the last piece stays in the box as the next draft.
+  const takeSeparators = (full: string) => {
+    if (!SEPARATORS.test(full)) { setText(full); setOpen(true); setActive(-1); return }
+    const parts = full.split(SPLIT)
+    addMany(parts.slice(0, -1), parts[parts.length - 1])
   }
   const remove = (tag: string) => onChange(value.filter(v => v !== tag))
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (composing(e)) return
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!options.length) return
       e.preventDefault()
@@ -72,7 +99,7 @@ export function TagsField({
     } else if (e.key === 'Enter') {
       if (active >= 0 && options[active]) { e.preventDefault(); add(options[active].label) }
       else if (typed) { e.preventDefault(); add(typed) }
-    } else if (e.key === ',') {
+    } else if (e.key === ',' || e.key === '，' || e.key === ';' || e.key === '；') {
       e.preventDefault()
       add(text)
     } else if (e.key === 'Backspace' && text === '' && value.length) {
@@ -103,7 +130,7 @@ export function TagsField({
             aria-label={t('ui.form.tags_remove', { tag })}
             title={t('ui.form.tags_remove', { tag })}
             onClick={e => { e.stopPropagation(); remove(tag); input.current?.focus() }}
-            className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3"
+            className={cn(TOUCH_TARGET, 'rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3')}
           >
             <XIcon />
           </button>
@@ -125,7 +152,20 @@ export function TagsField({
         value={text}
         placeholder={value.length ? undefined : (placeholder ?? t('ui.form.tags_placeholder'))}
         autoComplete="off"
-        onChange={e => { setText(e.target.value); setOpen(true); setActive(-1) }}
+        onChange={e => {
+          if (e.nativeEvent instanceof InputEvent && e.nativeEvent.isComposing) { setText(e.target.value); return }
+          if (isComposing.current) { setText(e.target.value); return }
+          takeSeparators(e.target.value)
+        }}
+        onCompositionStart={() => { isComposing.current = true }}
+        onCompositionEnd={e => { isComposing.current = false; takeSeparators(e.currentTarget.value) }}
+        onPaste={e => {
+          const pasted = e.clipboardData.getData('text')
+          if (!SEPARATORS.test(pasted)) return
+          e.preventDefault()
+          // The whole paste is complete tags: nothing is left over as a draft.
+          addMany(`${text}${pasted}`.split(SPLIT))
+        }}
         onFocus={() => setOpen(true)}
         onBlur={() => { setOpen(false); if (typed) add(typed) }}
         onKeyDown={onKey}

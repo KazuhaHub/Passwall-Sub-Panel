@@ -45,3 +45,15 @@ describe('SecretField', () => {
     expect(onChange).toHaveBeenCalledWith('abc')
   })
 })
+
+describe('SecretField and password managers', () => {
+  it('asks browsers and managers not to offer to save an API token as a login', () => {
+    render(<SecretField aria-label="Token" value="" onChange={() => {}} />)
+    const input = screen.getByLabelText('Token')
+    // autocomplete="off" is ignored by Chrome for password inputs; new-password is not
+    expect(input.getAttribute('autocomplete')).toBe('new-password')
+    expect(input.getAttribute('data-1p-ignore')).not.toBeNull()
+    expect(input.getAttribute('data-lpignore')).toBe('true')
+    expect(input.getAttribute('data-bwignore')).toBe('true')
+  })
+})

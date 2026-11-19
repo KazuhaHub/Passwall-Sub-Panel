@@ -10,7 +10,7 @@ afterEach(cleanup)
 const nodes: PathNode[] = [
   { id: 'u', kind: 'user', label: 'User' },
   { id: 'e', kind: 'entry', label: 'Taiwan HiNet Dynamic', sublabel: ':10443', status: 'success' },
-  { id: 'l', kind: 'landing', label: 'Irvine Home', colorId: 7 },
+  { id: 'l', kind: 'landing', label: 'Irvine Home', landingColor: { index: 7, cycle: 0 } },
 ]
 const edges: PathEdge[] = [{ style: 'solid' }, { style: 'dashed', label: '48 ms', status: 'warning' }]
 
@@ -18,7 +18,7 @@ describe('PathDiagram', () => {
   it('is one image whose accessible name is the generated sentence', () => {
     render(<PathDiagram nodes={nodes} edges={edges} />)
     const img = screen.getByRole('img')
-    expect(img.getAttribute('aria-label')).toBe('User through Taiwan HiNet Dynamic (:10443) by encrypted tunnel (48 ms) to Irvine Home')
+    expect(img.getAttribute('aria-label')).toBe('User through Taiwan HiNet Dynamic (:10443) by encrypted tunnel (48 ms, needs attention) to Irvine Home')
   })
 
   it('lets the caller supply the sentence', () => {

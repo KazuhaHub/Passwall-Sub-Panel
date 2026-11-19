@@ -44,3 +44,10 @@ describe('SegmentedControl', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 })
+
+describe('SegmentedControl contrast', () => {
+  it('draws unselected options in foreground at 70%, not the muted grey that is 4.34:1 on the track', () => {
+    render(<SegmentedControl aria-label="Mode" value="a" onChange={() => {}} options={options} />)
+    expect(screen.getByRole('radio', { name: 'Gamma' }).className).toContain('text-foreground/70')
+  })
+})

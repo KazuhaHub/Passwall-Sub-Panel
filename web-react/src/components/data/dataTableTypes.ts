@@ -23,13 +23,38 @@ declare module '@tanstack/react-table' {
 export type { ColumnDef, ExpandedState, RowData, SortingState, VisibilityState, ReorderCall }
 
 export interface BulkContext<T> {
+  /** Every selected id, including rows on other pages and rows a filter has hidden. */
   selectedIds: string[]
-  /** Only the selected rows that are in `data` now: with server paging, a selection can outlive its page. */
+  /** The selected rows that `data` holds: in client mode all of them, in server mode only those on this page. */
   selectedRows: T[]
+  /** How many selected ids are not among the rows shown now (another page, or filtered out). */
+  hiddenCount: number
   clear: () => void
+  /** Drop only the selected ids that are not shown now. */
+  clearHidden: () => void
 }
 
-export interface DataTableProps<T> {
+/** Why a page number changed: a person asked, or the table corrected a page that no longer exists. */
+export type PageChangeReason = 'user' | 'correction'
+
+export interface RowOptions {
+  /**
+   * Render this across the whole row instead of the cells: a separator line in a
+   * mixed list. The row keeps its place in the order and may still be dragged.
+   */
+  fullWidth?: ReactNode
+  /** false: no checkbox, left out of select-all and Space. Default true when the table is selectable. */
+  selectable?: boolean
+  /** false: a click or Enter does not open it. Default true when onRowOpen is set. */
+  openable?: boolean
+  /** Styling states a page needs without writing its own row: dimmed (inactive) and pending (not live yet). */
+  state?: 'dimmed' | 'pending'
+  className?: string
+  /** Extra attributes on the row element, for a page's own hooks (data-kind, ...). */
+  data?: Record<string, string>
+}
+
+interface DataTableBase<T> {
   data: readonly T[]
   // The column helper produces differently-typed columns in one array.
   columns: ColumnDef<T, any>[]
@@ -47,7 +72,8 @@ export interface DataTableProps<T> {
   /** false hides the footer and shows every row (a short list, a reorderable list). */
   pagination?: boolean
   page?: number
-  onPageChange?: (page: number) => void
+  /** `reason` is 'correction' when the table moved to the last page that exists; a URL-backed page should REPLACE then, not push. */
+  onPageChange?: (page: number, reason: PageChangeReason) => void
   pageSize?: number
   onPageSizeChange?: (size: number) => void
   pageSizeOptions?: readonly number[]
@@ -83,8 +109,12 @@ export interface DataTableProps<T> {
   /** Shown when there are no rows. Defaults to a plain sentence. */
   empty?: ReactNode
 
-  /** Adds a drag handle column. Reports (movedId, beforeId). Off while a column sort is on. */
-  onReorder?: (call: ReorderCall) => void
+  /** Per-row overrides; see RowOptions. */
+  rowOptions?: (row: T) => RowOptions | undefined
+  /** The row under the pointer or holding keyboard focus (null when it leaves): for highlighting related rows elsewhere. */
+  onRowHover?: (id: string | null) => void
+  /** Rows to mark highlighted from outside (rows sharing the hovered row's landing, say). */
+  highlightedIds?: readonly string[]
 
   /** Makes rows a tree: children render under their parent, indented, expandable. */
   getSubRows?: (row: T) => T[] | undefined
@@ -98,3 +128,16 @@ export interface DataTableProps<T> {
   maxHeight?: string | null
   className?: string
 }
+
+/**
+ * Reordering needs the whole list on screen, because the report is (movedId,
+ * beforeId) relative to the rows shown: on a page, the last slot would read as
+ * "after everything" and move the row to the end of the whole list. So onReorder
+ * requires `pagination={false}` (and client mode); the types reject the rest, and
+ * at runtime the handles are shown off with the reason.
+ */
+type ReorderProps =
+  | { onReorder?: undefined; pagination?: boolean }
+  | { /** Adds a drag handle column. Reports (movedId, beforeId). */ onReorder: (call: ReorderCall) => void; pagination: false }
+
+export type DataTableProps<T> = DataTableBase<T> & ReorderProps

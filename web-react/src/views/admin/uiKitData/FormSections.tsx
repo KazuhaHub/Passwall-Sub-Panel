@@ -159,7 +159,7 @@ export function ControlsDemoSection() {
     if (k === 'forward') return { nodes: [u, { id: 'e', kind: 'entry' as const, label: '入口' }, l], edges: [solid, solid] }
     if (k === 'tunnel') return { nodes: [u, { id: 'e', kind: 'entry' as const, label: '入口' }, l], edges: [solid, { style: 'dashed' as const }] }
     if (k === 'cdn') return { nodes: [u, { id: 'c', kind: 'cdn' as const, label: 'CDN' }, l], edges: [solid, { style: 'solid' as const, name: '回源' }] }
-    return { nodes: [u, { id: 'x', kind: 'external' as const, label: '中转机' }, l], edges: [solid, { style: 'solid' as const, name: '转发' }] }
+    return { nodes: [u, { id: 'x', kind: 'external' as const, label: '外部入口' }, l], edges: [solid, { style: 'solid' as const, name: '' }] }
   }
   const card = (k: typeof kind, title: string, description: string, extra: { disabled?: boolean; disabledReason?: string } = {}) => {
     const s = sample(k)
@@ -208,8 +208,9 @@ export function ControlsDemoSection() {
             onChange={setUser}
             renderValue={show}
             defaultValue={100}
-            hint="选择「在此设置」后可以填 0，表示不限量"
-            renderEditor={({ id, value, onChange }) => <NumberField id={id} value={value} onChange={v => onChange(v ?? 0)} unit="GB" min={0} integer zeroLabel="不限量" />}
+            hint="选择「在此设置」后可以填 0，表示不限量；清空输入框会回到「跟随上级」，不会存成 0"
+            onCleared={() => setUser(undefined)}
+            renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={onChange} unit="GB" min={0} integer zeroLabel="不限量" />}
           />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">分组也可以单独设置（只读演示）</span>

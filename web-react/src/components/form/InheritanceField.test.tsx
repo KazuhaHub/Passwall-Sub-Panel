@@ -7,8 +7,8 @@ import { InheritanceField, SourceTrail, effectiveLevel } from './InheritanceFiel
 afterEach(cleanup)
 
 const show = (v: number) => (v === 0 ? 'Unlimited' : `${v} GB`)
-const editor = ({ value, onChange, id }: { value: number; onChange: (v: number) => void; id: string }) => (
-  <input id={id} aria-label="Edit value" value={value} onChange={e => onChange(Number(e.target.value))} />
+const editor = ({ value, onChange, id, ...aria }: { value: number; onChange: (v: number | null) => void; id: string; 'aria-labelledby': string; 'aria-describedby'?: string }) => (
+  <input id={id} data-testid="editor" aria-labelledby={aria['aria-labelledby']} value={value} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />
 )
 const lv = (global: number | undefined, group: number | undefined, user: number | undefined) => [
   { id: 'global', label: 'Global', value: global },
@@ -48,13 +48,25 @@ describe('SourceTrail', () => {
   })
 })
 
+describe('SourceTrail on a phone', () => {
+  it('stacks the levels on narrow widths and lets a long value wrap instead of truncating the state', () => {
+    render(<SourceTrail levels={lv(100, 50, undefined)} renderValue={show} />)
+    const list = screen.getByRole('list')
+    expect(list.className).toContain('flex-col')
+    expect(list.className).toContain('sm:grid')
+    const active = screen.getAllByRole('listitem')[1]
+    expect(active.querySelector('.truncate')).toBeNull()
+  })
+})
+
 describe('InheritanceField', () => {
-  const base = { label: 'Traffic limit', editLevel: 'user', renderValue: show, renderEditor: editor, defaultValue: 10 }
+  const onCleared = vi.fn()
+  const base = { label: 'Traffic limit', editLevel: 'user', renderValue: show, renderEditor: editor, defaultValue: 10, onCleared }
 
   it('starts in "follow" when the level above is in effect: no editor, no number to mistake for zero', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, undefined)} onChange={() => {}} />)
     expect(screen.getByRole('radio', { name: 'Follow the level above' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.queryByLabelText('Edit value')).toBeNull()
+    expect(screen.queryByTestId('editor')).toBeNull()
     expect(screen.getByText(/Following the level above, currently 50 GB/)).toBeTruthy()
   })
 
@@ -83,19 +95,33 @@ describe('InheritanceField', () => {
   it('shows the editor, holding the explicit zero, when the level sets one', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, 0)} onChange={() => {}} />)
     expect(screen.getByRole('radio', { name: 'Set here' }).getAttribute('aria-checked')).toBe('true')
-    expect((screen.getByLabelText('Edit value') as HTMLInputElement).value).toBe('0')
+    expect((screen.getByTestId('editor') as HTMLInputElement).value).toBe('0')
   })
 
   it('passes edits from the editor through', () => {
     const onChange = vi.fn()
     render(<InheritanceField {...base} levels={lv(100, 50, 20)} onChange={onChange} />)
-    fireEvent.change(screen.getByLabelText('Edit value'), { target: { value: '30' } })
+    fireEvent.change(screen.getByTestId('editor'), { target: { value: '30' } })
     expect(onChange).toHaveBeenCalledWith(30)
+  })
+
+  it('gives the editor the field label as its accessible name', () => {
+    render(<InheritanceField {...base} levels={lv(100, 50, 20)} onChange={() => {}} />)
+    expect(screen.getByRole('textbox', { name: 'Traffic limit' })).toBeTruthy()
+  })
+
+  it('does not turn a cleared editor into a value: it asks the caller what clearing means', () => {
+    const onChange = vi.fn()
+    const cleared = vi.fn()
+    render(<InheritanceField {...base} onCleared={cleared} levels={lv(100, 50, 20)} onChange={onChange} />)
+    fireEvent.change(screen.getByTestId('editor'), { target: { value: '' } })
+    expect(cleared).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('names the control by the label and the level it edits', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, undefined)} onChange={() => {}} />)
-    expect(screen.getByRole('radiogroup', { name: 'How User gets its value' })).toBeTruthy()
+    expect(screen.getByRole('radiogroup', { name: 'Traffic limit: how User gets its value' })).toBeTruthy()
     expect(screen.getByText('Traffic limit')).toBeTruthy()
   })
 })

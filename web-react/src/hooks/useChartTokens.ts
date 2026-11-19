@@ -98,16 +98,20 @@ export function readChartTokens(root: HTMLElement = document.documentElement): C
 export function useChartTokens(): ChartTokens {
   const [tokens, setTokens] = useState<ChartTokens>(() => readChartTokens())
   useEffect(() => {
-    const observer = new MutationObserver(() => setTokens(readChartTokens()))
+    // Every <html> class or style change fires this, most of them nothing to do with
+    // colour; a new object per change would repaint every chart. Keep the old one
+    // unless a colour really changed.
+    const refresh = () => setTokens(prev => {
+      const next = readChartTokens()
+      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
+    })
+    const observer = new MutationObserver(refresh)
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class', 'style', 'data-brand', 'data-density'],
     })
     // The stylesheet or the appearance sync may have landed between the first render and now.
-    setTokens(prev => {
-      const next = readChartTokens()
-      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
-    })
+    refresh()
     return () => observer.disconnect()
   }, [])
   return tokens

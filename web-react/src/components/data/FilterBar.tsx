@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SearchIcon, XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { cn } from '@/lib/utils'
 import { FacetFilter, type FacetOption } from './FacetFilter'
 import { TipButton } from './TipButton'
+import { TOUCH_TARGET } from './touchTarget'
 
 export interface FilterBarFacet {
   id: string
@@ -16,6 +17,8 @@ export interface FilterBarFacet {
 }
 
 export interface FilterBarProps {
+  /** Names the search landmark when a page has more than one; defaults to "筛选". */
+  'aria-label'?: string
   search?: {
     value: string
     onChange: (next: string) => void
@@ -37,8 +40,8 @@ export interface FilterBarProps {
  * a server-paged list is asked once per pause in typing. While typing, the box
  * shows what was typed even though the page still holds the old keyword.
  */
-export function FilterBar({ search, facets = [], onClearAll, children, className }: FilterBarProps) {
-  const { t } = useTranslation('common')
+export function FilterBar({ search, facets = [], onClearAll, children, className, ...aria }: FilterBarProps) {
+  const { t } = useSpacedT()
   const [draft, setDraft] = useState(search?.value ?? '')
   const reported = useRef(search?.value ?? '')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -70,7 +73,7 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
   const filtered = (search?.value ?? '') !== '' || draft !== '' || facets.some(f => f.selected.length > 0)
 
   return (
-    <div role="search" data-slot="filter-bar" className={cn('flex flex-wrap items-center gap-2', className)}>
+    <div role="search" aria-label={aria['aria-label'] ?? t('ui.data.filter_bar')} data-slot="filter-bar" className={cn('flex flex-wrap items-center gap-2', className)}>
       {search && (
         <InputGroup className="w-full sm:w-64">
           <InputGroupAddon><SearchIcon aria-hidden="true" /></InputGroupAddon>
@@ -103,7 +106,7 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
       ))}
       {children}
       {filtered && onClearAll && (
-        <Button variant="ghost" size="sm" onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
+        <Button variant="ghost" size="sm" className={TOUCH_TARGET} onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
           {t('ui.data.clear_all')}
         </Button>
       )}

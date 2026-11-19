@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation } from 'react-router'
+import { useUrlWriter, type UrlHistory } from './urlBatch'
 
 /**
  * How one value is spelled in the query string. `parse` must accept anything a
@@ -49,7 +50,7 @@ export const urlCodecs = {
   },
 }
 
-export type UrlHistory = 'replace' | 'push'
+export type { UrlHistory }
 export interface UrlWriteOptions { history?: UrlHistory }
 
 // `any`, not `unknown`: codecs are contravariant in the value they serialize, so a
@@ -66,24 +67,20 @@ export type UrlValues<S extends Schema> = { [K in keyof S]: S[K] extends UrlCode
  * default is replace; pass `{ history: 'push' }` per hook or per call.
  *
  * A patch writes only the keys it names and leaves every other param alone
- * (another hook, a utm tag). Two patches in the same tick compose, because the
- * setter works from the URL it last wrote rather than from the last render —
- * react-router's own setSearchParams loses the first of two writes.
+ * (another hook, a utm tag). Writes in the same tick, from this hook or any
+ * other, compose into one navigation (see useUrlWriter).
  */
 export function useUrlStates<S extends Schema>(
   schema: S,
   opts: UrlWriteOptions = {},
 ): [UrlValues<S>, (patch: Partial<UrlValues<S>>, o?: UrlWriteOptions) => void] {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const { search } = location
+  const { search } = useLocation()
+  const write = useUrlWriter()
 
   // The schema is a literal at the call site, new on every render; read it
   // through a ref so the setter keeps its identity.
-  const cfg = useRef({ schema, history: opts.history ?? 'replace', state: location.state as unknown })
-  cfg.current = { schema, history: opts.history ?? 'replace', state: location.state }
-  const latest = useRef(search)
-  latest.current = search
+  const cfg = useRef({ schema, history: opts.history ?? 'replace' })
+  cfg.current = { schema, history: opts.history ?? 'replace' }
 
   const values = useMemo(() => {
     const params = new URLSearchParams(search)
@@ -94,23 +91,18 @@ export function useUrlStates<S extends Schema>(
   }, [search])
 
   const set = useCallback((patch: Partial<UrlValues<S>>, o: UrlWriteOptions = {}) => {
-    const params = new URLSearchParams(latest.current)
-    for (const [key, value] of Object.entries(patch)) {
-      const codec = cfg.current.schema[key]
-      if (!codec) continue
-      const s = codec.serialize(value)
-      if (s === null) params.delete(key)
-      else params.set(key, s)
-    }
-    const text = params.toString()
-    const next = text ? `?${text}` : ''
-    if (next === latest.current) return
-    latest.current = next
-    void navigate({ search: next }, {
-      replace: (o.history ?? cfg.current.history) === 'replace',
-      state: cfg.current.state,
-    })
-  }, [navigate])
+    const entries = Object.entries(patch)
+    const schemaNow = cfg.current.schema
+    write(params => {
+      for (const [key, value] of entries) {
+        const codec = schemaNow[key]
+        if (!codec) continue
+        const s = codec.serialize(value)
+        if (s === null) params.delete(key)
+        else params.set(key, s)
+      }
+    }, o.history ?? cfg.current.history)
+  }, [write])
 
   return [values, set]
 }

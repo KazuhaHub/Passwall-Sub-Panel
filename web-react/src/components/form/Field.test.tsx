@@ -57,3 +57,18 @@ describe('Field', () => {
     expect(screen.getByLabelText('Name').id).toBe('mine')
   })
 })
+
+describe('Field error announcement', () => {
+  it('keeps one live region mounted and changes its text, so an error is announced', () => {
+    const { container, rerender } = render(<Field label="Port" hint="1-65535"><Input /></Field>)
+    const live = container.querySelector('[aria-live]')!
+    expect(live.textContent).toBe('')
+    rerender(<Field label="Port" hint="1-65535" error="Enter a port between 1 and 65535"><Input /></Field>)
+    expect(container.querySelector('[aria-live]')).toBe(live)
+    expect(live.textContent).toBe('Enter a port between 1 and 65535')
+    expect(screen.getByLabelText('Port').getAttribute('aria-describedby')).toBe(live.id)
+    rerender(<Field label="Port" hint="1-65535"><Input /></Field>)
+    expect(live.textContent).toBe('')
+    expect(screen.getByLabelText('Port').getAttribute('aria-describedby')).toBe(screen.getByText('1-65535').id)
+  })
+})

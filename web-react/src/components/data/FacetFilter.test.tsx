@@ -60,4 +60,16 @@ describe('FacetFilter', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search options' }), { target: { value: 'tokyo' } })
     expect(screen.getAllByRole('checkbox')).toHaveLength(1)
   })
+
+  it('says how many in all in Chinese: three chosen reads "等 3 项", not "等 2 项"', async () => {
+    const i18n = (await import('@/test/initI18n')).default
+    await i18n.changeLanguage('zh-CN')
+    try {
+      const many = [...options, { value: 'x', label: 'Extra', count: 1 }]
+      render(<FacetFilter label="状态" options={many} selected={['up', 'down', 'pending']} onChange={() => {}} />)
+      expect(screen.getByRole('button', { name: /^状态/ }).textContent).toContain('Online 等 3 项')
+    } finally {
+      await i18n.changeLanguage('en-US')
+    }
+  })
 })

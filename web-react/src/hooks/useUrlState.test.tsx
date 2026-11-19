@@ -3,6 +3,7 @@ import { act, cleanup } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { renderHookInRouter } from '@/test/routerHarness'
 import { urlCodecs, useUrlState, useUrlStates } from './useUrlState'
+import { useUrlSelection } from './useUrlSelection'
 
 afterEach(cleanup)
 
@@ -103,5 +104,57 @@ describe('useUrlStates', () => {
       result.current[1]({ page: 4 })
     })
     expect(result.current[0]).toEqual({ tab: 'live', level: [], page: 4 })
+  })
+})
+
+describe('writes from several hooks in the same tick', () => {
+  const q = urlCodecs.string()
+  const page = urlCodecs.int(1, { min: 1 })
+
+  it('compose instead of the last hook overwriting the others', async () => {
+    const { result, router } = renderHookInRouter(() => ({
+      a: useUrlState('q', q),
+      b: useUrlState('page', page),
+    }), ['/list?page=3'])
+    await act(async () => {
+      result.current.a[1]('hi')
+      result.current.b[1](1)
+    })
+    expect(router.state.location.search).toBe('?q=hi')
+  })
+
+  it('keep every key when a selection and a filter change together', async () => {
+    const { result, router } = renderHookInRouter(() => ({
+      f: useUrlStates({ q }),
+      sel: useUrlSelection('row'),
+    }), ['/nodes'])
+    await act(async () => {
+      result.current.f[1]({ q: 'hk' })
+      result.current.sel.select('n1')
+    })
+    expect(new URLSearchParams(router.state.location.search).get('q')).toBe('hk')
+    expect(new URLSearchParams(router.state.location.search).get('row')).toBe('n1')
+  })
+
+  it('make one history entry, and a push anywhere in the batch wins over replace', async () => {
+    const { result, router } = renderHookInRouter(() => ({
+      a: useUrlState('q', q),
+      b: useUrlState('tab', q, { history: 'push' }),
+    }), ['/list'])
+    await act(async () => {
+      result.current.a[1]('x')
+      result.current.b[1]('y')
+    })
+    expect(router.state.historyAction).toBe('PUSH')
+    expect(router.state.location.search).toBe('?q=x&tab=y')
+    await act(async () => { await router.navigate(-1) })
+    expect(router.state.location.search).toBe('')
+  })
+
+  it('and a later tick builds on the earlier write, not on a stale location', async () => {
+    const { result, router } = renderHookInRouter(() => ({ a: useUrlState('q', q), b: useUrlState('page', page) }), ['/list'])
+    await act(async () => { result.current.a[1]('x') })
+    await act(async () => { result.current.b[1](2) })
+    expect(router.state.location.search).toBe('?q=x&page=2')
   })
 })

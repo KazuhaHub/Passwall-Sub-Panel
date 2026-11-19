@@ -59,3 +59,55 @@ describe('useUnsavedChanges', () => {
     expect(clean.defaultPrevented).toBe(false)
   })
 })
+
+describe('save then navigate in one handler', () => {
+  it('does not ask when the handler marks the draft saved before navigating', async () => {
+    const confirm = vi.fn(async () => false)
+    const { result, router } = renderHookInRouter(() => useUnsavedChanges(true, { confirm }), ['/a'])
+    // The state update that clears `dirty` has not rendered yet when navigate runs.
+    await act(async () => {
+      result.current.markSaved()
+      await router.navigate('/b')
+    })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(router.state.location.pathname).toBe('/b')
+  })
+
+  it('allowNext lets exactly one navigation through, then guards again', async () => {
+    const confirm = vi.fn(async () => false)
+    const { result, router } = renderHookInRouter(() => useUnsavedChanges(true, { confirm }), ['/a'])
+    await act(async () => {
+      result.current.allowNext()
+      await router.navigate('/b')
+    })
+    expect(router.state.location.pathname).toBe('/b')
+    await act(async () => { await router.navigate('/c') })
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(router.state.location.pathname).toBe('/b')
+  })
+
+  it('guards the browser Back button too', async () => {
+    const confirm = vi.fn(async () => false)
+    const { router } = renderHookInRouter(() => useUnsavedChanges(true, { confirm }), ['/a', '/b'])
+    expect(router.state.location.pathname).toBe('/b')
+    await act(async () => { await router.navigate(-1) })
+    expect(confirm).toHaveBeenCalled()
+    expect(router.state.location.pathname).toBe('/b')
+  })
+
+  it('a draft that becomes dirty again after markSaved is guarded again', async () => {
+    const confirm = vi.fn(async () => false)
+    const { result, router, rerender } = renderHookInRouter(() => useUnsavedChanges(false, { confirm }), ['/a'])
+    void result; void rerender
+    await act(async () => { await router.navigate('/b') })
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('stops warning on tab close once markSaved was called, before the next render', () => {
+    const { result } = renderHookInRouter(() => useUnsavedChanges(true))
+    act(() => { result.current.markSaved() })
+    const ev = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+  })
+})

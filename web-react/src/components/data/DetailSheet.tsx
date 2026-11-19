@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
 import { XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
+import { TOUCH_TARGET } from './touchTarget'
 
 export interface DetailSheetProps {
   open: boolean
@@ -31,7 +32,7 @@ export interface DetailSheetProps {
  * of the screen of list behind it is no use.
  */
 export function DetailSheet({ open, onClose, title, status, description, actions, footer, children, className }: DetailSheetProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   return (
     <Sheet open={open} onOpenChange={next => { if (!next) onClose() }}>
       <SheetContent
@@ -50,7 +51,7 @@ export function DetailSheet({ open, onClose, title, status, description, actions
           {description && <SheetDescription>{description}</SheetDescription>}
           {actions && <div className="flex flex-wrap items-center gap-2 pt-1">{actions}</div>}
           <SheetClose
-            render={<Button variant="ghost" size="icon-sm" className="absolute top-3 right-3" aria-label={t('ui.data.detail_close')} title={t('ui.data.detail_close')} />}
+            render={<Button variant="ghost" size="icon-sm" className={cn(TOUCH_TARGET, 'absolute top-3 right-3')} aria-label={t('ui.data.detail_close')} title={t('ui.data.detail_close')} />}
           >
             <XIcon />
           </SheetClose>

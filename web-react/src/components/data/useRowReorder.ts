@@ -12,8 +12,10 @@ interface Options {
   scrollRef: RefObject<HTMLElement | null>
 }
 
-// Autoscroll when the pointer is within this many px of the scrolling frame's edge.
+// Autoscroll when the pointer is within this many px of the scrolling frame's edge;
+// a release further than OUTSIDE px beyond the frame cancels the drag.
 const EDGE = 36
+const OUTSIDE = 64
 
 /**
  * Row reordering by pointer and by keyboard, with no drag-and-drop library:
@@ -42,23 +44,43 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
     const from = ids.indexOf(id)
     if (from < 0) return
     let insertion = from
+    let point = { x: e.clientX, y: e.clientY }
+    let raf = 0
     setDragging({ id, insertion })
 
-    const move = (ev: PointerEvent) => {
+    const near = () => {
+      const frame = scrollRef.current
+      if (!frame) return 0
+      const b = frame.getBoundingClientRect()
+      if (b.height <= 0) return 0
+      if (point.y < b.top + EDGE) return -1
+      if (point.y > b.bottom - EDGE) return 1
+      return 0
+    }
+    const update = () => {
       const rows = bodyRef.current?.querySelectorAll<HTMLElement>('[data-row]') ?? []
       const mids = [...rows].map(r => { const b = r.getBoundingClientRect(); return b.top + b.height / 2 })
-      insertion = insertionIndex(mids, ev.clientY)
+      insertion = insertionIndex(mids, point.y)
       setDragging({ id, insertion })
-      const frame = scrollRef.current
-      if (frame) {
-        const b = frame.getBoundingClientRect()
-        if (b.height > 0) {
-          if (ev.clientY < b.top + EDGE) frame.scrollTop -= 14
-          else if (ev.clientY > b.bottom - EDGE) frame.scrollTop += 14
-        }
+    }
+    // Scrolling must go on while the pointer is held still at an edge, and a
+    // pointermove only arrives when it moves: so a frame loop does the scrolling.
+    const loop = () => {
+      const dir = near()
+      if (dir !== 0 && scrollRef.current) {
+        scrollRef.current.scrollTop += dir * 14
+        update()
       }
+      raf = requestAnimationFrame(loop)
+    }
+    const move = (ev: PointerEvent) => { point = { x: ev.clientX, y: ev.clientY }; update() }
+    const outside = (ev: PointerEvent) => {
+      const b = scrollRef.current?.getBoundingClientRect()
+      if (!b || (b.width === 0 && b.height === 0)) return false
+      return ev.clientX < b.left - OUTSIDE || ev.clientX > b.right + OUTSIDE || ev.clientY < b.top - OUTSIDE || ev.clientY > b.bottom + OUTSIDE
     }
     const end = (commit: boolean) => {
+      cancelAnimationFrame(raf)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancel)
@@ -70,13 +92,15 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
         if (call) onReorder?.(call)
       }
     }
-    const up = () => end(true)
+    // Letting go far from the table is how a drag is abandoned.
+    const up = (ev: PointerEvent) => end(!outside(ev))
     const cancel = () => end(false)
     const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') end(false) }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', cancel)
     window.addEventListener('keydown', key)
+    raf = requestAnimationFrame(loop)
     stop.current = () => end(false)
   }, [enabled, ids, onReorder, bodyRef, scrollRef])
 

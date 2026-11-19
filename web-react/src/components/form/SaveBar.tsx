@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Loader2Icon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -25,9 +25,14 @@ export interface SaveBarProps {
  * serves one section or tab: each saves on its own (audit section 0).
  */
 export function SaveBar({ dirty, pending, disabled, message, saveLabel, onSave, onDiscard, className }: SaveBarProps) {
-  const { t } = useTranslation('common')
-  if (!dirty && !pending) return null
+  const { t } = useSpacedT()
+  const visible = dirty || pending
+  const spoken = pending ? t('ui.form.saving') : dirty ? t('ui.form.unsaved') : ''
   return (
+    <>
+      {/* Always in the page: a live region announces a change in its text, not its own arrival. */}
+      <p role="status" className="sr-only">{spoken}</p>
+      {visible && (
     <div
       role="region"
       aria-label={t('ui.form.unsaved')}
@@ -46,5 +51,7 @@ export function SaveBar({ dirty, pending, disabled, message, saveLabel, onSave, 
         </Button>
       </div>
     </div>
+      )}
+    </>
   )
 }

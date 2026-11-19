@@ -1,22 +1,39 @@
+import type { CSSProperties } from 'react'
+
 const PALETTE_SIZE = 8
 
+/** One landing's colour: a palette slot (--landing-1..8) and how many times the palette has been used up. */
+export interface LandingColor { index: number; cycle: number }
+
 /**
- * Which of the 8 landing colours (--landing-1..8, src/styles/data-tokens.css) an
- * id gets, from a hash of the id's text. The same landing therefore has the
- * same colour on every page and after every reload with no table to keep, and a
- * numeric id and its string form agree. Collisions are possible beyond 8
- * landings; the colour is a visual aid next to the name, never the only cue.
+ * Colours for the landing nodes on one page, by FIRST APPEARANCE in the list the
+ * caller passes (the order the page shows them in). The first eight are always
+ * eight different colours; a hash of the id could not promise that (ids 4 and 10
+ * collided). The same list gives the same colours on every render. Past eight the
+ * palette cycles and `cycle` goes up, which landingColorStyle draws as stripes: a
+ * colour is a hint next to the landing's name, never the only way to tell two apart.
  */
-export function landingColorIndex(id: string | number): number {
-  let h = 0x811c9dc5 // FNV-1a, 32 bit
-  for (const ch of String(id)) {
-    h ^= ch.codePointAt(0)!
-    h = Math.imul(h, 0x01000193) >>> 0
+export function assignLandingColors(ids: readonly (string | number)[]): Map<string, LandingColor> {
+  const map = new Map<string, LandingColor>()
+  for (const raw of ids) {
+    const id = String(raw)
+    if (map.has(id)) continue
+    const n = map.size
+    map.set(id, { index: (n % PALETTE_SIZE) + 1, cycle: Math.floor(n / PALETTE_SIZE) })
   }
-  // The low bits of FNV are weak for short inputs; fold the high half in.
-  return (((h ^ (h >>> 16)) >>> 0) % PALETTE_SIZE) + 1
+  return map
 }
 
-export function landingColorVar(id: string | number): string {
-  return `var(--landing-${landingColorIndex(id)})`
+export function landingColorVar(c: LandingColor): string {
+  return `var(--landing-${c.index})`
+}
+
+/** Fill for a colour bar or ring: the colour, plus diagonal stripes once the palette has been reused. */
+export function landingColorStyle(c: LandingColor): CSSProperties {
+  return {
+    backgroundColor: landingColorVar(c),
+    ...(c.cycle > 0
+      ? { backgroundImage: 'repeating-linear-gradient(135deg, transparent 0 2px, color-mix(in oklab, var(--card) 70%, transparent) 2px 4px)' }
+      : {}),
+  }
 }

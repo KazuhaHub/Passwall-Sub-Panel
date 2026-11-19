@@ -49,18 +49,18 @@ describe('RelationGraph', () => {
 
   it('selecting a box keeps its edges and dims the rest', () => {
     const { container } = render(<RelationGraph columns={columns} edges={edges} />)
-    fireEvent.click(screen.getByRole('button', { name: /Entry 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 1/ }))
     const paths = [...container.querySelectorAll('path[data-edge]')]
     expect(paths.map(p => p.getAttribute('data-dim'))).toEqual([null, null, 'true'])
     // connected boxes stay, strangers dim
-    expect(screen.getByRole('button', { name: /Landing 1/ }).getAttribute('data-dim')).toBeNull()
-    expect(screen.getByRole('button', { name: /Landing 3/ }).getAttribute('data-dim')).toBe('true')
-    expect(screen.getByRole('button', { name: /Entry 1/ }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Landing 1/ }).getAttribute('data-dim')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Landing 3/ }).getAttribute('data-dim')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Entry 1/ }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('selecting again, or pressing Escape, clears the selection', () => {
     const { container } = render(<RelationGraph columns={columns} edges={edges} />)
-    const box = screen.getByRole('button', { name: /Entry 1/ })
+    const box = screen.getByRole('button', { name: /^Entry 1/ })
     fireEvent.click(box)
     fireEvent.click(box)
     expect(container.querySelectorAll('[data-dim]')).toHaveLength(0)
@@ -73,7 +73,7 @@ describe('RelationGraph', () => {
     const onSelect = vi.fn()
     const { container, rerender } = render(<RelationGraph columns={columns} edges={edges} selectedId="l3" onSelect={onSelect} />)
     expect([...container.querySelectorAll('path[data-edge]')].map(p => p.getAttribute('data-dim'))).toEqual(['true', 'true', null])
-    fireEvent.click(screen.getByRole('button', { name: /Entry 2/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 2/ }))
     expect(onSelect).toHaveBeenCalledWith('e2')
     rerender(<RelationGraph columns={columns} edges={edges} selectedId={null} onSelect={onSelect} />)
     expect(container.querySelectorAll('[data-dim]')).toHaveLength(0)
@@ -83,19 +83,19 @@ describe('RelationGraph', () => {
     render(<RelationGraph columns={columns} edges={edges} />)
     const boxes = screen.getAllByRole('button')
     expect(boxes.filter(b => b.getAttribute('tabindex') === '0')).toHaveLength(1)
-    const e1 = screen.getByRole('button', { name: /Entry 1/ })
+    const e1 = screen.getByRole('button', { name: /^Entry 1/ })
     e1.focus()
     fireEvent.keyDown(e1, { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Entry 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2/ }))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Landing 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Landing 2/ }))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Entry 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2/ }))
   })
 
   it('announces what a selection is connected to', () => {
     render(<RelationGraph columns={columns} edges={edges} />)
-    fireEvent.click(screen.getByRole('button', { name: /Entry 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 1/ }))
     expect(screen.getByRole('status').textContent).toContain('Entry 1 selected, 2 connections')
   })
 
@@ -107,6 +107,6 @@ describe('RelationGraph', () => {
     const { container } = render(<RelationGraph columns={big} edges={bigEdges} />)
     expect(screen.getAllByRole('button')).toHaveLength(90)
     expect(container.querySelectorAll('path[data-edge]')).toHaveLength(30)
-    expect((container.firstElementChild as HTMLElement).className).toContain('overflow-auto')
+    expect(container.querySelector('.overflow-auto')).not.toBeNull()
   })
 })

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useCallback, useEffect, useRef } from 'react'
+import { useSpacedT } from '@/lib/cjkSpacing'
 import { useBlocker } from 'react-router'
 
 export interface UnsavedChangesOptions {
@@ -18,17 +18,42 @@ export interface UnsavedChangesOptions {
 }
 
 /**
- * Warns before unsaved edits are lost: on a route change (react-router's
- * blocker) and on closing or reloading the tab (the browser's beforeunload
- * prompt, whose text the browser controls). It guards ROUTE changes only; a
+ * Warns before unsaved edits are lost: on a route change, including the
+ * browser's Back and Forward (react-router's blocker), and on closing or
+ * reloading the tab (the browser's beforeunload prompt, whose text the browser
+ * controls). It guards ROUTE changes only; a
  * dialog or sheet closed with Esc is not a navigation and needs its own guard.
  *
  * useBlocker needs a data router (createBrowserRouter), which production mounts.
  */
-export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = {}): void {
-  const { t } = useTranslation('common')
+export interface UnsavedChangesControls {
+  /**
+   * The draft was just saved. Takes effect immediately, before React renders the
+   * `dirty = false` that the save also causes, so "save, then navigate" in one
+   * handler is not stopped by a prompt about changes that no longer exist.
+   */
+  markSaved: () => void
+  /** Let the very next navigation through without asking, then guard again. */
+  allowNext: () => void
+}
+
+export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = {}): UnsavedChangesControls {
+  const { t } = useSpacedT()
   const leaves = opts.leaves ?? ((next, current) => next.pathname !== current.pathname)
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && leaves(nextLocation, currentLocation))
+
+  // What the guard reads is a ref, updated synchronously, never the `dirty` of
+  // the render the blocker callback happened to be created in.
+  const dirtyRef = useRef(dirty)
+  const allowRef = useRef(false)
+  const lastProp = useRef(dirty)
+  if (lastProp.current !== dirty) { lastProp.current = dirty; dirtyRef.current = dirty }
+  const leavesRef = useRef(leaves)
+  leavesRef.current = leaves
+
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (allowRef.current) { allowRef.current = false; return false }
+    return dirtyRef.current && leavesRef.current(nextLocation, currentLocation)
+  })
 
   // Read through a ref so the effect below runs once per blocked navigation,
   // not once per render while the question is open.
@@ -48,10 +73,16 @@ export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = 
     return () => { live = false }
   }, [blocker])
 
+  // The listener is always attached and asks the ref, so a save that clears the
+  // draft stops the prompt at once.
   useEffect(() => {
-    if (!dirty) return
-    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (dirtyRef.current) e.preventDefault() }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
+  }, [])
+
+  return {
+    markSaved: useCallback(() => { dirtyRef.current = false }, []),
+    allowNext: useCallback(() => { allowRef.current = true }, []),
+  }
 }

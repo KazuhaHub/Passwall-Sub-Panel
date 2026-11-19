@@ -7,6 +7,9 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { LandingColorBar } from '@/components/diagram/LandingColorBar'
 import { PathDiagram } from '@/components/diagram/PathDiagram'
+import { RelationGraph } from '@/components/diagram/RelationGraph'
+import type { LandingColor } from '@/components/diagram/landingColor'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { DataTable } from '@/components/data/DataTable'
 import { DetailSheet } from '@/components/data/DetailSheet'
 import { FilterBar } from '@/components/data/FilterBar'
@@ -18,7 +21,7 @@ import { urlCodecs, useUrlStates } from '@/hooks/useUrlState'
 import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { cn } from '@/lib/utils'
 import {
-  LANDING_TREE, LINES, NODES, fetchUsers, linePath, type LandingGroupRow, type LineRow, type LineStatus, type NodeRow, type UserRow,
+  LINES, NODES, fetchUsers, landingColorsFor, linePath, type LineRow, type LineStatus, type NodeRow, type UserRow,
 } from './sampleData'
 
 export function Section({ id, title, note, children }: { id?: string; title: string; note?: string; children: React.ReactNode }) {
@@ -111,7 +114,9 @@ export function NodesTableSection() {
         rowLabel={n => n.name}
         selectable
         page={url.page}
-        onPageChange={p => setUrl({ page: p }, { history: 'push' })}
+        // A person paging pushes (Back returns to the previous page); a correction of an
+        // out-of-range page REPLACES, or Back would return to the bad page and be corrected again.
+        onPageChange={(p, reason) => setUrl({ page: p }, { history: reason === 'correction' ? 'replace' : 'push' })}
         pageSize={view.state.pageSize}
         onPageSizeChange={view.setPageSize}
         sorting={sorting}
@@ -164,57 +169,34 @@ export function NodesTableSection() {
   )
 }
 
-// ---------------------------------------------------------------- lines: reorder + path cell
+// ---------------------------------------------------------------- lines: three views, one data set
 
 const KIND_LABEL: Record<LineRow['lineKind'], string> = { forward: '端口转发', tunnel: '加密隧道', cdn: 'CDN', external: '外部入口', direct: '直连' }
 
-const lineColumns: ColumnDef<LineRow>[] = [
-  {
-    id: 'path', header: '线路', enableSorting: false, meta: { hideable: false, className: 'w-full' },
-    cell: c => {
-      const row = c.row.original
-      const { nodes, edges } = linePath(row, false)
-      return (
-        <div className="flex items-center gap-2">
-          <LandingColorBar id={row.landingId} className="h-5 self-center" />
-          <PathDiagram nodes={nodes} edges={edges} size="sm" />
-        </div>
-      )
-    },
-  },
-  { id: 'kind', header: '类型', enableSorting: false, cell: c => KIND_LABEL[c.row.original.lineKind], meta: { label: '类型' } },
-  { accessorKey: 'multiplier', header: '倍率', enableSorting: false, meta: { align: 'right', label: '倍率' }, cell: c => `×${c.getValue<number>()}` },
-]
-
-export function LinesReorderSection() {
-  const [rows, setRows] = useState(LINES)
-  const [log, setLog] = useState('尚未移动')
+function PathCell({ row, colors }: { row: LineRow; colors: Map<string, LandingColor> }) {
+  const { nodes, edges } = linePath(row, false, colors)
   return (
-    <Section id="lines" title="线路列表（拖动排序，路径单元格）" note="手柄可拖动，也可聚焦后按空格拿起、方向键移动、空格放下。每次移动只上报 (movedId, beforeId)。">
-      <DataTable
-        aria-label="线路"
-        data={rows}
-        columns={lineColumns}
-        getRowId={r => r.id}
-        rowLabel={r => `${r.landing} · ${r.entry}`}
-        pagination={false}
-        columnMenu={false}
-        onReorder={call => { setRows(prev => applyReorder(prev, r => r.id, call)); setLog(`移动 ${call.movedId}，放到 ${call.beforeId ?? '末尾'} 之前`) }}
-      />
-      <p className="text-xs text-muted-foreground" role="status">{log}</p>
-    </Section>
+    <div className="flex items-center gap-2">
+      <LandingColorBar color={colors.get(String(row.landingId))} className="h-5 self-center" />
+      <PathDiagram nodes={nodes} edges={edges} size="sm" />
+    </div>
   )
 }
 
-// ---------------------------------------------------------------- tree: by landing
+interface TreeRow { id: string; name: string; sub: string; status: LineStatus; kind: string; line?: LineRow; children?: TreeRow[] }
 
-interface TreeRow { id: string; name: string; sub: string; status: LineStatus; kind: string; children?: TreeRow[] }
-function treeOf(groups: LandingGroupRow[]): TreeRow[] {
-  return groups.map(g => ({
-    id: g.id, name: g.name, sub: g.entry, status: g.status, kind: '落地节点',
-    children: (g.lines ?? []).map(l => ({ id: l.id, name: `${l.entry}`, sub: `:${l.port}`, status: l.status, kind: KIND_LABEL[l.lineKind] })),
-  }))
+function treeOf(lines: LineRow[]): TreeRow[] {
+  const landings = [...new Set(lines.filter(l => l.kind === 'line').map(l => l.landing))]
+  return landings.map(name => {
+    const mine = lines.filter(l => l.kind === 'line' && l.landing === name)
+    return {
+      id: `landing:${name}`, name, kind: '落地节点', sub: `${mine.length} 条线路`,
+      status: mine.some(l => l.status === 'down') ? 'down' : mine.some(l => l.status === 'pending') ? 'pending' : 'ok',
+      children: mine.map(l => ({ id: l.id, name: l.entry, sub: `:${l.port}`, status: l.status, kind: KIND_LABEL[l.lineKind], line: l })),
+    } satisfies TreeRow
+  })
 }
+
 const treeColumns: ColumnDef<TreeRow>[] = [
   { accessorKey: 'name', header: '名称', meta: { hideable: false, className: 'font-medium' }, enableSorting: false },
   { accessorKey: 'kind', header: '类型', enableSorting: false },
@@ -222,11 +204,132 @@ const treeColumns: ColumnDef<TreeRow>[] = [
   { accessorKey: 'status', header: '状态', enableSorting: false, cell: c => { const v = c.getValue<LineStatus>(); return <StatusCell status={v === 'ok' ? 'up' : v} /> } },
 ]
 
-export function TreeSection() {
-  const data = useMemo(() => treeOf(LANDING_TREE), [])
+type LinesView = 'flat' | 'tree' | 'graph'
+
+export function LinesViewsSection() {
+  const [view, setView] = useState<LinesView>('flat')
+  const [rows, setRows] = useState(LINES)
+  const [selectedId, setSelectedId] = useState<string | null>('l2')
+  const [hover, setHover] = useState<string | null>(null)
+  const [by, setBy] = useState<'landing' | 'entry'>('landing')
+  const [log, setLog] = useState('尚未移动')
+  const colors = useMemo(() => landingColorsFor(rows), [rows])
+
+  // Lines that share the hovered line's landing (or entry): lit in every view.
+  const hovered = rows.find(r => r.id === hover && r.kind === 'line')
+  const highlighted = useMemo(
+    () => (hovered ? rows.filter(r => r.kind === 'line' && r.id !== hovered.id && (by === 'landing' ? r.landingId === hovered.landingId : r.entry === hovered.entry)).map(r => r.id) : []),
+    [rows, hovered, by],
+  )
+  const selected = rows.find(r => r.id === selectedId && r.kind === 'line')
+
+  const flatColumns = useMemo<ColumnDef<LineRow>[]>(() => [
+    { id: 'path', header: '线路', enableSorting: false, meta: { hideable: false, className: 'w-full' }, cell: c => <PathCell row={c.row.original} colors={colors} /> },
+    { id: 'kind', header: '类型', enableSorting: false, cell: c => KIND_LABEL[c.row.original.lineKind], meta: { label: '类型' } },
+    { id: 'multiplier', header: '倍率', enableSorting: false, meta: { align: 'right', label: '倍率' }, cell: c => `×${c.row.original.multiplier}` },
+  ], [colors])
+
+  const tree = useMemo(() => treeOf(rows), [rows])
+
+  // The graph: entries to landings. A box selects the first line through it, so the
+  // selection stays one line id across all three views.
+  const graph = useMemo(() => {
+    const lines = rows.filter(l => l.kind === 'line' && l.lineKind !== 'direct')
+    const entries = [...new Set(lines.map(l => l.entry))]
+    const landings = [...new Set(lines.map(l => l.landing))]
+    const landingId = (n: string) => lines.find(l => l.landing === n)!.landingId
+    return {
+      lines,
+      columns: [
+        { id: 'entries', title: '入口服务器', boxes: entries.map(e => ({ id: `entry:${e}`, label: e })) },
+        { id: 'landings', title: '落地节点', boxes: landings.map(n => ({ id: `landing:${n}`, label: n, landingColor: colors.get(String(landingId(n))) })) },
+      ],
+      edges: lines.map(l => ({ from: `entry:${l.entry}`, to: `landing:${l.landing}`, style: l.lineKind === 'tunnel' ? 'dashed' as const : 'solid' as const, status: l.status === 'ok' ? 'success' as const : l.status === 'pending' ? 'warning' as const : 'danger' as const })),
+    }
+  }, [rows, colors])
+
+  const open = (id: string) => setSelectedId(prev => (prev === id ? null : id))
+
   return (
-    <Section id="tree" title="按落地节点分组（树形行）" note="父行下缩进显示子行。聚焦父行后按右箭头展开、左箭头收起。">
-      <DataTable aria-label="按落地节点" data={data} columns={treeColumns} getRowId={r => r.id} rowLabel={r => r.name} getSubRows={r => r.children} defaultExpanded pagination={false} columnMenu={false} />
+    <Section id="lines" title="线路列表（三种视图，共用一份数据和一个选中项）" note="平铺视图可拖动排序，含分隔行和等待生效的线路；悬停一行，同落地节点或同入口的线路会一起亮起。切换视图，选中的线路不变。">
+      <div className="flex flex-wrap items-center gap-3">
+        <SegmentedControl
+          aria-label="视图"
+          value={view}
+          onChange={setView}
+          options={[{ value: 'flat', label: '平铺' }, { value: 'tree', label: '按落地节点' }, { value: 'graph', label: '关系图' }]}
+        />
+        <SegmentedControl
+          aria-label="悬停时高亮"
+          size="sm"
+          value={by}
+          onChange={setBy}
+          options={[{ value: 'landing', label: '同落地节点' }, { value: 'entry', label: '同入口' }]}
+        />
+      </div>
+
+      {view === 'flat' && (
+        <DataTable
+          aria-label="线路"
+          data={rows}
+          columns={flatColumns}
+          getRowId={r => r.id}
+          rowLabel={r => (r.kind === 'separator' ? r.title ?? '' : `${r.landing} · ${r.entry}`)}
+          pagination={false}
+          columnMenu={false}
+          selectable
+          onRowOpen={r => open(r.id)}
+          activeRowId={selectedId}
+          onRowHover={setHover}
+          highlightedIds={highlighted}
+          rowOptions={r => r.kind === 'separator'
+            ? { fullWidth: <span className="text-xs font-medium tracking-wide text-muted-foreground">— {r.title} —</span>, selectable: false, openable: false }
+            : { state: r.status === 'pending' ? 'pending' : r.hidden ? 'dimmed' : undefined }}
+          onReorder={call => { setRows(prev => applyReorder(prev, r => r.id, call)); setLog(`移动 ${call.movedId}，放到 ${call.beforeId ?? '末尾'} 之前`) }}
+        />
+      )}
+      {view === 'tree' && (
+        <DataTable
+          aria-label="按落地节点"
+          data={tree}
+          columns={treeColumns}
+          getRowId={r => r.id}
+          rowLabel={r => r.name}
+          getSubRows={r => r.children}
+          defaultExpanded
+          pagination={false}
+          columnMenu={false}
+          onRowOpen={r => { if (r.line) open(r.line.id) }}
+          activeRowId={selectedId}
+          onRowHover={h => setHover(h)}
+          highlightedIds={highlighted}
+          rowOptions={r => ({ openable: !!r.line, state: r.status === 'pending' && r.line ? 'pending' : undefined })}
+        />
+      )}
+      {view === 'graph' && (
+        <RelationGraph
+          columns={graph.columns}
+          edges={graph.edges}
+          selectedId={selected && selected.lineKind !== 'direct' ? `entry:${selected.entry}` : null}
+          onSelect={id => {
+            if (id === null) { setSelectedId(null); return }
+            const line = graph.lines.find(l => `entry:${l.entry}` === id || `landing:${l.landing}` === id)
+            setSelectedId(line?.id ?? null)
+          }}
+          maxHeight="22rem"
+        />
+      )}
+
+      <div className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4">
+        <span className="text-xs font-medium text-muted-foreground">选中的线路（三个视图共用）</span>
+        {selected ? (
+          <>
+            <PathDiagram {...linePath(selected, true, colors)} />
+            <div><Button variant="outline" size="sm" onClick={() => setSelectedId(null)}>取消选中</Button></div>
+          </>
+        ) : <span className="text-sm text-muted-foreground">没有选中的线路</span>}
+      </div>
+      <p className="text-xs text-muted-foreground" role="status">{log}</p>
     </Section>
   )
 }

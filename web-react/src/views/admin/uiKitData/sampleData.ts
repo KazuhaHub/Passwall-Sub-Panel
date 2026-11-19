@@ -1,5 +1,6 @@
 import type { PathEdge, PathNode } from '@/components/diagram/PathDiagram'
 import type { GraphColumn, GraphEdge } from '@/components/diagram/RelationGraph'
+import { assignLandingColors, type LandingColor } from '@/components/diagram/landingColor'
 
 // PSP-shaped sample data for the dev-only data/form/diagram gallery. Nothing
 // here ships: the module is only reachable through /__ui-kit/data.
@@ -35,9 +36,12 @@ export const NODES: NodeRow[] = Array.from({ length: 38 }, (_, i) => ({
 export type LineKind = 'forward' | 'tunnel' | 'cdn' | 'external' | 'direct'
 export type LineStatus = 'ok' | 'pending' | 'down'
 
+/** A row of the subscription-order list: a line, or a separator the subscriber sees between groups of lines. */
 export interface LineRow {
   id: string
   kind: 'line' | 'separator'
+  /** Separator text. */
+  title?: string
   landingId: number
   landing: string
   lineKind: LineKind
@@ -46,28 +50,38 @@ export interface LineRow {
   latencyMs: number | null
   status: LineStatus
   multiplier: number
+  /** Hidden from subscribers: shown dimmed. */
+  hidden?: boolean
 }
 
 const LANDINGS = ['Irvine Home', 'Tokyo Edge', 'Frankfurt 01']
-const ENTRIES = ['Taiwan HiNet Dynamic', 'Hong Kong CN2', 'Singapore Relay', 'Cloudflare', 'Own relay']
+const ENTRIES = ['Taiwan HiNet Dynamic', 'Hong Kong CN2', 'Singapore Relay', 'Cloudflare', 'External entry']
+const sep = (id: string, title: string): LineRow => ({ id, kind: 'separator', title, landingId: 0, landing: '', lineKind: 'direct', entry: '', port: 0, latencyMs: null, status: 'ok', multiplier: 1 })
 
 export const LINES: LineRow[] = [
   { id: 'l1', kind: 'line', landingId: 3, landing: LANDINGS[0], lineKind: 'forward', entry: ENTRIES[0], port: 10443, latencyMs: 48, status: 'ok', multiplier: 1 },
   { id: 'l2', kind: 'line', landingId: 3, landing: LANDINGS[0], lineKind: 'tunnel', entry: ENTRIES[1], port: 20443, latencyMs: 61, status: 'ok', multiplier: 1.5 },
   { id: 'l3', kind: 'line', landingId: 3, landing: LANDINGS[0], lineKind: 'direct', entry: LANDINGS[0], port: 443, latencyMs: 142, status: 'ok', multiplier: 1 },
+  sep('sep1', 'Tokyo 线路'),
   { id: 'l4', kind: 'line', landingId: 7, landing: LANDINGS[1], lineKind: 'forward', entry: ENTRIES[2], port: 30443, latencyMs: null, status: 'pending', multiplier: 1 },
   { id: 'l5', kind: 'line', landingId: 7, landing: LANDINGS[1], lineKind: 'cdn', entry: ENTRIES[3], port: 443, latencyMs: 88, status: 'ok', multiplier: 1 },
   { id: 'l6', kind: 'line', landingId: 7, landing: LANDINGS[1], lineKind: 'external', entry: ENTRIES[4], port: 8443, latencyMs: 210, status: 'down', multiplier: 2 },
+  sep('sep2', 'Frankfurt 线路'),
   { id: 'l7', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'tunnel', entry: ENTRIES[1], port: 21443, latencyMs: 96, status: 'ok', multiplier: 1 },
-  { id: 'l8', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'direct', entry: LANDINGS[2], port: 443, latencyMs: 156, status: 'ok', multiplier: 1 },
+  { id: 'l8', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'direct', entry: LANDINGS[2], port: 443, latencyMs: 156, status: 'ok', multiplier: 1, hidden: true },
 ]
+
+/** Colours for this page's landings, by first appearance in the list. */
+export function landingColorsFor(lines: readonly LineRow[]): Map<string, LandingColor> {
+  return assignLandingColors(lines.filter(l => l.kind === 'line').map(l => l.landingId))
+}
 
 const TONE = { ok: 'success', pending: 'warning', down: 'danger' } as const
 
 /** The user-to-internet path a line draws, as the nodes page will build it. */
-export function linePath(line: LineRow, withEnds: boolean): { nodes: PathNode[]; edges: PathEdge[] } {
+export function linePath(line: LineRow, withEnds: boolean, colors: Map<string, LandingColor>): { nodes: PathNode[]; edges: PathEdge[] } {
   const tone = TONE[line.status]
-  const landing: PathNode = { id: `landing-${line.landingId}`, kind: 'landing', label: line.landing, colorId: line.landingId, status: tone }
+  const landing: PathNode = { id: `landing-${line.landingId}`, kind: 'landing', label: line.landing, landingColor: colors.get(String(line.landingId)), status: tone }
   const user: PathNode = { id: 'user', kind: 'user', label: '用户' }
   const internet: PathNode = { id: 'internet', kind: 'internet', label: '互联网' }
   const latency = line.latencyMs === null ? undefined : `${line.latencyMs} ms`
@@ -86,7 +100,7 @@ export function linePath(line: LineRow, withEnds: boolean): { nodes: PathNode[];
       break
     case 'external':
       nodes = [user, { id: 'ext', kind: 'external', label: line.entry, sublabel: `:${line.port}`, status: tone }, landing]
-      edges = [{ style: 'solid' }, { style: 'solid', name: '转发', label, status: tone }]
+      edges = [{ style: 'solid' }, { style: 'solid', name: '', label, status: tone }]
       break
     case 'tunnel':
       nodes = [user, { id: 'entry', kind: 'entry', label: line.entry, sublabel: `:${line.port}`, status: tone }, landing]
@@ -102,28 +116,6 @@ export function linePath(line: LineRow, withEnds: boolean): { nodes: PathNode[];
   }
   return { nodes, edges }
 }
-
-export interface LandingGroupRow {
-  id: string
-  name: string
-  lines?: LineRow[]
-  status: LineStatus
-  entry: string
-  latencyMs: number | null
-}
-
-/** Lines grouped under their landing node, for the "按落地节点" tree view. */
-export const LANDING_TREE: LandingGroupRow[] = LANDINGS.map((name, i) => {
-  const lines = LINES.filter(l => l.landing === name)
-  return {
-    id: `landing-${i}`,
-    name,
-    entry: `${lines.length} 条线路`,
-    status: lines.some(l => l.status === 'down') ? 'down' : lines.some(l => l.status === 'pending') ? 'pending' : 'ok',
-    latencyMs: null,
-    lines,
-  }
-})
 
 export interface UserRow {
   id: number
@@ -168,12 +160,13 @@ export function fetchUsers(q: UserQuery, opts: { fail?: boolean; empty?: boolean
 }
 
 export function graphSample(perColumn: number): { columns: GraphColumn[]; edges: GraphEdge[] } {
+  const colors = assignLandingColors(Array.from({ length: perColumn }, (_, i) => i))
   const entries = Array.from({ length: perColumn }, (_, i) => ({
     id: `e${i}`, label: i % 3 === 0 ? `Entry ${i + 1} HiNet` : `Entry ${i + 1}`, sublabel: `:${10000 + i * 7}`,
     status: (i % 11 === 4 ? 'danger' : i % 7 === 3 ? 'warning' : 'success') as 'danger' | 'warning' | 'success',
   }))
   const landings = Array.from({ length: perColumn }, (_, i) => ({
-    id: `l${i}`, label: `Landing ${i + 1}`, sublabel: ['Irvine', 'Tokyo', 'Frankfurt'][i % 3], colorId: i + 1,
+    id: `l${i}`, label: `Landing ${i + 1}`, sublabel: ['Irvine', 'Tokyo', 'Frankfurt'][i % 3], landingColor: colors.get(String(i))!,
     status: 'success' as const,
   }))
   const exits = Array.from({ length: Math.max(3, Math.ceil(perColumn / 3)) }, (_, i) => ({

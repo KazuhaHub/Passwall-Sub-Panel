@@ -78,4 +78,46 @@ describe('TagsField', () => {
     fireEvent.blur(box())
     expect(onValue).toHaveBeenLastCalledWith(['Pending'])
   })
+
+  describe('Chinese input and pasted lists', () => {
+    it('does not commit the raw text when Enter confirms an IME candidate', () => {
+      const onValue = vi.fn()
+      render(<Harness onValue={onValue} />)
+      fireEvent.change(box(), { target: { value: 'zhongwen' } })
+      fireEvent.keyDown(box(), { key: 'Enter', isComposing: true })
+      fireEvent.keyDown(box(), { key: 'Enter', keyCode: 229 })
+      expect(onValue).not.toHaveBeenCalled()
+      fireEvent.keyDown(box(), { key: ',', isComposing: true })
+      expect(onValue).not.toHaveBeenCalled()
+      // once the composition is over, Enter commits as usual
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      expect(onValue).toHaveBeenLastCalledWith(['zhongwen'])
+    })
+
+    it('splits a pasted list on commas, full-width commas, semicolons and newlines', () => {
+      const onValue = vi.fn()
+      render(<Harness initial={['HK']} onValue={onValue} />)
+      fireEvent.paste(box(), { clipboardData: { getData: () => ' a ,b，c;d\n e、f , hk ,, a ' } })
+      expect(onValue).toHaveBeenLastCalledWith(['HK', 'a', 'b', 'c', 'd', 'e', 'f'])
+    })
+
+    it('splits as you type a full-width comma, keeping what follows as the next draft', () => {
+      const onValue = vi.fn()
+      render(<Harness onValue={onValue} />)
+      fireEvent.change(box(), { target: { value: '香港，东' } })
+      expect(onValue).toHaveBeenLastCalledWith(['香港'])
+      expect(box().value).toBe('东')
+    })
+
+    it('splits text that arrives when a composition ends', () => {
+      const onValue = vi.fn()
+      render(<Harness onValue={onValue} />)
+      fireEvent.compositionStart(box())
+      fireEvent.change(box(), { target: { value: '甲，乙' } })
+      expect(onValue).not.toHaveBeenCalled()
+      fireEvent.compositionEnd(box(), { data: '甲，乙' })
+      expect(onValue).toHaveBeenLastCalledWith(['甲'])
+      expect(box().value).toBe('乙')
+    })
+  })
 })

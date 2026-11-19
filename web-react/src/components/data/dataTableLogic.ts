@@ -94,3 +94,32 @@ export function applyReorder<T>(items: readonly T[], idOf: (item: T) => string, 
   rest.splice(at < 0 ? rest.length : at, 0, moved)
   return rest
 }
+
+const isEmpty = (v: unknown) => v === null || v === undefined || v === ''
+
+/**
+ * A direction-aware comparison for the table's sort: text with the UI language's
+ * collation and numeric: true (so "item9" sorts before "item10", and Chinese
+ * follows the language's own order, pinyin for zh), numbers as numbers, booleans
+ * false before true, and empty values (null, undefined, "") LAST whichever way the
+ * column is sorted. The table multiplies the result by -1 for a descending sort,
+ * so an empty value returns the sign that survives that flip.
+ */
+export function compareCells(a: unknown, b: unknown, desc: boolean, collator: Intl.Collator): number {
+  const ae = isEmpty(a)
+  const be = isEmpty(b)
+  if (ae || be) {
+    if (ae && be) return 0
+    const lastWhenAscending = ae ? 1 : -1
+    return desc ? -lastWhenAscending : lastWhenAscending
+  }
+  if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0
+  if (typeof a === 'boolean' && typeof b === 'boolean') return a === b ? 0 : a ? 1 : -1
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+  return collator.compare(String(a), String(b))
+}
+
+export function makeCollator(language: string): Intl.Collator {
+  try { return new Intl.Collator(language, { numeric: true, sensitivity: 'base' }) }
+  catch { return new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }) }
+}

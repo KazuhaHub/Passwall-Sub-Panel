@@ -12,7 +12,7 @@ const facet = { id: 'status', label: 'Status', options: [{ value: 'up', label: '
 describe('FilterBar', () => {
   it('is a search landmark with the search box first', () => {
     render(<FilterBar search={{ value: '', onChange: () => {}, placeholder: 'Search nodes' }} facets={[facet]} />)
-    expect(screen.getByRole('search')).toBeTruthy()
+    expect(screen.getByRole('search', { name: 'Filters' })).toBeTruthy()
     expect(screen.getByRole('searchbox', { name: 'Search nodes' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Status/ })).toBeTruthy()
   })
