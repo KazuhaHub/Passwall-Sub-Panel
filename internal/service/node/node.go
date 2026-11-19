@@ -101,6 +101,9 @@ type Service struct {
 	// planned are the ports picked for listeners about to be made, by line.
 	plannedMu sync.Mutex
 	planned   map[string]int
+	// orderMu serialises subscription reorders so the version check and the
+	// write of one cannot interleave with another's.
+	orderMu sync.Mutex
 	// canGuard says whether a landing on a server can check where connections come
 	// from (SetSourceGuardCheck).
 	canGuard func(ctx context.Context, panelID int64) bool

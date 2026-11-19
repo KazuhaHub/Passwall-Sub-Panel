@@ -565,6 +565,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// Reads + toggle-enabled are operator-safe; create/update/delete and
 		// the import / claim flows touch 3X-UI panels directly, admin only.
 		staffGroup.GET("/nodes", nodes.List)
+		// Per-line subscription order: the staff may read it, only an
+		// administrator may rearrange it (same split as the legacy reorder below).
+		staffGroup.GET("/nodes/order", nodes.ListOrder)
 		staffGroup.GET("/nodes/:id", nodes.Get)
 		staffGroup.POST("/nodes/:id/set-enabled", nodes.SetEnabled)
 		staffGroup.GET("/nodes/unmanaged", nodes.ListUnmanaged)
@@ -581,6 +584,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		previewPOST(adminGroup, "/nodes/setup-preview", nodes.PreviewSetup)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
+		adminGroup.PUT("/nodes/order", nodes.PutOrder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
 		// Tunnel-mode relay lines: the confirmed mode switch, the listener's own
 		// settings, and the re-copy from the landing.
