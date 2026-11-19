@@ -64,6 +64,22 @@ describe('applyHtmlAppearance', () => {
     expect(root.style.getPropertyValue('--sidebar-primary')).toBe(primary)
   })
 
+  it('sets the foreground colours inline too, from the same tone the MUI theme uses', () => {
+    applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#123456' })
+    const on = tokensFromSource('#123456', 'light').onPrimary
+    expect(root.style.getPropertyValue('--brand-foreground')).toBe(on)
+    expect(root.style.getPropertyValue('--sidebar-primary-foreground')).toBe(on)
+    applyHtmlAppearance(root, { mode: 'dark', density: 'compact', color: '#123456' })
+    expect(root.style.getPropertyValue('--brand-foreground')).toBe(tokensFromSource('#123456', 'dark').onPrimary)
+  })
+
+  it('removes the inline foregrounds when going back to a preset', () => {
+    applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#123456' })
+    applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#0061A4' })
+    expect(root.style.getPropertyValue('--brand-foreground')).toBe('')
+    expect(root.style.getPropertyValue('--sidebar-primary-foreground')).toBe('')
+  })
+
   it('clears the inline colour again when the colour goes back to a preset', () => {
     applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#123456' })
     applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#6750A4' })

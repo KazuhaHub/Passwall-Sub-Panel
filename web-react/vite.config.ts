@@ -1,6 +1,7 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { expandScope } from './scripts/psp-scope.mjs'
 import path from 'node:path'
 
 // Chunk assignment is by EXACT npm package name, taken from the last
@@ -31,7 +32,7 @@ const CHUNK_BY_PACKAGE = new Map<string, string>([
   ...['echarts', 'zrender'].map(n => [n, 'vendor-echarts'] as const),
   ...['i18next', 'react-i18next', 'html-parse-stringify', 'void-elements'].map(n => [n, 'vendor-i18n'] as const),
   ...['@base-ui/react', '@base-ui/utils', 'tabbable', 'reselect'].map(n => [n, 'vendor-base-ui'] as const),
-  ...['lucide-react', 'cmdk', 'sonner', '@tanstack/react-table', '@tanstack/table-core', 'react-remove-scroll',
+  ...['lucide-react', 'cmdk', 'sonner', 'tailwind-merge', 'class-variance-authority', '@tanstack/react-table', '@tanstack/table-core', 'react-remove-scroll',
     'react-remove-scroll-bar', 'react-style-singleton', 'use-callback-ref', 'use-sidecar', 'aria-hidden', 'get-nonce',
     'detect-node-es'].map(n => [n, 'vendor-ui'] as const),
 ])
@@ -43,6 +44,11 @@ const CHUNK_BY_SCOPE = new Map<string, string>([
   ['@floating-ui', 'vendor-base-ui'],
 ])
 
+// Direct dependencies of the Tailwind/shadcn stack; transitive ones are caught by
+// smoke:dist's vendor-import check.
+const NEW_STACK_PACKAGES = new Set(['@base-ui/react', 'class-variance-authority', 'lucide-react', 'sonner', 'cmdk',
+  'tailwind-merge', '@tanstack/react-table'])
+
 function chunkFor(pkg: string): string | undefined {
   return CHUNK_BY_PACKAGE.get(pkg) ?? CHUNK_BY_SCOPE.get(pkg.split('/')[0])
 }
@@ -52,11 +58,50 @@ function packageOf(id: string): string | undefined {
   return m?.[1].replace('\\', '/')
 }
 
+// Expands the `:psp-new` pseudo-classes in styles/ui.css (see scripts/psp-scope.mjs
+// and the contract at the top of ui.css). Must run before the Tailwind plugin.
+function pspScope(): Plugin {
+  return {
+    name: 'psp-scope',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]styles[\\/]ui\.css$/.test(id.split('?')[0])) return
+      return { code: expandScope(code), map: null }
+    },
+  }
+}
+
+// Fails the build when a new-stack package ends up outside its vendor chunk (for
+// example because it is missing from CHUNK_BY_PACKAGE and landed in the first lazy
+// page that imports it, as tailwind-merge once did). The smoke:dist vendor-import
+// check covers the other direction: a vendor chunk reaching into page code.
+function newStackPlacement(): Plugin {
+  const homes = new Set(['vendor-base-ui', 'vendor-ui'])
+  return {
+    name: 'psp-new-stack-placement',
+    generateBundle(_options, bundle) {
+      for (const [file, chunk] of Object.entries(bundle)) {
+        if (chunk.type !== 'chunk') continue
+        for (const id of Object.keys(chunk.modules)) {
+          const pkg = packageOf(id)
+          const home = pkg && chunkFor(pkg)
+          if (home && homes.has(home) && !file.startsWith(`assets/${home}-`)) {
+            this.error(`${pkg} belongs in ${home} but was bundled into ${file}`)
+          }
+          if (pkg && NEW_STACK_PACKAGES.has(pkg) && !home) {
+            this.error(`${pkg} is a new-stack package missing from CHUNK_BY_PACKAGE (bundled into ${file})`)
+          }
+        }
+      }
+    },
+  }
+}
+
 export default defineConfig({
   // Runtime panel_path is injected through <base href> in index.html. Relative
   // asset URLs let the same bundle work at /, /panel/, or a deeper prefix.
   base: './',
-  plugins: [react(), tailwindcss()],
+  plugins: [pspScope(), react(), tailwindcss(), newStackPlacement()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -65,7 +110,9 @@ export default defineConfig({
   server: {
     port: 5174,
     host: true,
-    proxy: {
+    // PSP_DEV_NO_PROXY=1 serves the SPA without forwarding /api anywhere (used by
+    // scripts/check-coexistence.mjs, which needs no backend).
+    proxy: process.env.PSP_DEV_NO_PROXY ? {} : {
       '/api': { target: 'http://localhost:8788', changeOrigin: true },
       '/sub': { target: 'http://localhost:8788', changeOrigin: true },
     },
@@ -83,7 +130,7 @@ export default defineConfig({
     // the latest assets without a copy step.
     outDir: '../internal/web/dist',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         // Split heavy vendor deps into stable named chunks instead of
         // bundling everything into one ~700KB main bundle. Each chunk
@@ -98,6 +145,14 @@ export default defineConfig({
         // dependencies into the first claiming chunk (see CHUNK_BY_PACKAGE).
         // includeDependenciesRecursively is off for the same reason: a group
         // holds exactly the packages the map names, nothing it merely imports.
+        // The rolldown types suggest pairing that with strictExecutionOrder and
+        // preserveEntrySignatures: false/'allow-extension'. Neither is set, on
+        // measurement: strictExecutionOrder wraps every module in an init helper
+        // (+144 kB of JS, +3%, and the entry becomes a 48-byte stub) to guard
+        // against circular chunks, and this graph has none (smoke:dist fails if a
+        // vendor chunk imports anything but vendor chunks and the runtime, and
+        // vendor-react imports only the runtime). preserveEntrySignatures: false
+        // produced byte-identical output because the app entry has no exports.
         codeSplitting: {
           groups: [{
             name: (id: string) => {

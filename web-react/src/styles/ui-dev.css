@@ -1,0 +1,14 @@
+/*
+ * Utilities for the dev-only pages (views/admin/UiKitchenSink.tsx and
+ * UiMixedTree.tsx), in their own entry so production CSS never contains them:
+ * only those pages import this file, and their routes are dropped from
+ * production builds. `@reference` pulls in ui.css's theme and utility
+ * definitions without emitting them again. The utilities MUST sit in
+ * `@layer utilities`: an unlayered utility would beat the layered base rules and
+ * be rolled back by the shim's `revert-layer`, which is exactly what the pages
+ * here exist to check.
+ */
+@reference "./ui.css";
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../views/admin/UiKitchenSink.tsx";
+@source "../views/admin/UiMixedTree.tsx";

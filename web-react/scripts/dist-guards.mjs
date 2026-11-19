@@ -6,12 +6,19 @@ import { join } from 'node:path'
 
 // Chunks that hold the new stack. The login page (and every un-migrated MUI
 // page) must not load them, so index.html must not preload them.
-const NEW_STACK_CHUNK = /^vendor-(base-ui|ui)\b/
+// (?![a-z]) rather than \b: a de-duplicated name such as vendor-ui2-<hash> must match too.
+const NEW_STACK_CHUNK = /^vendor-(?:base-ui|ui)(?![a-z])/
 
+// Every asset index.html loads eagerly: <script src> and <link rel=modulepreload>,
+// whatever the attribute order.
 export function preloadedAssets(indexHtml) {
   const out = []
-  const re = /<(?:link[^>]*\brel="modulepreload"[^>]*\bhref|script[^>]*\bsrc)="\.\/(assets\/[^"]+)"/g
-  for (let m; (m = re.exec(indexHtml)); ) out.push(m[1])
+  for (const tag of indexHtml.match(/<(?:link|script)\b[^>]*>/g) ?? []) {
+    const attr = name => new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`).exec(tag)?.[1]
+    const url = tag.startsWith('<script') ? attr('src') : /modulepreload/.test(attr('rel') ?? '') ? attr('href') : undefined
+    const m = url && /^\.\/(assets\/.+)$/.exec(url)
+    if (m) out.push(m[1])
+  }
   return out
 }
 
@@ -28,7 +35,8 @@ export function checkVendorImports(files) {
   const problems = []
   for (const [name, code] of Object.entries(files)) {
     if (!name.startsWith('vendor-')) continue
-    for (const m of code.matchAll(/from\s*"\.\/([^"]+\.js)"/g)) {
+    // static `from"./x.js"`, side-effect `import"./x.js"` and dynamic `import("./x.js")`
+    for (const m of code.matchAll(/\b(?:from|import)\s*\(?\s*["']\.\/([^"']+\.js)["']/g)) {
       const dep = m[1]
       if (!dep.startsWith('vendor-') && !dep.startsWith('rolldown-runtime')) {
         problems.push(`${name} imports ${dep}: vendor chunks may import only vendor chunks`)
@@ -43,13 +51,33 @@ export function checkVendorImports(files) {
 // report any rule on a global selector (`*`, html, body, :host, :root, bare
 // ::before/::after/::backdrop) that sets a real property. Custom properties
 // (`--x`) on those selectors are fine: nothing reads them but Tailwind.
+// Split a selector list on top-level commas only: not inside (), [] or after a
+// backslash (Tailwind escapes commas in arbitrary-value class names).
+function splitSelectors(prelude) {
+  const parts = []
+  let depth = 0, start = 0
+  for (let i = 0; i < prelude.length; i++) {
+    const c = prelude[i]
+    if (c === '\\') i++
+    else if (c === '(' || c === '[') depth++
+    else if (c === ')' || c === ']') depth--
+    else if (c === ',' && depth === 0) { parts.push(prelude.slice(start, i)); start = i + 1 }
+  }
+  parts.push(prelude.slice(start))
+  return parts
+}
+
 export function checkGlobalRules(css) {
   const problems = []
+  // A selector is global when it can match an element without any class,
+  // id or attribute narrowing it: a bare type or universal selector (`a`,
+  // `svg`, `h1`, `table td`, `*`), or the document roots (`html`, `body`,
+  // `:root`, `:host`) with only class / attribute / pseudo qualifiers, since
+  // `:root.dark` is still the one <html> element.
   const isGlobalSelector = sel => {
     const s = sel.trim()
-    // Anything rooted in a class, id, attribute, :where/:is or :not is scoped.
-    if (/[.#[]|:where|:is|:not|:has/.test(s)) return false
-    return /^(\*|html|body|:host|:root|:?:?(before|after|backdrop)|\*:?:?(before|after|backdrop))$/.test(s)
+    if (/^(?::root|:host|html|body)(?:[.#[:][^\s>+~]*)*$/.test(s)) return true
+    return !/[.#[]/.test(s)
   }
   const skipAt = /^@(font-face|keyframes|property|-webkit-keyframes|counter-style|page)\b/
 
@@ -58,7 +86,8 @@ export function checkGlobalRules(css) {
     while (i < text.length) {
       const open = text.indexOf('{', i)
       if (open < 0) break
-      const prelude = text.slice(i, open).trim().replace(/^[;}\s]+/, '')
+      // Drop earlier statements (`@layer a, b;`) that share the span before `{`.
+      const prelude = text.slice(i, open).replace(/^[\s\S]*;/, '').replace(/^[;}\s]+/, '').trim()
       let depth = 1, j = open + 1
       for (; j < text.length && depth > 0; j++) {
         const c = text[j]
@@ -70,7 +99,7 @@ export function checkGlobalRules(css) {
       if (prelude.startsWith('@')) {
         if (skipAt.test(prelude) || /^@layer\s+properties$/.test(prelude)) { /* skipped */ }
         else walk(body, `${ctx} ${prelude}`)
-      } else if (prelude.split(',').some(isGlobalSelector)) {
+      } else if (splitSelectors(prelude).some(isGlobalSelector)) {
         const decls = body.split(';').map(d => d.trim()).filter(Boolean)
         const real = decls.filter(d => !d.startsWith('--') && !d.includes('{'))
         if (real.length) problems.push(`global rule "${prelude}"${ctx ? ` in${ctx}` : ''} sets ${real.map(d => d.split(':')[0]).join(', ')}`)

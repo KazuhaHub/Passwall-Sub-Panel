@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
+import '@/styles/ui-dev.css'
 import { COLOR_PRESETS } from '@/theme/presets'
 import { useAppearanceStore, type Density, type ThemeMode } from '@/stores/appearance'
 

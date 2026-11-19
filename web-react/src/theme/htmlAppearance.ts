@@ -21,6 +21,8 @@ export function brandPresetFor(hex: string): string | null {
   return COLOR_PRESETS.find(p => p.hex.toUpperCase() === upper)?.id ?? null
 }
 
+const CUSTOM_BRAND_VARS = ['--brand', '--sidebar-primary', '--brand-foreground', '--sidebar-primary-foreground']
+
 // applyHtmlAppearance mirrors the appearance store onto <html>, which is where
 // the Tailwind/shadcn side reads it: the `dark` class, data-density and
 // data-brand. MUI keeps reading the store through its own ThemeProvider; this
@@ -34,16 +36,19 @@ export function applyHtmlAppearance(root: HTMLElement, a: HtmlAppearance): void 
     // Presets are defined in the stylesheet (light and dark), so no inline
     // value: an inline --brand would beat the stylesheet and pin one mode.
     root.dataset.brand = preset
-    root.style.removeProperty('--brand')
-    root.style.removeProperty('--sidebar-primary')
+    for (const v of CUSTOM_BRAND_VARS) root.style.removeProperty(v)
     return
   }
   // A custom colour has no stylesheet block. Use the same primary tone the MUI
   // theme derives for this mode, so both stacks agree on what "brand" is.
   root.dataset.brand = 'custom'
-  const primary = tokensFromSource(a.color, a.mode).primary
-  root.style.setProperty('--brand', primary)
-  root.style.setProperty('--sidebar-primary', primary)
+  // The foregrounds matter as much as the fills: without them the :root
+  // defaults (light text) would sit on a possibly light dark-mode brand colour.
+  const t = tokensFromSource(a.color, a.mode)
+  root.style.setProperty('--brand', t.primary)
+  root.style.setProperty('--sidebar-primary', t.primary)
+  root.style.setProperty('--brand-foreground', t.onPrimary)
+  root.style.setProperty('--sidebar-primary-foreground', t.onPrimary)
 }
 
 // Layout effect, not a passive one: the class has to be on <html> before the
