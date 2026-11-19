@@ -336,8 +336,9 @@ type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error
 	// UpdateMetadata is the column-scoped writer for the admin-editable
-	// identity fields (display_name, server_address, flow, region, tags,
-	// sort_order). Use it instead of Update for the node-edit path so a
+	// identity fields (display_name, server_address, flow, region, tags, relays,
+	// ...). It never writes sort_order: that is owned by BatchUpdateSortOrder and
+	// ApplySubscriptionOrder, and a caller's copy of it may be stale. Use it instead of Update for the node-edit path so a
 	// full-row Save can't roll back poll-owned columns (traffic / health /
 	// inbound-config snapshot) to the dialog's stale snapshot.
 	UpdateMetadata(ctx context.Context, n *domain.Node) error

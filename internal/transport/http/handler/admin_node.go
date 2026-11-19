@@ -844,6 +844,14 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	}
 	h.auditLineFactors(c, node.ChangedLineFactors(&before, n))
 	h.auditTunnelLines(c, n.ID, before.Relays, n.Relays)
+	// An explicit sort_order (the legacy edit dialog) is a deliberate move and goes
+	// through the reorder writer: the metadata save itself never writes the column.
+	if req.SortOrder != nil {
+		if err := h.node.Reorder(c.Request.Context(), []ports.NodeSortUpdate{{NodeID: n.ID, SortOrder: *req.SortOrder}}); err != nil {
+			mapNodeServiceError(c, err)
+			return
+		}
+	}
 	// Reload: the service settled the tunnel lines (listener ids, ports).
 	saved, err := h.node.Get(c.Request.Context(), id)
 	if err != nil {

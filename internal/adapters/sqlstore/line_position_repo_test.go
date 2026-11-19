@@ -285,3 +285,22 @@ func TestUpdateMetadataKeepsPositionOfEditedLine(t *testing.T) {
 		t.Fatalf("position serialised into relays: %s", raw)
 	}
 }
+
+// sort_order belongs to the reorder writers. A metadata save carries whatever
+// SortOrder its caller loaded, which can be stale by the time it is written, so
+// the column is never part of it.
+func TestUpdateMetadataNeverWritesSortOrder(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	if err := repo.ApplySubscriptionOrder(ctx, ports.SubscriptionOrderWrite{Nodes: []ports.NodeSortUpdate{{NodeID: nodes[0].ID, SortOrder: 90}}}); err != nil {
+		t.Fatal(err)
+	}
+	edit := *nodes[0] // carries the SortOrder it was created with
+	edit.DisplayName = "renamed"
+	if err := repo.UpdateMetadata(ctx, &edit); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.GetByID(ctx, nodes[0].ID)
+	if got.DisplayName != "renamed" || got.SortOrder != 90 {
+		t.Fatalf("name=%q sort_order=%d, want the rename and 90", got.DisplayName, got.SortOrder)
+	}
+}

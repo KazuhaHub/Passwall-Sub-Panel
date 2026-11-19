@@ -66,6 +66,12 @@ func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 // full-row Save here would roll those back to whatever stale values the edit
 // dialog loaded — double-counted/lost traffic, flapping health. Same
 // column-scoped rationale as UpdateTrafficCounters / UpdateHealth.
+//
+// sort_order is NOT written either: it belongs to the reorder writers
+// (BatchUpdateSortOrder, ApplySubscriptionOrder), which commit without any
+// server lock. Every caller of this method carries a copy of the node it loaded
+// earlier, so writing the column here could put back a position a reorder had
+// just committed.
 func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if n == nil || n.ID == 0 {
 		return fmt.Errorf("UpdateMetadata requires a non-zero node ID; got %+v", n)
@@ -79,8 +85,7 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 				"flow":              n.Flow,
 				"region":            n.Region,
 				"tags":              jsonStrings(n.Tags),
-				"sort_order":        n.SortOrder,
-				"relays":            jsonRelays(n.Relays),
+					"relays":            jsonRelays(n.Relays),
 				"hide_direct":       n.HideDirect,
 				"show_relay_status": n.ShowRelayStatus,
 				"egress_panel_id":   n.EgressPanelID,

@@ -1018,7 +1018,7 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	// landing are, and carrying the line's labels, address and factor.
 	updated := *previous
 	updated.Relays = n.Relays
-	updated.DisplayName, updated.SortOrder = n.DisplayName, n.SortOrder
+	updated.DisplayName = n.DisplayName // the position stays the stored one: a metadata save never moves a node
 	if err := s.followTunnelLines(ctx, &updated); err != nil {
 		return err
 	}
