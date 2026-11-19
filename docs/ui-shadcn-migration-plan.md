@@ -1,0 +1,348 @@
+# 前端 UI 更换计划：MUI (MD3) → shadcn/ui + Tailwind
+
+状态：草案，等待确认。基线：`origin/main` @ 2026-11-18。
+
+## 1. 目标与非目标
+
+**目标**
+
+1. 把管理端和用户端的界面从 MUI v9 (Material Design 3) 换成 shadcn/ui（`base-nova` 风格，底层 Base UI）+ Tailwind v4，与 KazuhaHub/rackbook 使用同一套组件。
+2. 界面要"人性化、方便操作"：信息一眼看得全，常用操作一步到位。具体规则见第 3 节，它和换库同等重要。
+3. 迁移期间主分支随时可构建、可发布，两套组件并存。
+
+**非目标**
+
+- 不改后端 API、路由路径、RBAC 规则、i18n 命名空间。
+- 不换数据层（react-query、axios、Zustand 保持）。
+- 不换 ECharts、CodeMirror。
+- 不在迁移 PR 里顺手加新功能。
+
+## 2. 现状规模（origin/main 实测）
+
+| 项目 | 数量 |
+| --- | --- |
+| 引用 `@mui/` 的文件 | 251 |
+| `sx={}` | 3161 处 |
+| `views` + `components` + `layouts` 非测试源码 | 228 个文件，约 4.97 万行 |
+| 测试文件 | 248 个，其中 21 个用了 `.Mui*` 选择器 |
+| 用到的 MUI 图标 | 135 种 |
+| 路由 | 42 条 |
+
+用量最大的组件：`Box` 1375、`Typography` 1018、`Button` 476、`TextField` 423、`Alert` 168、`Tooltip` 136、`IconButton` 116、`FormControlLabel` 91、`Chip` 83、`Dialog` 74。
+
+最大的页面：
+
+| 文件 | 行数 |
+| --- | --- |
+| `views/admin/NodesView.tsx` | 4569 |
+| `views/admin/SettingsView.tsx` | 3078 |
+| `views/admin/ServersView.tsx` | 2785 |
+| `views/admin/UsersView.tsx` | 2379 |
+| `views/user/MeView.tsx` | 1661 |
+| `views/admin/CertificatesView.tsx` | 1134 |
+| `views/admin/accessControl/`（48 个文件） | 6942 |
+| `views/admin/risk/`（35 个文件） | 5330 |
+| `views/admin/diagnostics/`（15 个文件） | 2008 |
+
+## 3. 交互规则（"人性化"的具体含义）
+
+每个迁移后的页面都要满足下面的规则。评审时逐条对照。
+
+### 3.1 页面结构
+
+- **列表 + 右侧详情栏**：点一行，在右侧 `Sheet` 里看详情和操作；不再弹窗套弹窗。选中的行写进 URL（如 `/admin/nodes/12`），刷新、后退、分享链接都能回到同一处。
+- **每页只有一个主按钮**（实心深色）。其余操作是描边或幽灵按钮。危险操作收进"更多"菜单。
+- **页头固定格式**：标题 + 数量 + 右侧操作区。由共享的 `PageHeader` 提供，不允许各页自己拼。
+- **超过 600 行的页面必须拆成目录**：`list` / `detail` / `form` / `dialogs` 各自成文件。
+
+### 3.2 表格
+
+- 顶部一行：搜索框 + 分面筛选按钮（状态、协议、分组等）+ 列显隐。
+- 筛选、排序、每页条数按页面记在 `localStorage`，下次进来还在。
+- 状态默认安静：正常行只有一个小圆点；只有异常行才出现彩色标签。
+- ID、订阅链接、地址等一点即复制，并有提示。
+- 勾选行后底部出现批量操作条。
+- 键盘：上下键移动行，回车打开详情，`Esc` 关闭。
+- 窄屏：侧栏收成抽屉；表格固定第一列横向滚动，或退化成卡片行。
+
+### 3.3 表单
+
+- 标签在输入框上方，说明文字在下方。不用浮动标签。
+- 按主题分节；高级选项默认折叠，展开状态被记住。
+- 常见值预填好；占位符是一个真实的例子。
+- 失焦即校验，错误写在字段旁边，说清楚怎么改。
+- 长表单底部有吸附的保存条，显示"有未保存的修改"；离开页面时提醒。
+- 设置页：左侧分区导航 + 设置项搜索，每个分区单独保存。
+
+### 3.4 反馈
+
+- 成功用 toast，一句话，不带"成功"二字和感叹号。
+- 后端返回 `X-Sync-Pending` 时显示"已排队，服务器恢复后自动同步"，并能跳到同步任务页。
+- 删除类确认框写明对象名称和后果，确认按钮写动词（"删除节点"），不写"确定"。
+- 三种标准状态统一提供：加载（骨架屏）、空（一句说明 + 一个行动按钮）、出错（原因 + 重试）。
+
+### 3.5 全局
+
+- `⌘K` / `Ctrl K` 命令面板：跳转页面，搜索用户和节点，执行常用操作。
+- 所有只有图标的按钮都有 tooltip 和 `aria-label`。
+- 明暗两种模式都要验收。
+- 用户端 `MeView` 以手机为先设计：订阅链接、二维码、用量在首屏。
+
+### 3.6 图示
+
+参照 Cloudflare 控制台的做法：凡是涉及"流量怎么走"的配置，都配一张路径图，文字只做补充。
+
+- 共享构件 `PathDiagram`：一行若干个节点（用户、入口、落地、出口、互联网），节点之间的连线上标注"谁来转发、这一跳谁加密、端口"，并带状态点和探测到的延迟 / 丢包。
+- 选择类型时用"带小图的选项卡片"，而不是下拉框。选中哪张卡片，下面只出现这一类需要的字段。
+- 图随表单实时变化：改了入口服务器或端口，图上的名字和端口跟着变。
+- 图是 HTML + 内联 SVG，颜色取 CSS 变量，明暗模式都要清楚；窄屏时改为竖排。
+- 图不能是唯一的信息来源：每个节点和连线都有文字标签，供读屏和复制。
+
+适用范围不限于节点页：服务器接入（PSP ↔ 3X-UI / S-UI / Passwall Node）、SNI 共用端口（fronts）、按目标分流（routes）、证书签发流程、订阅渲染链路都适合用同一个构件。
+
+### 3.7 交互审查
+
+换组件之前先看交互。每个大页面（节点、设置、服务器、用户、用户端首页、访问控制、风险中心）在动手前产出一页"交互审查"：
+
+1. 现状里让人犯晕的地方（列具体位置）。
+2. 新的信息结构（分几块、每块回答什么问题）。
+3. 哪里需要图示。
+4. 哪些文案要改名。
+
+审查由调度（Opus）写，负责人确认后才派发该页面的执行包。小页面不单独审查，直接套第 3 节的规则。
+
+设置、服务器、用户与分组、用户端与登录、访问控制、风险中心与诊断这六块的审查已完成，见 [ui-interaction-audit.md](ui-interaction-audit.md)。各包的执行简报要引用其中对应的一节。
+
+## 3A. 节点页重设计（试点的具体方案）
+
+### 现状的问题（读代码所见）
+
+- 一个 520px 宽的"编辑节点"对话框里同时放了五类东西：基本信息、默认出口、按目标分流、中转线路、直连倍率与隐藏直连。
+- **两个方向混在一起**。"用户怎么连进来"（中转线路）和"流量从哪出去"（默认出口、按目标分流）上下相邻，用词又重叠：入口侧有"加密隧道"，出口侧也是"经隧道出网"。
+- **入口类型靠两层下拉框决定**：第一层"入口"把"外部入口 / CDN / 各台服务器的名字"混在同一个列表；选了服务器后才出现第二层"模式"（直接转发 / 加密隧道）。实际上这是四种不同的线路，字段各不相同。
+- **新建和编辑是两套界面**：新建是一个四步向导（落地 → 入口 → 出口 → 核对端口），一次填完所有信息；编辑却拆成每行上的两个图标按钮，"编辑"（名称、线路、出口）和"编辑 Inbound 配置"（协议、传输、TLS），各开一个对话框（`NodesView.tsx` 3836–3840 行）。新建时是一件事，编辑时变成两件事，而且从图标看不出哪个改哪部分。新方案里每行只有一个入口：点进节点详情页，四个标签对应新建向导的四块内容。
+- 线路状态是一行行小字（"等待中转服务器生效…"），要逐条读才知道哪条有问题。
+- 页面有三个标签（已管理 / 未管理 / 线路表），线路表和节点编辑互相跳转靠滚动定位。
+
+### 新的信息结构
+
+节点从"列表 + 对话框"改成"列表 + 节点详情页"（`/admin/nodes/:id`）。内容太多，右侧窄栏放不下；窄栏只用于列表里的快速预览。
+
+详情页顶部是一张**总览路径图**：这个节点的每条线路一行，从"用户"画到"互联网"。下面分四个标签：
+
+| 标签 | 回答的问题 | 内容 |
+| --- | --- | --- |
+| 入口线路 | 用户怎么连进来 | 直连线路的开关和倍率；其余线路逐条列出，每条一张路径图 + 状态 |
+| 出口 | 流量从哪出去 | 本机出网 / 经另一台服务器出网；按目标分流的规则 |
+| 协议 | 这个监听器本身怎么配 | 现在的入站表单（协议、传输、TLS / REALITY） |
+| 基本信息 | 叫什么、给谁看 | 名称、地址、区域、标签、可见分组 |
+
+每个标签单独保存，互不牵连。
+
+### 线路类型：四张带图的卡片
+
+"添加线路"先选类型，再填字段。类型一旦选定，表单只显示这一类的字段：
+
+| 卡片 | 现有概念 | 路径 | 一句话 |
+| --- | --- | --- | --- |
+| 托管转发 | 入口选服务器 + 直接转发 | 用户 → 入口服务器 ⇒ 落地 | 入口原样转发，加密由落地负责，开销最低 |
+| 托管隧道 | 入口选服务器 + 加密隧道 | 用户 → 入口监听器 ⇒ 服务器间隧道 ⇒ 落地 | 入口自己终结连接，再走加密隧道到落地 |
+| CDN | CDN | 用户 → CDN ⇒ 落地 | 由 CDN 回源，PSP 看不到中间这一跳 |
+| 自建中转 | 外部入口 | 用户 → 你的中转机 ⇒ 落地 | 转发由你在面板外配置，这里只登记地址 |
+
+转发和隧道之间的切换保留（后端支持带确认的模式切换），做成线路上的一个明确操作"改为托管隧道"，并说明订阅者需要刷新订阅；CDN 线路不能改类型，卡片上直接写明。
+
+### 新建与编辑统一
+
+新建向导的四步与详情页的四个标签一一对应，用同一批表单组件。最后一步"核对端口"在现有表格上方加一张完整路径图，把每台服务器要占用的端口标在对应节点上。
+
+### 文案
+
+入口侧统一叫"线路"，出口侧统一叫"出口"。"隧道"一词只在"托管隧道"和"服务器间隧道"两处出现，并在图上能看出它们是哪一段。具体改名在 N1 的交互审查里逐条列出，改名只动 locale 文案，不动后端字段。
+
+## 4. 技术方案
+
+### 4.1 选型
+
+| 用途 | 选择 | 取代 |
+| --- | --- | --- |
+| 组件 | shadcn/ui `base-nova`（`@base-ui/react`），源码放 `src/components/ui/` | `@mui/material` |
+| 样式 | Tailwind v4（`@tailwindcss/vite`）+ CSS 变量 | emotion、`sx` |
+| 图标 | `lucide-react` | `@mui/icons-material` |
+| 提示 | `sonner` | `SnackbarHost` |
+| 命令面板 | `cmdk` | 无 |
+| 表格 | `@tanstack/react-table` + 共享 `DataTable` | MUI `Table` |
+| 字体 | Geist Variable / Geist Mono，中文走系统字体 | Roboto |
+
+组件文件从 rackbook 的 `web/src/components/ui/`（26 个）直接拷贝，再补 PSP 需要而 rackbook 没有的：`select`、`radio-group`、`toggle-group`、`accordion`、`collapsible`、`pagination`、`progress`、`scroll-area`、`calendar`（如需要）。
+
+不使用 shadcn CLI 生成，原因是 PSP 是 TypeScript 7、rackbook 是 6，CLI 兼容性未验证；拷贝文件后以 `tsc -b` 通过为准。
+
+### 4.2 两套并存
+
+- Tailwind v4 的 preflight 和工具类都在 CSS 层（`@layer`）里，MUI 的 emotion 样式不在层里。按层叠规则，不在层里的样式优先，所以预期 preflight 不会破坏还没迁移的 MUI 页面。**这一点必须在 F1 里实测确认**，不能只靠推断。
+- 推论：不要在同一个元素上同时用 MUI 组件和 Tailwind 类，工具类会输。一个文件要么是旧的，要么是新的。
+- `App.tsx` 里 `ThemeProvider` + `CssBaseline` 保留到最后一步才删。
+- 明暗模式：现有 `stores/appearance.ts` 继续是唯一来源，新增一个副作用把 `.dark` 类同步到 `<html>`。
+
+### 4.3 主题
+
+- 颜色变量沿用 rackbook 的 `index.css`（中性灰 + `--brand` + `--success` + `--warning` + `--destructive`）。
+- 现有 6 个主题色预设保留，改为切换 `--brand`（`<html data-brand="teal">`）。`@material/material-color-utilities` 在收尾阶段移除。
+- 密度：`<html data-density="compact|comfortable">` 控制行高和控件高度两个变量。默认 `compact`。
+- 图表：新增 `useChartTokens()`，从 CSS 变量读颜色给 ECharts，取代 `theme.palette.md`。
+- CodeMirror：主题同样从 CSS 变量取色。
+
+### 4.4 不能碰的东西
+
+- `web-react/index.html` 里的 `<!-- PSP_PANEL_BASE -->` 和 vite 的 `base: './'`。
+- CSP 目前是 `style-src 'self' 'unsafe-inline'`，Tailwind 产出静态 CSS，不需要改后端。
+- RBAC 的三处前端门控（`ROLE_CAPS` / `ADMIN_ONLY_ROUTES` / 导航项 `adminOnly`）逐项保留，迁移 PR 不改变任何权限行为。
+- i18n 七个命名空间不增不减；zh-CN 和 en-US 同步加键（`localeParity.test.ts` 会拦）。
+- 不新增 oxlint 警告；`tsc -b` 的未使用导入会让 CI 失败。
+
+## 5. 工作包
+
+每个工作包 = 一个分支 + 一个 PR。分支名 `kazuha/ui-<包名>`，从最新的 `origin/main` 切出。
+
+### 阶段 0：地基（串行）
+
+| 包 | 内容 | 完成标准 |
+| --- | --- | --- |
+| **F1 基础设施** | 装 Tailwind v4、拷 `components/ui`、`index.css` 变量、字体、`cn()`、`.dark` 同步、`data-brand` / `data-density` | 现有全部页面外观无变化（截图对比 5 个代表页）；并存结论写进本文档 4.2 |
+| **F2 共享构件** | `AppShell`（侧栏、顶栏、用户菜单）、`CommandPalette`、`PageHeader`、`DataTable`、`DetailSheet`、`OptionCards`（带小图的选项卡片）、`Field` / `FormSection` / `SaveBar`、`ConfirmDialog`、toast 适配、`StatusDot` / `ToneBadge`、`EmptyState` / `ErrorState`、图标映射表、`useChartTokens` | 每个构件有测试；有一个仅开发环境可见的 `/admin/_ui` 展示页 |
+| **F3 换外壳** | `AdminLayout`、`UserLayout` 换成 `AppShell`，内部页面仍是 MUI | 导航、权限过滤、预取、通知铃、语言和外观菜单行为不变；现有布局测试通过 |
+
+F2 要保持现有命令式接口的签名不变（`ConfirmHost`、`SnackbarHost` 的调用方式），只换实现，这样未迁移的页面不用动。
+
+### 阶段 1：试点（串行，结束后人工验收）
+
+| 包 | 内容 |
+| --- | --- |
+| **N0 节点页交互审查** | 按 3.7 产出审查稿，细化 3A；负责人确认。不写代码 |
+| **N1 列表与详情页框架** | `NodesView` 拆成 `views/admin/nodes/` 目录；列表（已管理 / 未管理 / 线路表）用 `DataTable`；新增 `/admin/nodes/:id` 详情页、四个标签的骨架、顶部总览路径图（`PathDiagram` 在此落地）；基本信息标签 |
+| **N2 入口线路** | 线路类型卡片选择器、四类线路各自的表单与路径图、状态与探测显示；连带 `TunnelLineEditor`、`CdnLineFields`、`LineLabelsFields`、`SourceAddressesField`、`LineMultipliersDialog`、`TagsAutocomplete` |
+| **N3 出口与协议** | 出口标签（默认出口、`TransitLinkFields`、`routes/` 的分流规则）；协议标签（入站表单、`TLSCipherSuitesSelect`）；新建向导改用同一批表单组件（`NodeSetupFields`） |
+| **N4 节点对话框** | 指标、诊断、迁移预览、重装、REALITY 扫描、原生升级、清理等对话框 |
+
+**验收关口**：试点合并后停下来，由负责人看实际效果。第 3 节的规则和 F2 的构件在这里定型；之后的并行阶段不再改共享构件的接口。
+
+### 阶段 2：并行铺开
+
+同一波里的包互不重叠文件，可以同时做。跨波串行。
+
+**波 A：小页面（并行 6 个）**
+
+| 包 | 文件 |
+| --- | --- |
+| A1 登录与账号流程 | `views/*.tsx` 10 个（Login、Register、Forgot / Reset、Enroll2FA、Verify、Sso*、LoggedOut）+ `CaptchaWidget`、`SiteFooter`、`ConsentDialog` |
+| A2 概览与流量 | `DashboardView`、`TrafficView`、`TrafficChart`、`KpiTile`、`SyncStatusCard` |
+| A3 日志与任务 | `LogsView`、`SyncTasksView`、`NodeIssuesView` |
+| A4 订阅配置 | `RuleSetsView`、`TemplatesView`、`SubClientsView`、`subclients/`、`RuleEditorDialog`、`MihomoAdvancedRulesEditor`、`ProxyGroupMembersEditor`、`CodeEditor` |
+| A5 杂项 | `LanguagePacksView`、`fronts/`（SNI 共用端口，配路径图）、`legal/`、`LegalDocument` |
+| A6 用户端 | `MeView`（拆目录）、`TwoFactorDialog`、`PasskeyDialog`、`RecoveryCodesDialog` |
+
+**波 B：大页面（并行 5 个）**
+
+| 包 | 文件 |
+| --- | --- |
+| B1 用户 | `UsersView`（拆目录）、`AccountSecurityDrawer`、`AdminPasskeysDialog`、`UserNodeUsage`、`UserServerUsage`、`UserActivity`、`UserAutocomplete` |
+| B2 服务器 | `ServersView`（拆目录）、`ServerAccessDialog`、`ServerHasNodesDialog`、`NodeInstallCommand`、`NodeReleaseSelector`、`LinkProbeSettings` |
+| B3 证书 | `CertificatesView`、`CertEventsTab` |
+| B4 分组 | `GroupsView`、`groups/`、`components/scope/` |
+| B5 设置 | `SettingsView`（拆成分区导航 + 每区一个文件） |
+
+**波 C：功能目录（并行 3 个）**
+
+| 包 | 文件 |
+| --- | --- |
+| C1 风险中心 | `views/admin/risk/`（35 个文件） |
+| C2 访问控制 | `views/admin/accessControl/`（48 个文件）+ `DestResolveDialog`、`AuditCollectDialog`、`PolicyField`、`NodePolicyStatusRow` |
+| C3 运行诊断 | `views/admin/diagnostics/`（15 个文件） |
+
+`components/` 里的共享组件跟随第一个使用它的包迁移；被多个包使用的（`HelpTip`、`InfoTip`、`FieldHint`、`TzHint`、`AsyncButton`、`BulkBar`、`PagedTableFooter`、`SortableTableCell`、`StatusLine`、`ToneBadge`）归 F2。
+
+### 阶段 3：收尾（串行）
+
+| 包 | 内容 |
+| --- | --- |
+| **Z1 移除 MUI** | 删除 `@mui/*`、`@emotion/*`、`@fontsource/roboto`、`@material/material-color-utilities`、`src/theme/`、`ThemeProvider`、`CssBaseline`；更新 `vite.config.ts` 的 `manualChunks` |
+| **Z2 核对** | `git grep "@mui/"` 为空；包体积前后对比；`npm run smoke:dist`；全站明暗 + 窄屏走查；更新 README 和 docs 里提到 MUI 的地方 |
+
+`routes/` 因此从 A5 移到 N3。波 B、波 C 的每个包开工前各有一份交互审查（3.7），不单独计 PR。
+
+合计：3 + 4 + 14 + 2 = **23 个 PR**，外加节点页和各大页面的交互审查稿。
+
+## 6. 派发与执行
+
+### 6.1 角色
+
+| 角色 | 模型 | 做什么 |
+| --- | --- | --- |
+| 调度 | Opus | 读本计划，按波派发；每个包写简报；合并前做对抗式评审；处理冲突 |
+| 执行 | Sonnet | 每个包一个子 agent，独立 worktree，写代码、跑测试 |
+| 探查 | Haiku | 执行过程中的文件 / 调用点查找，只返回 `文件:行` |
+
+### 6.2 每个包的流程
+
+1. `git fetch origin main --prune`，`git worktree add -b kazuha/ui-<包名> <路径> origin/main`。
+2. 先调整测试：把该包涉及的测试改成按角色 / 标签 / 文字查询，去掉 `.Mui*` 选择器；新行为（URL 选中项、筛选记忆等）先写失败的测试。
+3. 实现。只动本包清单里的文件，加上两个 locale JSON 和必要的路由。
+4. 本地门禁，全部通过才算完成：
+   - `npm run lint`（不新增警告）
+   - `npm run test`
+   - `npm run build`
+   - `npm run smoke:dist`
+5. 浏览器实测并截图：明、暗、桌面宽度、手机宽度各一张；逐条对照第 3 节。
+6. 调度（Opus）对最终提交做对抗式评审，一行一条问题。修完后对新的最终提交再评一次。
+7. 开 PR，不合并。合并由负责人决定。
+
+### 6.3 并行时的冲突规则
+
+- 一个文件只属于一个包。清单外的文件需要改，先停下来报告。
+- `locales/*/admin.json` 等是公共文件：每个包只在自己页面的键前缀下增删，不整理别人的键。
+- 共享构件（F2 的产物）在阶段 2 期间冻结接口。发现缺能力时报告给调度，由调度单开一个小 PR 统一加，不在页面包里各自打补丁。
+- 同一波的 PR 逐个合并，后合并的在合并前 rebase 一次。
+
+### 6.4 给执行 agent 的简报模板
+
+```text
+任务：UI 迁移工作包 <包名>
+计划：docs/ui-shadcn-migration-plan.md（先读第 3、4、6 节）
+范围：<文件清单>
+参考实现：views/admin/nodes/（试点页，照它的结构和写法）
+共享构件：src/components/ui/、src/components/shell/、src/components/data/ —— 只用，不改
+必须保持：路由路径、权限门控、API 调用、i18n 键的语义
+完成标准：6.2 的门禁全部通过；第 3 节逐条满足；四张截图
+不要做：改清单外的文件；加新功能；合并 PR
+卡住时：停下并报告，不要绕过
+```
+
+## 7. 风险
+
+| 风险 | 应对 |
+| --- | --- |
+| 并存期 preflight 影响旧页面 | F1 实测并截图对比；有问题就把 preflight 限定在新外壳的容器内 |
+| 主分支同时在加功能，迁移中的页面被改 | 一个页面进入迁移后，该页面的功能改动等它合并后再做；每个包尽量小、尽快合并 |
+| 大页面一次改太多，评审不动 | 强制拆目录；N1–N3 那样分成多个 PR |
+| 248 个测试大面积失败 | 测试随所属页面在同一个 PR 里迁移；按角色查询的测试大多不用改 |
+| 行为悄悄变了（权限、校验、提交内容） | 评审清单里专门核对提交给后端的请求体前后一致 |
+| 发布的 beta 里新旧页面混杂 | 外壳最先换，整体框架一致；稳定版等阶段 3 完成后再发 |
+
+仓库里有一批 10 月的未合并前端 PR（#272–#283，访问控制系列）。动手前要确认它们是已被取代还是还要合并，否则会和 C2 冲突。
+
+## 8. 需要负责人拍板的事
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| 1 | 增量合并到 `main`，还是开一个长期集成分支最后一次合并 | 增量合并。主分支变动快，长期分支会烂掉 |
+| 2 | 6 个主题色预设是否保留 | 保留，只切换强调色 |
+| 3 | 密度开关是否保留、默认哪个 | 保留，默认紧凑 |
+| 4 | 子 agent 是否自己开 PR | 开 PR 但不合并 |
+| 5 | 试点后是否设人工验收关口 | 设。这是定型的唯一机会 |
+| 6 | #272–#283 这批旧 PR 怎么处理 | 需要你确认 |
+| 7 | 服务器、用户、分组是否都改成"列表 + 详情页" | 改。三处都有对话框套对话框的问题 |
+| 8 | 设置页是否按审查稿重新分区，并把节点相关的设置移走 | 改，分区名单见审查稿第 1 节 |
+| 9 | 是否新增"需要处理"收件箱 | 做，但作为迁移完成后的独立功能，不放进迁移 PR |
+| 10 | 术语表（审查稿第 7 节） | 上游机器统一叫"服务器"（2026-11-18 已确定）；其余各行仍待确认 |
+| 11 | 审查稿第 8 节的非界面问题是否随迁移一起修 | 已核对的几条随所在页面的包一起修；"设置整份提交覆盖"先单独验证 |
