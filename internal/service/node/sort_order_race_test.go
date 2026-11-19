@@ -64,15 +64,6 @@ func moveTo(t *testing.T, repos ports.Repos, id int64, order int) {
 	}
 }
 
-func storedOrder(t *testing.T, repos ports.Repos, id int64) int {
-	t.Helper()
-	n, err := repos.Node.GetByID(t.Context(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n.SortOrder
-}
-
 // The HTTP edit path: the handler fills the node with what it read before the
 // server locks, then the service saves it. A reorder that lands in between must
 // win.
