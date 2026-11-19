@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next'
+import { spacedT } from '@/i18n/spacing'
 import type { LandingColor } from './landingColor'
 
 export type PathNodeKind = 'user' | 'entry' | 'cdn' | 'external' | 'landing' | 'exit' | 'internet'
@@ -8,7 +9,8 @@ export type PathTone = 'success' | 'warning' | 'danger' | 'pending' | 'neutral'
 export interface PathNode {
   id: string
   kind: PathNodeKind
-  label: string
+  /** The node's own name (a server, a landing node). Left out for the generic nodes (the user, the internet), which the diagram package names itself in the UI language. */
+  label?: string
   /** A port or a region: small text under (md) or after (sm) the label. */
   sublabel?: string
   status?: PathTone
@@ -28,7 +30,14 @@ export interface PathEdge {
    * internet); its label, if any, is then attached to the node it leads to.
    */
   name?: string
+  /** `origin`: a CDN fetching from the origin (回源), named in the UI language. */
+  role?: 'origin'
   status?: PathTone
+}
+
+/** A node's name: its own label, or the generic name of its kind in the UI language. */
+export function nodeLabel(node: PathNode, t: TFunction): string {
+  return node.label ?? t(`ui.diagram.kind_${node.kind}`)
 }
 
 type Problem = 'danger' | 'warning' | 'pending'
@@ -53,13 +62,13 @@ function bracket(parts: (string | null | undefined)[], t: TFunction, head: strin
 /** A node's wording: its label, with a CDN or external entry named as such (the picture says it only by icon), its port, and any text an unnamed hop attached to it. */
 function nodeText(node: PathNode, t: TFunction, extra: (string | undefined)[] = []): string {
   const kind = node.kind === 'cdn' ? t('ui.diagram.kind_cdn') : node.kind === 'external' ? t('ui.diagram.kind_external') : undefined
-  return bracket([kind, node.sublabel, ...extra], t, node.label)
+  return bracket([kind, node.sublabel, ...extra], t, nodeLabel(node, t))
 }
 
 /** An edge's wording: `phrase` goes in the sentence ("端口转发 (48 ms)"); `tail` is the label an unnamed edge hands to its destination. */
 export function edgeText(edge: PathEdge | undefined, t: TFunction): { phrase: string; tail: string | undefined } {
   const e = edge ?? { style: 'solid' as const }
-  const name = e.name ?? t(e.style === 'dashed' ? 'ui.diagram.edge_dashed' : 'ui.diagram.edge_solid')
+  const name = e.name ?? (e.role === 'origin' ? t('ui.diagram.edge_origin') : t(e.style === 'dashed' ? 'ui.diagram.edge_dashed' : 'ui.diagram.edge_solid'))
   if (!name) return { phrase: '', tail: e.label }
   return { phrase: e.label ? `${name}${t('ui.diagram.summary_paren', { parts: e.label })}` : name, tail: undefined }
 }
@@ -75,13 +84,13 @@ function statusClause(nodes: readonly PathNode[], edges: readonly (PathEdge | un
   const considered: { problem: Problem | null; name: string }[] = []
   const everything: { problem: Problem | null; name: string }[] = []
   nodes.forEach((n, i) => {
-    const el = { problem: problemOf(n.status), name: n.label }
+    const el = { problem: problemOf(n.status), name: nodeLabel(n, t) }
     everything.push(el)
     if (inner(i)) considered.push(el)
   })
   edges.forEach((e, i) => {
     if (i >= nodes.length - 1) return
-    const el = { problem: problemOf(e?.status), name: t('ui.diagram.status_edge_ref', { from: nodes[i].label, to: nodes[i + 1].label }) }
+    const el = { problem: problemOf(e?.status), name: t('ui.diagram.status_edge_ref', { from: nodeLabel(nodes[i], t), to: nodeLabel(nodes[i + 1], t) }) }
     everything.push(el)
     if (inner(i) && inner(i + 1)) considered.push(el)
   })
@@ -114,10 +123,12 @@ function statusClause(nodes: readonly PathNode[], edges: readonly (PathEdge | un
  * elements that have it), and never inside the brackets, so a node and an edge that
  * share a status do not repeat it. Healthy and neutral are not spoken.
  *
- * The Chinese templates carry the spaces copy rule 8 asks for; nothing here
- * rewrites a label.
+ * Spaces between Chinese and Latin text at the joins are resolved at render time
+ * (src/i18n/spacing.ts); nothing here rewrites a label.
  */
-export function describePath(nodes: readonly PathNode[], edges: readonly (PathEdge | undefined)[], t: TFunction): string {
+export function describePath(nodes: readonly PathNode[], edges: readonly (PathEdge | undefined)[], rawT: TFunction): string {
+  // Every sentence here joins values to template text: the boundaries are resolved by the spacing rule.
+  const t = spacedT(rawT)
   if (nodes.length === 0) return t('ui.diagram.summary_empty')
   if (nodes.length === 1) return nodeText(nodes[0], t)
 

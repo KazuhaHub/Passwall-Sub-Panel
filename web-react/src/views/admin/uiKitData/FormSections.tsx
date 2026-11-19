@@ -12,6 +12,7 @@ import { InheritanceField, SourceTrail } from '@/components/form/InheritanceFiel
 import { NumberField } from '@/components/form/NumberField'
 import { OptionCards } from '@/components/form/OptionCards'
 import { SaveBar } from '@/components/form/SaveBar'
+import { FormValidityProvider } from '@/components/form/FormValidity'
 import { SecretField } from '@/components/form/SecretField'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { TagsField } from '@/components/form/TagsField'
@@ -64,6 +65,7 @@ export function FormsDemoSection() {
 
   return (
     <Section id="forms" title="表单" note="标签在上，说明在下；失焦才校验，错误替换说明；改动后底部出现保存条。试着清空名称再移开焦点，或把端口改成 99999。">
+      <FormValidityProvider>
       <div className="flex max-w-2xl flex-col gap-8 rounded-xl border bg-card p-5">
         <FormSection title="基本信息" description="名称和地址，列表和订阅里都会用到。">
           <Field label="名称" required hint="显示在节点列表和订阅里" error={fe.errors.name}>
@@ -135,6 +137,7 @@ export function FormsDemoSection() {
           onDiscard={() => { setD(saved); fe.reset() }}
         />
       </div>
+      </FormValidityProvider>
     </Section>
   )
 }
@@ -154,11 +157,11 @@ export function ControlsDemoSection() {
 
   const solid = { style: 'solid' as const }
   const sample = (k: typeof kind) => {
-    const u = { id: 'u', kind: 'user' as const, label: '用户' }
+    const u = { id: 'u', kind: 'user' as const }
     const l = { id: 'l', kind: 'landing' as const, label: '落地' }
     if (k === 'forward') return { nodes: [u, { id: 'e', kind: 'entry' as const, label: '入口' }, l], edges: [solid, solid] }
     if (k === 'tunnel') return { nodes: [u, { id: 'e', kind: 'entry' as const, label: '入口' }, l], edges: [solid, { style: 'dashed' as const }] }
-    if (k === 'cdn') return { nodes: [u, { id: 'c', kind: 'cdn' as const, label: 'CDN' }, l], edges: [solid, { style: 'solid' as const, name: '回源' }] }
+    if (k === 'cdn') return { nodes: [u, { id: 'c', kind: 'cdn' as const }, l], edges: [solid, { style: 'solid' as const, role: 'origin' as const }] }
     return { nodes: [u, { id: 'x', kind: 'external' as const, label: '外部入口' }, l], edges: [solid, { style: 'solid' as const, name: '' }] }
   }
   const card = (k: typeof kind, title: string, description: string, extra: { disabled?: boolean; disabledReason?: string } = {}) => {
@@ -208,9 +211,12 @@ export function ControlsDemoSection() {
             onChange={setUser}
             renderValue={show}
             defaultValue={100}
-            hint="选择「在此设置」后可以填 0，表示不限量；清空输入框会回到「跟随上级」，不会存成 0"
-            onCleared={() => setUser(undefined)}
-            renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={onChange} unit="GB" min={0} integer zeroLabel="不限量" />}
+            hint="选择「在此设置」后可以填 0，表示不限量。要回到上一级的取值，请选「跟随上级」"
+            renderEditor={({ id, value, onChange, ...aria }) => (
+              // Inside an InheritanceField the NumberField never reports an empty value (an empty box is
+              // invalid until filled), so the null case is ignored, never turned into 0.
+              <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} unit="GB" min={0} integer zeroLabel="不限量" />
+            )}
           />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium">分组也可以单独设置（只读演示）</span>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SearchIcon, XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { cn } from '@/lib/utils'
@@ -41,7 +41,7 @@ export interface FilterBarProps {
  * shows what was typed even though the page still holds the old keyword.
  */
 export function FilterBar({ search, facets = [], onClearAll, children, className, ...aria }: FilterBarProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const [draft, setDraft] = useState(search?.value ?? '')
   const reported = useRef(search?.value ?? '')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

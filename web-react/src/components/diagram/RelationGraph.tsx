@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { landingColorStyle, type LandingColor } from './landingColor'
 import type { PathTone } from './pathSummary'
@@ -22,6 +22,10 @@ export interface GraphColumn {
 }
 
 export interface GraphEdge {
+  /** Identity of the line (its line id): two lines can join the same two boxes, and each must stay itself in the picture and in the text. */
+  id: string
+  /** The line's name, shown in the lines list next to its path when there are several. */
+  label?: string
   from: string
   to: string
   style?: 'solid' | 'dashed'
@@ -71,12 +75,14 @@ export function layoutGraph(columns: readonly GraphColumn[]): { boxes: Record<st
 }
 
 /** A cubic curve from one box's near edge to the other's, horizontal at both ends. */
-export function edgePath(a: BoxRect, b: BoxRect): string {
+export function edgePath(a: BoxRect, b: BoxRect, offset = 0): string {
   const forward = a.col <= b.col
   const x1 = forward ? a.x + a.w : a.x
   const x2 = forward ? b.x : b.x + b.w
-  const y1 = a.y + a.h / 2
-  const y2 = b.y + b.h / 2
+  // `offset` moves both ends up or down the box edge, so parallel lines between the
+  // same two boxes are separate curves.
+  const y1 = a.y + a.h / 2 + offset
+  const y2 = b.y + b.h / 2 + offset
   const mid = (x1 + x2) / 2
   return `M ${x1} ${y1} C ${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`
 }
@@ -88,35 +94,43 @@ function boxStatus(status: PathTone | undefined, t: (k: string) => string): stri
 
 const MAX_PATHS = 200
 
+export interface GraphPath {
+  /** Box ids from where the line enters to where it leaves. */
+  nodes: string[]
+  /** The line that joins each pair of neighbours in `nodes`: parallel lines are separate paths. */
+  edges: GraphEdge[]
+}
+
 /**
  * Every path through `id`: each way back to where traffic enters, joined to each way
- * on to where it leaves, following the edges' direction. A box with no edges has no
- * paths. Capped, so a densely wired graph cannot make the list run away.
+ * on to where it leaves, following the edges' direction. Walked over EDGES, not
+ * boxes, so two lines joining the same pair of boxes are two paths. A box with no
+ * edges has no paths. Capped, so a densely wired graph cannot make the list run away.
  */
-export function pathsThrough(id: string, edges: readonly GraphEdge[]): string[][] {
-  const out = new Map<string, string[]>()
-  const into = new Map<string, string[]>()
+export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath[] {
+  const out = new Map<string, GraphEdge[]>()
+  const into = new Map<string, GraphEdge[]>()
   for (const e of edges) {
-    out.set(e.from, [...(out.get(e.from) ?? []), e.to])
-    into.set(e.to, [...(into.get(e.to) ?? []), e.from])
+    out.set(e.from, [...(out.get(e.from) ?? []), e])
+    into.set(e.to, [...(into.get(e.to) ?? []), e])
   }
-  const chains = (start: string, next: Map<string, string[]>): string[][] => {
-    const done: string[][] = []
-    const walk = (node: string, trail: string[]) => {
+  const chains = (start: string, next: Map<string, GraphEdge[]>, far: (e: GraphEdge) => string): GraphPath[] => {
+    const done: GraphPath[] = []
+    const walk = (node: string, trail: GraphPath) => {
       if (done.length >= MAX_PATHS) return
-      const more = (next.get(node) ?? []).filter(n => !trail.includes(n))
+      const more = (next.get(node) ?? []).filter(e => !trail.nodes.includes(far(e)))
       if (more.length === 0) { done.push(trail); return }
-      for (const n of more) walk(n, [...trail, n])
+      for (const e of more) walk(far(e), { nodes: [...trail.nodes, far(e)], edges: [...trail.edges, e] })
     }
-    walk(start, [start])
+    walk(start, { nodes: [start], edges: [] })
     return done
   }
-  const forward = chains(id, out)
-  const backward = chains(id, into).map(c => c.slice().reverse())
-  const found: string[][] = []
+  const forward = chains(id, out, e => e.to)
+  const backward = chains(id, into, e => e.from).map(c => ({ nodes: c.nodes.slice().reverse(), edges: c.edges.slice().reverse() }))
+  const found: GraphPath[] = []
   for (const b of backward) for (const f of forward) {
-    if (b.length === 1 && f.length === 1) continue
-    found.push([...b, ...f.slice(1)])
+    if (b.nodes.length === 1 && f.nodes.length === 1) continue
+    found.push({ nodes: [...b.nodes, ...f.nodes.slice(1)], edges: [...b.edges, ...f.edges] })
     if (found.length >= MAX_PATHS) return found
   }
   return found
@@ -146,7 +160,7 @@ const DOT: Record<PathTone, string> = {
  * a column, left and right across columns); Enter or Space selects.
  */
 export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className }: RelationGraphProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const narrow = useMediaQuery('(max-width: 639px)')
   const asList = layout === 'list' || (layout === 'auto' && narrow)
   const [own, setOwn] = useState<string | null>(null)
@@ -160,11 +174,6 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     return m
   }, [columns])
   const drawn = useMemo(() => edges.filter(e => layoutInfo.boxes[e.from] && layoutInfo.boxes[e.to]), [edges, layoutInfo])
-  const degree = useMemo(() => {
-    const d: Record<string, number> = {}
-    for (const e of drawn) { d[e.from] = (d[e.from] ?? 0) + 1; d[e.to] = (d[e.to] ?? 0) + 1 }
-    return d
-  }, [drawn])
 
   // WHO IS AFFECTED. Selecting a box lights every path through it, in both
   // directions: forward to where its traffic ends up (an entry reaches its landings
@@ -172,15 +181,25 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
   // entries). "This server went down: who does it hurt?" is answered by the paths,
   // not by the direct neighbours.
   const paths = useMemo(() => (selected === null ? [] : pathsThrough(selected, drawn)), [selected, drawn])
-  const hotNodes = useMemo(() => new Set(paths.flat()), [paths])
-  const hotEdges = useMemo(() => {
-    const hop = new Set<string>()
-    for (const path of paths) for (let i = 0; i + 1 < path.length; i++) hop.add(`${path[i]}>${path[i + 1]}`)
-    return hop
-  }, [paths])
-  const touching = (e: GraphEdge) => hotEdges.has(`${e.from}>${e.to}`)
+  const hotNodes = useMemo(() => new Set(paths.flatMap(p => p.nodes)), [paths])
+  const hotEdgeIds = useMemo(() => new Set(paths.flatMap(p => p.edges.map(e => e.id))), [paths])
+  const touching = (e: GraphEdge) => hotEdgeIds.has(e.id)
   const related = hotNodes
-  const connectedCount = selected === null ? 0 : Math.max(0, hotNodes.size - 1)
+  // ONE definition of "lines through a box" for its name and for the announcement:
+  // the number of paths through it (an end-to-end line each).
+  const throughCount = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const c of columns) for (const b of c.boxes) m[b.id] = pathsThrough(b.id, drawn).length
+    return m
+  }, [columns, drawn])
+  // Where each of several lines between the same two boxes is drawn, so they are visibly apart.
+  const offsetOf = useMemo(() => {
+    const groups = new Map<string, GraphEdge[]>()
+    for (const e of drawn) groups.set(`${e.from}>${e.to}`, [...(groups.get(`${e.from}>${e.to}`) ?? []), e])
+    const m: Record<string, number> = {}
+    for (const g of groups.values()) g.forEach((e, i) => { m[e.id] = g.length === 1 ? 0 : (i - (g.length - 1) / 2) * Math.min(10, 28 / (g.length - 1)) })
+    return m
+  }, [drawn])
 
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
   const firstId = columns.find(c => c.boxes.length)?.boxes[0]?.id
@@ -204,15 +223,13 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
 
   const selectedBox = selected !== null ? boxById[selected] : undefined
   const announce = selectedBox
-    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: connectedCount })
+    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: throughCount[selectedBox.id] ?? 0 })
     : ''
-
-  const edgeOf = (from: string, to: string) => drawn.find(e => e.from === from && e.to === to)
 
   const connections = (
     <section
       role="region"
-      aria-label={`${t('ui.diagram.graph_label')} ${t('ui.diagram.graph_connections_suffix')}`}
+      aria-label={`${t('ui.diagram.graph_label')} ${t('ui.diagram.graph_lines_suffix')}`}
       tabIndex={0}
       className="rounded-lg border bg-muted/30 px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
     >
@@ -224,13 +241,13 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
           ) : (
             <ul className="flex flex-col gap-1.5">
               {paths.map(path => {
-                const hops = path.slice(1).map((id, i) => edgeOf(path[i], id)).filter((e): e is GraphEdge => e !== undefined)
-                const tunnel = hops.some(e => e.style === 'dashed')
-                const problems = [...new Set(hops.map(e => e.status).filter((x): x is 'danger' | 'warning' | 'pending' => x === 'danger' || x === 'warning' || x === 'pending'))]
+                const tunnel = path.edges.some(e => e.style === 'dashed')
+                const problems = [...new Set(path.edges.map(e => e.status).filter((x): x is 'danger' | 'warning' | 'pending' => x === 'danger' || x === 'warning' || x === 'pending'))]
+                const names = path.edges.map(e => e.label).filter((x): x is string => !!x)
                 return (
-                  <li key={path.join('>')} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
-                    {path.map((id, i) => (
-                      <span key={id} className="inline-flex items-center gap-1">
+                  <li key={path.edges.map(e => e.id).join('>')} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                    {path.nodes.map((id, i) => (
+                      <span key={`${i}-${id}`} className="inline-flex items-center gap-1">
                         {i > 0 && <span aria-hidden="true" className="text-muted-foreground">→</span>}
                         <button
                           type="button"
@@ -242,8 +259,9 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
                         </button>
                       </span>
                     ))}
-                    {(tunnel || problems.length > 0) && (
+                    {(names.length > 0 || tunnel || problems.length > 0) && (
                       <span className="ml-1 inline-flex flex-wrap gap-x-2 text-xs text-foreground/70">
+                        {names.map(n => <span key={n} className="font-medium text-foreground">{n}</span>)}
                         {tunnel && <span>{t('ui.diagram.edge_dashed')}</span>}
                         {problems.map(p => <span key={p} className="font-medium text-foreground">{t(`ui.diagram.status_${p}`)}</span>)}
                       </span>
@@ -269,7 +287,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
         ref={el => { refs.current[b.id] = el }}
         type="button"
         aria-pressed={isSel}
-        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_connections', { count: degree[b.id] ?? 0 })].filter(Boolean).join(', ')}
+        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_through', { count: throughCount[b.id] ?? 0 })].filter(Boolean).join(', ')}
         data-dim={dim ? 'true' : undefined}
         tabIndex={b.id === tabStop ? 0 : -1}
         onClick={() => select(isSel ? null : b.id)}
@@ -317,18 +335,19 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
       <div className="overflow-auto rounded-xl border bg-card" style={{ maxHeight }}>
         <div className="relative" style={{ width: layoutInfo.width, height: layoutInfo.height }}>
           <svg aria-hidden="true" width={layoutInfo.width} height={layoutInfo.height} className="pointer-events-none absolute inset-0">
-            {drawn.map((e, i) => {
+            {drawn.map(e => {
               const tone = e.status ?? 'neutral'
               const hot = touching(e)
               const dim = selected !== null && !hot
               return (
                 <path
-                  key={`${e.from}>${e.to}>${i}`}
+                  key={e.id}
                   data-edge=""
+                  data-edge-id={e.id}
                   data-style={e.style ?? 'solid'}
                   data-tone={tone}
                   data-dim={dim ? 'true' : undefined}
-                  d={edgePath(layoutInfo.boxes[e.from], layoutInfo.boxes[e.to])}
+                  d={edgePath(layoutInfo.boxes[e.from], layoutInfo.boxes[e.to], offsetOf[e.id] ?? 0)}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={hot ? 2.5 : 1.5}

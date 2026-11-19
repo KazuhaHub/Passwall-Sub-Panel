@@ -172,10 +172,10 @@ describe('writes from several hooks in the same tick', () => {
 
 describe('a batch belongs to the route it was written on (item 2)', () => {
   const q = urlCodecs.string()
-  const withNav = () => ({ a: useUrlState('q', q), nav: useNavigate() })
+  const useWithNav = () => ({ a: useUrlState('q', q), nav: useNavigate() })
 
   it('write then navigate: the old page\'s keys do not follow onto the new route', async () => {
-    const { result, where } = mount(withNav, ['/list'])
+    const { result, where } = mount(useWithNav, ['/list'])
     await act(async () => {
       result.current.a[1]('x')
       void result.current.nav('/other?z=1')
@@ -184,7 +184,7 @@ describe('a batch belongs to the route it was written on (item 2)', () => {
   })
 
   it('navigate then write: the write was made on the old page, so it is dropped too', async () => {
-    const { result, where } = mount(withNav, ['/list'])
+    const { result, where } = mount(useWithNav, ['/list'])
     await act(async () => {
       void result.current.nav('/other?z=1')
       result.current.a[1]('x')
@@ -193,7 +193,7 @@ describe('a batch belongs to the route it was written on (item 2)', () => {
   })
 
   it('writes made while staying on the page still land', async () => {
-    const { result, where } = mount(withNav, ['/list?z=1'])
+    const { result, where } = mount(useWithNav, ['/list?z=1'])
     await act(async () => { result.current.a[1]('x') })
     expect(where()).toEqual({ pathname: '/list', search: '?z=1&q=x' })
   })

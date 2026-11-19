@@ -17,8 +17,8 @@ import { useUrlWriter } from './urlBatch'
  * the list as it was before opening (never back on the panel). Going Back first and
  * rewriting afterwards would remove that extra entry but cannot be batched with other
  * writes in the same tick, which matters more. Back while the panel is open pops the
- * pushed entry, which is what closes it. The mark in history state names the param,
- * so one page's panel never takes another's entry for its own.
+ * pushed entry, which is what closes it. (No marker is kept in history state: nothing
+ * needs to tell a pushed entry from any other.)
  *
  * It writes through useUrlWriter, so it composes with every other URL hook on
  * the page in the same tick.
@@ -29,8 +29,6 @@ export interface UrlSelection<T> {
   select: (id: T, opts?: { replace?: boolean }) => void
   clear: () => void
 }
-
-interface SelectionMark { pspSelection?: string }
 
 export function useUrlSelection<T = string>(
   param: string,
@@ -49,8 +47,7 @@ export function useUrlSelection<T = string>(
     write((params, ctx) => {
       const wasOpen = params.get(param) !== null
       params.set(param, value)
-      // Mark only the entry this call pushes; a switch between rows keeps the mark it already has.
-      if (!wasOpen) ctx.state({ pspSelection: param } satisfies SelectionMark)
+      // Opening pushes (Back closes it); moving between rows while open replaces.
       if (!wasOpen && opts.replace !== true) ctx.push()
     }, 'replace')
   }, [write, param])

@@ -1,22 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import zh from '../locales/zh-CN/common.json'
 
-// Copy rule 8 (audit section 7.2): a space between a Chinese character and a Latin
-// letter or digit, and also between a Chinese character and an interpolated value,
-// because the value may be either ("{{name}}" is "HK 03" or "香港 03"). The spaces
-// are written into the templates themselves; nothing transforms a label at run time.
-// Full-width punctuation never takes a space, and is not matched here.
+// Copy rule 8 for the zh-CN templates of common:ui.data / ui.form / ui.diagram.
+//
+// Literal text carries the spaces rule 8 asks for ("按 Esc 取消"). A PLACEHOLDER
+// boundary carries none: what meets there is decided when the string is rendered
+// (src/i18n/spacing.ts), because the value may be Chinese or Latin. So a template:
+//   - has no space next to a {{placeholder}};
+//   - has a space between a Chinese character and literal Latin text or a digit;
+//   - has no space next to full-width punctuation.
 const CJK = '\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff'
+const PUNCT = '，。；：、！？（）“”‘’《》'
+const PLACEHOLDER = ''
 const rules: [string, RegExp][] = [
-  ['Chinese directly before a Latin letter or digit', new RegExp(`[${CJK}][A-Za-z0-9]`)],
-  ['Latin letter or digit directly before Chinese', new RegExp(`[A-Za-z0-9][${CJK}]`)],
-  ['Chinese directly before a {{placeholder}}', new RegExp(`[${CJK}]\\{\\{`)],
-  ['a {{placeholder}} directly before Chinese', new RegExp(`\\}\\}[${CJK}]`)],
+  ['a hand-written space before a {{placeholder}}', new RegExp(`\\s${PLACEHOLDER}`)],
+  ['a hand-written space after a {{placeholder}}', new RegExp(`${PLACEHOLDER}\\s`)],
+  ['Chinese directly before literal Latin text or a digit', new RegExp(`[${CJK}][A-Za-z0-9]`)],
+  ['literal Latin text or a digit directly before Chinese', new RegExp(`[A-Za-z0-9][${CJK}]`)],
+  ['a space before full-width punctuation', new RegExp(`\\s[${PUNCT}]`)],
+  ['a space after full-width punctuation', new RegExp(`[${PUNCT}]\\s`)],
 ]
-// Cases the rule excludes: none needed so far. A template that really must be
-// tight (before "%" or "°" the rule already allows it, they are not letters) is
-// listed here as `key`, with a reason.
-const ALLOW = new Set<string>([])
 
 function flat(obj: unknown, prefix = ''): Record<string, string> {
   const out: Record<string, string> = {}
@@ -30,9 +33,20 @@ function flat(obj: unknown, prefix = ''): Record<string, string> {
 
 describe('zh-CN templates of common:ui.data / ui.form / ui.diagram', () => {
   const ui = flat((zh as unknown as { ui: unknown }).ui, 'ui')
-  it.each(Object.entries(ui).filter(([key]) => /^ui\.(data|form|diagram)\./.test(key)))('%s keeps rule 8', (key, text) => {
-    if (ALLOW.has(key)) return
-    const broken = rules.filter(([, re]) => re.test(text)).map(([why]) => why)
+  it.each(Object.entries(ui))('%s keeps rule 8', (key, text) => {
+    // A placeholder stands for a value of unknown script, and its name has Latin letters in it.
+    const template = text.replace(/\{\{[^}]*\}\}/g, PLACEHOLDER)
+    const broken = rules.filter(([, re]) => re.test(template)).map(([why]) => why)
     expect(broken, `${key}: ${text}`).toEqual([])
+  })
+
+  it('checks the rules themselves: a bad template is caught', () => {
+    const bad = (s: string) => rules.some(([, re]) => re.test(s.replace(/\{\{[^}]*\}\}/g, PLACEHOLDER)))
+    expect(bad('选择 {{name}}')).toBe(true)
+    expect(bad('{{n}} 项')).toBe(true)
+    expect(bad('按Esc取消')).toBe(true)
+    expect(bad('（{{x}}） 再')).toBe(true)
+    expect(bad('选择{{name}}')).toBe(false)
+    expect(bad('按 Esc 取消')).toBe(false)
   })
 })

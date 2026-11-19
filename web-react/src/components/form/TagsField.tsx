@@ -1,8 +1,9 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { useReportValidity } from './FormValidity'
 import { TOUCH_TARGET } from '@/components/data/touchTarget'
 
 export interface TagsFieldProps {
@@ -11,6 +12,8 @@ export interface TagsFieldProps {
   /** Known tags to pick from. Anything typed that is not among them can still be added. */
   suggestions?: readonly string[]
   placeholder?: string
+  /** At least one tag is needed: while there is none, the form cannot be saved (see useReportValidity). */
+  required?: boolean
   /** Most tags allowed. Past it, new ones are dropped and a message says so. */
   max?: number
   id?: string
@@ -48,9 +51,9 @@ const composing = (e: { nativeEvent: globalThis.KeyboardEvent; keyCode: number }
  * ignored rather than added twice.
  */
 export function TagsField({
-  value, onChange, suggestions = [], placeholder, max, id, disabled, className, ...aria
+  value, onChange, suggestions = [], placeholder, max, required, id, disabled, className, ...aria
 }: TagsFieldProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const uid = useId()
   const listId = `${uid}-list`
   const input = useRef<HTMLInputElement>(null)
@@ -59,6 +62,7 @@ export function TagsField({
   const [active, setActive] = useState(-1)
   const isComposing = useRef(false)
   const [note, setNote] = useState<string | null>(null)
+  useReportValidity(required && value.length === 0 ? t('ui.form.tags_required') : null)
 
   const typed = text.trim()
   const options = useMemo(() => {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronDownIcon, ListFilterIcon, XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -32,7 +32,7 @@ export interface FacetFilterProps {
  * without opening anything, and a separate x clears it in one click.
  */
 export function FacetFilter({ label, options, selected, onChange, searchAbove = 8, className }: FacetFilterProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const [q, setQ] = useState('')
   const shown = q.trim() ? options.filter(o => o.label.toLowerCase().includes(q.trim().toLowerCase())) : options
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v])

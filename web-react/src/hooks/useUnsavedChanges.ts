@@ -36,7 +36,8 @@ export interface UnsavedChangesControls {
    */
   markSaved: () => void
   /**
-   * Let a navigation started in THIS tick through without asking. It expires when
+   * Let the navigation you are about to start through without asking: call it
+   * synchronously right before navigating, with no `await` in between. It expires when
    * the tick ends, so a later, unrelated route change is guarded as usual.
    */
   allowNext: () => void

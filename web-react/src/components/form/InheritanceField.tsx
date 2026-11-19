@@ -1,7 +1,8 @@
-import { useId, useRef, type CSSProperties, type ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useId, type CSSProperties, type ReactNode } from 'react'
+import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
+import { InheritEditorContext } from './editorContext'
 
 /**
  * One level of "全局 → 分组 → 本人". `value` is what is stored AT this level:
@@ -35,7 +36,7 @@ export interface SourceTrailProps<T> {
  * explained but not edited (the Settings scope rail, a user's effective quota).
  */
 export function SourceTrail<T>({ levels, renderValue, className }: SourceTrailProps<T>) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const inEffect = effectiveLevel(levels)
   return (
     // Stacked on a phone, where three cells side by side leave each about 100px and
@@ -78,15 +79,7 @@ export function SourceTrail<T>({ levels, renderValue, className }: SourceTrailPr
 export interface InheritanceEditorProps<T> {
   id: string
   value: T
-  /**
-   * The editor's new value, or null for an explicit empty COMMIT (the box emptied and
-   * then confirmed or left: a NumberField only says it with `allowEmpty`). null is NOT
-   * a value of T: a field cleared to nothing must not be saved as 0, which is
-   * "unlimited" here. The field hands it to `onCleared` and never to `onChange`.
-   * While the person is still editing, an editor must not report null at all (see
-   * NumberField), or the editor would be torn down under the cursor.
-   */
-  onChange: (next: T | null) => void
+  onChange: (next: T) => void
   /** The field label's id: the editor must be named by it, or a screen reader hears a bare number box. */
   'aria-labelledby': string
   'aria-describedby'?: string
@@ -103,12 +96,6 @@ export interface InheritanceFieldProps<T> {
   renderValue: (v: T) => string
   /** The control for an explicit value: a NumberField, a Switch, a select. */
   renderEditor: (p: InheritanceEditorProps<T>) => ReactNode
-  /**
-   * What clearing the editor means. Required, so it cannot be forgotten and
-   * defaulted to a number: the usual answer is to go back to following
-   * (`() => onChange(undefined)`), or to flag the field invalid until it is filled.
-   */
-  onCleared: () => void
   /** What "set here" starts from when no level above defines a value. */
   defaultValue: T
   hint?: ReactNode
@@ -119,14 +106,16 @@ export interface InheritanceFieldProps<T> {
 /**
  * Edits one level of a value that is inherited from above: shows the trail,
  * then a two-way switch "跟随上级 / 在此设置" and, only after "set here", the
- * editor. The switch is the single place follow is chosen, and choosing "set
- * here" seeds the editor with the value that was in effect, so nobody lands on
- * an empty or zero box and saves it by accident.
+ * editor. The switch is the ONLY way back to following: the editor offers none
+ * of its own, and an emptied editor is simply invalid until it is filled (or the
+ * person picks "跟随上级"), so no path unmounts a control that has focus. Choosing
+ * "set here" seeds the editor with the value that was in effect, so nobody lands
+ * on an empty or zero box and saves it by accident.
  */
 export function InheritanceField<T>({
-  label, levels, editLevel, onChange, renderValue, renderEditor, onCleared, defaultValue, hint, error, className,
+  label, levels, editLevel, onChange, renderValue, renderEditor, defaultValue, hint, error, className,
 }: InheritanceFieldProps<T>) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const uid = useId()
   const idx = levels.findIndex(l => l.id === editLevel)
   const own = idx >= 0 ? levels[idx] : undefined
@@ -134,8 +123,6 @@ export function InheritanceField<T>({
   const isSet = own?.value !== undefined
   const noteId = `${uid}-note`
   const labelId = `${uid}-label`
-  const editorBox = useRef<HTMLDivElement>(null)
-  const modeBox = useRef<HTMLDivElement>(null)
 
   const setMode = (mode: 'follow' | 'set') => {
     if (mode === 'follow') onChange(undefined)
@@ -148,7 +135,7 @@ export function InheritanceField<T>({
       <SourceTrail levels={levels} renderValue={renderValue} />
       {own && (
         <div className="flex flex-col gap-2">
-          <div ref={modeBox} className="w-fit max-w-full">
+          <div className="w-fit max-w-full">
           <SegmentedControl
             aria-label={t('ui.form.inherit_mode', { label, level: own.label })}
             size="sm"
@@ -161,26 +148,17 @@ export function InheritanceField<T>({
           />
           </div>
           {isSet ? (
-            <div ref={editorBox}>
+            // The editor is told it is inside an inheritance field: an empty box is
+            // invalid-until-filled there, and "follow" is the mode control's alone.
+            <InheritEditorContext.Provider value>
               {renderEditor({
                 id: `${uid}-editor`,
                 value: own.value as T,
-                onChange: v => {
-                  if (v !== null) { onChange(v); return }
-                  // An explicit empty commit. If the person is still in the editor (Enter),
-                  // the editor is about to go away with the focus in it: hand the focus to
-                  // the mode control, which is where they now are. A commit by leaving the
-                  // box needs no help, the focus has already gone where they sent it.
-                  const hadFocus = editorBox.current?.contains(document.activeElement) === true
-                  onCleared()
-                  if (hadFocus) {
-                    requestAnimationFrame(() => modeBox.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus())
-                  }
-                },
+                onChange,
                 'aria-labelledby': labelId,
                 'aria-describedby': error || hint ? noteId : undefined,
               })}
-            </div>
+            </InheritEditorContext.Provider>
           ) : (
             <p className="text-xs text-muted-foreground">
               {above?.value !== undefined

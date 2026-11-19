@@ -2,9 +2,9 @@ import { Fragment, useEffect, useRef, useState, type ComponentType } from 'react
 import {
   ChevronRightIcon, CloudIcon, ExternalLinkIcon, GlobeIcon, LogOutIcon, MapPinIcon, ServerIcon, UserRoundIcon,
 } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
-import { describePath, edgeText, statusWord, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
+import { describePath, edgeText, nodeLabel, statusWord, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
 import '@/styles/data-tokens.css'
 
 export type { PathEdge, PathNode, PathNodeKind, PathTone } from './pathSummary'
@@ -82,7 +82,7 @@ function StatusDot({ tone, className }: { tone: PathTone; className?: string }) 
  * Every edge also has a `title`, so a hover or a copy gets the words too.
  */
 export function PathDiagram({ nodes, edges = [], size = 'md', orientation = 'auto', summary, className }: PathDiagramProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const needed = nodes.length * NODE_W + Math.max(0, nodes.length - 1) * EDGE_W
   const [ref, fits] = useFits(needed, size === 'md' && orientation === 'auto')
   const vertical = size === 'md' && (orientation === 'vertical' || (orientation === 'auto' && !fits))
@@ -138,19 +138,21 @@ function visibleLabel(edge: PathEdge, t: Parameters<typeof statusWord>[1]): stri
 // ---- sm: inside a table row --------------------------------------------------
 
 function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
+  const { t } = useSpacedT()
+  const label = nodeLabel(node, t)
   // The origin and the internet are icon-only: they are the same on every row, so
   // spelling them out would spend the row's width on words that tell nothing.
   const iconOnly = end && (node.kind === 'user' || node.kind === 'internet')
   return (
     <span
       data-node={node.id}
-      title={node.label}
+      title={label}
       className="inline-flex min-w-0 items-center gap-1"
     >
       <NodeIcon node={node} className="size-3.5 shrink-0 text-muted-foreground" />
       {!iconOnly && (
         <>
-          <span className="max-w-[9rem] truncate font-medium text-foreground">{node.label}</span>
+          <span className="max-w-[9rem] truncate font-medium text-foreground">{label}</span>
           {node.sublabel && <span className="font-mono text-[10px] text-muted-foreground">{node.sublabel}</span>}
         </>
       )}
@@ -160,7 +162,7 @@ function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
 }
 
 function SmallEdge({ edge }: { edge: PathEdge }) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const tone = edge.status ?? 'neutral'
   const shown = visibleLabel(edge, t)
   const { phrase, tail } = edgeText(edge, t)
@@ -187,11 +189,13 @@ function SmallEdge({ edge }: { edge: PathEdge }) {
 // ---- md: the detail-page diagram ---------------------------------------------
 
 function FullNode({ node, vertical }: { node: PathNode; vertical: boolean }) {
+  const { t } = useSpacedT()
+  const label = nodeLabel(node, t)
   const ring = node.landingColor !== undefined
   return (
     <div
       data-node={node.id}
-      title={node.label}
+      title={label}
       className={cn('flex min-w-0 shrink-0 gap-2', vertical ? 'w-full flex-row items-center' : 'w-24 flex-col items-center text-center')}
     >
       <span
@@ -202,7 +206,7 @@ function FullNode({ node, vertical }: { node: PathNode; vertical: boolean }) {
         {node.status && <StatusDot tone={node.status} className="absolute -top-0.5 -right-0.5 size-2.5 ring-2 ring-background" />}
       </span>
       <span className={cn('flex min-w-0 flex-col', vertical ? 'items-start' : 'w-full items-center')}>
-        <span className="w-full truncate text-sm font-medium">{node.label}</span>
+        <span className="w-full truncate text-sm font-medium">{label}</span>
         {node.sublabel && <span className="w-full truncate font-mono text-xs text-muted-foreground">{node.sublabel}</span>}
       </span>
     </div>
@@ -210,7 +214,7 @@ function FullNode({ node, vertical }: { node: PathNode; vertical: boolean }) {
 }
 
 function FullEdge({ edge, vertical }: { edge: PathEdge; vertical: boolean }) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const tone = edge.status ?? 'neutral'
   const shown = visibleLabel(edge, t)
   const { phrase, tail } = edgeText(edge, t)

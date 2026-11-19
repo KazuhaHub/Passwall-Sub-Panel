@@ -10,6 +10,7 @@ import zh from '../locales/zh-CN/common.json'
 // listed here on purpose, with the values they can take; the test checks that list
 // against the locale too.
 const DYNAMIC: Record<string, string[]> = {
+  'ui.diagram.kind_': ['user', 'entry', 'cdn', 'external', 'landing', 'exit', 'internet'],
   'ui.data.reorder_blocked_': ['sorted', 'tree', 'paged'],
   'ui.diagram.status_': ['pending', 'warning', 'danger'],
 }
@@ -25,7 +26,7 @@ const base = (key: string) => key.replace(/_(zero|one|two|few|many|other)$/, '')
 const enKeys = keysOf((en as unknown as { ui: Tree }).ui)
 const zhKeys = keysOf((zh as unknown as { ui: Tree }).ui)
 
-const used = new Set([...all.matchAll(/['"`](ui\.(?:data|form|diagram)\.[a-z_]+)['"`]/g)].map(m => m[1]))
+const used = new Set([...all.matchAll(/['"`](?:common:)?(ui\.(?:data|form|diagram)\.[a-z_]+)['"`]/g)].map(m => m[1]))
 const dynamicKeys = new Set(Object.entries(DYNAMIC).flatMap(([prefix, vs]) => vs.map(v => `${prefix}${v}`)))
 
 describe('common:ui.data / ui.form / ui.diagram keys', () => {
@@ -44,7 +45,7 @@ describe('common:ui.data / ui.form / ui.diagram keys', () => {
 
   it('keeps the list of run-time keys honest: they all exist, and the source really builds them', () => {
     for (const [prefix, vs] of Object.entries(DYNAMIC)) {
-      expect(all.includes(`${prefix}\${`), `${prefix}\${...} is not built anywhere`).toBe(true)
+      expect(new RegExp(`${prefix.replace(/\./g, '\\.')}(\\$\\{|' ?\\+)`).test(all) || all.includes(`${prefix}\${`), `${prefix}\${...} is not built anywhere`).toBe(true)
       for (const v of vs) {
         expect([...enKeys].map(base)).toContain(`${prefix}${v}`)
         expect([...zhKeys].map(base)).toContain(`${prefix}${v}`)

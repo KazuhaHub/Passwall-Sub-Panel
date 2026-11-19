@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
 import { useState } from 'react'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InheritanceField, SourceTrail, effectiveLevel } from './InheritanceField'
+import { NumberField } from './NumberField'
 
 afterEach(cleanup)
 
 const show = (v: number) => (v === 0 ? 'Unlimited' : `${v} GB`)
-const editor = ({ value, onChange, id, ...aria }: { value: number; onChange: (v: number | null) => void; id: string; 'aria-labelledby': string; 'aria-describedby'?: string }) => (
-  <input id={id} data-testid="editor" aria-labelledby={aria['aria-labelledby']} value={value} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />
+const editor = ({ value, onChange, id, ...aria }: { value: number; onChange: (v: number) => void; id: string; 'aria-labelledby': string; 'aria-describedby'?: string }) => (
+  <input id={id} data-testid="editor" aria-labelledby={aria['aria-labelledby']} value={value} onChange={e => onChange(Number(e.target.value))} />
 )
 const lv = (global: number | undefined, group: number | undefined, user: number | undefined) => [
   { id: 'global', label: 'Global', value: global },
@@ -61,8 +62,7 @@ describe('SourceTrail on a phone', () => {
 })
 
 describe('InheritanceField', () => {
-  const onCleared = vi.fn()
-  const base = { label: 'Traffic limit', editLevel: 'user', renderValue: show, renderEditor: editor, defaultValue: 10, onCleared }
+  const base = { label: 'Traffic limit', editLevel: 'user', renderValue: show, renderEditor: editor, defaultValue: 10 }
 
   it('starts in "follow" when the level above is in effect: no editor, no number to mistake for zero', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, undefined)} onChange={() => {}} />)
@@ -111,48 +111,43 @@ describe('InheritanceField', () => {
     expect(screen.getByRole('textbox', { name: 'Traffic limit' })).toBeTruthy()
   })
 
-  it('does not turn a cleared editor into a value: it asks the caller what clearing means', () => {
-    const onChange = vi.fn()
-    const cleared = vi.fn()
-    render(<InheritanceField {...base} onCleared={cleared} levels={lv(100, 50, 20)} onChange={onChange} />)
-    fireEvent.change(screen.getByTestId('editor'), { target: { value: '' } })
-    expect(cleared).toHaveBeenCalledTimes(1)
-    expect(onChange).not.toHaveBeenCalled()
-  })
-
   it('names the control by the label and the level it edits', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, undefined)} onChange={() => {}} />)
     expect(screen.getByRole('radiogroup', { name: 'Traffic limit: how User gets its value' })).toBeTruthy()
     expect(screen.getByText('Traffic limit')).toBeTruthy()
   })
 
-  describe('focus', () => {
+  describe('the editor is for filling a value; following is the mode control\'s job', () => {
     function Wired() {
       const [user, setUser] = useState<number | undefined>(20)
       return (
         <InheritanceField
           label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
-          levels={lv(100, 50, user)} onChange={setUser} onCleared={() => setUser(undefined)} renderEditor={editor}
+          levels={lv(100, 50, user)} onChange={setUser}
+          renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} allowEmpty emptyLabel="Follows the group" unit="GB" />}
         />
       )
     }
 
-    it('never removes the editor while it is being edited: emptying it on the way to retyping does nothing', () => {
-      const onChange = vi.fn()
-      const cleared = vi.fn()
-      render(<InheritanceField {...base} onCleared={cleared} levels={lv(100, 50, 20)} onChange={onChange} renderEditor={p => <input data-testid="editor" id={p.id} aria-labelledby={p['aria-labelledby']} defaultValue="20" />} />)
-      expect(screen.getByTestId('editor')).toBeTruthy()
-      expect(cleared).not.toHaveBeenCalled()
+    it('shows no follow button and no "follows" label inside the editor, even if the NumberField asked for them', () => {
+      render(<Wired />)
+      expect(screen.queryByRole('button', { name: 'Follow again' })).toBeNull()
+      expect(screen.queryByText('Follows the group')).toBeNull()
     })
 
-    it('when an empty commit sends the field back to following, the focus lands on the mode control, not on the page body', async () => {
+    it('an emptied editor stays where it is and is invalid until filled, with the way out named', () => {
       render(<Wired />)
-      const input = screen.getByTestId('editor')
+      const input = screen.getByRole('textbox', { name: 'Traffic limit' }) as HTMLInputElement
       input.focus()
       fireEvent.change(input, { target: { value: '' } })
-      await act(async () => { await new Promise(r => requestAnimationFrame(() => r(null))) })
-      expect(screen.queryByTestId('editor')).toBeNull()
-      expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Follow the level above' }))
+      fireEvent.keyDown(input, { key: 'Enter' })
+      fireEvent.blur(input)
+      expect(screen.getByRole('textbox', { name: 'Traffic limit' })).toBe(input)
+      expect(input.getAttribute('aria-invalid')).toBe('true')
+      expect(screen.getByText('Fill in a value, or switch to “Follow the level above”')).toBeTruthy()
+      // the mode control is how you leave
+      fireEvent.click(screen.getByRole('radio', { name: 'Follow the level above' }))
+      expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
     })
   })
 })

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { finalIndexFromInsertion, insertionIndex, reorderCall, type ReorderCall } from './dataTableLogic'
 
 interface Options {
@@ -28,7 +28,7 @@ const OUTSIDE = 64
  * the list that still includes the dragged row) so the table can draw one line.
  */
 export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scrollRef }: Options) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const [dragging, setDragging] = useState<{ id: string; insertion: number } | null>(null)
   const [lifted, setLifted] = useState<{ id: string; from: number; to: number } | null>(null)
   const [announcement, setAnnouncement] = useState('')

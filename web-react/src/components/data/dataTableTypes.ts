@@ -24,20 +24,24 @@ export type { ColumnDef, ExpandedState, RowData, SortingState, VisibilityState, 
 
 /**
  * What a bulk action is handed. Selection is by id and outlives paging and filtering,
- * so `ids` can name rows that are not on screen and `visibleRows` can be shorter.
+ * so `ids` can name rows that are not on screen and `loadedRows` can be shorter.
  *
  * A DESTRUCTIVE action (delete, disable, reset) acts on `ids`, so it must confirm
- * with the total, `ids.length`, and say how many of those are hidden
- * (`hiddenCount`): "删除 12 项，其中 4 项不在当前页". Acting on `visibleRows` alone
+ * with the total, `ids.length`, and say how many of those are not in the current
+ * list (`hiddenCount`): "删除 12 项，其中 4 项不在当前列表中". Acting on `loadedRows` alone
  * would do less than the bar promised; acting on `ids` without saying so does more
  * than the person can see.
  */
 export interface BulkContext<T> {
   /** Every selected id, including rows on other pages and rows a filter has hidden. */
   ids: string[]
-  /** The selected rows `data` holds: in client mode all of them, in server mode only those on this page. */
-  visibleRows: T[]
-  /** How many selected ids are not among the rows shown now (another page, or filtered out). */
+  /**
+   * The selected rows the table has LOADED, i.e. that `data` holds: in client mode all of
+   * them whichever page they are on, in server mode only those on the current page. Not
+   * "the rows on screen".
+   */
+  loadedRows: T[]
+  /** How many selected ids are not among the rows shown now (on another page, or filtered out of the list). */
   hiddenCount: number
   clear: () => void
   /** Drop only the selected ids that are not shown now. */

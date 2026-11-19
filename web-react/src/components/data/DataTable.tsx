@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { BulkActionBar } from './BulkActionBar'
 import { ColumnMenu, columnLabel } from './ColumnMenu'
@@ -49,7 +49,7 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
 }
 
 function DefaultError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : null
   return (
     <div role="alert" className="flex flex-col items-center gap-2 px-4 py-10 text-center">
@@ -95,7 +95,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight = '70dvh', className,
     rowOptions, onRowHover, highlightedIds,
   } = props
-  const { t, i18n } = useTranslation('common')
+  const { t, i18n } = useSpacedT()
   const server = mode === 'server'
 
   // ---- state: each piece is the caller's if they pass it, the table's otherwise ----
@@ -214,7 +214,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }
   const bulkCtx: BulkContext<T> = {
     ids: selectedIds,
-    visibleRows: selectedIds.map(id => coreById[id]?.original).filter((r): r is T => r !== undefined),
+    loadedRows: selectedIds.map(id => coreById[id]?.original).filter((r): r is T => r !== undefined),
     hiddenCount: hiddenIds.length,
     clear,
     clearHidden,
@@ -560,7 +560,7 @@ function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
   onKeyDown: (e: React.KeyboardEvent) => void
   onBlur: () => void
 }) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const off = blockedText !== ''
   return (
     <TipButton
@@ -633,7 +633,7 @@ interface DataRowProps<T> {
 }
 
 function DataRowInner<T>(p: DataRowProps<T>) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const { row, ctx, api, selected } = p
   const lead = `sticky z-[1] ${PIN_BG}`
   const { tree, selectable, reorderCol } = ctx
@@ -652,9 +652,11 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       tabIndex={ctx.interactive ? (p.tabStop ? 0 : -1) : undefined}
       onFocus={e => { if (e.target === e.currentTarget) api.current.focus(row.id) }}
       onBlur={e => { if (e.target === e.currentTarget) api.current.blur() }}
-      onMouseEnter={api.current.hovering ? () => api.current.enter(row.id) : undefined}
-      onMouseLeave={api.current.hovering ? () => api.current.leave() : undefined}
-      onClick={api.current.clickable ? e => api.current.click(e, row) : undefined}
+      // Always attached and decided when the event fires: onRowHover / onRowOpen may only
+      // become defined after the row was first rendered (a memoised row is not re-rendered for that).
+      onMouseEnter={() => api.current.enter(row.id)}
+      onMouseLeave={() => api.current.leave()}
+      onClick={e => api.current.click(e, row)}
       onKeyDown={ctx.interactive ? e => api.current.key(e, row) : undefined}
       className={cn(
         'group/row outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
@@ -730,13 +732,16 @@ function DataRowInner<T>(p: DataRowProps<T>) {
 }
 
 // A row re-renders only when something that shows on it changed. `api` is a stable
-// ref and `fullWidth` is compared by whether it exists: the separator content is
-// rebuilt with its row, which changes when the row's data does.
+// ref. `fullWidth` (a separator's content) is compared by IDENTITY: a page builds that
+// JSX again on every render, so a separator re-renders whenever its page does and can
+// never show a stale count, a busy flag or a permission that has changed. Separators are
+// few; the hundreds of ordinary rows are what the memo is for.
 const DataRow = memo(DataRowInner, (a, b) => {
   const keys = Object.keys(a) as (keyof DataRowProps<unknown>)[]
   for (const k of keys) {
-    if (k === 'fullWidth' || k === 'dataAttrs') continue
+    // dataAttrs is compared through dataKey (its JSON), because the page builds a new object each render.
+    if (k === 'dataAttrs') continue
     if (a[k] !== b[k]) return false
   }
-  return (a.fullWidth === undefined) === (b.fullWidth === undefined)
+  return true
 }) as typeof DataRowInner

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { TOUCH_HEIGHT } from './touchTarget'
@@ -22,7 +22,7 @@ export function BulkActionBar({ count, hidden = 0, onClear, onClearHidden, child
   children?: ReactNode
   className?: string
 }) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   if (count <= 0) return null
   return (
     <div

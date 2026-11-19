@@ -69,6 +69,8 @@ export const LINES: LineRow[] = [
   sep('sep2', 'Frankfurt 线路'),
   { id: 'l7', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'tunnel', entry: ENTRIES[1], port: 21443, latencyMs: 96, status: 'ok', multiplier: 1 },
   { id: 'l8', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'direct', entry: LANDINGS[2], port: 443, latencyMs: 156, status: 'ok', multiplier: 1, hidden: true },
+  // Two lines from one server to one landing node (a tunnel and a port forward): ordinary, and the graph must keep them apart.
+  { id: 'l9', kind: 'line', landingId: 3, landing: LANDINGS[0], lineKind: 'forward', entry: ENTRIES[1], port: 20444, latencyMs: 63, status: 'down', multiplier: 1 },
 ]
 
 /**
@@ -87,8 +89,8 @@ const TONE = { ok: 'success', pending: 'pending', down: 'danger' } as const
 export function linePath(line: LineRow, withEnds: boolean, colors: Map<string, LandingColor>): { nodes: PathNode[]; edges: PathEdge[] } {
   const tone = TONE[line.status]
   const landing: PathNode = { id: `landing-${line.landingId}`, kind: 'landing', label: line.landing, landingColor: colors.get(String(line.landingId)), status: tone }
-  const user: PathNode = { id: 'user', kind: 'user', label: '用户' }
-  const internet: PathNode = { id: 'internet', kind: 'internet', label: '互联网' }
+  const user: PathNode = { id: 'user', kind: 'user' }
+  const internet: PathNode = { id: 'internet', kind: 'internet' }
   const latency = line.latencyMs === null ? undefined : `${line.latencyMs} ms`
   const label = latency
   let nodes: PathNode[]
@@ -100,7 +102,7 @@ export function linePath(line: LineRow, withEnds: boolean, colors: Map<string, L
       break
     case 'cdn':
       nodes = [user, { id: 'cdn', kind: 'cdn', label: line.entry, status: tone }, landing]
-      edges = [{ style: 'solid' }, { style: 'solid', name: '回源', label, status: tone }]
+      edges = [{ style: 'solid' }, { style: 'solid', role: 'origin', label, status: tone }]
       break
     case 'external':
       nodes = [user, { id: 'ext', kind: 'external', label: line.entry, sublabel: `:${line.port}`, status: tone }, landing]
@@ -178,10 +180,10 @@ export function graphSample(perColumn: number): { columns: GraphColumn[]; edges:
   }))
   const edges: GraphEdge[] = []
   entries.forEach((e, i) => {
-    edges.push({ from: e.id, to: `l${(i * 5) % perColumn}`, style: i % 4 === 0 ? 'dashed' : 'solid', status: e.status })
-    if (i % 3 === 0) edges.push({ from: e.id, to: `l${(i * 5 + 7) % perColumn}`, style: 'solid', status: 'success' })
+    edges.push({ id: `g${edges.length}`, from: e.id, to: `l${(i * 5) % perColumn}`, style: i % 4 === 0 ? 'dashed' : 'solid', status: e.status })
+    if (i % 3 === 0) edges.push({ id: `g${edges.length}`, from: e.id, to: `l${(i * 5 + 7) % perColumn}`, style: 'solid', status: 'success' })
   })
-  landings.forEach((l, i) => edges.push({ from: l.id, to: `x${i % exits.length}`, style: 'solid', status: 'neutral' }))
+  landings.forEach((l, i) => edges.push({ id: `g${edges.length}`, from: l.id, to: `x${i % exits.length}`, style: 'solid', status: 'neutral' }))
   return {
     columns: [
       { id: 'entries', title: '入口服务器', boxes: entries },

@@ -145,7 +145,7 @@ export function NodesTableSection() {
               variant="destructive"
               size="sm"
               onClick={() => {
-                const text = `删除 ${ids.length} 个节点${hiddenCount > 0 ? `，其中 ${hiddenCount} 个不在当前页` : ''}？`
+                const text = `删除 ${ids.length} 个节点${hiddenCount > 0 ? `，其中 ${hiddenCount} 个不在当前列表中` : ''}？`
                 if (window.confirm(text)) { setBulkLog(`已确认：${text}`); clear() }
               }}
             >
@@ -270,10 +270,10 @@ export function LinesViewsSection() {
     return {
       lines,
       columns: [
-        { id: 'entries', title: '入口服务器', boxes: entries.map(e => ({ id: `entry:${e}`, label: e })) },
+        { id: 'entries', title: '入口', boxes: entries.map(e => ({ id: `entry:${e}`, label: e })) },
         { id: 'landings', title: '落地节点', boxes: landings.map(n => ({ id: `landing:${n}`, label: n, landingColor: colors.get(String(landingId(n))) })) },
       ],
-      edges: lines.map(l => ({ from: `entry:${l.entry}`, to: `landing:${l.landing}`, style: l.lineKind === 'tunnel' ? 'dashed' as const : 'solid' as const, status: l.status === 'ok' ? 'success' as const : l.status === 'pending' ? 'pending' as const : 'danger' as const })),
+      edges: lines.map(l => ({ id: l.id, label: KIND_LABEL[l.lineKind], from: `entry:${l.entry}`, to: `landing:${l.landing}`, style: l.lineKind === 'tunnel' ? 'dashed' as const : 'solid' as const, status: l.status === 'ok' ? 'success' as const : l.status === 'pending' ? 'pending' as const : 'danger' as const })),
     }
   }, [rows, colors])
   const throughBox = boxSel ? graph.lines.filter(l => `entry:${l.entry}` === boxSel || `landing:${l.landing}` === boxSel) : []

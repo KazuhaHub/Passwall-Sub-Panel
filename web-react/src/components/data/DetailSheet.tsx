@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { XIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -32,7 +32,7 @@ export interface DetailSheetProps {
  * of the screen of list behind it is no use.
  */
 export function DetailSheet({ open, onClose, title, status, description, actions, footer, children, className }: DetailSheetProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   return (
     <Sheet open={open} onOpenChange={next => { if (!next) onClose() }}>
       <SheetContent

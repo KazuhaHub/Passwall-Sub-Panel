@@ -130,6 +130,6 @@ export function useUrlWriter(): (op: UrlOp, history: UrlHistory) => void {
     const search = text ? `?${text}` : ''
     if (search === f.search) return
     f.search = search
-    void f.navigate({ search }, { replace: !push, state })
+    void f.navigate({ search, hash: f.location.hash }, { replace: !push, state })
   }, [router])
 }

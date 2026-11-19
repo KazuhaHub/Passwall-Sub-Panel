@@ -78,4 +78,9 @@ describe('Field error announcement', () => {
     expect(live.className).toContain('sr-only')
     expect(live.className).not.toMatch(/(^|\s)hidden(\s|$)/)
   })
+
+  it('reserves the line under the control, so a message appearing does not move what is below', () => {
+    const { container } = render(<Field label="Port"><Input /></Field>)
+    expect(container.querySelector('[aria-live]')!.parentElement!.className).toContain('min-h-4')
+  })
 })

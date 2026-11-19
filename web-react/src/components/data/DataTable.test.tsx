@@ -695,7 +695,7 @@ describe('sorting (item 9)', () => {
 })
 
 describe('selection across pages and filters (item 10)', () => {
-  function Harness({ rows, onCtx }: { rows: Row[]; onCtx?: (c: { ids: string[]; hiddenCount: number; visibleRows: Row[] }) => void }) {
+  function Harness({ rows, onCtx }: { rows: Row[]; onCtx?: (c: { ids: string[]; hiddenCount: number; loadedRows: Row[] }) => void }) {
     const [sel, setSel] = useState<Record<string, boolean>>({ r1: true, r2: true, r30: true })
     return (
       <DataTable
@@ -711,18 +711,18 @@ describe('selection across pages and filters (item 10)', () => {
     render(<Harness rows={mk(40)} onCtx={seen} />)
     const bar = screen.getByRole('region', { name: 'Bulk actions' })
     expect(bar.textContent).toContain('3 selected')
-    expect(bar.textContent).toContain('1 not on this page')
+    expect(bar.textContent).toContain('1 not in the current list')
     expect(seen).toHaveBeenLastCalledWith(expect.objectContaining({ ids: ['r1', 'r2', 'r30'], hiddenCount: 1 }))
     // client mode holds every row, so the off-page one is still resolved
-    expect(seen.mock.lastCall![0].visibleRows.map((r: Row) => r.id)).toEqual(['r1', 'r2', 'r30'])
-    fireEvent.click(within(bar).getByRole('button', { name: 'Deselect items not on this page' }))
+    expect(seen.mock.lastCall![0].loadedRows.map((r: Row) => r.id)).toEqual(['r1', 'r2', 'r30'])
+    fireEvent.click(within(bar).getByRole('button', { name: 'Deselect items not in the current list' }))
     expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).toContain('2 selected')
-    expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).not.toContain('not on this page')
+    expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).not.toContain('not in the current list')
   })
 
   it('treats a row filtered out of the data as not on the page', () => {
     render(<Harness rows={mk(40).filter(r => r.id !== 'r2')} />)
-    expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).toContain('2 not on this page')
+    expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).toContain('2 not in the current list')
   })
 
   it('shows the header checkbox as indeterminate when only some of the page is selected', () => {
@@ -857,5 +857,56 @@ describe('dimmed rows keep their text readable (item 19)', () => {
     const row = screen.getAllByRole('row')[1]
     expect(row.className).toContain('text-foreground/70')
     expect(row.className).not.toMatch(/opacity-/)
+  })
+})
+
+describe('separator rows are never stale (item 2)', () => {
+  interface L { id: string; name: string; kind?: 'line' | 'separator' }
+  const data: L[] = [{ id: 'a', name: 'Line A' }, { id: 'sep', name: 'Premium', kind: 'separator' }, { id: 'b', name: 'Line B' }]
+  const cols: ColumnDef<L>[] = [{ accessorKey: 'name', header: 'Name', enableSorting: false }]
+
+  function Page({ count, busy, canEdit }: { count: number; busy: boolean; canEdit: boolean }) {
+    return (
+      <DataTable
+        data={data} columns={cols} getRowId={r => r.id} pagination={false} columnMenu={false}
+        rowOptions={r => (r.kind === 'separator'
+          ? { fullWidth: <span>{r.name}: {count} lines{busy ? ' (busy)' : ''}{canEdit ? <button>Edit separator</button> : null}</span>, selectable: false, openable: false }
+          : undefined)}
+      />
+    )
+  }
+
+  it('shows content that comes from outer state, not only from the row', () => {
+    const { rerender } = render(<Page count={2} busy={false} canEdit={false} />)
+    expect(screen.getByText(/Premium: 2 lines/)).toBeTruthy()
+    rerender(<Page count={5} busy={false} canEdit={false} />)
+    expect(screen.getByText(/Premium: 5 lines/)).toBeTruthy()
+  })
+
+  it('follows a busy flag and a permission change', () => {
+    const { rerender } = render(<Page count={2} busy={false} canEdit={false} />)
+    expect(screen.queryByText(/\(busy\)/)).toBeNull()
+    rerender(<Page count={2} busy canEdit={false} />)
+    expect(screen.getByText(/\(busy\)/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit separator' })).toBeNull()
+    rerender(<Page count={2} busy canEdit />)
+    expect(screen.getByRole('button', { name: 'Edit separator' })).toBeTruthy()
+    rerender(<Page count={2} busy canEdit={false} />)
+    expect(screen.queryByRole('button', { name: 'Edit separator' })).toBeNull()
+  })
+})
+
+describe('handlers that arrive after the first render (item 2)', () => {
+  const data = mk(3)
+  it('onRowHover and onRowOpen defined later still reach rows that were already rendered', () => {
+    const onHover = vi.fn()
+    const onOpen = vi.fn()
+    const { rerender } = render(<DataTable data={data} columns={columns} getRowId={r => r.id} />)
+    rerender(<DataTable data={data} columns={columns} getRowId={r => r.id} onRowHover={onHover} onRowOpen={onOpen} />)
+    const row = screen.getAllByRole('row')[1]
+    fireEvent.mouseEnter(row)
+    expect(onHover).toHaveBeenLastCalledWith('r1')
+    fireEvent.click(within(row).getByText('Node 01'))
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }))
   })
 })

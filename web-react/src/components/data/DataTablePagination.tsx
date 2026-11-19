@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon, ChevronsLeftIcon, ChevronsRightIcon } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useSpacedT } from '@/i18n/spacing'
 import { NativeSelect } from '@/components/ui/native-select'
 import { cn } from '@/lib/utils'
 import { PAGE_SIZE_OPTIONS, pageCount, pageRange } from './dataTableLogic'
@@ -27,7 +27,7 @@ export interface DataTablePaginationProps {
 export function DataTablePagination({
   page, pageSize, total, shown, onPageChange, onPageSizeChange, pageSizeOptions = PAGE_SIZE_OPTIONS, disabled, className,
 }: DataTablePaginationProps) {
-  const { t } = useTranslation('common')
+  const { t } = useSpacedT()
   const pages = pageCount(total, pageSize)
   const { from, to } = pageRange(page, pageSize, total, shown)
   // A remembered or caller-chosen size the footer does not list must still be selectable.
