@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -80,7 +81,9 @@ export default function UiKitchenSink() {
           <CardHeader><CardTitle>Buttons and badges</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap gap-2">
-              <Button>Default</Button>
+              <Button id="ui-kit-btn-sm" size="sm">Small</Button>
+              <Button id="ui-kit-btn">Default</Button>
+              <Button id="ui-kit-btn-lg" size="lg">Large</Button>
               <Button variant="secondary">Secondary</Button>
               <Button variant="outline">Outline</Button>
               <Button variant="ghost">Ghost</Button>
@@ -99,7 +102,8 @@ export default function UiKitchenSink() {
                 <Switch id="ui-kit-switch" defaultChecked />
                 <Label htmlFor="ui-kit-switch">Switch</Label>
               </div>
-              <Input className="h-(--control-h) max-w-60" placeholder="Input (height follows density)" />
+              <Input id="ui-kit-input" className="max-w-60" placeholder="Input (height follows density)" />
+              <NativeSelect id="ui-kit-select" className="max-w-40" defaultValue="a"><option value="a">Select</option></NativeSelect>
             </div>
           </CardContent>
         </Card>
@@ -108,7 +112,7 @@ export default function UiKitchenSink() {
           <CardHeader><CardTitle>Table, tabs and dialog</CardTitle></CardHeader>
           <CardContent>
             <Tabs defaultValue="table">
-              <TabsList>
+              <TabsList id="ui-kit-tabs">
                 <TabsTrigger value="table">Table</TabsTrigger>
                 <TabsTrigger value="dialog">Dialog</TabsTrigger>
               </TabsList>
@@ -123,7 +127,7 @@ export default function UiKitchenSink() {
                   </TableHeader>
                   <TableBody>
                     {[['tokyo-1', 'online', '1.2 TB'], ['frankfurt-2', 'online', '640 GB'], ['香港-3', 'offline', '0 B']].map(([n, s, t]) => (
-                      <TableRow key={n} className="h-(--row-h)">
+                      <TableRow key={n}>
                         <TableCell className="font-medium">{n}</TableCell>
                         <TableCell><Badge variant={s === 'online' ? 'secondary' : 'destructive'}>{s}</Badge></TableCell>
                         <TableCell className="text-right tabular-nums">{t}</TableCell>

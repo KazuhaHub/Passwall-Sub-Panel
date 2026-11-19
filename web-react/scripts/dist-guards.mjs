@@ -4,8 +4,9 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// Chunks that hold the new stack. The login page (and every un-migrated MUI
-// page) must not load them, so index.html must not preload them.
+// Chunks that hold the new stack (shadcn / base-ui / lucide ...). index.html may
+// modulepreload one only when the entry itself statically imports it; otherwise it
+// is a stray preload that makes every page download code the entry never runs.
 // (?![a-z]) rather than \b: a de-duplicated name such as vendor-ui2-<hash> must match too.
 const NEW_STACK_CHUNK = /^vendor-(?:base-ui|ui)(?![a-z])/
 
@@ -22,10 +23,22 @@ export function preloadedAssets(indexHtml) {
   return out
 }
 
-export function checkPreloads(indexHtml) {
+// Static imports of the entry script (the <script src> in index.html), from its
+// source when `files` (name -> code) is given.
+function entryImports(indexHtml, files) {
+  const names = new Set()
+  const entry = (indexHtml.match(/<script\b[^>]*>/g) ?? []).map(t => /\bsrc\s*=\s*"\.\/assets\/([^"]+)"/.exec(t)?.[1]).find(Boolean)
+  const code = entry && files?.[entry]
+  if (code) for (const m of code.matchAll(/\b(?:from|import)\s*["']\.\/([^"']+\.js)["']/g)) names.add(m[1])
+  return names
+}
+
+export function checkPreloads(indexHtml, files) {
+  const needed = entryImports(indexHtml, files)
   return preloadedAssets(indexHtml)
-    .filter(f => NEW_STACK_CHUNK.test(f.replace(/^assets\//, '')))
-    .map(f => `index.html preloads ${f}: the new UI stack must not load on un-migrated pages`)
+    .map(f => f.replace(/^assets\//, ''))
+    .filter(name => NEW_STACK_CHUNK.test(name) && !needed.has(name))
+    .map(name => `index.html preloads ${name}, which the entry does not import`)
 }
 
 // A vendor chunk may import only other vendor chunks and the runtime chunk. One
@@ -56,7 +69,7 @@ export function checkDist(dist) {
   const names = readdirSync(assets)
   const js = Object.fromEntries(names.filter(n => n.endsWith('.js')).map(n => [n, readFileSync(join(assets, n), 'utf8')]))
   const problems = [
-    ...checkPreloads(readFileSync(join(dist, 'index.html'), 'utf8')),
+    ...checkPreloads(readFileSync(join(dist, 'index.html'), 'utf8'), js),
     ...checkVendorImports(js),
   ]
   return problems

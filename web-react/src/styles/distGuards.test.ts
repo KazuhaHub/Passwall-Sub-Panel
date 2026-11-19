@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { checkPreloads, checkVendorImports } from '../../scripts/dist-guards.mjs'
 
+describe('checkPreloads when the entry itself needs the new stack', () => {
+  const entry = 'import{a}from"./vendor-ui-y.js";import"./vendor-react-r.js";'
+  it('flags a new-stack preload nothing in the entry imports', () => {
+    const html = '<script type="module" src="./assets/index-a.js"></script><link rel="modulepreload" href="./assets/vendor-ui-y.js">'
+    expect(checkPreloads(html, { 'index-a.js': 'import"./vendor-react-r.js";' })).toHaveLength(1)
+  })
+  it('accepts it once the entry statically imports it', () => {
+    const html = '<script type="module" src="./assets/index-a.js"></script><link rel="modulepreload" href="./assets/vendor-ui-y.js">'
+    expect(checkPreloads(html, { 'index-a.js': entry })).toEqual([])
+  })
+})
+
 describe('checkPreloads', () => {
   it('flags a preloaded new-stack chunk', () => {
     const html = '<script type="module" src="./assets/index-a.js"></script><link rel="modulepreload" href="./assets/vendor-base-ui-x.js"><link rel="modulepreload" href="./assets/vendor-ui-y.js">'

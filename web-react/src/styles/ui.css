@@ -134,7 +134,7 @@
     --sidebar-ring: oklch(0.708 0 0);
 }
 
-:root.dark {
+.dark {
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -179,8 +179,9 @@
  * derives from the same source (tone 40 in light, tone 80 in dark), so the two
  * stacks agree on the brand colour while both are on screen. A colour that is
  * not a preset gets data-brand="custom" and an inline --brand instead.
- * The `:root.dark[...]` selectors are more specific than `:root[...]`, so dark
- * wins without relying on source order.
+ * The `.dark[data-brand=...]` rules have the same specificity as `:root[data-brand=...]`
+ * and come after them, so dark wins by source order. (Plain `.dark` for the token
+ * block, as in the reference project.)
  */
 :root[data-brand="blue"]   { --brand: #0061a4; --sidebar-primary: #0061a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
 :root[data-brand="purple"] { --brand: #6750a4; --sidebar-primary: #6750a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
@@ -188,22 +189,22 @@
 :root[data-brand="green"]  { --brand: #386a1f; --sidebar-primary: #386a1f; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
 :root[data-brand="orange"] { --brand: #825500; --sidebar-primary: #825500; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
 :root[data-brand="pink"]   { --brand: #a53265; --sidebar-primary: #a53265; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
-:root.dark[data-brand="blue"]   { --brand: #9fcaff; --sidebar-primary: #9fcaff; --sidebar-primary-foreground: #003258; --brand-foreground: #003258; }
-:root.dark[data-brand="purple"] { --brand: #cfbcff; --sidebar-primary: #cfbcff; --sidebar-primary-foreground: #381e72; --brand-foreground: #381e72; }
-:root.dark[data-brand="teal"]   { --brand: #4cdadb; --sidebar-primary: #4cdadb; --sidebar-primary-foreground: #003737; --brand-foreground: #003737; }
-:root.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #113800; --brand-foreground: #113800; }
-:root.dark[data-brand="orange"] { --brand: #ffb951; --sidebar-primary: #ffb951; --sidebar-primary-foreground: #452b00; --brand-foreground: #452b00; }
-:root.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #640036; --brand-foreground: #640036; }
+.dark[data-brand="blue"]   { --brand: #9fcaff; --sidebar-primary: #9fcaff; --sidebar-primary-foreground: #003258; --brand-foreground: #003258; }
+.dark[data-brand="purple"] { --brand: #cfbcff; --sidebar-primary: #cfbcff; --sidebar-primary-foreground: #381e72; --brand-foreground: #381e72; }
+.dark[data-brand="teal"]   { --brand: #4cdadb; --sidebar-primary: #4cdadb; --sidebar-primary-foreground: #003737; --brand-foreground: #003737; }
+.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #113800; --brand-foreground: #113800; }
+.dark[data-brand="orange"] { --brand: #ffb951; --sidebar-primary: #ffb951; --sidebar-primary-foreground: #452b00; --brand-foreground: #452b00; }
+.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #640036; --brand-foreground: #640036; }
 
 /*
- * Density. --control-h is the height of buttons/inputs/selects, --row-h the
- * height of a table row. New components opt in with h-(--control-h) /
- * h-(--row-h); nothing reads them yet. The bare :root default matches the
- * store's default (comfortable) for the instant before the sync effect runs.
+ * Density. --control-h is the height of buttons, inputs and selects, --row-h the
+ * height of a table row; the copied components read them (default size follows
+ * --control-h, `sm` / `lg` are --control-h -/+ 0.25rem, `xs` stays fixed). Compact
+ * is the default, both before the sync effect runs and for a user with no saved
+ * choice; compact is 2rem, the reference project's own button height.
  */
-:root, :root[data-density="comfortable"] { --control-h: 2.25rem; --row-h: 3rem; }
-:root[data-density="compact"] { --control-h: 1.75rem; --row-h: 2.25rem; }
-
+:root, :root[data-density="compact"] { --control-h: 2rem; --row-h: 2.25rem; }
+:root[data-density="comfortable"] { --control-h: 2.5rem; --row-h: 3rem; }
 
 @layer base {
   * {
@@ -213,11 +214,25 @@
     @apply font-sans;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    /* Geist stylistic sets, as in the reference project. */
+    font-feature-settings: 'cv11', 'ss01';
   }
   body {
     @apply bg-background text-foreground;
   }
   ::selection {
     background: color-mix(in oklch, var(--ring) 35%, transparent);
+  }
+}
+
+/* Respect the OS reduced-motion setting for every transition and animation. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }

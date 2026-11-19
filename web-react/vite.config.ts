@@ -15,9 +15,11 @@ import path from 'node:path'
 // page. Anything a vendor chunk depends on and that is shared with another chunk
 // is therefore assigned to vendor-react explicitly.
 //
-// vendor-base-ui and vendor-ui hold the Tailwind/shadcn stack. Nothing on the
-// login path may import them (smoke:dist enforces it on index.html), because the
-// un-migrated MUI pages must not pay for the new stack.
+// vendor-base-ui and vendor-ui hold the Tailwind/shadcn stack. The rules kept for
+// the single cutover (smoke:dist enforces them): index.html modulepreloads a
+// new-stack chunk only if the entry itself statically imports it; vendor chunks
+// import only vendor chunks; and every new-stack package lands in its mapped
+// vendor chunk (the placement plugin below fails the build otherwise).
 const CHUNK_BY_PACKAGE = new Map<string, string>([
   // React core and the small libraries every chunk shares.
   ...['react', 'react-dom', 'scheduler', 'react-router', 'cookie-es', '@remix-run/route-pattern',

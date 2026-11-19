@@ -29,6 +29,8 @@ const CUSTOM_BRAND_VARS = ['--brand', '--sidebar-primary', '--brand-foreground',
 // is one-way and never reads back.
 export function applyHtmlAppearance(root: HTMLElement, a: HtmlAppearance): void {
   root.classList.toggle('dark', a.mode === 'dark')
+  // Native widgets (scrollbars, date/select pickers, autofill) follow the mode.
+  root.style.colorScheme = a.mode
   root.dataset.density = a.density
 
   const preset = brandPresetFor(a.color)

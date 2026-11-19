@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { DATA_COLLECTION_MARKER, type DataCollection } from '@/api/legal'
 import DataCollectionCard from './DataCollectionCard'
-import { legalLinkComponents, legalMarkdownProps } from './ReleaseNotes'
+import { legalLinkComponents, legalMarkdownProps, markdownBlocks, markdownLists } from './ReleaseNotes'
 
 // The marker is a line of its own, as the editor inserts it.
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -34,8 +34,8 @@ const sized = (variant: 'h2' | 'h3' | 'h4', size: number): Components['h1'] => (
 const components: Components = {
   h1: sized('h2', 22), h2: sized('h3', 18), h3: sized('h4', 16), h4: sized('h4', 15), h5: sized('h4', 15), h6: sized('h4', 15),
   p: ({ children }) => <Typography sx={{ fontSize: 15, lineHeight: 1.75, my: 1 }}>{children}</Typography>,
-  ul: ({ children }) => <Box component="ul" sx={{ my: 1, pl: 3 }}>{children}</Box>,
-  ol: ({ children }) => <Box component="ol" sx={{ my: 1, pl: 3 }}>{children}</Box>,
+  ...markdownLists,
+  ...markdownBlocks,
   li: ({ children }) => <Typography component="li" sx={{ fontSize: 15, lineHeight: 1.75 }}>{children}</Typography>,
   ...legalLinkComponents,
 }

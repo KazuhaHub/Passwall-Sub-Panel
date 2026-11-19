@@ -9,7 +9,7 @@ function TabsList({ className, ...props }: TabsPrimitive.List.Props) {
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
-      className={cn("relative inline-flex h-9 w-fit items-center gap-1 rounded-lg bg-muted p-[3px] text-muted-foreground", className)}
+      className={cn("relative inline-flex h-[calc(var(--control-h)+0.25rem)] w-fit items-center gap-1 rounded-lg bg-muted p-[3px] text-muted-foreground", className)}
       {...props}
     />
   )

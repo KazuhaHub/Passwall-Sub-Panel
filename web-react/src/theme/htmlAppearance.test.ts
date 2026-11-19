@@ -35,6 +35,13 @@ describe('applyHtmlAppearance', () => {
     expect(root.classList.contains('dark')).toBe(false)
   })
 
+  it('sets color-scheme from the resolved mode so native widgets follow it', () => {
+    applyHtmlAppearance(root, { mode: 'dark', density: 'compact', color: '#0061A4' })
+    expect(root.style.colorScheme).toBe('dark')
+    applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#0061A4' })
+    expect(root.style.colorScheme).toBe('light')
+  })
+
   it('leaves unrelated classes on <html> alone', () => {
     root.classList.add('keep-me')
     applyHtmlAppearance(root, { mode: 'dark', density: 'compact', color: '#0061A4' })
@@ -97,7 +104,7 @@ describe('stylesheet', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
   it.each(COLOR_PRESETS.map(p => p.id))('defines light and dark --brand for preset %s', id => {
     expect(css).toContain(`:root[data-brand="${id}"]`)
-    expect(css).toContain(`:root.dark[data-brand="${id}"]`)
+    expect(css).toContain(`.dark[data-brand="${id}"]`)
   })
   it('defines both density variables for both densities', () => {
     for (const d of ['compact', 'comfortable']) expect(css).toContain(`:root[data-density="${d}"]`)
@@ -127,7 +134,7 @@ describe('stylesheet brand values match the MUI theme derivation', () => {
     for (const mode of ['light', 'dark'] as const) {
       it(`${preset.id} ${mode}`, () => {
         const t = tokensFromSource(preset.hex, mode)
-        const got = declared(mode === 'dark' ? `:root.dark[data-brand="${preset.id}"]` : `:root[data-brand="${preset.id}"]`)
+        const got = declared(mode === 'dark' ? `.dark[data-brand="${preset.id}"]` : `:root[data-brand="${preset.id}"]`)
         expect(got['--brand']).toBe(t.primary.toLowerCase())
         expect(got['--sidebar-primary']).toBe(t.primary.toLowerCase())
         expect(got['--brand-foreground']).toBe(t.onPrimary.toLowerCase())
