@@ -118,6 +118,10 @@ export function NumberField({
   // "whatever the parent holds now", because the parent is told every complete number as it is
   // typed (an out-of-range "9999" is held by the parent too until it is fixed or abandoned).
   const committed = useRef<number | null>(value)
+  // For a field that gets switched off (see below): what the parent supplied first, and the last
+  // value that the field itself would accept, seen from the parent or from typing (undefined: none yet).
+  const initial = useRef<number | null>(value)
+  const lastAcceptable = useRef<number | null | undefined>(undefined)
   // The caller may pass a ref of its own; both get the element.
   const outerRef = (rest as { ref?: Ref<HTMLInputElement> }).ref
   const setInput = useCallback((node: HTMLInputElement | null) => {
@@ -129,6 +133,13 @@ export function NumberField({
   draftNow.current = draft
   // Bumped by a commit so the check below runs once the parent's answer has rendered, even if its value did not change.
   const [commitTick, setCommitTick] = useState(0)
+
+  const acceptable = (n: number | null): boolean =>
+    n === null ? allowEmpty === true && !inheritEditor
+      : (min === undefined || n >= min) && (max === undefined || n <= max) && (integer !== true || Number.isInteger(n))
+  const acceptableRef = useRef(acceptable)
+  acceptableRef.current = acceptable
+  useEffect(() => { if (acceptableRef.current(value)) lastAcceptable.current = value }, [value])
 
   // A value changed from outside (follow again, reset, load) replaces the text;
   // a value that merely echoes what was typed leaves it alone.
@@ -171,17 +182,20 @@ export function NumberField({
   const fits = (n: number) => (lo === undefined || n >= lo) && (hi === undefined || n <= hi)
   const settled = committed.current
   // The value the box holds when it is usable (what the person knows), else a round number, else a bound.
+  const impossible = lo !== undefined && hi !== undefined && lo > hi
   const example = settled !== null && fits(settled) ? settled
     : integer ? (fits(1000) ? 1000 : lo ?? hi ?? 1000)
       : fits(1.5) ? 1.5 : lo !== undefined && fits(lo + 0.5) ? lo + 0.5 : lo ?? hi ?? 1.5
-  if (reading.kind === 'exponent') problem = { message: t('ui.form.number_exponent', { example }), showNow: true }
-  else if (reading.kind === 'invalid') problem = { message: t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid', { example }), showNow: true }
-  else if (reading.kind === 'partial') problem = { message: t('ui.form.number_incomplete', { example }), showNow: touched }
+  // "such as N" is a separate piece so a field whose bounds cross (nothing is acceptable) can leave it out.
+  const withExample = (message: string) => (impossible ? message : message + t('ui.form.number_example', { example }))
+  if (reading.kind === 'exponent') problem = { message: withExample(t('ui.form.number_exponent')), showNow: true }
+  else if (reading.kind === 'invalid') problem = { message: withExample(t(integer ? 'ui.form.number_invalid_int' : 'ui.form.number_invalid')), showNow: true }
+  else if (reading.kind === 'partial') problem = { message: withExample(t('ui.form.number_incomplete')), showNow: touched }
   else if (reading.kind === 'empty' && !emptyOk) {
     // Says what to enter, not only that something is missing.
     const needs = inheritEditor ? 'ui.form.number_required_inherit'
       : min !== undefined && max !== undefined ? 'ui.form.number_required_range' : 'ui.form.number_required'
-    problem = { message: t(needs, { min, max, example }), showNow: true }
+    problem = { message: needs === 'ui.form.number_required' ? withExample(t(needs)) : t(needs, { min, max }), showNow: true }
   }
   else if (out) problem = { message: rangeText, showNow: true }
   // An empty box on a field that allows empty is a complete answer, not a problem: the empty
@@ -196,7 +210,10 @@ export function NumberField({
     setDraft(text)
     setRejected(null)
     const r = readNumberText(text, integer === true)
-    if (r.kind === 'number') onChange(r.value)
+    if (r.kind === 'number') {
+      if (acceptable(r.value)) lastAcceptable.current = r.value
+      onChange(r.value)
+    }
   }
 
   const commit = () => {
@@ -235,9 +252,23 @@ export function NumberField({
     if (value !== back && (back !== null || emptyOk) && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
   }
 
+  // THE INVARIANT once the box is switched off: it shows exactly what the parent holds, and that is
+  // a value the field accepts, or else the value the parent originally gave. A draft that is not
+  // usable, or a parent value the field would reject, therefore goes back to the last acceptable
+  // value (seen from the parent or from typing); if there never was one, to what the parent
+  // started with, which may be empty. Telling the parent that is RESTORING what it gave, not
+  // inventing an empty, so it is the one place `null` is sent by a field that does not allow empty.
+  // A usable draft stays as it is.
   useEffect(() => {
-    if (rest.disabled && problem !== null) revert()
-    // Only the moment the box becomes disabled matters; `revert` and `problem` are read as they are then.
+    if (!rest.disabled) return
+    if (problem === null && acceptable(value)) return
+    const back = lastAcceptable.current !== undefined ? lastAcceptable.current : initial.current
+    committed.current = back
+    setDraft(fmt(back))
+    setRejected(null)
+    setTouched(false)
+    if (value !== back && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
+    // Only the moment the box becomes disabled matters; the rest is read as it is then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rest.disabled])
 

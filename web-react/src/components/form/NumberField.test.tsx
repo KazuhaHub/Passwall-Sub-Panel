@@ -376,14 +376,57 @@ describe('NumberField', () => {
       expect(screen.getByTestId('blocked').textContent).toBe('ok')
     })
 
-    it('never sends null for a field that does not allow empty', () => {
+    // The invariant: once disabled, the box shows exactly what the parent holds, and that is a
+    // value the field accepts or the value the parent originally gave.
+    const shown = (disabled: boolean, props: Partial<React.ComponentProps<typeof NumberField>> & { initial: number | null }, onValue: (v: number | null) => void) => {
+      const { initial, ...rest } = props
+      return <Harness initial={initial} onValue={onValue} disabled={disabled} {...rest} />
+    }
+
+    it('(a) started empty, typed 5, cleared the box: disabling restores the last acceptable value in the box and the parent', () => {
       const onValue = vi.fn()
-      const ui = (disabled: boolean) => <Harness initial={null} min={10} max={600} onValue={onValue} disabled={disabled} />
-      const { rerender } = render(ui(false))
+      const { rerender } = render(shown(false, { initial: null }, onValue))
       type('5')
-      rerender(ui(true))
+      type('')
+      rerender(shown(true, { initial: null }, onValue))
+      expect(box().value).toBe('5')
+      expect(onValue).toHaveBeenLastCalledWith(5)
+    })
+
+    it('(b) no acceptable value was ever seen: the parent gets back what it started with (null), and the box is empty', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: null, min: 10, max: 600 }, onValue))
+      type('5')
+      expect(onValue).toHaveBeenLastCalledWith(5)
+      rerender(shown(true, { initial: null, min: 10, max: 600 }, onValue))
       expect(box().value).toBe('')
-      expect(onValue).not.toHaveBeenCalledWith(null)
+      expect(onValue).toHaveBeenLastCalledWith(null)
+    })
+
+    it('started at 7, typed 9999: disabling goes back to 7', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: 7, min: 1, max: 600 }, onValue))
+      type('9999')
+      rerender(shown(true, { initial: 7, min: 1, max: 600 }, onValue))
+      expect(box().value).toBe('7')
+      expect(onValue).toHaveBeenLastCalledWith(7)
+    })
+
+    it('an allow-empty field that started empty goes back to empty', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: null, allowEmpty: true, min: 10 }, onValue))
+      type('5')
+      rerender(shown(true, { initial: null, allowEmpty: true, min: 10 }, onValue))
+      expect(box().value).toBe('')
+      expect(onValue).toHaveBeenLastCalledWith(null)
+    })
+
+    it('a decimal is not an acceptable value for a whole-number field', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: 4, integer: true }, onValue))
+      type('2.5')
+      rerender(shown(true, { initial: 4, integer: true }, onValue))
+      expect(box().value).toBe('4')
     })
 
     it('leaves a valid draft alone', () => {
@@ -413,6 +456,14 @@ describe('NumberField', () => {
       render(<Harness initial={42} min={1} max={600} integer />)
       type('abc')
       expect(screen.getAllByText('Enter a whole number, such as 42').length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('impossible bounds', () => {
+    it('give no example, because any number would be refused', () => {
+      render(<Harness initial={null} min={10} max={5} />)
+      type('abc')
+      expect(screen.getAllByText('Enter a number').length).toBeGreaterThan(0)
     })
   })
 

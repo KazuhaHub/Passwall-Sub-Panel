@@ -1,10 +1,17 @@
-import { useEffect, useRef, type RefObject } from 'react'
+import { createContext, useEffect, useRef, type RefObject } from 'react'
 
 // Containers that can hide their contents (a collapsed form section, an inactive tab that
 // stays mounted) register here how to show them again. Something that only has an element
 // in hand, such as "take the person to the field that has a problem", then walks up from
 // the element and opens everything it is hidden in, without knowing what kinds of
 // container there are.
+/**
+ * True inside a FormValidityProvider. Containers that would unmount their hidden contents (tab
+ * panels) read it to keep them mounted instead: a field that is not in the page cannot report that
+ * its value is unusable, so an invalid value the parent already holds would be saved.
+ */
+export const InFormContext = createContext(false)
+
 const revealers = new WeakMap<Element, () => void>()
 
 /** The reveal functions of every registered container around `el` (and `el` itself), innermost first. */

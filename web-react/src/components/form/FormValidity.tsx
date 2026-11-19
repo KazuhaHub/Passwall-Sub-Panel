@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
-import { revealersAround } from '@/lib/reveal'
+import { InFormContext, revealersAround } from '@/lib/reveal'
 
 export interface ValidityIssue {
   id: string
@@ -127,6 +127,9 @@ export function focusProblem(el: HTMLElement | null | undefined): boolean {
  *    be fixed, so it must not hold the whole form hostage. To keep the first rule true, a
  *    field that becomes disabled puts an invalid draft back to its last committed value (and
  *    tells its parent), so what it shows is exactly what will be saved.
+ *  - A field in a hidden tab still blocks: inside a provider, `TabsContent` keeps inactive panels
+ *    mounted (hidden) by default, so their fields keep reporting. A panel given `keepMounted={false}`
+ *    unmounts its fields, and fields that are not in the page cannot block Save.
  *  - One control is one problem: a Field's error, the control's own report and a page error that
  *    names the same element are merged into one entry, the control's own reason first.
  *
@@ -180,7 +183,7 @@ export function FormValidityProvider({ children }: { children: ReactNode }) {
   const discard = useCallback(() => { discardCbs.current.forEach(cb => cb()) }, [])
 
   const value = useMemo<Registry>(() => ({ issues, report, onDiscard, discard }), [issues, report, onDiscard, discard])
-  return <ValidityContext.Provider value={value}>{children}</ValidityContext.Provider>
+  return <InFormContext.Provider value><ValidityContext.Provider value={value}>{children}</ValidityContext.Provider></InFormContext.Provider>
 }
 
 /** What the nearest provider currently knows: the problems (in page order), and whether there are any. */

@@ -110,11 +110,20 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
       if (l && dup(l, base)) { seen[l] = (seen[l] ?? 0) + 1; named[i] = t('ui.form.invalid_nth', { label: l, n: seen[l] }) }
     })
   }
-  const kind = blocked ? 'invalid' : 'notice'
+  // What needs fixing (blocking problems, and the `disabled` message) and what only has a message
+  // (non-blocking ones) are separate sentences: a notice is never counted as something to fix.
+  const part = (indices: number[], kind: 'invalid' | 'notice'): string | null => {
+    const sel = indices.map(i => all[i])
+    if (sel.length === 0) return null
+    if (sel.length === 1) return sel[0].label ? (sel[0].message ? t('ui.form.invalid_field', { label: sel[0].label, message: sel[0].message }) : sel[0].label) : sel[0].message
+    const names = indices.map(i => named[i])
+    return names.every(Boolean)
+      ? t(kind === 'invalid' ? 'ui.form.invalid_named' : 'ui.form.notice_named', { count: sel.length, names: names.join(t('ui.form.name_sep')) })
+      : t(kind === 'invalid' ? 'ui.form.invalid_count' : 'ui.form.notice_count', { count: sel.length })
+  }
+  const indicesOf = (blocking: boolean) => all.flatMap((p, i) => (p.blocking === blocking ? [i] : []))
   const reason = problems.length === 0 ? null
-    : count === 1 ? (problems[0].label ? t('ui.form.invalid_field', { label: problems[0].label, message: problems[0].message }) : problems[0].message)
-      : named.every(Boolean) ? t(kind === 'invalid' ? 'ui.form.invalid_named' : 'ui.form.notice_named', { count, names: named.join(t('ui.form.name_sep')) })
-        : t(kind === 'invalid' ? 'ui.form.invalid_count' : 'ui.form.notice_count', { count })
+    : [part(indicesOf(true), 'invalid'), part(indicesOf(false), 'notice')].filter(Boolean).join(t('ui.form.summary_sep'))
   const canGo = problems.length > 0
   const goToFirst = () => {
     const list = gather()
@@ -142,7 +151,7 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
         className,
       )}
     >
-      <p id={reasonId} className={cn('min-h-5 min-w-0 flex-1 text-sm font-medium', reason && 'text-destructive')}>
+      <p id={reasonId} className={cn('min-h-5 min-w-0 flex-1 text-sm font-medium', reason && (blocked ? 'text-destructive' : 'text-warning-ink'))}>
         {reason && canGo ? (
           <button
             type="button"
@@ -151,7 +160,8 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
             className="-mx-1 rounded-md px-1 text-left underline decoration-dotted underline-offset-4 outline-none hover:decoration-solid focus-visible:ring-3 focus-visible:ring-ring/50"
           >{reason}</button>
         ) : (reason ?? message ?? t('ui.form.unsaved'))}
-        {hiddenText && <span className="mt-0.5 block text-xs font-normal">{hiddenText}</span>}
+        {/* A real space, so the two texts read apart in the accessible name as well as on screen. */}
+        {hiddenText && <>{' '}<span className="mt-0.5 block text-xs font-normal">{hiddenText}</span></>}
       </p>
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={() => { discard(); onDiscard() }} disabled={pending}>{t('ui.form.discard')}</Button>

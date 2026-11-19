@@ -584,6 +584,93 @@ describe('a problem in a part of the page that is not shown', () => {
       </FormValidityProvider>,
     )
     fireEvent.click(summary())
-    expect(screen.getAllByText('Second is in a part of the page that is not shown').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Second is in a part of the page that is not shown/).length).toBeGreaterThan(0)
+  })
+})
+
+describe('tabs inside a form keep their fields mounted, so a hidden field still blocks', () => {
+  function Form({ controlled, keepMounted }: { controlled?: boolean; keepMounted?: boolean }) {
+    const [tab, setTab] = useState('a')
+    const root = controlled ? { value: tab, onValueChange: (v: unknown) => setTab(String(v)) } : { defaultValue: 'a' }
+    return (
+      <FormValidityProvider>
+        <Tabs {...root}>
+          <TabsList><TabsTrigger value="a">A</TabsTrigger><TabsTrigger value="b">B</TabsTrigger></TabsList>
+          <TabsContent value="a"><input aria-label="First" /></TabsContent>
+          <TabsContent value="b" keepMounted={keepMounted}><Num label="Second" initial={9999} /></TabsContent>
+        </Tabs>
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>
+    )
+  }
+
+  it.each([['uncontrolled', false], ['controlled', true]])('%s: 9999 in the hidden tab blocks Save, and the bar goes to it', (_name, controlled) => {
+    render(<Form controlled={controlled} />)
+    expect(save().getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'B' }).getAttribute('aria-selected')).toBe('false')
+    fireEvent.click(summary())
+    expect(screen.getByRole('tab', { name: 'B' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByLabelText('Second'))
+  })
+
+  it('keepMounted={false} is honoured: the hidden field is gone and cannot block', () => {
+    render(<Form keepMounted={false} />)
+    expect(screen.queryByLabelText('Second')).toBeNull()
+    expect(save().getAttribute('aria-disabled')).toBeNull()
+  })
+
+  it('outside a form the default is unchanged: an inactive panel is not in the page', () => {
+    render(
+      <Tabs defaultValue="a">
+        <TabsList><TabsTrigger value="a">A</TabsTrigger><TabsTrigger value="b">B</TabsTrigger></TabsList>
+        <TabsContent value="a"><input aria-label="First" /></TabsContent>
+        <TabsContent value="b"><input aria-label="Second" /></TabsContent>
+      </Tabs>,
+    )
+    expect(screen.queryByLabelText('Second')).toBeNull()
+  })
+})
+
+describe('blocking and non-blocking problems together', () => {
+  function Mixed({ soft = true }: { soft?: boolean }) {
+    return (
+      <FormValidityProvider>
+        <Num label="Timeout" />
+        <Num label="Retries" />
+        {soft && <Field label="Name" error="Taken" errorBlocksSave={false}><input /></Field>}
+        <SaveBar dirty onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>
+    )
+  }
+
+  it('the count and list of what needs fixing hold only the blocking ones; the notice follows', () => {
+    render(<Mixed />)
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
+    expect(summary().textContent).toBe('Timeout: Enter a number, such as 5 · Name: Taken')
+    fireEvent.change(screen.getByLabelText('Retries'), { target: { value: 'abc' } })
+    expect(summary().textContent).toBe('2 inputs need fixing: Timeout, Retries · Name: Taken')
+  })
+
+  it('a non-blocking problem on its own is not drawn as a failure', () => {
+    render(<Mixed />)
+    const p = summary().parentElement!
+    expect(p.className).not.toContain('text-destructive')
+    expect(p.className).toContain('text-warning-ink')
+    fireEvent.change(screen.getByLabelText('Timeout'), { target: { value: 'abc' } })
+    expect(summary().parentElement!.className).toContain('text-destructive')
+  })
+})
+
+describe('the hidden-problem message says what to do, and is separated from the summary', () => {
+  it('has the action, and a real space between the two texts in the visible and accessible text', () => {
+    render(
+      <FormValidityProvider>
+        <div id="nowhere" />
+        <SaveBar dirty errors={[{ label: 'Second', message: 'Bad', id: 'nowhere' }]} onSave={() => {}} onDiscard={() => {}} />
+      </FormValidityProvider>,
+    )
+    fireEvent.click(summary())
+    const p = summary().parentElement!
+    expect(p.textContent).toBe('Second: Bad Second is in a part of the page that is not shown; open or switch to that part, then fix it.')
   })
 })

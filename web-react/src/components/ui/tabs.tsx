@@ -1,7 +1,7 @@
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
-import { useRef } from "react"
+import { useContext, useRef } from "react"
 import { cn } from "@/lib/utils"
-import { useRevealOnProblem } from "@/lib/reveal"
+import { InFormContext, useRevealOnProblem } from "@/lib/reveal"
 
 function Tabs({ className, ...props }: TabsPrimitive.Root.Props) {
   return <TabsPrimitive.Root data-slot="tabs" className={cn("flex flex-col gap-4", className)} {...props} />
@@ -43,7 +43,14 @@ function TabsIndicator({ className, ...props }: TabsPrimitive.Indicator.Props) {
   )
 }
 
-function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
+/**
+ * Inside a FormValidityProvider an inactive panel stays mounted (hidden) by default, so the fields
+ * in it keep reporting an unusable value: an unmounted field reports nothing, and a form would save
+ * a value that nobody can see is wrong. Outside a form the default is unchanged. An explicit
+ * `keepMounted={false}` is honoured, and then fields in a hidden tab cannot block Save.
+ */
+function TabsContent({ className, keepMounted, ...props }: TabsPrimitive.Panel.Props) {
+  const inForm = useContext(InFormContext)
   // A panel kept mounted while inactive still holds fields that can have problems. Registering
   // it lets "go to the first problem" switch to its tab: the panel names its tab through
   // aria-labelledby, and activating that tab works the same whether the tabs are controlled or not.
@@ -52,7 +59,7 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
     const tab = document.getElementById(ref.current?.getAttribute("aria-labelledby") ?? "")
     tab?.click()
   })
-  return <TabsPrimitive.Panel ref={ref} data-slot="tabs-content" className={cn("outline-none", className)} {...props} />
+  return <TabsPrimitive.Panel ref={ref} keepMounted={keepMounted ?? inForm} data-slot="tabs-content" className={cn("outline-none", className)} {...props} />
 }
 
 export { Tabs, TabsList, TabsTrigger, TabsIndicator, TabsContent }
