@@ -420,10 +420,11 @@ func (s *Service) UpdateSeparator(ctx context.Context, e *domain.SeparatorEntry)
 	return s.separators.Update(ctx, e)
 }
 
-// nextSortOrder returns max(sort_order across nodes, separators and line
-// positions) + 10,
-// or 10 if both tables are empty. Used to drop new separators at the tail
-// of the merged list without forcing the admin to pick a number.
+// nextSortOrder returns max(sort_order across nodes, separators and the
+// positions of relay lines that exist) + 10, or 10 when there is none of them.
+// Used to drop new separators at the tail of the merged list without forcing
+// the admin to pick a number. Position rows whose line or node is gone are not
+// counted; nodeRepo.Create applies the same rule (maxLivePosition).
 func (s *Service) nextSortOrder(ctx context.Context) (int, error) {
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {

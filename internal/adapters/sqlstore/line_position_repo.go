@@ -43,6 +43,9 @@ func (subscriptionLinePositionRow) TableName() string { return "subscription_lin
 // placeholder limit of every dialect.
 const linePositionChunk = 500
 
+// linePositionInsertBatch is the rows per INSERT when positions are written.
+const linePositionInsertBatch = 100
+
 // attachLinePositions fills RelayLine.Position on loaded nodes with one query
 // per chunk of nodes that carry relays. Rows whose line no longer exists are
 // ignored (they are inert and the next reorder rewrites the table), and the
@@ -127,12 +130,55 @@ func (r *nodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.Subscript
 		if err := tx.Where("1 = 1").Delete(&subscriptionLinePositionRow{}).Error; err != nil {
 			return err
 		}
-		for _, line := range w.Lines {
-			row := subscriptionLinePositionRow{NodeID: line.NodeID, LineID: line.LineID, SortOrder: line.SortOrder}
-			if err := tx.Create(&row).Error; err != nil {
+		// Batched: a few hundred lines would otherwise be a round trip each. Four
+		// columns per row and 100 rows per statement stay far under the bind
+		// variable limit of every dialect (SQLite's older 999 included).
+		rows := make([]subscriptionLinePositionRow, len(w.Lines))
+		for i, line := range w.Lines {
+			rows[i] = subscriptionLinePositionRow{NodeID: line.NodeID, LineID: line.LineID, SortOrder: line.SortOrder}
+		}
+		if len(rows) > 0 {
+			if err := tx.CreateInBatches(rows, linePositionInsertBatch).Error; err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// maxLivePosition is the largest position among lines that still exist, 0 when
+// none. Rows for a deleted node or a removed line are skipped, which is also
+// what node.Service.nextSortOrder does (it only sees positions attached to the
+// lines of loaded nodes). Used when a node is appended, which is rare, so
+// loading the relays of the few nodes that have position rows is fine.
+func maxLivePosition(ctx context.Context, db *gorm.DB) (int, error) {
+	var rows []subscriptionLinePositionRow
+	if err := db.WithContext(ctx).Find(&rows).Error; err != nil || len(rows) == 0 {
+		return 0, err
+	}
+	byNode := map[int64]map[string]int{}
+	var ids []int64
+	for _, row := range rows {
+		if byNode[row.NodeID] == nil {
+			byNode[row.NodeID] = map[string]int{}
+			ids = append(ids, row.NodeID)
+		}
+		byNode[row.NodeID][row.LineID] = row.SortOrder
+	}
+	best := 0
+	for start := 0; start < len(ids); start += linePositionChunk {
+		end := min(start+linePositionChunk, len(ids))
+		var nodes []nodeRow
+		if err := db.WithContext(ctx).Select("id", "relays").Where("id IN ?", ids[start:end]).Find(&nodes).Error; err != nil {
+			return 0, err
+		}
+		for i := range nodes {
+			for _, relay := range []domain.RelayLine(nodes[i].Relays) {
+				if pos, ok := byNode[nodes[i].ID][relay.ID]; ok && pos > best {
+					best = pos
+				}
+			}
+		}
+	}
+	return best, nil
 }

@@ -280,8 +280,10 @@ func TestNodesOrderGetShape(t *testing.T) {
 	}
 }
 
-// A single read of each table, however many rows come back.
-func TestNodesOrderGetSingleQueryPerKind(t *testing.T) {
+// The list handler calls each repo's List once (nodes, separators, panels). It
+// counts List calls on wrapping repos, not SQL statements: what each List runs
+// is covered by the sqlstore tests.
+func TestNodesOrderGetCallsEachListOnce(t *testing.T) {
 	f := newOrderFixture(t)
 	f.nodes.lists.Store(0)
 	f.seps.lists.Store(0)
@@ -290,7 +292,7 @@ func TestNodesOrderGetSingleQueryPerKind(t *testing.T) {
 		t.Fatal(code)
 	}
 	if n, s, p := f.nodes.lists.Load(), f.seps.lists.Load(), f.panels.lists.Load(); n != 1 || s != 1 || p != 1 {
-		t.Fatalf("list calls: nodes=%d separators=%d panels=%d, want 1 each", n, s, p)
+		t.Fatalf("List calls: nodes=%d separators=%d panels=%d, want 1 each", n, s, p)
 	}
 }
 

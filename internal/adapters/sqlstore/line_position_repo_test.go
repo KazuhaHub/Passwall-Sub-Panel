@@ -304,3 +304,38 @@ func TestUpdateMetadataNeverWritesSortOrder(t *testing.T) {
 		t.Fatalf("name=%q sort_order=%d, want the rename and 90", got.DisplayName, got.SortOrder)
 	}
 }
+
+// One rule for "past every line": only positions of lines that still exist
+// count, here and in node.Service.nextSortOrder. An orphan row (its line is
+// gone) must not push a new node's position out.
+func TestCreateAppendsPastLivePositionsOnly(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	putPosition(t, repo, nodes[0].ID, "A-r1", 500)  // live line
+	putPosition(t, repo, nodes[0].ID, "gone", 9000) // orphan
+	putPosition(t, repo, 99999, "A-r1", 8000)       // orphan: no such node
+	n := &domain.Node{PanelID: 1, InboundID: 9, DisplayName: "New", Enabled: true}
+	if err := repo.Create(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	if n.SortOrder != 510 {
+		t.Fatalf("sort_order = %d, want 510 (past the live line at 500, ignoring orphans)", n.SortOrder)
+	}
+}
+
+// More rows than one INSERT batch, written in one call and read back whole.
+func TestApplySubscriptionOrderWritesManyLinesInBatches(t *testing.T) {
+	repo, ctx, nodes := seedPositionedNodes(t)
+	var lines []ports.LinePositionWrite
+	want := map[string]int{}
+	for i := 0; i < 250; i++ { // 3 batches of 100
+		id := fmt.Sprintf("line-%d", i)
+		lines = append(lines, ports.LinePositionWrite{NodeID: nodes[0].ID, LineID: id, SortOrder: (i + 1) * 10})
+		want[fmt.Sprintf("%d/%s", nodes[0].ID, id)] = (i + 1) * 10
+	}
+	if err := repo.ApplySubscriptionOrder(ctx, ports.SubscriptionOrderWrite{Lines: lines}); err != nil {
+		t.Fatal(err)
+	}
+	if got := allPositions(t, repo); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%d rows stored, want %d", len(got), len(want))
+	}
+}
