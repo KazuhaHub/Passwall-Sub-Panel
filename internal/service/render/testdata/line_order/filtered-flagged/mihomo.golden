@@ -1,0 +1,113 @@
+proxies:
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1FA\U0001F1F8 A"
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n7.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1FA\U0001F1F8 A a1"
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: a1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1FA\U0001F1F8 A a2"
+      network: tcp
+      port: 8444
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: a2.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1EF\U0001F1F5 C"
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n8.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1EF\U0001F1F5 C c1"
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: c1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1ED\U0001F1F0 D"
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n9.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: "\U0001F1ED\U0001F1F0 D d1"
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: d1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+proxy-groups:
+    - name: 国外媒体
+      type: select
+      proxies:
+        - "\U0001F1FA\U0001F1F8 A"
+        - "\U0001F1FA\U0001F1F8 A a1"
+        - "\U0001F1FA\U0001F1F8 A a2"
+        - "\U0001F1EF\U0001F1F5 C"
+        - "\U0001F1EF\U0001F1F5 C c1"
+        - "\U0001F1ED\U0001F1F0 D"
+        - "\U0001F1ED\U0001F1F0 D d1"
+rules:
+    - MATCH,国外媒体
+sub-rules: {}
