@@ -304,7 +304,12 @@ type updateMetadataRequest struct {
 	Flow          string   `json:"flow"`
 	Region        string   `json:"region"`
 	Tags          []string `json:"tags"`
-	SortOrder     int      `json:"sort_order"`
+	// SortOrder nil (field absent) keeps the stored position. The edit dialog
+	// used to send it with every save, so a dialog opened before a drag and
+	// saved after it put the node back where it was, and a client that left it
+	// out wrote 0. Reordering belongs to PUT /nodes/order; an explicit value is
+	// still written for the legacy UI.
+	SortOrder *int `json:"sort_order"`
 	// Relays full-replaces the node's transit lines; nil (field absent) leaves
 	// them untouched, an explicit [] clears them — same patch semantics as Tags.
 	Relays     []relayLineDTO `json:"relays"`
@@ -817,7 +822,9 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.Tags != nil {
 		n.Tags = req.Tags
 	}
-	n.SortOrder = req.SortOrder
+	if req.SortOrder != nil {
+		n.SortOrder = *req.SortOrder
+	}
 	// Relays: nil (field absent) leaves them — and HideDirect — untouched, so a
 	// relay-unaware client never disturbs them; an explicit [] clears the lines.
 	if req.Relays != nil {

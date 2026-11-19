@@ -296,3 +296,17 @@ func TestSubscriptionOrderVersionTracksTheOrder(t *testing.T) {
 		t.Fatal("a new line did not change the order version")
 	}
 }
+
+// A separator created later must land below a line dragged to the bottom, not
+// just below the last node.
+func TestNextSortOrderCountsLinePositions(t *testing.T) {
+	svc, repo := orderFixture()
+	if got, _ := svc.nextSortOrder(context.Background()); got != 30 {
+		t.Fatalf("baseline next = %d, want 30", got)
+	}
+	p := 95
+	repo.nodes[0].Relays[0].Position = &p
+	if got, _ := svc.nextSortOrder(context.Background()); got != 105 {
+		t.Fatalf("next = %d, want 105 (past the line at 95)", got)
+	}
+}

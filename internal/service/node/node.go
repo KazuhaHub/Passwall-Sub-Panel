@@ -420,7 +420,8 @@ func (s *Service) UpdateSeparator(ctx context.Context, e *domain.SeparatorEntry)
 	return s.separators.Update(ctx, e)
 }
 
-// nextSortOrder returns max(sort_order across nodes + separators) + 10,
+// nextSortOrder returns max(sort_order across nodes, separators and line
+// positions) + 10,
 // or 10 if both tables are empty. Used to drop new separators at the tail
 // of the merged list without forcing the admin to pick a number.
 func (s *Service) nextSortOrder(ctx context.Context) (int, error) {
@@ -436,6 +437,13 @@ func (s *Service) nextSortOrder(ctx context.Context) (int, error) {
 	for _, n := range nodes {
 		if n.SortOrder > maxSort {
 			maxSort = n.SortOrder
+		}
+		// A line dragged to the bottom sits past every node; a separator
+		// appended below nodes alone would land above it.
+		for _, line := range n.Relays {
+			if line.Position != nil && *line.Position > maxSort {
+				maxSort = *line.Position
+			}
 		}
 	}
 	for _, sep := range seps {

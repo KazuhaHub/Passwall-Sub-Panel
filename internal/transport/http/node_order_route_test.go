@@ -401,3 +401,74 @@ func TestLegacyReorderEndpointsStillWork(t *testing.T) {
 		t.Fatalf("sort_order = %d", got.SortOrder)
 	}
 }
+
+// The edit dialog used to send sort_order with every save, so one opened before
+// a drag and saved after it put the node back where it was (and a client that
+// omitted the field wrote 0). Omitting it now keeps the stored position; an
+// explicit value (the legacy UI) is still honoured.
+func TestUpdateMetadataWithoutSortOrderKeepsPosition(t *testing.T) {
+	f := newOrderFixture(t)
+	ctx := context.Background()
+	_, cur := f.get(f.adminToken)
+	// Drag Osaka to the top through the new endpoint: it gets sort_order 10.
+	keys := rowKeys(t, cur)
+	arranged := append([]string{keys[len(keys)-1]}, keys[:len(keys)-1]...)
+	if code, out := f.put(f.adminToken, orderPutBody(cur["order_version"].(string), arranged...)); code != stdhttp.StatusOK {
+		t.Fatalf("PUT = %d %v", code, out)
+	}
+	moved, _ := f.repos.Node.GetByID(ctx, f.nodeB.ID)
+
+	w := f.do("PUT", fmt.Sprintf("/api/admin/nodes/%d/metadata", f.nodeB.ID), f.adminToken, `{"display_name":"Osaka B renamed"}`)
+	if w.Code != stdhttp.StatusOK && w.Code != stdhttp.StatusNoContent {
+		t.Fatalf("metadata save = %d: %s", w.Code, w.Body.String())
+	}
+	got, _ := f.repos.Node.GetByID(ctx, f.nodeB.ID)
+	if got.DisplayName != "Osaka B renamed" {
+		t.Fatalf("the save did not apply: %+v", got)
+	}
+	if got.SortOrder != moved.SortOrder || got.SortOrder == 0 {
+		t.Fatalf("sort_order = %d after a save without it, want the dragged %d", got.SortOrder, moved.SortOrder)
+	}
+
+	w = f.do("PUT", fmt.Sprintf("/api/admin/nodes/%d/metadata", f.nodeB.ID), f.adminToken, `{"display_name":"Osaka B renamed","sort_order":777}`)
+	if w.Code != stdhttp.StatusOK && w.Code != stdhttp.StatusNoContent {
+		t.Fatalf("metadata save = %d: %s", w.Code, w.Body.String())
+	}
+	if got, _ = f.repos.Node.GetByID(ctx, f.nodeB.ID); got.SortOrder != 777 {
+		t.Fatalf("an explicit sort_order must still be written, got %d", got.SortOrder)
+	}
+}
+
+// A line dragged to the bottom must not be undercut by a node created later:
+// the next node's default position is past every line position too.
+func TestNewNodeLandsBelowDraggedLines(t *testing.T) {
+	f := newOrderFixture(t)
+	ctx := context.Background()
+	_, cur := f.get(f.adminToken)
+	keys := rowKeys(t, cur)
+	// Move Tokyo's forward line to the very bottom.
+	var arranged []string
+	for _, k := range keys {
+		if k != fmt.Sprintf("node:%d/a-fwd", f.nodeA.ID) {
+			arranged = append(arranged, k)
+		}
+	}
+	arranged = append(arranged, fmt.Sprintf("node:%d/a-fwd", f.nodeA.ID))
+	if code, out := f.put(f.adminToken, orderPutBody(cur["order_version"].(string), arranged...)); code != stdhttp.StatusOK {
+		t.Fatalf("PUT = %d %v", code, out)
+	}
+	maxLine := 0
+	a, _ := f.repos.Node.GetByID(ctx, f.nodeA.ID)
+	for _, r := range a.Relays {
+		if r.Position != nil && *r.Position > maxLine {
+			maxLine = *r.Position
+		}
+	}
+	n := &domain.Node{PanelID: f.nodeA.PanelID, InboundID: 9, DisplayName: "New", Enabled: true}
+	if err := f.repos.Node.Create(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	if n.SortOrder <= maxLine {
+		t.Fatalf("new node sort_order %d is not past the last line position %d", n.SortOrder, maxLine)
+	}
+}

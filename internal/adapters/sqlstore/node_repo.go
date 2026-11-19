@@ -26,11 +26,18 @@ func (r *nodeRepo) Create(ctx context.Context, n *domain.Node) error {
 	// The reorder path only ever assigns positive values, so 0 is a safe "auto"
 	// sentinel.
 	if n.SortOrder <= 0 {
-		var maxSort int
+		var maxSort, maxLine int
 		if err := r.db.WithContext(ctx).Model(&nodeRow{}).
 			Select("COALESCE(MAX(sort_order),0)").Scan(&maxSort).Error; err != nil {
 			return err
 		}
+		// A relay line dragged to the bottom has a position of its own, past
+		// every node's; a node appended below nodes alone could land above it.
+		if err := r.db.WithContext(ctx).Model(&subscriptionLinePositionRow{}).
+			Select("COALESCE(MAX(sort_order),0)").Scan(&maxLine).Error; err != nil {
+			return err
+		}
+		maxSort = max(maxSort, maxLine)
 		n.SortOrder = maxSort + 10
 	}
 	row, err := nodeFromDomain(n)
