@@ -409,9 +409,10 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 			}
 		}
 		if !ok {
-			// 503, not 429: nothing is wrong with the request. The agent keeps
-			// its state on a 5xx and sends the same request again on its next
-			// poll; a 400 or 415 would have switched compression off for an hour.
+			// 503, not 429: nothing is wrong with the request. A 503 is a
+			// transient to the agent: it keeps its state and sends the same
+			// request again on its next poll. A 400 or 415 would make it resend
+			// in plain at once and, that succeeding, stay plain for an hour.
 			metrics.NodeSyncDecodeBusyTotal.Inc()
 			w.Header().Set("Retry-After", "5")
 			writeNodeError(w, http.StatusServiceUnavailable, errors.New("node sync busy"))
