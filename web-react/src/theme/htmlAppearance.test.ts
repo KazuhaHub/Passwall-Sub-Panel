@@ -89,3 +89,34 @@ describe('stylesheet', () => {
     expect(css).toContain('--row-h')
   })
 })
+
+// The stylesheet hard-codes each preset's brand colours (a stylesheet cannot
+// call tokensFromSource). Derive the expected values from the same function the
+// MUI theme uses, for every preset and both modes, so the two cannot drift.
+describe('stylesheet brand values match the MUI theme derivation', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
+  const declared = (selector: string): Record<string, string> => {
+    const escaped = selector.replace(/[.[\]"]/g, '\\$&')
+    const m = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)
+    if (!m) throw new Error(`no rule for ${selector}`)
+    const block = m[1]
+    return Object.fromEntries(
+      block.split(';').map(d => d.trim()).filter(Boolean).map(d => {
+        const i = d.indexOf(':')
+        return [d.slice(0, i).trim(), d.slice(i + 1).trim().toLowerCase()]
+      }),
+    )
+  }
+  for (const preset of COLOR_PRESETS) {
+    for (const mode of ['light', 'dark'] as const) {
+      it(`${preset.id} ${mode}`, () => {
+        const t = tokensFromSource(preset.hex, mode)
+        const got = declared(mode === 'dark' ? `:root.dark[data-brand="${preset.id}"]` : `:root[data-brand="${preset.id}"]`)
+        expect(got['--brand']).toBe(t.primary.toLowerCase())
+        expect(got['--sidebar-primary']).toBe(t.primary.toLowerCase())
+        expect(got['--brand-foreground']).toBe(t.onPrimary.toLowerCase())
+        expect(got['--sidebar-primary-foreground']).toBe(t.onPrimary.toLowerCase())
+      })
+    }
+  }
+})

@@ -64,7 +64,7 @@ export default function UiKitchenSink() {
               <span className="w-20 text-sm text-muted-foreground">Brand</span>
               {COLOR_PRESETS.map(p => (
                 <Button key={p.id} size="sm" variant={userColor === p.hex ? 'default' : 'outline'} onClick={() => setUserColor(p.hex)}>
-                  <span className="size-3 rounded-full bg-brand" />
+                  <span className="size-3 rounded-full" style={{ backgroundColor: p.hex }} />
                   {p.id}
                 </Button>
               ))}
@@ -105,6 +105,25 @@ export default function UiKitchenSink() {
               </div>
               <Input className="h-(--control-h) max-w-60" placeholder="Input (height follows density)" />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>MUI coexistence checks</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {/* Each sample uses a utility that an unlayered MUI global would beat
+                without the shim in ui.css; ids are read by the verification script. */}
+            <div id="ui-kit-no-scrollbar" className="no-scrollbar h-16 w-64 overflow-y-scroll rounded-md border p-2">
+              {Array.from({ length: 12 }, (_, i) => <div key={i}>no-scrollbar row {i + 1}</div>)}
+            </div>
+            <div id="ui-kit-thin-scrollbar" className="h-16 w-64 overflow-y-scroll rounded-md border p-2">
+              {Array.from({ length: 12 }, (_, i) => <div key={i}>default scrollbar row {i + 1}</div>)}
+            </div>
+            <p>
+              <strong id="ui-kit-strong-normal" className="font-normal">strong.font-normal</strong>{' '}
+              <strong id="ui-kit-strong-plain">strong</strong>{' '}
+              <span id="ui-kit-box-content" className="box-content inline-block w-16 border-4 p-2">box-content</span>
+            </p>
           </CardContent>
         </Card>
 

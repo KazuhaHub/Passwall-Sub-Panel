@@ -4,33 +4,80 @@
  * LAYERS. Tailwind emits its theme variables and utilities inside `@layer`s.
  * MUI's emotion styles are injected as plain, UNLAYERED <style> rules, and by
  * the cascade an unlayered author rule beats a layered one regardless of
- * specificity or source order. So the utilities here lose to MUI on any element
- * MUI styles, which is what lets un-migrated pages keep rendering as before.
- * The corollary (plan section 4.2): never mix an MUI component with Tailwind
- * utilities on one element, because the utilities would lose.
+ * specificity or source order. That cuts BOTH ways:
+ *   - MUI beats Tailwind on every element MUI styles, so un-migrated pages keep
+ *     rendering as before;
+ *   - MUI's GLOBAL rules (`*`, `strong, b`, ...) beat Tailwind utilities on the
+ *     new elements too. The "MUI coexistence shim" near the end of this file
+ *     answers each one. Plan section 4.2's corollary stands: never mix an MUI
+ *     component with Tailwind utilities on one element.
  *
- * PREFLIGHT IS NOT IMPORTED GLOBALLY, and that is deliberate. Layering alone is
- * not enough: wherever MUI does not set a property itself, the layered reset
- * still applies. Measured on the built login page, a global preflight changed
- * `vertical-align` on every MUI svg icon (baseline -> middle), set border-style
- * solid on every element, and changed tab-size, the tap-highlight colour and the
- * html font-family / line-height. So `tailwindcss/theme.css` and
- * `tailwindcss/utilities.css` are imported separately (this is what
- * `@import "tailwindcss"` does minus preflight), and a scoped copy of the reset
- * lives in the base layer below, applying only inside `.psp-ui` and
- * `[data-slot]` (every shadcn component, including portaled popups).
+ * PREFLIGHT IS NOT IMPORTED GLOBALLY. Layering alone is not enough: wherever
+ * MUI does not set a property itself, a layered reset still applies. Measured on
+ * the built login page, a global preflight changed `vertical-align` on every MUI
+ * svg icon, set border-style solid on every element, and changed tab-size, the
+ * tap-highlight colour and the html font-family / line-height. So
+ * `tailwindcss/theme.css` and `tailwindcss/utilities.css` are imported
+ * separately (what `@import "tailwindcss"` does, minus preflight), and a scoped
+ * copy of the reset lives in the base layer below, applying only inside
+ * `.psp-ui` and `[data-slot]` (every shadcn component, including portaled
+ * popups).
  *
- * Anything NOT inside a layer here would beat MUI, so the only unlayered rules
- * are custom properties on :root (MUI does not read them) and the @font-face
- * rules from the font packages.
+ * WHAT THIS FILE EMITS GLOBALLY (unlayered or on a global selector), and why
+ * each item is harmless to un-migrated pages. Guarded by `smoke:dist`.
+ *   - `:root` / `:root.dark` / `:root[data-brand|data-density]` custom
+ *     properties: MUI does not read them.
+ *   - @font-face for Geist and Geist Mono: inert until a rule uses the family,
+ *     which only `.psp-ui` / `[data-slot]` do.
+ *   - `@layer properties`: Tailwind's `@property`-style fallbacks for its own
+ *     `--tw-*` variables, custom properties only.
+ *   - `@property` registrations and `@keyframes` (spin, pulse, enter, exit,
+ *     accordion-*): named at-rules, applied only by Tailwind utility classes.
+ *   - The MUI coexistence shim: selectors rooted at `.psp-ui` / `[data-slot]`.
+ * Nothing sets a real property on `*`, `html`, `body` or `:host` outside those.
+ *
+ * Utilities are generated only from the @source list below, not from all of
+ * `src` (auto-detection would turn bare words in i18n JSON and the MUI views
+ * into app-wide `.hidden`, `.table`, `.container`, ... rules that beat MUI's
+ * own layout classes). When a page is migrated, add ONE `@source` line for its
+ * file or directory in the marked block.
  */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+@import "./shadcn-tailwind.css";
+
+/* Sources scanned for utility classes (paths are relative to this file). */
+@source "../components/ui";
+@source "../lib";
+@source "../hooks";
+@source "../views/admin/UiKitchenSink.tsx";
+/* MIGRATED VIEWS: add one @source line per migrated page below this line. */
+
+/*
+ * Geist, Latin subset only (shadcn's other subsets: cyrillic, vietnamese,
+ * latin-ext, cost ~7 more faces and ~85 kB of render-blocking CSS). Characters
+ * outside Latin, including all CJK, fall through to the system stack in
+ * --font-sans. Source: @fontsource-variable/geist and geist-mono 5.3.0,
+ * `*-latin-wght-normal.woff2` with the upstream unicode-range.
+ */
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -180,9 +227,9 @@
 :root.dark[data-brand="blue"]   { --brand: #9fcaff; --sidebar-primary: #9fcaff; --sidebar-primary-foreground: #003258; --brand-foreground: #003258; }
 :root.dark[data-brand="purple"] { --brand: #cfbcff; --sidebar-primary: #cfbcff; --sidebar-primary-foreground: #381e72; --brand-foreground: #381e72; }
 :root.dark[data-brand="teal"]   { --brand: #4cdadb; --sidebar-primary: #4cdadb; --sidebar-primary-foreground: #003737; --brand-foreground: #003737; }
-:root.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #0b3900; --brand-foreground: #0b3900; }
+:root.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #113800; --brand-foreground: #113800; }
 :root.dark[data-brand="orange"] { --brand: #ffb951; --sidebar-primary: #ffb951; --sidebar-primary-foreground: #452b00; --brand-foreground: #452b00; }
-:root.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #5e1133; --brand-foreground: #5e1133; }
+:root.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #640036; --brand-foreground: #640036; }
 
 /*
  * Density. --control-h is the height of buttons/inputs/selects, --row-h the
@@ -276,4 +323,84 @@
   .psp-ui ::selection {
     background: color-mix(in oklch, var(--ring) 35%, transparent);
   }
+  /* Thin themed scrollbars on the new elements, matching the MUI theme's look.
+     Declared in the base layer so any utility (`no-scrollbar`) overrides it; the
+     shim below stops MUI's unlayered `*` rule from beating that. */
+  :where(.psp-ui, [data-slot]), :where(.psp-ui, [data-slot]) * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
+  }
 }
+
+/*
+ * ===== MUI coexistence shim (delete this whole block when MUI is removed) =====
+ *
+ * MUI's CssBaseline and this app's theme (src/theme/index.ts, MuiCssBaseline
+ * styleOverrides) inject UNLAYERED global rules. They beat every layered
+ * Tailwind utility on any element, including the new ones. This block neutralises
+ * exactly the ones that reach elements inside `.psp-ui` / `[data-slot]`.
+ *
+ * HOW. An unlayered `prop: revert-layer` rolls that element's cascade back to the
+ * layered rules (utilities > components > base), as if the MUI rule were absent.
+ * So the shim does not itself outrank utilities, which a plain unlayered reset
+ * would. The selector is `:is(.psp-ui, [data-slot])` + descendants, specificity
+ * (0,1,0)+, which beats MUI's (0,0,0)-(0,0,1) globals.
+ *
+ * Every global rule the app emits (read from the live emotion sheets on the
+ * built login page) and its decision:
+ *   html { -webkit-font-smoothing, box-sizing: border-box, text-size-adjust }
+ *       inherited / harmless: same smoothing as the new components set, and
+ *       `.psp-ui` re-declares box-sizing via the scoped preflight. No shim.
+ *   *, *::before, *::after { box-sizing: inherit }
+ *       AFFECTS: beats the `box-content` utility (combobox, input-group).
+ *       Shimmed below.
+ *   strong, b { font-weight: 700 }
+ *       AFFECTS: beats `font-*` utilities on <b>/<strong>. Shimmed below.
+ *   body { margin; colour; typography.body1; background }
+ *       inherited only (font-family Roboto, size 1rem, weight 400, colour):
+ *       `.psp-ui` and `[data-slot]` set their own font-family and colours.
+ *       No shim.
+ *   @media print body { background }, body::backdrop { background }
+ *       body only. No shim.
+ *   * { scrollbar-width: thin; scrollbar-color }
+ *       AFFECTS: beats `no-scrollbar` (scrollbar-width: none). Shimmed below;
+ *       new elements keep a thin themed scrollbar through the base-layer default
+ *       declared further down, so the two stacks look alike.
+ *   *::-webkit-scrollbar{,-track,-thumb,-thumb:hover,-corner}
+ *       AFFECTS: only Safari/Chrome builds without the standard scrollbar
+ *       properties; would fight `.no-scrollbar::-webkit-scrollbar`. Shimmed.
+ *   @keyframes mui-auto-fill, mui-auto-fill-cancel, animation-*
+ *       uniquely named, referenced only by MUI classes. No shim.
+ *   label[data-shrink] + .MuiInputBase-formControl ..., and all `.css-*` /
+ *   `.Mui*` rules
+ *       class-qualified to MUI elements; cannot match shadcn markup.
+ *   @font-face Roboto
+ *       inert unless a rule names it.
+ *
+ * CONSTRAINTS. (1) `revert-layer` drops EVERY unlayered declaration of that
+ * property on the element, so on <b>/<strong> inside the new components with no
+ * `font-*` utility the browser default (bolder) applies, not MUI's 700 (the
+ * same as on a plain page, which is the goal). (2) Only the rules enumerated
+ * above are covered: any unlayered MUI global added later is not. Re-run the
+ * enumeration (list the data-emotion sheets' selectors that are not `.css-*` /
+ * `.Mui*`) when the theme's MuiCssBaseline overrides change.
+ */
+:is(.psp-ui, [data-slot]), :is(.psp-ui, [data-slot]) *,
+:is(.psp-ui, [data-slot]) *::before, :is(.psp-ui, [data-slot]) *::after {
+  box-sizing: revert-layer;
+}
+:is(.psp-ui, [data-slot]) :is(b, strong) {
+  font-weight: revert-layer;
+}
+:is(.psp-ui, [data-slot]), :is(.psp-ui, [data-slot]) * {
+  scrollbar-width: revert-layer;
+  scrollbar-color: revert-layer;
+}
+:is(.psp-ui, [data-slot]) *::-webkit-scrollbar { width: revert-layer; height: revert-layer; }
+:is(.psp-ui, [data-slot]) *::-webkit-scrollbar-track { background-color: revert-layer; }
+:is(.psp-ui, [data-slot]) *::-webkit-scrollbar-thumb {
+  background-color: revert-layer; border-radius: revert-layer; border: revert-layer; background-clip: revert-layer;
+}
+:is(.psp-ui, [data-slot]) *::-webkit-scrollbar-thumb:hover { background-color: revert-layer; }
+:is(.psp-ui, [data-slot]) *::-webkit-scrollbar-corner { background-color: revert-layer; }
+/* ===== end MUI coexistence shim ===== */
