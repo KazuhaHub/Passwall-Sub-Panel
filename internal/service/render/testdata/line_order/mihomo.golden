@@ -1,0 +1,182 @@
+proxies:
+    - cipher: chacha20-ietf-poly1305
+      name: '---- early ----'
+      password: psp-separator
+      port: 1
+      server: 127.0.0.1
+      type: ss
+      udp: false
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: A
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n7.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: A a1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: a1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: A a2
+      network: tcp
+      port: 8444
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: a2.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: C c1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: c1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - cipher: chacha20-ietf-poly1305
+      name: '---- positional ----'
+      password: psp-separator
+      port: 1
+      server: 127.0.0.1
+      type: ss
+      udp: false
+    - cipher: chacha20-ietf-poly1305
+      name: '---- tied with D ----'
+      password: psp-separator
+      port: 1
+      server: 127.0.0.1
+      type: ss
+      udp: false
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: D
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n9.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: D d1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: d1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: D d2
+      network: tcp
+      port: 8444
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: d2.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: E
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n10.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: F
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n11.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: F f1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: f1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+proxy-groups:
+    - name: 国外媒体
+      type: select
+      proxies:
+        - '---- early ----'
+        - A
+        - A a1
+        - A a2
+        - C c1
+        - '---- positional ----'
+        - '---- tied with D ----'
+        - D
+        - D d1
+        - D d2
+        - E
+        - F
+        - F f1
+rules:
+    - MATCH,国外媒体
+sub-rules: {}
