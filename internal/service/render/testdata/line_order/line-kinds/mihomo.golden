@@ -1,0 +1,99 @@
+proxies:
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: K
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n40.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: K fw
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: fw.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: K tn
+      network: tcp
+      port: 8444
+      reality-opts:
+        public-key: childPubKey
+        short-id: ef01
+      server: tn.relay.example
+      servername: www.asus.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: K ext
+      network: tcp
+      port: 8446
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: ext.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - name: W
+      network: ws
+      port: 8443
+      server: n42.example.com
+      servername: origin.example.com
+      skip-cert-verify: true
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+      ws-opts:
+        headers:
+            Host: origin.example.com
+        path: /ws
+    - client-fingerprint: chrome
+      name: W CF
+      network: ws
+      port: 443
+      server: 104.16.1.1
+      servername: cdn.example.com
+      skip-cert-verify: false
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+      ws-opts:
+        headers:
+            Host: cdn.example.com
+        path: /ws
+proxy-groups:
+    - name: 国外媒体
+      type: select
+      proxies:
+        - K
+        - K fw
+        - K tn
+        - K ext
+        - W
+        - W CF
+rules:
+    - MATCH,国外媒体
+sub-rules: {}

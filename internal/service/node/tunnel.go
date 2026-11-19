@@ -326,10 +326,16 @@ func (s *Service) followTunnelLines(ctx context.Context, landing *domain.Node) e
 		want.ServerAddress = line.Address
 		factor := line.EffectiveTrafficFactor()
 		want.TrafficFactorMilli = &factor
-		want.SortOrder = landing.SortOrder
 		if child.DisplayName != want.DisplayName || child.ServerAddress != want.ServerAddress ||
-			child.EffectiveTrafficFactor() != factor || child.SortOrder != want.SortOrder {
+			child.EffectiveTrafficFactor() != factor {
 			if err := s.nodes.UpdateMetadata(ctx, &want); err != nil {
+				return err
+			}
+		}
+		// The listener keeps its landing's position. UpdateMetadata does not write
+		// it, so this is the deliberate move, through the reorder writer.
+		if child.SortOrder != landing.SortOrder {
+			if err := s.nodes.BatchUpdateSortOrder(ctx, []ports.NodeSortUpdate{{NodeID: child.ID, SortOrder: landing.SortOrder}}); err != nil {
 				return err
 			}
 		}

@@ -101,6 +101,9 @@ type Service struct {
 	// planned are the ports picked for listeners about to be made, by line.
 	plannedMu sync.Mutex
 	planned   map[string]int
+	// orderMu serialises subscription reorders so the version check and the
+	// write of one cannot interleave with another's.
+	orderMu sync.Mutex
 	// canGuard says whether a landing on a server can check where connections come
 	// from (SetSourceGuardCheck).
 	canGuard func(ctx context.Context, panelID int64) bool
@@ -417,9 +420,11 @@ func (s *Service) UpdateSeparator(ctx context.Context, e *domain.SeparatorEntry)
 	return s.separators.Update(ctx, e)
 }
 
-// nextSortOrder returns max(sort_order across nodes + separators) + 10,
-// or 10 if both tables are empty. Used to drop new separators at the tail
-// of the merged list without forcing the admin to pick a number.
+// nextSortOrder returns max(sort_order across nodes, separators and the
+// positions of relay lines that exist) + 10, or 10 when there is none of them.
+// Used to drop new separators at the tail of the merged list without forcing
+// the admin to pick a number. Position rows whose line or node is gone are not
+// counted; nodeRepo.Create applies the same rule (maxLivePosition).
 func (s *Service) nextSortOrder(ctx context.Context) (int, error) {
 	nodes, err := s.nodes.List(ctx)
 	if err != nil {
@@ -433,6 +438,13 @@ func (s *Service) nextSortOrder(ctx context.Context) (int, error) {
 	for _, n := range nodes {
 		if n.SortOrder > maxSort {
 			maxSort = n.SortOrder
+		}
+		// A line dragged to the bottom sits past every node; a separator
+		// appended below nodes alone would land above it.
+		for _, line := range n.Relays {
+			if line.Position != nil && *line.Position > maxSort {
+				maxSort = *line.Position
+			}
 		}
 	}
 	for _, sep := range seps {
@@ -1007,7 +1019,7 @@ func (s *Service) updateMetadataLocked(ctx context.Context, previous, n *domain.
 	// landing are, and carrying the line's labels, address and factor.
 	updated := *previous
 	updated.Relays = n.Relays
-	updated.DisplayName, updated.SortOrder = n.DisplayName, n.SortOrder
+	updated.DisplayName = n.DisplayName // the position stays the stored one: a metadata save never moves a node
 	if err := s.followTunnelLines(ctx, &updated); err != nil {
 		return err
 	}

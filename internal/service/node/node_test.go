@@ -14,6 +14,16 @@ import (
 type fakeNodeRepo struct {
 	got []ports.NodeSortUpdate
 	err error
+	// order records the last ApplySubscriptionOrder write.
+	order *ports.SubscriptionOrderWrite
+}
+
+func (r *fakeNodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.SubscriptionOrderWrite) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.order = &w
+	return nil
 }
 
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error                { return nil }

@@ -26,7 +26,11 @@ export function useInertMuiModals(active: boolean) {
     }
     document.addEventListener('focusin', onFocusIn, true)
 
+    // Tracked so cleanup can cancel them: a late restore that fires after the
+    // page (or a test's DOM) is gone has no document to read.
+    const timers = new Set<ReturnType<typeof setTimeout>>()
     const restore = (late: HTMLElement[]) => {
+      if (typeof document === 'undefined') return
       const ae = document.activeElement
       const lost = !ae || ae === document.body || late.some(el => el.contains(ae))
       if (lost && lastFocus?.isConnected && !lastFocus.closest('[inert]')) lastFocus.focus()
@@ -39,14 +43,16 @@ export function useInertMuiModals(active: boolean) {
       if (late.length > 0) {
         restore(late)
         // MUI moves focus in its own effect, which can land after the observer fires.
-        setTimeout(() => restore(late), 0)
-        setTimeout(() => restore(late), 120)
+        timers.add(setTimeout(() => restore(late), 0))
+        timers.add(setTimeout(() => restore(late), 120))
       }
     }
     hold()
     const observer = new MutationObserver(hold)
     observer.observe(document.body, { childList: true })
     return () => {
+      for (const t of timers) clearTimeout(t)
+      timers.clear()
       document.removeEventListener('focusin', onFocusIn, true)
       observer.disconnect()
       held.forEach(el => el.removeAttribute('inert'))
