@@ -137,6 +137,8 @@ describe('states', () => {
   it('says so when empty, and takes a custom empty state', () => {
     const { rerender } = render(<DataTable data={[]} columns={columns} getRowId={r => r.id} />)
     expect(screen.getByText('No data')).toBeTruthy()
+    // The shared empty state, not a private rendering: one look for "nothing here" everywhere.
+    expect(document.querySelector('[data-slot="empty-state"]')).not.toBeNull()
     rerender(<DataTable data={[]} columns={columns} getRowId={r => r.id} empty={<div>No nodes yet. Add one to start.</div>} />)
     expect(screen.getByText('No nodes yet. Add one to start.')).toBeTruthy()
   })
@@ -144,7 +146,8 @@ describe('states', () => {
   it('shows an error with a retry instead of the rows', () => {
     const onRetry = vi.fn()
     render(<DataTable data={mk(3)} error columns={columns} getRowId={r => r.id} onRetry={onRetry} />)
-    expect(screen.getByText('Could not load the data')).toBeTruthy()
+    expect(screen.getByText('Couldn’t load this')).toBeTruthy()
+    expect(document.querySelector('[data-slot="error-state"]')).not.toBeNull()
     expect(screen.queryByText('Node 01')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onRetry).toHaveBeenCalled()

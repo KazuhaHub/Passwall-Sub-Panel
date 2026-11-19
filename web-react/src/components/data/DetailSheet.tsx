@@ -4,7 +4,7 @@ import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { TOUCH_TARGET } from './touchTarget'
+import { TOUCH_TARGET } from '@/components/common/touchTarget'
 
 export interface DetailSheetProps {
   open: boolean

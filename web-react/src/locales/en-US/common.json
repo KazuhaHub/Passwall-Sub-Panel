@@ -13,7 +13,8 @@
     "save": "Save",
     "edit": "Edit",
     "delete": "Delete",
-    "deleted": "Deleted"
+    "deleted": "Deleted",
+    "search": "Search"
   },
   "saved": "Saved",
   "empty": "No data",
@@ -81,10 +82,6 @@
   },
   "ui": {
     "data": {
-      "empty": "No data",
-      "error": "Could not load the data",
-      "error_hint": "Check the connection and try again",
-      "retry": "Retry",
       "columns": "Columns",
       "columns_menu": "Visible columns",
       "sort_by": "Sort by {{column}}",
@@ -119,7 +116,6 @@
       "facet_none": "No matching options",
       "facet_clear_named": "Clear {{label}}",
       "facet_more": "{{first}} and {{rest}} more",
-      "search_placeholder": "Search",
       "search_clear": "Clear search",
       "clear_all": "Clear all filters",
       "detail_close": "Close details"
@@ -127,15 +123,12 @@
     "form": {
       "unsaved": "You have unsaved changes",
       "unsaved_leave": "You have unsaved changes that will be lost if you leave. Leave anyway?",
-      "save": "Save",
       "saving": "Saving",
       "discard": "Discard changes",
       "advanced_show": "Show advanced options",
       "advanced_hide": "Hide advanced options",
       "secret_show": "Show",
       "secret_hide": "Hide",
-      "secret_copy": "Copy",
-      "secret_copied": "Copied",
       "secret_is_set": "Already set; leave empty to keep it",
       "number_follow": "Follow again",
       "number_exponent": "Scientific notation is not supported; enter a plain number such as 1000",
@@ -208,7 +201,6 @@
     },
     "shell": {
       "more": "More",
-      "search": "Search",
       "skip_to_content": "Skip to main content",
       "toggle_sidebar": "Toggle sidebar",
       "sidebar_title": "Navigation menu",

@@ -2,7 +2,7 @@ import type { Table } from '@tanstack/react-table'
 import { Columns3Icon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
-import { TOUCH_HEIGHT } from './touchTarget'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'

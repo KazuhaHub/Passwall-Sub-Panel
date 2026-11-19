@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { TOUCH_HEIGHT } from '@/components/data/touchTarget'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 
 export interface SegmentOption<V extends string> {
   value: V

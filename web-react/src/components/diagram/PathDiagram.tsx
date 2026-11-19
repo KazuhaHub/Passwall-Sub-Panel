@@ -2,9 +2,11 @@ import { Fragment, useEffect, useRef, useState, type ComponentType } from 'react
 import {
   ChevronRightIcon, CloudIcon, ExternalLinkIcon, GlobeIcon, LogOutIcon, MapPinIcon, ServerIcon, UserRoundIcon,
 } from 'lucide-react'
+import { ToneDot } from '@/components/common/StatusDot'
+import { TONE_STYLE } from '@/components/common/tones'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
-import { describePath, edgeText, nodeLabel, statusWord, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
+import { describePath, edgeText, nodeLabel, statusWord, toneOfPath, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
 import '@/styles/data-tokens.css'
 
 export type { PathEdge, PathNode, PathNodeKind, PathTone } from './pathSummary'
@@ -17,16 +19,6 @@ const ICONS: Record<PathNodeKind, ComponentType<{ className?: string }>> = {
   landing: MapPinIcon,
   exit: LogOutIcon,
   internet: GlobeIcon,
-}
-
-// Whole class strings, because Tailwind only emits classes it can read in the source.
-const TONE: Record<PathTone, { line: string; text: string; dot: string }> = {
-  success: { line: 'border-success', text: 'text-success', dot: 'bg-success' },
-  warning: { line: 'border-warning', text: 'text-warning', dot: 'bg-warning' },
-  // A pending line has not taken effect yet: drawn like a warning, told apart by its own tone attribute and wording.
-  pending: { line: 'border-warning', text: 'text-warning', dot: 'bg-warning' },
-  danger: { line: 'border-destructive', text: 'text-destructive', dot: 'bg-destructive' },
-  neutral: { line: 'border-muted-foreground/50', text: 'text-muted-foreground', dot: 'bg-muted-foreground/60' },
 }
 
 export interface PathDiagramProps {
@@ -66,8 +58,12 @@ function useFits(needed: number, enabled: boolean) {
   return [ref, fits] as const
 }
 
+// The tone colours are common/tones.ts's, the one source; only the pending-to-warning
+// mapping is this diagram's own (see toneOfPath).
+const toneStyle = (tone: PathTone) => TONE_STYLE[toneOfPath(tone)]
+
 function StatusDot({ tone, className }: { tone: PathTone; className?: string }) {
-  return <span aria-hidden="true" className={cn('inline-block size-2 shrink-0 rounded-full', TONE[tone].dot, className)} />
+  return <ToneDot tone={toneOfPath(tone)} className={className} />
 }
 
 /**
@@ -180,8 +176,8 @@ function SmallEdge({ edge }: { edge: PathEdge }) {
           {shown}
         </span>
       )}
-      <span className={cn('w-4 border-t-2', edge.style === 'dashed' ? 'border-dashed' : 'border-solid', TONE[tone].line)} />
-      <ChevronRightIcon className={cn('-ml-2 size-3', TONE[tone].text)} />
+      <span className={cn('w-4 border-t-2', edge.style === 'dashed' ? 'border-dashed' : 'border-solid', toneStyle(tone).line)} />
+      <ChevronRightIcon className={cn('-ml-2 size-3', toneStyle(tone).ink)} />
     </span>
   )
 }
@@ -230,8 +226,8 @@ function FullEdge({ edge, vertical }: { edge: PathEdge; vertical: boolean }) {
     return (
       <div data-edge={edge.style} data-tone={tone} title={word || undefined} className="flex h-9 items-center gap-2 pl-[1.0625rem]">
         <span className="flex h-full flex-col items-center">
-          <span className={cn('flex-1 border-l-2', dashed ? 'border-dashed' : 'border-solid', TONE[tone].line)} />
-          <ChevronRightIcon className={cn('-mt-1.5 size-3.5 rotate-90', TONE[tone].text)} />
+          <span className={cn('flex-1 border-l-2', dashed ? 'border-dashed' : 'border-solid', toneStyle(tone).line)} />
+          <ChevronRightIcon className={cn('-mt-1.5 size-3.5 rotate-90', toneStyle(tone).ink)} />
         </span>
         {label}
       </div>
@@ -247,8 +243,8 @@ function FullEdge({ edge, vertical }: { edge: PathEdge; vertical: boolean }) {
     >
       <span className="min-h-4 text-center leading-4">{label}</span>
       <span className="flex w-full items-center">
-        <span className={cn('flex-1 border-t-2', dashed ? 'border-dashed' : 'border-solid', TONE[tone].line)} />
-        <ChevronRightIcon className={cn('-ml-2 size-3.5', TONE[tone].text)} />
+        <span className={cn('flex-1 border-t-2', dashed ? 'border-dashed' : 'border-solid', toneStyle(tone).line)} />
+        <ChevronRightIcon className={cn('-ml-2 size-3.5', toneStyle(tone).ink)} />
       </span>
     </div>
   )

@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { cn } from '@/lib/utils'
 import { FacetFilter, type FacetOption } from './FacetFilter'
-import { TipButton } from './TipButton'
-import { TOUCH_HEIGHT } from './touchTarget'
+import { IconButton } from '@/components/common/IconButton'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 
 export interface FilterBarFacet {
   id: string
@@ -80,8 +80,8 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
           <InputGroupInput
             type="search"
             role="searchbox"
-            aria-label={search.placeholder ?? t('ui.data.search_placeholder')}
-            placeholder={search.placeholder ?? t('ui.data.search_placeholder')}
+            aria-label={search.placeholder ?? t('actions.search')}
+            placeholder={search.placeholder ?? t('actions.search')}
             value={draft}
             onChange={e => type(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') report(draft) }}
@@ -90,13 +90,13 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
           />
           {draft && (
             <InputGroupAddon align="inline-end">
-              <TipButton
+              <IconButton
                 label={t('ui.data.search_clear')}
                 size="icon-xs"
                 onClick={() => { setDraft(''); report('') }}
               >
                 <XIcon />
-              </TipButton>
+              </IconButton>
             </InputGroupAddon>
           )}
         </InputGroup>

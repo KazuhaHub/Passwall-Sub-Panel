@@ -45,4 +45,31 @@ describe('KpiTile', () => {
     expect(screen.getByText('3').className).toContain('text-destructive')
     expect(screen.getByText('4').className).not.toContain('text-destructive')
   })
+
+  // Folded in from the data block's StatFilterCard, which was the same tile with a tone bar.
+  it('shows a dash while the figure is not known yet, so unknown never reads as zero', () => {
+    render(<KpiTile label="Online" value={undefined} />)
+    expect(screen.getByText('—')).toBeTruthy()
+  })
+
+  it('carries a tone as a bar and as the figure colour, and neutral draws no bar', () => {
+    render(<><KpiTile label="up" value="1" tone="success" /><KpiTile label="warn" value="2" tone="warning" /><KpiTile label="n" value="3" /></>)
+    const tiles = document.querySelectorAll('[data-slot="kpi-tile"]')
+    expect(tiles[0].querySelector('[data-slot="kpi-tone-bar"]')?.className).toContain('bg-success')
+    expect(screen.getByText('1').className).toContain('text-success')
+    // Amber words on white are too faint at this weight: the tone lives on the bar only.
+    expect(tiles[1].querySelector('[data-slot="kpi-tone-bar"]')?.className).toContain('bg-warning-ink')
+    expect(screen.getByText('2').className).not.toContain('text-warning')
+    expect(tiles[2].querySelector('[data-slot="kpi-tone-bar"]')).toBeNull()
+  })
+
+  it('treats danger as the danger tone, so there is one way to say it', () => {
+    render(<KpiTile label="a" value="3" danger />)
+    expect(document.querySelector('[data-slot="kpi-tone-bar"]')?.className).toContain('bg-destructive')
+  })
+
+  it('draws an optional icon beside the label', () => {
+    render(<KpiTile label="Nodes" value="1" icon={<svg data-testid="ic" />} />)
+    expect(screen.getByTestId('ic')).toBeTruthy()
+  })
 })

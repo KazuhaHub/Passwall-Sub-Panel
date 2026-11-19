@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { ToneDot } from '@/components/common/StatusDot'
+import { TONE_STYLE } from '@/components/common/tones'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { landingColorStyle, type LandingColor } from './landingColor'
-import type { PathTone } from './pathSummary'
+import { toneOfPath, type PathTone } from './pathSummary'
 import '@/styles/data-tokens.css'
 
 export interface GraphBox {
@@ -134,13 +136,6 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
     if (found.length >= MAX_PATHS) return found
   }
   return found
-}
-
-const STROKE: Record<PathTone, string> = {
-  success: 'text-success', warning: 'text-warning', pending: 'text-warning', danger: 'text-destructive', neutral: 'text-muted-foreground',
-}
-const DOT: Record<PathTone, string> = {
-  success: 'bg-success', warning: 'bg-warning', pending: 'bg-warning', danger: 'bg-destructive', neutral: 'bg-muted-foreground/60',
 }
 
 /**
@@ -308,7 +303,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
           <span className="truncate text-sm leading-tight font-medium">{b.label}</span>
           {b.sublabel && <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground">{b.sublabel}</span>}
         </span>
-        {b.status && <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', DOT[b.status])} />}
+        {b.status && <ToneDot tone={toneOfPath(b.status)} />}
       </button>
     )
   }
@@ -353,7 +348,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
                   strokeWidth={hot ? 2.5 : 1.5}
                   strokeDasharray={e.style === 'dashed' ? '6 4' : undefined}
                   strokeLinecap="round"
-                  className={cn(STROKE[tone], 'transition-opacity')}
+                  className={cn(TONE_STYLE[toneOfPath(tone)].ink, 'transition-opacity')}
                   opacity={dim ? 0.1 : hot ? 1 : 0.55}
                 />
               )

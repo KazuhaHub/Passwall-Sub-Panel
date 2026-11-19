@@ -4,7 +4,8 @@ import { IconHelp, IconInfo } from '@/lib/icons'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
-import { IconButton, TOUCH_TARGET } from './IconButton'
+import { IconButton } from './IconButton'
+import { TOUCH_TARGET } from './touchTarget'
 import { cn } from '@/lib/utils'
 
 // The explanation patterns, on popover/tooltip. They take translated TEXT, not

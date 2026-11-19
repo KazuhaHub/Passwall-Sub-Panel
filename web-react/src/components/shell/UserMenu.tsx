@@ -31,7 +31,7 @@ export function UserMenu({ user }: { user: ShellUser }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<IconButton label={`${t('ui.shell.user_menu')}: ${user.label}`} tooltip={user.label} size="icon" className="rounded-full" />}
+        render={<IconButton label={`${t('ui.shell.user_menu')}: ${user.label}`} tooltip={user.label} size="icon" className="rounded-full" data-psp-account-menu="" />}
       >
         <span className="flex size-7 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-foreground">{initial}</span>
       </DropdownMenuTrigger>

@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react'
 
 /**
- * Whether a CSS media query matches, live. Unlike use-mobile's useIsMobile it
- * tolerates an environment without matchMedia (tests, very old webviews) by
- * answering false, so a component that switches layout on it never throws.
+ * Whether a CSS media query matches, live. It tolerates an environment
+ * without matchMedia (tests, very old webviews) by answering false, so a component
+ * that switches layout on it never throws. useIsMobile is this with the 768px query.
  */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(

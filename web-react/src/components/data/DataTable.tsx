@@ -4,9 +4,10 @@ import {
   type ColumnDef, type ExpandedState, type Row, type SortingState, type VisibilityState,
 } from '@tanstack/react-table'
 import {
-  ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon, GripVerticalIcon, SearchXIcon, TriangleAlertIcon,
+  ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon, GripVerticalIcon, SearchXIcon,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -18,8 +19,8 @@ import { ColumnMenu, columnLabel } from './ColumnMenu'
 import { DataTablePagination } from './DataTablePagination'
 import { DEFAULT_PAGE_SIZE, clampPage, compareCells, makeCollator } from './dataTableLogic'
 import type { BulkContext, DataTableProps, PageChangeReason, RowOptions } from './dataTableTypes'
-import { TipButton } from './TipButton'
-import { TOUCH_HEIGHT } from './touchTarget'
+import { IconButton } from '@/components/common/IconButton'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 import { useRowReorder } from './useRowReorder'
 
 // Anything inside a row that does its own thing on click or on keys: a click or
@@ -46,19 +47,6 @@ function useControlled<V>(value: V | undefined, onChange: ((v: V) => void) | und
 function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
   if (def.id) return def.id
   return 'accessorKey' in def && def.accessorKey !== undefined ? String(def.accessorKey) : undefined
-}
-
-function DefaultError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  const { t } = useSpacedT()
-  const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : null
-  return (
-    <div role="alert" className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-      <TriangleAlertIcon className="size-6 text-destructive" aria-hidden="true" />
-      <p className="text-sm font-medium">{t('ui.data.error')}</p>
-      <p className="text-sm text-muted-foreground">{detail ?? t('ui.data.error_hint')}</p>
-      {onRetry && <Button variant="outline" size="sm" className={TOUCH_HEIGHT} onClick={onRetry}>{t('ui.data.retry')}</Button>}
-    </div>
-  )
 }
 
 /**
@@ -347,7 +335,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   const bodyContent = (): ReactNode => {
     if (showError) {
-      return <TableRow className="hover:bg-transparent"><TableCell colSpan={colSpan} className="whitespace-normal"><DefaultError error={error} onRetry={onRetry} /></TableCell></TableRow>
+      return <TableRow className="hover:bg-transparent"><TableCell colSpan={colSpan} className="whitespace-normal"><ErrorState compact reason={error} retry={onRetry} /></TableCell></TableRow>
     }
     if (skeleton) {
       return Array.from({ length: 6 }, (_, i) => (
@@ -362,9 +350,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
       return (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={colSpan} className="h-32 whitespace-normal text-center text-muted-foreground">
-            {empty ?? (
-              <span className="inline-flex items-center gap-2"><SearchXIcon className="size-4" aria-hidden="true" />{t('ui.data.empty')}</span>
-            )}
+            {empty ?? <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}
           </TableCell>
         </TableRow>
       )
@@ -418,9 +404,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 <span aria-hidden="true">{t('ui.data.select_all')}</span>
               </li>
             )}
-            {showError && <li className="list-none"><DefaultError error={error} onRetry={onRetry} /></li>}
+            {showError && <li className="list-none"><ErrorState compact reason={error} retry={onRetry} /></li>}
             {skeleton && Array.from({ length: 4 }, (_, i) => <li key={i} className="p-3"><Skeleton className="h-12 w-full" /></li>)}
-            {isEmpty && <li className="p-8 text-center text-sm text-muted-foreground">{empty ?? t('ui.data.empty')}</li>}
+            {isEmpty && <li className="list-none">{empty ?? <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}</li>}
             {!showError && rows.map((row, i) => {
               const o = optsOf(row)
               const selected = selection[row.id] === true
@@ -563,7 +549,7 @@ function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
   const { t } = useSpacedT()
   const off = blockedText !== ''
   return (
-    <TipButton
+    <IconButton
       label={t('ui.data.drag_handle', { name })}
       tooltip={off ? blockedText : undefined}
       size="icon-xs"
@@ -575,7 +561,7 @@ function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
       {...handlers}
     >
       <GripVerticalIcon />
-    </TipButton>
+    </IconButton>
   )
 }
 
@@ -711,7 +697,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
             {first && tree ? (
               <div className="flex items-center gap-1" style={{ paddingLeft: `${row.depth * 1.25}rem` }}>
                 {row.getCanExpand() ? (
-                  <TipButton
+                  <IconButton
                     label={t(p.expanded ? 'ui.data.collapse_row' : 'ui.data.expand_row', { name: p.name })}
                     size="icon-xs"
                     aria-expanded={p.expanded}
@@ -719,7 +705,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
                     onClick={() => row.toggleExpanded()}
                   >
                     <ChevronRightIcon className={cn('transition-transform', p.expanded && 'rotate-90')} />
-                  </TipButton>
+                  </IconButton>
                 ) : <span className="inline-block size-6 shrink-0" aria-hidden="true" />}
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
               </div>

@@ -168,7 +168,7 @@ function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
         className="hidden w-full max-w-64 justify-start gap-2 font-normal text-muted-foreground md:inline-flex"
       >
         <IconSearch aria-hidden />
-        <span className="truncate">{t('ui.shell.search')}</span>
+        <span className="truncate">{t('actions.search')}</span>
         <kbd className="ml-auto rounded border bg-muted px-1.5 font-mono text-[10px]">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
       </Button>
       <IconButton label={t('ui.shell.palette.open')} tooltip={`${t('ui.shell.palette.title')} (${IS_MAC ? '⌘K' : 'Ctrl K'})`} onClick={onOpen} className="md:hidden">

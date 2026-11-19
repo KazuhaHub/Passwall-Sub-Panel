@@ -77,7 +77,7 @@ export default function UserLayout() {
             }}
           />
           <Tooltip title={label}>
-            <IconButton onClick={(e: MouseEvent<HTMLElement>) => setUserAnchor(e.currentTarget)} sx={{ ml: 1, p: 0.5 }}>
+            <IconButton data-psp-account-menu="" onClick={(e: MouseEvent<HTMLElement>) => setUserAnchor(e.currentTarget)} sx={{ ml: 1, p: 0.5 }}>
               <Avatar sx={{ width: 32, height: 32, bgcolor: md.primary, color: md.onPrimary, fontSize: 14, fontWeight: 500 }}>
                 {label.charAt(0).toUpperCase()}
               </Avatar>

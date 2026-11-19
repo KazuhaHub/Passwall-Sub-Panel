@@ -61,7 +61,7 @@ export function SaveBar({ dirty, pending, disabled, message, saveLabel, onSave, 
           className={cn(blocked && 'cursor-not-allowed opacity-50')}
         >
           {pending && <Loader2Icon className="animate-spin" aria-hidden="true" />}
-          {pending ? t('ui.form.saving') : (saveLabel ?? t('ui.form.save'))}
+          {pending ? t('ui.form.saving') : (saveLabel ?? t('actions.save'))}
         </Button>
       </div>
     </div>

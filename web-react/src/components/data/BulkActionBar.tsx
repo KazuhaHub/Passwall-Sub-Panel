@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { TOUCH_HEIGHT } from './touchTarget'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 
 /**
  * The bar that rises at the bottom of a list while rows are selected (replaces
