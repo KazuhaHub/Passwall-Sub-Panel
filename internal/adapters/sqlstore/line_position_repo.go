@@ -137,11 +137,13 @@ func (r *nodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.Subscript
 		for i, line := range w.Lines {
 			rows[i] = subscriptionLinePositionRow{NodeID: line.NodeID, LineID: line.LineID, SortOrder: line.SortOrder}
 		}
-		// Chunked by hand rather than with CreateInBatches: that helper opens a
-		// nested transaction, which inside this one means a SAVEPOINT, and a
-		// connection that does not offer one fails the whole write with
+		// Chunked by hand rather than with CreateInBatches: past one batch that
+		// helper opens a nested transaction, which inside this one means a
+		// SAVEPOINT. The real dialects all offer one, but a dialector wrapper
+		// that embeds only gorm.Dialector hides it (the test harness's
+		// reusableSchemaDialector does), and GORM then fails the write with
 		// "unsupported driver". A plain multi-row Create needs nothing but the
-		// transaction already open.
+		// transaction already open, so it cannot depend on that.
 		for start := 0; start < len(rows); start += linePositionInsertBatch {
 			end := min(start+linePositionInsertBatch, len(rows))
 			chunk := rows[start:end]
