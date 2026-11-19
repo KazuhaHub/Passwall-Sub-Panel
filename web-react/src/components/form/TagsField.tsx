@@ -1,10 +1,10 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { XIcon } from 'lucide-react'
+import { IconButton } from '@/components/common/IconButton'
 import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useReportValidity } from './FormValidity'
-import { TOUCH_TARGET } from '@/components/common/touchTarget'
 
 export interface TagsFieldProps {
   value: string[]
@@ -140,15 +140,16 @@ export function TagsField({
       {value.map(tag => (
         <Badge key={tag} variant="secondary" className="h-5 max-w-full gap-0.5 pr-0.5">
           <span className="truncate">{tag}</span>
-          <button
-            type="button"
-            aria-label={t('ui.form.tags_remove', { tag })}
-            title={t('ui.form.tags_remove', { tag })}
+          {/* On top: below would cover the hint or error line under the box. */}
+          <IconButton
+            label={t('ui.form.tags_remove', { tag })}
+            size="icon-xs"
+            side="top"
             onClick={e => { e.stopPropagation(); remove(tag); input.current?.focus() }}
-            className={cn(TOUCH_TARGET, 'rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3')}
+            className="size-4 rounded-full p-0.5 hover:bg-foreground/10 [&_svg]:size-3"
           >
             <XIcon />
-          </button>
+          </IconButton>
         </Badge>
       ))}
       <input

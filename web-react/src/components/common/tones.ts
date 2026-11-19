@@ -16,6 +16,21 @@
 
 export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 
+/**
+ * The shape each tone's dot is drawn in. Colour alone must not carry a state (WCAG 1.4.1):
+ * in the light theme the warning, danger and neutral hues are close in lightness, so each
+ * tone also has its own silhouette, readable at 8px. See ToneDot for the drawings.
+ */
+export type ToneShape = 'circle' | 'triangle' | 'diamond' | 'square' | 'ring'
+
+export const TONE_SHAPE: Record<Tone, ToneShape> = {
+  success: 'circle',
+  warning: 'triangle',
+  danger: 'diamond',
+  info: 'square',
+  neutral: 'ring',
+}
+
 export const TONES: readonly Tone[] = ['success', 'warning', 'danger', 'info', 'neutral']
 
 export interface ToneStyle {
@@ -40,7 +55,7 @@ export const TONE_STYLE: Record<Tone, ToneStyle> = {
     tokens: { ink: '--success', tint: '--success', tintAlpha: 0.12, dot: '--success' },
   },
   warning: {
-    dot: 'bg-warning-ink', ink: 'text-warning-ink', tint: 'bg-warning/12', ring: 'ring-warning/30', line: 'border-warning', loud: true,
+    dot: 'bg-warning-ink', ink: 'text-warning-ink', tint: 'bg-warning/12', ring: 'ring-warning/30', line: 'border-warning-ink', loud: true,
     tokens: { ink: '--warning-ink', tint: '--warning', tintAlpha: 0.12, dot: '--warning-ink' },
   },
   danger: {

@@ -411,7 +411,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
             )}
             {showError && <li className="list-none"><ErrorState compact reason={error} retry={onRetry} /></li>}
             {skeleton && Array.from({ length: 4 }, (_, i) => <li key={i} className="p-3"><Skeleton className="h-12 w-full" /></li>)}
-            {isEmpty && <li className="list-none">{empty ?? <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}</li>}
+            {/* A custom node gets the padding and muted centred text the table cell gives it, so both modes look alike. */}
+            {isEmpty && <li className="list-none">{empty ? <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div> : <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}</li>}
             {!showError && rows.map((row, i) => {
               const o = optsOf(row)
               const selected = selection[row.id] === true

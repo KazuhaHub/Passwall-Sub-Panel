@@ -40,10 +40,10 @@ export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...
         className="font-mono"
       />
       <InputGroupAddon align="inline-end">
-        <IconButton label={shown ? t('ui.form.secret_hide') : t('ui.form.secret_show')} size="icon-xs" onClick={() => setShown(s => !s)}>
+        <IconButton label={shown ? t('ui.form.secret_hide') : t('ui.form.secret_show')} size="icon-xs" side="top" onClick={() => setShown(s => !s)}>
           {shown ? <EyeOffIcon /> : <EyeIcon />}
         </IconButton>
-        {value && <CopyButton value={value} size="icon-xs" />}
+        {value && <CopyButton value={value} size="icon-xs" side="top" />}
       </InputGroupAddon>
     </InputGroup>
   )

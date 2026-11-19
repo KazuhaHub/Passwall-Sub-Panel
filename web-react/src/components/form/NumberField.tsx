@@ -247,7 +247,7 @@ export function NumberField({
           {value === 0 && zeroLabel && <Badge variant="outline">{zeroLabel}</Badge>}
           {unit && <InputGroupText>{unit}</InputGroupText>}
           {emptyOk && value !== null && (
-            <IconButton label={t('ui.form.number_follow')} size="icon-xs" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); onChange(null) }}>
+            <IconButton label={t('ui.form.number_follow')} size="icon-xs" side="top" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); onChange(null) }}>
               <RotateCcwIcon />
             </IconButton>
           )}
