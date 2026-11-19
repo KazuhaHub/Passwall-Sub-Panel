@@ -41,6 +41,10 @@ const TrafficView = lazy(viewLoaders['/admin/traffic'])
 const SettingsView = lazy(viewLoaders['/admin/settings'])
 const LanguagePacksView = lazy(viewLoaders['/admin/language-packs'])
 const MeView = lazy(viewLoaders['/user/me'])
+// Dev-only component gallery for the Tailwind/shadcn stack. The condition is a
+// compile-time constant, so a production build drops both the route and the
+// lazy chunk.
+const UiKitchenSink = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitchenSink')) : null
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
@@ -73,6 +77,7 @@ export const router = createBrowserRouter([
         path: '/',
         element: <RootRedirect />,
       },
+  ...(UiKitchenSink ? [{ path: '/__ui-kit', element: <UiKitchenSink /> }] : []),
   { path: '/login', element: <LoginView /> },
   { path: '/login/local', element: <LoginView forceLocal /> },
   { path: '/sso-callback', element: <SsoCallbackView /> },

@@ -1,5 +1,4 @@
 import { Suspense, useEffect, useMemo, useState } from 'react'
-import CssBaseline from '@mui/material/CssBaseline'
 import { ThemeProvider } from '@mui/material/styles'
 import AppRouter from '@/router/AppRouter'
 import RequestProgressBar from '@/components/RequestProgressBar'
@@ -14,6 +13,7 @@ import ConfirmHost from '@/components/ConfirmHost'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { QuerySessionProvider } from '@/query/QuerySessionProvider'
 import { router } from '@/router'
+import { useHtmlAppearance } from '@/theme/htmlAppearance'
 
 // Snapshot of prefers-color-scheme. SSR-safe defaults to "light" so
 // the initial render before the listener fires doesn't flash dark on
@@ -60,6 +60,10 @@ export default function App() {
 
   const effectiveMode = resolveEffectiveMode(mode, systemDark)
 
+  // Mirror mode / density / brand onto <html> for the Tailwind side. MUI keeps
+  // reading the store through its own theme below; this never feeds back.
+  useHtmlAppearance({ mode: effectiveMode, density, color: sourceColor })
+
   const theme = useMemo(
     () => createAppTheme({ mode: effectiveMode, sourceColor, language, density }),
     [effectiveMode, sourceColor, language, density],
@@ -67,7 +71,6 @@ export default function App() {
 
   return (
     <ThemeProvider theme={theme}>
-      <CssBaseline />
       {/* SnackbarHost / ConfirmHost stay OUTSIDE the boundary so a
           render crash inside a route can still surface as a snack or
           confirm dialog if anything in cleanup tries to push one. */}
