@@ -83,30 +83,6 @@ func SS2022KeyLen(method string) int { return ss2022KeyLen(method) }
 // internal Protocol enum. ssMethod is required to disambiguate SS from
 // SS-2022 (both report protocol="shadowsocks").
 func DetectProtocol(inboundProtocol, ssMethod string) domain.Protocol {
-	switch strings.ToLower(inboundProtocol) {
-	case "vless":
-		return domain.ProtoVLESS
-	case "vmess":
-		return domain.ProtoVMess
-	case "trojan":
-		return domain.ProtoTrojan
-	case "shadowsocks", "ss":
-		if isSS2022Method(ssMethod) {
-			return domain.ProtoSS2022
-		}
-		return domain.ProtoSS
-	case "hysteria2", "hy2":
-		return domain.ProtoHysteria2
-	case "anytls":
-		return domain.ProtoAnyTLS
-	case "tuic":
-		return domain.ProtoTUIC
-	case "naive":
-		return domain.ProtoNaive
-	}
-	return ""
-}
-
-func isSS2022Method(method string) bool {
-	return strings.HasPrefix(strings.ToLower(method), "2022-blake3-")
+	// One classifier, in domain, shared with the credential comparisons.
+	return domain.ClassifyProtocol(inboundProtocol, ssMethod)
 }

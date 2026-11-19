@@ -383,7 +383,10 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	want := clientdoc.Mint(c, atts).Lifecycle()
 	// From here on the headroom is this server's RAW bytes, so the cap and the
 	// deadband below are measured against the counter the panel compares.
-	factor := s.trafficFactor(ctx, c)
+	// One lookup per node for the whole push: the line node read here is
+	// usually also one of the attachments scanned for credential fields below.
+	getNode := s.memoNodes(ctx)
+	factor := s.trafficFactorWith(c, getNode)
 	want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, factor)
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
@@ -414,7 +417,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	// alone. Comparing it anyway failed the confirm on every cycle and made the
 	// skip impossible (a full-replace per cycle, user_resync tasks retrying to
 	// their cap). Unknown nodes/protocols compare everything (fail closed).
-	creds := s.credentialFields(ctx, atts)
+	creds := s.credentialFields(getNode, atts)
 
 	unreadReason := "panel_unread"
 	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
@@ -504,11 +507,38 @@ func (s *Service) countLifecycleFailure(panelID int64, stage string) {
 // longer be read keeps the factor it was last booked at; a legacy row without
 // a line is one-for-one.
 func (s *Service) trafficFactor(ctx context.Context, c *domain.PSPClient) int {
+	return s.trafficFactorWith(c, func(id int64) (*domain.Node, error) { return s.nodes.GetByID(ctx, id) })
+}
+
+// nodeLookup resolves nodes by id; pushLifecycle hands it a memoizing one so
+// the traffic factor and the credential-field scan share each lookup.
+type nodeLookup func(id int64) (*domain.Node, error)
+
+// memoNodes returns a lookup that asks the repo once per node id for the life
+// of one push (errors are memoized too: a failing node stays failed, so the
+// fail-closed answer is stable within the push).
+func (s *Service) memoNodes(ctx context.Context) nodeLookup {
+	type res struct {
+		n   *domain.Node
+		err error
+	}
+	seen := map[int64]res{}
+	return func(id int64) (*domain.Node, error) {
+		if r, ok := seen[id]; ok {
+			return r.n, r.err
+		}
+		n, err := s.nodes.GetByID(ctx, id)
+		seen[id] = res{n, err}
+		return n, err
+	}
+}
+
+func (s *Service) trafficFactorWith(c *domain.PSPClient, get nodeLookup) int {
 	line, ok := c.Line()
 	if !ok || s.nodes == nil {
 		return c.LastFactor()
 	}
-	n, err := s.nodes.GetByID(ctx, line.NodeID)
+	n, err := get(line.NodeID)
 	if err != nil || n == nil {
 		return c.LastFactor()
 	}
@@ -657,20 +687,20 @@ func credentialsMatch(got *ports.ClientDetail, want ports.ClientSpec, creds doma
 // be resolved (or has no protocol) makes the answer "everything", never
 // "nothing". Protocol detection is clientplan's, so an SS-2022 node (stored as
 // "shadowsocks" plus a method) is classified exactly as the planner did.
-func (s *Service) credentialFields(ctx context.Context, atts []domain.PSPClientInbound) domain.CredentialFields {
+func (s *Service) credentialFields(get nodeLookup, atts []domain.PSPClientInbound) domain.CredentialFields {
 	if s.nodes == nil {
 		return domain.CredentialFieldsFor()
 	}
 	protos := make([]domain.Protocol, 0, len(atts))
 	for _, a := range atts {
-		n, err := s.nodes.GetByID(ctx, a.NodeID)
+		n, err := get(a.NodeID)
 		if err != nil || n == nil {
 			return domain.CredentialFieldsFor()
 		}
 		if n.IsSeparator() {
 			continue
 		}
-		protos = append(protos, clientplan.NodeCredFromNode(n).Protocol)
+		protos = append(protos, n.CredentialProtocol())
 	}
 	return domain.CredentialFieldsFor(protos...)
 }

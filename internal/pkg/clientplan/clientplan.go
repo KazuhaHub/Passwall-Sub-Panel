@@ -24,7 +24,6 @@
 package clientplan
 
 import (
-	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,16 +98,7 @@ func NodeCredsFromNodes(nodes []*domain.Node) []NodeCred {
 }
 
 func ssMethodFromSettings(settings string) string {
-	if settings == "" {
-		return ""
-	}
-	var s struct {
-		Method string `json:"method"`
-	}
-	if err := json.Unmarshal([]byte(settings), &s); err != nil {
-		return ""
-	}
-	return s.Method
+	return domain.SSMethodFromInboundSettings(settings)
 }
 
 // LineCred describes one subscription line a user can see on a panel.

@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 type Role string
 
 const (
@@ -200,7 +205,14 @@ func CredentialFieldsFor(ps ...Protocol) CredentialFields {
 		case p == ProtoVLESS || p == ProtoVMess:
 			out.ID = true
 		case p == ProtoHysteria2:
-			out.Auth = true
+			// Hy2 reads auth, but render uses the stored id (AppliedUUID) as the
+			// Hy2 password, and 3X-UI can keep a stale id after a UUID reset, so
+			// the id stays compared too.
+			out.ID, out.Auth = true, true
+		case p == ProtoTUIC:
+			// TUIC authenticates with uuid AND password (Mihomo renders the uuid
+			// from AppliedUUID).
+			out.ID, out.Password = true, true
 		case p.UsesPassword():
 			out.Password = true
 		default:
@@ -208,6 +220,55 @@ func CredentialFieldsFor(ps ...Protocol) CredentialFields {
 		}
 	}
 	return out
+}
+
+// ClassifyProtocol maps a 3X-UI inbound protocol string (and, for Shadowsocks,
+// the cipher) to the Protocol enum, or "" when it is not recognised. It is the
+// one classifier behind crypto.DetectProtocol, clientplan and the credential
+// comparisons, so they cannot disagree on aliases ("ss", "hy2").
+func ClassifyProtocol(inboundProtocol, ssMethod string) Protocol {
+	switch strings.ToLower(strings.TrimSpace(inboundProtocol)) {
+	case "vless":
+		return ProtoVLESS
+	case "vmess":
+		return ProtoVMess
+	case "trojan":
+		return ProtoTrojan
+	case "shadowsocks", "ss":
+		if strings.HasPrefix(strings.ToLower(ssMethod), "2022-blake3-") {
+			return ProtoSS2022
+		}
+		return ProtoSS
+	case "hysteria2", "hy2":
+		return ProtoHysteria2
+	case "anytls":
+		return ProtoAnyTLS
+	case "tuic":
+		return ProtoTUIC
+	case "naive":
+		return ProtoNaive
+	}
+	return ""
+}
+
+// SSMethodFromInboundSettings reads the Shadowsocks cipher out of an inbound's
+// settings JSON ("" when absent or unparseable).
+func SSMethodFromInboundSettings(settings string) string {
+	if settings == "" {
+		return ""
+	}
+	var s struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(settings), &s); err != nil {
+		return ""
+	}
+	return s.Method
+}
+
+// CredentialProtocol is the node's protocol as the credential planner sees it.
+func (n *Node) CredentialProtocol() Protocol {
+	return ClassifyProtocol(n.DesiredProtocol, SSMethodFromInboundSettings(n.InboundSettings))
 }
 
 type ClientType string

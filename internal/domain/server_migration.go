@@ -290,10 +290,14 @@ func (s *ServerMigrationSnapshot) Blockers() []MigrationIssue {
 			// client (it authenticates by id; an UpdateClient password never reads
 			// back), so comparing it blocked every VLESS client forever. Email
 			// always matters (3X-UI keys clients by it). Hysteria2's auth is the
-			// UUID, which AppliedUUID carries. Unknown protocols fail closed.
-			fields := CredentialFieldsFor(Protocol(p))
+			// UUID, but AppliedUUID prefers the read-back id and falls back to
+			// auth only when the id is empty, so the id is compared for Hy2 as
+			// well (a stale id would be recorded and rendered); auth itself has
+			// no applied column. Same classifier as the shared-client path;
+			// unknown protocols fail closed.
+			fields := CredentialFieldsFor(n.CredentialProtocol())
 			if !a.Applied() || a.AppliedEmail != c.Email ||
-				((fields.ID || fields.Auth) && a.AppliedUUID != c.UUID) ||
+				(fields.ID && a.AppliedUUID != c.UUID) ||
 				(fields.Password && a.AppliedPassword != c.Password) {
 				add("credential_not_confirmed", a.NodeID, c.ID)
 			}
