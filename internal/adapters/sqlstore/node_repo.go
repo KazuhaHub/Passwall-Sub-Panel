@@ -437,7 +437,7 @@ func (r *nodeRepo) ListByCertID(ctx context.Context, certID int64) ([]*domain.No
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -456,7 +456,7 @@ func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -499,7 +499,7 @@ func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, 0, err
 	}
 	return out, total, nil
@@ -525,7 +525,7 @@ func (r *nodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -536,8 +536,19 @@ func (r *nodeRepo) withTransit(ctx context.Context, node *domain.Node, err error
 	if err != nil {
 		return nil, err
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), []*domain.Node{node}); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), []*domain.Node{node}); err != nil {
 		return nil, err
 	}
 	return node, nil
+}
+
+// attachNodeState is every piece of loaded, non-column state a node read
+// carries: transit readiness and each line's explicit position. All node read
+// paths that feed render or an admin list go through it, so a new piece of
+// state added here reaches all of them.
+func attachNodeState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	if err := attachTransitState(ctx, db, nodes); err != nil {
+		return err
+	}
+	return attachLinePositions(ctx, db, nodes)
 }
