@@ -23,6 +23,8 @@ go.work.sum
 
 # Local runtime data and database files
 data/
+# ...but not the shared data-table components, which are source.
+!web-react/src/components/data/
 *.db
 *.db-journal
 *.db-wal
