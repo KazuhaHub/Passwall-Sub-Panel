@@ -20,6 +20,9 @@ import LogoutIcon from '@mui/icons-material/Logout'
 
 import AppearanceMenu from '@/components/AppearanceMenu'
 import LanguageMenu from '@/components/LanguageMenu'
+import { ToastLogButton } from '@/components/shell/ToastLogButton'
+import ToastLogMenuItem from './ToastLogMenuItem'
+import { useLogInBar } from './useLogInBar'
 import BrandLogo from '@/components/BrandLogo'
 import ConsentDialog from '@/components/ConsentDialog'
 import SiteFooter from '@/components/SiteFooter'
@@ -33,6 +36,7 @@ export default function UserLayout() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation('common')
+  const logInBar = useLogInBar()
   const auth = useAuthStore()
   const label = selectLabel(auth)
   const site = useSiteStore()
@@ -63,6 +67,7 @@ export default function UserLayout() {
             {site.appTitle || site.siteTitle}
           </Typography>
           <Box sx={{ flex: 1 }} />
+          {logInBar && <ToastLogButton size="bar" />}
           <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
           <AppearanceMenu
             state={{ systemColor: appearance.systemColor, userColor: appearance.userColor, mode: appearance.mode }}
@@ -86,6 +91,7 @@ export default function UserLayout() {
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
             slotProps={{ paper: { sx: { mt: 1, minWidth: 180 } } }}
           >
+            {!logInBar && <ToastLogMenuItem onClose={() => setUserAnchor(null)} />}
             <MenuItem onClick={handleLogout}>
               <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
               <ListItemText primary={t('auth.logout')} />

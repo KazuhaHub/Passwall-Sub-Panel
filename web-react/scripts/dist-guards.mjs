@@ -24,12 +24,25 @@ export function preloadedAssets(indexHtml) {
 }
 
 // Static imports of the entry script (the <script src> in index.html), from its
-// source when `files` (name -> code) is given.
+// source when `files` (name -> code) is given, followed transitively: Vite preloads
+// the whole static closure of the entry, so a new-stack chunk reached through a shared
+// chunk (or through another vendor chunk) is a legitimate preload, not a stray one.
+// Only static edges (`from"./x.js"` and the side-effect `import"./x.js"`) count; a
+// dynamic `import("./x.js")` loads on demand and puts nothing in the closure.
+const STATIC_IMPORT = /\b(?:from|import)\s*["']\.\/([^"']+\.js)["']/g
+
 function entryImports(indexHtml, files) {
   const names = new Set()
   const entry = (indexHtml.match(/<script\b[^>]*>/g) ?? []).map(t => /\bsrc\s*=\s*"\.\/assets\/([^"]+)"/.exec(t)?.[1]).find(Boolean)
-  const code = entry && files?.[entry]
-  if (code) for (const m of code.matchAll(/\b(?:from|import)\s*["']\.\/([^"']+\.js)["']/g)) names.add(m[1])
+  const queue = entry && files?.[entry] !== undefined ? [entry] : []
+  const seen = new Set(queue)
+  while (queue.length) {
+    const code = files[queue.pop()] ?? ''
+    for (const m of code.matchAll(STATIC_IMPORT)) {
+      names.add(m[1])
+      if (!seen.has(m[1])) { seen.add(m[1]); queue.push(m[1]) }
+    }
+  }
   return names
 }
 
@@ -59,11 +72,22 @@ export function checkVendorImports(files) {
   return problems
 }
 
-// Parse minified CSS into style rules, ignoring @font-face / @keyframes /
-// @property / `@layer properties` (Tailwind's custom-property fallbacks), and
-// report any rule on a global selector (`*`, html, body, :host, :root, bare
-// ::before/::after/::backdrop) that sets a real property. Custom properties
-// (`--x`) on those selectors are fine: nothing reads them but Tailwind.
+// The coarse-pointer minimum size of icon buttons (components/common/IconButton.tsx):
+// Tailwind finds the utility by scanning for its literal text, so a refactor of that
+// string can silently drop the rule from the build. The built CSS must carry it, inside
+// a (pointer: coarse) media query.
+export function checkCoarseTarget(css) {
+  // Both axes, inside one (pointer: coarse) block: a rule for the height alone would leave
+  // the button narrower than a finger.
+  const media = /@media\s*\(pointer:\s*coarse\)\s*\{([^@]*)\}\s*(?=[.@]|$)/g
+  for (const m of css.matchAll(media)) {
+    const body = m[1]
+    if (/\.pointer-coarse\\:min-h-\\\[2rem\\\]\s*\{[^}]*min-height:\s*2rem/.test(body)
+      && /\.pointer-coarse\\:min-w-\\\[2rem\\\]\s*\{[^}]*min-width:\s*2rem/.test(body)) return []
+  }
+  return ['built CSS has no (pointer: coarse) rule giving icon buttons a 2rem minimum height and width']
+}
+
 export function checkDist(dist) {
   const assets = join(dist, 'assets')
   const names = readdirSync(assets)
@@ -71,6 +95,7 @@ export function checkDist(dist) {
   const problems = [
     ...checkPreloads(readFileSync(join(dist, 'index.html'), 'utf8'), js),
     ...checkVendorImports(js),
+    ...checkCoarseTarget(names.filter(n => n.endsWith('.css')).map(n => readFileSync(join(assets, n), 'utf8')).join('\n')),
   ]
   return problems
 }

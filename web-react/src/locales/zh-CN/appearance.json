@@ -2,7 +2,10 @@
   "title": "外观",
   "density": {
     "switch_to_comfortable": "切换为舒适布局",
-    "switch_to_compact": "切换为紧凑布局"
+    "switch_to_compact": "切换为紧凑布局",
+    "section": "密度",
+    "compact": "紧凑",
+    "comfortable": "舒适"
   },
   "preset_section": "预设主题色",
   "custom_section": "自定义",
@@ -23,5 +26,7 @@
     "green": "绿色",
     "orange": "橙色",
     "pink": "粉色"
-  }
+  },
+  "apply": "应用",
+  "color_input": "颜色值"
 }

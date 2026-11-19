@@ -50,6 +50,9 @@ import AppearanceMenu from '@/components/AppearanceMenu'
 import DensityToggle from '@/components/DensityToggle'
 import LanguageMenu from '@/components/LanguageMenu'
 import NotificationBell from '@/components/NotificationBell'
+import { ToastLogButton } from '@/components/shell/ToastLogButton'
+import ToastLogMenuItem from './ToastLogMenuItem'
+import { useLogInBar } from './useLogInBar'
 import BrandLogo from '@/components/BrandLogo'
 import { useAuthStore, selectLabel } from '@/stores/auth'
 import { useSiteStore, selectIcon } from '@/stores/site'
@@ -144,6 +147,7 @@ export default function AdminLayout() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['nav', 'common'])
+  const logInBar = useLogInBar()
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
@@ -463,6 +467,8 @@ export default function AdminLayout() {
               {siteTitle}
             </Typography>
             <Box sx={{ flex: 1 }} />
+            {/* The log of messages that were never shown as toasts (new-stack button in the MUI bar until the shell swap). Below the width where the bar has room it is not rendered and the account menu carries the log instead (useLogInBar). */}
+            {logInBar && <ToastLogButton size="bar" />}
             <NotificationBell />
             <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
             <DensityToggle />
@@ -496,6 +502,7 @@ export default function AdminLayout() {
                   </Typography>
                 </Box>
               </MenuItem>
+              {!logInBar && <ToastLogMenuItem onClose={() => setUserAnchor(null)} />}
               <MenuItem onClick={handleLogout}>
                 <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
                 <ListItemText primary={t('common:auth.logout')} />

@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     http,
     baseAdapter,
     pushSnack: vi.fn(),
+    notifySyncPending: vi.fn(),
     translate: vi.fn((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key),
     exists: vi.fn((key: string) => key === 'common:errors.codes.source_guard_needs_cidrs'),
   }
@@ -42,6 +43,7 @@ vi.mock('axios', () => ({
 }))
 vi.mock('@/i18n', () => ({ default: { t: mocks.translate, exists: mocks.exists } }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: mocks.pushSnack }))
+vi.mock('@/components/feedback/syncPendingToast', () => ({ notifySyncPending: mocks.notifySyncPending }))
 vi.mock('@/panelPath', () => ({
   panelAPIBase: '/panel/api',
   panelURL: (route = '/') => `/panel${route}`,
@@ -72,6 +74,7 @@ beforeEach(() => {
   mocks.http.mockReset()
   mocks.http.post.mockReset()
   mocks.pushSnack.mockReset()
+  mocks.notifySyncPending.mockReset()
   mocks.translate.mockClear()
   vi.useRealTimers()
 })
@@ -93,12 +96,11 @@ describe('shared API client interceptors', () => {
     expect(mocks.state.responseOK?.(response)).toBe(response)
     vi.setSystemTime(5_000)
     mocks.state.responseOK?.(response)
-    expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
-    expect(mocks.pushSnack).toHaveBeenCalledWith('common:errors.sync_pending', 'warning')
+    expect(mocks.notifySyncPending).toHaveBeenCalledTimes(1)
 
     vi.setSystemTime(7_001)
     mocks.state.responseOK?.(response)
-    expect(mocks.pushSnack).toHaveBeenCalledTimes(2)
+    expect(mocks.notifySyncPending).toHaveBeenCalledTimes(2)
   })
 
   it('lets an open status area speak for the signal instead of a toast', () => {
@@ -113,12 +115,12 @@ describe('shared API client interceptors', () => {
     // work in more detail, so the toast would be the same news twice.
     const release = observeUser(7)
     mocks.state.responseOK?.(response)
-    expect(mocks.pushSnack).not.toHaveBeenCalled()
+    expect(mocks.notifySyncPending).not.toHaveBeenCalled()
 
     // Once it closes, the toast is the only surface left and must come back.
     release()
     mocks.state.responseOK?.(response)
-    expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
+    expect(mocks.notifySyncPending).toHaveBeenCalledTimes(1)
   })
 
   it('does not turn intentional cancellation into an error toast', async () => {

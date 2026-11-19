@@ -46,6 +46,8 @@ const MeView = lazy(viewLoaders['/user/me'])
 // lazy chunk.
 const UiKitchenSink = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitchenSink')) : null
 const UiKitData = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitData')) : null
+const UiKitShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell')) : null
+const UiKitUserShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell').then(m => ({ default: m.UiKitUserShell }))) : null
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
@@ -80,6 +82,8 @@ export const router = createBrowserRouter([
       },
   ...(UiKitchenSink ? [{ path: '/__ui-kit', element: <UiKitchenSink /> }] : []),
   ...(UiKitData ? [{ path: '/__ui-kit/data', element: <UiKitData /> }] : []),
+  ...(UiKitShell ? [{ path: '/__ui-kit/shell/*', element: <UiKitShell /> }] : []),
+  ...(UiKitUserShell ? [{ path: '/__ui-kit/shell-user', element: <UiKitUserShell /> }] : []),
   { path: '/login', element: <LoginView /> },
   { path: '/login/local', element: <LoginView forceLocal /> },
   { path: '/sso-callback', element: <SsoCallbackView /> },

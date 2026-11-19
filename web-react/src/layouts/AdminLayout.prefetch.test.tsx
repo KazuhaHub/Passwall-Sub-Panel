@@ -10,6 +10,10 @@ import { useAuthStore } from '@/stores/auth'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import AdminLayout from './AdminLayout'
 
+const mq = vi.hoisted(() => ({ roomForLog: true }))
+// useLogInBar's one query: whether the bar has room for the log button.
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => mq.roomForLog }))
+
 const prefetch = vi.hoisted(() => ({
   prefetchView: vi.fn(),
   prefetchViewsWhenIdle: vi.fn((_paths: readonly string[]) => () => {}),
@@ -48,6 +52,7 @@ describe('AdminLayout view prefetching', () => {
   beforeEach(() => {
     prefetch.prefetchView.mockClear()
     prefetch.prefetchViewsWhenIdle.mockClear()
+    mq.roomForLog = true
     useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
   })
   afterEach(cleanup)
@@ -98,5 +103,51 @@ describe('AdminLayout view prefetching', () => {
     await waitFor(() => expect(prefetch.prefetchViewsWhenIdle).toHaveBeenCalled())
     const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
     expect(paths).toContain('/admin/access-control')
+  })
+
+  // Until the new shell replaces this layout, the message log (errors that came too fast to
+  // be shown as toasts) is reachable from this app bar: as a button where the bar has room,
+  // as an account-menu item where it has not, and never both.
+  const openAccountMenu = async () => {
+    const avatar = await waitFor(() => document.querySelector('.MuiAvatar-root')!.closest('button') as HTMLElement)
+    fireEvent.click(avatar)
+  }
+
+  it('renders the log BUTTON where the bar has room, and no menu item', async () => {
+    mq.roomForLog = true
+    mountLayout()
+    const log = await screen.findByRole('button', { name: 'ui.feedback.log_title' })
+    expect(log.closest('header')).not.toBeNull()
+    expect(log.className).toContain('size-10')
+    await openAccountMenu()
+    await screen.findByRole('menuitem', { name: 'common:auth.logout' })
+    expect(screen.queryByRole('menuitem', { name: 'ui.feedback.log_title' })).toBeNull()
+    expect(document.querySelector('[data-slot="toast-log-menu-count"]')).toBeNull()
+  })
+
+  it('renders the log MENU ITEM where it has not, and no button', async () => {
+    mq.roomForLog = false
+    mountLayout()
+    await waitFor(() => expect(document.querySelector('.MuiAvatar-root')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: 'ui.feedback.log_title' })).toBeNull()
+    await openAccountMenu()
+    expect(await screen.findByRole('menuitem', { name: 'ui.feedback.log_title' })).toBeTruthy()
+  })
+
+  it('leaves the account menu keyboard-operable when the item is absent: the first real item takes focus and Enter signs out', async () => {
+    mq.roomForLog = true
+    const logout = vi.fn()
+    useAuthStore.setState({ logout })
+    mountLayout()
+    await openAccountMenu()
+    const signOut = await screen.findByRole('menuitem', { name: 'common:auth.logout' })
+    // MUI focuses the first item it can: with no hidden item in the way, that is "log out".
+    await waitFor(() => expect(document.activeElement).toBe(signOut))
+    fireEvent.keyDown(signOut, { key: 'ArrowDown' })
+    fireEvent.keyDown(signOut, { key: 'Home' })
+    expect(document.activeElement).toBe(signOut)
+    fireEvent.keyDown(signOut, { key: 'Enter' })
+    fireEvent.click(signOut)
+    expect(logout).toHaveBeenCalled()
   })
 })

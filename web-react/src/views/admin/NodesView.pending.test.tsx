@@ -45,9 +45,9 @@ describe('NodesView managed-row actions', () => {
     await waitFor(() => expect(deleteButton.disabled).toBe(false))
     fireEvent.click(deleteButton)
 
-    const confirmDialog = await screen.findByRole('dialog')
+    const confirmDialog = await screen.findByRole('alertdialog')
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'admin:nodes.action.delete' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 
     await waitFor(() => expect(deleteButton.getAttribute('aria-busy')).toBe('true'))
     expect(deleteButton.disabled).toBe(true)
@@ -70,9 +70,9 @@ describe('NodesView managed-row actions', () => {
     const detachButton = within(row).getByTestId('LinkOffIcon').closest('button')!
     fireEvent.click(detachButton)
 
-    const confirmDialog = await screen.findByRole('dialog')
+    const confirmDialog = await screen.findByRole('alertdialog')
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'admin:nodes.action.detach' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 
     await waitFor(() => expect(detachButton.getAttribute('aria-busy')).toBe('true'))
     expect(detachButton.disabled).toBe(true)
@@ -95,11 +95,11 @@ describe('NodesView managed-row actions', () => {
     const recreateButton = within(row).getByTestId('CloudSyncIcon').closest('button')!
     fireEvent.click(recreateButton)
 
-    const confirmDialog = await screen.findByRole('dialog')
+    const confirmDialog = await screen.findByRole('alertdialog')
     fireEvent.click(within(confirmDialog).getByRole('button', {
       name: 'admin:nodes.action.recreate_inbound',
     }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 
     await waitFor(() => expect(recreateButton.getAttribute('aria-busy')).toBe('true'))
     expect(recreateButton.disabled).toBe(true)
