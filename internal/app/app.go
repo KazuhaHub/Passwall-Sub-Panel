@@ -542,8 +542,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	nodeSvc.SetFronts(repos.TransitFronts, frontSvc)
 	// A landing can check where connections come from only on a Passwall Node
-	// server whose agent declared it; 3X-UI and S-UI servers have no agent. A read
-	// that fails counts as "cannot": the stricter rule is the safe one to save by.
+	// server whose agent declared it; 3X-UI and S-UI servers have no agent. This
+	// check is the fallback when no guard inputs are wired; with
+	// SetSourceGuardInputs below, a read that fails fails the save.
 	nodeSvc.SetSourceGuardCheck(func(ctx context.Context, panelID int64) bool {
 		agents, err := repos.NodeAgent.ListByPanelIDs(ctx, []int64{panelID})
 		return err == nil && len(agents) > 0 && agents[0].CanSourceGuard()

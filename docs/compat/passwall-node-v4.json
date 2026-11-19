@@ -328,6 +328,17 @@
         "managed-docker"
       ],
       "tag": "v4.3.0-beta.3"
+    },
+    {
+      "version": "4.3.0-beta.4",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "tag": "v4.3.0-beta.4"
     }
   ]
 }

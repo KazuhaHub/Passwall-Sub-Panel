@@ -898,6 +898,16 @@ func (s *Service) engineLinkRefusal(ctx context.Context, panelID int64, to domai
 	if s.links == nil {
 		return nil
 	}
+	// Staying on the same engine (a routine version update) is no switch: it
+	// cannot create an incompatible pair, and refusing it would hold back core
+	// updates on a server that is part of a link made before this check.
+	current, err := s.desiredEngines(ctx, panelID)
+	if err != nil {
+		return err
+	}
+	if engine, known := current[panelID]; known && domain.NormalizeNodeCoreEngine(engine) == domain.NormalizeNodeCoreEngine(to) {
+		return nil
+	}
 	links, err := s.links.ListLinks(ctx)
 	if err != nil {
 		return err
