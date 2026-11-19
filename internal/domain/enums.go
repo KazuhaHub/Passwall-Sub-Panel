@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 type Role string
 
 const (
@@ -149,6 +154,122 @@ const (
 	ProtoTUIC      Protocol = "tuic"
 	ProtoNaive     Protocol = "naive"
 )
+
+// AllProtocols lists every Protocol value, so tests can prove each one has an
+// explicit credential decision.
+func AllProtocols() []Protocol {
+	return []Protocol{ProtoVLESS, ProtoVMess, ProtoTrojan, ProtoSS, ProtoSS2022,
+		ProtoHysteria2, ProtoAnyTLS, ProtoTUIC, ProtoNaive}
+}
+
+// UsesPassword reports whether the protocol authenticates with the client's
+// `password` slot. It is the single source of truth for that question:
+// clientplan's password-class planner and every credential read-back
+// comparison derive from it. VLESS/VMess authenticate by id and Hysteria2 by
+// auth, so the password stored upstream is inert for them.
+func (p Protocol) UsesPassword() bool {
+	switch p {
+	case ProtoTrojan, ProtoSS, ProtoSS2022, ProtoAnyTLS, ProtoTUIC, ProtoNaive:
+		return true
+	}
+	return false
+}
+
+// CredentialFields names which upstream client fields a protocol (or a set of
+// them) actually authenticates with.
+type CredentialFields struct {
+	ID       bool // VLESS, VMess
+	Password bool // see Protocol.UsesPassword
+	Auth     bool // Hysteria2 (PSP sets Auth to the client UUID)
+}
+
+// CredentialFieldsFor is the union of the fields the given protocols read.
+//
+// Why this exists: since the 4.3 per-line split a user has one client per line
+// and 3X-UI keeps whatever password the client was first created with on a
+// VLESS client — an UpdateClient with a new password does not change what
+// GetClient reads back, because VLESS never reads it. Comparing the password
+// anyway made every such client a permanent false "read-back mismatch".
+//
+// Fail closed: an empty list or a protocol this build cannot classify compares
+// EVERY field, so an unrecognised attachment can never wave a real credential
+// mismatch through.
+func CredentialFieldsFor(ps ...Protocol) CredentialFields {
+	all := CredentialFields{ID: true, Password: true, Auth: true}
+	if len(ps) == 0 {
+		return all
+	}
+	var out CredentialFields
+	for _, p := range ps {
+		switch {
+		case p == ProtoVLESS || p == ProtoVMess:
+			out.ID = true
+		case p == ProtoHysteria2:
+			// Hy2 reads auth, but render uses the stored id (AppliedUUID) as the
+			// Hy2 password, and 3X-UI can keep a stale id after a UUID reset, so
+			// the id stays compared too.
+			out.ID, out.Auth = true, true
+		case p == ProtoTUIC:
+			// TUIC authenticates with uuid AND password (Mihomo renders the uuid
+			// from AppliedUUID).
+			out.ID, out.Password = true, true
+		case p.UsesPassword():
+			out.Password = true
+		default:
+			return all
+		}
+	}
+	return out
+}
+
+// ClassifyProtocol maps a 3X-UI inbound protocol string (and, for Shadowsocks,
+// the cipher) to the Protocol enum, or "" when it is not recognised. It is the
+// one classifier behind crypto.DetectProtocol, clientplan and the credential
+// comparisons, so they cannot disagree on aliases ("ss", "hy2").
+func ClassifyProtocol(inboundProtocol, ssMethod string) Protocol {
+	switch strings.ToLower(strings.TrimSpace(inboundProtocol)) {
+	case "vless":
+		return ProtoVLESS
+	case "vmess":
+		return ProtoVMess
+	case "trojan":
+		return ProtoTrojan
+	case "shadowsocks", "ss":
+		if strings.HasPrefix(strings.ToLower(ssMethod), "2022-blake3-") {
+			return ProtoSS2022
+		}
+		return ProtoSS
+	case "hysteria2", "hy2":
+		return ProtoHysteria2
+	case "anytls":
+		return ProtoAnyTLS
+	case "tuic":
+		return ProtoTUIC
+	case "naive":
+		return ProtoNaive
+	}
+	return ""
+}
+
+// SSMethodFromInboundSettings reads the Shadowsocks cipher out of an inbound's
+// settings JSON ("" when absent or unparseable).
+func SSMethodFromInboundSettings(settings string) string {
+	if settings == "" {
+		return ""
+	}
+	var s struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(settings), &s); err != nil {
+		return ""
+	}
+	return s.Method
+}
+
+// CredentialProtocol is the node's protocol as the credential planner sees it.
+func (n *Node) CredentialProtocol() Protocol {
+	return ClassifyProtocol(n.DesiredProtocol, SSMethodFromInboundSettings(n.InboundSettings))
+}
 
 type ClientType string
 

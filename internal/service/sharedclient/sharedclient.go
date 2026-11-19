@@ -383,7 +383,10 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	want := clientdoc.Mint(c, atts).Lifecycle()
 	// From here on the headroom is this server's RAW bytes, so the cap and the
 	// deadband below are measured against the counter the panel compares.
-	factor := s.trafficFactor(ctx, c)
+	// One lookup per node for the whole push: the line node read here is
+	// usually also one of the attachments scanned for credential fields below.
+	getNode := s.memoNodes(ctx)
+	factor := s.trafficFactorWith(c, getNode)
 	want.QuotaHeadroom = domain.RawHeadroom(want.QuotaHeadroom, factor)
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
@@ -406,6 +409,15 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	// The gap is already reported above; it must not also become a write loop.
 	capIP := ports.SupportsCapability(cli, ports.CapabilityClientIPLimit)
 	capDevice := ports.SupportsCapability(cli, ports.CapabilityClientDeviceLimit)
+
+	// Only the credential fields the attached protocols read may drive the skip
+	// and the confirm below. Since the 4.3 per-line split a VLESS client keeps
+	// the stale shared password 3X-UI stored at creation: UpdateClient's new
+	// password never shows up on GetClient because VLESS authenticates by id
+	// alone. Comparing it anyway failed the confirm on every cycle and made the
+	// skip impossible (a full-replace per cycle, user_resync tasks retrying to
+	// their cap). Unknown nodes/protocols compare everything (fail closed).
+	creds := s.credentialFields(getNode, atts)
 
 	unreadReason := "panel_unread"
 	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
@@ -439,7 +451,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		// that a deadband on that one field recovers the skip. Any other
 		// reason showing up in bulk would mean a deadband buys nothing
 		// and Phase 1a is aimed at the wrong field.
-		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, want.QuotaHeadroom)
+		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, creds, want.QuotaHeadroom)
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
 			// Not counted as a failure: it never was (see pushLifecycle).
@@ -466,7 +478,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		return fail(metrics.LifecycleErrorStageConfirmRead,
 			fmt.Errorf("confirm shared client %s credentials: %w", c.Email, err))
 	}
-	if confirmed == nil || confirmed.ID != spec.ID || confirmed.Password != spec.Password || confirmed.Auth != spec.Auth {
+	if confirmed == nil || !credentialsMatch(confirmed, spec, creds) {
 		return fail(metrics.LifecycleErrorStageConfirmMismatch,
 			fmt.Errorf("confirm shared client %s credentials: read-back does not match desired identity", c.Email))
 	}
@@ -495,11 +507,38 @@ func (s *Service) countLifecycleFailure(panelID int64, stage string) {
 // longer be read keeps the factor it was last booked at; a legacy row without
 // a line is one-for-one.
 func (s *Service) trafficFactor(ctx context.Context, c *domain.PSPClient) int {
+	return s.trafficFactorWith(c, func(id int64) (*domain.Node, error) { return s.nodes.GetByID(ctx, id) })
+}
+
+// nodeLookup resolves nodes by id; pushLifecycle hands it a memoizing one so
+// the traffic factor and the credential-field scan share each lookup.
+type nodeLookup func(id int64) (*domain.Node, error)
+
+// memoNodes returns a lookup that asks the repo once per node id for the life
+// of one push (errors are memoized too: a failing node stays failed, so the
+// fail-closed answer is stable within the push).
+func (s *Service) memoNodes(ctx context.Context) nodeLookup {
+	type res struct {
+		n   *domain.Node
+		err error
+	}
+	seen := map[int64]res{}
+	return func(id int64) (*domain.Node, error) {
+		if r, ok := seen[id]; ok {
+			return r.n, r.err
+		}
+		n, err := s.nodes.GetByID(ctx, id)
+		seen[id] = res{n, err}
+		return n, err
+	}
+}
+
+func (s *Service) trafficFactorWith(c *domain.PSPClient, get nodeLookup) int {
 	line, ok := c.Line()
 	if !ok || s.nodes == nil {
 		return c.LastFactor()
 	}
-	n, err := s.nodes.GetByID(ctx, line.NodeID)
+	n, err := get(line.NodeID)
 	if err != nil || n == nil {
 		return c.LastFactor()
 	}
@@ -610,7 +649,7 @@ func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want 
 // can never converge. Excluding it is not "ignoring drift" — there is no drift
 // to heal on a panel that has nowhere to put the value, and the gap is already
 // counted by reportCapabilityGaps.
-func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool, headroom int64) string {
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool, creds domain.CredentialFields, headroom int64) string {
 	switch {
 	case !domain.PanelQuotaWithinBand(cur.TotalGB, spec.TotalGB, headroom):
 		return "total_gb"
@@ -622,16 +661,48 @@ func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP,
 		return "enable"
 	case cur.ExpiryTime != spec.ExpiryTime:
 		return "expiry"
-	case cur.ID != spec.ID:
+	case creds.ID && cur.ID != spec.ID:
 		return "id"
-	case cur.Password != spec.Password:
+	case creds.Password && cur.Password != spec.Password:
 		return "password"
 	case cur.Flow != spec.Flow:
 		return "flow"
-	case cur.Auth != spec.Auth:
+	case creds.Auth && cur.Auth != spec.Auth:
 		return "auth"
 	}
 	return ""
+}
+
+// credentialsMatch is the post-write read-back check, restricted to the
+// credential fields the client's attached protocols actually read (see
+// pushLifecycle for why a stale, inert password must not fail it).
+func credentialsMatch(got *ports.ClientDetail, want ports.ClientSpec, creds domain.CredentialFields) bool {
+	return (!creds.ID || got.ID == want.ID) &&
+		(!creds.Password || got.Password == want.Password) &&
+		(!creds.Auth || got.Auth == want.Auth)
+}
+
+// credentialFields unions the credential fields of the protocols of a client's
+// attachments. Separators carry no protocol and are ignored; a node that cannot
+// be resolved (or has no protocol) makes the answer "everything", never
+// "nothing". Protocol detection is clientplan's, so an SS-2022 node (stored as
+// "shadowsocks" plus a method) is classified exactly as the planner did.
+func (s *Service) credentialFields(get nodeLookup, atts []domain.PSPClientInbound) domain.CredentialFields {
+	if s.nodes == nil {
+		return domain.CredentialFieldsFor()
+	}
+	protos := make([]domain.Protocol, 0, len(atts))
+	for _, a := range atts {
+		n, err := get(a.NodeID)
+		if err != nil || n == nil {
+			return domain.CredentialFieldsFor()
+		}
+		if n.IsSeparator() {
+			continue
+		}
+		protos = append(protos, n.CredentialProtocol())
+	}
+	return domain.CredentialFieldsFor(protos...)
 }
 
 // absInt64 returns |v| as a float64 for histogram observation. The floor

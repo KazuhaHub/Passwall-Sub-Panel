@@ -24,7 +24,6 @@
 package clientplan
 
 import (
-	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,16 +98,7 @@ func NodeCredsFromNodes(nodes []*domain.Node) []NodeCred {
 }
 
 func ssMethodFromSettings(settings string) string {
-	if settings == "" {
-		return ""
-	}
-	var s struct {
-		Method string `json:"method"`
-	}
-	if err := json.Unmarshal([]byte(settings), &s); err != nil {
-		return ""
-	}
-	return s.Method
+	return domain.SSMethodFromInboundSettings(settings)
 }
 
 // LineCred describes one subscription line a user can see on a panel.
@@ -205,17 +195,18 @@ const pwAgnostic = -1
 
 // pwReqFor returns the password CLASS a protocol requires, or pwAgnostic.
 func pwReqFor(nc LineCred) int {
-	switch nc.Protocol {
-	case domain.ProtoSS2022:
+	// domain.Protocol.UsesPassword is the single source of truth for which
+	// protocols read the password slot; only the class split lives here.
+	if !nc.Protocol.UsesPassword() {
+		return pwAgnostic
+	}
+	if nc.Protocol == domain.ProtoSS2022 {
 		if crypto.SS2022KeyLen(nc.SSMethod) == 16 {
 			return pwClass128
 		}
 		return pwClass256
-	case domain.ProtoTrojan, domain.ProtoSS, domain.ProtoAnyTLS, domain.ProtoTUIC, domain.ProtoNaive:
-		return pwClassDefault
-	default:
-		return pwAgnostic
 	}
+	return pwClassDefault
 }
 
 // effectiveFlow coerces a VLESS flow into the allowlist; other protocols have

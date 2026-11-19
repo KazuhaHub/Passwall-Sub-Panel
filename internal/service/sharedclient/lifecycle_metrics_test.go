@@ -35,7 +35,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		}
 	}
 
-	if got := lifecycleWriteReason(match(), base, true, true, headroom); got != "" {
+	if got := lifecycleWriteReason(match(), base, true, true, allCreds, headroom); got != "" {
 		t.Fatalf("identical state must skip, got reason %q", got)
 	}
 
@@ -55,7 +55,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := match()
 			tc.mutate(d)
-			if got := lifecycleWriteReason(d, base, true, true, headroom); got != tc.want {
+			if got := lifecycleWriteReason(d, base, true, true, allCreds, headroom); got != tc.want {
 				t.Fatalf("reason = %q, want %q", got, tc.want)
 			}
 		})
@@ -68,7 +68,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 func TestLifecycleWriteReason_QuotaWinsWhenSeveralFieldsDiffer(t *testing.T) {
 	spec := ports.ClientSpec{Enable: true, TotalGB: 5 << 30, ID: "a"}
 	cur := &ports.ClientDetail{Enable: false, TotalGB: 4 << 30, ID: "b"}
-	if got := lifecycleWriteReason(cur, spec, true, true, 5<<30); got != "total_gb" {
+	if got := lifecycleWriteReason(cur, spec, true, true, allCreds, 5<<30); got != "total_gb" {
 		t.Fatalf("reason = %q, want total_gb", got)
 	}
 }
