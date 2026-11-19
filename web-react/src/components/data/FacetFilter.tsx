@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { ChevronDownIcon, ListFilterIcon, XIcon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { TipButton } from './TipButton'
-import { TOUCH_TARGET } from './touchTarget'
+import { TOUCH_HEIGHT } from './touchTarget'
 
 export interface FacetOption {
   value: string
@@ -32,7 +32,7 @@ export interface FacetFilterProps {
  * without opening anything, and a separate x clears it in one click.
  */
 export function FacetFilter({ label, options, selected, onChange, searchAbove = 8, className }: FacetFilterProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const [q, setQ] = useState('')
   const shown = q.trim() ? options.filter(o => o.label.toLowerCase().includes(q.trim().toLowerCase())) : options
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v])
@@ -52,7 +52,7 @@ export function FacetFilter({ label, options, selected, onChange, searchAbove = 
             <Button
               variant="outline"
               size="sm"
-              className={cn(TOUCH_TARGET, selected.length > 0 && 'rounded-r-none border-brand/60 bg-brand/5 dark:bg-brand/10')}
+              className={cn(TOUCH_HEIGHT, selected.length > 0 && 'rounded-r-none border-brand/60 bg-brand/5 dark:bg-brand/10')}
             />
           }
         >

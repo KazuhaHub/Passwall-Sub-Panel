@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Loader2Icon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -25,7 +25,7 @@ export interface SaveBarProps {
  * serves one section or tab: each saves on its own (audit section 0).
  */
 export function SaveBar({ dirty, pending, disabled, message, saveLabel, onSave, onDiscard, className }: SaveBarProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const visible = dirty || pending
   const spoken = pending ? t('ui.form.saving') : dirty ? t('ui.form.unsaved') : ''
   return (

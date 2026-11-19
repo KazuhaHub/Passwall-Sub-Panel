@@ -71,4 +71,11 @@ describe('Field error announcement', () => {
     expect(live.textContent).toBe('')
     expect(screen.getByLabelText('Port').getAttribute('aria-describedby')).toBe(screen.getByText('1-65535').id)
   })
+
+  it('keeps the empty live region visually hidden but in the accessibility tree (display:none would drop it)', () => {
+    const { container } = render(<Field label="Port"><Input /></Field>)
+    const live = container.querySelector('[aria-live]') as HTMLElement
+    expect(live.className).toContain('sr-only')
+    expect(live.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+  })
 })

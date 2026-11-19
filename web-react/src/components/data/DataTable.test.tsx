@@ -163,7 +163,7 @@ describe('selection and the bulk bar', () => {
       <DataTable
         data={mk(4)} columns={columns} getRowId={r => r.id} selectable selection={sel} onSelectionChange={setSel}
         rowLabel={r => r.name}
-        bulkActions={({ selectedIds, clear }) => (<><button onClick={() => onBulk?.(selectedIds)}>Disable</button><button onClick={clear}>Done</button></>)}
+        bulkActions={({ ids, clear }) => (<><button onClick={() => onBulk?.(ids)}>Disable</button><button onClick={clear}>Done</button></>)}
       />
     )
   }
@@ -535,14 +535,32 @@ describe('reordering needs the whole list (item 5)', () => {
     render(<DataTable data={rows} columns={cols} getRowId={r => r.id} rowLabel={r => r.name} onReorder={() => {}} />)
     const h = screen.getByRole('button', { name: /Drag to reorder: A/ })
     expect(h.getAttribute('aria-disabled')).toBe('true')
-    expect(document.getElementById(h.getAttribute('aria-describedby')!.split(' ').pop()!)?.textContent).toContain('paged')
+    expect(document.getElementById(h.getAttribute('aria-describedby')!.split(' ').pop()!)?.textContent).toContain('only some rows')
     expect(err).toHaveBeenCalledWith(expect.stringContaining('pagination={false}'))
   })
 
   it('is off in server mode, where the page is only part of the list', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
+    // @ts-expect-error onReorder requires client mode
     render(<DataTable mode="server" data={rows} total={50} columns={cols} getRowId={r => r.id} rowLabel={r => r.name} onReorder={() => {}} pagination={false} />)
     expect(screen.getByRole('button', { name: /Drag to reorder: A/ }).getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('is off in server mode even without paging, and the types say so', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // @ts-expect-error onReorder requires client mode
+    render(<DataTable mode="server" data={rows} total={50} columns={cols} getRowId={r => r.id} rowLabel={r => r.name} onReorder={() => {}} pagination={false} />)
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('client mode'))
+  })
+
+  it('is off while the caller says so (a filter is active), with the caller\'s reason', () => {
+    render(<DataTable data={rows} columns={cols} getRowId={r => r.id} rowLabel={r => r.name} onReorder={() => {}} pagination={false} reorderBlockedReason="Clear the search to reorder" />)
+    const h = screen.getByRole('button', { name: /Drag to reorder: A/ })
+    expect(h.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(h.getAttribute('aria-describedby')!.split(' ').pop()!)?.textContent).toBe('Clear the search to reorder')
+    h.focus()
+    fireEvent.keyDown(h, { key: ' ' })
+    expect(screen.getByRole('status').textContent).not.toContain('Picked up')
   })
 
   it('says why a tree cannot be reordered', () => {
@@ -677,7 +695,7 @@ describe('sorting (item 9)', () => {
 })
 
 describe('selection across pages and filters (item 10)', () => {
-  function Harness({ rows, onCtx }: { rows: Row[]; onCtx?: (c: { selectedIds: string[]; hiddenCount: number; selectedRows: Row[] }) => void }) {
+  function Harness({ rows, onCtx }: { rows: Row[]; onCtx?: (c: { ids: string[]; hiddenCount: number; visibleRows: Row[] }) => void }) {
     const [sel, setSel] = useState<Record<string, boolean>>({ r1: true, r2: true, r30: true })
     return (
       <DataTable
@@ -694,9 +712,9 @@ describe('selection across pages and filters (item 10)', () => {
     const bar = screen.getByRole('region', { name: 'Bulk actions' })
     expect(bar.textContent).toContain('3 selected')
     expect(bar.textContent).toContain('1 not on this page')
-    expect(seen).toHaveBeenLastCalledWith(expect.objectContaining({ selectedIds: ['r1', 'r2', 'r30'], hiddenCount: 1 }))
+    expect(seen).toHaveBeenLastCalledWith(expect.objectContaining({ ids: ['r1', 'r2', 'r30'], hiddenCount: 1 }))
     // client mode holds every row, so the off-page one is still resolved
-    expect(seen.mock.lastCall![0].selectedRows.map((r: Row) => r.id)).toEqual(['r1', 'r2', 'r30'])
+    expect(seen.mock.lastCall![0].visibleRows.map((r: Row) => r.id)).toEqual(['r1', 'r2', 'r30'])
     fireEvent.click(within(bar).getByRole('button', { name: 'Deselect items not on this page' }))
     expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).toContain('2 selected')
     expect(screen.getByRole('region', { name: 'Bulk actions' }).textContent).not.toContain('not on this page')
@@ -820,8 +838,8 @@ describe('phone cards (item 14)', () => {
 describe('touch targets (item 15) and header names (item 26)', () => {
   it('gives sort buttons and icon buttons the coarse-pointer hit area', () => {
     render(<DataTable data={mk(30)} columns={columns} getRowId={r => r.id} pageSize={10} />)
-    expect(within(screen.getByRole('columnheader', { name: /Name/ })).getByRole('button').className).toContain('pointer-coarse:after:')
-    expect(screen.getByRole('button', { name: 'Next page' }).className).toContain('pointer-coarse:after:')
+    expect(within(screen.getByRole('columnheader', { name: /Name/ })).getByRole('button').className).toContain('pointer-coarse:min-h-')
+    expect(screen.getByRole('button', { name: 'Next page' }).className).toContain('pointer-coarse:min-h-')
   })
 
   it('never leaves a column header empty: axe flags it', () => {
@@ -830,5 +848,14 @@ describe('touch targets (item 15) and header names (item 26)', () => {
     for (const th of screen.getAllByRole('columnheader')) expect(th.textContent!.trim().length).toBeGreaterThan(0)
     expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy()
     expect(screen.getByRole('columnheader', { name: 'Reorder' })).toBeTruthy()
+  })
+})
+
+describe('dimmed rows keep their text readable (item 19)', () => {
+  it('softens with colour, never with opacity (which takes muted text to about 2:1)', () => {
+    render(<DataTable data={[{ id: 'a', name: 'A', status: '', traffic: 0 }]} columns={columns} getRowId={r => r.id} rowOptions={() => ({ state: 'dimmed' })} pagination={false} columnMenu={false} />)
+    const row = screen.getAllByRole('row')[1]
+    expect(row.className).toContain('text-foreground/70')
+    expect(row.className).not.toMatch(/opacity-/)
   })
 })

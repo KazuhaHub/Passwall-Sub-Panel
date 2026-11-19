@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { useBlocker } from 'react-router'
 
 export interface UnsavedChangesOptions {
@@ -31,22 +31,28 @@ export interface UnsavedChangesControls {
    * The draft was just saved. Takes effect immediately, before React renders the
    * `dirty = false` that the save also causes, so "save, then navigate" in one
    * handler is not stopped by a prompt about changes that no longer exist.
+   * Call it AFTER the save succeeded. If it was called too early and the save
+   * failed, the next render with `dirty` still true arms the guard again.
    */
   markSaved: () => void
-  /** Let the very next navigation through without asking, then guard again. */
+  /**
+   * Let a navigation started in THIS tick through without asking. It expires when
+   * the tick ends, so a later, unrelated route change is guarded as usual.
+   */
   allowNext: () => void
 }
 
 export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = {}): UnsavedChangesControls {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const leaves = opts.leaves ?? ((next, current) => next.pathname !== current.pathname)
 
   // What the guard reads is a ref, updated synchronously, never the `dirty` of
   // the render the blocker callback happened to be created in.
   const dirtyRef = useRef(dirty)
   const allowRef = useRef(false)
-  const lastProp = useRef(dirty)
-  if (lastProp.current !== dirty) { lastProp.current = dirty; dirtyRef.current = dirty }
+  // Every render restates what the page says: a markSaved() that was premature (the
+  // save then failed) is undone by the next render that still has dirty = true.
+  dirtyRef.current = dirty
   const leavesRef = useRef(leaves)
   leavesRef.current = leaves
 
@@ -83,6 +89,6 @@ export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = 
 
   return {
     markSaved: useCallback(() => { dirtyRef.current = false }, []),
-    allowNext: useCallback(() => { allowRef.current = true }, []),
+    allowNext: useCallback(() => { allowRef.current = true; queueMicrotask(() => { allowRef.current = false }) }, []),
   }
 }

@@ -1,6 +1,6 @@
 import { useId, useState, type ReactNode } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
 /** localStorage key for an advanced section's remembered open state. */
@@ -38,7 +38,7 @@ export interface FormSectionProps {
  * exist for validation.
  */
 export function FormSection({ title, description, advanced, sectionKey, forceOpen, actions, className, children }: FormSectionProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const uid = useId()
   const titleId = `${uid}-title`
   const bodyId = `${uid}-body`

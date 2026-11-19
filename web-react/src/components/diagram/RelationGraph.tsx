@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { landingColorStyle, type LandingColor } from './landingColor'
 import type { PathTone } from './pathSummary'
@@ -81,11 +81,52 @@ export function edgePath(a: BoxRect, b: BoxRect): string {
   return `M ${x1} ${y1} C ${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`
 }
 
+/** The text for a non-normal box status, or '' (healthy and neutral are not spoken). */
+function boxStatus(status: PathTone | undefined, t: (k: string) => string): string {
+  return status === 'danger' || status === 'warning' || status === 'pending' ? t(`ui.diagram.status_${status}`) : ''
+}
+
+const MAX_PATHS = 200
+
+/**
+ * Every path through `id`: each way back to where traffic enters, joined to each way
+ * on to where it leaves, following the edges' direction. A box with no edges has no
+ * paths. Capped, so a densely wired graph cannot make the list run away.
+ */
+export function pathsThrough(id: string, edges: readonly GraphEdge[]): string[][] {
+  const out = new Map<string, string[]>()
+  const into = new Map<string, string[]>()
+  for (const e of edges) {
+    out.set(e.from, [...(out.get(e.from) ?? []), e.to])
+    into.set(e.to, [...(into.get(e.to) ?? []), e.from])
+  }
+  const chains = (start: string, next: Map<string, string[]>): string[][] => {
+    const done: string[][] = []
+    const walk = (node: string, trail: string[]) => {
+      if (done.length >= MAX_PATHS) return
+      const more = (next.get(node) ?? []).filter(n => !trail.includes(n))
+      if (more.length === 0) { done.push(trail); return }
+      for (const n of more) walk(n, [...trail, n])
+    }
+    walk(start, [start])
+    return done
+  }
+  const forward = chains(id, out)
+  const backward = chains(id, into).map(c => c.slice().reverse())
+  const found: string[][] = []
+  for (const b of backward) for (const f of forward) {
+    if (b.length === 1 && f.length === 1) continue
+    found.push([...b, ...f.slice(1)])
+    if (found.length >= MAX_PATHS) return found
+  }
+  return found
+}
+
 const STROKE: Record<PathTone, string> = {
-  success: 'text-success', warning: 'text-warning', danger: 'text-destructive', neutral: 'text-muted-foreground',
+  success: 'text-success', warning: 'text-warning', pending: 'text-warning', danger: 'text-destructive', neutral: 'text-muted-foreground',
 }
 const DOT: Record<PathTone, string> = {
-  success: 'bg-success', warning: 'bg-warning', danger: 'bg-destructive', neutral: 'bg-muted-foreground/60',
+  success: 'bg-success', warning: 'bg-warning', pending: 'bg-warning', danger: 'bg-destructive', neutral: 'bg-muted-foreground/60',
 }
 
 /**
@@ -105,7 +146,7 @@ const DOT: Record<PathTone, string> = {
  * a column, left and right across columns); Enter or Space selects.
  */
 export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className }: RelationGraphProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const narrow = useMediaQuery('(max-width: 639px)')
   const asList = layout === 'list' || (layout === 'auto' && narrow)
   const [own, setOwn] = useState<string | null>(null)
@@ -125,18 +166,21 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     return d
   }, [drawn])
 
-  const touching = (e: GraphEdge) => selected !== null && (e.from === selected || e.to === selected)
-  const related = useMemo(() => {
-    const s = new Set<string>()
-    if (selected === null) return s
-    s.add(selected)
-    for (const e of drawn) {
-      if (e.from === selected) s.add(e.to)
-      if (e.to === selected) s.add(e.from)
-    }
-    return s
-  }, [drawn, selected])
-  const selectedEdges = selected === null ? [] : drawn.filter(touching)
+  // WHO IS AFFECTED. Selecting a box lights every path through it, in both
+  // directions: forward to where its traffic ends up (an entry reaches its landings
+  // and their exits) and back to what feeds it (an exit reaches its landings and
+  // entries). "This server went down: who does it hurt?" is answered by the paths,
+  // not by the direct neighbours.
+  const paths = useMemo(() => (selected === null ? [] : pathsThrough(selected, drawn)), [selected, drawn])
+  const hotNodes = useMemo(() => new Set(paths.flat()), [paths])
+  const hotEdges = useMemo(() => {
+    const hop = new Set<string>()
+    for (const path of paths) for (let i = 0; i + 1 < path.length; i++) hop.add(`${path[i]}>${path[i + 1]}`)
+    return hop
+  }, [paths])
+  const touching = (e: GraphEdge) => hotEdges.has(`${e.from}>${e.to}`)
+  const related = hotNodes
+  const connectedCount = selected === null ? 0 : Math.max(0, hotNodes.size - 1)
 
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
   const firstId = columns.find(c => c.boxes.length)?.boxes[0]?.id
@@ -160,10 +204,10 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
 
   const selectedBox = selected !== null ? boxById[selected] : undefined
   const announce = selectedBox
-    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: selectedEdges.length })
+    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: connectedCount })
     : ''
 
-  const statusWord = (s: PathTone | undefined) => (s === 'danger' ? t('ui.diagram.status_danger') : s === 'warning' ? t('ui.diagram.status_warning') : '')
+  const edgeOf = (from: string, to: string) => drawn.find(e => e.from === from && e.to === to)
 
   const connections = (
     <section
@@ -175,28 +219,35 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
       {selectedBox ? (
         <>
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">{t('ui.diagram.graph_lines', { name: selectedBox.label })}</h3>
-          {selectedEdges.length === 0 ? (
+          {paths.length === 0 ? (
             <p className="text-muted-foreground">{t('ui.diagram.graph_lines_empty', { name: selectedBox.label })}</p>
           ) : (
-            <ul className="flex flex-col gap-1">
-              {selectedEdges.map((e, i) => {
-                const otherId = e.from === selected ? e.to : e.from
-                const other = boxById[otherId]
-                const problem = statusWord(e.status)
+            <ul className="flex flex-col gap-1.5">
+              {paths.map(path => {
+                const hops = path.slice(1).map((id, i) => edgeOf(path[i], id)).filter((e): e is GraphEdge => e !== undefined)
+                const tunnel = hops.some(e => e.style === 'dashed')
+                const problems = [...new Set(hops.map(e => e.status).filter((x): x is 'danger' | 'warning' | 'pending' => x === 'danger' || x === 'warning' || x === 'pending'))]
                 return (
-                  <li key={`${e.from}>${e.to}>${i}`} className="flex flex-wrap items-center gap-x-2">
-                    <button
-                      type="button"
-                      aria-label={t('ui.diagram.graph_pick', { name: other.label })}
-                      onClick={() => select(otherId)}
-                      className="rounded-md px-1 py-0.5 text-left underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                      {boxById[e.from].label} → {boxById[e.to].label}
-                    </button>
-                    <span className="text-xs text-muted-foreground">
-                      {t(e.style === 'dashed' ? 'ui.diagram.edge_dashed' : 'ui.diagram.edge_solid')}
-                      {problem && <span className="font-medium text-foreground">{`，${problem}`}</span>}
-                    </span>
+                  <li key={path.join('>')} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                    {path.map((id, i) => (
+                      <span key={id} className="inline-flex items-center gap-1">
+                        {i > 0 && <span aria-hidden="true" className="text-muted-foreground">→</span>}
+                        <button
+                          type="button"
+                          aria-current={id === selected ? 'true' : undefined}
+                          onClick={() => select(id)}
+                          className={cn('rounded-md px-1 py-0.5 text-left underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50', id === selected && 'font-semibold')}
+                        >
+                          {boxById[id].label}
+                        </button>
+                      </span>
+                    ))}
+                    {(tunnel || problems.length > 0) && (
+                      <span className="ml-1 inline-flex flex-wrap gap-x-2 text-xs text-foreground/70">
+                        {tunnel && <span>{t('ui.diagram.edge_dashed')}</span>}
+                        {problems.map(p => <span key={p} className="font-medium text-foreground">{t(`ui.diagram.status_${p}`)}</span>)}
+                      </span>
+                    )}
                   </li>
                 )
               })}
@@ -218,7 +269,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
         ref={el => { refs.current[b.id] = el }}
         type="button"
         aria-pressed={isSel}
-        aria-label={`${b.label}${b.sublabel ? ` ${b.sublabel}` : ''}, ${t('ui.diagram.graph_connections', { count: degree[b.id] ?? 0 })}`}
+        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_connections', { count: degree[b.id] ?? 0 })].filter(Boolean).join(', ')}
         data-dim={dim ? 'true' : undefined}
         tabIndex={b.id === tabStop ? 0 : -1}
         onClick={() => select(isSel ? null : b.id)}
@@ -229,7 +280,9 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
           'hover:border-foreground/40 focus-visible:ring-3 focus-visible:ring-ring/50',
           style ? 'absolute' : 'h-11 w-full',
           isSel && 'border-brand ring-2 ring-brand/50',
-          dim && 'opacity-35',
+          // Not-related boxes are softened with colour and a dashed edge, never with opacity:
+          // opacity took their text to an unreadable grey in dark mode.
+          dim && 'border-dashed bg-muted/50 text-foreground/70 [&_.text-muted-foreground]:text-foreground/70',
         )}
       >
         {b.landingColor && <span aria-hidden="true" className="h-6 w-1 shrink-0 rounded-full" style={landingColorStyle(b.landingColor)} />}
@@ -245,7 +298,9 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
   if (asList) {
     return (
       <div data-slot="relation-graph" data-layout="list" role="group" aria-label={t('ui.diagram.graph_label')} className={cn('flex flex-col gap-3', className)}>
-        {connections}
+        {/* Sticky: a box deep in a long column is tapped far below the top, and its
+            connections must stay in view next to it. */}
+        <div className="sticky top-2 z-10 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">{connections}</div>
         {columns.map(c => (
           <section key={c.id} role="region" aria-label={c.title} className="flex flex-col gap-2">
             <h3 className="text-xs font-medium text-muted-foreground">{c.title} <span className="tabular-nums">{c.boxes.length}</span></h3>

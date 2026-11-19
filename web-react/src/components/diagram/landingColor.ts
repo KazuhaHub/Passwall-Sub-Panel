@@ -7,9 +7,14 @@ export interface LandingColor { index: number; cycle: number }
 
 /**
  * Colours for the landing nodes on one page, by FIRST APPEARANCE in the list the
- * caller passes (the order the page shows them in). The first eight are always
- * eight different colours; a hash of the id could not promise that (ids 4 and 10
- * collided). The same list gives the same colours on every render. Past eight the
+ * caller passes. The first eight are always eight different colours; a hash of the
+ * id could not promise that (ids 4 and 10 collided). The same list gives the same
+ * colours on every render.
+ *
+ * PASS A STABLE LIST: the page's complete, unfiltered set of landing ids in a fixed
+ * order (sorted by id), NOT the rows as currently displayed. A drag reorders the
+ * rows and a filter hides some; if the list followed the display, every row's colour
+ * would change with it. Past eight the
  * palette cycles and `cycle` goes up, which landingColorStyle draws as stripes: a
  * colour is a hint next to the landing's name, never the only way to tell two apart.
  */

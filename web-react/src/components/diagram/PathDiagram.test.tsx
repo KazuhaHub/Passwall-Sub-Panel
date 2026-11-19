@@ -18,7 +18,7 @@ describe('PathDiagram', () => {
   it('is one image whose accessible name is the generated sentence', () => {
     render(<PathDiagram nodes={nodes} edges={edges} />)
     const img = screen.getByRole('img')
-    expect(img.getAttribute('aria-label')).toBe('User through Taiwan HiNet Dynamic (:10443) by encrypted tunnel (48 ms, needs attention) to Irvine Home')
+    expect(img.getAttribute('aria-label')).toBe('User through Taiwan HiNet Dynamic (:10443) by encrypted tunnel (48 ms) to Irvine Home; the hop from Taiwan HiNet Dynamic to Irvine Home: needs attention')
   })
 
   it('lets the caller supply the sentence', () => {

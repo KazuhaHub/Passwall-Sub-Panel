@@ -22,11 +22,21 @@ declare module '@tanstack/react-table' {
 
 export type { ColumnDef, ExpandedState, RowData, SortingState, VisibilityState, ReorderCall }
 
+/**
+ * What a bulk action is handed. Selection is by id and outlives paging and filtering,
+ * so `ids` can name rows that are not on screen and `visibleRows` can be shorter.
+ *
+ * A DESTRUCTIVE action (delete, disable, reset) acts on `ids`, so it must confirm
+ * with the total, `ids.length`, and say how many of those are hidden
+ * (`hiddenCount`): "删除 12 项，其中 4 项不在当前页". Acting on `visibleRows` alone
+ * would do less than the bar promised; acting on `ids` without saying so does more
+ * than the person can see.
+ */
 export interface BulkContext<T> {
   /** Every selected id, including rows on other pages and rows a filter has hidden. */
-  selectedIds: string[]
-  /** The selected rows that `data` holds: in client mode all of them, in server mode only those on this page. */
-  selectedRows: T[]
+  ids: string[]
+  /** The selected rows `data` holds: in client mode all of them, in server mode only those on this page. */
+  visibleRows: T[]
   /** How many selected ids are not among the rows shown now (another page, or filtered out). */
   hiddenCount: number
   clear: () => void
@@ -109,6 +119,11 @@ interface DataTableBase<T> {
   /** Shown when there are no rows. Defaults to a plain sentence. */
   empty?: ReactNode
 
+  /**
+   * Why reordering is off right now, from the caller (a filter is active, a save is
+   * running). Shown on the handles like the built-in reasons. Undefined: no extra block.
+   */
+  reorderBlockedReason?: string
   /** Per-row overrides; see RowOptions. */
   rowOptions?: (row: T) => RowOptions | undefined
   /** The row under the pointer or holding keyboard focus (null when it leaves): for highlighting related rows elsewhere. */
@@ -133,11 +148,14 @@ interface DataTableBase<T> {
  * Reordering needs the whole list on screen, because the report is (movedId,
  * beforeId) relative to the rows shown: on a page, the last slot would read as
  * "after everything" and move the row to the end of the whole list. So onReorder
- * requires `pagination={false}` (and client mode); the types reject the rest, and
- * at runtime the handles are shown off with the reason.
+ * requires `pagination={false}` AND client mode (a server page is only part of the
+ * list); the types reject the rest, and at runtime the handles are shown off with
+ * the reason and a developer error is logged. A FILTERED list has the same problem
+ * and the table cannot know about the caller's filter: pass `reorderBlockedReason`
+ * while one is active.
  */
 type ReorderProps =
   | { onReorder?: undefined; pagination?: boolean }
-  | { /** Adds a drag handle column. Reports (movedId, beforeId). */ onReorder: (call: ReorderCall) => void; pagination: false }
+  | { /** Adds a drag handle column. Reports (movedId, beforeId). */ onReorder: (call: ReorderCall) => void; pagination: false; mode?: 'client' }
 
 export type DataTableProps<T> = DataTableBase<T> & ReorderProps

@@ -120,4 +120,44 @@ describe('TagsField', () => {
       expect(box().value).toBe('乙')
     })
   })
+
+  describe('tabs, width variants and a cap (item 14)', () => {
+    it('splits a spreadsheet row pasted with tabs', () => {
+      const onValue = vi.fn()
+      render(<Harness onValue={onValue} />)
+      fireEvent.paste(box(), { clipboardData: { getData: () => 'a\tb\tc' } })
+      expect(onValue).toHaveBeenLastCalledWith(['a', 'b', 'c'])
+    })
+
+    it('treats tags that differ only in width or case as the same tag (NFKC)', () => {
+      const onValue = vi.fn()
+      render(<Harness initial={['HK']} onValue={onValue} />)
+      fireEvent.change(box(), { target: { value: 'ＨＫ' } })
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      expect(onValue).not.toHaveBeenCalled()
+      fireEvent.change(box(), { target: { value: 'ｈｋ' } })
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      expect(onValue).not.toHaveBeenCalled()
+    })
+
+    it('stops at max, drops the rest of a big paste, and says so', () => {
+      const onValue = vi.fn()
+      function Capped() {
+        const [v, setV] = useState<string[]>([])
+        return <TagsField aria-label="Tags" value={v} max={3} onChange={n => { setV(n); onValue(n) }} />
+      }
+      render(<Capped />)
+      fireEvent.paste(box(), { clipboardData: { getData: () => Array.from({ length: 2000 }, (_, i) => `t${i}`).join(',') } })
+      expect(onValue).toHaveBeenLastCalledWith(['t0', 't1', 't2'])
+      expect(screen.getAllByRole('button', { name: /^Remove/ })).toHaveLength(3)
+      expect(screen.getByText('At most 3 tags; the rest were ignored')).toBeTruthy()
+    })
+
+    it('keeps the cap message region in the page, empty until needed', () => {
+      const { container } = render(<Harness />)
+      const live = container.querySelector('[data-slot="tags-note"]')!
+      expect(live.getAttribute('role')).toBe('status')
+      expect(live.textContent).toBe('')
+    })
+  })
 })

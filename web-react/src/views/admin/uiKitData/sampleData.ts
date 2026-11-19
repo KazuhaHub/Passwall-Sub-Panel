@@ -71,12 +71,17 @@ export const LINES: LineRow[] = [
   { id: 'l8', kind: 'line', landingId: 11, landing: LANDINGS[2], lineKind: 'direct', entry: LANDINGS[2], port: 443, latencyMs: 156, status: 'ok', multiplier: 1, hidden: true },
 ]
 
-/** Colours for this page's landings, by first appearance in the list. */
+/**
+ * Colours for this page's landings. Built from the COMPLETE set of landing ids, sorted,
+ * never from the rows as displayed, so dragging a row or filtering the list does not
+ * recolour anything.
+ */
 export function landingColorsFor(lines: readonly LineRow[]): Map<string, LandingColor> {
-  return assignLandingColors(lines.filter(l => l.kind === 'line').map(l => l.landingId))
+  const ids = [...new Set(lines.filter(l => l.kind === 'line').map(l => l.landingId))].sort((a, b) => a - b)
+  return assignLandingColors(ids)
 }
 
-const TONE = { ok: 'success', pending: 'warning', down: 'danger' } as const
+const TONE = { ok: 'success', pending: 'pending', down: 'danger' } as const
 
 /** The user-to-internet path a line draws, as the nodes page will build it. */
 export function linePath(line: LineRow, withEnds: boolean, colors: Map<string, LandingColor>): { nodes: PathNode[]; edges: PathEdge[] } {
@@ -85,8 +90,7 @@ export function linePath(line: LineRow, withEnds: boolean, colors: Map<string, L
   const user: PathNode = { id: 'user', kind: 'user', label: '用户' }
   const internet: PathNode = { id: 'internet', kind: 'internet', label: '互联网' }
   const latency = line.latencyMs === null ? undefined : `${line.latencyMs} ms`
-  const waiting = line.status === 'pending' ? '等待生效' : undefined
-  const label = waiting ?? latency
+  const label = latency
   let nodes: PathNode[]
   let edges: PathEdge[]
   switch (line.lineKind) {

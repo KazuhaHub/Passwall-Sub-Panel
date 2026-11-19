@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
-import { act, cleanup } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
-import { renderHookInRouter } from '@/test/routerHarness'
+import { act, cleanup, render } from '@testing-library/react'
+import { MemoryRouter, useNavigate } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BASENAMES, renderHookInRouter } from '@/test/routerHarness'
 import { urlCodecs, useUrlState, useUrlStates } from './useUrlState'
 import { useUrlSelection } from './useUrlSelection'
 
 afterEach(cleanup)
+
+function Plain() {
+  useUrlState('q', urlCodecs.string())
+  return null
+}
 
 describe('urlCodecs', () => {
   it('int falls back to the default for anything that is not a plain integer in range', () => {
@@ -43,41 +49,45 @@ describe('urlCodecs', () => {
   })
 })
 
+describe.each(BASENAMES)('under basename %j', base => {
+const mount = <T,>(hook: () => T, entries?: string[]) => renderHookInRouter(hook, entries, base)
 describe('useUrlState', () => {
   it('reads the value from the query string, default when absent', () => {
-    const { result } = renderHookInRouter(() => useUrlState('tab', urlCodecs.oneOf(['a', 'b'] as const, 'a')), ['/?tab=b'])
+    const { result } = mount(() => useUrlState('tab', urlCodecs.oneOf(['a', 'b'] as const, 'a')), ['/?tab=b'])
     expect(result.current[0]).toBe('b')
   })
 
   it('writes with replace by default: Back does not walk through every filter change', async () => {
-    const { result, router } = renderHookInRouter(() => useUrlState('q', urlCodecs.string()), ['/list'])
+    const { result, router, where } = mount(() => useUrlState('q', urlCodecs.string()), ['/list'])
     await act(async () => { result.current[1]('abc') })
-    expect(router.state.location.search).toBe('?q=abc')
+    expect(where().search).toBe('?q=abc')
+    // the basename must not be applied twice (/panel/panel/list is a route that does not exist)
+    expect(where().pathname).toBe('/list')
     expect(router.state.historyAction).toBe('REPLACE')
   })
 
   it('pushes when asked, for state that Back should undo', async () => {
-    const { result, router } = renderHookInRouter(() => useUrlState('q', urlCodecs.string(), { history: 'push' }), ['/list'])
+    const { result, router, where } = mount(() => useUrlState('q', urlCodecs.string(), { history: 'push' }), ['/list'])
     await act(async () => { result.current[1]('abc') })
     expect(router.state.historyAction).toBe('PUSH')
     await act(async () => { await router.navigate(-1) })
-    expect(router.state.location.search).toBe('')
+    expect(where().search).toBe('')
   })
 
   it('lets one call override the hook default', async () => {
-    const { result, router } = renderHookInRouter(() => useUrlState('q', urlCodecs.string()), ['/'])
+    const { result, router } = mount(() => useUrlState('q', urlCodecs.string()), ['/'])
     await act(async () => { result.current[1]('x', { history: 'push' }) })
     expect(router.state.historyAction).toBe('PUSH')
   })
 
   it('removes the param when the value equals the default and keeps other params', async () => {
-    const { result, router } = renderHookInRouter(() => useUrlState('page', urlCodecs.int(1, { min: 1 })), ['/?page=3&q=hi'])
+    const { result, where } = mount(() => useUrlState('page', urlCodecs.int(1, { min: 1 })), ['/?page=3&q=hi'])
     await act(async () => { result.current[1](1) })
-    expect(router.state.location.search).toBe('?q=hi')
+    expect(where().search).toBe('?q=hi')
   })
 
   it('accepts an updater function', async () => {
-    const { result } = renderHookInRouter(() => useUrlState('page', urlCodecs.int(1, { min: 1 })), ['/?page=2'])
+    const { result } = mount(() => useUrlState('page', urlCodecs.int(1, { min: 1 })), ['/?page=2'])
     await act(async () => { result.current[1](p => p + 1) })
     expect(result.current[0]).toBe(3)
   })
@@ -91,14 +101,14 @@ describe('useUrlStates', () => {
   }
 
   it('patches several keys in one navigation', async () => {
-    const { result, router } = renderHookInRouter(() => useUrlStates(schema), ['/risk'])
+    const { result, where } = mount(() => useUrlStates(schema), ['/risk'])
     await act(async () => { result.current[1]({ tab: 'live', level: ['high', 'low'], page: 1 }) })
-    expect(router.state.location.search).toBe('?tab=live&level=high%2Clow')
+    expect(where().search).toBe('?tab=live&level=high%2Clow')
     expect(result.current[0]).toEqual({ tab: 'live', level: ['high', 'low'], page: 1 })
   })
 
   it('composes two patches made in the same tick instead of the last one winning', async () => {
-    const { result } = renderHookInRouter(() => useUrlStates(schema), ['/risk'])
+    const { result } = mount(() => useUrlStates(schema), ['/risk'])
     await act(async () => {
       result.current[1]({ tab: 'live' })
       result.current[1]({ page: 4 })
@@ -112,7 +122,7 @@ describe('writes from several hooks in the same tick', () => {
   const page = urlCodecs.int(1, { min: 1 })
 
   it('compose instead of the last hook overwriting the others', async () => {
-    const { result, router } = renderHookInRouter(() => ({
+    const { result, where } = mount(() => ({
       a: useUrlState('q', q),
       b: useUrlState('page', page),
     }), ['/list?page=3'])
@@ -120,11 +130,11 @@ describe('writes from several hooks in the same tick', () => {
       result.current.a[1]('hi')
       result.current.b[1](1)
     })
-    expect(router.state.location.search).toBe('?q=hi')
+    expect(where().search).toBe('?q=hi')
   })
 
   it('keep every key when a selection and a filter change together', async () => {
-    const { result, router } = renderHookInRouter(() => ({
+    const { result, router } = mount(() => ({
       f: useUrlStates({ q }),
       sel: useUrlSelection('row'),
     }), ['/nodes'])
@@ -137,7 +147,7 @@ describe('writes from several hooks in the same tick', () => {
   })
 
   it('make one history entry, and a push anywhere in the batch wins over replace', async () => {
-    const { result, router } = renderHookInRouter(() => ({
+    const { result, router, where } = mount(() => ({
       a: useUrlState('q', q),
       b: useUrlState('tab', q, { history: 'push' }),
     }), ['/list'])
@@ -146,15 +156,55 @@ describe('writes from several hooks in the same tick', () => {
       result.current.b[1]('y')
     })
     expect(router.state.historyAction).toBe('PUSH')
-    expect(router.state.location.search).toBe('?q=x&tab=y')
+    expect(where().search).toBe('?q=x&tab=y')
     await act(async () => { await router.navigate(-1) })
-    expect(router.state.location.search).toBe('')
+    expect(where().search).toBe('')
   })
 
   it('and a later tick builds on the earlier write, not on a stale location', async () => {
-    const { result, router } = renderHookInRouter(() => ({ a: useUrlState('q', q), b: useUrlState('page', page) }), ['/list'])
+    const { result, where } = mount(() => ({ a: useUrlState('q', q), b: useUrlState('page', page) }), ['/list'])
     await act(async () => { result.current.a[1]('x') })
     await act(async () => { result.current.b[1](2) })
-    expect(router.state.location.search).toBe('?q=x&page=2')
+    expect(where().search).toBe('?q=x&page=2')
   })
+})
+
+
+describe('a batch belongs to the route it was written on (item 2)', () => {
+  const q = urlCodecs.string()
+  const withNav = () => ({ a: useUrlState('q', q), nav: useNavigate() })
+
+  it('write then navigate: the old page\'s keys do not follow onto the new route', async () => {
+    const { result, where } = mount(withNav, ['/list'])
+    await act(async () => {
+      result.current.a[1]('x')
+      void result.current.nav('/other?z=1')
+    })
+    expect(where()).toEqual({ pathname: '/other', search: '?z=1' })
+  })
+
+  it('navigate then write: the write was made on the old page, so it is dropped too', async () => {
+    const { result, where } = mount(withNav, ['/list'])
+    await act(async () => {
+      void result.current.nav('/other?z=1')
+      result.current.a[1]('x')
+    })
+    expect(where()).toEqual({ pathname: '/other', search: '?z=1' })
+  })
+
+  it('writes made while staying on the page still land', async () => {
+    const { result, where } = mount(withNav, ['/list?z=1'])
+    await act(async () => { result.current.a[1]('x') })
+    expect(where()).toEqual({ pathname: '/list', search: '?z=1&q=x' })
+  })
+})
+
+describe('without a data router (item 7)', () => {
+  it('says so in development instead of silently losing writes', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => render(<MemoryRouter><Plain /></MemoryRouter>)).toThrow(/data router/i)
+    err.mockRestore()
+  })
+})
+
 })

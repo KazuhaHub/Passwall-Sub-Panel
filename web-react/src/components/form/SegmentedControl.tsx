@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { TOUCH_TARGET } from '@/components/data/touchTarget'
+import { TOUCH_HEIGHT } from '@/components/data/touchTarget'
 
 export interface SegmentOption<V extends string> {
   value: V
@@ -70,7 +70,7 @@ export function SegmentedControl<V extends string>({
             onClick={() => { if (!off) onChange(o.value) }}
             onKeyDown={e => move(e, i)}
             className={cn(
-              TOUCH_TARGET,
+              TOUCH_HEIGHT,
               'inline-flex items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
               size === 'sm' ? 'h-[calc(var(--control-h)-0.75rem)] px-2.5 text-xs' : 'h-[calc(var(--control-h)-0.375rem)]',
               checked ? 'bg-background text-foreground shadow-sm dark:bg-input/60' : 'text-foreground/70 hover:text-foreground',

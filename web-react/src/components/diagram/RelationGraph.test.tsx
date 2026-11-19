@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RelationGraph, edgePath, layoutGraph, type GraphColumn, type GraphEdge } from './RelationGraph'
+import { RelationGraph, edgePath, layoutGraph, pathsThrough, type GraphColumn, type GraphEdge } from './RelationGraph'
 
 afterEach(cleanup)
 
@@ -49,18 +49,18 @@ describe('RelationGraph', () => {
 
   it('selecting a box keeps its edges and dims the rest', () => {
     const { container } = render(<RelationGraph columns={columns} edges={edges} />)
-    fireEvent.click(screen.getByRole('button', { name: /^Entry 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 1,/ }))
     const paths = [...container.querySelectorAll('path[data-edge]')]
     expect(paths.map(p => p.getAttribute('data-dim'))).toEqual([null, null, 'true'])
     // connected boxes stay, strangers dim
-    expect(screen.getByRole('button', { name: /^Landing 1/ }).getAttribute('data-dim')).toBeNull()
-    expect(screen.getByRole('button', { name: /^Landing 3/ }).getAttribute('data-dim')).toBe('true')
-    expect(screen.getByRole('button', { name: /^Entry 1/ }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Landing 1,/ }).getAttribute('data-dim')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Landing 3,/ }).getAttribute('data-dim')).toBe('true')
+    expect(screen.getByRole('button', { name: /^Entry 1,/ }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('selecting again, or pressing Escape, clears the selection', () => {
     const { container } = render(<RelationGraph columns={columns} edges={edges} />)
-    const box = screen.getByRole('button', { name: /^Entry 1/ })
+    const box = screen.getByRole('button', { name: /^Entry 1,/ })
     fireEvent.click(box)
     fireEvent.click(box)
     expect(container.querySelectorAll('[data-dim]')).toHaveLength(0)
@@ -73,7 +73,7 @@ describe('RelationGraph', () => {
     const onSelect = vi.fn()
     const { container, rerender } = render(<RelationGraph columns={columns} edges={edges} selectedId="l3" onSelect={onSelect} />)
     expect([...container.querySelectorAll('path[data-edge]')].map(p => p.getAttribute('data-dim'))).toEqual(['true', 'true', null])
-    fireEvent.click(screen.getByRole('button', { name: /^Entry 2/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 2,/ }))
     expect(onSelect).toHaveBeenCalledWith('e2')
     rerender(<RelationGraph columns={columns} edges={edges} selectedId={null} onSelect={onSelect} />)
     expect(container.querySelectorAll('[data-dim]')).toHaveLength(0)
@@ -83,19 +83,19 @@ describe('RelationGraph', () => {
     render(<RelationGraph columns={columns} edges={edges} />)
     const boxes = screen.getAllByRole('button')
     expect(boxes.filter(b => b.getAttribute('tabindex') === '0')).toHaveLength(1)
-    const e1 = screen.getByRole('button', { name: /^Entry 1/ })
+    const e1 = screen.getByRole('button', { name: /^Entry 1,/ })
     e1.focus()
     fireEvent.keyDown(e1, { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2,/ }))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Landing 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Landing 2,/ }))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2/ }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Entry 2,/ }))
   })
 
   it('announces what a selection is connected to', () => {
     render(<RelationGraph columns={columns} edges={edges} />)
-    fireEvent.click(screen.getByRole('button', { name: /^Entry 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Entry 1,/ }))
     expect(screen.getByRole('status').textContent).toContain('Entry 1 selected, 2 connections')
   })
 
@@ -108,5 +108,62 @@ describe('RelationGraph', () => {
     expect(screen.getAllByRole('button')).toHaveLength(90)
     expect(container.querySelectorAll('path[data-edge]')).toHaveLength(30)
     expect(container.querySelector('.overflow-auto')).not.toBeNull()
+  })
+})
+
+describe('full paths through a box (item 16)', () => {
+  const cols: GraphColumn[] = [
+    { id: 'e', title: 'Entries', boxes: [{ id: 'e1', label: 'Entry 1', status: 'danger' }, { id: 'e2', label: 'Entry 2' }, { id: 'e3', label: 'Entry 3' }] },
+    { id: 'l', title: 'Landings', boxes: [{ id: 'l1', label: 'Landing 1' }, { id: 'l2', label: 'Landing 2' }] },
+    { id: 'x', title: 'Exits', boxes: [{ id: 'x1', label: 'Exit 1' }, { id: 'x2', label: 'Exit 2' }] },
+  ]
+  const es: GraphEdge[] = [
+    { from: 'e1', to: 'l1' }, { from: 'e2', to: 'l1' }, { from: 'e3', to: 'l2' },
+    { from: 'l1', to: 'x1' }, { from: 'l2', to: 'x2' },
+  ]
+
+  it('finds paths in both directions', () => {
+    expect(pathsThrough('e1', es)).toEqual([['e1', 'l1', 'x1']])
+    expect(pathsThrough('x1', es).map(p => p.join('>')).sort()).toEqual(['e1>l1>x1', 'e2>l1>x1'])
+    expect(pathsThrough('l1', es).map(p => p.join('>')).sort()).toEqual(['e1>l1>x1', 'e2>l1>x1'])
+    expect(pathsThrough('nobody', es)).toEqual([])
+  })
+
+  it('selecting an entry lights its landing AND that landing\'s exit, and dims the rest', () => {
+    const { container } = render(<RelationGraph columns={cols} edges={es} selectedId="e1" layout="canvas" />)
+    const dim = (name: RegExp) => screen.getByRole('button', { name }).getAttribute('data-dim')
+    expect(dim(/^Landing 1,/)).toBeNull()
+    expect(dim(/^Exit 1,/)).toBeNull()
+    expect(dim(/^Landing 2,/)).toBe('true')
+    expect(dim(/^Exit 2,/)).toBe('true')
+    // the edge that only feeds the same landing from elsewhere is not on a path through e1
+    const edgeDim = [...container.querySelectorAll('path[data-edge]')].map(p => p.getAttribute('data-dim'))
+    expect(edgeDim).toEqual([null, 'true', 'true', null, 'true'])
+  })
+
+  it('selecting an exit reaches back to every entry that ends there', () => {
+    render(<RelationGraph columns={cols} edges={es} selectedId="x1" layout="canvas" />)
+    expect(screen.getByRole('button', { name: /^Entry 1,/ }).getAttribute('data-dim')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Entry 2,/ }).getAttribute('data-dim')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Entry 3,/ }).getAttribute('data-dim')).toBe('true')
+  })
+
+  it('lists every path in the connections list, node by node', () => {
+    render(<RelationGraph columns={cols} edges={es} selectedId="x1" layout="canvas" />)
+    const items = within(screen.getByRole('region', { name: 'Relationship graph connections' })).getAllByRole('listitem')
+    expect(items.map(i => i.textContent?.replace(/\s*→\s*/g, ' → ').replace(/\s+/g, ' ').trim())).toEqual(['Entry 1 → Landing 1 → Exit 1', 'Entry 2 → Landing 1 → Exit 1'])
+  })
+
+  it('puts a box\'s problem and its connection count (singular, plural) in its name', () => {
+    render(<RelationGraph columns={cols} edges={es} layout="canvas" />)
+    expect(screen.getByRole('button', { name: /^Entry 1,/ }).getAttribute('aria-label')).toBe('Entry 1, interrupted, 1 connection')
+    expect(screen.getByRole('button', { name: /^Landing 1,/ }).getAttribute('aria-label')).toBe('Landing 1, 3 connections')
+  })
+
+  it('softens unrelated boxes with colour, not opacity', () => {
+    render(<RelationGraph columns={cols} edges={es} selectedId="e1" layout="canvas" />)
+    const dimmed = screen.getByRole('button', { name: /^Landing 2,/ })
+    expect(dimmed.className).toContain('text-foreground/70')
+    expect(dimmed.className).not.toMatch(/opacity-/)
   })
 })

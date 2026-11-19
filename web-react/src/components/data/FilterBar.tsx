@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SearchIcon, XIcon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { cn } from '@/lib/utils'
 import { FacetFilter, type FacetOption } from './FacetFilter'
 import { TipButton } from './TipButton'
-import { TOUCH_TARGET } from './touchTarget'
+import { TOUCH_HEIGHT } from './touchTarget'
 
 export interface FilterBarFacet {
   id: string
@@ -41,7 +41,7 @@ export interface FilterBarProps {
  * shows what was typed even though the page still holds the old keyword.
  */
 export function FilterBar({ search, facets = [], onClearAll, children, className, ...aria }: FilterBarProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const [draft, setDraft] = useState(search?.value ?? '')
   const reported = useRef(search?.value ?? '')
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -106,7 +106,7 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
       ))}
       {children}
       {filtered && onClearAll && (
-        <Button variant="ghost" size="sm" className={TOUCH_TARGET} onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
+        <Button variant="ghost" size="sm" className={TOUCH_HEIGHT} onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
           {t('ui.data.clear_all')}
         </Button>
       )}

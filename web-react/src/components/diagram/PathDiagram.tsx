@@ -2,9 +2,9 @@ import { Fragment, useEffect, useRef, useState, type ComponentType } from 'react
 import {
   ChevronRightIcon, CloudIcon, ExternalLinkIcon, GlobeIcon, LogOutIcon, MapPinIcon, ServerIcon, UserRoundIcon,
 } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
-import { describePath, edgeText, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
+import { describePath, edgeText, statusWord, type PathEdge, type PathNode, type PathNodeKind, type PathTone } from './pathSummary'
 import '@/styles/data-tokens.css'
 
 export type { PathEdge, PathNode, PathNodeKind, PathTone } from './pathSummary'
@@ -23,6 +23,8 @@ const ICONS: Record<PathNodeKind, ComponentType<{ className?: string }>> = {
 const TONE: Record<PathTone, { line: string; text: string; dot: string }> = {
   success: { line: 'border-success', text: 'text-success', dot: 'bg-success' },
   warning: { line: 'border-warning', text: 'text-warning', dot: 'bg-warning' },
+  // A pending line has not taken effect yet: drawn like a warning, told apart by its own tone attribute and wording.
+  pending: { line: 'border-warning', text: 'text-warning', dot: 'bg-warning' },
   danger: { line: 'border-destructive', text: 'text-destructive', dot: 'bg-destructive' },
   neutral: { line: 'border-muted-foreground/50', text: 'text-muted-foreground', dot: 'bg-muted-foreground/60' },
 }
@@ -80,7 +82,7 @@ function StatusDot({ tone, className }: { tone: PathTone; className?: string }) 
  * Every edge also has a `title`, so a hover or a copy gets the words too.
  */
 export function PathDiagram({ nodes, edges = [], size = 'md', orientation = 'auto', summary, className }: PathDiagramProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const needed = nodes.length * NODE_W + Math.max(0, nodes.length - 1) * EDGE_W
   const [ref, fits] = useFits(needed, size === 'md' && orientation === 'auto')
   const vertical = size === 'md' && (orientation === 'vertical' || (orientation === 'auto' && !fits))
@@ -127,6 +129,12 @@ function NodeIcon({ node, className }: { node: PathNode; className?: string }) {
   return <Icon className={className} />
 }
 
+/** What is written on the edge: its label, or for a pending or interrupted edge with none, that status, so the colour never stands alone. */
+function visibleLabel(edge: PathEdge, t: Parameters<typeof statusWord>[1]): string | null {
+  if (edge.label) return edge.label
+  return edge.status === 'pending' || edge.status === 'danger' ? statusWord(edge.status, t) : null
+}
+
 // ---- sm: inside a table row --------------------------------------------------
 
 function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
@@ -152,8 +160,9 @@ function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
 }
 
 function SmallEdge({ edge }: { edge: PathEdge }) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const tone = edge.status ?? 'neutral'
+  const shown = visibleLabel(edge, t)
   const { phrase, tail } = edgeText(edge, t)
   const word = phrase || tail
   return (
@@ -163,10 +172,10 @@ function SmallEdge({ edge }: { edge: PathEdge }) {
       title={word || undefined}
       className="inline-flex shrink-0 items-center gap-0.5"
     >
-      {edge.label && (
+      {shown && (
         <span className="inline-flex items-center gap-0.5 text-[10px] text-foreground">
           {edge.status && <StatusDot tone={tone} className="size-1.5" />}
-          {edge.label}
+          {shown}
         </span>
       )}
       <span className={cn('w-4 border-t-2', edge.style === 'dashed' ? 'border-dashed' : 'border-solid', TONE[tone].line)} />
@@ -201,15 +210,16 @@ function FullNode({ node, vertical }: { node: PathNode; vertical: boolean }) {
 }
 
 function FullEdge({ edge, vertical }: { edge: PathEdge; vertical: boolean }) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const tone = edge.status ?? 'neutral'
+  const shown = visibleLabel(edge, t)
   const { phrase, tail } = edgeText(edge, t)
   const word = phrase || tail
   const dashed = edge.style === 'dashed'
-  const label = edge.label && (
+  const label = shown && (
     <span className="inline-flex items-center gap-1 text-xs text-foreground">
       {edge.status && <StatusDot tone={tone} className="size-1.5" />}
-      {edge.label}
+      {shown}
     </span>
   )
   if (vertical) {

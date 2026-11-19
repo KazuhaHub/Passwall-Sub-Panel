@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InheritanceField, SourceTrail, effectiveLevel } from './InheritanceField'
 
@@ -123,5 +124,35 @@ describe('InheritanceField', () => {
     render(<InheritanceField {...base} levels={lv(100, 50, undefined)} onChange={() => {}} />)
     expect(screen.getByRole('radiogroup', { name: 'Traffic limit: how User gets its value' })).toBeTruthy()
     expect(screen.getByText('Traffic limit')).toBeTruthy()
+  })
+
+  describe('focus', () => {
+    function Wired() {
+      const [user, setUser] = useState<number | undefined>(20)
+      return (
+        <InheritanceField
+          label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
+          levels={lv(100, 50, user)} onChange={setUser} onCleared={() => setUser(undefined)} renderEditor={editor}
+        />
+      )
+    }
+
+    it('never removes the editor while it is being edited: emptying it on the way to retyping does nothing', () => {
+      const onChange = vi.fn()
+      const cleared = vi.fn()
+      render(<InheritanceField {...base} onCleared={cleared} levels={lv(100, 50, 20)} onChange={onChange} renderEditor={p => <input data-testid="editor" id={p.id} aria-labelledby={p['aria-labelledby']} defaultValue="20" />} />)
+      expect(screen.getByTestId('editor')).toBeTruthy()
+      expect(cleared).not.toHaveBeenCalled()
+    })
+
+    it('when an empty commit sends the field back to following, the focus lands on the mode control, not on the page body', async () => {
+      render(<Wired />)
+      const input = screen.getByTestId('editor')
+      input.focus()
+      fireEvent.change(input, { target: { value: '' } })
+      await act(async () => { await new Promise(r => requestAnimationFrame(() => r(null))) })
+      expect(screen.queryByTestId('editor')).toBeNull()
+      expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Follow the level above' }))
+    })
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import {
   flexRender, getCoreRowModel, getExpandedRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
   type ColumnDef, type ExpandedState, type Row, type SortingState, type VisibilityState,
@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { BulkActionBar } from './BulkActionBar'
 import { ColumnMenu, columnLabel } from './ColumnMenu'
@@ -19,7 +19,7 @@ import { DataTablePagination } from './DataTablePagination'
 import { DEFAULT_PAGE_SIZE, clampPage, compareCells, makeCollator } from './dataTableLogic'
 import type { BulkContext, DataTableProps, PageChangeReason, RowOptions } from './dataTableTypes'
 import { TipButton } from './TipButton'
-import { TOUCH_TARGET } from './touchTarget'
+import { TOUCH_HEIGHT } from './touchTarget'
 import { useRowReorder } from './useRowReorder'
 
 // Anything inside a row that does its own thing on click or on keys: a click or
@@ -49,14 +49,14 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
 }
 
 function DefaultError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const detail = error instanceof Error ? error.message : typeof error === 'string' ? error : null
   return (
     <div role="alert" className="flex flex-col items-center gap-2 px-4 py-10 text-center">
       <TriangleAlertIcon className="size-6 text-destructive" aria-hidden="true" />
       <p className="text-sm font-medium">{t('ui.data.error')}</p>
       <p className="text-sm text-muted-foreground">{detail ?? t('ui.data.error_hint')}</p>
-      {onRetry && <Button variant="outline" size="sm" className={TOUCH_TARGET} onClick={onRetry}>{t('ui.data.retry')}</Button>}
+      {onRetry && <Button variant="outline" size="sm" className={TOUCH_HEIGHT} onClick={onRetry}>{t('ui.data.retry')}</Button>}
     </div>
   )
 }
@@ -95,7 +95,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight = '70dvh', className,
     rowOptions, onRowHover, highlightedIds,
   } = props
-  const { t, i18n } = useSpacedT()
+  const { t, i18n } = useTranslation('common')
   const server = mode === 'server'
 
   // ---- state: each piece is the caller's if they pass it, the table's otherwise ----
@@ -142,6 +142,10 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const sortingRef = useRef(sorting)
   sortingRef.current = sorting
 
+  const paginationState = useMemo(
+    () => ({ pageIndex: Math.max(effectivePage, 1) - 1, pageSize: pagination ? pageSize : Math.max(data.length, 1) }),
+    [effectivePage, pageSize, pagination, data.length],
+  )
   const table = useReactTable<T>({
     data: data as T[],
     columns,
@@ -151,7 +155,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
       columnVisibility: visibility,
       rowSelection: selection,
       expanded,
-      pagination: { pageIndex: Math.max(effectivePage, 1) - 1, pageSize: pagination ? pageSize : Math.max(data.length, 1) },
+      pagination: paginationState,
     },
     defaultColumn: {
       // false: undefined is an ordinary value to compareCells, not tanstack's flip-with-direction default.
@@ -209,8 +213,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
     setSelection(next)
   }
   const bulkCtx: BulkContext<T> = {
-    selectedIds,
-    selectedRows: selectedIds.map(id => coreById[id]?.original).filter((r): r is T => r !== undefined),
+    ids: selectedIds,
+    visibleRows: selectedIds.map(id => coreById[id]?.original).filter((r): r is T => r !== undefined),
     hiddenCount: hiddenIds.length,
     clear,
     clearHidden,
@@ -222,16 +226,17 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const bodyRef = useRef<HTMLTableSectionElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
   const reorderCol = onReorder !== undefined
-  const blocked: 'sorted' | 'tree' | 'paged' | null = !reorderCol ? null
+  const blocked: 'sorted' | 'tree' | 'paged' | 'custom' | null = !reorderCol ? null
     : tree ? 'tree'
       : (pagination !== false || server) ? 'paged'
-        : sorting.length > 0 ? 'sorted' : null
-  const blockedText = blocked ? t(`ui.data.reorder_blocked_${blocked}`) : ''
+        : sorting.length > 0 ? 'sorted'
+          : props.reorderBlockedReason ? 'custom' : null
+  const blockedText = blocked === 'custom' ? props.reorderBlockedReason! : blocked ? t(`ui.data.reorder_blocked_${blocked}`) : ''
   useEffect(() => {
-    if (reorderCol && pagination !== false) {
-      console.error('DataTable: onReorder needs pagination={false}: a reorder is reported relative to the rows on screen, so on a page the last slot would move the row to the end of the whole list.')
+    if (reorderCol && (pagination !== false || server)) {
+      console.error('DataTable: onReorder needs pagination={false} and client mode: a reorder is reported relative to the rows on screen, so on a page (or a server page) the last slot would move the row to the end of the whole list.')
     }
-  }, [reorderCol, pagination])
+  }, [reorderCol, pagination, server])
   const reorder = useRowReorder({
     enabled: reorderCol && blocked === null,
     ids: rowIds,
@@ -290,7 +295,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     onKeyDown: interactive ? (e: KeyboardEvent<HTMLElement>) => onRowKeyDown(e, row) : undefined,
   })
   const rowStateClasses = (row: Row<T>, o: RowOptions) => cn(
-    o.state === 'dimmed' && 'opacity-55',
+    o.state === 'dimmed' && 'bg-muted/40 text-foreground/70 [&_.text-muted-foreground]:text-foreground/70',
     o.state === 'pending' && 'bg-warning/[0.07] [&>td:first-child]:shadow-[inset_3px_0_0_var(--warning)]',
     highlighted.has(row.id) && 'bg-brand/[0.09]',
     activeRowId === row.id && 'bg-brand/[0.07] hover:bg-brand/10',
@@ -318,6 +323,28 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const isEmpty = !loading && !showError && rows.length === 0
   const checkLabel = (row: Row<T>, n: number) => rowLabel ? t('ui.data.select_row_named', { name: nameOf(row) }) : t('ui.data.select_row', { n })
 
+  // Rows are memoised (DataRow): hovering one row must re-render that row and the
+  // one it replaces, not all of them. The handlers rows need live behind one ref'd
+  // object, so a row's props do not change just because the parent re-rendered.
+  const apiRef = useRef<RowApi<T>>(null as unknown as RowApi<T>)
+  apiRef.current = {
+    focus: id => { setTabId(id); onRowHover?.(id) },
+    blur: () => onRowHover?.(null),
+    enter: id => onRowHover?.(id),
+    leave: () => onRowHover?.(null),
+    click: onRowClick,
+    key: onRowKeyDown,
+    pointerDown: (e, id) => reorder.onPointerDown(e, id),
+    handleKey: (e, id) => reorder.onKeyDown(e, id),
+    handleBlur: id => reorder.onBlur(id),
+    hovering: onRowHover !== undefined,
+    clickable: onRowOpen !== undefined,
+  }
+  const rowCtx = useMemo<RowCtx>(() => ({
+    columns, visibility, tree, selectable: selectable === true, reorderCol, interactive,
+    blockedText, hintId, reasonId, leadWidth,
+  }), [columns, visibility, tree, selectable, reorderCol, interactive, blockedText, hintId, reasonId, leadWidth])
+
   const bodyContent = (): ReactNode => {
     if (showError) {
       return <TableRow className="hover:bg-transparent"><TableCell colSpan={colSpan} className="whitespace-normal"><DefaultError error={error} onRetry={onRetry} /></TableCell></TableRow>
@@ -344,82 +371,31 @@ export function DataTable<T>(props: DataTableProps<T>) {
     }
     return rows.map((row, index) => {
       const o = optsOf(row)
-      const selected = selection[row.id] === true
-      const dropBefore = reorder.insertion === index
-      const dropAfter = reorder.insertion === rows.length && index === rows.length - 1
-      const moving = reorder.movingId === row.id
-      const lead = `sticky z-[1] ${PIN_BG}`
       return (
-        <TableRow
+        <DataRow
           key={row.id}
-          {...rowEvents(row)}
-          {...rowDataAttrs(row, o, selected)}
-          data-depth={tree ? row.depth : undefined}
-          data-drop={dropBefore ? 'before' : dropAfter ? 'after' : undefined}
-          className={cn(
-            'group/row outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-            canOpen(row) && 'cursor-pointer',
-            moving && 'opacity-50',
-            dropBefore && '[&>td]:shadow-[inset_0_2px_0_0_var(--brand)]',
-            dropAfter && '[&>td]:shadow-[inset_0_-2px_0_0_var(--brand)]',
-            rowStateClasses(row, o),
-          )}
-        >
-          {reorderCol && (
-            <TableCell data-no-row-click="" className={cn(lead, 'left-0 w-8 min-w-8 px-0 text-center')}>
-              <DragHandle
-                blockedText={blockedText}
-                reasonId={reasonId}
-                name={nameOf(row)}
-                onPointerDown={e => reorder.onPointerDown(e, row.id)}
-                onKeyDown={e => reorder.onKeyDown(e, row.id)}
-                onBlur={() => reorder.onBlur(row.id)}
-                describedBy={hintId}
-              />
-            </TableCell>
-          )}
-          {selectable && (
-            <TableCell data-no-row-click="" className={cn(lead, 'w-10 min-w-10 pr-0')} style={{ left: `${reorderCol ? DRAG_W : 0}rem` }}>
-              {canSelect(row) && <Checkbox checked={selected} onCheckedChange={v => row.toggleSelected(v === true)} aria-label={checkLabel(row, index + 1 + (effectivePage - 1) * pageSize)} />}
-            </TableCell>
-          )}
-          {o.fullWidth !== undefined ? (
-            <TableCell colSpan={visibleColumns.length} className="whitespace-normal">{o.fullWidth}</TableCell>
-          ) : row.getVisibleCells().map((cell, ci) => {
-            const meta = cell.column.columnDef.meta
-            const first = ci === 0
-            const p = pin(first)
-            return (
-              <TableCell
-                key={cell.id}
-                style={p.style}
-                className={cn(
-                  p.className && `${p.className} ${PIN_BG}`,
-                  meta?.align === 'right' && 'text-right',
-                  meta?.align === 'center' && 'text-center',
-                  meta?.className,
-                )}
-              >
-                {first && tree ? (
-                  <div className="flex items-center gap-1" style={{ paddingLeft: `${row.depth * 1.25}rem` }}>
-                    {row.getCanExpand() ? (
-                      <TipButton
-                        label={t(row.getIsExpanded() ? 'ui.data.collapse_row' : 'ui.data.expand_row', { name: nameOf(row) })}
-                        size="icon-xs"
-                        aria-expanded={row.getIsExpanded()}
-                        data-no-row-click=""
-                        onClick={() => row.toggleExpanded()}
-                      >
-                        <ChevronRightIcon className={cn('transition-transform', row.getIsExpanded() && 'rotate-90')} />
-                      </TipButton>
-                    ) : <span className="inline-block size-6 shrink-0" aria-hidden="true" />}
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </div>
-                ) : flexRender(cell.column.columnDef.cell, cell.getContext())}
-              </TableCell>
-            )
-          })}
-        </TableRow>
+          api={apiRef}
+          ctx={rowCtx}
+          row={row}
+          index={index}
+          name={nameOf(row)}
+          checkLabel={checkLabel(row, index + 1 + (effectivePage - 1) * pageSize)}
+          selected={selection[row.id] === true}
+          active={activeRowId === row.id}
+          highlighted={highlighted.has(row.id)}
+          tabStop={row.id === tabStop}
+          expanded={tree ? row.getIsExpanded() : false}
+          canSelect={canSelect(row)}
+          canOpen={canOpen(row)}
+          state={o.state}
+          extraClass={cn(o.className, rowClassName?.(row.original))}
+          dataKey={o.data ? JSON.stringify(o.data) : ''}
+          dataAttrs={o.data}
+          fullWidth={o.fullWidth}
+          dropBefore={reorder.insertion === index}
+          dropAfter={reorder.insertion === rows.length && index === rows.length - 1}
+          moving={reorder.movingId === row.id}
+        />
       )
     })
   }
@@ -438,7 +414,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           <ul aria-label={props['aria-label']} aria-busy={loading || undefined} className="divide-y">
             {selectable && rows.length > 0 && (
               <li className="flex items-center gap-2 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                <Checkbox checked={allOnPage} indeterminate={!allOnPage && someOnPage} onCheckedChange={v => toggleAll(v === true)} aria-label={t('ui.data.select_all')} />
+                <CheckBox checked={allOnPage} indeterminate={!allOnPage && someOnPage} onCheckedChange={v => toggleAll(v === true)} aria-label={t('ui.data.select_all')} />
                 <span aria-hidden="true">{t('ui.data.select_all')}</span>
               </li>
             )}
@@ -457,7 +433,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   className={cn('flex items-start gap-2 p-3 outline-none focus-visible:bg-muted', open && 'cursor-pointer', selected && 'bg-muted', rowStateClasses(row, o))}
                 >
                   {canSelect(row) && (
-                    <Checkbox data-no-row-click="" className="mt-0.5" checked={selected} onCheckedChange={v => row.toggleSelected(v === true)} aria-label={checkLabel(row, i + 1)} />
+                    <CheckBox data-no-row-click="" className="mt-0.5" checked={selected} onCheckedChange={v => row.toggleSelected(v === true)} aria-label={checkLabel(row, i + 1)} />
                   )}
                   <div className="min-w-0 flex-1">{o.fullWidth ?? renderCard(row.original, { selected, active: activeRowId === row.id, open })}</div>
                 </li>
@@ -472,7 +448,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   {reorderCol && <TableHead className={cn('sticky left-0 z-20 w-8 min-w-8 px-0', HEAD_BG)}><span className="sr-only">{t('ui.data.reorder_column')}</span></TableHead>}
                   {selectable && (
                     <TableHead className={cn('sticky z-20 w-10 min-w-10', HEAD_BG)} style={{ left: `${reorderCol ? DRAG_W : 0}rem` }}>
-                      <Checkbox
+                      <CheckBox
                         checked={allOnPage}
                         indeterminate={!allOnPage && someOnPage}
                         onCheckedChange={v => toggleAll(v === true)}
@@ -510,7 +486,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                             onClick={col.getToggleSortingHandler()}
                             title={t('ui.data.sort_by', { column: columnLabel(col) })}
                             className={cn(
-                              TOUCH_TARGET,
+                              TOUCH_HEIGHT,
                               '-mx-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50',
                               meta?.align === 'right' && 'flex-row-reverse',
                             )}
@@ -561,6 +537,19 @@ export function DataTable<T>(props: DataTableProps<T>) {
   )
 }
 
+/**
+ * The row checkbox. On a coarse pointer its real box grows to 2rem inside a wrapper
+ * (the checkbox's own invisible hit area, which reached into the drag handle beside
+ * it, is switched off), so two controls in one row never overlap.
+ */
+function CheckBox({ className, ...props }: React.ComponentProps<typeof Checkbox>) {
+  return (
+    <span className="inline-flex items-center justify-center pointer-coarse:size-8">
+      <Checkbox {...props} className={cn('after:hidden', className)} />
+    </span>
+  )
+}
+
 function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
   name: string
   /** Empty while dragging works; otherwise why it does not, shown as the tooltip and described to readers. */
@@ -571,7 +560,7 @@ function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
   onKeyDown: (e: React.KeyboardEvent) => void
   onBlur: () => void
 }) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const off = blockedText !== ''
   return (
     <TipButton
@@ -589,3 +578,165 @@ function DragHandle({ name, blockedText, reasonId, describedBy, ...handlers }: {
     </TipButton>
   )
 }
+
+
+interface RowApi<T> {
+  focus: (id: string) => void
+  blur: () => void
+  enter: (id: string) => void
+  leave: () => void
+  click: (e: MouseEvent<HTMLElement>, row: Row<T>) => void
+  key: (e: KeyboardEvent<HTMLElement>, row: Row<T>) => void
+  pointerDown: (e: React.PointerEvent, id: string) => void
+  handleKey: (e: React.KeyboardEvent, id: string) => void
+  handleBlur: (id: string) => void
+  hovering: boolean
+  clickable: boolean
+}
+
+/** What every row shares and only a column, visibility or mode change alters. */
+interface RowCtx {
+  columns: unknown
+  visibility: VisibilityState
+  tree: boolean
+  selectable: boolean
+  reorderCol: boolean
+  interactive: boolean
+  blockedText: string
+  hintId: string
+  reasonId: string
+  leadWidth: number
+}
+
+interface DataRowProps<T> {
+  api: { current: RowApi<T> }
+  ctx: RowCtx
+  row: Row<T>
+  index: number
+  name: string
+  checkLabel: string
+  selected: boolean
+  active: boolean
+  highlighted: boolean
+  tabStop: boolean
+  expanded: boolean
+  canSelect: boolean
+  canOpen: boolean
+  state: RowOptions['state']
+  extraClass: string
+  dataKey: string
+  dataAttrs: Record<string, string> | undefined
+  fullWidth: ReactNode
+  dropBefore: boolean
+  dropAfter: boolean
+  moving: boolean
+}
+
+function DataRowInner<T>(p: DataRowProps<T>) {
+  const { t } = useTranslation('common')
+  const { row, ctx, api, selected } = p
+  const lead = `sticky z-[1] ${PIN_BG}`
+  const { tree, selectable, reorderCol } = ctx
+
+  return (
+    <TableRow
+      data-row=""
+      data-id={row.id}
+      data-depth={tree ? row.depth : undefined}
+      data-state={selected ? 'selected' : undefined}
+      data-active={p.active ? 'true' : undefined}
+      data-row-state={p.state}
+      data-highlight={p.highlighted ? 'true' : undefined}
+      data-drop={p.dropBefore ? 'before' : p.dropAfter ? 'after' : undefined}
+      {...p.dataAttrs}
+      tabIndex={ctx.interactive ? (p.tabStop ? 0 : -1) : undefined}
+      onFocus={e => { if (e.target === e.currentTarget) api.current.focus(row.id) }}
+      onBlur={e => { if (e.target === e.currentTarget) api.current.blur() }}
+      onMouseEnter={api.current.hovering ? () => api.current.enter(row.id) : undefined}
+      onMouseLeave={api.current.hovering ? () => api.current.leave() : undefined}
+      onClick={api.current.clickable ? e => api.current.click(e, row) : undefined}
+      onKeyDown={ctx.interactive ? e => api.current.key(e, row) : undefined}
+      className={cn(
+        'group/row outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+        p.canOpen && 'cursor-pointer',
+        p.moving && 'opacity-50',
+        p.dropBefore && '[&>td]:shadow-[inset_0_2px_0_0_var(--brand)]',
+        p.dropAfter && '[&>td]:shadow-[inset_0_-2px_0_0_var(--brand)]',
+        // Dimmed is colour, not opacity: opacity takes muted text to about 2:1. A page adds
+        // its own cue (a tag) in the cells; the row only softens its background and text.
+        p.state === 'dimmed' && 'bg-muted/40 text-foreground/70 [&_.text-muted-foreground]:text-foreground/70',
+        p.state === 'pending' && 'bg-warning/[0.07] [&>td:first-child]:shadow-[inset_3px_0_0_var(--warning)]',
+        p.highlighted && 'bg-brand/[0.09]',
+        p.active && 'bg-brand/[0.07] hover:bg-brand/10',
+        p.extraClass,
+      )}
+    >
+      {reorderCol && (
+        <TableCell data-no-row-click="" className={cn(lead, 'left-0 w-8 min-w-8 px-0 text-center')}>
+          <DragHandle
+            blockedText={ctx.blockedText}
+            reasonId={ctx.reasonId}
+            name={p.name}
+            onPointerDown={e => api.current.pointerDown(e, row.id)}
+            onKeyDown={e => api.current.handleKey(e, row.id)}
+            onBlur={() => api.current.handleBlur(row.id)}
+            describedBy={ctx.hintId}
+          />
+        </TableCell>
+      )}
+      {selectable && (
+        <TableCell data-no-row-click="" className={cn(lead, 'w-10 min-w-10 pr-0')} style={{ left: `${reorderCol ? DRAG_W : 0}rem` }}>
+          {p.canSelect && <CheckBox checked={selected} onCheckedChange={v => row.toggleSelected(v === true)} aria-label={p.checkLabel} />}
+        </TableCell>
+      )}
+      {p.fullWidth !== undefined ? (
+        <TableCell colSpan={row.getVisibleCells().length} className="whitespace-normal">{p.fullWidth}</TableCell>
+      ) : row.getVisibleCells().map((cell, ci) => {
+        const meta = cell.column.columnDef.meta
+        const first = ci === 0
+        const pinned = first ? { className: 'sticky z-[1]', style: { left: `${ctx.leadWidth}rem` } as CSSProperties } : {}
+        return (
+          <TableCell
+            key={cell.id}
+            style={pinned.style}
+            className={cn(
+              pinned.className && `${pinned.className} ${PIN_BG}`,
+              meta?.align === 'right' && 'text-right',
+              meta?.align === 'center' && 'text-center',
+              meta?.className,
+            )}
+          >
+            {first && tree ? (
+              <div className="flex items-center gap-1" style={{ paddingLeft: `${row.depth * 1.25}rem` }}>
+                {row.getCanExpand() ? (
+                  <TipButton
+                    label={t(p.expanded ? 'ui.data.collapse_row' : 'ui.data.expand_row', { name: p.name })}
+                    size="icon-xs"
+                    aria-expanded={p.expanded}
+                    data-no-row-click=""
+                    onClick={() => row.toggleExpanded()}
+                  >
+                    <ChevronRightIcon className={cn('transition-transform', p.expanded && 'rotate-90')} />
+                  </TipButton>
+                ) : <span className="inline-block size-6 shrink-0" aria-hidden="true" />}
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </div>
+            ) : flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </TableCell>
+        )
+      })}
+    </TableRow>
+  )
+}
+
+// A row re-renders only when something that shows on it changed. `api` is a stable
+// ref and `fullWidth` is compared by whether it exists: the separator content is
+// rebuilt with its row, which changes when the row's data does.
+const DataRow = memo(DataRowInner, (a, b) => {
+  const keys = Object.keys(a) as (keyof DataRowProps<unknown>)[]
+  for (const k of keys) {
+    if (k === 'fullWidth' || k === 'dataAttrs') continue
+    if (a[k] !== b[k]) return false
+  }
+  return (a.fullWidth === undefined) === (b.fullWidth === undefined)
+}) as typeof DataRowInner

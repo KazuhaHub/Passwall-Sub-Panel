@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { TipButton } from '@/components/data/TipButton'
 
@@ -17,7 +17,7 @@ export interface SecretFieldProps extends Omit<ComponentProps<'input'>, 'value' 
 
 /** Masked by default; reveal and copy are explicit, and both have tooltips and labels. */
 export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...rest }: SecretFieldProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const [shown, setShown] = useState(false)
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

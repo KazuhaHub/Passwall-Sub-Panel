@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { XIcon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { TOUCH_TARGET } from '@/components/data/touchTarget'
@@ -11,6 +11,8 @@ export interface TagsFieldProps {
   /** Known tags to pick from. Anything typed that is not among them can still be added. */
   suggestions?: readonly string[]
   placeholder?: string
+  /** Most tags allowed. Past it, new ones are dropped and a message says so. */
+  max?: number
   id?: string
   disabled?: boolean
   'aria-label'?: string
@@ -20,13 +22,16 @@ export interface TagsFieldProps {
   className?: string
 }
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+// NFKC folds full-width letters and compatibility forms ('ＨＫ' is 'HK'), so tags that
+// only differ in width are one tag.
+const fold = (x: string) => x.normalize('NFKC').toLowerCase()
+const same = (a: string, b: string) => fold(a) === fold(b)
 
 // Half- and full-width commas, semicolons, the enumeration comma and newlines all
 // separate tags: a list pasted from a spreadsheet or typed on a Chinese keyboard
 // must not become one tag with punctuation in it.
-const SEPARATORS = /[,，;；、\n\r]/
-const SPLIT = /[,，;；、\n\r]+/
+const SEPARATORS = /[,，;；、\t\n\r]/
+const SPLIT = /[,，;；、\t\n\r]+/
 // During an IME composition the keys belong to the IME: Enter confirms a
 // candidate, it is not "add this tag". keyCode 229 is how browsers that report
 // isComposing late still mark those events.
@@ -43,9 +48,9 @@ const composing = (e: { nativeEvent: globalThis.KeyboardEvent; keyCode: number }
  * ignored rather than added twice.
  */
 export function TagsField({
-  value, onChange, suggestions = [], placeholder, id, disabled, className, ...aria
+  value, onChange, suggestions = [], placeholder, max, id, disabled, className, ...aria
 }: TagsFieldProps) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const uid = useId()
   const listId = `${uid}-list`
   const input = useRef<HTMLInputElement>(null)
@@ -53,6 +58,7 @@ export function TagsField({
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const isComposing = useRef(false)
+  const [note, setNote] = useState<string | null>(null)
 
   const typed = text.trim()
   const options = useMemo(() => {
@@ -69,10 +75,14 @@ export function TagsField({
   // against the existing tags and within the batch dropped.
   const addMany = (raws: string[], rest = '') => {
     const next = [...value]
+    let capped = false
     for (const raw of raws) {
       const tag = raw.trim()
-      if (tag && !next.some(v => same(v, tag))) next.push(tag)
+      if (!tag || next.some(v => same(v, tag))) continue
+      if (max !== undefined && next.length >= max) { capped = true; continue }
+      next.push(tag)
     }
+    setNote(capped ? t('ui.form.tags_max', { max }) : null)
     setText(rest)
     setActive(-1)
     if (next.length !== value.length) onChange(next)
@@ -111,6 +121,7 @@ export function TagsField({
 
   const showList = open && options.length > 0
   return (
+    <div className="flex min-w-0 flex-col gap-1">
     <div
       data-slot="tags-field"
       className={cn(
@@ -196,6 +207,9 @@ export function TagsField({
           ))}
         </ul>
       )}
+    </div>
+    {/* Always in the page, empty until the cap is hit. */}
+    <p data-slot="tags-note" role="status" className={note ? 'text-xs text-destructive' : 'sr-only'}>{note}</p>
     </div>
   )
 }

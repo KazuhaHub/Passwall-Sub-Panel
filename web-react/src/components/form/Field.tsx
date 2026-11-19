@@ -71,7 +71,7 @@ export function Field({ label, hint, error, required, orientation = 'vertical', 
   // text changes is announced.
   const note = (
     <>
-      <p id={errorId} aria-live="polite" className={cn('text-xs text-destructive', !error && 'hidden')}>{error}</p>
+      <p id={errorId} aria-live="polite" className={cn('text-xs text-destructive', !error && 'sr-only')}>{error}</p>
       {!error && hint && <p id={hintId} className="text-xs text-muted-foreground">{hint}</p>}
     </>
   )

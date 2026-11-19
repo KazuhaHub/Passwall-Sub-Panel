@@ -1,6 +1,6 @@
 import type { Table } from '@tanstack/react-table'
 import { Columns3Icon } from 'lucide-react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuTrigger,
@@ -14,7 +14,7 @@ export function columnLabel<T>(col: ReturnType<Table<T>['getAllLeafColumns']>[nu
 
 /** The "Columns" button: a checklist of the columns that may be hidden. Renders nothing when none may. */
 export function ColumnMenu<T>({ table }: { table: Table<T> }) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const cols = table.getAllLeafColumns().filter(c => c.getCanHide() && c.columnDef.meta?.hideable !== false)
   if (cols.length === 0) return null
   return (

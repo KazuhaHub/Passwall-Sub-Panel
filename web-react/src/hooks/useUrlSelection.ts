@@ -1,5 +1,5 @@
-import { useCallback, useContext, useRef } from 'react'
-import { UNSAFE_DataRouterContext, useLocation, useNavigate } from 'react-router'
+import { useCallback, useRef } from 'react'
+import { useLocation } from 'react-router'
 import { useUrlWriter } from './urlBatch'
 
 /**
@@ -10,14 +10,15 @@ import { useUrlWriter } from './urlBatch'
  * still behind it; selecting another row while one is open REPLACES, so moving
  * down a list with the arrow keys does not leave a Back step per row.
  *
- * clear() closes the panel and keeps everything else as it is NOW. If select()
- * made the entry, closing goes Back (no dead "panel open" entry is left in
- * history) and then writes the current params, minus the selection, over the
- * entry it landed on: a keyword changed while the panel was open must survive the
- * close, and a plain Back would restore the one from before. On a deep link or a
- * reload there is no entry of ours to return to, so it just removes the param.
- * The mark lives in history state and names the param, so one page's panel never
- * takes another's entry for its own.
+ * clear() closes the panel by REPLACING the entry with the selection key removed
+ * and every other param as it is NOW, so a keyword changed while the panel was open
+ * survives. The trade-off of that simple scheme: the entry from before the panel
+ * opened is still in history, so after closing from the UI one more Back lands on
+ * the list as it was before opening (never back on the panel). Going Back first and
+ * rewriting afterwards would remove that extra entry but cannot be batched with other
+ * writes in the same tick, which matters more. Back while the panel is open pops the
+ * pushed entry, which is what closes it. The mark in history state names the param,
+ * so one page's panel never takes another's entry for its own.
  *
  * It writes through useUrlWriter, so it composes with every other URL hook on
  * the page in the same tick.
@@ -36,8 +37,6 @@ export function useUrlSelection<T = string>(
   { parse, format }: { parse?: (raw: string | null) => T | null; format?: (id: T) => string } = {},
 ): UrlSelection<T> {
   const location = useLocation()
-  const navigate = useNavigate()
-  const router = useContext(UNSAFE_DataRouterContext)?.router
   const write = useUrlWriter()
   const raw = new URLSearchParams(location.search).get(param)
   const read = parse ?? ((r: string | null) => (r ? (r as unknown as T) : null))
@@ -56,23 +55,9 @@ export function useUrlSelection<T = string>(
     }, 'replace')
   }, [write, param])
 
-  const clear = useCallback(() => {
-    const live = router ? router.state.location : location
-    const pushedHere = (live.state as SelectionMark | null)?.pspSelection === param
-    const params = new URLSearchParams(live.search)
-    params.delete(param)
-    const text = params.toString()
-    const search = text ? `?${text}` : ''
-    if (pushedHere && router) {
-      void router.navigate(-1).then(() => {
-        if (router.state.location.search !== search) {
-          void router.navigate({ pathname: router.state.location.pathname, search }, { replace: true, state: router.state.location.state })
-        }
-      })
-      return
-    }
-    void navigate({ search }, { replace: true, state: live.state })
-  }, [router, location, navigate, param])
+  // Closing is a plain write of "this key is gone": it keeps every other current
+  // param, and it composes with any other URL write made in the same tick.
+  const clear = useCallback(() => write(params => { params.delete(param) }, 'replace'), [write, param])
 
   return { selected, isOpen: selected !== null, select, clear }
 }

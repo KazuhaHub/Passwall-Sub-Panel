@@ -1,5 +1,5 @@
-import { useId, type CSSProperties, type ReactNode } from 'react'
-import { useSpacedT } from '@/lib/cjkSpacing'
+import { useId, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
 
@@ -35,7 +35,7 @@ export interface SourceTrailProps<T> {
  * explained but not edited (the Settings scope rail, a user's effective quota).
  */
 export function SourceTrail<T>({ levels, renderValue, className }: SourceTrailProps<T>) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const inEffect = effectiveLevel(levels)
   return (
     // Stacked on a phone, where three cells side by side leave each about 100px and
@@ -79,9 +79,12 @@ export interface InheritanceEditorProps<T> {
   id: string
   value: T
   /**
-   * The editor's new value, or null when its box was cleared. null is NOT a value
-   * of T: a NumberField cleared to nothing must not be saved as 0, which is
+   * The editor's new value, or null for an explicit empty COMMIT (the box emptied and
+   * then confirmed or left: a NumberField only says it with `allowEmpty`). null is NOT
+   * a value of T: a field cleared to nothing must not be saved as 0, which is
    * "unlimited" here. The field hands it to `onCleared` and never to `onChange`.
+   * While the person is still editing, an editor must not report null at all (see
+   * NumberField), or the editor would be torn down under the cursor.
    */
   onChange: (next: T | null) => void
   /** The field label's id: the editor must be named by it, or a screen reader hears a bare number box. */
@@ -123,7 +126,7 @@ export interface InheritanceFieldProps<T> {
 export function InheritanceField<T>({
   label, levels, editLevel, onChange, renderValue, renderEditor, onCleared, defaultValue, hint, error, className,
 }: InheritanceFieldProps<T>) {
-  const { t } = useSpacedT()
+  const { t } = useTranslation('common')
   const uid = useId()
   const idx = levels.findIndex(l => l.id === editLevel)
   const own = idx >= 0 ? levels[idx] : undefined
@@ -131,6 +134,8 @@ export function InheritanceField<T>({
   const isSet = own?.value !== undefined
   const noteId = `${uid}-note`
   const labelId = `${uid}-label`
+  const editorBox = useRef<HTMLDivElement>(null)
+  const modeBox = useRef<HTMLDivElement>(null)
 
   const setMode = (mode: 'follow' | 'set') => {
     if (mode === 'follow') onChange(undefined)
@@ -143,6 +148,7 @@ export function InheritanceField<T>({
       <SourceTrail levels={levels} renderValue={renderValue} />
       {own && (
         <div className="flex flex-col gap-2">
+          <div ref={modeBox} className="w-fit max-w-full">
           <SegmentedControl
             aria-label={t('ui.form.inherit_mode', { label, level: own.label })}
             size="sm"
@@ -153,14 +159,28 @@ export function InheritanceField<T>({
               { value: 'set', label: t('ui.form.inherit_set_here') },
             ]}
           />
+          </div>
           {isSet ? (
-            renderEditor({
-              id: `${uid}-editor`,
-              value: own.value as T,
-              onChange: v => { if (v === null) onCleared(); else onChange(v) },
-              'aria-labelledby': labelId,
-              'aria-describedby': error || hint ? noteId : undefined,
-            })
+            <div ref={editorBox}>
+              {renderEditor({
+                id: `${uid}-editor`,
+                value: own.value as T,
+                onChange: v => {
+                  if (v !== null) { onChange(v); return }
+                  // An explicit empty commit. If the person is still in the editor (Enter),
+                  // the editor is about to go away with the focus in it: hand the focus to
+                  // the mode control, which is where they now are. A commit by leaving the
+                  // box needs no help, the focus has already gone where they sent it.
+                  const hadFocus = editorBox.current?.contains(document.activeElement) === true
+                  onCleared()
+                  if (hadFocus) {
+                    requestAnimationFrame(() => modeBox.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus())
+                  }
+                },
+                'aria-labelledby': labelId,
+                'aria-describedby': error || hint ? noteId : undefined,
+              })}
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground">
               {above?.value !== undefined

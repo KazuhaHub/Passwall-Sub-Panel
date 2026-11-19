@@ -136,10 +136,21 @@ export function NodesTableSection() {
           />
         }
         empty={<span>没有符合条件的节点。清除筛选后再试。</span>}
-        bulkActions={({ selectedIds }) => (
+        bulkActions={({ ids, hiddenCount, clear }) => (
           <>
-            <Button variant="outline" size="sm" onClick={() => setBulkLog(`禁用 ${selectedIds.length} 个节点`)}>禁用</Button>
-            <Button variant="outline" size="sm" onClick={() => setBulkLog(`导出 ${selectedIds.join(', ')}`)}>导出</Button>
+            <Button variant="outline" size="sm" onClick={() => setBulkLog(`导出 ${ids.join(', ')}`)}>导出</Button>
+            {/* A destructive action acts on every selected id, so it confirms with the TOTAL
+                and says how many of them are not on screen. */}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                const text = `删除 ${ids.length} 个节点${hiddenCount > 0 ? `，其中 ${hiddenCount} 个不在当前页` : ''}？`
+                if (window.confirm(text)) { setBulkLog(`已确认：${text}`); clear() }
+              }}
+            >
+              删除
+            </Button>
           </>
         )}
       />
@@ -179,6 +190,8 @@ function PathCell({ row, colors }: { row: LineRow; colors: Map<string, LandingCo
     <div className="flex items-center gap-2">
       <LandingColorBar color={colors.get(String(row.landingId))} className="h-5 self-center" />
       <PathDiagram nodes={nodes} edges={edges} size="sm" />
+      {/* A dimmed row also says why, in words: a softened row alone would be the only cue. */}
+      {row.hidden && <Badge variant="outline">已隐藏</Badge>}
     </div>
   )
 }
@@ -204,16 +217,30 @@ const treeColumns: ColumnDef<TreeRow>[] = [
   { accessorKey: 'status', header: '状态', enableSorting: false, cell: c => { const v = c.getValue<LineStatus>(); return <StatusCell status={v === 'ok' ? 'up' : v} /> } },
 ]
 
-type LinesView = 'flat' | 'tree' | 'graph'
+const LINE_VIEWS = ['flat', 'tree', 'graph'] as const
 
+// One colour map for the page, from the complete set of landings (see landingColorsFor).
+const LANDING_COLORS = landingColorsFor(LINES)
+
+/**
+ * The line list as the nodes page will build it, and the template to copy:
+ * - three views over ONE data set: flat (reorderable, with separators), tree (by landing),
+ *   graph (entries to landings);
+ * - ONE opened line, kept in the URL (useUrlSelection), so a link opens it and Back closes it;
+ * - ONE checkbox selection, lifted here, so it survives switching views;
+ * - the graph's own box selection kept apart from the opened line;
+ * - a search that switches reordering off, with the reason shown on the handles.
+ */
 export function LinesViewsSection() {
-  const [view, setView] = useState<LinesView>('flat')
+  const [url, setUrl] = useUrlStates({ view: urlCodecs.oneOf(LINE_VIEWS, 'flat'), lq: urlCodecs.string() })
+  const open = useUrlSelection('line')
+  const [checked, setChecked] = useState<Record<string, boolean>>({})
+  const [boxSel, setBoxSel] = useState<string | null>(null)
   const [rows, setRows] = useState(LINES)
-  const [selectedId, setSelectedId] = useState<string | null>('l2')
   const [hover, setHover] = useState<string | null>(null)
   const [by, setBy] = useState<'landing' | 'entry'>('landing')
   const [log, setLog] = useState('尚未移动')
-  const colors = useMemo(() => landingColorsFor(rows), [rows])
+  const colors = LANDING_COLORS
 
   // Lines that share the hovered line's landing (or entry): lit in every view.
   const hovered = rows.find(r => r.id === hover && r.kind === 'line')
@@ -221,7 +248,10 @@ export function LinesViewsSection() {
     () => (hovered ? rows.filter(r => r.kind === 'line' && r.id !== hovered.id && (by === 'landing' ? r.landingId === hovered.landingId : r.entry === hovered.entry)).map(r => r.id) : []),
     [rows, hovered, by],
   )
-  const selected = rows.find(r => r.id === selectedId && r.kind === 'line')
+  const openLine = rows.find(r => r.id === open.selected && r.kind === 'line')
+  const toggleOpen = (id: string) => { if (open.selected === id) open.clear(); else open.select(id) }
+
+  const visible = useMemo(() => (url.lq ? filterRows(rows.filter(r => r.kind === 'line'), r => `${r.landing} ${r.entry} ${KIND_LABEL[r.lineKind]}`, url.lq) : rows), [rows, url.lq])
 
   const flatColumns = useMemo<ColumnDef<LineRow>[]>(() => [
     { id: 'path', header: '线路', enableSorting: false, meta: { hideable: false, className: 'w-full' }, cell: c => <PathCell row={c.row.original} colors={colors} /> },
@@ -231,8 +261,7 @@ export function LinesViewsSection() {
 
   const tree = useMemo(() => treeOf(rows), [rows])
 
-  // The graph: entries to landings. A box selects the first line through it, so the
-  // selection stays one line id across all three views.
+  // The graph: entries to landings. Boxes select boxes; the line that is open is a different thing.
   const graph = useMemo(() => {
     const lines = rows.filter(l => l.kind === 'line' && l.lineKind !== 'direct')
     const entries = [...new Set(lines.map(l => l.entry))]
@@ -244,19 +273,20 @@ export function LinesViewsSection() {
         { id: 'entries', title: '入口服务器', boxes: entries.map(e => ({ id: `entry:${e}`, label: e })) },
         { id: 'landings', title: '落地节点', boxes: landings.map(n => ({ id: `landing:${n}`, label: n, landingColor: colors.get(String(landingId(n))) })) },
       ],
-      edges: lines.map(l => ({ from: `entry:${l.entry}`, to: `landing:${l.landing}`, style: l.lineKind === 'tunnel' ? 'dashed' as const : 'solid' as const, status: l.status === 'ok' ? 'success' as const : l.status === 'pending' ? 'warning' as const : 'danger' as const })),
+      edges: lines.map(l => ({ from: `entry:${l.entry}`, to: `landing:${l.landing}`, style: l.lineKind === 'tunnel' ? 'dashed' as const : 'solid' as const, status: l.status === 'ok' ? 'success' as const : l.status === 'pending' ? 'pending' as const : 'danger' as const })),
     }
   }, [rows, colors])
+  const throughBox = boxSel ? graph.lines.filter(l => `entry:${l.entry}` === boxSel || `landing:${l.landing}` === boxSel) : []
 
-  const open = (id: string) => setSelectedId(prev => (prev === id ? null : id))
+  const selectedCount = Object.values(checked).filter(Boolean).length
 
   return (
-    <Section id="lines" title="线路列表（三种视图，共用一份数据和一个选中项）" note="平铺视图可拖动排序，含分隔行和等待生效的线路；悬停一行，同落地节点或同入口的线路会一起亮起。切换视图，选中的线路不变。">
+    <Section id="lines" title="线路列表（三种视图，共用一份数据）" note="平铺视图可拖动排序，含分隔行、等待生效和已隐藏的线路；悬停一行，同落地节点或同入口的线路会一起亮起。打开的线路写在地址栏里，勾选的行切换视图后仍在。搜索时排序关闭，手柄上写明原因。窄屏下每行变成一张卡片，路径竖排。">
       <div className="flex flex-wrap items-center gap-3">
         <SegmentedControl
           aria-label="视图"
-          value={view}
-          onChange={setView}
+          value={url.view}
+          onChange={view => setUrl({ view })}
           options={[{ value: 'flat', label: '平铺' }, { value: 'tree', label: '按落地节点' }, { value: 'graph', label: '关系图' }]}
         />
         <SegmentedControl
@@ -266,29 +296,47 @@ export function LinesViewsSection() {
           onChange={setBy}
           options={[{ value: 'landing', label: '同落地节点' }, { value: 'entry', label: '同入口' }]}
         />
+        <span className="text-xs text-muted-foreground tabular-nums">已勾选 {selectedCount} 行</span>
       </div>
 
-      {view === 'flat' && (
+      {url.view === 'flat' && (
         <DataTable
           aria-label="线路"
-          data={rows}
+          data={visible}
           columns={flatColumns}
           getRowId={r => r.id}
           rowLabel={r => (r.kind === 'separator' ? r.title ?? '' : `${r.landing} · ${r.entry}`)}
           pagination={false}
           columnMenu={false}
           selectable
-          onRowOpen={r => open(r.id)}
-          activeRowId={selectedId}
+          selection={checked}
+          onSelectionChange={setChecked}
+          onRowOpen={r => toggleOpen(r.id)}
+          activeRowId={open.selected}
           onRowHover={setHover}
           highlightedIds={highlighted}
+          toolbar={<FilterBar aria-label="筛选线路" search={{ value: url.lq, onChange: lq => setUrl({ lq }), placeholder: '搜索落地节点、入口' }} onClearAll={() => setUrl({ lq: '' })} />}
+          reorderBlockedReason={url.lq ? '搜索时无法调整顺序，清除搜索后再试' : undefined}
           rowOptions={r => r.kind === 'separator'
-            ? { fullWidth: <span className="text-xs font-medium tracking-wide text-muted-foreground">— {r.title} —</span>, selectable: false, openable: false }
+            ? { fullWidth: <span className="text-xs font-medium tracking-wide text-foreground/70">— {r.title} —</span>, selectable: false, openable: false }
             : { state: r.status === 'pending' ? 'pending' : r.hidden ? 'dimmed' : undefined }}
           onReorder={call => { setRows(prev => applyReorder(prev, r => r.id, call)); setLog(`移动 ${call.movedId}，放到 ${call.beforeId ?? '末尾'} 之前`) }}
+          renderCard={(r, { open: openRow }) => (r.kind === 'separator'
+            ? <span className="text-xs font-medium text-foreground/70">— {r.title} —</span>
+            : (
+              <button type="button" onClick={openRow} className="flex w-full min-w-0 flex-col gap-2 text-left">
+                <div className="flex items-center gap-2">
+                  <LandingColorBar color={colors.get(String(r.landingId))} className="h-4" />
+                  <span className="min-w-0 truncate text-sm font-medium">{r.landing}</span>
+                  <span className="text-xs text-foreground/70">{KIND_LABEL[r.lineKind]} · ×{r.multiplier}</span>
+                  {r.hidden && <Badge variant="outline">已隐藏</Badge>}
+                </div>
+                <PathDiagram {...linePath(r, false, colors)} size="md" orientation="vertical" />
+              </button>
+            ))}
         />
       )}
-      {view === 'tree' && (
+      {url.view === 'tree' && (
         <DataTable
           aria-label="按落地节点"
           data={tree}
@@ -299,35 +347,40 @@ export function LinesViewsSection() {
           defaultExpanded
           pagination={false}
           columnMenu={false}
-          onRowOpen={r => { if (r.line) open(r.line.id) }}
-          activeRowId={selectedId}
-          onRowHover={h => setHover(h)}
+          selectable
+          selection={checked}
+          onSelectionChange={setChecked}
+          onRowOpen={r => { if (r.line) toggleOpen(r.line.id) }}
+          activeRowId={open.selected}
+          onRowHover={setHover}
           highlightedIds={highlighted}
-          rowOptions={r => ({ openable: !!r.line, state: r.status === 'pending' && r.line ? 'pending' : undefined })}
+          rowOptions={r => ({ openable: !!r.line, selectable: !!r.line, state: r.status === 'pending' && r.line ? 'pending' : undefined })}
         />
       )}
-      {view === 'graph' && (
-        <RelationGraph
-          columns={graph.columns}
-          edges={graph.edges}
-          selectedId={selected && selected.lineKind !== 'direct' ? `entry:${selected.entry}` : null}
-          onSelect={id => {
-            if (id === null) { setSelectedId(null); return }
-            const line = graph.lines.find(l => `entry:${l.entry}` === id || `landing:${l.landing}` === id)
-            setSelectedId(line?.id ?? null)
-          }}
-          maxHeight="22rem"
-        />
+      {url.view === 'graph' && (
+        <>
+          <RelationGraph columns={graph.columns} edges={graph.edges} selectedId={boxSel} onSelect={setBoxSel} maxHeight="22rem" />
+          {boxSel && (
+            <div className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">经过所选的线路：点一条打开它</span>
+              {throughBox.map(l => (
+                <Button key={l.id} variant={open.selected === l.id ? 'secondary' : 'ghost'} size="sm" className="justify-start" onClick={() => toggleOpen(l.id)}>
+                  {l.entry} → {l.landing}
+                </Button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <div className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4">
-        <span className="text-xs font-medium text-muted-foreground">选中的线路（三个视图共用）</span>
-        {selected ? (
+        <span className="text-xs font-medium text-muted-foreground">打开的线路（三个视图共用，写在地址栏里）</span>
+        {openLine ? (
           <>
-            <PathDiagram {...linePath(selected, true, colors)} />
-            <div><Button variant="outline" size="sm" onClick={() => setSelectedId(null)}>取消选中</Button></div>
+            <PathDiagram {...linePath(openLine, true, colors)} />
+            <div><Button variant="outline" size="sm" onClick={open.clear}>关闭</Button></div>
           </>
-        ) : <span className="text-sm text-muted-foreground">没有选中的线路</span>}
+        ) : <span className="text-sm text-muted-foreground">没有打开的线路</span>}
       </div>
       <p className="text-xs text-muted-foreground" role="status">{log}</p>
     </Section>
