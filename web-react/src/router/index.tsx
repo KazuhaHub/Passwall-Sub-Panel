@@ -45,6 +45,7 @@ const MeView = lazy(viewLoaders['/user/me'])
 // compile-time constant, so a production build drops both the route and the
 // lazy chunk.
 const UiKitchenSink = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitchenSink')) : null
+const UiKitData = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitData')) : null
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
@@ -78,6 +79,7 @@ export const router = createBrowserRouter([
         element: <RootRedirect />,
       },
   ...(UiKitchenSink ? [{ path: '/__ui-kit', element: <UiKitchenSink /> }] : []),
+  ...(UiKitData ? [{ path: '/__ui-kit/data', element: <UiKitData /> }] : []),
   { path: '/login', element: <LoginView /> },
   { path: '/login/local', element: <LoginView forceLocal /> },
   { path: '/sso-callback', element: <SsoCallbackView /> },

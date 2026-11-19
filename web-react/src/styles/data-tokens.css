@@ -1,0 +1,50 @@
+/*
+ * Colours the shared data and diagram blocks need beyond the shadcn set:
+ * a categorical series palette for charts and a palette for telling landing
+ * nodes apart. Declared as custom properties so every consumer (Tailwind
+ * classes, inline SVG, ECharts through useChartTokens) reads the same values and
+ * dark mode only has to be written once, here.
+ *
+ * Series 1 follows the brand so a single-series chart matches the page; the
+ * rest are fixed hues chosen to stay apart from each other in both modes. The
+ * landing palette skips the brand on purpose: a coloured bar that happened to
+ * match the selection highlight would read as "selected".
+ */
+:root {
+  --series-1: var(--brand);
+  --series-2: oklch(0.62 0.13 200);
+  --series-3: oklch(0.72 0.15 75);
+  --series-4: oklch(0.58 0.17 305);
+  --series-5: oklch(0.62 0.17 15);
+  --series-6: oklch(0.6 0.14 150);
+  --series-7: oklch(0.6 0.12 250);
+  --series-8: oklch(0.55 0.02 260);
+
+  --landing-1: oklch(0.62 0.15 25);
+  --landing-2: oklch(0.7 0.14 75);
+  --landing-3: oklch(0.62 0.14 130);
+  --landing-4: oklch(0.6 0.11 180);
+  --landing-5: oklch(0.6 0.12 225);
+  --landing-6: oklch(0.56 0.16 275);
+  --landing-7: oklch(0.58 0.17 315);
+  --landing-8: oklch(0.62 0.16 350);
+}
+
+.dark {
+  --series-2: oklch(0.74 0.12 200);
+  --series-3: oklch(0.82 0.14 80);
+  --series-4: oklch(0.72 0.14 305);
+  --series-5: oklch(0.74 0.14 15);
+  --series-6: oklch(0.76 0.14 150);
+  --series-7: oklch(0.74 0.11 250);
+  --series-8: oklch(0.72 0.02 260);
+
+  --landing-1: oklch(0.74 0.13 25);
+  --landing-2: oklch(0.8 0.12 80);
+  --landing-3: oklch(0.76 0.13 130);
+  --landing-4: oklch(0.74 0.1 180);
+  --landing-5: oklch(0.74 0.11 225);
+  --landing-6: oklch(0.72 0.14 275);
+  --landing-7: oklch(0.74 0.14 315);
+  --landing-8: oklch(0.76 0.13 350);
+}

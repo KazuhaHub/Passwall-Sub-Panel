@@ -22,7 +22,7 @@ go.work
 go.work.sum
 
 # Local runtime data and database files
-data/
+/data/
 *.db
 *.db-journal
 *.db-wal
