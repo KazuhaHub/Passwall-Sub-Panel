@@ -7,15 +7,16 @@ import { cn } from '@/lib/utils'
 
 /**
  * The top-bar door to the message log: the messages that came too fast to be shown, errors
- * among them, stay reachable here after their summary toast is gone. The badge shows how
- * many errors are unseen when there are any (in the danger colour), and otherwise how many
- * messages are; it is capped at 99+ so it never outgrows the button, and it clears the
- * moment the log is opened.
- */
-/**
+ * among them, stay reachable here after their summary toast is gone. The badge counts the
+ * messages not yet seen, so the number never goes DOWN as more arrive (it is the total,
+ * not the error count); errors are conveyed by the badge turning red and by the accessible
+ * name ("N not yet seen, M of them errors"). Capped at 99+ so it never outgrows the button,
+ * and it clears the moment the log is opened.
+ *
  * `size="bar"` is for the old MUI app bars: the same 40px button and 24px icon as the MUI
  * icon buttons beside it, with a smaller badge tucked into the corner so the icon stays
- * recognisable. `className` lets such a bar hide it below the width where it no longer fits.
+ * recognisable. Whether the bar has room for it is the layout's decision (it renders this or
+ * the account-menu item, never both): see layouts/useLogInBar.ts.
  */
 export function ToastLogButton({ size = 'default', className }: { size?: 'default' | 'bar'; className?: string }) {
   const { t } = useSpacedT()
@@ -24,7 +25,7 @@ export function ToastLogButton({ size = 'default', className }: { size?: 'defaul
   const label = unread === 0 ? title
     : unreadErrors > 0 ? t('ui.feedback.log_unread_errors', { count: unread, errors: unreadErrors })
       : t('ui.feedback.log_unread', { count: unread })
-  const shown = unreadErrors > 0 ? unreadErrors : unread
+  const shown = unread
   return (
     <IconButton label={label} tooltip={title} className={cn('relative', size === 'bar' && "size-10 [&_svg:not([class*='size-'])]:size-6", className)} onClick={openToastLog}>
       <IconLogs />

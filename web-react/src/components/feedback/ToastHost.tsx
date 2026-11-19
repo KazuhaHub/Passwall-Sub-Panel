@@ -91,7 +91,9 @@ function ToastRow({ view, leaving, fading, onDismiss, onHover }: {
   )
 }
 
-function LogPanel({ open, onClose, entries, omitted, returnFocus }: {
+function LogPanel({ open, onClose, entries, omitted, returnFocus, language }: {
+  /** The app's current language, for the time format: not the browser's. */
+  language?: string
   open: boolean
   onClose: () => void
   entries: readonly LogEntry[]
@@ -140,7 +142,7 @@ function LogPanel({ open, onClose, entries, omitted, returnFocus }: {
                       {l.count > 1 && <span className="ml-1 text-xs text-muted-foreground tabular-nums">×{l.count}</span>}
                     </span>
                     <time dateTime={new Date(l.at).toISOString()} className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                      {new Date(l.at).toLocaleTimeString()}
+                      {new Date(l.at).toLocaleTimeString(language)}
                     </time>
                   </li>
                 )
@@ -190,8 +192,9 @@ const MODAL = '[role="dialog"][aria-modal="true"]:not([data-slot="toast-log"]):n
 
 // True on a phone-width screen while a modal dialog is open. Toasts that ENTER then are placed
 // at the top of the screen: at the bottom they sat over the dialog's own buttons (a confirm's
-// Cancel at 360x640, its footer at 390x600). Toasts already on screen are not moved (see the
-// placements in the host): nothing jumps under the pointer when a dialog opens.
+// Cancel at 360x640, its footer at 390x600). Toasts already on screen are moved too, by a
+// cross-fade (see relocate in the host), and not while the pointer is over the stack or
+// keyboard focus is inside it: nothing jumps under the user's hand.
 function useToastsAtTop(): boolean {
   const [top, setTop] = useState(false)
   useEffect(() => {
@@ -224,7 +227,7 @@ function useToastsAtTop(): boolean {
  * must not freeze every countdown.
  */
 export default function ToastHost() {
-  const { t } = useSpacedT()
+  const { t, i18n } = useSpacedT()
   const tRef = useRef(t)
   tRef.current = t
   const alertRegion = useRef<HTMLDivElement>(null)
@@ -360,7 +363,17 @@ export default function ToastHost() {
     placements.current.clear()
     store.setPaused('hover', false)
     setLeaving([])
+    // Closing the panel under someone's focus would drop it on <body>: hand it to the page's
+    // main landmark instead (the old layouts' <main> has no tabindex, so it gets one).
+    const hadFocusInPanel = document.activeElement?.closest('[data-slot="toast-log"]') != null
     setPanelOpen(false)
+    if (hadFocusInPanel) {
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return
+        const main = document.querySelector<HTMLElement>('#main-content, main')
+        if (main) { if (!main.hasAttribute('tabindex')) main.tabIndex = -1; main.focus({ preventScroll: true }) }
+      })
+    }
   }, [identity, store])
 
   // When a modal dialog opens on a phone, toasts already at the bottom move to the top stack
@@ -375,6 +388,12 @@ export default function ToastHost() {
     if (hovered.current.size > 0 || (inStack(document.activeElement) && focusByKeyboard.current)) return
     const ids = stateRef.current.visible.filter(v => placements.current.get(v.id) === 'bottom').map(v => v.id)
     if (ids.length === 0) return
+    // With reduced motion there is no fade: they simply move.
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      for (const id of ids) placements.current.set(id, 'top')
+      setFading(new Set())
+      return
+    }
     relocating.current = true
     setFading(new Set(ids))
     setTimeout(() => {
@@ -535,6 +554,7 @@ export default function ToastHost() {
         open={panelOpen}
         entries={state.log}
         omitted={panelOpen ? omittedAtOpen.current : 0}
+        language={i18n.resolvedLanguage || i18n.language}
         returnFocus={() => (panelReturn.current?.isConnected && !inStack(panelReturn.current) ? panelReturn.current : false)}
         onClose={() => { setPanelOpen(false); store.acknowledgeLog() }}
       />

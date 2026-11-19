@@ -89,6 +89,21 @@ describe('10,000 pushes', () => {
   })
 })
 
+describe('the badge number', () => {
+  it('is the unread total and never goes down as messages arrive, errors showing as colour and in the name', () => {
+    render(<><SnackbarHost /><ToastLogButton /></>)
+    act(() => { for (let i = 1; i <= 3; i++) pushSnack(`i${i}`) })
+    act(() => { for (let i = 1; i <= 8; i++) pushSnack(`x${i}`) })
+    const badge = () => document.querySelector('[data-slot="toast-log-badge"]') as HTMLElement
+    const before = Number(badge().textContent)
+    expect(badge().hasAttribute('data-errors')).toBe(false)
+    act(() => { for (let i = 1; i <= 3; i++) pushSnack(`e${i}`, 'error') })
+    act(() => { for (let i = 1; i <= 2; i++) pushSnack(`f${i}`, 'error') })
+    expect(Number(badge().textContent)).toBeGreaterThanOrEqual(before)
+    expect(badge().hasAttribute('data-errors')).toBe(true)
+  })
+})
+
 describe('the badge', () => {
   it('is capped at 99+ and shows the error count when there are errors', () => {
     render(<><SnackbarHost /><ToastLogButton /></>)

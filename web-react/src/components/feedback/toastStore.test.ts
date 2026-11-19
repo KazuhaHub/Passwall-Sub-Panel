@@ -574,3 +574,21 @@ describe('unread', () => {
     expect(s.log.filter(l => l.state === 'collapsed').length).toBeGreaterThan(0)
   })
 })
+
+describe('reset', () => {
+  it('clears the omitted counts too, so the next user inherits no unread numbers', () => {
+    const { store } = setup({ collapsedLimit: 5 })
+    for (const m of ['a', 'b', 'c']) store.push({ message: m, severity: 'error' })
+    for (let i = 1; i <= 20; i++) store.push({ message: `x${i}`, severity: 'error' })
+    expect(store.getState().omitted).toBeGreaterThan(0)
+    expect(store.getState().unreadErrors).toBeGreaterThan(0)
+    store.reset()
+    const s = store.getState()
+    expect(s.omitted).toBe(0)
+    expect(s.unread).toBe(0)
+    expect(s.unreadErrors).toBe(0)
+    expect(s.log).toHaveLength(0)
+    expect(s.visible).toHaveLength(0)
+    expect(s.queued).toBe(0)
+  })
+})

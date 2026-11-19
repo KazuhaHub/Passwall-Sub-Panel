@@ -629,6 +629,18 @@ describe('placement', () => {
     dialog.remove()
   })
 
+  it('moves them without the fade under prefers-reduced-motion', async () => {
+    window.matchMedia = vi.fn().mockImplementation((q: string) => ({ matches: q.includes('max-width') || q.includes('prefers-reduced-motion'), media: q, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), onchange: null, dispatchEvent: vi.fn() }))
+    render(<SnackbarHost />)
+    act(() => pushSnack('before'))
+    const dialog = modal()
+    await act(async () => { document.body.appendChild(dialog); await Promise.resolve() })
+    // At once in the top stack, never at opacity 0 in between.
+    expect(stackOf('top').textContent).toContain('before')
+    expect(stackOf('top').querySelector('[data-slot="toast"]')!.className).not.toContain('opacity-0')
+    dialog.remove()
+  })
+
   it('puts the top stack ahead of the bottom one in the document, so Tab follows the screen', () => {
     render(<SnackbarHost />)
     const top = stackOf('top'); const bottom = stackOf('bottom')
@@ -725,6 +737,18 @@ describe('repeats and pre-emption, on screen', () => {
   })
 })
 
+describe('the log panel and the clock', () => {
+  it('formats a row’s time in the app’s language, not the browser’s', () => {
+    render(<SnackbarHost />)
+    act(() => { for (let i = 1; i <= 3; i++) pushSnack(`e${i}`, 'error') })
+    act(() => { for (let i = 1; i <= 7; i++) pushSnack(`x${i}`, 'error') })
+    advance(DURATION)
+    fireEvent.click(screen.getByRole('button', { name: '查看提示记录' }))
+    const time = document.querySelector('[data-slot="toast-log-row"] time') as HTMLTimeElement
+    expect(time.textContent).toBe(new Date(time.dateTime).toLocaleTimeString('zh-CN'))
+  })
+})
+
 describe('a change of signed-in identity', () => {
   afterEach(() => { useAuthStore.setState({ userId: null, authEpoch: 0 }) })
 
@@ -749,6 +773,25 @@ describe('a change of signed-in identity', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看提示记录' }))
     const rows = [...document.querySelectorAll('[data-slot="toast-log-row"]')].map(r => r.textContent)
     expect(rows.some(r => r?.includes('e1') || r?.includes('x1'))).toBe(false)
+  })
+
+  it('closes an open log panel, and moves focus to the main landmark instead of dropping it on body', () => {
+    const main = document.createElement('main')
+    document.body.appendChild(main)
+    render(<SnackbarHost />)
+    act(() => { for (let i = 1; i <= 3; i++) pushSnack(`e${i}`, 'error') })
+    act(() => { for (let i = 1; i <= 7; i++) pushSnack(`x${i}`, 'error') })
+    advance(DURATION)
+    fireEvent.click(screen.getByRole('button', { name: '查看提示记录' }))
+    const panel = document.querySelector('[data-slot="toast-log"]') as HTMLElement
+    const inside = panel.querySelector('button') as HTMLElement
+    act(() => inside.focus())
+    expect(document.activeElement?.closest('[data-slot="toast-log"]')).not.toBeNull()
+    act(() => { useAuthStore.setState({ userId: 77 }) })
+    advance(500)
+    expect(document.querySelector('[data-slot="toast-log"]')).toBeNull()
+    expect(document.activeElement).toBe(main)
+    main.remove()
   })
 
   it('leaves everything alone when the identity does not change', () => {
