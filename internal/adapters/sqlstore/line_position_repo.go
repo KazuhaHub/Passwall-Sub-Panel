@@ -137,8 +137,15 @@ func (r *nodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.Subscript
 		for i, line := range w.Lines {
 			rows[i] = subscriptionLinePositionRow{NodeID: line.NodeID, LineID: line.LineID, SortOrder: line.SortOrder}
 		}
-		if len(rows) > 0 {
-			if err := tx.CreateInBatches(rows, linePositionInsertBatch).Error; err != nil {
+		// Chunked by hand rather than with CreateInBatches: that helper opens a
+		// nested transaction, which inside this one means a SAVEPOINT, and a
+		// connection that does not offer one fails the whole write with
+		// "unsupported driver". A plain multi-row Create needs nothing but the
+		// transaction already open.
+		for start := 0; start < len(rows); start += linePositionInsertBatch {
+			end := min(start+linePositionInsertBatch, len(rows))
+			chunk := rows[start:end]
+			if err := tx.Create(&chunk).Error; err != nil {
 				return err
 			}
 		}
