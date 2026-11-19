@@ -1699,6 +1699,8 @@ var schemaModels = []any{
 	&sourceGuardHitRow{},
 	&transitRouteRow{},
 	&transitRouteListRow{},
+	// Per-line subscription ordering: explicit positions of relay lines.
+	&subscriptionLinePositionRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then

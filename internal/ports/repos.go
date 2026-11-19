@@ -336,8 +336,9 @@ type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error
 	// UpdateMetadata is the column-scoped writer for the admin-editable
-	// identity fields (display_name, server_address, flow, region, tags,
-	// sort_order). Use it instead of Update for the node-edit path so a
+	// identity fields (display_name, server_address, flow, region, tags, relays,
+	// ...). It never writes sort_order: that is owned by BatchUpdateSortOrder and
+	// ApplySubscriptionOrder, and a caller's copy of it may be stale. Use it instead of Update for the node-edit path so a
 	// full-row Save can't roll back poll-owned columns (traffic / health /
 	// inbound-config snapshot) to the dialog's stale snapshot.
 	UpdateMetadata(ctx context.Context, n *domain.Node) error
@@ -395,6 +396,14 @@ type NodeRepo interface {
 	// of Update and keeps the table consistent if the call is interrupted
 	// mid-flight.
 	BatchUpdateSortOrder(ctx context.Context, updates []NodeSortUpdate) error
+	// ApplySubscriptionOrder writes the complete subscription order in ONE
+	// transaction: nodes.sort_order for every direct line, nodes_separator.
+	// sort_order for every separator, and the full set of relay-line positions
+	// (all existing position rows are replaced by the ones given). It replaces
+	// the two non-atomic reorder calls for the line-aware admin list, and is
+	// column-scoped on every table it touches. The caller (node.Service) has
+	// already validated the set against the current state.
+	ApplySubscriptionOrder(ctx context.Context, w SubscriptionOrderWrite) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.Node, error)
 	GetByPanelInbound(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error)
@@ -419,6 +428,22 @@ type RealityFingerprintCASRepo interface {
 // NodeSortUpdate is one (node_id, sort_order) pair for BatchUpdateSortOrder.
 type NodeSortUpdate struct {
 	NodeID    int64
+	SortOrder int
+}
+
+// SubscriptionOrderWrite is one atomic subscription reorder. Lines carries
+// relay lines only: the direct line's place is its node's sort_order (Nodes).
+type SubscriptionOrderWrite struct {
+	Nodes      []NodeSortUpdate
+	Separators []SeparatorSortUpdate
+	Lines      []LinePositionWrite
+}
+
+// LinePositionWrite is the explicit place of one relay line on the shared sort
+// scale (see domain.PlaceFloatingLines).
+type LinePositionWrite struct {
+	NodeID    int64
+	LineID    string
 	SortOrder int
 }
 

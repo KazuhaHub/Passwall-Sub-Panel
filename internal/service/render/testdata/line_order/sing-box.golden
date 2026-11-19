@@ -1,0 +1,275 @@
+{
+  "outbounds": [
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    },
+    {
+      "method": "chacha20-ietf-poly1305",
+      "password": "psp-separator",
+      "server": "127.0.0.1",
+      "server_port": 1,
+      "tag": "---- early ----",
+      "type": "shadowsocks"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n7.example.com",
+      "server_port": 443,
+      "tag": "A",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "a1.relay.example",
+      "server_port": 8443,
+      "tag": "A a1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "a2.relay.example",
+      "server_port": 8444,
+      "tag": "A a2",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "c1.relay.example",
+      "server_port": 8443,
+      "tag": "C c1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "method": "chacha20-ietf-poly1305",
+      "password": "psp-separator",
+      "server": "127.0.0.1",
+      "server_port": 1,
+      "tag": "---- positional ----",
+      "type": "shadowsocks"
+    },
+    {
+      "method": "chacha20-ietf-poly1305",
+      "password": "psp-separator",
+      "server": "127.0.0.1",
+      "server_port": 1,
+      "tag": "---- tied with D ----",
+      "type": "shadowsocks"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n9.example.com",
+      "server_port": 443,
+      "tag": "D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "d1.relay.example",
+      "server_port": 8443,
+      "tag": "D d1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "d2.relay.example",
+      "server_port": 8444,
+      "tag": "D d2",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n10.example.com",
+      "server_port": 443,
+      "tag": "E",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n11.example.com",
+      "server_port": 443,
+      "tag": "F",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "f1.relay.example",
+      "server_port": 8443,
+      "tag": "F f1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "default": "---- early ----",
+      "outbounds": [
+        "---- early ----",
+        "A",
+        "A a1",
+        "A a2",
+        "C c1",
+        "---- positional ----",
+        "---- tied with D ----",
+        "D",
+        "D d1",
+        "D d2",
+        "E",
+        "F",
+        "F f1"
+      ],
+      "tag": "国外媒体",
+      "type": "selector"
+    }
+  ],
+  "route": {
+    "final": "国外媒体",
+    "rule_set": [],
+    "rules": [
+      {
+        "action": "sniff"
+      }
+    ]
+  }
+}

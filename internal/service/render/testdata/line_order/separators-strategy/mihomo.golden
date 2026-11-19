@@ -1,0 +1,129 @@
+proxies:
+    - cipher: chacha20-ietf-poly1305
+      name: '---- bound, visible ----'
+      password: psp-separator
+      port: 1
+      server: 127.0.0.1
+      type: ss
+      udp: false
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Seven
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n7.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Eight
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n8.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Eight e1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: e1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Nine
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n9.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Nine n1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - cipher: chacha20-ietf-poly1305
+      name: '---- global ----'
+      password: psp-separator
+      port: 1
+      server: 127.0.0.1
+      type: ss
+      udp: false
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Six
+      network: tcp
+      port: 443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: n6.example.com
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+    - client-fingerprint: chrome
+      flow: xtls-rprx-vision
+      name: Six s1
+      network: tcp
+      port: 8443
+      reality-opts:
+        public-key: aPubKey
+        short-id: abcd
+      server: s1.relay.example
+      servername: www.microsoft.com
+      tls: true
+      type: vless
+      udp: true
+      uuid: 12345678-1234-4abc-8def-123456789abc
+proxy-groups:
+    - name: 国外媒体
+      type: select
+      proxies:
+        - '---- bound, visible ----'
+        - Seven
+        - Eight
+        - Eight e1
+        - Nine
+        - Nine n1
+        - '---- global ----'
+        - Six
+        - Six s1
+rules:
+    - MATCH,国外媒体
+sub-rules: {}

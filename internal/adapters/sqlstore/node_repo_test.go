@@ -52,7 +52,7 @@ func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
 	// counters/health (as the edit form would).
 	edit := &domain.Node{
 		ID: n.ID, PanelID: 1, InboundID: 2,
-		DisplayName: "New", ServerAddress: "n.example.com", Region: "HK", Tags: []string{"b", "c"}, SortOrder: 7,
+		DisplayName: "New", ServerAddress: "n.example.com", Region: "HK", Tags: []string{"b", "c"},
 		Relays: []domain.RelayLine{{Name: "new", Address: "new.relay", Port: 8443, Enabled: true}}, ShowRelayStatus: true,
 		// Lifetime*/Health* deliberately zero — must not be persisted.
 	}
@@ -65,7 +65,7 @@ func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 	// Identity fields updated.
-	if got.DisplayName != "New" || got.Region != "HK" || got.ServerAddress != "n.example.com" || got.SortOrder != 7 {
+	if got.DisplayName != "New" || got.Region != "HK" || got.ServerAddress != "n.example.com" {
 		t.Errorf("identity not updated: %+v", got)
 	}
 	if len(got.Tags) != 2 || got.Tags[0] != "b" {

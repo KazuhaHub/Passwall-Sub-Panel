@@ -1265,6 +1265,9 @@ func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*do
 	}
 	return items, int64(len(items)), nil
 }
+func (r *fakeNodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.SubscriptionOrderWrite) error {
+	return nil
+}
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	return nil
 }

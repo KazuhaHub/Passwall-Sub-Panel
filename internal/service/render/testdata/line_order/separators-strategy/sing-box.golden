@@ -1,0 +1,200 @@
+{
+  "outbounds": [
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    },
+    {
+      "method": "chacha20-ietf-poly1305",
+      "password": "psp-separator",
+      "server": "127.0.0.1",
+      "server_port": 1,
+      "tag": "---- bound, visible ----",
+      "type": "shadowsocks"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n7.example.com",
+      "server_port": 443,
+      "tag": "Seven",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n8.example.com",
+      "server_port": 443,
+      "tag": "Eight",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "e1.relay.example",
+      "server_port": 8443,
+      "tag": "Eight e1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n9.example.com",
+      "server_port": 443,
+      "tag": "Nine",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n1.relay.example",
+      "server_port": 8443,
+      "tag": "Nine n1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "method": "chacha20-ietf-poly1305",
+      "password": "psp-separator",
+      "server": "127.0.0.1",
+      "server_port": 1,
+      "tag": "---- global ----",
+      "type": "shadowsocks"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n6.example.com",
+      "server_port": 443,
+      "tag": "Six",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "s1.relay.example",
+      "server_port": 8443,
+      "tag": "Six s1",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "default": "---- bound, visible ----",
+      "outbounds": [
+        "---- bound, visible ----",
+        "Seven",
+        "Eight",
+        "Eight e1",
+        "Nine",
+        "Nine n1",
+        "---- global ----",
+        "Six",
+        "Six s1"
+      ],
+      "tag": "国外媒体",
+      "type": "selector"
+    }
+  ],
+  "route": {
+    "final": "国外媒体",
+    "rule_set": [],
+    "rules": [
+      {
+        "action": "sniff"
+      }
+    ]
+  }
+}

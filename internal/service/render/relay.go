@@ -40,14 +40,25 @@ func expandRelays(items []renderItem) []renderItem {
 			relays = kept
 		}
 		// Hiding the direct entry is independent of enabled relay/route lines.
+		// The landing's scale position is set here rather than trusted from
+		// applyLayout, so a bare item (as the tests build them) is placed the
+		// same way.
+		it.slot = domain.LineSlot{Key: it.node.SortOrder, Keyed: true}
 		if !it.node.EffectiveHideDirect() {
 			out = append(out, it)
 		}
 		for i := range relays {
+			// An unpositioned line carries its landing's key and is emitted right
+			// after it, as always; a positioned one floats (placeLines).
+			slot := it.slot
+			if relays[i].Position != nil {
+				slot = domain.LineSlot{Key: *relays[i].Position, Keyed: true, Floating: true}
+			}
 			out = append(out, renderItem{
 				name:  relayEntryName(it.name, relays[i]),
 				node:  it.node,
 				relay: &relays[i],
+				slot:  slot,
 			})
 		}
 	}
@@ -200,4 +211,36 @@ func applyCDNStream(relay *domain.RelayLine, stream *xuiStreamSettings) {
 	if relay.SNI != "" {
 		stream.TLSSettings.ServerName = relay.SNI
 	}
+}
+
+// placeLines applies the per-line placement rule to the expanded sequence: lines
+// with an explicit position (relay.Position) move to their place on the shared
+// sort scale, everything else stays where applyLayout + expandRelays put it.
+// With no positioned line it returns items untouched, which is what keeps every
+// subscription byte-identical to the pre-feature output until an administrator
+// first reorders lines.
+//
+// It runs AFTER per-user filtering (tag filter, line visibility, unready egress,
+// Publishable, the CDN landing fault) because all of that already happened to
+// the node set before layout. Each user's order is therefore the global admin
+// order with the entries that user may not see removed: a position never
+// brings a withheld line back, and a line whose landing is filtered out is gone
+// with it. Emit-time drops (no inbound, unconfirmed credentials, a protocol the
+// format cannot carry) happen later still and only remove entries.
+func placeLines(items []renderItem) []renderItem {
+	slots := make([]domain.LineSlot, len(items))
+	floating := false
+	for i, it := range items {
+		slots[i] = it.slot
+		floating = floating || it.slot.Floating
+	}
+	if !floating {
+		return items
+	}
+	order := domain.PlaceFloatingLines(slots)
+	out := make([]renderItem, len(items))
+	for i, from := range order {
+		out[i] = items[from]
+	}
+	return out
 }

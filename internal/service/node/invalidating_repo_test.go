@@ -28,6 +28,9 @@ func (countingNodeRepo) UpdateEnabled(context.Context, int64, bool) error       
 func (countingNodeRepo) UpdateTrafficCounters(context.Context, *domain.Node) error { return nil }
 func (countingNodeRepo) UpdateHealth(context.Context, *domain.Node) error          { return nil }
 func (countingNodeRepo) Delete(context.Context, int64) error                       { return nil }
+func (countingNodeRepo) ApplySubscriptionOrder(context.Context, ports.SubscriptionOrderWrite) error {
+	return nil
+}
 func (countingNodeRepo) BatchUpdateSortOrder(context.Context, []ports.NodeSortUpdate) error {
 	return nil
 }
@@ -46,6 +49,7 @@ func (countingNodeRepo) BatchUpdateSortOrder(context.Context, []ports.NodeSortUp
 func TestInvalidatingNodeRepoCoversEveryWriter(t *testing.T) {
 	// Writers the decorator MUST wrap.
 	subscriptionVisible := []string{
+		"ApplySubscriptionOrder",
 		"BatchUpdateSortOrder",
 		"ConfirmAppliedConfig",
 		"Create",
@@ -133,6 +137,8 @@ func isWriter(name string) bool {
 	case len(name) > 6 && name[:6] == "Update":
 		return true
 	case len(name) > 5 && name[:5] == "Batch":
+		return true
+	case len(name) > 5 && name[:5] == "Apply":
 		return true
 	}
 	return false
