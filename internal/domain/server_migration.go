@@ -284,10 +284,19 @@ func (s *ServerMigrationSnapshot) Blockers() []MigrationIssue {
 			if n.PanelID != c.PanelID {
 				add("cross_panel_attachment", a.NodeID, c.ID)
 			}
-			if !a.Applied() || a.AppliedEmail != c.Email || a.AppliedUUID != c.UUID || a.AppliedPassword != c.Password {
+			p := strings.ToLower(strings.TrimSpace(n.DesiredProtocol))
+			// Only the credential the attached protocol reads must be confirmed.
+			// Since the 4.3 per-line split 3X-UI keeps a stale password on a VLESS
+			// client (it authenticates by id; an UpdateClient password never reads
+			// back), so comparing it blocked every VLESS client forever. Email
+			// always matters (3X-UI keys clients by it). Hysteria2's auth is the
+			// UUID, which AppliedUUID carries. Unknown protocols fail closed.
+			fields := CredentialFieldsFor(Protocol(p))
+			if !a.Applied() || a.AppliedEmail != c.Email ||
+				((fields.ID || fields.Auth) && a.AppliedUUID != c.UUID) ||
+				(fields.Password && a.AppliedPassword != c.Password) {
 				add("credential_not_confirmed", a.NodeID, c.ID)
 			}
-			p := strings.ToLower(strings.TrimSpace(n.DesiredProtocol))
 			if a.FlowOverride != "" && a.FlowOverride != "xtls-rprx-vision" {
 				add("unsupported_flow", a.NodeID, c.ID)
 			}

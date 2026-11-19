@@ -150,6 +150,66 @@ const (
 	ProtoNaive     Protocol = "naive"
 )
 
+// AllProtocols lists every Protocol value, so tests can prove each one has an
+// explicit credential decision.
+func AllProtocols() []Protocol {
+	return []Protocol{ProtoVLESS, ProtoVMess, ProtoTrojan, ProtoSS, ProtoSS2022,
+		ProtoHysteria2, ProtoAnyTLS, ProtoTUIC, ProtoNaive}
+}
+
+// UsesPassword reports whether the protocol authenticates with the client's
+// `password` slot. It is the single source of truth for that question:
+// clientplan's password-class planner and every credential read-back
+// comparison derive from it. VLESS/VMess authenticate by id and Hysteria2 by
+// auth, so the password stored upstream is inert for them.
+func (p Protocol) UsesPassword() bool {
+	switch p {
+	case ProtoTrojan, ProtoSS, ProtoSS2022, ProtoAnyTLS, ProtoTUIC, ProtoNaive:
+		return true
+	}
+	return false
+}
+
+// CredentialFields names which upstream client fields a protocol (or a set of
+// them) actually authenticates with.
+type CredentialFields struct {
+	ID       bool // VLESS, VMess
+	Password bool // see Protocol.UsesPassword
+	Auth     bool // Hysteria2 (PSP sets Auth to the client UUID)
+}
+
+// CredentialFieldsFor is the union of the fields the given protocols read.
+//
+// Why this exists: since the 4.3 per-line split a user has one client per line
+// and 3X-UI keeps whatever password the client was first created with on a
+// VLESS client — an UpdateClient with a new password does not change what
+// GetClient reads back, because VLESS never reads it. Comparing the password
+// anyway made every such client a permanent false "read-back mismatch".
+//
+// Fail closed: an empty list or a protocol this build cannot classify compares
+// EVERY field, so an unrecognised attachment can never wave a real credential
+// mismatch through.
+func CredentialFieldsFor(ps ...Protocol) CredentialFields {
+	all := CredentialFields{ID: true, Password: true, Auth: true}
+	if len(ps) == 0 {
+		return all
+	}
+	var out CredentialFields
+	for _, p := range ps {
+		switch {
+		case p == ProtoVLESS || p == ProtoVMess:
+			out.ID = true
+		case p == ProtoHysteria2:
+			out.Auth = true
+		case p.UsesPassword():
+			out.Password = true
+		default:
+			return all
+		}
+	}
+	return out
+}
+
 type ClientType string
 
 const (

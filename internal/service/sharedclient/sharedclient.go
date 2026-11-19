@@ -407,6 +407,15 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 	capIP := ports.SupportsCapability(cli, ports.CapabilityClientIPLimit)
 	capDevice := ports.SupportsCapability(cli, ports.CapabilityClientDeviceLimit)
 
+	// Only the credential fields the attached protocols read may drive the skip
+	// and the confirm below. Since the 4.3 per-line split a VLESS client keeps
+	// the stale shared password 3X-UI stored at creation: UpdateClient's new
+	// password never shows up on GetClient because VLESS authenticates by id
+	// alone. Comparing it anyway failed the confirm on every cycle and made the
+	// skip impossible (a full-replace per cycle, user_resync tasks retrying to
+	// their cap). Unknown nodes/protocols compare everything (fail closed).
+	creds := s.credentialFields(ctx, atts)
+
 	unreadReason := "panel_unread"
 	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
 		// Hand the operator's 3X-UI note straight back. UpdateClient is a
@@ -439,7 +448,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		// that a deadband on that one field recovers the skip. Any other
 		// reason showing up in bulk would mean a deadband buys nothing
 		// and Phase 1a is aimed at the wrong field.
-		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, want.QuotaHeadroom)
+		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, creds, want.QuotaHeadroom)
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
 			// Not counted as a failure: it never was (see pushLifecycle).
@@ -466,7 +475,7 @@ func (s *Service) pushLifecycle(ctx context.Context, c *domain.PSPClient) (stage
 		return fail(metrics.LifecycleErrorStageConfirmRead,
 			fmt.Errorf("confirm shared client %s credentials: %w", c.Email, err))
 	}
-	if confirmed == nil || confirmed.ID != spec.ID || confirmed.Password != spec.Password || confirmed.Auth != spec.Auth {
+	if confirmed == nil || !credentialsMatch(confirmed, spec, creds) {
 		return fail(metrics.LifecycleErrorStageConfirmMismatch,
 			fmt.Errorf("confirm shared client %s credentials: read-back does not match desired identity", c.Email))
 	}
@@ -610,7 +619,7 @@ func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want 
 // can never converge. Excluding it is not "ignoring drift" — there is no drift
 // to heal on a panel that has nowhere to put the value, and the gap is already
 // counted by reportCapabilityGaps.
-func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool, headroom int64) string {
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool, creds domain.CredentialFields, headroom int64) string {
 	switch {
 	case !domain.PanelQuotaWithinBand(cur.TotalGB, spec.TotalGB, headroom):
 		return "total_gb"
@@ -622,16 +631,48 @@ func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP,
 		return "enable"
 	case cur.ExpiryTime != spec.ExpiryTime:
 		return "expiry"
-	case cur.ID != spec.ID:
+	case creds.ID && cur.ID != spec.ID:
 		return "id"
-	case cur.Password != spec.Password:
+	case creds.Password && cur.Password != spec.Password:
 		return "password"
 	case cur.Flow != spec.Flow:
 		return "flow"
-	case cur.Auth != spec.Auth:
+	case creds.Auth && cur.Auth != spec.Auth:
 		return "auth"
 	}
 	return ""
+}
+
+// credentialsMatch is the post-write read-back check, restricted to the
+// credential fields the client's attached protocols actually read (see
+// pushLifecycle for why a stale, inert password must not fail it).
+func credentialsMatch(got *ports.ClientDetail, want ports.ClientSpec, creds domain.CredentialFields) bool {
+	return (!creds.ID || got.ID == want.ID) &&
+		(!creds.Password || got.Password == want.Password) &&
+		(!creds.Auth || got.Auth == want.Auth)
+}
+
+// credentialFields unions the credential fields of the protocols of a client's
+// attachments. Separators carry no protocol and are ignored; a node that cannot
+// be resolved (or has no protocol) makes the answer "everything", never
+// "nothing". Protocol detection is clientplan's, so an SS-2022 node (stored as
+// "shadowsocks" plus a method) is classified exactly as the planner did.
+func (s *Service) credentialFields(ctx context.Context, atts []domain.PSPClientInbound) domain.CredentialFields {
+	if s.nodes == nil {
+		return domain.CredentialFieldsFor()
+	}
+	protos := make([]domain.Protocol, 0, len(atts))
+	for _, a := range atts {
+		n, err := s.nodes.GetByID(ctx, a.NodeID)
+		if err != nil || n == nil {
+			return domain.CredentialFieldsFor()
+		}
+		if n.IsSeparator() {
+			continue
+		}
+		protos = append(protos, clientplan.NodeCredFromNode(n).Protocol)
+	}
+	return domain.CredentialFieldsFor(protos...)
 }
 
 // absInt64 returns |v| as a float64 for histogram observation. The floor

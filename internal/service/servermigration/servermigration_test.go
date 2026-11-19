@@ -201,7 +201,8 @@ func TestSnapshotBlockersFailClosedWithoutSecrets(t *testing.T) {
 		{"json_clients", "snapshot_contains_clients", func(s *domain.ServerMigrationSnapshot) { s.Nodes[0].InboundSettings = `{"clients":[]}` }},
 		{"lifecycle", "lifecycle_not_minted", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Client.DesiredMinted = false }},
 		{"credential_mismatch", "credential_not_confirmed", func(s *domain.ServerMigrationSnapshot) {
-			s.Clients[0].Inbounds[0].AppliedPassword = "test-original-unconfirmed"
+			// The fixture node is VLESS, which reads the id, not the password.
+			s.Clients[0].Inbounds[0].AppliedUUID = "test-original-unconfirmed"
 		}},
 		{"pending_attachment", "credential_not_confirmed", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Inbounds[0].State = domain.ClientApplyPending }},
 		{"cross_panel_client", "cross_panel_attachment", func(s *domain.ServerMigrationSnapshot) { s.Clients[0].Client.PanelID = 10 }},
