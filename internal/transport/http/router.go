@@ -878,6 +878,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		servers.WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
 			WithNodeMetrics(d.Repos.NodeHostMetric).
 			WithNodeAgents(d.Repos.NodeAgent).
+			WithSyncTasks(d.Repos.SyncTask).
 			WithNodeSettings(d.Repos.Settings).
 			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
 			WithNodeDiagnostics(d.NodeDiagnostics).

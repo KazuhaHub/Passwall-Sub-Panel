@@ -42,6 +42,7 @@ type AdminServersHandler struct {
 	repo              ports.XUIPanelRepo
 	pool              ports.XUIPool
 	nodes             ports.NodeRepo
+	syncTasks         ports.SyncTaskRepo
 	audit             ports.AuditRepo
 	async             AsyncDispatcher
 	invalidateRender  func()
@@ -81,6 +82,13 @@ type EngineLinkGuard interface {
 }
 
 // WithEngineLinkGuard binds the tunnel check run before an engine switch.
+// WithSyncTasks lets the line answers say which landings are queued for
+// deletion (a node delete only disables the node until its sync task drains).
+func (h *AdminServersHandler) WithSyncTasks(tasks ports.SyncTaskRepo) *AdminServersHandler {
+	h.syncTasks = tasks
+	return h
+}
+
 func (h *AdminServersHandler) WithEngineLinkGuard(g EngineLinkGuard) *AdminServersHandler {
 	h.links = g
 	return h
@@ -1926,12 +1934,21 @@ func serverRouteUsers(all []*domain.Node, id int64) []gin.H {
 }
 
 // serverEntryLines is node.LinesEnteringServer in the shape of the delete
-// answers.
-func serverEntryLines(all []*domain.Node, id int64) []gin.H {
+// answers. landing_pending_delete is true when the line's landing is queued for
+// deletion: it is only disabled until its sync task drains (up to 100 attempts
+// while its panel is down), so its lines still count. Unreadable task state
+// reads as "not pending" — the line is still listed and still blocks.
+func (h *AdminServersHandler) serverEntryLines(ctx context.Context, all []*domain.Node, id int64) []gin.H {
 	lines := make([]gin.H, 0)
+	pending := map[int64]bool{}
 	for _, l := range node.LinesEnteringServer(all, id) {
+		p, seen := pending[l.NodeID]
+		if !seen && h.syncTasks != nil {
+			p, _ = h.syncTasks.HasActiveByTargetAny(ctx, []domain.SyncTaskType{domain.SyncTaskNodeDelete}, "node", l.NodeID)
+			pending[l.NodeID] = p
+		}
 		lines = append(lines, gin.H{"node_id": l.NodeID, "line_id": l.LineID, "landing_name": l.LandingName,
-			"line_name": l.LineName, "line_type": l.LineType})
+			"line_name": l.LineName, "line_type": l.LineType, "landing_pending_delete": p})
 	}
 	return lines
 }
@@ -1966,7 +1983,7 @@ func (h *AdminServersHandler) DeleteImpact(c *gin.Context) {
 	if routes == nil {
 		routes = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{"server_id": id, "nodes": attached, "lines_entering": serverEntryLines(all, id),
+	c.JSON(http.StatusOK, gin.H{"server_id": id, "nodes": attached, "lines_entering": h.serverEntryLines(c.Request.Context(), all, id),
 		"egress_users": egress, "route_users": routes})
 }
 
@@ -2003,11 +2020,15 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 	// the line published, pointing at a forward nothing runs any more. No
 	// cascade: removing a line goes through its landing's metadata save, which
 	// handles tunnels, shared-port routes and the clients.
-	if lines := serverEntryLines(all, id); len(lines) > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "Relay lines still enter through this server; remove those lines on their landing nodes first",
-			"code":  "server_has_lines", "lines": lines,
-		})
+	if lines := h.serverEntryLines(c.Request.Context(), all, id); len(lines) > 0 {
+		message := "Relay lines still enter through this server; remove those lines on their landing nodes first"
+		for _, l := range lines {
+			if l["landing_pending_delete"] == true {
+				message += ". Some of those lines belong to nodes that are being deleted (the delete only finishes once their sync task has run): wait for that deletion to finish, or detach those nodes, then delete the server"
+				break
+			}
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": message, "code": "server_has_lines", "lines": lines})
 		return
 	}
 	// Refuse if any node's routes by destination leave through this server: the

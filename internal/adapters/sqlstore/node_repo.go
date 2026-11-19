@@ -85,7 +85,7 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 				"flow":              n.Flow,
 				"region":            n.Region,
 				"tags":              jsonStrings(n.Tags),
-					"relays":            jsonRelays(n.Relays),
+				"relays":            jsonRelays(n.Relays),
 				"hide_direct":       n.HideDirect,
 				"show_relay_status": n.ShowRelayStatus,
 				"egress_panel_id":   n.EgressPanelID,
