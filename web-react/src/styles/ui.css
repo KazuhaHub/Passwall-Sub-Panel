@@ -1,0 +1,279 @@
+/*
+ * Tailwind v4 + shadcn (base-nova) stylesheet, coexisting with MUI.
+ *
+ * LAYERS. Tailwind emits its theme variables and utilities inside `@layer`s.
+ * MUI's emotion styles are injected as plain, UNLAYERED <style> rules, and by
+ * the cascade an unlayered author rule beats a layered one regardless of
+ * specificity or source order. So the utilities here lose to MUI on any element
+ * MUI styles, which is what lets un-migrated pages keep rendering as before.
+ * The corollary (plan section 4.2): never mix an MUI component with Tailwind
+ * utilities on one element, because the utilities would lose.
+ *
+ * PREFLIGHT IS NOT IMPORTED GLOBALLY, and that is deliberate. Layering alone is
+ * not enough: wherever MUI does not set a property itself, the layered reset
+ * still applies. Measured on the built login page, a global preflight changed
+ * `vertical-align` on every MUI svg icon (baseline -> middle), set border-style
+ * solid on every element, and changed tab-size, the tap-highlight colour and the
+ * html font-family / line-height. So `tailwindcss/theme.css` and
+ * `tailwindcss/utilities.css` are imported separately (this is what
+ * `@import "tailwindcss"` does minus preflight), and a scoped copy of the reset
+ * lives in the base layer below, applying only inside `.psp-ui` and
+ * `[data-slot]` (every shadcn component, including portaled popups).
+ *
+ * Anything NOT inside a layer here would beat MUI, so the only unlayered rules
+ * are custom properties on :root (MUI does not read them) and the @font-face
+ * rules from the font packages.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, 'PingFang SC', monospace;
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --brand: oklch(0.5 0.2 264);
+    --brand-foreground: oklch(0.985 0 0);
+    --success: oklch(0.55 0.15 150);
+    --success-foreground: oklch(0.98 0.02 150);
+    --warning: oklch(0.7 0.15 75);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.5 0.2 264);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.945 0.004 264);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+:root.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --brand: oklch(0.72 0.14 264);
+    --brand-foreground: oklch(0.145 0 0);
+    --success: oklch(0.72 0.17 150);
+    --success-foreground: oklch(0.2 0.05 150);
+    --warning: oklch(0.8 0.15 80);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.72 0.14 264);
+    --sidebar-primary-foreground: oklch(0.145 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+ * Brand presets. appearance.ts offers six source colours; useHtmlAppearance puts
+ * the matching id on <html data-brand>. The values are the tones the MUI theme
+ * derives from the same source (tone 40 in light, tone 80 in dark), so the two
+ * stacks agree on the brand colour while both are on screen. A colour that is
+ * not a preset gets data-brand="custom" and an inline --brand instead.
+ * The `:root.dark[...]` selectors are more specific than `:root[...]`, so dark
+ * wins without relying on source order.
+ */
+:root[data-brand="blue"]   { --brand: #0061a4; --sidebar-primary: #0061a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="purple"] { --brand: #6750a4; --sidebar-primary: #6750a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="teal"]   { --brand: #00696a; --sidebar-primary: #00696a; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="green"]  { --brand: #386a1f; --sidebar-primary: #386a1f; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="orange"] { --brand: #825500; --sidebar-primary: #825500; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="pink"]   { --brand: #a53265; --sidebar-primary: #a53265; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root.dark[data-brand="blue"]   { --brand: #9fcaff; --sidebar-primary: #9fcaff; --sidebar-primary-foreground: #003258; --brand-foreground: #003258; }
+:root.dark[data-brand="purple"] { --brand: #cfbcff; --sidebar-primary: #cfbcff; --sidebar-primary-foreground: #381e72; --brand-foreground: #381e72; }
+:root.dark[data-brand="teal"]   { --brand: #4cdadb; --sidebar-primary: #4cdadb; --sidebar-primary-foreground: #003737; --brand-foreground: #003737; }
+:root.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #0b3900; --brand-foreground: #0b3900; }
+:root.dark[data-brand="orange"] { --brand: #ffb951; --sidebar-primary: #ffb951; --sidebar-primary-foreground: #452b00; --brand-foreground: #452b00; }
+:root.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #5e1133; --brand-foreground: #5e1133; }
+
+/*
+ * Density. --control-h is the height of buttons/inputs/selects, --row-h the
+ * height of a table row. New components opt in with h-(--control-h) /
+ * h-(--row-h); nothing reads them yet. The bare :root default matches the
+ * store's default (comfortable) for the instant before the sync effect runs.
+ */
+:root, :root[data-density="comfortable"] { --control-h: 2.25rem; --row-h: 3rem; }
+:root[data-density="compact"] { --control-h: 1.75rem; --row-h: 2.25rem; }
+
+@layer base {
+  /*
+   * Scoped preflight: a trimmed copy of tailwindcss/preflight.css whose every
+   * selector is rooted at :where(.psp-ui, [data-slot]), so it has zero
+   * specificity (any utility or component class wins) and never reaches an MUI
+   * element. Dropped from the original: Firefox-only fixes, the date-input
+   * pseudo-element patches and the `:host` selectors, none of which this app
+   * needs. Re-diff against preflight.css when bumping Tailwind.
+   */
+  :where(.psp-ui, [data-slot]) {
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    -webkit-tap-highlight-color: transparent;
+
+    &, & *, & ::after, & ::before, &::backdrop, & ::backdrop, & ::file-selector-button {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      border: 0 solid;
+    }
+    & hr { height: 0; color: inherit; border-top-width: 1px; }
+    & abbr:where([title]) { text-decoration: underline dotted; }
+    & :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; font-weight: inherit; }
+    & a { color: inherit; text-decoration: inherit; }
+    & :is(b, strong) { font-weight: bolder; }
+    & :is(code, kbd, samp, pre) { font-family: var(--font-mono); font-size: 1em; }
+    & small { font-size: 80%; }
+    & :is(sub, sup) { font-size: 75%; line-height: 0; position: relative; vertical-align: baseline; }
+    & sub { bottom: -0.25em; }
+    & sup { top: -0.5em; }
+    & table { text-indent: 0; border-color: inherit; border-collapse: collapse; }
+    & progress { vertical-align: baseline; }
+    & summary { display: list-item; }
+    & :is(ol, ul, menu) { list-style: none; }
+    & :is(img, svg, video, canvas, audio, iframe, embed, object) { display: block; vertical-align: middle; }
+    & :is(img, video) { max-width: 100%; height: auto; }
+    & :is(button, input, select, optgroup, textarea), & ::file-selector-button {
+      font: inherit;
+      font-feature-settings: inherit;
+      font-variation-settings: inherit;
+      letter-spacing: inherit;
+      color: inherit;
+      border-radius: 0;
+      background-color: transparent;
+      opacity: 1;
+    }
+    & ::file-selector-button { margin-inline-end: 4px; }
+    & ::placeholder { opacity: 1; color: color-mix(in oklab, currentcolor 50%, transparent); }
+    & textarea { resize: vertical; }
+    & ::-webkit-search-decoration { -webkit-appearance: none; }
+    & :is(button, input:where([type='button'], [type='reset'], [type='submit'])), & ::file-selector-button { appearance: button; }
+    & ::-webkit-inner-spin-button, & ::-webkit-outer-spin-button { height: auto; }
+    & [hidden]:where(:not([hidden='until-found'])) { display: none !important; }
+  }
+
+  /*
+   * Border/outline defaults from the shadcn setup, scoped to what the new
+   * components own. Applying them to `*` (as the reference does) would also
+   * recolour borders on MUI elements that set only a width/style. [data-slot] is
+   * on every shadcn component, including those that portal out to <body>, so a
+   * `.psp-ui` wrapper alone would miss dialogs and popovers.
+   */
+  .psp-ui, .psp-ui *, [data-slot], [data-slot] * {
+    @apply border-border outline-ring/50;
+  }
+  /*
+   * Font: Geist for Latin, system CJK after it (see --font-sans). It must NOT go
+   * on html/body: MUI's CssBaseline sets the body font (Roboto stack) and every
+   * un-migrated page inherits it. Scoping to the wrapper class and to
+   * [data-slot] (portaled popups) leaves MUI pages untouched.
+   */
+  .psp-ui, [data-slot] {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .psp-ui {
+    @apply bg-background text-foreground;
+  }
+  .psp-ui ::selection {
+    background: color-mix(in oklch, var(--ring) 35%, transparent);
+  }
+}

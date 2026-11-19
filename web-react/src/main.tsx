@@ -10,6 +10,9 @@ import '@fontsource/roboto/500.css'
 // Microsoft YaHei on Windows, Hiragino Sans on iOS) which all Chinese-
 // reading platforms ship with. Re-add a custom font-subset here if a
 // future deployment specifically needs Noto Sans SC.
+// Tailwind/shadcn layer. Imported AFTER the Roboto faces and before the app so
+// its @layer rules sit under MUI's unlayered emotion styles (see styles/ui.css).
+import '@/styles/ui.css'
 import i18n, { i18nReady } from '@/i18n'
 import App from '@/App'
 

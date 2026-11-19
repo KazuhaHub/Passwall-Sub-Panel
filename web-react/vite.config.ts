@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
 export default defineConfig({
   // Runtime panel_path is injected through <base href> in index.html. Relative
   // asset URLs let the same bundle work at /, /panel/, or a deeper prefix.
   base: './',
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -45,6 +46,12 @@ export default defineConfig({
         // per-request overhead.
         manualChunks(id) {
           if (!id.includes('node_modules')) return
+          // Must precede the react rule below: '@base-ui/react/' contains a
+          // '/react/' path segment and would otherwise land in vendor-react.
+          // Empty until a migrated page imports components/ui, then the
+          // shadcn stack gets its own cacheable chunk.
+          if (/[\\/]@base-ui[\\/]/.test(id)) return 'vendor-base-ui'
+          if (/[\\/](lucide-react|cmdk|sonner|@tanstack[\\/]react-table|@tanstack[\\/]table-core)[\\/]/.test(id)) return 'vendor-ui'
           if (/[\\/](react|react-dom|react-router-dom)[\\/]/.test(id)) return 'vendor-react'
           if (/[\\/](@mui[\\/]material|@mui[\\/]icons-material|@emotion[\\/](react|styled))[\\/]/.test(id)) return 'vendor-mui'
           if (/[\\/]echarts[\\/]/.test(id)) return 'vendor-echarts'
