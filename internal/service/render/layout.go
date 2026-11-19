@@ -17,6 +17,11 @@ type renderItem struct {
 	// Host override) instead of the node's own ServerAddress. nil = direct.
 	// Populated by expandRelays.
 	relay *domain.RelayLine
+	// slot is where the entry sits on the shared sort scale, for the line
+	// placement rule (domain.PlaceFloatingLines). Set by applyLayout for nodes
+	// and standalone separators and by expandRelays for lines; positional group
+	// separators stay keyless on purpose.
+	slot domain.LineSlot
 }
 
 // region and tags are the entry's effective subscription labels: a relay
@@ -110,7 +115,8 @@ func applyLayout(nodes []*domain.Node, separators []*domain.SeparatorEntry, layo
 		return false
 	})
 	for _, p := range pres {
-		items = append(items, renderItem{isSeparator: p.isSeparator, name: p.name, node: p.node})
+		items = append(items, renderItem{isSeparator: p.isSeparator, name: p.name, node: p.node,
+			slot: domain.LineSlot{Key: p.sortOrder, Keyed: true}})
 	}
 
 	// Insert positional separators highest-position-first so earlier
