@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -213,4 +214,35 @@ func (h *AdminNodeHandler) PutOrder(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"order_version": version})
+}
+
+// DeleteImpact is the read-only answer to "what does deleting this node take
+// with it": its lines, the tunnel listeners that go too (the delete asks to
+// confirm them) and the shared-port routes that would block it.
+func (h *AdminNodeHandler) DeleteImpact(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	impact, err := h.node.DeleteImpact(c.Request.Context(), id)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	lines := make([]gin.H, 0, len(impact.Lines))
+	for _, l := range impact.Lines {
+		lines = append(lines, gin.H{"node_id": l.NodeID, "line_id": l.LineID, "landing_name": l.LandingName,
+			"line_name": l.LineName, "line_type": l.LineType})
+	}
+	tunnels := impact.Tunnels
+	if tunnels == nil {
+		tunnels = []node.TunnelItem{}
+	}
+	routes := impact.BlockedByRoutes
+	if routes == nil {
+		routes = []string{}
+	}
+	c.JSON(http.StatusOK, gin.H{"node": gin.H{"id": impact.Node.ID, "name": impact.Node.Name},
+		"lines": lines, "tunnels": tunnels, "blocked_by_routes": routes})
 }

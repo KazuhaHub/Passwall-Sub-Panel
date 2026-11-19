@@ -472,3 +472,42 @@ func TestNewNodeLandsBelowDraggedLines(t *testing.T) {
 		t.Fatalf("new node sort_order %d is not past the last line position %d", n.SortOrder, maxLine)
 	}
 }
+
+// The two delete-impact reads and the server refusal are administrator-only and
+// agree with each other through the real services.
+func TestDeleteImpactRoutesAndServerRefusal(t *testing.T) {
+	f := newOrderFixture(t)
+	ctx := context.Background()
+	entryID := f.nodeA.Relays[0].EntryPanelID
+
+	nodePath := fmt.Sprintf("/api/admin/nodes/%d/delete-impact", f.nodeA.ID)
+	serverPath := fmt.Sprintf("/api/admin/servers/%d/delete-impact", entryID)
+	for _, p := range []string{nodePath, serverPath} {
+		if w := f.do("GET", p, f.operatorToken, ""); w.Code != stdhttp.StatusForbidden {
+			t.Fatalf("operator GET %s = %d, want 403", p, w.Code)
+		}
+	}
+	w := f.do("GET", nodePath, f.adminToken, "")
+	var impact map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &impact)
+	if w.Code != stdhttp.StatusOK || len(impact["lines"].([]any)) != 3 { // direct + two relays
+		t.Fatalf("node impact = %d %v", w.Code, impact)
+	}
+	w = f.do("GET", serverPath, f.adminToken, "")
+	var server map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &server)
+	lines, _ := server["lines_entering"].([]any)
+	if w.Code != stdhttp.StatusOK || len(lines) != 1 || lines[0].(map[string]any)["line_id"] != "a-fwd" {
+		t.Fatalf("server impact = %d %v", w.Code, server)
+	}
+
+	w = f.do("DELETE", fmt.Sprintf("/api/admin/servers/%d", entryID), f.adminToken, "")
+	var refusal map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &refusal)
+	if w.Code != stdhttp.StatusConflict || refusal["code"] != "server_has_lines" {
+		t.Fatalf("server delete = %d %v, want 409 server_has_lines", w.Code, refusal)
+	}
+	if _, err := f.repos.XUIPanel.GetByID(ctx, entryID); err != nil {
+		t.Fatalf("a refused delete removed the server: %v", err)
+	}
+}
