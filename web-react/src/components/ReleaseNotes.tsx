@@ -1,4 +1,5 @@
 import { Box, Link, Typography } from '@mui/material'
+import type { ReactNode } from 'react'
 import Markdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -60,6 +61,31 @@ export const legalLinkComponents: typeof safeLinkComponents = {
       : <>{children}</>,
 }
 
+// Tailwind's reset (global now) strips what a browser gives these elements by
+// default: list markers and indentation, block-quote and code-block styling, and
+// table borders and padding. In a terms document the numbering IS content
+// ("clause 3"), so both markdown renderers put it back here, in one place.
+export const markdownLists: Pick<Components, 'ul' | 'ol'> = {
+  ul: ({ children }) => <Box component="ul" sx={{ my: 0.5, pl: 3, listStyleType: 'disc', '& ul': { listStyleType: 'circle' }, '& ol, & ul': { my: 0 } }}>{children}</Box>,
+  ol: ({ children }) => <Box component="ol" sx={{ my: 0.5, pl: 3, listStyleType: 'decimal', '& ol': { listStyleType: 'lower-alpha' }, '& ol, & ul': { my: 0 } }}>{children}</Box>,
+}
+
+export const markdownBlocks: Pick<Components, 'blockquote' | 'pre' | 'code' | 'table' | 'th' | 'td' | 'hr'> = {
+  blockquote: ({ children }: { children?: ReactNode }) =>
+    <Box component="blockquote" sx={{ my: 1, mx: 0, pl: 2, py: 0.25, borderLeft: 3, borderColor: 'divider', borderStyle: 'solid', borderWidth: '0 0 0 3px', color: 'text.secondary' }}>{children}</Box>,
+  pre: ({ children }: { children?: ReactNode }) =>
+    <Box component="pre" sx={{ my: 1, p: 1.5, overflow: 'auto', whiteSpace: 'pre', borderRadius: 1, bgcolor: 'action.hover', fontSize: 13, '& code': { bgcolor: 'transparent', p: 0 } }}>{children}</Box>,
+  code: ({ children }: { children?: ReactNode }) =>
+    <Box component="code" sx={{ px: 0.5, borderRadius: 0.5, bgcolor: 'action.hover', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.9em' }}>{children}</Box>,
+  table: ({ children }: { children?: ReactNode }) =>
+    <Box sx={{ my: 1, overflowX: 'auto' }}><Box component="table" sx={{ borderCollapse: 'collapse' }}>{children}</Box></Box>,
+  th: ({ children }: { children?: ReactNode }) =>
+    <Box component="th" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: 'left', fontWeight: 600 }}>{children}</Box>,
+  td: ({ children }: { children?: ReactNode }) =>
+    <Box component="td" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5 }}>{children}</Box>,
+  hr: () => <Box component="hr" sx={{ my: 1.5, border: 0, borderTop: 1, borderColor: 'divider', borderStyle: 'solid', borderWidth: '1px 0 0' }} />,
+}
+
 // Headings are demoted to one small size: the dialog title is the page's
 // heading, and a release body's "##" would otherwise render larger than it.
 const heading: Components['h1'] = ({ children }) =>
@@ -68,8 +94,8 @@ const heading: Components['h1'] = ({ children }) =>
 const components: Components = {
   h1: heading, h2: heading, h3: heading, h4: heading, h5: heading, h6: heading,
   p: ({ children }) => <Typography variant="body2" sx={{ my: 0.5 }}>{children}</Typography>,
-  ul: ({ children }) => <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>{children}</Box>,
-  ol: ({ children }) => <Box component="ol" sx={{ my: 0.5, pl: 2.5 }}>{children}</Box>,
+  ...markdownLists,
+  ...markdownBlocks,
   li: ({ children }) => <Typography component="li" variant="body2" sx={{ my: 0.25 }}>{children}</Typography>,
   ...safeLinkComponents,
 }

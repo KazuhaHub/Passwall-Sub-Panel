@@ -11,8 +11,8 @@ export type ThemeMode = 'light' | 'dark' | 'auto'
 //     inputs, larger buttons, 56px+ table rows.
 //   - compact: Cloudreve-style trim — size="small" inputs/tables,
 //     43-50px rows, 36px tabs, tighter dialog padding, smaller h4.
-// Choice persists in localStorage. Default for new visitors is
-// "comfortable" so existing users don't see a sudden layout shift.
+// Choice persists in localStorage. The default for a visitor with no saved
+// choice is "compact" (owner decision); a saved choice is always honoured.
 export type Density = 'comfortable' | 'compact'
 
 interface AppearanceState {
@@ -50,7 +50,9 @@ function loadUserMode(): ThemeMode {
 function loadUserDensity(): Density {
   const v = localStorage.getItem(USER_DENSITY_KEY)
   if (v === 'comfortable' || v === 'compact') return v
-  return 'comfortable'
+  // Compact is the default for a visitor with no saved choice; a saved choice
+  // (either value) is honoured.
+  return 'compact'
 }
 
 export const useAppearanceStore = create<AppearanceState>((set) => ({
