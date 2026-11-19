@@ -169,6 +169,10 @@ describe('the rows', () => {
   })
 
   it('days are headed in the panel zone: today, yesterday-or-earlier', async () => {
+    // The default rows start one hour back, which is still "yesterday" in the
+    // panel zone for the first hour after its midnight, so this test failed
+    // for that hour every day. Pin the newest row to the current hour.
+    vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ hour_ms: BASE }), item({ hour_ms: BASE - 30 * H })] }))
     renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
     const heads = screen.getAllByRole('heading', { level: 3 }).map(h => h.textContent)
