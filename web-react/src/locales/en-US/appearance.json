@@ -2,7 +2,10 @@
   "title": "Appearance",
   "density": {
     "switch_to_comfortable": "Switch to comfortable density",
-    "switch_to_compact": "Switch to compact density"
+    "switch_to_compact": "Switch to compact density",
+    "section": "Density",
+    "compact": "Compact",
+    "comfortable": "Comfortable"
   },
   "preset_section": "Preset palette",
   "custom_section": "Custom",
@@ -23,5 +26,7 @@
     "green": "Green",
     "orange": "Orange",
     "pink": "Pink"
-  }
+  },
+  "apply": "Apply",
+  "color_input": "Colour value"
 }

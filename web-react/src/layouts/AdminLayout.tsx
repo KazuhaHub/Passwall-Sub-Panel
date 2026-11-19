@@ -50,6 +50,8 @@ import AppearanceMenu from '@/components/AppearanceMenu'
 import DensityToggle from '@/components/DensityToggle'
 import LanguageMenu from '@/components/LanguageMenu'
 import NotificationBell from '@/components/NotificationBell'
+import { ToastLogButton } from '@/components/shell/ToastLogButton'
+import ToastLogMenuItem from './ToastLogMenuItem'
 import BrandLogo from '@/components/BrandLogo'
 import { useAuthStore, selectLabel } from '@/stores/auth'
 import { useSiteStore, selectIcon } from '@/stores/site'
@@ -463,6 +465,8 @@ export default function AdminLayout() {
               {siteTitle}
             </Typography>
             <Box sx={{ flex: 1 }} />
+            {/* The log of messages that were never shown as toasts (new-stack button in the MUI bar until the shell swap). Hidden below sm, where the bar has no room: the account menu carries it there. */}
+            <ToastLogButton size="bar" className="hidden sm:inline-flex" />
             <NotificationBell />
             <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
             <DensityToggle />
@@ -496,6 +500,7 @@ export default function AdminLayout() {
                   </Typography>
                 </Box>
               </MenuItem>
+              <ToastLogMenuItem onClose={() => setUserAnchor(null)} />
               <MenuItem onClick={handleLogout}>
                 <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
                 <ListItemText primary={t('common:auth.logout')} />

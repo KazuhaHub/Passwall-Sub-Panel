@@ -1,0 +1,59 @@
+import type { ReactNode } from 'react'
+
+import { cn } from '@/lib/utils'
+
+/**
+ * One figure: what it is, the number, and what it is out of. Static by default;
+ * with `onToggle` it is a filter in tile form: a button with aria-pressed, pressed
+ * shown by the brand ring and a tinted fill. A second click is the page's cue to
+ * clear the filter.
+ */
+export function KpiTile({ label, value, caption, danger, title, pressed, onToggle, className }: {
+  label: string
+  value: ReactNode
+  caption?: ReactNode
+  /** Only for a figure that is itself a failure; nothing else is coloured. */
+  danger?: boolean
+  /** Raw values behind a folded figure, on hover. */
+  title?: string
+  pressed?: boolean
+  onToggle?: () => void
+  className?: string
+}) {
+  const body = (
+    <>
+      <span className="block w-full text-xs text-muted-foreground">{label}</span>
+      <span className={cn('block text-[1.0625rem] leading-snug font-semibold tabular-nums [overflow-wrap:anywhere]', danger ? 'text-destructive' : 'text-foreground')}>{value}</span>
+      {caption ? <span className="block text-xs text-muted-foreground tabular-nums">{caption}</span> : null}
+    </>
+  )
+  // One layout for both variants. A <button> centres its content vertically and a <div>
+  // does not, so in a row the labels of a clickable and a plain tile sat ~9px apart;
+  // both are a top-aligned column of the same minimum height now.
+  const base = 'flex min-h-11 min-w-0 flex-col items-start justify-start rounded-lg bg-card px-3 py-2.5 text-left ring-1 ring-foreground/10'
+  if (!onToggle) {
+    return <div data-slot="kpi-tile" title={title} className={cn(base, className)}>{body}</div>
+  }
+  return (
+    <button
+      type="button"
+      data-slot="kpi-tile"
+      title={title}
+      aria-pressed={pressed === true}
+      onClick={onToggle}
+      className={cn(
+        base,
+        'w-full outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50',
+        pressed && 'bg-brand/10 ring-2 ring-brand hover:bg-brand/15',
+        className,
+      )}
+    >
+      {body}
+    </button>
+  )
+}
+
+/** Two tiles a row on a phone, as many as fit on a wider screen. */
+export function KpiGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('my-3 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))]', className)}>{children}</div>
+}

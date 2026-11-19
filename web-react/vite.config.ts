@@ -33,7 +33,7 @@ const CHUNK_BY_PACKAGE = new Map<string, string>([
   ...['echarts', 'zrender'].map(n => [n, 'vendor-echarts'] as const),
   ...['i18next', 'react-i18next', 'html-parse-stringify', 'void-elements'].map(n => [n, 'vendor-i18n'] as const),
   ...['@base-ui/react', '@base-ui/utils', 'tabbable', 'reselect'].map(n => [n, 'vendor-base-ui'] as const),
-  ...['lucide-react', 'cmdk', 'sonner', 'tailwind-merge', 'class-variance-authority', '@tanstack/react-table', '@tanstack/table-core', 'react-remove-scroll',
+  ...['lucide-react', 'cmdk', 'tailwind-merge', 'class-variance-authority', '@tanstack/react-table', '@tanstack/table-core', 'react-remove-scroll',
     'react-remove-scroll-bar', 'react-style-singleton', 'use-callback-ref', 'use-sidecar', 'aria-hidden', 'get-nonce',
     'detect-node-es'].map(n => [n, 'vendor-ui'] as const),
 ])
@@ -47,7 +47,7 @@ const CHUNK_BY_SCOPE = new Map<string, string>([
 
 // Direct dependencies of the Tailwind/shadcn stack; transitive ones are caught by
 // smoke:dist's vendor-import check.
-const NEW_STACK_PACKAGES = new Set(['@base-ui/react', 'class-variance-authority', 'lucide-react', 'sonner', 'cmdk',
+const NEW_STACK_PACKAGES = new Set(['@base-ui/react', 'class-variance-authority', 'lucide-react', 'cmdk',
   'tailwind-merge', '@tanstack/react-table'])
 
 function chunkFor(pkg: string): string | undefined {

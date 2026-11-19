@@ -30,13 +30,13 @@ describe('ServersView row delete button', () => {
     const deleteButton = await screen.findByRole('button', { name: 'admin:servers.action.delete' })
     fireEvent.click(deleteButton)
 
-    const confirmDialog = await screen.findByRole('dialog')
+    const confirmDialog = await screen.findByRole('alertdialog')
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'admin:servers.action.delete' }))
 
     // The confirm dialog's exit transition keeps it in the DOM for a moment,
     // and MUI marks the rest of the page aria-hidden while any modal is
     // mounted — wait for it to actually leave before reading the row button.
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     await waitFor(() => expect(deleteButton.getAttribute('aria-busy')).toBe('true'))
     expect((deleteButton as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByRole('progressbar')).toBeTruthy()

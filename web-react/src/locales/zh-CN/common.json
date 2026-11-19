@@ -38,7 +38,6 @@
     "body": "此页面尚未从 Vue 版本迁移到 React + MUI。当前路径："
   },
   "errors": {
-    "sync_pending": "3X-UI 暂时不可达，同步任务已加入后台队列（每分钟自动重试）",
     "network": "网络异常，请检查连接后重试",
     "timeout": "请求超时，请稍后重试",
     "server": "服务器异常，请稍后重试",
@@ -204,6 +203,63 @@
       "graph_lines": "经过{{name}}的线路",
       "graph_lines_none": "选择一个框，在这里查看经过它的线路",
       "graph_lines_empty": "没有线路经过{{name}}"
+    },
+    "shell": {
+      "more": "更多",
+      "search": "搜索",
+      "skip_to_content": "跳到主要内容",
+      "toggle_sidebar": "展开或收起侧栏",
+      "sidebar_title": "导航菜单",
+      "sidebar_description": "当前账号可以打开的页面",
+      "main_nav": "主导航",
+      "user_menu": "账号菜单",
+      "role": {
+        "admin": "管理员",
+        "operator": "操作员",
+        "user": "用户"
+      },
+      "notifications_count": "{{count}}项待处理",
+      "palette": {
+        "title": "命令面板",
+        "description": "搜索页面和操作，按 Enter 打开",
+        "placeholder": "搜索页面或操作",
+        "empty": "没有匹配的结果",
+        "searching": "搜索中",
+        "pages": "页面",
+        "open": "打开命令面板"
+      }
+    },
+    "feedback": {
+      "loading": "加载中",
+      "error_title": "无法加载内容",
+      "error_hint": "请检查网络后重试。问题仍然存在时，请联系管理员。",
+      "sync_pending": "已排队，服务器恢复后自动同步",
+      "sync_pending_action": "查看同步任务",
+      "copy": "复制",
+      "copied": "已复制",
+      "copy_named": "复制{{name}}",
+      "help_label": "查看说明",
+      "more_toasts": "还有{{count}}条提示",
+      "view_all": "查看提示记录",
+      "notifications": "提示",
+      "log_title": "提示记录",
+      "log_description": "最近的提示，包括没有显示出来的",
+      "log_empty": "还没有提示",
+      "severity": {
+        "error": "错误",
+        "warning": "警告",
+        "info": "信息",
+        "success": "已完成"
+      },
+      "more_toasts_errors": "还有{{count}}条提示，其中{{errors}}条错误",
+      "more_toasts_warnings": "还有{{count}}条提示，其中{{warnings}}条警告",
+      "more_toasts_both": "还有{{count}}条提示，其中{{errors}}条错误、{{warnings}}条警告",
+      "log_omitted": "更早的{{count}}条提示已省略",
+      "log_unread": "提示记录，{{count}}条未查看",
+      "log_unread_errors": "提示记录，{{count}}条未查看，其中{{errors}}条错误",
+      "announce_more": "另有{{count}}条新提示",
+      "announce_more_errors": "另有{{count}}条新提示，其中{{errors}}条错误",
+      "severity_prefix": "{{severity}}："
     }
   }
 }

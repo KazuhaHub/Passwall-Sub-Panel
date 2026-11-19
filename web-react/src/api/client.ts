@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import i18n from '@/i18n'
 import { pushSnack } from '@/components/SnackbarHost'
+import { notifySyncPending } from '@/components/feedback/syncPendingToast'
 import { panelAPIBase, panelURL } from '@/panelPath'
 import { announcePending, isUserObserved, syncPendingOf, userIdFromURL } from './syncPending'
 import { trackWrites } from './requestProgress'
@@ -46,7 +47,7 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Throttle the "3X-UI sync pending" toast so a burst of admin clicks
+// Throttle the "sync pending" toast so a burst of admin clicks
 // doesn't spam the user with the same warning.
 let lastSyncPendingToast = 0
 
@@ -166,7 +167,7 @@ client.interceptors.response.use(
         // Only the toast we actually showed moves the window; a suppressed one
         // must not swallow the next genuine notification.
         lastSyncPendingToast = now
-        pushSnack(i18n.t('common:errors.sync_pending'), 'warning')
+        notifySyncPending()
       }
     }
     return res

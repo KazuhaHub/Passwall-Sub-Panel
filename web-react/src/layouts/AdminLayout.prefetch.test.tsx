@@ -99,4 +99,26 @@ describe('AdminLayout view prefetching', () => {
     const paths = prefetch.prefetchViewsWhenIdle.mock.calls.at(-1)![0]
     expect(paths).toContain('/admin/access-control')
   })
+
+  // Until the new shell replaces this layout, the message log (errors that came too fast to
+  // be shown as toasts) is reachable from this app bar.
+  it('has the message log button in its app bar, next to the notification bell', async () => {
+    mountLayout()
+    const log = await screen.findByRole('button', { name: 'ui.feedback.log_title' })
+    expect(log.closest('header')).not.toBeNull()
+    // It takes no app-bar space below sm: there the bar is full and it pushed the account
+    // avatar off the screen.
+    expect(log.className).toContain('hidden')
+    expect(log.className).toContain('sm:inline-flex')
+  })
+
+  it('carries the log in the account menu for widths where the button is hidden', async () => {
+    mountLayout()
+    const avatar = await waitFor(() => document.querySelector('.MuiAvatar-root')!.closest('button') as HTMLElement)
+    fireEvent.click(avatar)
+    const item = await screen.findByRole('menuitem', { name: 'ui.feedback.log_title' })
+    // Shown only where the app-bar button is hidden.
+    expect(getComputedStyle(item).display).not.toBe('')
+    expect(item.className).toContain('MuiMenuItem')
+  })
 })

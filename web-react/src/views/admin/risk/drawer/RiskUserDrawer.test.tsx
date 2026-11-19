@@ -203,11 +203,15 @@ describe('RiskUserDrawer', () => {
 
     act(() => { void confirm({ title: 'leave-guard', message: 'unsaved' }) })
 
-    const asked = (await screen.findByText('leave-guard')).closest('.MuiDialog-root')!
+    // The confirm is a Tailwind alert dialog now; jsdom loads no stylesheet, so its
+    // stacking is read from the z-index utility it carries (z-[N]) and the backdrop's.
+    const asked = (await screen.findByText('leave-guard')).closest('[role="alertdialog"]')!
     const drawer = document.querySelector('.MuiDrawer-root')!
     const z = (el: Element) => Number(getComputedStyle(el).zIndex)
     expect(z(drawer)).toBe(riskDrawerZIndex(theme))
-    expect(z(asked)).toBeGreaterThan(z(drawer))
+    const level = (el: Element) => Number(/(?:^|\s)z-\[(\d+)\]/.exec(el.className)?.[1])
+    expect(level(asked)).toBeGreaterThan(z(drawer))
+    expect(level(document.querySelector('[data-slot="alert-dialog-overlay"]')!)).toBeGreaterThan(z(drawer))
   })
 
   it.each([

@@ -38,7 +38,6 @@
     "body": "This page hasn't been moved from the Vue version to React + MUI yet. Current path:"
   },
   "errors": {
-    "sync_pending": "3X-UI temporarily unreachable; the sync task has been queued (auto-retry every minute).",
     "network": "Network error — please check your connection and try again.",
     "timeout": "Request timed out, please try again later.",
     "server": "Server error — please try again later.",
@@ -206,6 +205,63 @@
       "graph_lines": "Lines through {{name}}",
       "graph_lines_none": "Select a box to list the lines through it here",
       "graph_lines_empty": "No lines pass through {{name}}"
+    },
+    "shell": {
+      "more": "More",
+      "search": "Search",
+      "skip_to_content": "Skip to main content",
+      "toggle_sidebar": "Toggle sidebar",
+      "sidebar_title": "Navigation menu",
+      "sidebar_description": "Pages this account can open",
+      "main_nav": "Main navigation",
+      "user_menu": "Account menu",
+      "role": {
+        "admin": "Administrator",
+        "operator": "Operator",
+        "user": "User"
+      },
+      "notifications_count": "{{count}} to review",
+      "palette": {
+        "title": "Command palette",
+        "description": "Search pages and actions, then press Enter to open",
+        "placeholder": "Search pages or actions",
+        "empty": "No matching results",
+        "searching": "Searching",
+        "pages": "Pages",
+        "open": "Open the command palette"
+      }
+    },
+    "feedback": {
+      "loading": "Loading",
+      "error_title": "Couldn’t load this",
+      "error_hint": "Check your connection and try again. If it keeps happening, contact an administrator.",
+      "sync_pending": "Queued. It syncs automatically once the server is back",
+      "sync_pending_action": "View sync tasks",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copy_named": "Copy {{name}}",
+      "help_label": "Show explanation",
+      "more_toasts": "More messages: {{count}}",
+      "view_all": "View message log",
+      "notifications": "Messages",
+      "log_title": "Message log",
+      "log_description": "The most recent messages, including the ones that were never shown",
+      "log_empty": "No messages yet",
+      "severity": {
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Info",
+        "success": "Done"
+      },
+      "more_toasts_errors": "More messages: {{count}}, errors: {{errors}}",
+      "more_toasts_warnings": "More messages: {{count}}, warnings: {{warnings}}",
+      "more_toasts_both": "More messages: {{count}}, errors: {{errors}}, warnings: {{warnings}}",
+      "log_omitted": "Earlier messages left out: {{count}}",
+      "log_unread": "Message log, not yet seen: {{count}}",
+      "log_unread_errors": "Message log, not yet seen: {{count}}, errors: {{errors}}",
+      "announce_more": "More new messages: {{count}}",
+      "announce_more_errors": "More new messages: {{count}}, errors: {{errors}}",
+      "severity_prefix": "{{severity}}: "
     }
   }
 }

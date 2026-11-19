@@ -65,10 +65,25 @@ export const legalLinkComponents: typeof safeLinkComponents = {
 // default: list markers and indentation, block-quote and code-block styling, and
 // table borders and padding. In a terms document the numbering IS content
 // ("clause 3"), so both markdown renderers put it back here, in one place.
+//
+// A GFM task list (`- [x] done`) is an ul (or ol) that react-markdown tags
+// `contains-task-list`, each item holding a disabled checkbox: the checkbox is the
+// marker, so a bullet beside it is a second one. Such a list drops its marker and its
+// indent; the items of an ordinary list around it keep theirs.
+const isTaskList = (className?: string) => className?.split(' ').includes('contains-task-list') === true
+const taskListSx = { listStyleType: 'none', pl: 0.5, '& input': { mr: 0.75, verticalAlign: 'middle' } }
+
 export const markdownLists: Pick<Components, 'ul' | 'ol'> = {
-  ul: ({ children }) => <Box component="ul" sx={{ my: 0.5, pl: 3, listStyleType: 'disc', '& ul': { listStyleType: 'circle' }, '& ol, & ul': { my: 0 } }}>{children}</Box>,
-  ol: ({ children }) => <Box component="ol" sx={{ my: 0.5, pl: 3, listStyleType: 'decimal', '& ol': { listStyleType: 'lower-alpha' }, '& ol, & ul': { my: 0 } }}>{children}</Box>,
+  ul: ({ children, className }) => <Box component="ul" sx={{ my: 0.5, pl: 3, listStyleType: 'disc', '& ul': { listStyleType: 'circle' }, '& ol, & ul': { my: 0 }, ...(isTaskList(className) && taskListSx) }}>{children}</Box>,
+  // `start` is what makes "3. third" render as 3, not 1: dropping it renumbered a list that continues across a block.
+  ol: ({ children, className, start }) => <Box component="ol" start={start ?? undefined} sx={{ my: 0.5, pl: 3, listStyleType: 'decimal', '& ol': { listStyleType: 'lower-alpha' }, '& ol, & ul': { my: 0 }, ...(isTaskList(className) && taskListSx) }}>{children}</Box>,
 }
+
+// GFM column alignment (`:-:`, `-:`) arrives as a style prop on th and td; the cell
+// keeps its own default (left for a header, the table's for a body cell) otherwise.
+type Align = 'left' | 'center' | 'right'
+const alignOf = (style?: { textAlign?: string }): Align | undefined =>
+  style?.textAlign === 'left' || style?.textAlign === 'center' || style?.textAlign === 'right' ? style.textAlign : undefined
 
 export const markdownBlocks: Pick<Components, 'blockquote' | 'pre' | 'code' | 'table' | 'th' | 'td' | 'hr'> = {
   blockquote: ({ children }: { children?: ReactNode }) =>
@@ -79,10 +94,10 @@ export const markdownBlocks: Pick<Components, 'blockquote' | 'pre' | 'code' | 't
     <Box component="code" sx={{ px: 0.5, borderRadius: 0.5, bgcolor: 'action.hover', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.9em' }}>{children}</Box>,
   table: ({ children }: { children?: ReactNode }) =>
     <Box sx={{ my: 1, overflowX: 'auto' }}><Box component="table" sx={{ borderCollapse: 'collapse' }}>{children}</Box></Box>,
-  th: ({ children }: { children?: ReactNode }) =>
-    <Box component="th" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: 'left', fontWeight: 600 }}>{children}</Box>,
-  td: ({ children }: { children?: ReactNode }) =>
-    <Box component="td" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5 }}>{children}</Box>,
+  th: ({ children, style }: { children?: ReactNode; style?: { textAlign?: string } }) =>
+    <Box component="th" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: alignOf(style) ?? 'left', fontWeight: 600 }}>{children}</Box>,
+  td: ({ children, style }: { children?: ReactNode; style?: { textAlign?: string } }) =>
+    <Box component="td" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: alignOf(style) }}>{children}</Box>,
   hr: () => <Box component="hr" sx={{ my: 1.5, border: 0, borderTop: 1, borderColor: 'divider', borderStyle: 'solid', borderWidth: '1px 0 0' }} />,
 }
 

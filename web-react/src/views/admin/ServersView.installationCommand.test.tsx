@@ -179,7 +179,7 @@ describe('Passwall Node installation', () => {
     await openInstallation(nativeServer)
     await screen.findByText('admin:servers.native.legacy_credential_hint')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.action.rotate_node_credential' }))
-    const confirmation = await screen.findByRole('dialog', { name: 'admin:servers.native.rotate_title' })
+    const confirmation = await screen.findByRole('alertdialog', { name: 'admin:servers.native.rotate_title' })
     fireEvent.click(within(confirmation).getByRole('button', { name: 'admin:servers.native.rotate_confirm' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/rotate-node-credential'))
     fireEvent.click(await screen.findByRole('button', { name: 'common:actions.close' }))

@@ -39,13 +39,16 @@ function AlertDialogOverlay({
 function AlertDialogContent({
   className,
   size = "default",
+  overlay,
   ...props
 }: AlertDialogPrimitive.Popup.Props & {
   size?: "default" | "sm"
+  /** Props for the backdrop: a stacking override, or a click handler. */
+  overlay?: AlertDialogPrimitive.Backdrop.Props
 }) {
   return (
     <AlertDialogPortal>
-      <AlertDialogOverlay />
+      <AlertDialogOverlay {...overlay} />
       <AlertDialogPrimitive.Popup
         data-slot="alert-dialog-content"
         data-size={size}
