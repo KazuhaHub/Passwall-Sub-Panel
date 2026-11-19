@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } fro
 import { createPortal } from 'react-dom'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 
-import { TOUCH_TARGET } from '@/components/common/IconButton'
+import { TONE_STYLE, type Tone } from '@/components/common/tones'
+import { TOUCH_TARGET } from '@/components/common/touchTarget'
 import { Button } from '@/components/ui/button'
 import { IconClose, IconError, IconInfo, IconSuccess, IconWarning } from '@/lib/icons'
 import { useInertMuiModals } from '@/lib/inertModals'
@@ -30,11 +31,13 @@ const ANNOUNCE_MS = 7000
 const ANNOUNCE_EACH = 3
 const ANNOUNCE_WINDOW_MS = 250
 
-const TONE: Record<Severity, { Icon: typeof IconInfo; ink: string }> = {
-  success: { Icon: IconSuccess, ink: 'text-success' },
-  info: { Icon: IconInfo, ink: 'text-info' },
-  warning: { Icon: IconWarning, ink: 'text-warning-ink' },
-  error: { Icon: IconError, ink: 'text-destructive' },
+// Only the icon is the toast's own; the colour is common/tones.ts's, so a toast, a badge and a dot
+// can never disagree about what "warning" looks like.
+const SEVERITY: Record<Severity, { Icon: typeof IconInfo; tone: Tone }> = {
+  success: { Icon: IconSuccess, tone: 'success' },
+  info: { Icon: IconInfo, tone: 'info' },
+  warning: { Icon: IconWarning, tone: 'warning' },
+  error: { Icon: IconError, tone: 'danger' },
 }
 
 // "还有 6 条提示，其中 4 条错误": a summary says what it holds, errors and warnings first.
@@ -57,7 +60,8 @@ function ToastRow({ view, leaving, fading, onDismiss, onHover }: {
   onHover: (on: boolean) => void
 }) {
   const { t } = useSpacedT()
-  const { Icon, ink } = TONE[view.severity]
+  const { Icon, tone } = SEVERITY[view.severity]
+  const ink = TONE_STYLE[tone].ink
   return (
     <li
       data-slot="toast"
@@ -132,7 +136,8 @@ function LogPanel({ open, onClose, entries, omitted, returnFocus, language }: {
           ) : (
             <ul className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
               {rows.map(l => {
-                const { Icon, ink } = TONE[l.severity]
+                const { Icon, tone } = SEVERITY[l.severity]
+                const ink = TONE_STYLE[tone].ink
                 return (
                   <li key={l.id} data-slot="toast-log-row" data-state={l.state} className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-muted">
                     <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', ink)} />

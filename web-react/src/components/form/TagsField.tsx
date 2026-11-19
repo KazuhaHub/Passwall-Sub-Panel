@@ -4,7 +4,7 @@ import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useReportValidity } from './FormValidity'
-import { TOUCH_TARGET } from '@/components/data/touchTarget'
+import { TOUCH_TARGET } from '@/components/common/touchTarget'
 
 export interface TagsFieldProps {
   value: string[]

@@ -13,13 +13,13 @@ import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { DataTable } from '@/components/data/DataTable'
 import { DetailSheet } from '@/components/data/DetailSheet'
 import { FilterBar } from '@/components/data/FilterBar'
-import { StatFilterCard, StatFilterGrid } from '@/components/data/StatFilterCard'
-import { TipButton } from '@/components/data/TipButton'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { IconButton } from '@/components/common/IconButton'
 import { applyReorder, filterRows } from '@/components/data/dataTableLogic'
 import { useTableViewState } from '@/hooks/useTableViewState'
 import { urlCodecs, useUrlStates } from '@/hooks/useUrlState'
 import { useUrlSelection } from '@/hooks/useUrlSelection'
-import { cn } from '@/lib/utils'
 import {
   LINES, NODES, fetchUsers, landingColorsFor, linePath, type LineRow, type LineStatus, type NodeRow, type UserRow,
 } from './sampleData'
@@ -37,16 +37,11 @@ export function Section({ id, title, note, children }: { id?: string; title: str
 }
 
 const STATUS_LABEL = { up: '在线', down: '离线', pending: '等待生效' } as const
-const STATUS_TEXT = { up: 'bg-success', down: 'bg-destructive', pending: 'bg-warning' } as const
+const STATUS_TONE = { up: 'success', down: 'danger', pending: 'warning' } as const
 
 /** A quiet dot for the normal state and a coloured badge only when something is off (plan 3.2). */
 function StatusCell({ status }: { status: 'up' | 'down' | 'pending' }) {
-  if (status === 'up') return <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="size-2 rounded-full bg-success" />{STATUS_LABEL.up}</span>
-  return (
-    <Badge variant={status === 'down' ? 'destructive' : 'secondary'} className="gap-1.5">
-      <span className={cn('size-1.5 rounded-full', STATUS_TEXT[status])} />{STATUS_LABEL[status]}
-    </Badge>
-  )
+  return <StatusBadge tone={STATUS_TONE[status]} label={STATUS_LABEL[status]} />
 }
 
 // ---------------------------------------------------------------- nodes: client mode
@@ -61,7 +56,7 @@ const nodeColumns: ColumnDef<NodeRow>[] = [
   { accessorKey: 'trafficGb', header: '本周期流量', meta: { label: '本周期流量', align: 'right' }, cell: c => `${c.getValue<number>().toFixed(1)} GB` },
   {
     id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right' },
-    cell: () => <TipButton label="更多操作" size="icon-xs" onClick={e => e.stopPropagation()}><EllipsisIcon /></TipButton>,
+    cell: () => <IconButton label="更多操作" size="icon-xs" onClick={e => e.stopPropagation()}><EllipsisIcon /></IconButton>,
   },
 ]
 
@@ -100,12 +95,12 @@ export function NodesTableSection() {
 
   return (
     <Section id="nodes" title="节点列表（客户端分页）" note="筛选、排序、每页条数和列显隐记在 localStorage；搜索词、页码、选中行在 URL 里。点一行，或用方向键加回车，打开右侧详情。">
-      <StatFilterGrid columns={4}>
-        <StatFilterCard label="全部节点" value={NODES.length} />
-        <StatFilterCard label="在线" value={sc.get('up') ?? 0} tone="success" pressed={status.length === 1 && status[0] === 'up'} onToggle={() => setFacet('status')(status[0] === 'up' && status.length === 1 ? [] : ['up'])} />
-        <StatFilterCard label="离线" value={sc.get('down') ?? 0} tone="danger" pressed={status.length === 1 && status[0] === 'down'} onToggle={() => setFacet('status')(status[0] === 'down' && status.length === 1 ? [] : ['down'])} />
-        <StatFilterCard label="等待生效" value={sc.get('pending') ?? 0} tone="warning" pressed={status.length === 1 && status[0] === 'pending'} onToggle={() => setFacet('status')(status[0] === 'pending' && status.length === 1 ? [] : ['pending'])} />
-      </StatFilterGrid>
+      <KpiGrid>
+        <KpiTile label="全部节点" value={NODES.length} />
+        <KpiTile label="在线" value={sc.get('up') ?? 0} tone="success" pressed={status.length === 1 && status[0] === 'up'} onToggle={() => setFacet('status')(status[0] === 'up' && status.length === 1 ? [] : ['up'])} />
+        <KpiTile label="离线" value={sc.get('down') ?? 0} tone="danger" pressed={status.length === 1 && status[0] === 'down'} onToggle={() => setFacet('status')(status[0] === 'down' && status.length === 1 ? [] : ['down'])} />
+        <KpiTile label="等待生效" value={sc.get('pending') ?? 0} tone="warning" pressed={status.length === 1 && status[0] === 'pending'} onToggle={() => setFacet('status')(status[0] === 'pending' && status.length === 1 ? [] : ['pending'])} />
+      </KpiGrid>
       <DataTable
         aria-label="节点"
         data={filtered}

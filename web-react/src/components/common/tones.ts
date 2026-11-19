@@ -25,6 +25,8 @@ export interface ToneStyle {
   ink: string
   /** Badge fill when the tone is shown as a badge, not as a quiet dot. */
   tint: string
+  /** Border colour for a line or a connector drawn in the tone. */
+  line: string
   /** Badge ring. */
   ring: string
   /** Shown as a tinted badge unless the caller asks for the quiet form. */
@@ -34,23 +36,23 @@ export interface ToneStyle {
 
 export const TONE_STYLE: Record<Tone, ToneStyle> = {
   success: {
-    dot: 'bg-success', ink: 'text-success', tint: 'bg-success/12', ring: 'ring-success/25', loud: false,
+    dot: 'bg-success', ink: 'text-success', tint: 'bg-success/12', ring: 'ring-success/25', line: 'border-success', loud: false,
     tokens: { ink: '--success', tint: '--success', tintAlpha: 0.12, dot: '--success' },
   },
   warning: {
-    dot: 'bg-warning-ink', ink: 'text-warning-ink', tint: 'bg-warning/12', ring: 'ring-warning/30', loud: true,
+    dot: 'bg-warning-ink', ink: 'text-warning-ink', tint: 'bg-warning/12', ring: 'ring-warning/30', line: 'border-warning', loud: true,
     tokens: { ink: '--warning-ink', tint: '--warning', tintAlpha: 0.12, dot: '--warning-ink' },
   },
   danger: {
-    dot: 'bg-destructive', ink: 'text-destructive', tint: 'bg-destructive/12', ring: 'ring-destructive/25', loud: true,
+    dot: 'bg-destructive', ink: 'text-destructive', tint: 'bg-destructive/12', ring: 'ring-destructive/25', line: 'border-destructive', loud: true,
     tokens: { ink: '--destructive', tint: '--destructive', tintAlpha: 0.12, dot: '--destructive' },
   },
   info: {
-    dot: 'bg-info', ink: 'text-info', tint: 'bg-info/12', ring: 'ring-info/25', loud: true,
+    dot: 'bg-info', ink: 'text-info', tint: 'bg-info/12', ring: 'ring-info/25', line: 'border-info', loud: true,
     tokens: { ink: '--info', tint: '--info', tintAlpha: 0.12, dot: '--info' },
   },
   neutral: {
-    dot: 'bg-muted-foreground', ink: 'text-muted-foreground', tint: 'bg-muted', ring: 'ring-border', loud: false,
+    dot: 'bg-muted-foreground', ink: 'text-muted-foreground', tint: 'bg-muted', ring: 'ring-border', line: 'border-muted-foreground/50', loud: false,
     tokens: { ink: '--muted-foreground', tint: '--muted', tintAlpha: 1, dot: '--muted-foreground' },
   },
 }

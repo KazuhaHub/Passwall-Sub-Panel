@@ -1,10 +1,16 @@
 import type { TFunction } from 'i18next'
 import { spacedT } from '@/i18n/spacing'
+import type { Tone } from '@/components/common/tones'
 import type { LandingColor } from './landingColor'
 
 export type PathNodeKind = 'user' | 'entry' | 'cdn' | 'external' | 'landing' | 'exit' | 'internet'
 /** `pending` is a line that has not taken effect yet: its own tone, not a milder warning. */
 export type PathTone = 'success' | 'warning' | 'danger' | 'pending' | 'neutral'
+
+/** A pending line is drawn in the warning tone (it has not taken effect yet) and told apart by its own wording. */
+export function toneOfPath(status: PathTone): Tone {
+  return status === 'pending' ? 'warning' : status
+}
 
 export interface PathNode {
   id: string

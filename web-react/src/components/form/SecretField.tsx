@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ComponentProps } from 'react'
-import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
+import { useState, type ComponentProps } from 'react'
+import { EyeIcon, EyeOffIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
-import { TipButton } from '@/components/data/TipButton'
+import { CopyButton } from '@/components/common/CopyButton'
+import { IconButton } from '@/components/common/IconButton'
 
 export interface SecretFieldProps extends Omit<ComponentProps<'input'>, 'value' | 'onChange' | 'type'> {
   value: string
@@ -19,19 +20,6 @@ export interface SecretFieldProps extends Omit<ComponentProps<'input'>, 'value' 
 export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...rest }: SecretFieldProps) {
   const { t } = useSpacedT()
   const [shown, setShown] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      clearTimeout(timer.current)
-      timer.current = setTimeout(() => setCopied(false), 1500)
-    } catch { /* clipboard blocked: the reveal button is the fallback for copying by hand */ }
-  }
-
   return (
     <InputGroup>
       <InputGroupInput
@@ -52,14 +40,10 @@ export function SecretField({ value, onChange, isSet, readOnly, placeholder, ...
         className="font-mono"
       />
       <InputGroupAddon align="inline-end">
-        <TipButton label={shown ? t('ui.form.secret_hide') : t('ui.form.secret_show')} size="icon-xs" onClick={() => setShown(s => !s)}>
+        <IconButton label={shown ? t('ui.form.secret_hide') : t('ui.form.secret_show')} size="icon-xs" onClick={() => setShown(s => !s)}>
           {shown ? <EyeOffIcon /> : <EyeIcon />}
-        </TipButton>
-        {value && (
-          <TipButton label={copied ? t('ui.form.secret_copied') : t('ui.form.secret_copy')} size="icon-xs" onClick={() => void copy()}>
-            {copied ? <CheckIcon /> : <CopyIcon />}
-          </TipButton>
-        )}
+        </IconButton>
+        {value && <CopyButton value={value} size="icon-xs" />}
       </InputGroupAddon>
     </InputGroup>
   )

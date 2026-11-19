@@ -4,7 +4,7 @@ import { useSpacedT } from '@/i18n/spacing'
 import { NativeSelect } from '@/components/ui/native-select'
 import { cn } from '@/lib/utils'
 import { PAGE_SIZE_OPTIONS, pageCount, pageRange } from './dataTableLogic'
-import { TipButton } from './TipButton'
+import { IconButton } from '@/components/common/IconButton'
 
 export interface DataTablePaginationProps {
   page: number
@@ -62,10 +62,10 @@ export function DataTablePagination({
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground tabular-nums">{t('pagination.range', { from, to, count: total })}</span>
         <div ref={nav} className="flex items-center gap-0.5">
-          <TipButton data-nav="first" label={t('ui.data.first_page')} variant="outline" aria-disabled={disabled || atStart || undefined} onClick={() => go(1, 'next')}><ChevronsLeftIcon /></TipButton>
-          <TipButton data-nav="prev" label={t('ui.data.prev_page')} variant="outline" aria-disabled={disabled || atStart || undefined} onClick={() => onPageChange(page - 1)}><ChevronLeftIcon /></TipButton>
-          <TipButton data-nav="next" label={t('ui.data.next_page')} variant="outline" aria-disabled={disabled || atEnd || undefined} onClick={() => onPageChange(page + 1)}><ChevronRightIcon /></TipButton>
-          <TipButton data-nav="last" label={t('ui.data.last_page')} variant="outline" aria-disabled={disabled || atEnd || undefined} onClick={() => go(pages, 'prev')}><ChevronsRightIcon /></TipButton>
+          <IconButton size="icon-sm" data-nav="first" label={t('ui.data.first_page')} variant="outline" aria-disabled={disabled || atStart || undefined} onClick={() => go(1, 'next')}><ChevronsLeftIcon /></IconButton>
+          <IconButton size="icon-sm" data-nav="prev" label={t('ui.data.prev_page')} variant="outline" aria-disabled={disabled || atStart || undefined} onClick={() => onPageChange(page - 1)}><ChevronLeftIcon /></IconButton>
+          <IconButton size="icon-sm" data-nav="next" label={t('ui.data.next_page')} variant="outline" aria-disabled={disabled || atEnd || undefined} onClick={() => onPageChange(page + 1)}><ChevronRightIcon /></IconButton>
+          <IconButton size="icon-sm" data-nav="last" label={t('ui.data.last_page')} variant="outline" aria-disabled={disabled || atEnd || undefined} onClick={() => go(pages, 'prev')}><ChevronsRightIcon /></IconButton>
         </div>
       </div>
     </div>

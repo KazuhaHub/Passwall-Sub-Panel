@@ -1,17 +1,9 @@
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-
-// A phone finger needs a 32px target at the least. The icon buttons are 28px (compact
-// `icon-sm`) or 24px (`icon-xs`), which is right for a mouse, so on a coarse pointer the
-// BUTTON ITSELF grows to 2rem; on a mouse nothing changes. It grows the real box, not an
-// invisible hit area around it: an expanded hit area of an `icon-xs` button takes 4px of a
-// neighbour's visible area unless a gap is enforced everywhere, whereas a larger box just
-// lays out larger and can never overlap. Exported so a trigger that is not an IconButton
-// (InfoTip) carries the same rule. scripts/dist-guards.mjs checks the built CSS has it.
-export const TOUCH_TARGET = 'pointer-coarse:min-h-[2rem] pointer-coarse:min-w-[2rem]'
+import { TOUCH_TARGET } from './touchTarget'
 
 type TooltipSide = 'top' | 'right' | 'bottom' | 'left'
 
@@ -23,16 +15,32 @@ type TooltipSide = 'top' | 'right' | 'bottom' | 'left'
  * It forwards every other prop (and the ref) to the button, so it can be the
  * `render` of a menu or popover trigger: `<DropdownMenuTrigger render={<IconButton
  * label="更多" />} />` gets both the menu behaviour and the tooltip.
+ *
+ * Switch a control off with `aria-disabled`, not `disabled`: a disabled button cannot
+ * be focused and shows no tooltip, so nobody can learn the reason. The click is
+ * ignored here, the look follows the attribute, and `tooltip` can then say why.
  */
-export function IconButton({ label, tooltip, side = 'bottom', variant = 'ghost', size = 'icon', ...props }: Omit<ComponentProps<typeof Button>, 'aria-label'> & {
+export function IconButton({ label, tooltip, side = 'bottom', variant = 'ghost', size = 'icon', onClick, className, ...props }: Omit<ComponentProps<typeof Button>, 'aria-label'> & {
   label: string
-  /** When the tooltip should say more than the accessible name. */
-  tooltip?: string
+  /** When the tooltip should say more than the accessible name (or why the control is off). */
+  tooltip?: ReactNode
   side?: TooltipSide
 }) {
+  const off = props['aria-disabled'] === true || props['aria-disabled'] === 'true'
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button aria-label={label} variant={variant} size={size} {...props} className={cn(TOUCH_TARGET, props.className)} />} />
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={label}
+            variant={variant}
+            size={size}
+            {...props}
+            className={cn(TOUCH_TARGET, 'aria-disabled:cursor-not-allowed aria-disabled:opacity-50', className)}
+            onClick={off ? undefined : onClick}
+          />
+        }
+      />
       <TooltipContent side={side}>{tooltip ?? label}</TooltipContent>
     </Tooltip>
   )

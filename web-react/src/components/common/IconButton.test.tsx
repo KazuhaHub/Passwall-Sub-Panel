@@ -49,3 +49,31 @@ describe('touch targets', () => {
     expect(screen.getByRole('button', { name: 'y' }).className).toContain('rounded-full')
   })
 })
+
+describe('a switched-off control that still explains itself', () => {
+  // A `disabled` button cannot be focused and shows no tooltip, so nobody could learn why it is
+  // off. aria-disabled keeps it focusable; the click must still be ignored.
+  it('ignores the click while aria-disabled and stays focusable', () => {
+    const onClick = vi.fn()
+    render(<IconButton label="下一页" aria-disabled onClick={onClick}><svg /></IconButton>)
+    const button = screen.getByRole('button', { name: '下一页' })
+    fireEvent.click(button)
+    expect(onClick).not.toHaveBeenCalled()
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+    expect(button.className).toContain('aria-disabled:opacity-50')
+    expect(button.className).toContain('aria-disabled:cursor-not-allowed')
+  })
+
+  it('still clicks when aria-disabled is false or absent', () => {
+    const onClick = vi.fn()
+    render(<IconButton label="上一页" aria-disabled={false} onClick={onClick}><svg /></IconButton>)
+    fireEvent.click(screen.getByRole('button', { name: '上一页' }))
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a tooltip that differs from the accessible name, and accepts rich content', async () => {
+    render(<IconButton label="拖动" tooltip={<span data-testid="why">已排序，无法拖动</span>}><svg /></IconButton>)
+    fireEvent.focus(screen.getByRole('button', { name: '拖动' }))
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="why"]')?.textContent).toBe('已排序，无法拖动'))
+  })
+})

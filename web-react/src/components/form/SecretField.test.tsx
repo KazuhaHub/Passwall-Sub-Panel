@@ -20,9 +20,24 @@ describe('SecretField', () => {
   it('copies the value and confirms it', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    // The shared helper only trusts the async API in a secure context; jsdom reports none.
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
     render(<SecretField aria-label="Token" value="s3cret" readOnly />)
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })) })
     expect(writeText).toHaveBeenCalledWith('s3cret')
+    expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy()
+  })
+
+  // The panel is often served over plain HTTP, where navigator.clipboard does not exist. The shared
+  // copy helper falls back to execCommand; a private writeText call here would silently do nothing.
+  it('still copies where the async clipboard API is unavailable', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    const exec = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
+    render(<SecretField aria-label="Token" value="s3cret" readOnly />)
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy' })) })
+    expect(exec).toHaveBeenCalledWith('copy')
     expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy()
   })
 

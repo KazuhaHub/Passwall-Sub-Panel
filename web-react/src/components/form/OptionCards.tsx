@@ -1,3 +1,4 @@
+import { ToneDot } from '@/components/common/StatusDot'
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { CheckIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -95,7 +96,7 @@ export function OptionCards<V extends string>({
             <p id={descId} className="text-xs text-foreground/70">{o.description}</p>
             {o.disabled && o.disabledReason && (
               <p id={reasonId} className="flex items-start gap-1.5 text-xs font-medium text-foreground">
-                <span aria-hidden="true" className="mt-1 size-1.5 shrink-0 rounded-full bg-warning" />{o.disabledReason}
+                <ToneDot tone="warning" className="mt-1 size-1.5" />{o.disabledReason}
               </p>
             )}
           </div>

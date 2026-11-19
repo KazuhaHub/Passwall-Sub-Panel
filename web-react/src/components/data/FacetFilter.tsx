@@ -6,8 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { TipButton } from './TipButton'
-import { TOUCH_HEIGHT } from './touchTarget'
+import { IconButton } from '@/components/common/IconButton'
+import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 
 export interface FacetOption {
   value: string
@@ -88,7 +88,7 @@ export function FacetFilter({ label, options, selected, onChange, searchAbove = 
         </PopoverContent>
       </Popover>
       {selected.length > 0 && (
-        <TipButton
+        <IconButton
           label={t('ui.data.facet_clear_named', { label })}
           variant="outline"
           size="icon-sm"
@@ -96,7 +96,7 @@ export function FacetFilter({ label, options, selected, onChange, searchAbove = 
           onClick={() => onChange([])}
         >
           <XIcon />
-        </TipButton>
+        </IconButton>
       )}
     </div>
   )

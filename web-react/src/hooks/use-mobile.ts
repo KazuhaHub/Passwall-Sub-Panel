@@ -1,18 +1,10 @@
-import { useSyncExternalStore } from "react"
+import { useMediaQuery } from "./useMediaQuery"
 
+// shadcn's sidebar asks "is this a phone-width screen". The query machinery is
+// useMediaQuery's (one subscription implementation, safe where matchMedia is missing);
+// only the breakpoint is named here.
 const MOBILE_BREAKPOINT = 768
-const query = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`
-
-function subscribe(onChange: () => void) {
-  const mql = window.matchMedia(query)
-  mql.addEventListener("change", onChange)
-  return () => mql.removeEventListener("change", onChange)
-}
 
 export function useIsMobile() {
-  return useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(query).matches,
-    () => false,
-  )
+  return useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
 }

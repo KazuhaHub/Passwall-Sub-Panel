@@ -3,7 +3,7 @@ import { RotateCcwIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
-import { TipButton } from '@/components/data/TipButton'
+import { IconButton } from '@/components/common/IconButton'
 import { cn } from '@/lib/utils'
 import { useFieldMessage } from './Field'
 import { InheritEditorContext } from './editorContext'
@@ -214,9 +214,9 @@ export function NumberField({
           {value === 0 && zeroLabel && <Badge variant="outline">{zeroLabel}</Badge>}
           {unit && <InputGroupText>{unit}</InputGroupText>}
           {emptyOk && value !== null && (
-            <TipButton label={t('ui.form.number_follow')} size="icon-xs" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); onChange(null) }}>
+            <IconButton label={t('ui.form.number_follow')} size="icon-xs" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); onChange(null) }}>
               <RotateCcwIcon />
-            </TipButton>
+            </IconButton>
           )}
         </InputGroupAddon>
       </InputGroup>
