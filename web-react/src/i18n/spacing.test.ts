@@ -14,6 +14,13 @@ describe('resolveBoundaries', () => {
     expect(resolveBoundaries(`经${v('Taiwan')}端口转发`)).toBe('经 Taiwan 端口转发')
     expect(resolveBoundaries(`已选${v('3')}项`)).toBe('已选 3 项')
   })
+  it('treats a signed or leading-dot number as a number: 例如 -9.5, not 例如-9.5', () => {
+    expect(resolveBoundaries(`例如${v('-9.5')}`)).toBe('例如 -9.5')
+    expect(resolveBoundaries(`例如${v('.5')}`)).toBe('例如 .5')
+    expect(resolveBoundaries(`${v('-3')}个`)).toBe('-3 个')
+    // a dash that is not the sign of a number stays as it is
+    expect(resolveBoundaries(`例如${v('-abc')}`)).toBe('例如-abc')
+  })
   it('leaves Chinese next to Chinese alone', () => {
     expect(resolveBoundaries(`经${v('香港')}端口转发`)).toBe('经香港端口转发')
   })

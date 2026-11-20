@@ -53,3 +53,13 @@ describe('useFieldErrors', () => {
     expect(result.current.errors).toEqual({})
   })
 })
+
+describe('useFieldErrors.saveBarErrors', () => {
+  it('turns the current errors into SaveBar errors with the field label and id', () => {
+    const { result } = renderHook(() => useFieldErrors<Draft>(rules))
+    act(() => { result.current.blur('port', { name: 'a', port: '0' }) })
+    expect(result.current.saveBarErrors({ name: 'Name', port: 'Port' }, k => `f-${String(k)}`)).toEqual([
+      { label: 'Port', message: 'Enter a port between 1 and 65535', id: 'f-port', blocking: true },
+    ])
+  })
+})

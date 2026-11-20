@@ -1,10 +1,10 @@
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { XIcon } from 'lucide-react'
+import { IconButton } from '@/components/common/IconButton'
 import { useSpacedT } from '@/i18n/spacing'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useReportValidity } from './FormValidity'
-import { TOUCH_TARGET } from '@/components/common/touchTarget'
 
 export interface TagsFieldProps {
   value: string[]
@@ -62,7 +62,14 @@ export function TagsField({
   const [active, setActive] = useState(-1)
   const isComposing = useRef(false)
   const [note, setNote] = useState<string | null>(null)
-  useReportValidity(required && value.length === 0 ? t('ui.form.tags_required') : null)
+  // A disabled box cannot be filled, so it must not hold the form hostage.
+  useReportValidity(required && value.length === 0 && !disabled ? t('ui.form.tags_required') : null, input)
+
+  // Text typed but not yet a tag is not part of what will be saved; a box that is switched off
+  // must show only what is, so it is dropped (the tags themselves stay).
+  useEffect(() => {
+    if (disabled) { setText(''); setOpen(false); setActive(-1) }
+  }, [disabled])
 
   const typed = text.trim()
   const options = useMemo(() => {
@@ -140,15 +147,16 @@ export function TagsField({
       {value.map(tag => (
         <Badge key={tag} variant="secondary" className="h-5 max-w-full gap-0.5 pr-0.5">
           <span className="truncate">{tag}</span>
-          <button
-            type="button"
-            aria-label={t('ui.form.tags_remove', { tag })}
-            title={t('ui.form.tags_remove', { tag })}
+          {/* On top: below would cover the hint or error line under the box. */}
+          <IconButton
+            label={t('ui.form.tags_remove', { tag })}
+            size="icon-xs"
+            side="top"
             onClick={e => { e.stopPropagation(); remove(tag); input.current?.focus() }}
-            className={cn(TOUCH_TARGET, 'rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3')}
+            className="size-4 rounded-full p-0.5 hover:bg-foreground/10 [&_svg]:size-3"
           >
             <XIcon />
-          </button>
+          </IconButton>
         </Badge>
       ))}
       <input

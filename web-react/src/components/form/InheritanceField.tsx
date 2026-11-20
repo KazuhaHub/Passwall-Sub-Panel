@@ -1,8 +1,9 @@
-import { useId, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
-import { InheritEditorContext } from './editorContext'
+import { InheritEditorContext, type InheritEditorApi } from './editorContext'
+import { useOnFormDiscard } from './FormValidity'
 
 /**
  * One level of "全局 → 分组 → 本人". `value` is what is stored AT this level:
@@ -98,6 +99,14 @@ export interface InheritanceFieldProps<T> {
   renderEditor: (p: InheritanceEditorProps<T>) => ReactNode
   /** What "set here" starts from when no level above defines a value. */
   defaultValue: T
+  /**
+   * What the editor can actually hold of an inherited value (rounded to a whole number,
+   * clamped to its range). Give it whenever the editor is narrower than the level above.
+   * If the result differs from the inherited value, "set here" does NOT write it: that would
+   * store a number nobody chose and make the form dirty. The editor starts from the adjusted
+   * value, a note says so, and nothing is written until the person edits it.
+   */
+  fitInherited?: (inherited: T) => T
   hint?: ReactNode
   error?: ReactNode
   className?: string
@@ -113,7 +122,7 @@ export interface InheritanceFieldProps<T> {
  * on an empty or zero box and saves it by accident.
  */
 export function InheritanceField<T>({
-  label, levels, editLevel, onChange, renderValue, renderEditor, defaultValue, hint, error, className,
+  label, levels, editLevel, onChange, renderValue, renderEditor, defaultValue, hint, error, className, fitInherited,
 }: InheritanceFieldProps<T>) {
   const { t } = useSpacedT()
   const uid = useId()
@@ -121,12 +130,54 @@ export function InheritanceField<T>({
   const own = idx >= 0 ? levels[idx] : undefined
   const above = effectiveLevel(levels.slice(0, Math.max(idx, 0)))
   const isSet = own?.value !== undefined
+  // "Set here" chosen, but the value to start from had to be adjusted: shown in the editor,
+  // not yet written. Dropped as soon as a real value exists (an edit) or the mode goes back.
+  const [pending, setPending] = useState<{ value: T; parent: T } | null>(null)
+  // The start that was shown, kept after the person's first edit has cleared `pending`, so that
+  // Escape (which returns an editor to the value it started from) lands back on "nothing written
+  // yet" instead of storing that start as the person's own choice.
+  const startRef = useRef<{ value: T; parent: T } | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  // What this field last wrote. An own value that differs from it has been supplied from outside
+  // (another record loaded, a reset), and the remembered start belongs to what is gone.
+  const lastOut = useRef<T | undefined>(undefined)
+  const emitRef = useRef((v: T | undefined) => { lastOut.current = v; onChangeRef.current(v) })
+  const emit = emitRef.current
+  const api = useMemo<InheritEditorApi>(() => ({
+    revert: back => {
+      const start = startRef.current
+      if (!start || !Object.is(back, start.value)) return false
+      emit(undefined)
+      setPending(start)
+      return true
+    },
+  }), [emit])
+  useEffect(() => { if (!Object.is(own?.value, lastOut.current)) startRef.current = null }, [own?.value])
+  // A start that was adjusted for one record's level above says nothing about another's: when that level
+  // changes from outside, the note and the editor go, and the new record shows "follows above".
+  useEffect(() => {
+    const start = startRef.current
+    if (start && !Object.is(above?.value, start.parent)) { startRef.current = null; setPending(null) }
+  }, [above?.value])
+  // The page's Discard puts its draft back, which this field cannot see; the form tells it.
+  useOnFormDiscard(() => { startRef.current = null; setPending(null) })
+  if (isSet && pending) setPending(null)
+  const adjusting = !isSet && pending !== null
   const noteId = `${uid}-note`
+  const adjustId = `${uid}-adjusted`
   const labelId = `${uid}-label`
 
   const setMode = (mode: 'follow' | 'set') => {
-    if (mode === 'follow') onChange(undefined)
-    else onChange(above?.value !== undefined ? above.value : defaultValue)
+    setPending(null)
+    startRef.current = null
+    if (mode === 'follow') { emit(undefined); return }
+    const inherited = above?.value
+    if (inherited !== undefined && fitInherited) {
+      const fitted = fitInherited(inherited)
+      if (!Object.is(fitted, inherited)) { startRef.current = { value: fitted, parent: inherited }; setPending(startRef.current); return }
+    }
+    emit(inherited !== undefined ? inherited : defaultValue)
   }
 
   return (
@@ -139,7 +190,7 @@ export function InheritanceField<T>({
           <SegmentedControl
             aria-label={t('ui.form.inherit_mode', { label, level: own.label })}
             size="sm"
-            value={isSet ? 'set' : 'follow'}
+            value={isSet || adjusting ? 'set' : 'follow'}
             onChange={setMode}
             options={[
               { value: 'follow', label: t('ui.form.inherit_follow') },
@@ -147,16 +198,16 @@ export function InheritanceField<T>({
             ]}
           />
           </div>
-          {isSet ? (
+          {isSet || adjusting ? (
             // The editor is told it is inside an inheritance field: an empty box is
             // invalid-until-filled there, and "follow" is the mode control's alone.
-            <InheritEditorContext.Provider value>
+            <InheritEditorContext.Provider value={api}>
               {renderEditor({
                 id: `${uid}-editor`,
-                value: own.value as T,
-                onChange,
+                value: isSet ? own.value as T : pending!.value,
+                onChange: next => { setPending(null); emit(next) },
                 'aria-labelledby': labelId,
-                'aria-describedby': error || hint ? noteId : undefined,
+                'aria-describedby': [adjusting ? adjustId : undefined, error || hint ? noteId : undefined].filter(Boolean).join(' ') || undefined,
               })}
             </InheritEditorContext.Provider>
           ) : (
@@ -166,6 +217,11 @@ export function InheritanceField<T>({
                 : t('ui.form.inherit_not_set')}
             </p>
           )}
+          {/* Always in the page, only its text changes: a region that arrives together with its
+                text is skipped by many screen readers. Read with the box through aria-describedby. */}
+          <p id={adjustId} aria-live="polite" className={adjusting ? 'text-xs text-muted-foreground' : 'sr-only'}>
+            {adjusting ? t('ui.form.inherit_adjusted', { parent: renderValue(pending!.parent), value: renderValue(pending!.value) }) : ''}
+          </p>
         </div>
       )}
       {error

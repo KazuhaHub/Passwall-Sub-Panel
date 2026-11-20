@@ -26,11 +26,13 @@ function useCopy(value: string) {
   return { copied, copy }
 }
 
-export function CopyButton({ value, name, size = 'icon-sm', className }: {
+export function CopyButton({ value, name, size = 'icon-sm', side, className }: {
   value: string
   /** What is being copied ("订阅链接"); makes the button's name specific. */
   name?: string
   size?: 'icon' | 'icon-sm' | 'icon-xs'
+  /** Where the tooltip opens; inside a form field pass 'top' so it does not cover the help text below. */
+  side?: 'top' | 'right' | 'bottom' | 'left'
   className?: string
 }) {
   const { t } = useSpacedT()
@@ -39,6 +41,7 @@ export function CopyButton({ value, name, size = 'icon-sm', className }: {
   return (
     <>
       <IconButton
+        side={side}
         label={copied ? t('ui.feedback.copied') : label}
         tooltip={copied ? t('ui.feedback.copied') : label}
         size={size}

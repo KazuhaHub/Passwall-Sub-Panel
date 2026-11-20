@@ -161,3 +161,16 @@ describe('TagsField', () => {
     })
   })
 })
+
+describe('TagsField becoming disabled', () => {
+  it('drops text that was typed but never became a tag, so the box shows what is saved', () => {
+    const ui = (disabled: boolean) => <TagsField aria-label="Tags" value={['HK']} onChange={() => {}} disabled={disabled} />
+    const { rerender } = render(ui(false))
+    fireEvent.change(box(), { target: { value: 'half-typed' } })
+    expect(box().value).toBe('half-typed')
+    rerender(ui(true))
+    expect(box().value).toBe('')
+    rerender(ui(false))
+    expect(box().value).toBe('')
+  })
+})

@@ -72,6 +72,11 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
  * every selected id and says how many are not on screen, with a button to drop
  * them; the bulk callback gets all the ids, and the rows `data` still holds.
  *
+ * COLUMNS MUST BE STABLE. Pass `columns` from module scope or `useMemo`: a new array
+ * every render makes TanStack rebuild the column model and defeats the row memo (see
+ * DataTableBase.columns). Nothing breaks, it just gets slow as the list grows or the
+ * parent re-renders often.
+ *
  * ROW OVERRIDES (rowOptions): a row can render as a full-width separator, be
  * excluded from selection or opening, and carry a dimmed / pending state, a class
  * and attributes. onRowHover and highlightedIds let a page light up related rows.
@@ -406,7 +411,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
             )}
             {showError && <li className="list-none"><ErrorState compact reason={error} retry={onRetry} /></li>}
             {skeleton && Array.from({ length: 4 }, (_, i) => <li key={i} className="p-3"><Skeleton className="h-12 w-full" /></li>)}
-            {isEmpty && <li className="list-none">{empty ?? <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}</li>}
+            {/* A custom node gets the padding and muted centred text the table cell gives it, so both modes look alike. */}
+            {isEmpty && <li className="list-none">{empty ? <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div> : <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}</li>}
             {!showError && rows.map((row, i) => {
               const o = optsOf(row)
               const selected = selection[row.id] === true

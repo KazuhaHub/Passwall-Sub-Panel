@@ -40,7 +40,9 @@ export function resolveBoundaries(text: string): string {
   let lastWasValue = false
   for (const p of pieces) {
     if (p.text === '') continue
-    if ((p.value || lastWasValue) && out !== '' && needsSpace(out[out.length - 1], p.text[0])) out += ' '
+    // A number's sign or leading dot is part of the number: "例如 -9.5", not "例如-9.5".
+    const lead = /^[-+]\.?\d|^\.\d/.test(p.text) ? '0' : p.text[0]
+    if ((p.value || lastWasValue) && out !== '' && needsSpace(out[out.length - 1], lead)) out += ' '
     out += p.text
     lastWasValue = p.value
   }

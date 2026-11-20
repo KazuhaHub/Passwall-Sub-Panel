@@ -1,7 +1,8 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useCallback, useId, useRef, useState, type ReactNode } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
+import { useRevealOnProblem } from '@/lib/reveal'
 
 /** localStorage key for an advanced section's remembered open state. */
 export function formSectionKey(sectionKey: string): string {
@@ -44,6 +45,12 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
   const bodyId = `${uid}-body`
   const [remembered, setRemembered] = useState(() => readOpen(sectionKey, false))
   const open = !advanced || forceOpen === true || remembered
+  // Something with a problem inside asks for this section to open so the person can be taken
+  // to it (focusProblem finds sections by element). It opens for this visit only: what the
+  // person chose to remember is not rewritten by a validation error.
+  const reveal = useCallback(() => setRemembered(true), [])
+  const sectionRef = useRef<HTMLElement>(null)
+  useRevealOnProblem(sectionRef, reveal)
 
   const toggle = () => {
     const next = !remembered
@@ -54,7 +61,7 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
   }
 
   return (
-    <section aria-labelledby={titleId} data-slot="form-section" className={cn('flex flex-col gap-3', className)}>
+    <section ref={sectionRef} aria-labelledby={titleId} data-slot="form-section" className={cn('flex flex-col gap-3', className)}>
       <header className="flex items-start justify-between gap-3">
         {advanced ? (
           <button
@@ -69,13 +76,13 @@ export function FormSection({ title, description, advanced, sectionKey, forceOpe
           >
             <ChevronRightIcon className={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden="true" />
             <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium">{title}</span>
+              <span data-slot="form-section-title" className="text-sm font-medium">{title}</span>
               {description && <span className="text-xs font-normal text-muted-foreground">{description}</span>}
             </span>
           </button>
         ) : (
           <div className="flex min-w-0 flex-col gap-0.5">
-            <h3 id={titleId} className="text-sm font-medium">{title}</h3>
+            <h3 id={titleId} data-slot="form-section-title" className="text-sm font-medium">{title}</h3>
             {description && <p className="text-xs text-muted-foreground">{description}</p>}
           </div>
         )}
