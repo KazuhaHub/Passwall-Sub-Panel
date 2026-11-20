@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { ADMIN_NAV } from './adminNav'
+import { isAdminOnlyPath } from '@/router/home'
 import { activeItem, isNavActive, visibleItems, visibleSections, type NavSection } from './nav'
 
 const Icon = (() => null) as never
@@ -53,40 +52,48 @@ describe('isNavActive', () => {
   })
 })
 
-// THE SHELL MUST NOT CHANGE WHO SEES WHAT. ADMIN_NAV in layouts/AdminLayout.tsx is
-// still the live model until the shell replaces it, so this reads that file and
-// compares entry by entry: path, label key, adminOnly flag, section grouping and
-// order. When AdminLayout.tsx is deleted this test goes with it.
-describe('ADMIN_NAV parity with the layout it replaces', () => {
-  const source = readFileSync(fileURLToPath(new URL('../../layouts/AdminLayout.tsx', import.meta.url)), 'utf8')
-  const start = source.indexOf('const ADMIN_NAV')
-  const block = source.slice(start, source.indexOf('export default function AdminLayout'))
+// THE SHELL MUST NOT CHANGE WHO SEES WHAT. This is the admin navigation as the old
+// layout drew it, pinned here by hand (the layout is gone, so there is nothing left to
+// compare against): sections, entries, order, label keys and the adminOnly flags. A change
+// to ADMIN_NAV has to change this list in the same commit, which is the review prompt.
+describe('ADMIN_NAV is the console navigation', () => {
+  const PINNED: { labelKey?: string; items: [to: string, labelKey: string, adminOnly?: true][] }[] = [
+    { items: [['/admin/dashboard', 'nav:admin.dashboard']] },
+    { labelKey: 'nav:section.directory', items: [['/admin/users', 'nav:admin.users'], ['/admin/groups', 'nav:admin.groups']] },
+    { labelKey: 'nav:section.infrastructure', items: [
+      ['/admin/servers', 'nav:admin.servers', true], ['/admin/nodes', 'nav:admin.nodes'], ['/admin/certs', 'nav:admin.certs', true],
+    ] },
+    { labelKey: 'nav:section.subscription', items: [
+      ['/admin/rules', 'nav:admin.rules'], ['/admin/templates', 'nav:admin.templates'], ['/admin/sub-clients', 'nav:admin.sub_clients', true],
+    ] },
+    { labelKey: 'nav:section.reporting', items: [
+      ['/admin/traffic', 'nav:admin.traffic'], ['/admin/logs', 'nav:admin.logs'], ['/admin/sync-tasks', 'nav:admin.sync_tasks'],
+      ['/admin/node-issues', 'nav:admin.node_issues'], ['/admin/diagnostics', 'nav:admin.diagnostics', true],
+    ] },
+    { items: [['/admin/risk', 'nav:admin.risk_center', true], ['/admin/access-control', 'nav:admin.access_control', true]] },
+    { items: [['/admin/language-packs', 'nav:admin.language_packs', true], ['/admin/settings', 'nav:admin.settings', true]] },
+  ]
 
-  // Walk the old model's text: a section opens with `{ items: [` or
-  // `{ labelKey: '...', items: [`, and each entry is one `{ to: ... }` object.
-  const old: { labelKey?: string; items: { to: string; labelKey: string; adminOnly: boolean }[] }[] = []
-  for (const line of block.split('\n')) {
-    const section = /^\s*\{\s*(?:labelKey:\s*'([^']+)',\s*)?items:\s*\[\s*$/.exec(line)
-    if (section) { old.push({ labelKey: section[1], items: [] }); continue }
-    const item = /\{\s*to:\s*'([^']+)',\s*labelKey:\s*'([^']+)'[^}]*?(adminOnly:\s*true)?\s*\}/.exec(line)
-    if (item) old[old.length - 1].items.push({ to: item[1], labelKey: item[2], adminOnly: Boolean(item[3]) })
-  }
-
-  it('found the old model (the reader is not silently empty)', () => {
-    expect(old.length).toBe(7)
-    expect(old.flatMap(s => s.items).length).toBe(18)
-  })
-
-  it('has the same sections, entries, order and adminOnly flags', () => {
+  it('has the pinned sections, entries, order and adminOnly flags', () => {
     const now = ADMIN_NAV.map(s => ({
       labelKey: s.labelKey,
-      items: s.items.map(i => ({ to: i.to, labelKey: i.labelKey, adminOnly: Boolean(i.adminOnly) })),
+      items: s.items.map(i => i.adminOnly ? [i.to, i.labelKey, true] : [i.to, i.labelKey]),
     }))
-    expect(now).toEqual(old)
+    expect(now).toEqual(PINNED)
   })
 
-  it('shows an operator exactly what the old filter showed', () => {
-    const oldOperator = old.flatMap(s => s.items).filter(i => !i.adminOnly).map(i => i.to)
-    expect(visibleItems(ADMIN_NAV, 'operator').map(i => i.to)).toEqual(oldOperator)
+  it('shows an operator the ten staff entries and an admin all eighteen', () => {
+    expect(visibleItems(ADMIN_NAV, 'operator').map(i => i.to)).toEqual([
+      '/admin/dashboard', '/admin/users', '/admin/groups', '/admin/nodes', '/admin/rules', '/admin/templates',
+      '/admin/traffic', '/admin/logs', '/admin/sync-tasks', '/admin/node-issues',
+    ])
+    expect(visibleItems(ADMIN_NAV, 'admin')).toHaveLength(18)
+  })
+
+  // The route guard (router/home.ts ADMIN_ONLY_ROUTES) is a known subset of the sidebar's adminOnly
+  // flags (certs, sub-clients and language packs are hidden but not bounced). What must never
+  // happen is the reverse: the sidebar offering an operator a page the guard bounces them from.
+  it('never offers an operator a route the guard bounces them from', () => {
+    for (const item of visibleItems(ADMIN_NAV, 'operator')) expect(isAdminOnlyPath(item.to), item.to).toBe(false)
   })
 })
