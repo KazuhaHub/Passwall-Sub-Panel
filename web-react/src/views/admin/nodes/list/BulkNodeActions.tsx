@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { deleteNode, setNodeEnabled } from '@/api/nodes'
+import { setNodeEnabled } from '@/api/nodes'
 import type { Server } from '@/api/servers'
 import { Button } from '@/components/ui/button'
-import { confirm } from '@/components/ConfirmHost'
 import { pushToast } from '@/components/feedback/toasts'
 import { nodeKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -13,9 +12,9 @@ import { useNodesT } from '../shared/useNodesT'
 /**
  * The bulk bar's node actions (design 2.5). They act on the distinct landing NODES of the selected rows, filtered
  * by what each node's server allows, and the labels say "节点" with a count because a direct row's enable is the
- * whole node. The line actions (enable or disable the selected relay lines) are N2's; delete goes through the old confirmation until N4.
+ * whole node. The line actions (enable or disable the selected relay lines) are N2's; delete opens the impact dialog (delete/).
  */
-export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, serverOf, clear }: {
+export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, serverOf, clear, onDelete }: {
   nodeIds: number[]
   /** The relay lines among the selected rows. Enabling or disabling them writes each node's lines once. */
   lineRefs?: { nodeId: number; lineId: string }[]
@@ -24,11 +23,13 @@ export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, se
   /** The landing server of a node, for its capabilities. */
   serverOf: (nodeId: number) => Server | undefined
   clear: () => void
+  /** Opens the bulk delete dialog for these nodes; it reads what each takes with it before asking. */
+  onDelete: (nodeIds: number[], clear: () => void) => void
 }) {
   const t = useNodesT()
   const scope = useQueryScope()
   const queryClient = useQueryClient()
-  const [busy, setBusy] = useState<'enable' | 'disable' | 'delete' | 'enable_lines' | 'disable_lines' | ''>('')
+  const [busy, setBusy] = useState<'enable' | 'disable' | 'enable_lines' | 'disable_lines' | ''>('')
   const can = (cap: string) => nodeIds.filter(id => serverOf(id)?.capabilities?.includes(cap as never))
   const enableable = can('inbound.enable')
   const deletable = can('inbound.delete')
@@ -62,22 +63,6 @@ export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, se
       await refresh()
     } finally { setBusy('') }
   }
-  const remove = async () => {
-    const ok = await confirm({
-      title: t('nodes.confirm.batch_delete_title'), message: t('nodes.confirm.batch_delete_message', { count: deletable.length }),
-      destructive: true, confirmText: t('nodes.action.delete'),
-    })
-    if (!ok) return
-    setBusy('delete')
-    try {
-      const results = await allSettledLimited(deletable, id => deleteNode(id))
-      const failed = results.filter(r => r.status === 'rejected').length
-      report(deletable.length - failed, failed, 'nodes.toast.batch_deleted')
-      clear()
-      await refresh()
-    } finally { setBusy('') }
-  }
-
   return (
     <>
       <Button variant="outline" size="sm" disabled={busy !== '' || enableable.length === 0} onClick={() => void setEnabled(true)}>{t('nodes.bulk.enable_nodes', { count: enableable.length })}</Button>
@@ -88,7 +73,7 @@ export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, se
           <Button variant="outline" size="sm" disabled={busy !== ''} onClick={() => void setLinesEnabled(false)}>{t('nodes.line.bulk.disable', { count: lineRefs.length })}</Button>
         </>
       )}
-      {admin && <Button variant="destructive" size="sm" disabled={busy !== '' || deletable.length === 0} onClick={() => void remove()}>{t('nodes.bulk.delete_nodes', { count: deletable.length })}</Button>}
+      {admin && <Button variant="destructive" size="sm" disabled={busy !== '' || deletable.length === 0} onClick={() => onDelete(deletable, clear)}>{t('nodes.bulk.delete_nodes', { count: deletable.length })}</Button>}
     </>
   )
 }

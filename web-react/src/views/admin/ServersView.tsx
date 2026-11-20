@@ -1,4 +1,3 @@
-import { isAxiosError } from 'axios'
 import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
@@ -79,8 +78,7 @@ import PercentIcon from '@mui/icons-material/Percent'
 import CallSplitIcon from '@mui/icons-material/CallSplit'
 import { LineMultipliersDialog } from './LineMultipliersDialog'
 import SharedPortsDialog from './fronts/SharedPortsDialog'
-import ServerHasNodesDialog, { type BlockingNode } from './ServerHasNodesDialog'
-import { frontErrorOf } from '@/api/fronts'
+import { ServerDeleteDialog } from './nodes/delete/ServerDeleteDialog'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -212,7 +210,8 @@ export default function ServersView() {
   const canConfigure = useCan('config.write')
 
   const [search, setSearch] = useState('')
-  const [blockingNodes, setBlockingNodes] = useState<BlockingNode[] | null>(null)
+  // The server whose delete dialog is open: it reads what is still attached before offering the delete.
+  const [deleteTarget, setDeleteTarget] = useState<Server | null>(null)
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | 'upgrade_xray' | 'upgrade_panel' | ''>('')
@@ -830,28 +829,8 @@ export default function ServersView() {
     }
   }
 
-  async function confirmDelete(s: Server) {
-    const ok = await confirm({
-      title: t('admin:servers.confirm.delete_title'),
-      message: t('admin:servers.confirm.delete_message', { name: s.name }),
-      destructive: true,
-      confirmText: t('admin:servers.action.delete'),
-    })
-    if (!ok) return
-    try {
-      await deleteServer(s.id, { quiet: true })
-    } catch (err) {
-      // A server with nodes names them; a tunnel line's hidden listener is named by its line.
-      const e = frontErrorOf(err)
-      if (e?.code === 'server_has_nodes') {
-        const body = (isAxiosError(err) ? err.response?.data : undefined) as { nodes?: BlockingNode[] } | undefined
-        if (body?.nodes?.length) { setBlockingNodes(body.nodes); return }
-      }
-      pushSnack(e?.message || t('admin:servers.toast.delete_failed'), 'error')
-      return
-    }
-    pushSnack(t('admin:servers.toast.deleted'), 'success')
-    await load()
+  function confirmDelete(s: Server) {
+    setDeleteTarget(s)
   }
 
   async function batchRunTest() {
@@ -2098,7 +2077,13 @@ export default function ServersView() {
       />
       <ServerAccessDialog node={accessNode?.node ?? null} serverName={accessNode?.name ?? ''} onClose={() => setAccessNode(null)} />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
-      <ServerHasNodesDialog nodes={blockingNodes} onClose={() => setBlockingNodes(null)} />
+      {deleteTarget && (
+        <ServerDeleteDialog
+          server={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => { setDeleteTarget(null); pushSnack(t('admin:servers.toast.deleted'), 'success'); void load() }}
+        />
+      )}
       {retiredRoutesTarget && <RetiredRouteCleanupDialog server={retiredRoutesTarget} onClose={() => setRetiredRoutesTarget(null)} />}
       {sharedPortsTarget && <SharedPortsDialog key={`sharedports-${sharedPortsTarget.id}`} server={sharedPortsTarget} onClose={() => setSharedPortsTarget(null)} />}
       {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
