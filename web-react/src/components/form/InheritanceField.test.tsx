@@ -264,6 +264,32 @@ describe('InheritanceField', () => {
       expect(screen.getByRole('radio', { name: 'Follow the level above' }).getAttribute('aria-checked')).toBe('true')
     })
 
+    it('a value that arrives from outside forgets the remembered start: Escape then cannot swap it for "follows above"', () => {
+      const onWrite = vi.fn()
+      function Page({ reload }: { reload?: number }) {
+        const [user, setUser] = useState<number | undefined>(undefined)
+        const [seen, setSeen] = useState(reload)
+        if (seen !== reload) { setSeen(reload); setUser(reload) }
+        return (
+          <InheritanceField
+            label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
+            levels={lv(100, 1.25, user)} onChange={v => { onWrite(v); setUser(v) }} fitInherited={v => Math.round(v)}
+            renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} integer min={0} />}
+          />
+        )
+      }
+      const { rerender } = render(<Page />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      fireEvent.change(editorBox(), { target: { value: '9' } })
+      // another record is loaded whose own value happens to equal the old fitted start
+      rerender(<Page reload={1} />)
+      onWrite.mockClear()
+      fireEvent.change(editorBox(), { target: { value: '7' } })
+      fireEvent.keyDown(editorBox(), { key: 'Escape' })
+      expect(onWrite).not.toHaveBeenCalledWith(undefined)
+      expect(editorBox().value).toBe('1')
+    })
+
     it('a value the editor can hold is still written at once, as before', () => {
       const onWrite = vi.fn()
       render(<InheritanceField label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10} levels={lv(100, 50, undefined)} onChange={onWrite} fitInherited={v => Math.round(v)} renderEditor={editor} />)

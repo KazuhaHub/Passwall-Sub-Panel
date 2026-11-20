@@ -7,7 +7,7 @@ import { IconButton } from '@/components/common/IconButton'
 import { cn } from '@/lib/utils'
 import { useFieldMessage } from './Field'
 import { InheritEditorContext } from './editorContext'
-import { useReportValidity } from './FormValidity'
+import { useOnFormDiscard, useReportValidity } from './FormValidity'
 
 export interface NumberFieldProps
   extends Omit<ComponentProps<'input'>, 'value' | 'onChange' | 'type' | 'min' | 'max' | 'step' | 'size'> {
@@ -122,6 +122,10 @@ export function NumberField({
   // value that the field itself would accept, seen from the parent or from typing (undefined: none yet).
   const initial = useRef<number | null>(value)
   const lastAcceptable = useRef<number | null | undefined>(undefined)
+  // What this field itself last told the parent. A value that comes back as exactly that is the
+  // parent echoing it; anything else (a reload, a clamp, a reset) is the parent supplying a value.
+  const lastEmitted = useRef<number | null | undefined>(undefined)
+  const emit = (n: number | null) => { lastEmitted.current = n; onChange(n) }
   // The caller may pass a ref of its own; both get the element.
   const outerRef = (rest as { ref?: Ref<HTMLInputElement> }).ref
   const setInput = useCallback((node: HTMLInputElement | null) => {
@@ -131,6 +135,8 @@ export function NumberField({
   }, [outerRef])
   const draftNow = useRef(draft)
   draftNow.current = draft
+  const valueNow = useRef(value)
+  valueNow.current = value
   // Bumped by a commit so the check below runs once the parent's answer has rendered, even if its value did not change.
   const [commitTick, setCommitTick] = useState(0)
 
@@ -139,7 +145,25 @@ export function NumberField({
       : (min === undefined || n >= min) && (max === undefined || n <= max) && (integer !== true || Number.isInteger(n))
   const acceptableRef = useRef(acceptable)
   acceptableRef.current = acceptable
-  useEffect(() => { if (acceptableRef.current(value)) lastAcceptable.current = value }, [value])
+  // A value from outside is a NEW BASELINE for the disable rule below: the earlier record's values
+  // (what the parent first gave, what the person typed) belong to something that is gone and must
+  // never be written back. Typing only ever adds to `lastAcceptable`.
+  useEffect(() => {
+    if (lastEmitted.current !== undefined && Object.is(value, lastEmitted.current)) {
+      if (acceptableRef.current(value)) lastAcceptable.current = value
+      return
+    }
+    initial.current = value
+    lastAcceptable.current = acceptableRef.current(value) ? value : undefined
+    lastEmitted.current = undefined
+  }, [value])
+  // The page's Discard puts its draft back: whatever was typed is discarded with it, and the value
+  // that arrives next is a baseline too (this is for a discard that leaves the value as it is).
+  useOnFormDiscard(() => {
+    lastEmitted.current = undefined
+    initial.current = valueNow.current
+    lastAcceptable.current = acceptableRef.current(valueNow.current) ? valueNow.current : undefined
+  })
 
   // A value changed from outside (follow again, reset, load) replaces the text;
   // a value that merely echoes what was typed leaves it alone.
@@ -212,7 +236,7 @@ export function NumberField({
     const r = readNumberText(text, integer === true)
     if (r.kind === 'number') {
       if (acceptable(r.value)) lastAcceptable.current = r.value
-      onChange(r.value)
+      emit(r.value)
     }
   }
 
@@ -222,7 +246,7 @@ export function NumberField({
     if (r.kind === 'number') {
       setDraft(String(r.value))
       if (!out) committed.current = r.value
-      if (r.value !== value) { onChange(r.value) }
+      if (r.value !== value) { emit(r.value) }
       // Even when the parent already holds it: a refusal during typing shows up here.
       afterCommit.current = { expected: r.value }
       setCommitTick(n => n + 1)
@@ -230,7 +254,7 @@ export function NumberField({
     }
     if (r.kind === 'empty' && emptyOk) {
       committed.current = null
-      if (value !== null) onChange(null)
+      if (value !== null) emit(null)
       afterCommit.current = { expected: null }
       setCommitTick(n => n + 1)
       return
@@ -249,7 +273,7 @@ export function NumberField({
     setTouched(false)
     // The parent was told the abandoned number as it was typed; tell it the settled one.
     // Never null on a field that does not allow empty: that event means "cleared on purpose".
-    if (value !== back && (back !== null || emptyOk) && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
+    if (value !== back && (back !== null || emptyOk) && !(inheritEditor && inheritEditor.revert(back))) emit(back)
   }
 
   // THE INVARIANT once the box is switched off: it shows exactly what the parent holds, and that is
@@ -267,7 +291,7 @@ export function NumberField({
     setDraft(fmt(back))
     setRejected(null)
     setTouched(false)
-    if (value !== back && !(inheritEditor && inheritEditor.revert(back))) onChange(back)
+    if (value !== back && !(inheritEditor && inheritEditor.revert(back))) emit(back)
     // Only the moment the box becomes disabled matters; the rest is read as it is then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rest.disabled])
@@ -298,7 +322,7 @@ export function NumberField({
           {value === 0 && zeroLabel && <Badge variant="outline">{zeroLabel}</Badge>}
           {unit && <InputGroupText>{unit}</InputGroupText>}
           {emptyOk && value !== null && (
-            <IconButton label={t('ui.form.number_follow')} size="icon-xs" side="top" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); onChange(null) }}>
+            <IconButton label={t('ui.form.number_follow')} size="icon-xs" side="top" disabled={rest.disabled} onClick={() => { setRejected(null); setDraft(''); emit(null) }}>
               <RotateCcwIcon />
             </IconButton>
           )}

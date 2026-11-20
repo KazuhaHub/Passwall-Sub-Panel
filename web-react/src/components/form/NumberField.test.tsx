@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Field } from './Field'
 import { FormValidityProvider, useFormValidity } from './FormValidity'
+import { SaveBar } from './SaveBar'
 import { NumberField } from './NumberField'
 
 afterEach(cleanup)
@@ -456,6 +457,87 @@ describe('NumberField', () => {
       render(<Harness initial={42} min={1} max={600} integer />)
       type('abc')
       expect(screen.getAllByText('Enter a whole number, such as 42').length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('a value that arrives from outside is a new baseline for the disable rule', () => {
+    function Record({ fresh, disabled, clamp, extra }: { fresh: number | null; disabled: boolean; clamp?: boolean; extra?: React.ReactNode }) {
+      const [v, setV] = useState<number | null>(fresh)
+      const [seen, setSeen] = useState(fresh)
+      if (seen !== fresh) { setSeen(fresh); setV(fresh) }
+      return (
+        <FormValidityProvider>
+          <NumberField aria-label="Limit" value={v} onChange={n => setV(clamp && n !== null && n > 600 ? 600 : n)} min={1} max={600} disabled={disabled} />
+          <output data-testid="parent">{String(v)}</output>
+          {extra}
+        </FormValidityProvider>
+      )
+    }
+    const parent = () => screen.getByTestId('parent').textContent
+
+    it('(1) the parent loads another record: disabling keeps that record\'s value, not the old one', () => {
+      const { rerender } = render(<Record fresh={5} disabled={false} />)
+      rerender(<Record fresh={9999} disabled={false} />)
+      rerender(<Record fresh={9999} disabled />)
+      expect(box().value).toBe('9999')
+      expect(parent()).toBe('9999')
+    })
+
+    it('(2) a value that was typed and then discarded by a reload does not come back', () => {
+      const { rerender } = render(<Record fresh={5} disabled={false} />)
+      type('30')
+      leave()
+      rerender(<Record fresh={9999} disabled={false} />)
+      rerender(<Record fresh={9999} disabled />)
+      expect(box().value).toBe('9999')
+      expect(parent()).toBe('9999')
+    })
+
+    it('a new record with an acceptable value, then garbage, then disable: the new record\'s value', () => {
+      const { rerender } = render(<Record fresh={5} disabled={false} />)
+      rerender(<Record fresh={42} disabled={false} />)
+      type('abc')
+      rerender(<Record fresh={42} disabled />)
+      expect(box().value).toBe('42')
+      expect(parent()).toBe('42')
+    })
+
+    it('what the parent echoes back is not a new baseline: started 7, typed 9999, disabled gives 7', () => {
+      const { rerender } = render(<Record fresh={7} disabled={false} />)
+      rerender(<Record fresh={7} disabled={false} />)
+      type('9999')
+      rerender(<Record fresh={7} disabled />)
+      expect(parent()).toBe('7')
+    })
+
+    it('a parent that clamps what was emitted has supplied a new value: it is the baseline', () => {
+      const { rerender } = render(<Record fresh={5} disabled={false} clamp />)
+      type('700')
+      expect(parent()).toBe('600')
+      type('abc')
+      rerender(<Record fresh={5} disabled clamp />)
+      expect(box().value).toBe('600')
+      expect(parent()).toBe('600')
+    })
+
+    it('a form Discard that swaps the value starts a new baseline', () => {
+      function Page({ disabled }: { disabled: boolean }) {
+        const [v, setV] = useState<number | null>(5)
+        return (
+          <FormValidityProvider>
+            <NumberField aria-label="Limit" value={v} onChange={setV} min={1} max={600} disabled={disabled} />
+            <output data-testid="parent">{String(v)}</output>
+            <SaveBar dirty onSave={() => {}} onDiscard={() => setV(9999)} />
+          </FormValidityProvider>
+        )
+      }
+      const { rerender } = render(<Page disabled={false} />)
+      type('30')
+      leave()
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+      rerender(<Page disabled />)
+      expect(box().value).toBe('9999')
+      expect(parent()).toBe('9999')
     })
   })
 

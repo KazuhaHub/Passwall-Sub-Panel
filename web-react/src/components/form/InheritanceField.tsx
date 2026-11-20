@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { SegmentedControl } from './SegmentedControl'
@@ -139,15 +139,21 @@ export function InheritanceField<T>({
   const startRef = useRef<{ value: T; parent: T } | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  // What this field last wrote. An own value that differs from it has been supplied from outside
+  // (another record loaded, a reset), and the remembered start belongs to what is gone.
+  const lastOut = useRef<T | undefined>(undefined)
+  const emitRef = useRef((v: T | undefined) => { lastOut.current = v; onChangeRef.current(v) })
+  const emit = emitRef.current
   const api = useMemo<InheritEditorApi>(() => ({
     revert: back => {
       const start = startRef.current
       if (!start || !Object.is(back, start.value)) return false
-      onChangeRef.current(undefined)
+      emit(undefined)
       setPending(start)
       return true
     },
-  }), [])
+  }), [emit])
+  useEffect(() => { if (!Object.is(own?.value, lastOut.current)) startRef.current = null }, [own?.value])
   // The page's Discard puts its draft back, which this field cannot see; the form tells it.
   useOnFormDiscard(() => { startRef.current = null; setPending(null) })
   if (isSet && pending) setPending(null)
@@ -159,13 +165,13 @@ export function InheritanceField<T>({
   const setMode = (mode: 'follow' | 'set') => {
     setPending(null)
     startRef.current = null
-    if (mode === 'follow') { onChange(undefined); return }
+    if (mode === 'follow') { emit(undefined); return }
     const inherited = above?.value
     if (inherited !== undefined && fitInherited) {
       const fitted = fitInherited(inherited)
       if (!Object.is(fitted, inherited)) { startRef.current = { value: fitted, parent: inherited }; setPending(startRef.current); return }
     }
-    onChange(inherited !== undefined ? inherited : defaultValue)
+    emit(inherited !== undefined ? inherited : defaultValue)
   }
 
   return (
@@ -193,7 +199,7 @@ export function InheritanceField<T>({
               {renderEditor({
                 id: `${uid}-editor`,
                 value: isSet ? own.value as T : pending!.value,
-                onChange: next => { setPending(null); onChange(next) },
+                onChange: next => { setPending(null); emit(next) },
                 'aria-labelledby': labelId,
                 'aria-describedby': [adjusting ? adjustId : undefined, error || hint ? noteId : undefined].filter(Boolean).join(' ') || undefined,
               })}
