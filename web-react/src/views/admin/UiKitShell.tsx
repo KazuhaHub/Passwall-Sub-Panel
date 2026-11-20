@@ -1,3 +1,5 @@
+import { RelationGraph } from '@/components/diagram/RelationGraph'
+import { denseGraphSample } from './uiKitData/sampleData'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Dialog as MuiDialog, DialogActions, DialogContent, DialogTitle, Button as MuiButton, MenuItem as MuiMenuItem, Select as MuiSelect } from '@mui/material'
 
@@ -68,6 +70,8 @@ function Block({ title, note, children }: { title: string; note?: string; childr
   )
 }
 
+const DENSE = denseGraphSample()
+
 const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 // A stand-in for a form's sticky save bar: while it is mounted the toasts sit above it.
@@ -132,6 +136,13 @@ function Gallery({ role, setRole }: { role: Role; setRole: (r: Role) => void }) 
           { id: 'b', label: 'Remove', icon: icons.IconDelete, destructive: true, onSelect: () => {} },
         ]} />
       </Block>
+
+      {/* Not in a Block: a Card clips its overflow, and sticky positioning does not work inside a clipping ancestor. */}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium">Relation graph (list layout)</h3>
+        <p className="text-sm text-muted-foreground">Its connections list sticks below the top bar while the page scrolls: scroll down with the Hub selected.</p>
+        <RelationGraph columns={DENSE.columns} edges={DENSE.edges} layout="list" selectedId="hub" />
+      </section>
 
       <Block title="Explanations">
         <span className="flex items-center gap-1 text-sm">Help (click) <HelpTip text={'A short explanation of this page.\nSecond line.'} /></span>

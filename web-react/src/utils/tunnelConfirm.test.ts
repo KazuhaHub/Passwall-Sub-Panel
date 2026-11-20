@@ -160,4 +160,124 @@ describe('withTunnelConfirm', () => {
     expect(confirmMock.mock.calls[0][0].message).toContain('unsaved edits go')
     expect(confirmMock.mock.calls[0][0].message).toContain('sync_keeps')
   })
+
+  describe('with a presenter', () => {
+    it('hands the plan to the presenter instead of opening the shared confirmation', async () => {
+      const present = vi.fn().mockResolvedValue(true)
+      const run = vi.fn()
+        .mockRejectedValueOnce(tunnelRefusal({ action: 'remove_line', plan: 'p1', removes: [{ node_id: 9, name: 'hk-tunnel', line_name: 'Mobile', port: 40123 }] }))
+        .mockResolvedValueOnce('saved')
+      expect(await withTunnelConfirm(run, 'a note', { present })).toBe('saved')
+      expect(confirmMock).not.toHaveBeenCalled()
+      expect(present).toHaveBeenCalledTimes(1)
+      const shown = present.mock.calls[0][0]
+      expect(shown.action).toBe('remove_line')
+      expect(shown.title).toBe('admin:nodes.tunnel.confirm.remove_line_title')
+      expect(shown.message).toContain('"name":"hk-tunnel"')
+      expect(shown.message).toContain('a note')
+      expect(shown.lines.some((l: string) => l.includes('"port":40123'))).toBe(true)
+      expect(shown.lines.join('\n')).toBe(shown.message.replace('\na note', ''))
+      expect(shown.error.params.plan).toBe('p1')
+      expect(run).toHaveBeenLastCalledWith({ plan: 'p1' })
+    })
+
+    it('throws the refusal and does not resend when the presenter resolves false', async () => {
+      const refused = tunnelRefusal({ action: 'delete_node', plan: 'p1', removes: [] })
+      const present = vi.fn().mockResolvedValue(false)
+      const run = vi.fn().mockRejectedValue(refused)
+      await expect(withTunnelConfirm(run, undefined, { present })).rejects.toBe(refused)
+      expect(run).toHaveBeenCalledTimes(1)
+      expect(confirmMock).not.toHaveBeenCalled()
+    })
+
+    it('presents the fresh plan again when a second 409 follows a confirmation', async () => {
+      const present = vi.fn().mockResolvedValue(true)
+      const run = vi.fn()
+        .mockRejectedValueOnce(tunnelRefusal({ action: 'switch_mode', plan: 'p1', creates: [{ line_name: 'M', landing_name: 'L', entry_panel_id: 2, port: 40001 }] }))
+        .mockRejectedValueOnce(tunnelRefusal({ action: 'switch_mode', plan: 'p2', creates: [{ line_name: 'M', landing_name: 'L', entry_panel_id: 2, port: 40002 }] }))
+        .mockResolvedValueOnce('done')
+      expect(await withTunnelConfirm(run, undefined, { present })).toBe('done')
+      expect(present).toHaveBeenCalledTimes(2)
+      expect(present.mock.calls[0][0].message).toContain('"port":40001')
+      expect(present.mock.calls[1][0].message).toContain('"port":40002')
+      expect(run).toHaveBeenLastCalledWith({ plan: 'p2' })
+    })
+
+    it('stops when the second plan is declined', async () => {
+      const second = tunnelRefusal({ action: 'switch_mode', plan: 'p2', creates: [] })
+      const present = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+      const run = vi.fn().mockRejectedValueOnce(tunnelRefusal({ action: 'switch_mode', plan: 'p1', creates: [] })).mockRejectedValueOnce(second)
+      await expect(withTunnelConfirm(run, undefined, { present })).rejects.toBe(second)
+      expect(run).toHaveBeenCalledTimes(2)
+    })
+
+    it('throws when the same plan is refused again after it was confirmed, without presenting it a second time', async () => {
+      const again = tunnelRefusal({ action: 'switch_mode', plan: 'p1', creates: [] })
+      const present = vi.fn().mockResolvedValue(true)
+      const run = vi.fn().mockRejectedValue(again)
+      await expect(withTunnelConfirm(run, undefined, { present })).rejects.toBe(again)
+      expect(present).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves other refusals alone without calling the presenter', async () => {
+      const err = refusal({ error: 'port taken' }, 400)
+      const present = vi.fn()
+      await expect(withTunnelConfirm(vi.fn().mockRejectedValue(err), undefined, { present })).rejects.toBe(err)
+      expect(present).not.toHaveBeenCalled()
+    })
+
+    it('treats an abort while the presenter is pending as declined, without resending', async () => {
+      const refused = tunnelRefusal({ action: 'delete_node', plan: 'p1', removes: [] })
+      const ctl = new AbortController()
+      let later: (v: boolean) => void = () => {}
+      const present = vi.fn(() => new Promise<boolean>(r => { later = r }))
+      const run = vi.fn().mockRejectedValue(refused)
+      const pending = withTunnelConfirm(run, undefined, { present, signal: ctl.signal })
+      await Promise.resolve(); await Promise.resolve()
+      ctl.abort()
+      await expect(pending).rejects.toBe(refused)
+      later(true) // a late "yes" from the unmounted dialog changes nothing
+      await Promise.resolve()
+      expect(run).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not leave an unhandled rejection when the presenter rejects after the abort', async () => {
+      const refused = tunnelRefusal({ action: 'delete_node', plan: 'p1', removes: [] })
+      const ctl = new AbortController()
+      const unhandled = vi.fn()
+      process.on('unhandledRejection', unhandled)
+      let fail: (e: unknown) => void = () => {}
+      const present = vi.fn(() => new Promise<boolean>((_, rej) => { fail = rej }))
+      const pending = withTunnelConfirm(vi.fn().mockRejectedValue(refused), undefined, { present, signal: ctl.signal })
+      await Promise.resolve(); await Promise.resolve()
+      ctl.abort()
+      await expect(pending).rejects.toBe(refused)
+      fail(new Error('dialog gone'))
+      await new Promise(r => setTimeout(r, 10))
+      process.off('unhandledRejection', unhandled)
+      expect(unhandled).not.toHaveBeenCalled()
+    })
+
+    it('does not present at all when the signal is already aborted', async () => {
+      const refused = tunnelRefusal({ action: 'delete_node', plan: 'p1', removes: [] })
+      const ctl = new AbortController(); ctl.abort()
+      const present = vi.fn()
+      await expect(withTunnelConfirm(vi.fn().mockRejectedValue(refused), undefined, { present, signal: ctl.signal })).rejects.toBe(refused)
+      expect(present).not.toHaveBeenCalled()
+    })
+
+    it('hands the presenter the signal so it can close its dialog', async () => {
+      const ctl = new AbortController()
+      const present = vi.fn().mockResolvedValue(true)
+      const run = vi.fn().mockRejectedValueOnce(tunnelRefusal({ action: 'switch_mode', plan: 'p1', creates: [] })).mockResolvedValueOnce('ok')
+      await withTunnelConfirm(run, undefined, { present, signal: ctl.signal })
+      expect(present.mock.calls[0][0].signal).toBe(ctl.signal)
+    })
+
+    it('lets a rejecting presenter surface its own error', async () => {
+      const boom = new Error('dialog failed')
+      const run = vi.fn().mockRejectedValue(tunnelRefusal({ action: 'switch_mode', plan: 'p1', creates: [] }))
+      await expect(withTunnelConfirm(run, undefined, { present: vi.fn().mockRejectedValue(boom) })).rejects.toBe(boom)
+    })
+  })
 })

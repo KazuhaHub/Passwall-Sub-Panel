@@ -193,3 +193,18 @@ export function graphSample(perColumn: number): { columns: GraphColumn[]; edges:
     edges,
   }
 }
+
+/** A hub wired to 15 entries and 15 exits: 225 paths through it, past the 200 a box lists, so the "not shown" note appears. */
+export function denseGraphSample(): { columns: GraphColumn[]; edges: GraphEdge[] } {
+  const n = 15
+  const columns: GraphColumn[] = [
+    { id: 'entries', title: '入口服务器', boxes: Array.from({ length: n }, (_, i) => ({ id: `e${i}`, label: `Entry ${i + 1}`, sublabel: `:${20000 + i}` })) },
+    { id: 'landings', title: '落地节点', boxes: [{ id: 'hub', label: 'Hub', sublabel: 'Frankfurt', status: 'success' as const }] },
+    { id: 'exits', title: '出口', boxes: Array.from({ length: n }, (_, i) => ({ id: `x${i}`, label: `Exit ${i + 1}`, sublabel: 'direct' })) },
+  ]
+  const edges: GraphEdge[] = [
+    ...Array.from({ length: n }, (_, i) => ({ id: `in${i}`, from: `e${i}`, to: 'hub', style: 'solid' as const })),
+    ...Array.from({ length: n }, (_, i) => ({ id: `out${i}`, from: 'hub', to: `x${i}`, style: 'solid' as const })),
+  ]
+  return { columns, edges }
+}
