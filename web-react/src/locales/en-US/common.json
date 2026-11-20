@@ -213,7 +213,9 @@
       "graph_through_other": "{{count}} lines pass through",
       "graph_lines": "Lines through {{name}}",
       "graph_lines_none": "Select a box to list the lines through it here",
-      "graph_lines_empty": "No lines pass through {{name}}"
+      "graph_lines_empty": "No lines pass through {{name}}",
+      "graph_truncated_one": "{{count}} more connection not shown",
+      "graph_truncated_other": "{{count}} more connections not shown"
     },
     "shell": {
       "more": "More",

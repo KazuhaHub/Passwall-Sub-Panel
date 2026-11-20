@@ -2,7 +2,7 @@
 import '@/test/initI18n'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RelationGraph, edgePath, layoutGraph, pathsThrough, type GraphColumn, type GraphEdge } from './RelationGraph'
+import { RelationGraph, countPathsThrough, edgePath, layoutGraph, pathsThrough, type GraphColumn, type GraphEdge } from './RelationGraph'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
@@ -281,5 +281,103 @@ describe('parallel lines: the same entry and landing joined by more than one lin
   it('counts lines, not boxes', () => {
     render(<RelationGraph columns={cols} edges={three} layout="canvas" />)
     expect(box('Entry 1').getAttribute('aria-label')).toBe('Entry 1, 3 lines pass through')
+  })
+})
+
+describe('truncation of the connections list', () => {
+  // 15 entries into one landing out to 15 exits: 15 x 15 = 225 paths through the
+  // landing (over the 200 cap), 15 through every entry and exit.
+  const dense = (() => {
+    const n = 15
+    const columns: GraphColumn[] = [
+      { id: 'e', title: 'Entries', boxes: Array.from({ length: n }, (_, i) => ({ id: `e${i}`, label: `Entry ${i}` })) },
+      { id: 'l', title: 'Landings', boxes: [{ id: 'l0', label: 'Hub' }] },
+      { id: 'x', title: 'Exits', boxes: Array.from({ length: n }, (_, i) => ({ id: `x${i}`, label: `Exit ${i}` })) },
+    ]
+    const edges: GraphEdge[] = [
+      ...Array.from({ length: n }, (_, i) => ({ id: `in${i}`, from: `e${i}`, to: 'l0' })),
+      ...Array.from({ length: n }, (_, i) => ({ id: `out${i}`, from: 'l0', to: `x${i}` })),
+    ]
+    return { columns, edges }
+  })()
+
+  it('counts paths exactly as pathsThrough enumerates them when under the cap', () => {
+    const es: GraphEdge[] = [
+      { id: 'p1', from: 'e1', to: 'l1' }, { id: 'p2', from: 'e2', to: 'l1' }, { id: 'p3', from: 'e1', to: 'l1' },
+      { id: 'p4', from: 'l1', to: 'x1' }, { id: 'p5', from: 'l1', to: 'x2' },
+    ]
+    for (const id of ['e1', 'l1', 'x1', 'nobody']) expect(countPathsThrough(id, es)).toBe(pathsThrough(id, es).length)
+    expect(countPathsThrough('l1', es)).toBe(6)
+  })
+
+  it('counts past the enumeration cap', () => {
+    expect(pathsThrough('l0', dense.edges)).toHaveLength(200)
+    expect(countPathsThrough('l0', dense.edges)).toBe(225)
+  })
+
+  it('reports how many connections each box lost, only for the boxes that lost some', () => {
+    const onTruncated = vi.fn()
+    render(<RelationGraph columns={dense.columns} edges={dense.edges} layout="canvas" onTruncated={onTruncated} />)
+    expect(onTruncated).toHaveBeenCalledTimes(1)
+    expect(onTruncated).toHaveBeenCalledWith({ l0: 25 })
+  })
+
+  it('shows the note on the box, in its name, and at the end of the connections list when selected', () => {
+    render(<RelationGraph columns={dense.columns} edges={dense.edges} layout="canvas" />)
+    const hub = box('Hub')
+    expect(hub.getAttribute('aria-label')).toContain('25 more connections not shown')
+    expect(hub.querySelector('[data-truncated]')).toBeTruthy()
+    expect(box('Entry 3').querySelector('[data-truncated]')).toBeNull()
+    expect(box('Entry 3').getAttribute('aria-label')).not.toContain('not shown')
+    fireEvent.click(hub)
+    const region = listRegion()
+    expect(within(region).getAllByRole('listitem')).toHaveLength(200)
+    expect(region.textContent).toContain('25 more connections not shown')
+    expect(screen.getByRole('status').textContent).toContain('25 more connections not shown')
+    fireEvent.click(box('Entry 3'))
+    expect(listRegion().textContent).not.toContain('not shown')
+  })
+
+  it('says it in the list layout too, and in Chinese', async () => {
+    const i18n = (await import('i18next')).default
+    await i18n.changeLanguage('zh-CN')
+    try {
+      render(<RelationGraph columns={dense.columns} edges={dense.edges} layout="list" selectedId="l0" />)
+      expect(screen.getByRole('region', { name: '关系图 线路' }).textContent).toContain('另有 25 条连线未列出')
+    } finally { await i18n.changeLanguage('en-US') }
+  })
+
+  it('uses the singular for one connection', () => {
+    // 67 entries x 3 exits is 201 paths through the hub: one over the cap.
+    const columns: GraphColumn[] = [
+      { id: 'e', title: 'E', boxes: Array.from({ length: 67 }, (_, i) => ({ id: `e${i}`, label: `E${i}` })) },
+      { id: 'l', title: 'L', boxes: [{ id: 'l0', label: 'Hub' }] },
+      { id: 'x', title: 'X', boxes: [{ id: 'x0', label: 'X0' }, { id: 'x1', label: 'X1' }, { id: 'x2', label: 'X2' }] },
+    ]
+    const edges: GraphEdge[] = [
+      ...columns[0].boxes.map((b, i) => ({ id: `in${i}`, from: b.id, to: 'l0' })),
+      { id: 'o0', from: 'l0', to: 'x0' }, { id: 'o1', from: 'l0', to: 'x1' }, { id: 'o2', from: 'l0', to: 'x2' },
+    ]
+    render(<RelationGraph columns={columns} edges={edges} layout="canvas" />)
+    expect(box('Hub').getAttribute('aria-label')).toContain('1 more connection not shown')
+    cleanup()
+    render(<RelationGraph columns={columns} edges={edges.filter(e => e.id !== 'in0')} layout="canvas" />)
+    expect(box('Hub').getAttribute('aria-label')).not.toContain('not shown')
+  })
+
+  it('renders nothing extra and does not call back when nothing is cut', () => {
+    const onTruncated = vi.fn()
+    const { container } = render(<RelationGraph columns={columns} edges={edges} layout="canvas" selectedId="e1" onTruncated={onTruncated} />)
+    expect(onTruncated).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-truncated]')).toBeNull()
+    expect(container.textContent).not.toContain('not shown')
+  })
+})
+
+describe('sticky connections list in list layout', () => {
+  it('sits below the shell top bar, not under it', () => {
+    const { container } = render(<RelationGraph columns={columns} edges={edges} layout="list" />)
+    const sticky = container.querySelector('.sticky') as HTMLElement
+    expect(sticky.className).toContain('top-[calc(var(--shell-bar-h,0px)+0.5rem)]')
   })
 })

@@ -181,7 +181,7 @@ function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
 function TopBar({ title, onOpenPalette, actions, user }: { title?: string; onOpenPalette: () => void; actions?: ReactNode; user: ShellUser }) {
   const { t } = useTranslation('common')
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
+    <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
       <SidebarTrigger label={t('ui.shell.toggle_sidebar')} />
       {title && <h2 className="min-w-0 truncate text-sm font-medium md:hidden">{title}</h2>}
       <div className="flex min-w-0 flex-1 items-center md:px-1">

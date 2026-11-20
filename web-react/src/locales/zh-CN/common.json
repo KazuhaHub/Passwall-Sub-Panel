@@ -210,7 +210,8 @@
       "graph_through_other": "{{count}}条线路经过",
       "graph_lines": "经过{{name}}的线路",
       "graph_lines_none": "选择一个框，在这里查看经过它的线路",
-      "graph_lines_empty": "没有线路经过{{name}}"
+      "graph_lines_empty": "没有线路经过{{name}}",
+      "graph_truncated_other": "另有 {{count}} 条连线未列出"
     },
     "shell": {
       "more": "更多",

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { LandingColorBar } from '@/components/diagram/LandingColorBar'
 import { assignLandingColors } from '@/components/diagram/landingColor'
 import { PathDiagram } from '@/components/diagram/PathDiagram'
@@ -6,7 +6,7 @@ import { RelationGraph } from '@/components/diagram/RelationGraph'
 import { describePath } from '@/components/diagram/pathSummary'
 import { useChartTokens } from '@/hooks/useChartTokens'
 import { useTranslation } from 'react-i18next'
-import { LINES, graphSample, landingColorsFor, linePath } from './sampleData'
+import { LINES, denseGraphSample, graphSample, landingColorsFor, linePath } from './sampleData'
 import { Section } from './TableSections'
 
 export function PathDiagramSection() {
@@ -60,11 +60,17 @@ export function PathDiagramSection() {
 export function GraphSection() {
   const big = graphSample(30)
   const small = graphSample(6)
+  const dense = useMemo(() => denseGraphSample(), [])
   const [sel, setSel] = useState<string | null>('e3')
+  const [cut, setCut] = useState<Readonly<Record<string, number>>>({})
   return (
     <Section id="graph" title="关系图" note="选中一个框，经过它的连线保持清晰，其余变淡。每列 30 个框时滚动，不缩小；窄屏改为列表。图下方的连线列表始终可读、可聚焦。">
       <RelationGraph columns={small.columns} edges={small.edges} selectedId={sel} onSelect={setSel} maxHeight="22rem" />
       <RelationGraph columns={big.columns} edges={big.edges} maxHeight="30rem" />
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-muted-foreground">超过 200 条连线：选中“Hub”，列表只列出 200 条，其余在框上和列表末尾说明。{Object.keys(cut).length > 0 && <span className="font-mono"> onTruncated：{JSON.stringify(cut)}</span>}</p>
+        <RelationGraph columns={dense.columns} edges={dense.edges} maxHeight="22rem" onTruncated={setCut} />
+      </div>
     </Section>
   )
 }

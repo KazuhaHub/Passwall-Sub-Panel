@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { ToneDot } from '@/components/common/StatusDot'
 import { TONE_STYLE } from '@/components/common/tones'
@@ -41,6 +41,12 @@ export interface RelationGraphProps {
   /** Controlled selection; leave undefined for the graph to keep its own. */
   selectedId?: string | null
   onSelect?: (id: string | null) => void
+  /**
+   * Called with how many connections each box has beyond the ones listed (MAX_PATHS
+   * per box), keyed by box id and only for boxes that lost some. Not called while
+   * nothing is cut. The same figure is written on the box and in the connections list.
+   */
+  onTruncated?: (truncated: Readonly<Record<string, number>>) => void
   /** CSS max-height of the scrolling canvas. Boxes never shrink: a long column scrolls. */
   maxHeight?: string
   /**
@@ -94,8 +100,58 @@ function boxStatus(status: PathTone | undefined, t: (k: string) => string): stri
   return status === 'danger' || status === 'warning' || status === 'pending' ? t(`ui.diagram.status_${status}`) : ''
 }
 
-/** Most paths enumerated per box (and per direction); beyond it the list is cut without a marker. */
+/** Most paths enumerated per box (and per direction); beyond it the list is cut and the box says how many are missing. */
 const MAX_PATHS = 200
+
+/**
+ * Most chains counted in ONE direction before counting stops. Counting is for the
+ * "N more" note, so it only has to be honest, not unbounded: a graph this dense is
+ * reported as at least this many rather than walked to the end.
+ */
+const COUNT_CEILING = 100_000
+
+/**
+ * How many paths run through `id`, counted the way pathsThrough enumerates them but
+ * without the MAX_PATHS cap and without building any path, so a box with thousands
+ * of paths costs a walk, not memory. Capped at COUNT_CEILING chains per direction
+ * (the result is then a lower bound).
+ */
+export function countPathsThrough(id: string, edges: readonly GraphEdge[]): number {
+  const out = new Map<string, GraphEdge[]>()
+  const into = new Map<string, GraphEdge[]>()
+  for (const e of edges) {
+    if (!out.has(e.from)) out.set(e.from, [])
+    out.get(e.from)!.push(e)
+    if (!into.has(e.to)) into.set(e.to, [])
+    into.get(e.to)!.push(e)
+  }
+  const chains = (next: Map<string, GraphEdge[]>, far: (e: GraphEdge) => string): { count: number; trivial: boolean } => {
+    let count = 0
+    let trivial = true
+    const visited = new Set<string>([id])
+    const walk = (node: string) => {
+      if (count >= COUNT_CEILING) return
+      let any = false
+      for (const e of next.get(node) ?? []) {
+        const to = far(e)
+        if (visited.has(to)) continue
+        any = true
+        visited.add(to)
+        walk(to)
+        visited.delete(to)
+      }
+      if (!any) count++
+      else if (node === id) trivial = false
+    }
+    walk(id)
+    return { count, trivial }
+  }
+  const f = chains(out, e => e.to)
+  const b = chains(into, e => e.from)
+  // A box with no usable edge either way has no paths; the lone trivial x trivial chain is not one.
+  if (f.trivial && b.trivial) return 0
+  return f.count * b.count
+}
 
 export interface GraphPath {
   /** Box ids from where the line enters to where it leaves. */
@@ -154,9 +210,10 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
  * SIZE LIMITS. There is NO cap on boxes or edges: every box is drawn at a fixed size
  * and the canvas scrolls (the list layout scrolls with the page), so nothing is dropped
  * or summarised however many there are. The only cap is on PATHS: the connections of
- * one box, and the count in its name, stop at MAX_PATHS (200). Past that the list is cut
- * silently, with no "and more" row, so the counts are a lower bound for a graph that
- * dense. Work grows with the number of paths per box times the number of boxes (the
+ * one box, and the count in its name, stop at MAX_PATHS (200). Past that the list is cut,
+ * and the cut is SAID: the box carries a "+N" badge and "N more connections not shown" in
+ * its name, the connections list ends with the same sentence when that box is selected,
+ * and `onTruncated` reports the figures. The count in the name stays at the cap. Work grows with the number of paths per box times the number of boxes (the
  * per-box counts are computed up front), so keep graphs to the hundreds of edges.
  * Edges naming a box that is not in `columns` are dropped without a message.
  *
@@ -170,7 +227,7 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
  * Boxes are buttons with one tab stop and arrow-key movement (up and down within
  * a column, left and right across columns); Enter or Space selects.
  */
-export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className }: RelationGraphProps) {
+export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className, onTruncated }: RelationGraphProps) {
   const { t } = useSpacedT()
   const narrow = useMediaQuery('(max-width: 639px)')
   const asList = layout === 'list' || (layout === 'auto' && narrow)
@@ -203,6 +260,25 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     for (const c of columns) for (const b of c.boxes) m[b.id] = pathsThrough(b.id, drawn).length
     return m
   }, [columns, drawn])
+  // Connections each box has beyond the MAX_PATHS listed. Counted only for a box whose
+  // list was actually full, so the common graph pays nothing for it.
+  const truncatedBy = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const c of columns) for (const b of c.boxes) {
+      if ((throughCount[b.id] ?? 0) < MAX_PATHS) continue
+      const more = countPathsThrough(b.id, drawn) - MAX_PATHS
+      if (more > 0) m[b.id] = more
+    }
+    return m
+  }, [columns, drawn, throughCount])
+  const hadTruncation = useRef(false)
+  useEffect(() => {
+    const any = Object.keys(truncatedBy).length > 0
+    // Silent while nothing is cut, but once it was, a graph that stops being cut says so ({}).
+    if (any || hadTruncation.current) onTruncated?.(truncatedBy)
+    hadTruncation.current = any
+  }, [truncatedBy, onTruncated])
+  const notShown = (id: string) => (truncatedBy[id] ? t('ui.diagram.graph_truncated', { count: truncatedBy[id] }) : '')
   // Where each of several lines between the same two boxes is drawn, so they are visibly apart.
   const offsetOf = useMemo(() => {
     const groups = new Map<string, GraphEdge[]>()
@@ -234,7 +310,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
 
   const selectedBox = selected !== null ? boxById[selected] : undefined
   const announce = selectedBox
-    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: throughCount[selectedBox.id] ?? 0 })
+    ? [t('ui.diagram.graph_selected', { name: selectedBox.label, count: throughCount[selectedBox.id] ?? 0 }), notShown(selectedBox.id)].filter(Boolean).join(', ')
     : ''
 
   const connections = (
@@ -282,6 +358,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
               })}
             </ul>
           )}
+          {notShown(selectedBox.id) && <p data-truncated-note="" className="mt-1.5 text-xs font-medium text-foreground/70">{notShown(selectedBox.id)}</p>}
         </>
       ) : (
         <p className="text-muted-foreground">{t('ui.diagram.graph_lines_none')}</p>
@@ -298,7 +375,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
         ref={el => { refs.current[b.id] = el }}
         type="button"
         aria-pressed={isSel}
-        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_through', { count: throughCount[b.id] ?? 0 })].filter(Boolean).join(', ')}
+        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_through', { count: throughCount[b.id] ?? 0 }), notShown(b.id)].filter(Boolean).join(', ')}
         data-dim={dim ? 'true' : undefined}
         tabIndex={b.id === tabStop ? 0 : -1}
         onClick={() => select(isSel ? null : b.id)}
@@ -319,6 +396,10 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
           <span className="truncate text-sm leading-tight font-medium">{b.label}</span>
           {b.sublabel && <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground">{b.sublabel}</span>}
         </span>
+        {truncatedBy[b.id] > 0 && (
+          // The full wording is in the button's name; this is the glance for sighted users.
+          <span data-truncated="" aria-hidden="true" title={notShown(b.id)} className="shrink-0 rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-foreground/70">+{truncatedBy[b.id]}</span>
+        )}
         {b.status && <ToneDot tone={toneOfPath(b.status)} />}
       </button>
     )
@@ -328,8 +409,10 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     return (
       <div data-slot="relation-graph" data-layout="list" role="group" aria-label={t('ui.diagram.graph_label')} className={cn('flex flex-col gap-3', className)}>
         {/* Sticky: a box deep in a long column is tapped far below the top, and its
-            connections must stay in view next to it. */}
-        <div className="sticky top-2 z-10 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">{connections}</div>
+            connections must stay in view next to it. The app shell scrolls the whole page
+            under its own sticky top bar, so the offset starts below that bar (the shell
+            publishes its height); a bare top-2 would slide under it. */}
+        <div className="sticky top-[calc(var(--shell-bar-h,0px)+0.5rem)] z-10 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">{connections}</div>
         {columns.map(c => (
           <section key={c.id} role="region" aria-label={c.title} className="flex flex-col gap-2">
             <h3 className="text-xs font-medium text-muted-foreground">{c.title} <span className="tabular-nums">{c.boxes.length}</span></h3>

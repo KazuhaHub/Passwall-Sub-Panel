@@ -26,7 +26,7 @@ export function UserShell({ brand, user, topBarActions, footer, contentClassName
   return (
     <TooltipProvider delay={300}>
       <div className="flex min-h-svh flex-col bg-background">
-        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
+        <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <BrandLogo brand={brand} />
             <span className="truncate text-sm font-semibold">{brand.name}</span>

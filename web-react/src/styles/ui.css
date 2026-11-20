@@ -213,6 +213,13 @@
 :root, :root[data-density="compact"] { --control-h: 2rem; --row-h: 2.25rem; }
 :root[data-density="comfortable"] { --control-h: 2.5rem; --row-h: 3rem; }
 
+/*
+ * Height of the shell's sticky top bar (AppShell, UserShell). The whole page scrolls
+ * under it, so anything else that sticks to the top of the viewport (a graph's
+ * connections list, a table header) offsets itself by this value instead of 0.
+ */
+:root { --shell-bar-h: 3.5rem; }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
