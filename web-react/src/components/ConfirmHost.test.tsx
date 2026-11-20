@@ -150,4 +150,48 @@ describe('ConfirmHost', () => {
     ask({ title: 't', message: 'm' })
     expect((await screen.findByRole('button', { name: '确定' })).className).not.toContain('bg-destructive')
   })
+
+  describe("initialFocus: 'cancel'", () => {
+    it('starts focus on Cancel, not on the confirm button', async () => {
+      render(<ConfirmHost />)
+      ask({ title: 't', message: 'm', destructive: true, initialFocus: 'cancel' })
+      const cancel = await screen.findByRole('button', { name: '取消' })
+      await waitFor(() => expect(document.activeElement).toBe(cancel))
+    })
+
+    it('Enter on the focused Cancel cancels and never confirms', async () => {
+      render(<ConfirmHost />)
+      const settled = ask({ title: 't', message: 'm', destructive: true, initialFocus: 'cancel' })
+      const cancel = await screen.findByRole('button', { name: '取消' })
+      await waitFor(() => expect(document.activeElement).toBe(cancel))
+      // A real Enter on a focused button clicks it; jsdom does not synthesise that.
+      fireEvent.keyDown(cancel, { key: 'Enter' })
+      fireEvent.click(cancel)
+      await waitFor(() => expect(settled.value).toBe(false))
+    })
+
+    it('Escape still cancels', async () => {
+      render(<ConfirmHost />)
+      const settled = ask({ title: 't', message: 'm', initialFocus: 'cancel' })
+      fireEvent.keyDown(await screen.findByRole('alertdialog'), { key: 'Escape' })
+      await waitFor(() => expect(settled.value).toBe(false))
+    })
+
+    it('returns focus to the element that raised it when it closes', async () => {
+      render(<><button type="button">trigger</button><ConfirmHost /></>)
+      const trigger = screen.getByRole('button', { name: 'trigger' })
+      trigger.focus()
+      const settled = ask({ title: 't', message: 'm', initialFocus: 'cancel' })
+      fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+      await waitFor(() => expect(settled.value).toBe(false))
+      await waitFor(() => expect(document.activeElement).toBe(trigger))
+    })
+
+    it('still confirms with the confirm button', async () => {
+      render(<ConfirmHost />)
+      const settled = ask({ title: 't', message: 'm', initialFocus: 'cancel' })
+      fireEvent.click(await screen.findByRole('button', { name: '确定' }))
+      await waitFor(() => expect(settled.value).toBe(true))
+    })
+  })
 })
