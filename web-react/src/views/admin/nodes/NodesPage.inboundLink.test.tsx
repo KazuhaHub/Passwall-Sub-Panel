@@ -35,7 +35,7 @@ describe('legacy query strings', () => {
 })
 
 // The coverage sheet's "edit inbound" lands on /admin/nodes?inbound=<id>: it now continues to the node's page,
-// whose shell opens the inbound editor (until N3 builds the Inbound tab).
+// whose Inbound tab shows the form.
 const mountAt = (path: string, panelType = 'psp', role: 'admin' | 'operator' = 'admin') => {
   installReads({
     '/admin/servers': list([{ ...server, panel_type: panelType }]), '/admin/nodes': list([node]), '/admin/nodes/1': { node, inbound, clients: [] },
@@ -52,8 +52,8 @@ const mountAt = (path: string, panelType = 'psp', role: 'admin' | 'operator' = '
 
 it('opens the inbound editor for ?inbound=<id> through the node page', async () => {
   const router = mountAt('/admin/nodes?inbound=1')
-  const dialog = await screen.findByRole('dialog')
-  expect(within(dialog).getByText(/admin:nodes.edit_inbound_dialog.title/)).toBeTruthy()
+  expect(await screen.findByLabelText(/create_dialog.port/)).toBeTruthy()
+  expect(screen.getByRole('tab', { name: /tabs.inbound/ }).getAttribute('aria-selected')).toBe('true')
   expect(router.state.location.pathname).toBe('/admin/nodes/1')
   expect(router.state.location.search).toBe('?tab=inbound')
 })
@@ -62,7 +62,7 @@ it('says so when the node does not exist and opens nothing', async () => {
   const router = mountAt('/admin/nodes?inbound=99')
   api.get.mockImplementation(async (url: string) => { throw Object.assign(new Error('not found'), { url }) })
   await waitFor(() => expect(router.state.location.pathname).toBe('/admin/nodes/99'))
-  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByLabelText(/create_dialog.port/)).toBeNull()
 })
 
 // The source-country section is only for a native (psp) panel's inbound, and is a separate save from the node form.
@@ -73,9 +73,8 @@ it('shows the deny-source section in the inbound editor of a psp panel only', as
 
 it('does not show it for a 3X-UI panel', async () => {
   mountAt('/admin/nodes/1?tab=inbound', '3xui')
-  const dialog = await screen.findByRole('dialog')
   // The section is decided in the same render that shows the form, so the form being there is the signal to look.
-  await waitFor(() => expect(dialog.querySelector('#edit-inbound-form')).not.toBeNull())
+  await screen.findByLabelText(/create_dialog.port/)
   expect(screen.queryByTestId('source-rules-section')).toBeNull()
   // The section shows a skeleton while its read is pending, so its absence alone could be that; the read itself is the proof.
   expect(api.get.mock.calls.filter(([url]) => String(url).includes('/admin/dest/source-rules/1'))).toEqual([])

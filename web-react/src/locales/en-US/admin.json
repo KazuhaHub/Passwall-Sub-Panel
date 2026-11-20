@@ -2933,7 +2933,6 @@
       "back": "Nodes",
       "admin_only": "Only administrators can view and edit node details",
       "not_found": "This node was not found",
-      "edit_legacy": "Edit details and exit",
       "show_lines": "Show this node in the list",
       "dirty_tabs": "{{tabs}} have unsaved changes",
       "tab_separator": ", ",

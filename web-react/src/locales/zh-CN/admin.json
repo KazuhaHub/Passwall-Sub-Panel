@@ -2929,7 +2929,6 @@
       "back": "节点",
       "admin_only": "只有管理员可以查看和编辑节点详情",
       "not_found": "找不到这个节点",
-      "edit_legacy": "编辑基本信息和出口",
       "show_lines": "在列表中查看此节点",
       "dirty_tabs": "{{tabs}}有未保存的修改",
       "tab_separator": "、",
