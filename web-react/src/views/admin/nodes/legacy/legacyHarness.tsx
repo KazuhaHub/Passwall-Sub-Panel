@@ -5,7 +5,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { LegacyEditorsProvider, useLegacyEditors } from './LegacyEditors'
 
 // A stand-in for the list in the tests of the legacy editors: the editors are opened by the page now, so the
-// tests open them through the same host API with three buttons. Not part of the app.
+// tests open them through the same host API with four buttons. Not part of the app.
 function Buttons() {
   const legacy = useLegacyEditors()
   const nodes = useAllNodes(useQueryScope())
@@ -14,6 +14,7 @@ function Buttons() {
     <>
       <button disabled={!ready} onClick={() => legacy.openEdit(1)}>open-meta</button>
       <button disabled={!ready} onClick={() => legacy.openInbound(1)}>open-inbound</button>
+      <button disabled={!ready} onClick={() => legacy.openEdit(77)}>open-listener</button>
       <button disabled={!ready} onClick={() => legacy.openCreate()}>open-create</button>
     </>
   )
@@ -30,5 +31,6 @@ async function open(name: string) {
   return screen.findByRole('dialog')
 }
 export const openMeta = () => open('open-meta')
+export const openListener = () => open('open-listener')
 export const openInboundEditor = () => open('open-inbound')
 export const openCreateWizard = () => open('open-create')

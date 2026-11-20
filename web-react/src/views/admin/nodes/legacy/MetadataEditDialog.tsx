@@ -1,42 +1,35 @@
 // AUTOIMPORT-BEGIN
-import CdnLineFields from '../../CdnLineFields'
-import { CDN_DEFAULT_PORT } from '../../CdnLineFields'
-import LineLabelsFields from '../../LineLabelsFields'
-import LinkQualityCell from '../../LinkQualityCell'
 import ProbeQualityChip from '../../ProbeQualityChip'
-import SourceAddressesField from '../../SourceAddressesField'
+import LinkQualityCell from '../../LinkQualityCell'
+import PreviewCaption from '@/components/PreviewCaption'
 import TagsAutocomplete from '../../TagsAutocomplete'
 import TransitLinkFields from '../../TransitLinkFields'
-import TunnelLineEditor from '../../TunnelLineEditor'
-import { mergeServerLine } from '../../TunnelLineEditor'
 import RoutesSection from '../../routes/RoutesSection'
-import { lineVisibilityHint, nodeGroupsHint, useLineVisibility } from '../../useLineVisibility'
-import { CDN_ENTRY, EGRESS_READY_POLL_MS, MetaForm, RelayDraft, newRelayKey } from './inboundModel'
-import { lineLabelsInput, splitTagsText } from '@/api/lineLabels'
+import { nodeGroupsHint, useLineVisibility } from '../../useLineVisibility'
+import { EGRESS_READY_POLL_MS, MetaForm } from './inboundModel'
+import { splitTagsText } from '@/api/lineLabels'
 import { type LineVisibilityDraft, type TransitLink, getNode, getTransitLink, updateNodeMetadata, updateTransitLink } from '@/api/nodes'
 import { PanelCapability, Server } from '@/api/servers'
-import { type NodeSourceGuard, addRefusedSource, getNodeSourceGuard, parseSourceCIDRs } from '@/api/sourceGuard'
-import { Node, RelayLine } from '@/api/types'
-import { confirm } from '@/components/ConfirmHost'
-import PreviewCaption from '@/components/PreviewCaption'
+import { Node } from '@/api/types'
 import { pushSnack } from '@/components/SnackbarHost'
-import { TrafficFactorField } from '@/components/TrafficFactorField'
-import { DEFAULT_TRAFFIC_FACTOR_MILLI, factorTextToMilli, milliToFactorText } from '@/utils/trafficFactor'
 import { type FieldErrors, firstError, validateHost, validateName } from '@/utils/validators'
-import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { Accordion, AccordionDetails, AccordionSummary, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton, MenuItem, Switch, TextField, Tooltip, Typography, alpha, useTheme } from '@mui/material'
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Accordion, AccordionDetails, AccordionSummary, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, TextField, Typography, useTheme } from '@mui/material'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 // AUTOIMPORT-END
-// The legacy node metadata editor (name, address, region, tags, exit, routes and every line), moved out of the
-// old NodesView.tsx with its behaviour unchanged. It stays on MUI until N2 (line editor) and N3 (General and
-// Exit tabs) replace it. The host (LegacyEditors) mounts it for the node being edited and unmounts it on close.
+// The legacy node metadata editor: name, address, region, tags, the exit and the routes by destination. The lines
+// are no longer here: they are edited one at a time in the line editor (N2, views/admin/nodes/lines), which is
+// also where a line's enable switch, multiplier and the direct line's switch live. This dialog stays on MUI until
+// N3 (General and Exit tabs) replaces it. The host (LegacyEditors) mounts it for the node being edited and
+// unmounts it on close. It never sends `relays` or `hide_direct`, so saving here leaves every line as it is.
 // AUTOIMPORT-BEGIN
 // AUTOIMPORT-END
 
-function editFormOf(n: Node): MetaForm {
+/** What this dialog edits of a node. */
+type EditForm = Omit<MetaForm, 'relays' | 'hide_direct' | 'traffic_factor_milli' | 'traffic_factor_text'>
+
+function editFormOf(n: Node): EditForm {
   return {
     display_name: n.display_name,
     server_address: n.server_address,
@@ -44,32 +37,24 @@ function editFormOf(n: Node): MetaForm {
     region: n.region,
     tags_text: (n.tags ?? []).join(', '),
     sort_order: n.sort_order,
-    relays: (n.relays ?? []).map((r, i) => ({ ...r, only_line_name: !!r.only_line_name, _key: r.id ?? `saved-${i}` })),
-    hide_direct: !!n.hide_direct,
-    traffic_factor_milli: n.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI,
     egress_panel_id: n.egress_panel_id ?? 0,
   }
 }
 
 export interface MetadataEditProps {
   node: Node
-  /** The line to scroll to; or, with addLine, a blank line is appended. */
-  lineId?: string | null
-  addLine?: boolean
   servers: Server[]
   /** Every node (for the listener banner and the default-exit names). */
   nodes: Node[]
   allTags: string[]
   onClose: () => void
-  /** A tunnel listener opens in this same editor. */
-  onSwitchNode: (node: Node) => void
   onOpenInbound: (node: Node) => void
   /** Patches the cached node list after a write. */
   mutateManaged: (updater: (prev: Node[]) => Node[]) => void
   onSaved: () => void
 }
 
-export default function MetadataEditDialog({ node, lineId, addLine, servers, nodes: managed, allTags, onClose, onSwitchNode, onOpenInbound, mutateManaged, onSaved }: MetadataEditProps) {
+export default function MetadataEditDialog({ node, servers, nodes: managed, allTags, onClose, onOpenInbound, mutateManaged, onSaved }: MetadataEditProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -77,25 +62,18 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
   const editOpen = true
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<Node | null>(node)
-  const editLineTarget = useRef<string | null>(addLine ? null : lineId ?? null)
-  const [editForm, setEditForm] = useState<MetaForm>(() => {
-    const form = editFormOf(node)
-    if (!addLine) return form
-    editLineTarget.current = newRelayKey()
-    return { ...form, relays: [...form.relays, { _key: editLineTarget.current, name: '', address: '', port: 0, enabled: true }] }
-  })
-  // Which groups would see each line with the unsaved labels (ADR 0041). Rows
-  // keep editor order, including rows the save would drop for a blank address.
+  const [editForm, setEditForm] = useState<EditForm>(() => editFormOf(node))
+  // Which groups would see the node with the unsaved address, region and tags (ADR 0041). The node's own lines are
+  // sent as saved: they are not edited here.
   const lineVisibilityDraft = useMemo<LineVisibilityDraft | null>(() => {
     if (!editOpen || !editing) return null
-    const labels = (line: { region?: string; tags?: string[] }) => ({ region: (line.region ?? '').trim(), tags: line.tags ?? [] })
     return {
       server_address: editForm.server_address,
       region: editForm.region,
       tags: splitTagsText(editForm.tags_text),
-      relays: editForm.relays.map(r => ({ id: r.id, ...labels(r) })),
+      relays: (editing.relays ?? []).map(r => ({ id: r.id, region: (r.region ?? '').trim(), tags: r.tags ?? [] })),
     }
-  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text, editForm.relays])
+  }, [editOpen, editing, editForm.server_address, editForm.region, editForm.tags_text])
   const lineVisibility = useLineVisibility(editing?.id || 0, lineVisibilityDraft)
   type MetaField = 'display_name' | 'server_address' | 'region'
   const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
@@ -115,36 +93,6 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
   const [linkDirty, setLinkDirty] = useState(false)
   const [linkError, setLinkError] = useState(false)
   const editEgress = editForm.egress_panel_id ?? 0
-  // What the panel says of the saved node's lines' source addresses (ADR 0044):
-  // the set in force, the Cloudflare ranges, and the sources its landing refused.
-  const [sourceGuard, setSourceGuard] = useState<NodeSourceGuard | null>(null)
-  const [sourceBusy, setSourceBusy] = useState(false)
-  const editingId = editing?.id ?? 0
-  useEffect(() => {
-    setSourceGuard(null)
-    if (!editOpen || editingId <= 0) return
-    const controller = new AbortController()
-    getNodeSourceGuard(editingId, { signal: controller.signal })
-      .then(setSourceGuard)
-      .catch(() => { /* The editor works without it. */ })
-    return () => controller.abort()
-  }, [editOpen, editingId])
-  async function addSource(lineId: string, ip: string) {
-    setSourceBusy(true)
-    try {
-      const saved = await addRefusedSource(editingId, lineId, ip)
-      // The address is saved; the line's own list in the form follows it.
-      setEditForm(f => ({ ...f, relays: f.relays.map(x => (x.id === lineId ? { ...x, source_cidrs: saved, _source_text: undefined } : x)) }))
-      editBaseline.current = editBaseline.current && {
-        ...editBaseline.current,
-        relays: editBaseline.current.relays.map(x => (x.id === lineId ? { ...x, source_cidrs: saved } : x)),
-      }
-      pushSnack(t('admin:nodes.source.added', { ip }), 'success')
-      setSourceGuard(await getNodeSourceGuard(editingId))
-    } catch {
-      // The request layer already surfaced the failure.
-    } finally { setSourceBusy(false) }
-  }
   useEffect(() => {
     if (!editOpen || !editing || editEgress <= 0) return
     let cancelled = false
@@ -191,42 +139,7 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
   }
   const panelSupports = (panelID: number, capability: PanelCapability) =>
     !!servers.find(s => s.id === panelID)?.capabilities?.includes(capability)
-  const editBaseline = useRef<MetaForm | null>(editFormOf(node))
-  // The form as the admin has changed it, without what the server decides
-  // (status, a tunnel line's listener and port), for telling edits from a refresh.
-  const editSnapshot = (f: MetaForm) => JSON.stringify({
-    ...f,
-    relays: f.relays.map(({ tunnel: _tunnel, running: _running, managed_ready: _ready, probe: _probe, probe_withheld: _withheld, cdn_issues: _issues, source_withheld: _sourceWithheld, mode: _mode, ...r }) =>
-      (_mode === 'tunnel' ? { ...r, port: 0, sni: '', host: '' } : r)),
-  })
-  const editFormDirty = () => linkDirty || (editBaseline.current !== null && editSnapshot(editForm) !== editSnapshot(editBaseline.current))
-
-  // The server settled one saved line (a mode switch, a listener edit or sync):
-  // show it on that row, keep every other edit, and keep the list's copy current.
-  function applyServerLine(landingId: number, relays: RelayLine[], lineId: string) {
-    setEditForm(f => ({ ...f, relays: mergeServerLine(f.relays, relays, lineId) }))
-    if (editBaseline.current) editBaseline.current = { ...editBaseline.current, relays: mergeServerLine(editBaseline.current.relays, relays, lineId) }
-    mutateManaged(prev => prev.map(x => (x.id === landingId ? { ...x, relays } : x)))
-  }
-  // A tunnel line's listener is a node of its own, hidden from the list: its
-  // settings open in this same editor. Unsaved edits to the landing are not carried over.
-  async function openListener(listenerId: number) {
-    if (editFormDirty()) {
-      const ok = await confirm({
-        title: t('admin:nodes.tunnel.open_discard_title'),
-        message: t('admin:nodes.tunnel.open_discard_message'),
-        destructive: true,
-      })
-      if (!ok) return
-    }
-    try {
-      const { node: listener } = await getNode(listenerId)
-      onSwitchNode(listener)
-    } catch {
-      // The request layer already surfaced the failure.
-    }
-  }
-  function validateMeta(f: MetaForm): FieldErrors<MetaField> {
+  function validateMeta(f: EditForm): FieldErrors<MetaField> {
     return {
       display_name: validateName(f.display_name, { required: true, max: 64 }),
       server_address: validateHost(f.server_address, { required: true }),
@@ -241,16 +154,6 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
     setEditMetaErr(errs)
     const firstKey = firstError(errs)
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
-    // An invalid or empty multiplier keeps the last valid value in the form, so
-    // saving would silently write the old number: block instead.
-    if ((editForm.traffic_factor_text !== undefined && factorTextToMilli(editForm.traffic_factor_text) === null)
-      || editForm.relays.some(r => r._factor_text !== undefined && factorTextToMilli(r._factor_text) === null)) {
-      pushSnack(t('admin:nodes.validate.traffic_factor'), 'warning'); return
-    }
-    // A CDN line without a domain is not dropped like a blank row: it blocks the save.
-    if (editForm.relays.some(r => r.mode === 'cdn' && !r.domain?.trim())) {
-      pushSnack(t('admin:nodes.cdn.domain_required'), 'warning'); return
-    }
     setEditBusy(true)
     try {
       const egress = editForm.egress_panel_id ?? 0
@@ -265,6 +168,9 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
         setLinkForm(link)
         setLinkDirty(false)
       }
+      // Only what this dialog edits: no relays and no hide_direct (a save here leaves every line as it is), no
+      // direct multiplier (the direct line's editor owns it), and no sort_order (positions are written only by
+      // PUT /nodes/order; see InboundEditDialog).
       const saved = await updateNodeMetadata(editing.id, {
         display_name: editForm.display_name,
         server_address: editForm.server_address,
@@ -273,29 +179,11 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
         tags: editForm.tags_text
           ? editForm.tags_text.split(',').map(s => s.trim()).filter(Boolean)
           : [],
-        // No sort_order: see InboundEditDialog; positions are written only by PUT /nodes/order.
-        // Drop blank-address lines, trim, and coerce port to a number so a
-        // half-filled row never reaches the backend (which would 400).
-        relays: editForm.relays
-          .map(({ managed_ready: _ready, probe: _probe, probe_withheld: _probeWithheld, running: _running, tunnel: _tunnel, cdn_issues: _issues, source_withheld: _sourceWithheld, _source_text, _key, _factor_text, _factor_touched, traffic_factor_milli, ...r }) => ({ ...r, ...(r.mode === 'tunnel' ? { source_cidrs: undefined } : _source_text !== undefined ? { source_cidrs: parseSourceCIDRs(_source_text) } : {}), ...(_factor_touched && traffic_factor_milli !== undefined ? { traffic_factor_milli } : {}), name: r.name.trim(), only_line_name: !!r.only_line_name, address: r.address.trim(), domain: r.mode === 'cdn' ? r.domain?.trim() : undefined, port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined, entry_panel_id: r.entry_panel_id || undefined, ...lineLabelsInput(r) }))
-          // A CDN line may leave the address empty (it is the domain); every other line needs one.
-          .filter(r => r.address || (r.mode === 'cdn' && r.domain)),
-        hide_direct: editForm.hide_direct,
-        // Direct factor only when changed; relay lines carry their own value above.
-        ...(editForm.traffic_factor_milli !== undefined
-          && editForm.traffic_factor_milli !== (editing.traffic_factor_milli ?? DEFAULT_TRAFFIC_FACTOR_MILLI)
-          ? { traffic_factor_milli: editForm.traffic_factor_milli } : {}),
         egress_panel_id: egress,
       })
       mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       setEditing(saved)
       pushSnack(t('admin:nodes.toast.saved'), 'success')
-      // What the saved node says about its CDN lines is shown on the lines when
-      // the editor is opened again; do not let a likely problem pass unseen.
-      const flagged = (saved.relays ?? []).filter(r => r.mode === 'cdn' && r.cdn_issues?.some(i => i.warn))
-      if (flagged.length > 0) {
-        pushSnack(t('admin:nodes.cdn.saved_warnings', { lines: flagged.map(r => r.name || r.domain).join(', ') }), 'warning')
-      }
       onSaved()
       onClose()
     } catch {
@@ -306,10 +194,6 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
   return (
       <Dialog open onClose={() => !editBusy && onClose()}
         slotProps={{
-          transition: { onEntered: () => {
-            const target = editLineTarget.current
-            if (target) document.getElementById(`node-line-${target}`)?.scrollIntoView?.({ block: 'start' })
-          } },
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
         }}>
         <DialogTitle>
@@ -364,7 +248,7 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
                 </Typography>}
               </Box>
             })()}
-            {!isListener && (editForm.relays.length > 0 || editLineTarget.current === 'direct') && (
+            {!isListener && (editing?.relays ?? []).length > 0 && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1.5 }}>{t('admin:nodes.line_labels.node_change_hint')}</Typography>
             )}
 
@@ -424,128 +308,6 @@ export default function MetadataEditDialog({ node, lineId, addLine, servers, nod
                 }} />
             )}
 
-            {/* Transit / 中转 lines: the same landing offered through extra
-                relay fronts. Server-side forwarding (realm/gost/iptables) is
-                set up outside the panel; here we only record each front's
-                address/port (+ optional CDN SNI/Host). */}
-            {!isListener && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
-                <Button size="small" startIcon={<AddIcon />}
-                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { _key: newRelayKey(), name: '', only_line_name: false, address: '', port: 0, sni: '', host: '', enabled: true, region: f.region.trim(), tags: splitTagsText(f.tags_text) }] }))}>
-                  {t('admin:nodes.relay.add')}
-                </Button>
-              </Box>
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.relay.hint')}</Typography>
-              {editForm.relays.length === 0 ? (
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t('admin:nodes.relay.empty')}</Typography>
-              ) : editForm.relays.map((r, i) => {
-                const update = (patch: Partial<RelayDraft>) =>
-                  setEditForm(f => ({ ...f, relays: f.relays.map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
-                return (
-                  <Box key={r._key ?? i} id={`node-line-${r.id || r._key}`} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
-                        onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
-                        placeholder={t('admin:nodes.relay.name_ph')}
-                        helperText={t('admin:nodes.relay.name_factor_hint', { placeholder: '{{ factor }}' })} />
-                      <FormControlLabel id="node-line-direct" sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
-                        control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
-                      <Tooltip title={t('admin:nodes.relay.remove')}>
-                        <IconButton size="small" onClick={() => setEditForm(f => ({ ...f, relays: f.relays.filter((_, j) => j !== i) }))}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                    {/* The kind of line: an external entry, a Passwall Node server (a direct
-                        forward or an encrypted tunnel, chosen below), or a CDN in front of the
-                        landing. A CDN line is never turned into another kind, nor another into it. */}
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
-                      <TextField select size="small" fullWidth label={t('admin:nodes.relay.entry')}
-                        value={r.mode === 'cdn' ? CDN_ENTRY : (r.entry_panel_id ?? 0)}
-                        disabled={r.mode === 'cdn' && !!r.id}
-                        onChange={e => {
-                          const entry = Number(e.target.value) || 0
-                          if (entry === CDN_ENTRY) {
-                            update({ mode: 'cdn', entry_panel_id: 0, domain: '', address: '', sni: '', host: '', port: CDN_DEFAULT_PORT, client_tls: undefined })
-                          } else if (r.mode === 'cdn') {
-                            update({ mode: undefined, domain: undefined, client_tls: undefined, entry_panel_id: entry, address: '', sni: '', host: '', port: 0 })
-                          } else {
-                            // A managed entry forwards unchanged: no SNI/Host override.
-                            update(entry ? { entry_panel_id: entry, sni: '', host: '' } : { entry_panel_id: 0, mode: undefined })
-                          }
-                        }}
-                        helperText={r.mode === 'cdn' ? t('admin:nodes.cdn.entry_hint')
-                          : (r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.entry_managed_hint') : t('admin:nodes.relay.entry_external_hint')}>
-                        <MenuItem value={0}>{t('admin:nodes.relay.entry_external')}</MenuItem>
-                        <MenuItem value={CDN_ENTRY} disabled={!!r.id && r.mode !== 'cdn'}>{t('admin:nodes.relay.entry_cdn')}</MenuItem>
-                        {relayEntryServers.map(server => (
-                          <MenuItem key={server.id} value={server.id} disabled={r.mode === 'cdn' && !!r.id}>{server.name}</MenuItem>
-                        ))}
-                      </TextField>
-                    </Box>
-                    {r.mode === 'cdn' && <CdnLineFields line={r} onPatch={update} />}
-                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && (
-                      <TunnelLineEditor nodeId={editing?.id ?? 0} line={r}
-                        savedEntry={editing?.relays?.find(x => x.id === r.id)?.entry_panel_id ?? 0}
-                        onPatch={update}
-                        onSwitched={node => applyServerLine(node.id, node.relays ?? [], r.id!)}
-                        onRelays={relays => applyServerLine(editing?.id ?? 0, relays, r.id!)}
-                        onOpenListener={id => void openListener(id)} />
-                    )}
-                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
-                      <Typography sx={{ fontSize: 12, color: r.managed_ready ? md.primary : md.onSurfaceVariant }}>
-                        {r.managed_ready ? t('admin:nodes.relay.managed_ready') : t('admin:nodes.relay.managed_pending')}
-                      </Typography>
-                    )}
-                    {r.mode !== 'cdn' && (r.entry_panel_id ?? 0) > 0 && r.id && r.mode !== 'tunnel' && (
-                      <ProbeQualityChip probe={r.probe} withheld={r.probe_withheld} testId="relay-probe" />
-                    )}
-                    {r.mode !== 'cdn' && <Box sx={{ display: 'flex', gap: 1 }}>
-                      <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
-                        onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
-                      {r.mode !== 'tunnel' && <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
-                        required={(r.entry_panel_id ?? 0) > 0}
-                        onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
-                        helperText={(r.entry_panel_id ?? 0) > 0 ? t('admin:nodes.relay.port_managed_hint') : t('admin:nodes.relay.port_hint')} />}
-                    </Box>}
-                    {r.mode !== 'cdn' && !((r.entry_panel_id ?? 0) > 0) && (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <TextField size="small" label={t('admin:nodes.relay.sni')} value={r.sni ?? ''}
-                        onChange={e => update({ sni: e.target.value })} sx={{ flex: 1 }}
-                        placeholder={t('admin:nodes.relay.cdn_optional')} />
-                      <TextField size="small" label={t('admin:nodes.relay.host')} value={r.host ?? ''}
-                        onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
-                        placeholder={t('admin:nodes.relay.cdn_optional')} />
-                    </Box>
-                    )}
-                    {r.mode !== 'tunnel' && (
-                      <SourceAddressesField line={r}
-                        text={r._source_text ?? (r.source_cidrs ?? []).join('\n')}
-                        onText={text => update({ _source_text: text })}
-                        guard={r.id ? sourceGuard?.lines.find(x => x.line_id === r.id) : undefined}
-                        canGuard={sourceGuard?.can_guard}
-                        cannotGuardReason={sourceGuard?.cannot_guard_reason}
-                        cloudflare={sourceGuard?.cloudflare}
-                        busy={sourceBusy}
-                        onAdd={ip => { if (r.id) void addSource(r.id, ip) }} />
-                    )}
-                    <LineLabelsFields region={r.region ?? ''} tags={r.tags ?? []} tagOptions={allTags}
-                      visibility={lineVisibilityHint(lineVisibility, 'relays', i)}
-                      onChange={patch => update(patch)} />
-                    <TrafficFactorField compact text={r._factor_text ?? milliToFactorText(r.traffic_factor_milli)}
-                      onText={(text, m) => update({ _factor_text: text, _factor_touched: true, ...(m !== null ? { traffic_factor_milli: m } : {}) })} />
-                    <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.only_line_name')}
-                      control={<Switch size="small" checked={!!r.only_line_name} onChange={(_, checked) => update({ only_line_name: checked })} />} />
-                  </Box>
-                )
-              })}
-              <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
-                control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, checked) => setEditForm(f => ({ ...f, hide_direct: checked }))} />} />
-              <TrafficFactorField label={t('admin:nodes.field.traffic_factor_direct')} text={editForm.traffic_factor_text ?? milliToFactorText(editForm.traffic_factor_milli)}
-                onText={(text, m) => setEditForm(f => ({ ...f, traffic_factor_text: text, ...(m !== null ? { traffic_factor_milli: m } : {}) }))} />
-            </Box>}
-            <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
         <DialogActions>

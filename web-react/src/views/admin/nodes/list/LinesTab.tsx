@@ -20,9 +20,11 @@ import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { useSeparators } from '@/query/nodes'
 import { useSiteStore } from '@/stores/site'
 import { useCan } from '@/utils/permissions'
+import { LineEditor } from '../lines/LineEditor'
+import { useGuardedEditor } from '../lines/useGuardedEditor'
+import { useLineActions } from '../lines/useLineActions'
 import { useNodeDeletion } from '../delete/useNodeDeletion'
 import { TopologyView } from '../graph/TopologyView'
-import { useLegacyEditors } from '../legacy/LegacyEditors'
 import type { PathLabels } from '../shared/pathOf'
 import { useNodesT } from '../shared/useNodesT'
 import { BulkNodeActions } from './BulkNodeActions'
@@ -52,12 +54,13 @@ export default function LinesTab() {
   const t = useNodesT()
   const admin = useCan('config.write')
   const tz = useSiteStore(s => s.timezone)
-  const legacy = useLegacyEditors()
+  const actions = useLineActions()
+  const guard = useGuardedEditor()
   const navigate = useNavigate()
   const { scope, order, nodes, serverMap, rows, items, nodeMap } = useNodeList()
   const separators = useSeparators(scope)
   const moves = useOrderMoves()
-  const [url, setUrl] = useUrlStates({ view: urlCodecs.oneOf(VIEWS, 'order'), q: urlCodecs.string() })
+  const [url, setUrl] = useUrlStates({ view: urlCodecs.oneOf(VIEWS, 'order'), q: urlCodecs.string(), edit: urlCodecs.bool() })
   const lineSel = useUrlSelection('line')
   const sepSel = useUrlSelection('sep')
   const view = useTableViewState('admin.nodes.lines')
@@ -65,6 +68,7 @@ export default function LinesTab() {
   const [hover, setHover] = useState<string | null>(null)
   const tableRef = useRef<DataTableHandle>(null)
   const [moveTarget, setMoveTarget] = useState<OrderRow | null>(null)
+  const [added, setAdded] = useState<string[]>([])
 
   const filters: ListFilters = {
     q: url.q, type: view.state.filters.type ?? NONE, status: view.state.filters.status ?? NONE,
@@ -95,9 +99,17 @@ export default function LinesTab() {
     }
   }, [admin, serverMap])
 
+  // The line editor's entries (design 2.6): the sheet opens in edit mode straight from the row (`?line=…&edit=1`).
+  const itemOf = (row: OrderRow) => items.find(i => i.id === rowId(row))
+  const lineHandlers = {
+    edit: (row: OrderRow) => { lineSel.select(rowId(row)); setUrl({ edit: true }) },
+    add: (row: OrderRow) => { lineSel.select(`${row.node_id}.new`); setUrl({ edit: true }) },
+    toggle: (row: OrderRow, enable: boolean) => { void actions.toggle(row.node_id ?? 0, [row.line_id ?? ''], enable) },
+    remove: (row: OrderRow) => actions.askDelete({ row, node: nodeMap.get(row.node_id ?? 0), exitName: itemOf(row)?.exitName }),
+  }
   // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
   const deletion = useNodeDeletion({ rows, serverMap })
-  const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
+  const handlers = useRowHandlers({ lines: lineHandlers, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
   const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
     rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
@@ -133,21 +145,31 @@ export default function LinesTab() {
   const blockedReason = filtered ? t('nodes.order.blocked_filter') : moves.saving ? t('nodes.order.saving') : tooMany ? t('nodes.order.too_many') : undefined
 
   // ---- the open line ----
-  const open = lineSel.selected ? items.find(i => i.id === lineSel.selected) ?? null : null
+  // `?line=<node>.new` is a line being added to that node; any other value is a row of the order.
+  const addingTo = lineSel.selected?.endsWith('.new') ? Number(lineSel.selected.slice(0, -4)) : null
+  const open = lineSel.selected && addingTo === null ? items.find(i => i.id === lineSel.selected) ?? null : null
+  const editing = admin && url.edit && (open !== null || addingTo !== null)
   const siblings = useMemo(() => (open ? items.filter(i => i.row.kind === 'line' && i.row.node_id === open.row.node_id && i.id !== open.id) : []), [items, open])
   // A link to a line that no longer exists closes itself once the list has loaded.
-  useEffect(() => { if (lineSel.selected && order.data && !open) lineSel.clear() }, [lineSel, order.data, open])
-  const editFromSheet = () => {
-    if (!open) return
+  useEffect(() => { if (lineSel.selected && addingTo === null && order.data && !open) lineSel.clear() }, [lineSel, order.data, open, addingTo])
+  const closeSheet = () => guard.close(() => { lineSel.clear(); setUrl({ edit: false }) })
+  // A saved line returns to its view, which now shows the new state; a new line closes and is shown in the list.
+  const onEditorSaved = ({ addedId, isNew }: { addedId?: string; isNew: boolean }) => guard.leave(() => {
+    if (!isNew) { setUrl({ edit: false }); return }
+    const id = addedId && addingTo !== null ? `${addingTo}.${addedId}` : null
     lineSel.clear()
-    legacy.openEdit(open.row.node_id ?? 0, { lineId: open.row.line_id })
-  }
+    setUrl({ edit: false })
+    if (id) { setAdded([id]); setTimeout(() => setAdded(cur => (cur[0] === id ? [] : cur)), 2500) }
+  })
 
   // Once the new order has rendered, bring the moved row into view (the table needs the new data first).
   const firstMoved = moves.highlighted[0]
   useEffect(() => { if (firstMoved) tableRef.current?.scrollToRow(firstMoved) }, [firstMoved])
+  // A line just added appears once the order has been read again; bring it into view then.
+  const firstAdded = added[0] && items.some(i => i.id === added[0]) ? added[0] : null
+  useEffect(() => { if (firstAdded) tableRef.current?.scrollToRow(firstAdded) }, [firstAdded])
 
-  const highlight = useMemo(() => [...relatedIds(rows, hover), ...moves.highlighted], [rows, hover, moves.highlighted])
+  const highlight = useMemo(() => [...relatedIds(rows, hover), ...moves.highlighted, ...added], [rows, hover, moves.highlighted, added])
   const openItem = (item: ListRow) => { if (item.row.kind === 'separator') { if (admin) sepSel.select(String(item.row.id)) } else lineSel.select(item.id) }
 
   // `E` on a focused row opens the line editor; Enter keeps opening the sheet.
@@ -156,7 +178,7 @@ export default function LinesTab() {
     const el = e.target as HTMLElement
     if (!el.matches('[data-row]')) return
     const item = items.find(i => i.id === el.dataset.id) ?? tree.find(g => g.id === el.dataset.id)?.list
-    if (item && item.row.kind === 'line') { e.preventDefault(); legacy.openEdit(item.row.node_id ?? 0, { lineId: item.row.line_id }) }
+    if (item && item.row.kind === 'line') { e.preventDefault(); lineHandlers.edit(item.row) }
   }
 
   const statusOptions = useMemo(() => {
@@ -193,8 +215,13 @@ export default function LinesTab() {
     return { fullWidth: <SeparatorRowCell name={item.row.name} enabled={item.row.enabled} mode={item.row.mode} nodeCount={s?.node_ids.length ?? 0} menu={menuFor(item)} />, selectable: false, openable: admin, state: item.row.enabled ? undefined : 'dimmed' as const }
   }
   const nodeIdsOf = (ids: string[]) => [...new Set(ids.flatMap(id => (id.startsWith('landing:') ? [Number(id.slice(8))] : (items.find(i => i.id === id)?.row.node_id ?? []))))].filter(Number.isFinite) as number[]
+  // The relay lines among the selection (a direct row's enable is its whole node, which the node actions cover).
+  const relayRefsOf = (ids: string[]) => ids.flatMap(id => {
+    const r = items.find(i => i.id === id)?.row
+    return r && r.kind === 'line' && r.line_id !== 'direct' ? [{ nodeId: r.node_id ?? 0, lineId: r.line_id ?? '' }] : []
+  })
   const bulk = (ids: string[], clear: () => void) => (
-    <BulkNodeActions nodeIds={nodeIdsOf(ids)} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
+    <BulkNodeActions nodeIds={nodeIdsOf(ids)} lineRefs={relayRefsOf(ids)} toggleLines={actions.toggle} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
   )
 
   const common = {
@@ -287,10 +314,14 @@ export default function LinesTab() {
       )}
 
       <LineSheet
-        item={open} siblings={siblings} colors={colors} labels={labels} tz={tz}
+        item={open} newLine={editing && addingTo !== null ? { nodeName: nodeMap.get(addingTo)?.display_name ?? '' } : null}
+        editor={editing ? <LineEditor nodeId={addingTo ?? open?.row.node_id ?? 0} lineId={addingTo !== null ? null : open?.row.line_id ?? null} onDirtyChange={guard.setDirty} onSaved={onEditorSaved} /> : undefined}
+        siblings={siblings} colors={colors} labels={labels} tz={tz}
         menu={open ? menuFor(open, true) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}
-        onEdit={editFromSheet} onSelect={id => lineSel.select(id, { replace: true })} onClose={lineSel.clear}
+        onEdit={() => setUrl({ edit: true })} onBack={() => guard.close(() => setUrl({ edit: false }))}
+        onSelect={id => lineSel.select(id, { replace: true })} onClose={closeSheet}
       />
+      {actions.dialogs}
       <SeparatorSheet
         separatorId={!admin || !sepSel.selected ? null : sepSel.selected === 'new' ? 'new' : Number(sepSel.selected)}
         separators={separators.data ?? []}
