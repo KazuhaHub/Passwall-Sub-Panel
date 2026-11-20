@@ -22,11 +22,13 @@ import { panelTypeOf, xrayVersionOf } from './formRules'
 import { EMPTY_INBOUND, SS2022_METHODS, type InboundFormState, randomBase64 } from './inboundModel'
 import { validateInboundForm } from './inboundSettings'
 import { readInbound } from './readInbound'
-import { saveInbound } from './saveInbound'
+import { saveInbound, type PartialFailure } from './saveInbound'
 
 const RAW = { raw_settings: '', raw_stream_settings: '', raw_sniffing: '' }
+// The node's own fields travel in the form state but belong to the General tab: a rename there is not an edit here.
+const NODE_OWN = { display_name: '', server_address: '', region: '', tags_text: '' }
 /** What counts as an edit: the structured fields, or in JSON mode the three documents. The raw ones are only a snapshot while the form mode is on. */
-const keyOf = (f: InboundFormState, json: boolean) => JSON.stringify(json ? f : { ...f, ...RAW })
+const keyOf = (f: InboundFormState, json: boolean) => JSON.stringify({ ...f, ...NODE_OWN, ...(json ? {} : RAW) })
 
 /**
  * Inbound (design 4.5): how the listener is configured, as one form with its own save bar, plus the node's
@@ -61,6 +63,8 @@ export function InboundTab({ node, onDirtyChange }: { node: Node; onDirtyChange:
 
   const [pending, setPending] = useState(false)
   const [problem, setProblem] = useState('')
+  // After a save where the inbound went through but flow or the certificate source did not: the form as it was then and what is left to send.
+  const partial = useRef<{ key: string; parts: Set<PartialFailure['part']> } | null>(null)
   const [genBusy, setGenBusy] = useState(false)
   const intent = useRef(0)
   useEffect(() => () => { intent.current += 1 }, [])
@@ -102,18 +106,25 @@ export function InboundTab({ node, onDirtyChange }: { node: Node; onDirtyChange:
     }
     setPending(true)
     try {
-      const failed = await saveInbound(node, form, panelType, json)
+      // The inbound's name is the node's, which the General tab may have changed since this form was read.
+      const current = { ...form, display_name: node.display_name }
+      // Same form as when the inbound last went through: only what failed is sent again; any further edit sends the inbound too.
+      const only = partial.current && partial.current.key === keyOf(form, json) ? partial.current.parts : undefined
+      const failed = await saveInbound(node, current, panelType, json, only)
+      partial.current = null
       // What the server holds now: the form, the baseline and the node (its flow and certificate source) all follow it.
       const fresh = await detail.refetch()
       const again = fresh.data ? readInbound(fresh.data, node.id, t) : null
       if (again?.kind === 'ready') {
-        const f = settle(again.form)
+        const f = settle(json ? snapshotRaw(again.form) : again.form)
         baseline.current = f
         // What did not go through stays as the person set it, so it is still an edit to retry, not silently reverted.
         const kept: Partial<InboundFormState> = {}
         if (failed.some(p => p.part === 'flow')) kept.vless_flow = form.vless_flow
         if (failed.some(p => p.part === 'cert')) { kept.tls_cert_mode = form.tls_cert_mode; kept.cert_id = form.cert_id }
-        setForm({ ...f, ...kept })
+        const next = { ...f, ...kept }
+        setForm(next)
+        if (failed.length > 0) partial.current = { key: keyOf(next, json), parts: new Set(failed.map(p => p.part)) }
       }
       if (failed.length === 0) { pushToast({ message: t('nodes.edit_inbound_dialog.saved'), severity: 'success' }); return }
       setProblem(failed.map(p => t(`nodes.inbound.partial_${p.part}`, { reason: reasonOf(p.error) })).join(' '))

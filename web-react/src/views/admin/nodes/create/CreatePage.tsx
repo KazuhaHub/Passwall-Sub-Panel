@@ -90,7 +90,7 @@ function Wizard({ servers, writable }: { servers: Server[]; writable: Server[] }
             tcpTLS={w.form.vless_network === 'tcp' && w.form.vless_security !== 'none'} onBusyChange={w.setEntriesBusy} showErrors={w.attempted} />
         )}
         {w.step === 2 && w.landing && (
-          <ExitStep name={w.form.display_name} landing={w.landing} native={w.native} servers={exits} egress={w.egress} onEgress={w.setEgress} routes={w.routes} onRoutes={w.setRoutes} />
+          <ExitStep name={w.form.display_name} landing={w.landing} native={w.native} servers={exits} egress={w.egress} onEgress={w.setEgress} remote={w.remoteExit} onRemote={w.setRemoteExit} routes={w.routes} onRoutes={w.setRoutes} />
         )}
         {w.step === 3 && w.plan && w.landing && (
           <ReviewStep plan={w.plan} entries={w.entries} direct={w.direct} peers={servers} landingPort={w.form.port} routeCount={w.routes.length}

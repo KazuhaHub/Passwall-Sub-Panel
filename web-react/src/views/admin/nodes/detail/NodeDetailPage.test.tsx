@@ -133,4 +133,25 @@ describe('node page: delete', () => {
     await waitFor(() => expect(api.delete).toHaveBeenCalled())
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/nodes'))
   })
+
+  it('goes to the list even when a tab has unsaved edits, once the node it was asked to delete is gone', async () => {
+    const router = mount(landing([forward]))
+    const base = api.get.getMockImplementation()!
+    let gone = false
+    api.get.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/admin/nodes/1/delete-impact') return { data: { node: { id: 1, name: 'Landing' }, tunnels: [], blocked_by_routes: [], lines: [{ node_id: 1, line_id: 'direct', landing_name: 'Landing', line_name: 'Landing', line_type: 'direct' }] } }
+      if (gone && url === '/admin/nodes/1') throw Object.assign(new Error('nf'), { response: { status: 404 } })
+      return base(url, ...rest)
+    })
+    api.delete.mockImplementation(async () => { gone = true; return { data: {} } })
+    fireEvent.click(await screen.findByRole('tab', { name: 'General' }))
+    fireEvent.change(await screen.findByLabelText(/Display name/), { target: { value: 'Unsaved' } })
+    const header = document.querySelector('[data-slot="page-header"]') as HTMLElement
+    const buttons = within(header).getAllByRole('button')
+    fireEvent.click(buttons[buttons.length - 1])
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete node' }))
+    fireEvent.click(await within(await screen.findByRole('alertdialog')).findByRole('button', { name: /^Delete node and 1 line/ }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/nodes'))
+    expect(screen.queryByText(/have unsaved changes/)).toBeNull()
+  })
 })

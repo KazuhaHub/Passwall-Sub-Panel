@@ -4,6 +4,8 @@ import type { Server } from '@/api/servers'
 import type { Node } from '@/api/types'
 import { randomRealitySite } from '@/utils/xrayReality'
 import { draftIssues, inputOf, type DraftRoute } from '../exit/routes/routeDraft'
+import { splitTagsText } from '@/api/lineLabels'
+import { generalProblems } from '../general/GeneralFields'
 import { canUseJson, snapshotRaw } from '../inbound/InboundForm'
 import { panelTypeOf } from '../inbound/formRules'
 import { EMPTY_INBOUND, SS2022_METHODS, newRelayKey, randomBase64, serverHost, splitList, type InboundFormState } from '../inbound/inboundModel'
@@ -54,6 +56,8 @@ export function useCreateWizard({ servers, writable, t, onCreated }: {
   const [direct, setDirect] = useState(true)
   const [entries, setEntries] = useState<SetupRelay[]>([])
   const [egress, setEgress] = useState(0)
+  // "Another server" is chosen before which one: the choice is its own state, and the step cannot be left until a server is picked.
+  const [remoteExit, setRemoteExit] = useState(false)
   const [routes, setRoutes] = useState<DraftRoute[]>([])
   const [plan, setPlan] = useState<NodeSetupPlan | null>(null)
   const [loopbacks, setLoopbacks] = useState<Record<number, number>>({})
@@ -115,10 +119,14 @@ export function useCreateWizard({ servers, writable, t, onCreated }: {
     if (step === 0) {
       const problem = inboundProblem()
       if (problem) { setError(problem); return }
+      // The fields show these (host format, length limits); a problem that is shown must stop the step.
+      const basics = generalProblems({ display_name: form.display_name, server_address: form.server_address, region: form.region, tags: splitTagsText(form.tags_text) })
+      const first = Object.values(basics)[0]
+      if (first) { setError(t(first)); return }
       setAttempted(false)
       // The landing may have changed: an entry cannot enter through its own landing, and only a Passwall Node landing has an exit or routes.
       setEntries(es => es.filter(e => e.line.entry_panel_id !== form.panel_id))
-      if (egress === form.panel_id || !native) setEgress(0)
+      if (egress === form.panel_id || !native) { setEgress(0); setRemoteExit(false) }
       if (!native) setRoutes([])
       setStep(1)
       return
@@ -131,6 +139,7 @@ export function useCreateWizard({ servers, writable, t, onCreated }: {
       setStep(2)
       return
     }
+    if (remoteExit && egress === 0) { setError(t('nodes.exit.pick_server_error')); return }
     if (draftIssues(routes).length > 0) { setError(t('nodes.setup.invalid_routes')); return }
     setBusy(true)
     try {
@@ -154,7 +163,7 @@ export function useCreateWizard({ servers, writable, t, onCreated }: {
 
   return {
     form, setForm, json, setJsonMode, jsonAllowed, step, busy: busy || genBusy || entriesBusy, creating: busy, attempted, error, setError,
-    direct, setDirect, entries, setEntries, setEntriesBusy, egress, setEgress, routes, setRoutes, plan, loopbacks, setLoopbacks, linkPorts, setLinkPorts, changed,
+    direct, setDirect, entries, setEntries, setEntriesBusy, egress, setEgress, remoteExit, setRemoteExit, routes, setRoutes, plan, loopbacks, setLoopbacks, linkPorts, setLinkPorts, changed,
     recent, landing, panelType, native, dirty, genKeys, genBusy, randomizeSite, genSSPassword, next, goBack,
     /** The review's button: "Review ports" until a plan exists and is unedited, then "Create node". */
     finalStep: step === 3 && !!plan && !changed,

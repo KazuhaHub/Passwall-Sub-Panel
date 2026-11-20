@@ -79,22 +79,27 @@ export default function NodeDetailPage({ id }: { id: number }) {
   const visit = (next: Tab) => { setVisited(v => (v.has(next) ? v : new Set(v).add(next))); setTab(next) }
   const shown = visited.has(tab) ? visited : new Set(visited).add(tab)
 
+  // Set when a delete opened from this page's header: once the node is gone the page goes to the list, whatever is unsaved.
+  const deleting = useRef(false)
+  const gone = query.isError && (query.error as { response?: { status?: number } } | null)?.response?.status === 404
+  const deletedHere = gone && deleting.current
+  // A ref, written during render: the redirect below runs in a child's effect, before this component's own effects could hand the guard the new value.
+  const leaving = useRef(false)
+  leaving.current = deletedHere
   const { dirty, report } = useDirtyTabs(TABS)
   const names = dirty.map(d => t(`nodes.line.tabs.${d}`)).join(t('nodes.detail.tab_separator'))
   const copy = discardChangesConfirm(t)
-  useLeaveGuard(dirty.length > 0, { ...copy, message: t('nodes.detail.dirty_tabs', { tabs: names }) }, (next, current) => next.pathname !== current.pathname)
+  useLeaveGuard(dirty.length > 0, { ...copy, message: t('nodes.detail.dirty_tabs', { tabs: names }) }, (next, current) => !leaving.current && next.pathname !== current.pathname)
 
   const published = useMemo(() => {
     const lines = (order.data?.rows ?? []).filter(r => r.kind === 'line' && r.node_id === id)
     return lines.length === 0 ? undefined : t('nodes.line.published_count', { published: lines.filter(r => r.published).length, total: lines.length })
   }, [order.data, id, t])
-  const deleting = useRef(false)
   const { toggle, more, dialog } = useHeaderActions(listener ? undefined : node, deleting)
 
   const back = <Button variant="outline" render={<Link to="/admin/nodes" />}>{t('nodes.detail.back')}</Button>
-  const gone = query.isError && (query.error as { response?: { status?: number } } | null)?.response?.status === 404
   // A refetch that fails keeps the node it had, so "deleted from here" is read from the error itself.
-  if (gone && deleting.current) return <Navigate to="/admin/nodes" replace />
+  if (deletedHere) return <Navigate to="/admin/nodes" replace />
   if (query.isError && !node) return gone ? <EmptyState title={t('nodes.detail.not_found')} action={back} /> : <ErrorState reason={query.error} retry={() => void query.refetch()} />
   if (!node) return <LoadingState />
 

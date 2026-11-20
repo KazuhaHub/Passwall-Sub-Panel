@@ -19,10 +19,11 @@ export interface PartialFailure { part: 'flow' | 'cert'; error: unknown }
  * `flow` is sent, because the server keeps every field that is empty or absent and assigns `flow` unconditionally.
  * No `sort_order`: an explicit value is a move through the order writer.
  */
-export async function saveInbound(node: Node, f: InboundFormState, panelType: PanelType, json: boolean): Promise<PartialFailure[]> {
+export async function saveInbound(node: Node, f: InboundFormState, panelType: PanelType, json: boolean, only?: ReadonlySet<PartialFailure['part']>): Promise<PartialFailure[]> {
   const docs = inboundDocuments(f, panelType, json)
   const managed = f.tls_cert_mode === 'psp_managed' && f.cert_id > 0
-  await updateInboundConfig(node.id, {
+  // A retry after a partial save sends only the parts that failed: every inbound request is pushed to the upstream server, so repeating it is not free.
+  if (!only) await updateInboundConfig(node.id, {
     remark: f.display_name,
     enable: panelType === '3xui' ? f.enable : true,
     listen: f.listen,
@@ -36,13 +37,13 @@ export async function saveInbound(node: Node, f: InboundFormState, panelType: Pa
   const failed: PartialFailure[] = []
   // Non-VLESS protocols clear it.
   const flow = f.protocol === 'vless' ? f.vless_flow.trim() : ''
-  if (flow !== (node.flow ?? '')) {
+  if ((!only || only.has('flow')) && flow !== (node.flow ?? '')) {
     try { await updateNodeMetadata(node.id, { flow }) } catch (error) { failed.push({ part: 'flow', error }) }
   }
   // The update request already asks the backend to inject a managed cert before the panel update; this call
   // persists the binding and is content-diff-gated, so it does not cause a second push. Switching away from
   // managed unbinds it so the renewal worker stops re-deploying; the manual certificate was pushed above.
-  try {
+  if (!only || only.has('cert')) try {
     if (managed) await setNodeCertSource(node.id, 'psp_managed', f.cert_id)
     else if (node.cert_source === 'psp_managed') await setNodeCertSource(node.id, 'manual', 0)
   } catch (error) { failed.push({ part: 'cert', error }) }

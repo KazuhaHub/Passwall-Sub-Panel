@@ -79,6 +79,18 @@ describe('Exit tab: the default exit', () => {
     expect(puts().some(([u]) => u === '/admin/transit/links/1/2')).toBe(false)
   })
 
+  it('keeps the bar and the message when only the tunnel settings were edited and the exit write then fails', async () => {
+    open({ egress_panel_id: 2 })
+    fireEvent.change(await screen.findByLabelText('Exit address'), { target: { value: '198.51.100.7' } })
+    api.put.mockImplementation(async (url: string, body: object) => {
+      if (url === '/admin/nodes/1/metadata') throw Object.assign(new Error('x'), { response: { data: { error: 'exit refused' } } })
+      return { data: { ...link, ...body } }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(/Tunnel settings were saved, but the exit server was not: exit refused/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
+  })
+
   it('asks for a server before it sends anything when "another server" has none picked', async () => {
     open()
     fireEvent.click(await screen.findByRole('radio', { name: /Leave through another server/ }))

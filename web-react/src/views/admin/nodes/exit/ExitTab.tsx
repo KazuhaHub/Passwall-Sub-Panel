@@ -121,7 +121,7 @@ export function ExitTab({ node, onDirtyChange, routesOnly }: {
             onExit={id => { setProblem(''); setEdit({ mode: 'remote', exitId: id }) }}
             error={attempted && needsServer ? t('nodes.exit.pick_server_error') : undefined}
             link={link} linkError={linkError} onLink={p => { setLink(l => (l ? { ...l, ...p } : l)); setLinkDirty(true); setProblem('') }} />
-          <SaveBar dirty={dirty} pending={pending} errors={problem ? [{ message: problem, blocking: false }] : []} onSave={() => void save()}
+          <SaveBar dirty={dirty || problem !== ''} pending={pending} errors={problem ? [{ message: problem, blocking: false }] : []} onSave={() => void save()}
             onDiscard={() => { setEdit(null); setAttempted(false); setProblem(''); setLinkDirty(false); if (target > 0) getTransitLink(node.panel_id, target).then(setLink).catch(() => {}) }} />
         </form>
       </FormValidityProvider>}

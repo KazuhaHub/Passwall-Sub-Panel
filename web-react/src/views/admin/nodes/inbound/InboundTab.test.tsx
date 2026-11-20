@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from 'react'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Node } from '@/api/types'
@@ -206,5 +207,69 @@ describe('Inbound tab: JSON mode', () => {
     open({ node, inbound: plain, clients: [] }, { servers: [{ ...server, panel_type: 'sui' }] })
     await screen.findByLabelText(/^Port/)
     expect(screen.queryByRole('radio', { name: 'JSON' })).toBeNull()
+  })
+})
+
+describe('Inbound tab: a retry after a partial save', () => {
+  const failOn = (target: string) => api.put.mockImplementation(async (url: string) => {
+    if (url === target) throw Object.assign(new Error('x'), { response: { data: { error: 'refused' } } })
+    return { data: {} }
+  })
+  const urls = () => api.put.mock.calls.map(c => c[0])
+
+  it('sends only the metadata again when the inbound went through and the flow did not', async () => {
+    open({ node, inbound: plain, clients: [] })
+    fireEvent.change(await screen.findByLabelText('VLESS Flow'), { target: { value: 'xtls-rprx-vision' } })
+    failOn('/admin/nodes/1/metadata')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText(/VLESS flow was not/)
+    api.put.mockClear(); api.put.mockResolvedValue({ data: {} })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(urls()).toContain('/admin/nodes/1/metadata'))
+    expect(urls()).not.toContain('/admin/nodes/1/inbound')
+  })
+
+  it('sends only the certificate source again when that was the part that failed', async () => {
+    open({ node: { ...node, cert_source: 'psp_managed', cert_id: 7 }, inbound, clients: [] })
+    fireEvent.change(await screen.findByLabelText('Certificate source'), { target: { value: '' } })
+    failOn('/admin/nodes/1/cert-source')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText(/certificate source was not/)
+    api.put.mockClear(); api.put.mockResolvedValue({ data: {} })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(urls()).toContain('/admin/nodes/1/cert-source'))
+    expect(urls()).toEqual(['/admin/nodes/1/cert-source'])
+  })
+
+  it('sends the inbound again once the form was edited after the partial failure', async () => {
+    open({ node, inbound: plain, clients: [] })
+    fireEvent.change(await screen.findByLabelText('VLESS Flow'), { target: { value: 'xtls-rprx-vision' } })
+    failOn('/admin/nodes/1/metadata')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText(/VLESS flow was not/)
+    api.put.mockClear(); api.put.mockResolvedValue({ data: {} })
+    await changePort('9443')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(inboundPuts()).toHaveLength(1))
+    expect(inboundPuts()[0][1]).toMatchObject({ port: 9443 })
+  })
+})
+
+describe('Inbound tab: fields that belong to the node', () => {
+  it('sends the node\'s current name, not the one the form was read with, and a rename is not an edit', async () => {
+    const onDirtyChange = vi.fn()
+    installReads({ '/admin/servers': list([server]), '/admin/nodes': list([node]), '/admin/nodes/1': { node, inbound: plain, clients: [] }, '/admin/certs': { certs: [] } })
+    function Renamed() {
+      const [name, setName] = useState('old-name')
+      return <><button onClick={() => setName('Renamed')}>rename</button><InboundTab node={{ ...node, display_name: name }} onDirtyChange={onDirtyChange} /></>
+    }
+    mountPage(<Renamed />)
+    await screen.findByLabelText(/^Port/)
+    fireEvent.click(screen.getByRole('button', { name: 'rename' }))
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true)
+    await changePort('8443')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(inboundPuts()).toHaveLength(1))
+    expect(inboundPuts()[0][1]).toMatchObject({ remark: 'Renamed', port: 8443 })
   })
 })

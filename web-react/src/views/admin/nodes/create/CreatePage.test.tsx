@@ -97,6 +97,29 @@ describe('create page', () => {
     expect(screen.queryByRole('radio', { name: /Leave from this server/ })).toBeNull()
   })
 
+  it('does not leave step 1 with an address or region the fields say is wrong', async () => {
+    mount()
+    fireEvent.change(await screen.findByLabelText(/^Address/), { target: { value: 'not a host!' } })
+    await waitFor(() => expect((screen.getByLabelText(/Private Key/) as HTMLInputElement).value).toBe('private'))
+    fireEvent.click(next())
+    expect((await screen.findByRole('alert')).textContent).toMatch(/valid hostname or IP/)
+    expect(screen.queryByRole('radio', { name: /Leave from this server/ })).toBeNull()
+    expect(screen.queryByRole('switch', { name: /Include direct line/ })).toBeNull()
+  })
+
+  it('leaves the exit server empty when "another server" is chosen, and will not go on until one is picked', async () => {
+    mount([{ ...server, panel_type: 'psp', address: 'land.example' }, { ...server, id: 2, name: 'Osaka', panel_type: 'psp', address: 'osaka.example' }])
+    await waitFor(() => expect((screen.getByLabelText(/Private Key/) as HTMLInputElement).value).toBe('private'))
+    fireEvent.click(next())
+    await screen.findByRole('switch', { name: /Include direct line/ })
+    fireEvent.click(next())
+    fireEvent.click(await screen.findByRole('radio', { name: /Leave through another server/ }))
+    expect((await screen.findByRole('combobox', { name: /Exit server/ }) as HTMLInputElement).value).toBe('')
+    fireEvent.click(next())
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Choose the exit server/)
+    expect(api.post.mock.calls.some(([p]) => p === '/admin/nodes/setup-preview')).toBe(false)
+  })
+
   it('discards a created plan that the server refuses (409) and asks for a new review', async () => {
     mount()
     await waitFor(() => expect((screen.getByLabelText(/Private Key/) as HTMLInputElement).value).toBe('private'))
