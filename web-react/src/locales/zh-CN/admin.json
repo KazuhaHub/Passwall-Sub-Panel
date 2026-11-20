@@ -2603,6 +2603,10 @@
       "traffic_factor_direct": "直连线路流量倍率"
     },
     "action": {
+<<<<<<< HEAD
+=======
+      "delete": "删除",
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
       "recreate_inbound": "在服务器上重建入站",
       "edit_line": "编辑线路",
       "edit_direct": "编辑直连线路",
@@ -2643,6 +2647,11 @@
       "undo": "撤销"
     },
     "confirm": {
+<<<<<<< HEAD
+=======
+      "delete_title": "删除节点",
+      "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
       "recreate_inbound_title": "在服务器上重建 inbound？",
       "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。"
     },
@@ -2685,8 +2694,12 @@
     "view": {
       "label": "视图",
       "order": "订阅顺序",
+<<<<<<< HEAD
       "node": "按节点",
       "graph": "拓扑"
+=======
+      "node": "按节点"
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
     },
     "search": {
       "placeholder": "搜索线路、节点、服务器或地址"
@@ -2846,6 +2859,7 @@
       "load": "无法加载线路",
       "partial": "部分节点信息暂时无法加载"
     },
+<<<<<<< HEAD
     "impact": {
       "node_title": "删除节点“{{name}}”？",
       "loading": "正在查看这次删除会影响什么…",
@@ -2895,6 +2909,8 @@
       "box_deleted": "{{name}}（已删除）",
       "hint": "点击一个入口或落地节点，查看经过它的线路。已撤下或有问题的线路用颜色和文字标出，已停用的线路变淡"
     },
+=======
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
     "unmanaged": {
       "server": "服务器",
       "server_placeholder": "选择服务器",

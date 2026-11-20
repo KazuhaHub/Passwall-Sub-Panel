@@ -8,11 +8,17 @@ import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { DataTable } from '@/components/data/DataTable'
 import type { DataTableHandle } from '@/components/data/dataTableTypes'
+<<<<<<< HEAD
 import { FacetFilter } from '@/components/data/FacetFilter'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { TableSkeleton } from '@/components/feedback/LoadingState'
+=======
+import { FilterBar } from '@/components/data/FilterBar'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { useTableViewState } from '@/hooks/useTableViewState'
 import { urlCodecs, useUrlStates } from '@/hooks/useUrlState'
@@ -20,8 +26,11 @@ import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { useSeparators } from '@/query/nodes'
 import { useSiteStore } from '@/stores/site'
 import { useCan } from '@/utils/permissions'
+<<<<<<< HEAD
 import { useNodeDeletion } from '../delete/useNodeDeletion'
 import { TopologyView } from '../graph/TopologyView'
+=======
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
 import { useLegacyEditors } from '../legacy/LegacyEditors'
 import type { PathLabels } from '../shared/pathOf'
 import { useNodesT } from '../shared/useNodesT'
@@ -41,7 +50,11 @@ import { useNodeList } from './useNodeList'
 import { useOrderMoves } from './useOrderMoves'
 import { useRowHandlers } from './useRowHandlers'
 
+<<<<<<< HEAD
 const VIEWS = ['order', 'node', 'graph'] as const
+=======
+const VIEWS = ['order', 'node'] as const
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
 const MAX_ORDER_ROWS = 10_000
 const FACETS = ['type', 'status', 'entry', 'landing'] as const
 const NONE: string[] = []
@@ -95,9 +108,13 @@ export default function LinesTab() {
     }
   }, [admin, serverMap])
 
+<<<<<<< HEAD
   // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
   const deletion = useNodeDeletion({ rows, serverMap })
   const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
+=======
+  const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)) })
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
   const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
     rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
@@ -115,6 +132,7 @@ export default function LinesTab() {
     }))
   }, [shown, items, rows])
 
+<<<<<<< HEAD
   // ---- topology (N4) ----
   // Where a landing leaves through another server (its own egress), for the exit column; null = its own server.
   const exitOf = useCallback((nodeId: number) => {
@@ -128,6 +146,8 @@ export default function LinesTab() {
     setUrl({ view: 'order' })
   }
 
+=======
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
   // ---- reorder rules ----
   const tooMany = rows.length > MAX_ORDER_ROWS
   const blockedReason = filtered ? t('nodes.order.blocked_filter') : moves.saving ? t('nodes.order.saving') : tooMany ? t('nodes.order.too_many') : undefined
@@ -194,7 +214,11 @@ export default function LinesTab() {
   }
   const nodeIdsOf = (ids: string[]) => [...new Set(ids.flatMap(id => (id.startsWith('landing:') ? [Number(id.slice(8))] : (items.find(i => i.id === id)?.row.node_id ?? []))))].filter(Number.isFinite) as number[]
   const bulk = (ids: string[], clear: () => void) => (
+<<<<<<< HEAD
     <BulkNodeActions nodeIds={nodeIdsOf(ids)} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
+=======
+    <BulkNodeActions nodeIds={nodeIdsOf(ids)} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} />
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
   )
 
   const common = {
@@ -227,7 +251,11 @@ export default function LinesTab() {
         onClearAll={clearAll}
       >
         <SegmentedControl aria-label={t('nodes.view.label')} size="sm" value={url.view} onChange={v => setUrl({ view: v })}
+<<<<<<< HEAD
           options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }, { value: 'graph', label: t('nodes.view.graph') }]} />
+=======
+          options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }]} />
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
         {moves.undoable && <Button variant="outline" size="sm" onClick={moves.undo} data-testid="undo-move">{t('nodes.toast.undo')}</Button>}
         {admin && url.view === 'order' && filtered && <Button variant="ghost" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
       </FilterBar>
@@ -238,6 +266,7 @@ export default function LinesTab() {
         {!admin && url.view === 'order' && <span className="ml-2">{t('nodes.order.read_only')}</span>}
       </div>
 
+<<<<<<< HEAD
       {url.view === 'graph' ? (
         <TopologyView
           rows={graphRows} colors={colors} exitOf={exitOf} admin={admin} empty={loading ? <TableSkeleton rows={4} cols={3} /> : empty}
@@ -250,6 +279,9 @@ export default function LinesTab() {
           onShowInList={showInList} onAsList={() => setUrl({ view: 'order' })}
         />
       ) : url.view === 'order' ? (
+=======
+      {url.view === 'order' ? (
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
         <DataTable<ListRow>
           {...common}
           aria-label={t('nodes.tabs.lines')}
@@ -300,7 +332,10 @@ export default function LinesTab() {
       />
       {moveTarget && admin && <MoveToDialog rows={rows} target={moveTarget} onClose={() => setMoveTarget(null)} onMove={moves.move} />}
       {moves.stale && <StaleOrderDialog stale={moves.stale} onAnswer={moves.resolveStale} />}
+<<<<<<< HEAD
       {deletion.element}
+=======
+>>>>>>> refs/remotes/origin/kazuha/ui-shadcn
     </div>
   )
 }
