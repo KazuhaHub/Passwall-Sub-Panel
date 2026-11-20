@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { IconButton } from '@/components/common/IconButton'
+import { ToastLogMenuItem } from './ToastLogMenuItem'
 
 export interface ShellUser {
   /** The display name or login name. */
@@ -24,7 +25,7 @@ export interface ShellUser {
 }
 
 /** The avatar button and its menu: who is signed in, their role, and signing out. */
-export function UserMenu({ user }: { user: ShellUser }) {
+export function UserMenu({ user, logInMenu = false }: { user: ShellUser; /** Show the message log as a menu item (the bar has no room for its button). */ logInMenu?: boolean }) {
   const { t } = useTranslation('common')
   const role = user.role ? t(`ui.shell.role.${user.role}`) : ''
   const initial = (user.label.trim()[0] ?? '?').toUpperCase()
@@ -42,7 +43,7 @@ export function UserMenu({ user }: { user: ShellUser }) {
             {role && <span className="block text-xs font-normal">{role}</span>}
           </DropdownMenuLabel>
         </DropdownMenuGroup>
-        {user.items && <><DropdownMenuSeparator />{user.items}</>}
+        {(user.items || logInMenu) && <><DropdownMenuSeparator />{logInMenu && <ToastLogMenuItem />}{user.items}</>}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={user.onLogout}>
           <IconLogout />

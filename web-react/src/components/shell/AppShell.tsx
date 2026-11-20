@@ -32,7 +32,9 @@ import { BrandIcon, BrandLogo, type Brand } from './BrandMark'
 import { CommandPalette, useCommandPaletteHotkey } from './CommandPalette'
 import { navigationProvider, type CommandProvider } from './commands'
 import { activeItem, isNavActive, visibleSections, type NavSection } from './nav'
+import { MAIN_ID, SkipLink } from './SkipLink'
 import { ToastLogButton } from './ToastLogButton'
+import { useLogInMenu } from './ToastLogMenuItem'
 import { UserMenu, type ShellUser } from './UserMenu'
 
 export interface AppShellProps {
@@ -86,6 +88,10 @@ function VersionFooter({ version }: { version: VersionInfo }) {
 
 function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellProps, 'nav' | 'role' | 'brand' | 'version' | 'onNavIntent'>) {
   const { t } = useTranslation(['nav', 'common'])
+  const { state, isMobile } = useSidebar()
+  // The labels are tooltips for the collapsed icon rail only. Elsewhere the text is on screen,
+  // and a (hidden) tooltip opened by keyboard focus swallowed the first Escape in the phone sheet.
+  const railTooltips = state === 'collapsed' && !isMobile
   const { pathname } = useLocation()
   const sections = useMemo(() => visibleSections(nav, role), [nav, role])
   const current = useMemo(() => activeItem(nav, role, pathname), [nav, role, pathname])
@@ -124,7 +130,7 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
                       <SidebarMenuItem key={item.to}>
                         <SidebarMenuButton
                           isActive={active}
-                          tooltip={label}
+                          tooltip={railTooltips ? label : undefined}
                           // Intent precedes the click by a few hundred milliseconds;
                           // the owner of the model starts fetching the view's chunk then.
                           onPointerEnter={() => onNavIntent?.(item.to)}
@@ -180,17 +186,18 @@ function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
 
 function TopBar({ title, onOpenPalette, actions, user }: { title?: string; onOpenPalette: () => void; actions?: ReactNode; user: ShellUser }) {
   const { t } = useTranslation('common')
+  const logInMenu = useLogInMenu()
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
+    <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-1 border-b bg-background/85 px-2 backdrop-blur sm:gap-2 sm:px-4">
       <SidebarTrigger label={t('ui.shell.toggle_sidebar')} />
       {title && <h2 className="min-w-0 truncate text-sm font-medium md:hidden">{title}</h2>}
       <div className="flex min-w-0 flex-1 items-center md:px-1">
         <PaletteTrigger onOpen={onOpenPalette} />
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        <ToastLogButton />
+        {!logInMenu && <ToastLogButton />}
         {actions}
-        <UserMenu user={user} />
+        <UserMenu user={user} logInMenu={logInMenu} />
       </div>
     </header>
   )
@@ -229,14 +236,11 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
   return (
     <TooltipProvider delay={300}>
       <SidebarProvider>
-        <a
-          href="#main-content"
-          className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-md ring-1 ring-foreground/10 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
-        >
-          {t('common:ui.shell.skip_to_content')}
-        </a>
+        <SkipLink />
         <CloseMobileOnNavigate />
         <AppSidebar nav={nav} role={role} brand={brand} version={version} onNavIntent={onNavIntent} />
+        {/* A plain wrapper, not the <main>: the top bar is the page's banner and sits beside the
+            content region, so the bell, language and account controls are not inside main. */}
         <SidebarInset className="min-w-0">
           <TopBar
             title={current ? t(current.labelKey) : undefined}
@@ -244,14 +248,14 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
             actions={topBarActions}
             user={user}
           />
-          <div id="main-content" tabIndex={-1} className={cn('mx-auto w-full max-w-[100rem] flex-1 p-4 outline-none sm:p-6', contentClassName)}>
+          <main id={MAIN_ID} tabIndex={-1} className={cn('mx-auto w-full max-w-[100rem] flex-1 p-4 outline-none sm:p-6', contentClassName)}>
             {/* Per-route Suspense boundary INSIDE the shell, so switching pages only swaps
                 the content: an outer one would unmount the whole shell (and its
                 mount-time effects) on every cross-section navigation. */}
             <Suspense fallback={<PageSkeleton />}>
               {children ?? <Outlet />}
             </Suspense>
-          </div>
+          </main>
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} providers={providers} navigate={go} role={role} />
       </SidebarProvider>

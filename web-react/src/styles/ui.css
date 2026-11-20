@@ -210,6 +210,7 @@
  * is the default, both before the sync effect runs and for a user with no saved
  * choice; compact is 2rem, the reference project's own button height.
  */
+:root { --shell-bar-h: 3.5rem; }
 :root, :root[data-density="compact"] { --control-h: 2rem; --row-h: 2.25rem; }
 :root[data-density="comfortable"] { --control-h: 2.5rem; --row-h: 3rem; }
 
@@ -219,6 +220,9 @@
   }
   html {
     @apply font-sans;
+    /* The document scrolls under the sticky top bar, so an in-page scroll target (scrollIntoView,
+       a focused control) stops clear of it. Bar height plus a little air. */
+    scroll-padding-top: calc(var(--shell-bar-h) + 0.5rem);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     /* Geist stylistic sets, as in the reference project. */

@@ -160,13 +160,28 @@ describe('UserShell', () => {
 
   // The sidebar's shell has a skip link and the user one must too: the top bar's buttons come
   // before the content in tab order on every page.
-  it('offers a skip link to the content', () => {
-    render(
-      <MemoryRouter>
-        <UserShell brand={{ name: 'Passwall' }} user={{ label: 'u', role: 'user', onLogout: () => {} }}><p>body</p></UserShell>
-      </MemoryRouter>,
-    )
-    expect(screen.getByText('跳到主要内容').getAttribute('href')).toBe('#main-content')
-    expect(document.getElementById('main-content')).toBeTruthy()
+  // Under the <base href> the production server injects, a "#main-content" link leaves the page.
+  it('skips to the content by moving focus, not by navigating, even under a <base href>', () => {
+    const base = document.createElement('base')
+    base.href = 'http://localhost/x/'
+    document.head.appendChild(base)
+    Element.prototype.scrollIntoView = vi.fn()
+    try {
+      render(
+        <MemoryRouter>
+          <UserShell brand={{ name: 'Passwall' }} user={{ label: 'u', role: 'user', onLogout: () => {} }}><p>body</p></UserShell>
+        </MemoryRouter>,
+      )
+      const before = window.location.href
+      const skip = screen.getByRole('button', { name: '跳到主要内容' })
+      expect(skip.getAttribute('href')).toBeNull()
+      fireEvent.click(skip)
+      expect(window.location.href).toBe(before)
+      expect(document.activeElement).toBe(screen.getByRole('main'))
+      expect(screen.getAllByRole('banner')).toHaveLength(1)
+      expect(screen.getAllByRole('main')).toHaveLength(1)
+    } finally {
+      base.remove()
+    }
   })
 })

@@ -1,8 +1,6 @@
 {
   "title": "Appearance",
   "density": {
-    "switch_to_comfortable": "Switch to comfortable density",
-    "switch_to_compact": "Switch to compact density",
     "section": "Density",
     "compact": "Compact",
     "comfortable": "Comfortable"
