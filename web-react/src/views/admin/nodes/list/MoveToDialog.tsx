@@ -13,6 +13,13 @@ export function describeRow(row: OrderRow): string {
   return row.kind === 'separator' ? `— ${row.name} —` : row.name
 }
 
+/** The row with where it goes, so two rows with the same name can be told apart (design 3.2). */
+function optionLabel(row: OrderRow): string {
+  if (row.kind === 'separator') return describeRow(row)
+  const path = [row.entry?.panel_name, row.landing?.name].filter(Boolean).join(' → ')
+  return path && path !== row.name ? `${row.name} · ${path}` : row.name
+}
+
 interface Option { value: string; label: string }
 const TOP = ''
 
@@ -33,7 +40,7 @@ export function MoveToDialog({ rows, target, onClose, onMove }: {
   const [after, setAfter] = useState<Option | null>(null)
   const moved = useMemo(() => [rowId(target), ...(withLines ? others : [])], [target, withLines, others])
   const options = useMemo<Option[]>(
-    () => [{ value: TOP, label: t('nodes.order.move_top') }, ...rows.filter(r => !moved.includes(rowId(r))).map(r => ({ value: rowId(r), label: describeRow(r) }))],
+    () => [{ value: TOP, label: t('nodes.order.move_top') }, ...rows.filter(r => !moved.includes(rowId(r))).map(r => ({ value: rowId(r), label: optionLabel(r) }))],
     [rows, moved, t],
   )
   // A choice that the "with lines" box has since made impossible (it is now one of the moved rows) is dropped.

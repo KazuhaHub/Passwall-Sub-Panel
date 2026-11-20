@@ -19,7 +19,12 @@ export interface StaleState {
   intent: MoveIntent
   seen: OrderRow[]
   current: NodeOrder
+  /** The refused write was an Undo: there is no move to repeat, only the latest order to keep. */
+  undo?: boolean
 }
+
+/** What Undo puts back: the EXACT previous arrangement (a move of several rows from different places cannot be undone as one move), and the intent used only to explain a 409. */
+interface Undo { restore: OrderRow[]; intent: MoveIntent }
 
 /**
  * Optimistic reordering of the global order (design section 3.3 and 3.4).
@@ -35,7 +40,7 @@ export function useOrderMoves() {
   const [saving, setSaving] = useState(false)
   const [stale, setStale] = useState<StaleState | null>(null)
   const [highlighted, setHighlighted] = useState<string[]>([])
-  const [undoable, setUndoable] = useState<MoveIntent | null>(null)
+  const [undoable, setUndoable] = useState<Undo | null>(null)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   const savingRef = useRef(false)
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
@@ -48,23 +53,21 @@ export function useOrderMoves() {
     setHighlighted(ids)
     later(() => setHighlighted(cur => (cur === ids ? [] : cur)), HIGHLIGHT_MS)
   }
-  const offerUndo = (intent: MoveIntent) => {
-    setUndoable(intent)
-    later(() => setUndoable(cur => (cur === intent ? null : cur)), UNDO_MS)
+  const offerUndo = (u: Undo) => {
+    setUndoable(u)
+    later(() => setUndoable(cur => (cur === u ? null : cur)), UNDO_MS)
   }
 
-  /** The intent that puts the moved rows back where they were: after the row that preceded them. */
-  const inverse = (before: readonly OrderRow[], moved: string[]): MoveIntent => {
-    const at = before.findIndex(r => rowId(r) === moved[0])
-    let after: string | null = null
-    for (let i = at - 1; i >= 0; i--) { if (!moved.includes(rowId(before[i]))) { after = rowId(before[i]); break } }
-    return { moved, after }
+  /** The previous arrangement as rows of the CURRENT order where they still exist; a set that differs is left for the server to refuse (409). */
+  const restoreOf = (current: readonly OrderRow[], previous: readonly OrderRow[]): OrderRow[] => {
+    const byId = new Map(current.map(r => [rowId(r), r]))
+    return previous.map(r => byId.get(rowId(r)) ?? r)
   }
 
   /** Applies `intent` to `base` and sends it. `undo` says this move is itself an undo (no second undo is offered). */
-  const send = useCallback(async (base: NodeOrder, intent: MoveIntent, undo = false) => {
-    const next = applyIntent(base.rows, intent)
-    if (!next || isNoop(base.rows, intent)) return
+  const send = useCallback(async (base: NodeOrder, intent: MoveIntent, undo?: Undo) => {
+    const next = undo ? restoreOf(base.rows, undo.restore) : applyIntent(base.rows, intent)
+    if (!next || (!undo && isNoop(base.rows, intent))) return
     write({ order_version: base.order_version, rows: next })
     flash(intent.moved)
     savingRef.current = true
@@ -78,17 +81,17 @@ export function useOrderMoves() {
         setUndoable(null)
         pushToast({ message: t('nodes.order.undone'), severity: 'success' })
       } else {
-        const back = inverse(base.rows, intent.moved)
+        const back: Undo = { restore: base.rows, intent: { moved: intent.moved, after: null } }
         offerUndo(back)
         pushToast({
           message: t('nodes.order.saved'), severity: 'success',
-          action: { label: t('nodes.toast.undo'), onClick: () => { const cur = read(); if (cur) void send(cur, back, true) } },
+          action: { label: t('nodes.toast.undo'), onClick: () => runUndo(back) },
         })
       }
     } catch (err) {
       if (err instanceof OrderStaleError) {
         write(err.current)
-        setStale({ intent, seen: base.rows, current: err.current })
+        setStale({ intent, seen: base.rows, current: err.current, undo: !!undo })
       } else {
         write(base)
         pushToast({ message: t('nodes.order.failed', { reason: describeError(err) ?? '' }), severity: 'error' })
@@ -97,9 +100,15 @@ export function useOrderMoves() {
       savingRef.current = false
       setSaving(false)
     }
-  // `inverse`, `flash` and `offerUndo` only use refs and setters.
+  // `flash`, `offerUndo` and `runUndo` only use refs, setters and this callback.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient, scope, read, write, t])
+
+  /** One write at a time, for the toast's Undo and the toolbar's alike. */
+  const runUndo = (u: Undo) => {
+    const cur = read()
+    if (cur && !savingRef.current) void send(cur, u.intent, u)
+  }
 
   const move = useCallback((intent: MoveIntent) => {
     const base = read()
@@ -122,10 +131,7 @@ export function useOrderMoves() {
     void send(s.current, s.intent)
   }, [stale, send])
 
-  const undo = useCallback(() => {
-    const cur = read()
-    if (cur && undoable && !savingRef.current) void send(cur, undoable, true)
-  }, [read, undoable, send])
+  const undo = () => { if (undoable) runUndo(undoable) }
 
   return { saving, stale, highlighted, undoable, move, drag, resolveStale, undo }
 }

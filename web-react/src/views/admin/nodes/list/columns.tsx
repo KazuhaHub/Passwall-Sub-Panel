@@ -20,6 +20,10 @@ export interface ColumnCtx {
   menuOf: (item: ListRow) => MoreMenuItem[]
 }
 
+// The default columns share the frame in percentages (max-w-0 lets a cell shrink below its content) and clip with an
+// ellipsis, so the handle, checkbox and menu columns can never be pushed out of view; the full text is in `title`.
+const FIT = 'max-w-0 overflow-hidden text-ellipsis'
+
 const sortless = { enableSorting: false } as const
 
 /**
@@ -30,15 +34,15 @@ const sortless = { enableSorting: false } as const
 export function orderColumns(c: ColumnCtx): ColumnDef<ListRow, any>[] {
   const { t } = c
   return [
-    { id: 'line', header: t('nodes.col.line'), ...sortless, meta: { hideable: false, label: t('nodes.col.line'), className: 'min-w-40 max-w-64' },
+    { id: 'line', header: t('nodes.col.line'), ...sortless, meta: { hideable: false, label: t('nodes.col.line'), className: FIT + ' w-[26%]' },
       cell: ctx => <NameCell item={ctx.row.original} colors={c.colors} /> },
-    { id: 'path', header: t('nodes.col.path'), ...sortless, meta: { label: t('nodes.col.path'), className: 'min-w-56' },
+    { id: 'path', header: t('nodes.col.path'), ...sortless, meta: { label: t('nodes.col.path'), className: FIT + ' w-[34%]' },
       cell: ctx => <PathCell item={ctx.row.original} colors={c.colors} labels={c.labels} nodeHref={c.nodeHref?.(ctx.row.original.row.node_id ?? 0)} /> },
-    { id: 'address', header: t('nodes.col.address'), ...sortless, meta: { label: t('nodes.col.address'), className: 'max-w-56' },
+    { id: 'address', header: t('nodes.col.address'), ...sortless, meta: { label: t('nodes.col.address'), className: FIT + ' w-[20%]' },
       cell: ctx => <AddressCell row={ctx.row.original.row} /> },
-    { id: 'factor', header: t('nodes.col.factor'), ...sortless, meta: { label: t('nodes.col.factor'), align: 'right' },
+    { id: 'factor', header: t('nodes.col.factor'), ...sortless, meta: { label: t('nodes.col.factor'), align: 'right', className: 'w-16' },
       cell: ctx => <FactorCell row={ctx.row.original.row} /> },
-    { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status') },
+    { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status'), className: FIT + ' w-[20%]' },
       cell: ctx => <StatusCell item={ctx.row.original} /> },
     { id: 'landing_server', header: t('nodes.col.landing_server'), ...sortless, meta: { label: t('nodes.col.landing_server'), defaultHidden: true },
       cell: ctx => ctx.row.original.row.landing?.panel_name ?? '' },
@@ -52,7 +56,7 @@ export function orderColumns(c: ColumnCtx): ColumnDef<ListRow, any>[] {
       cell: ctx => ctx.row.original.node?.desired_protocol ?? ctx.row.original.node?.protocol ?? '—' },
     { id: 'checked_at', header: t('nodes.col.checked_at'), ...sortless, meta: { label: t('nodes.col.checked_at'), defaultHidden: true },
       cell: ctx => formatDualTz(ctx.row.original.row.health?.checked_at, c.tz) },
-    { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: t('nodes.col.actions') },
+    { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: t('nodes.col.actions'), className: 'w-10' },
       cell: ctx => <RowMenu items={c.menuOf(ctx.row.original)} name={ctx.row.original.row.name} /> },
   ]
 }

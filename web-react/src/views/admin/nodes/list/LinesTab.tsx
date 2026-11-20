@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import type { OrderRow } from '@/api/nodes'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -7,6 +7,7 @@ import { HelpTip } from '@/components/common/HelpTip'
 import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { DataTable } from '@/components/data/DataTable'
+import type { DataTableHandle } from '@/components/data/dataTableTypes'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
@@ -58,6 +59,7 @@ export default function LinesTab() {
   const view = useTableViewState('admin.nodes.lines')
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [hover, setHover] = useState<string | null>(null)
+  const tableRef = useRef<DataTableHandle>(null)
   const [moveTarget, setMoveTarget] = useState<OrderRow | null>(null)
 
   const filters: ListFilters = {
@@ -91,7 +93,7 @@ export default function LinesTab() {
 
   const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)) })
   const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
-    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet }), [capsOf, handlers, t])
+    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
   const menuOf = useCallback((item: ListRow) => menuFor(item), [menuFor])
 
@@ -121,6 +123,10 @@ export default function LinesTab() {
     lineSel.clear()
     legacy.openEdit(open.row.node_id ?? 0, { lineId: open.row.line_id })
   }
+
+  // Once the new order has rendered, bring the moved row into view (the table needs the new data first).
+  const firstMoved = moves.highlighted[0]
+  useEffect(() => { if (firstMoved) tableRef.current?.scrollToRow(firstMoved) }, [firstMoved])
 
   const highlight = useMemo(() => [...relatedIds(rows, hover), ...moves.highlighted], [rows, hover, moves.highlighted])
   const openItem = (item: ListRow) => { if (item.row.kind === 'separator') { if (admin) sepSel.select(String(item.row.id)) } else lineSel.select(item.id) }
@@ -217,6 +223,7 @@ export default function LinesTab() {
         <DataTable<ListRow>
           {...common}
           aria-label={t('nodes.tabs.lines')}
+          handleRef={tableRef}
           data={shown}
           columns={cols}
           getRowId={r => r.id}

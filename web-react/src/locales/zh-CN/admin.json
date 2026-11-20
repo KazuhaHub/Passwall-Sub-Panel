@@ -2768,7 +2768,8 @@
       "probe": "链路中断，已撤下",
       "source_guard": "无法按来源区分",
       "cdn_unfit": "节点无法经 CDN 访问",
-      "entry_missing": "入口服务器已删除"
+      "entry_missing": "入口服务器已删除",
+      "unpublished": "未发布"
     },
     "withheld_detail": {
       "landing_disabled": "节点停用后，它的所有线路都不会出现在订阅中",

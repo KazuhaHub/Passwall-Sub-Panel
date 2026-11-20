@@ -10,7 +10,7 @@ export type StatusId =
   | 'entry_missing' | 'landing_disabled' | 'hidden_direct' | 'disabled' | 'waiting_entry' | 'egress' | 'probe'
   | 'source_guard' | 'cdn_unfit' | 'config_failed' | 'config_pending' | 'endpoint_drift'
   | 'unreachable' | 'server_unreachable' | 'inbound_missing' | 'inconclusive' | 'inbound_disabled'
-  | 'ok' | 'unchecked'
+  | 'unpublished' | 'ok' | 'unchecked'
 
 export interface RowStatus {
   id: StatusId
@@ -57,6 +57,8 @@ export function statusOf(row: OrderRow, node?: NodeStatusFacts): RowStatus {
   if (row.entry?.missing) return loud('entry_missing', 'danger')
   const withheld = row.withheld ? WITHHELD[row.withheld] : undefined
   if (withheld) return loud(withheld.id, withheld.tone)
+  // A reason this client does not know is still a line that is not published: never a quiet "OK" dot.
+  if (row.withheld) return loud('unpublished', 'neutral')
   if (row.line_type === 'direct' && node) {
     // 'drift' is declared but has no producer (reconcile repairs it in the same call), so it is not a row state.
     if (node.config_sync_state === 'failed') return loud('config_failed', 'danger')
@@ -74,7 +76,7 @@ export function statusOf(row: OrderRow, node?: NodeStatusFacts): RowStatus {
 export function statusLabelKey(id: StatusId): string {
   switch (id) {
     case 'entry_missing': case 'landing_disabled': case 'hidden_direct': case 'disabled': case 'waiting_entry':
-    case 'egress': case 'probe': case 'source_guard': case 'cdn_unfit':
+    case 'egress': case 'probe': case 'source_guard': case 'cdn_unfit': case 'unpublished':
       return `nodes.withheld.${id}`
     default:
       return `nodes.status.${id}`

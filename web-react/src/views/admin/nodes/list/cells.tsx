@@ -16,17 +16,18 @@ export function StatusCell({ item }: { item: ListRow }) {
   const t = useNodesT()
   const s = statusOf(item.row, item.node)
   const label = t(statusLabelKey(s.id))
-  return s.quiet ? <StatusDot tone={s.tone} label={label} hideLabel /> : <StatusBadge tone={s.tone} label={label} />
+  return s.quiet ? <StatusDot tone={s.tone} label={label} hideLabel /> : <div className="flex max-w-full min-w-0" title={label}><StatusBadge tone={s.tone} label={label} className="min-w-0 max-w-full" /></div>
 }
 
 /** The path of a row, as a link to its node for an administrator. A table row has no room for the ends. */
 export function PathCell({ item, colors, labels, nodeHref }: { item: ListRow; colors: Map<string, LandingColor>; labels: PathLabels; nodeHref?: string }) {
   const t = useNodesT()
   const { nodes, edges } = pathOf(item.row, { colors, labels, exit: item.exitName ? { name: item.exitName } : null, node: item.node })
+  const titleOf = nodes.map(n => [n.label, n.sublabel].filter(Boolean).join(' ')).filter(Boolean).join(' → ')
   const diagram = <PathDiagram nodes={nodes} edges={edges} size="sm" />
   return nodeHref
-    ? <Link to={nodeHref} title={t('nodes.action.open_node')} className="inline-flex max-w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
-    : diagram
+    ? <Link to={nodeHref} title={`${titleOf}\n${t('nodes.action.open_node')}`} className="inline-flex max-w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
+    : <span className="inline-flex max-w-full min-w-0" title={titleOf}>{diagram}</span>
 }
 
 export function NameCell({ item, colors, hint }: { item: ListRow; colors: Map<string, LandingColor>; hint?: string }) {

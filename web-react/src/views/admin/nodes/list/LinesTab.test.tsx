@@ -117,4 +117,26 @@ describe('the subscription order list', () => {
     mountPage(<NodesPage />)
     expect(await screen.findByText('Could not load lines')).toBeTruthy()
   })
+
+  it('Undo restores the exact previous arrangement, even after moving rows from different places', async () => {
+    const six = [line(9, 'direct', 'Node9'), line(1, 'direct', 'Node1'), line(8, 'direct', 'Node8'), line(1, 'a', 'Node1 · L1'), line(7, 'direct', 'Node7'), line(1, 'b', 'Node1 · L2')]
+    const original: NodeOrder = { order_version: 'v1', rows: six }
+    reads(original)
+    api.put.mockResolvedValue({ data: { order_version: 'v2' } })
+    mountPage(<NodesPage />)
+    await screen.findAllByText('Node7')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Node1' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to…' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.keyDown(within(dialog).getByRole('combobox'), { key: 'ArrowDown' })
+    fireEvent.click(await screen.findByRole('option', { name: 'Node7' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    fireEvent.click(await screen.findByTestId('undo-move'))
+    await waitFor(() => expect(putBodies()).toHaveLength(2))
+    const ids = (b: { items: { node_id?: number; line_id?: string }[] }) => b.items.map(i => `${i.node_id}.${i.line_id}`)
+    expect(ids(putBodies()[0])).toEqual(['9.direct', '8.direct', '7.direct', '1.direct', '1.a', '1.b'])
+    expect(ids(putBodies()[1])).toEqual(six.map(r => `${r.node_id}.${r.line_id}`))
+  })
 })

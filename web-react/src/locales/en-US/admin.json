@@ -2772,7 +2772,8 @@
       "probe": "Withdrawn: link down",
       "source_guard": "Sources cannot be told apart",
       "cdn_unfit": "Node cannot be served through CDN",
-      "entry_missing": "Entry server deleted"
+      "entry_missing": "Entry server deleted",
+      "unpublished": "Not published"
     },
     "withheld_detail": {
       "landing_disabled": "While the node is disabled, none of its lines appear in subscriptions",

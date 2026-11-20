@@ -44,7 +44,7 @@ export function StaleOrderDialog({ stale, onAnswer }: { stale: StaleState; onAns
         {goneId && <p className="text-sm text-destructive" role="alert">{t('nodes.order.stale_gone', { name: nameOf(goneId) })}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={() => onAnswer('keep')}>{t('nodes.order.stale_keep')}</Button>
-          {!goneId && <Button onClick={() => onAnswer('reapply')}>{t('nodes.order.stale_reapply')}</Button>}
+          {!goneId && !stale.undo && <Button onClick={() => onAnswer('reapply')}>{t('nodes.order.stale_reapply')}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

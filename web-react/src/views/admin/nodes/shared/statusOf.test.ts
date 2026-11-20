@@ -40,6 +40,8 @@ describe('statusOf precedence', () => {
     expect(statusOf(line({ health: { state, checked_at: null } }))).toMatchObject({ id, tone: 'warning', quiet: false }))
   it('14 published and healthy is a quiet dot', () => expect(statusOf(line())).toMatchObject({ id: 'ok', tone: 'success', quiet: true }))
   it('15 published, never checked is a quiet neutral dot', () => expect(statusOf(line({ health: { state: 'unknown', checked_at: null } }))).toMatchObject({ id: 'unchecked', tone: 'neutral', quiet: true }))
+  it('a withheld reason this client does not know is shown as not published, not as healthy', () =>
+    expect(statusOf(line({ published: false, withheld: 'some_future_reason' as never }))).toMatchObject({ id: 'unpublished', quiet: false }))
   it('a withheld reason beats config and health conditions below it', () =>
     expect(statusOf(direct({ published: false, withheld: 'egress', health: { state: 'unreachable', checked_at: null } }), facts({ config_sync_state: 'failed' }))).toMatchObject({ id: 'egress' }))
 })
