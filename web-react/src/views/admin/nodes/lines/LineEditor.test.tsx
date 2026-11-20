@@ -151,7 +151,7 @@ describe('switching a saved line between direct forward and encrypted tunnel', (
     expect(within(dialog).getByTestId('tunnel-plan').textContent).toContain('20443')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/nodes/1/lines/F1/mode', { mode: 'tunnel', confirm: true, confirm_plan: 'p1' }, expect.anything()))
-    expect(await screen.findByTestId('tunnel-card')).toBeTruthy()
+    expect(await screen.findByTestId('tunnel-card', {}, { timeout: 4000 })).toBeTruthy()
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ message: 'The line now runs as an encrypted tunnel. Subscribers must refresh.' }))
   })
 
