@@ -9,7 +9,7 @@ import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import { MoreMenu } from '@/components/common/MoreMenu'
 import { PageHeader } from '@/components/common/PageHeader'
 import { StatusBadge } from '@/components/common/StatusBadge'
-import { StatusDot } from '@/components/common/StatusDot'
+import { StatusDot, ToneDot } from '@/components/common/StatusDot'
 import { TONES } from '@/components/common/tones'
 import { confirm } from '@/components/ConfirmHost'
 import { EmptyState } from '@/components/feedback/EmptyState'
@@ -114,7 +114,10 @@ function Gallery({ role, setRole }: { role: Role; setRole: (r: Role) => void }) 
         {TONES.map(tone => <StatusBadge key={tone} tone={tone} quiet label={`${tone} (quiet)`} />)}
         <span className="w-full" />
         {TONES.map(tone => <StatusDot key={tone} tone={tone} label={tone} hideLabel />)}
-        <span className="text-xs text-muted-foreground">dots with a hidden label</span>
+        <span className="text-xs text-muted-foreground">markers at their real size (label hidden): each tone has its own shape, so colour is never the only cue</span>
+        <span className="w-full" />
+        {TONES.map(tone => <span key={tone} className="inline-flex items-center gap-2 text-sm"><ToneDot tone={tone} className="size-6" />{tone}</span>)}
+        <span className="text-xs text-muted-foreground">the same markers enlarged</span>
       </Block>
 
       <Block title="Buttons" note="Pending buttons disable themselves while the promise is out. Icon-only buttons all have a tooltip and aria-label.">

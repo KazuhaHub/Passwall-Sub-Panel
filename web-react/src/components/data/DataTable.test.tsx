@@ -483,6 +483,15 @@ describe('phone layout', () => {
     expect(onRowOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }))
   })
 
+  it('pads and centres a custom empty node in card mode, as table mode does', () => {
+    stub(true)
+    render(<DataTable data={[]} columns={columns} getRowId={r => r.id} renderCard={row => <div>{row.name}</div>} empty={<div>No nodes yet. Add one to start.</div>} />)
+    const wrapper = screen.getByText('No nodes yet. Add one to start.').parentElement!
+    expect(wrapper.className).toContain('p-8')
+    expect(wrapper.className).toContain('text-center')
+    expect(wrapper.className).toContain('text-muted-foreground')
+  })
+
   it('keeps the table on a wide screen, or without a card renderer', () => {
     stub(false)
     const { unmount } = render(<DataTable data={mk(3)} columns={columns} getRowId={r => r.id} renderCard={row => <div>{row.name}</div>} />)

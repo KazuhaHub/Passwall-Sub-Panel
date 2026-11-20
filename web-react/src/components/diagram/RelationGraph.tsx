@@ -24,7 +24,7 @@ export interface GraphColumn {
 }
 
 export interface GraphEdge {
-  /** Identity of the line (its line id): two lines can join the same two boxes, and each must stay itself in the picture and in the text. */
+  /** Identity of the line (its line id): two lines can join the same two boxes, and each must stay itself in the picture and in the text. Required, and unique among the edges (see RelationGraph). */
   id: string
   /** The line's name, shown in the lines list next to its path when there are several. */
   label?: string
@@ -94,6 +94,7 @@ function boxStatus(status: PathTone | undefined, t: (k: string) => string): stri
   return status === 'danger' || status === 'warning' || status === 'pending' ? t(`ui.diagram.status_${status}`) : ''
 }
 
+/** Most paths enumerated per box (and per direction); beyond it the list is cut without a marker. */
 const MAX_PATHS = 200
 
 export interface GraphPath {
@@ -147,9 +148,24 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
  * TEXT EQUIVALENT. The connectors are SVG and hidden from assistive tech, so a
  * persistent, focusable "connections" list sits with the graph: it names every
  * connection of the selected box (both ends, the kind, a problem if there is one)
- * and each entry moves the selection to the other end. It never truncates, and it
- * is what a phone reads, because on a phone the layout IS the list: columns
- * stacked, no canvas.
+ * and each entry moves the selection to the other end. It is what a phone reads,
+ * because on a phone the layout IS the list: columns stacked, no canvas.
+ *
+ * SIZE LIMITS. There is NO cap on boxes or edges: every box is drawn at a fixed size
+ * and the canvas scrolls (the list layout scrolls with the page), so nothing is dropped
+ * or summarised however many there are. The only cap is on PATHS: the connections of
+ * one box, and the count in its name, stop at MAX_PATHS (200). Past that the list is cut
+ * silently, with no "and more" row, so the counts are a lower bound for a graph that
+ * dense. Work grows with the number of paths per box times the number of boxes (the
+ * per-box counts are computed up front), so keep graphs to the hundreds of edges.
+ * Edges naming a box that is not in `columns` are dropped without a message.
+ *
+ * IDS. `GraphEdge.id` is required and MUST be unique among edges, and `GraphBox.id`
+ * unique across all columns. Edge ids key the lines list, decide which connectors are
+ * highlighted and where parallel lines are offset from each other: two edges sharing
+ * an id are highlighted together, drawn on top of each other and collide as React keys.
+ * `columns` and `edges` should be stable references (memoised), since the layout and
+ * path work is cached on their identity.
  *
  * Boxes are buttons with one tab stop and arrow-key movement (up and down within
  * a column, left and right across columns); Enter or Space selects.
