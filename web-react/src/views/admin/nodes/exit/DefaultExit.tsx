@@ -7,7 +7,7 @@ import { FormSection } from '@/components/form/FormSection'
 import { OptionCards } from '@/components/form/OptionCards'
 import { PathDiagram, type PathEdge, type PathNode } from '@/components/diagram/PathDiagram'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { NativeSelect } from '@/components/ui/native-select'
+import { ServerSelect } from '../shared/ServerSelect'
 import type { TransitLink } from '@/api/nodes'
 import { useNodesT } from '../shared/useNodesT'
 import { ProbeChip } from '../lines/ProbeChip'
@@ -65,10 +65,7 @@ export function DefaultExit({ node, exits, native, mode, exitId, onMode, onExit,
       {mode === 'remote' && !remoteOff && (
         <div data-testid="egress-section" className="flex flex-col gap-3">
           <Field label={t('nodes.exit.server')} required error={error}>
-            <NativeSelect id="exit-server" value={exitId} onChange={e => onExit(Number(e.target.value) || 0)}>
-              <option value={0}>{t('nodes.exit.pick_server')}</option>
-              {exits.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </NativeSelect>
+            <ServerSelect id="exit-server" servers={exits} value={exitId} placeholder={t('nodes.exit.pick_server')} onChange={onExit} />
           </Field>
           {shown && (
             <div className="flex flex-wrap items-center gap-3">

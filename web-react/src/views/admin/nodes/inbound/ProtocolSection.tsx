@@ -1,7 +1,7 @@
 import type { Server } from '@/api/servers'
 import { FormSection } from '@/components/form/FormSection'
 import { Field } from '@/components/form/Field'
-import { NativeSelect } from '@/components/ui/native-select'
+import { ServerSelect } from '../shared/ServerSelect'
 import { useNodesT } from '../shared/useNodesT'
 import { FieldRow, SelectField, SwitchField, TextField, type SectionProps } from './controls'
 import { applyProtocolChange, applyServerChange, leavesJson } from './formRules'
@@ -24,16 +24,14 @@ export function ProtocolSection({ form, setForm, update, panelType, servers, pro
       <FieldRow>
         {servers && (
           <Field label={t('nodes.create_dialog.panel')}>
-            <NativeSelect value={servers.find(s => s.id === form.panel_id)?.id ?? servers[0]?.id ?? ''}
-              onChange={e => {
-                const next = servers.find(s => s.id === Number(e.target.value))
+            <ServerSelect servers={servers} value={form.panel_id || servers[0]?.id || 0} placeholder={t('nodes.create_dialog.panel_search_placeholder')}
+              onChange={id => {
+                const next = servers.find(s => s.id === id)
                 if (!next) return
                 // JSON mode is a 3X-UI escape hatch: a server of another kind cannot take it.
                 if (leavesJson(next)) onLeaveJson?.()
                 setForm(prev => applyServerChange(prev, servers, next))
-              }}>
-              {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </NativeSelect>
+              }} />
           </Field>
         )}
         <SelectField label={t('nodes.create_dialog.protocol')} value={form.protocol} disabled={protocolReadonly || json}

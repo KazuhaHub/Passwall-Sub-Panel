@@ -36,6 +36,11 @@ async function mountForm(initial?: Partial<InboundFormState>, props: Partial<Inb
   return view
 }
 const pick = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+// The server picker is a searchable combobox: open it, choose the option by its name.
+const pickServer = async (name: string) => {
+  fireEvent.mouseDown(screen.getByLabelText('3X-UI server'))
+  fireEvent.click(await screen.findByRole('option', { name }))
+}
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 // A required field's label carries an asterisk.
 const typeLike = (label: RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
@@ -141,7 +146,7 @@ describe('server picker', () => {
       tcp_accept_proxy_protocol: true, grpc_authority: 'a', grpc_multi_mode: true, tls_reject_unknown_sni: true, tls_cipher_suites: 'TLS_AES_128_GCM_SHA256',
       ss_iv_check: true, sockopt_enabled: true, sockopt_tproxy: 'tproxy',
     }, { servers, onLeaveJson })
-    pick('3X-UI server', '2')
+    await pickServer('Osaka')
     expect(onLeaveJson).toHaveBeenCalledTimes(1)
     expect(state).toMatchObject({
       panel_id: 2, display_name: 'Osaka', region: 'JP-Osaka', server_address: 'osaka.example.test', vless_network: 'tcp', enable: true, tcp_header_type: 'none',
@@ -152,14 +157,14 @@ describe('server picker', () => {
 
   it('keeps a name, region and address the admin changed', async () => {
     await mountForm({ display_name: 'Mine', region: 'XX', server_address: 'mine.example' }, { servers })
-    pick('3X-UI server', '2')
+    await pickServer('Osaka')
     expect(state).toMatchObject({ panel_id: 2, display_name: 'Mine', region: 'XX', server_address: 'mine.example' })
   })
 
   it('puts an S-UI-only protocol back to VLESS REALITY when a 3X-UI server is picked, and does not leave JSON', async () => {
     const onLeaveJson = vi.fn()
     await mountForm({ panel_id: 2, protocol: 'tuic', vless_network: 'http', vless_security: 'tls', tls_alpn_text: 'h3' }, { servers, server: sui(), onLeaveJson })
-    pick('3X-UI server', '1')
+    await pickServer('Tokyo')
     expect(onLeaveJson).not.toHaveBeenCalled()
     expect(state).toMatchObject({ panel_id: 1, protocol: 'vless', vless_security: 'reality', tls_alpn_text: 'h2,http/1.1', vless_network: 'tcp' })
   })

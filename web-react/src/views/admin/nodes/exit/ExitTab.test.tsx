@@ -35,6 +35,12 @@ function Live({ onDirtyChange }: { onDirtyChange: (d: boolean) => void }) {
   const q = useNodeDetail(1)
   return q.data ? <ExitTab node={q.data.node} onDirtyChange={onDirtyChange} /> : null
 }
+// The exit server is a searchable combobox: type to filter, then choose the option.
+async function chooseExit(name: string) {
+  const input = await screen.findByRole('combobox', { name: /Exit server/ })
+  fireEvent.mouseDown(input)
+  fireEvent.click(await screen.findByRole('option', { name }))
+}
 const puts = () => api.put.mock.calls.map(([url, body]) => [url, body] as const)
 
 beforeEach(() => { toast.mockReset(); api.put.mockImplementation(async (_url: string, body: object) => ({ data: { ...landing([]), ...body } })) })
@@ -43,7 +49,7 @@ describe('Exit tab: the default exit', () => {
   it('saves the tunnel settings first, then the exit and the current flow, and nothing else', async () => {
     open()
     fireEvent.click(await screen.findByRole('radio', { name: /Leave through another server/ }))
-    fireEvent.change(await screen.findByRole('combobox', { name: /Exit server/ }), { target: { value: '2' } })
+    await chooseExit('Osaka')
     // Tunnel settings are a collapsed section; its fields are mounted and carry the edit.
     fireEvent.change(await screen.findByLabelText('Exit address'), { target: { value: ' 198.51.100.7 ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -58,7 +64,7 @@ describe('Exit tab: the default exit', () => {
   it('says which part is already saved when the exit fails after the tunnel settings were written', async () => {
     open()
     fireEvent.click(await screen.findByRole('radio', { name: /Leave through another server/ }))
-    fireEvent.change(await screen.findByRole('combobox', { name: /Exit server/ }), { target: { value: '2' } })
+    await chooseExit('Osaka')
     fireEvent.change(await screen.findByLabelText('Exit address'), { target: { value: '198.51.100.7' } })
     api.put.mockImplementation(async (url: string, body: object) => {
       if (url === '/admin/nodes/1/metadata') throw Object.assign(new Error('x'), { response: { data: { error: 'exit refused' } } })

@@ -60,7 +60,7 @@ export function EntryCard({ entry, canTunnel, busy, showAll, touched, onTouch, o
         </div>
       )}
       {line.mode === 'cdn' ? (
-        <CdnFields draft={line} patch={onPatch} issues={line.cdn_issues ?? []}
+        <CdnFields draft={line} patch={onPatch} idPrefix={`${key}-`} issues={line.cdn_issues ?? []}
           error={f => (f === 'domain' || f === 'port') ? shown(f) : undefined} blur={f => { if (f === 'domain' || f === 'port') onTouch(key, f) }} />
       ) : (
         <>

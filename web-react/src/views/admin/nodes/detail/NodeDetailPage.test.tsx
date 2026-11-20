@@ -108,3 +108,29 @@ describe('node page: tunnel listener', () => {
     expect(screen.queryByRole('radio', { name: /Leave through another server/ })).toBeNull()
   })
 })
+
+describe('node page: delete', () => {
+  it('opens the same impact dialog as the list, and goes back to the list once the node is gone', async () => {
+    const node = landing([forward])
+    const router = mount(node)
+    // The impact read the dialog needs, and what the detail read answers once the node is deleted.
+    const base = api.get.getMockImplementation()!
+    let gone = false
+    api.get.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/admin/nodes/1/delete-impact') return { data: { node: { id: 1, name: 'Landing' }, tunnels: [], blocked_by_routes: [], lines: [{ node_id: 1, line_id: 'direct', landing_name: 'Landing', line_name: 'Landing', line_type: 'direct' }] } }
+      if (gone && url === '/admin/nodes/1') throw Object.assign(new Error('nf'), { response: { status: 404 } })
+      return base(url, ...rest)
+    })
+    api.delete.mockImplementation(async () => { gone = true; return { data: {} } })
+    await screen.findByRole('tab', { name: 'General' })
+    const header = document.querySelector('[data-slot="page-header"]') as HTMLElement
+    const buttons = within(header).getAllByRole('button')
+    fireEvent.click(buttons[buttons.length - 1])
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete node' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(api.delete).not.toHaveBeenCalled()
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^Delete node and 1 line/ }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalled())
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/nodes'))
+  })
+})

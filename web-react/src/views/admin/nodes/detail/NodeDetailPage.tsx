@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import { useMemo, useRef, useState } from 'react'
+import { Link, Navigate } from 'react-router'
 import type { OrderRow } from '@/api/nodes'
 import type { Node } from '@/api/types'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -19,6 +19,7 @@ import { ExitTab } from '../exit/ExitTab'
 import { GeneralTab } from '../general/GeneralTab'
 import { InboundTab } from '../inbound/InboundTab'
 import { useNodeDetail } from '../lines/useNodeDetail'
+import { useNodeDeletion } from '../delete/useNodeDeletion'
 import { useRowHandlers } from '../list/useRowHandlers'
 import { useNodesT } from '../shared/useNodesT'
 import DetailLinesTab from './LinesTab'
@@ -32,23 +33,31 @@ const LISTENER_TABS: readonly Tab[] = ['exit', 'inbound']
 const NOOP = () => {}
 const NO_LINE_HANDLERS = { edit: NOOP, add: NOOP, toggle: NOOP, remove: NOOP }
 
-/** The header's own actions on the node: enable or disable, and the server-side ones in the menu. */
-function useHeaderActions(node: Node | undefined) {
+/**
+ * The header's own actions on the node: enable or disable, and the server-side ones in the menu. Delete and
+ * remove-from-panel open the same impact dialogs as the list (what the delete takes with it, read first), so the
+ * two places cannot disagree. `deleting` says one of them was opened: when the node is gone afterwards the page
+ * goes back to the list instead of saying "not found".
+ */
+function useHeaderActions(node: Node | undefined, deleting: { current: boolean }) {
   const t = useNodesT()
   const scope = useQueryScope()
   const servers = useAllServers(scope)
-  const handlers = useRowHandlers({ lines: NO_LINE_HANDLERS, moveTo: NOOP, editSeparator: NOOP })
-  if (!node) return { toggle: null, more: [] as MoreMenuItem[] }
-  const caps = servers.data?.find(s => s.id === node.panel_id)?.capabilities ?? []
+  const order = useNodeOrder(scope)
+  const serverMap = useMemo(() => new Map((servers.data ?? []).map(s => [s.id, s])), [servers.data])
+  const deletion = useNodeDeletion({ rows: order.data?.rows ?? [], serverMap })
+  const handlers = useRowHandlers({ lines: NO_LINE_HANDLERS, moveTo: NOOP, editSeparator: NOOP, deletion })
+  if (!node) return { toggle: null, more: [] as MoreMenuItem[], dialog: deletion.element }
+  const caps = serverMap.get(node.panel_id)?.capabilities ?? []
   // The row handlers take an order row; a node page has only the node, which is all they read (its id and names).
-  const row = { kind: 'line', node_id: node.id, line_id: 'direct', name: node.display_name, landing: { node_id: node.id, name: node.display_name, enabled: node.enabled } } as unknown as OrderRow
+  const row = { kind: 'line', node_id: node.id, line_id: 'direct', name: node.display_name, landing: { node_id: node.id, name: node.display_name, enabled: node.enabled, panel_id: node.panel_id } } as unknown as OrderRow
   const more: MoreMenuItem[] = [
     { id: 'recreate', label: t('nodes.action.recreate_inbound'), disabled: !(caps.includes('inbound.create') && caps.includes('inbound.update') && caps.includes('inbound.delete')), onSelect: () => void handlers.recreateInbound(row) },
-    { id: 'remove', label: t('nodes.action.remove_from_panel'), onSelect: () => void handlers.removeFromPanel(row) },
-    { id: 'delete', label: t('nodes.action.delete_node'), icon: IconDelete, destructive: true, disabled: !caps.includes('inbound.delete'), onSelect: () => void handlers.deleteNode(row) },
+    { id: 'remove', label: t('nodes.action.remove_from_panel'), onSelect: () => { deleting.current = true; handlers.removeFromPanel(row) } },
+    { id: 'delete', label: t('nodes.action.delete_node'), icon: IconDelete, destructive: true, disabled: !caps.includes('inbound.delete'), onSelect: () => { deleting.current = true; handlers.deleteNode(row) } },
   ]
   const toggle = { label: t(node.enabled ? 'nodes.action.disable_node' : 'nodes.action.enable_node'), disabled: !caps.includes('inbound.enable'), run: () => handlers.toggleNode(row, !node.enabled) }
-  return { toggle, more }
+  return { toggle, more, dialog: deletion.element }
 }
 
 /**
@@ -79,13 +88,14 @@ export default function NodeDetailPage({ id }: { id: number }) {
     const lines = (order.data?.rows ?? []).filter(r => r.kind === 'line' && r.node_id === id)
     return lines.length === 0 ? undefined : t('nodes.line.published_count', { published: lines.filter(r => r.published).length, total: lines.length })
   }, [order.data, id, t])
-  const { toggle, more } = useHeaderActions(listener ? undefined : node)
+  const deleting = useRef(false)
+  const { toggle, more, dialog } = useHeaderActions(listener ? undefined : node, deleting)
 
   const back = <Button variant="outline" render={<Link to="/admin/nodes" />}>{t('nodes.detail.back')}</Button>
-  if (query.isError && !node) {
-    const gone = (query.error as { response?: { status?: number } } | null)?.response?.status === 404
-    return gone ? <EmptyState title={t('nodes.detail.not_found')} action={back} /> : <ErrorState reason={query.error} retry={() => void query.refetch()} />
-  }
+  const gone = query.isError && (query.error as { response?: { status?: number } } | null)?.response?.status === 404
+  // A refetch that fails keeps the node it had, so "deleted from here" is read from the error itself.
+  if (gone && deleting.current) return <Navigate to="/admin/nodes" replace />
+  if (query.isError && !node) return gone ? <EmptyState title={t('nodes.detail.not_found')} action={back} /> : <ErrorState reason={query.error} retry={() => void query.refetch()} />
   if (!node) return <LoadingState />
 
   const tabs = listener ? LISTENER_TABS : TABS
@@ -108,6 +118,7 @@ export default function NodeDetailPage({ id }: { id: number }) {
         <TabsContent value="inbound" keepMounted>{mounted('inbound') && <InboundTab node={node} onDirtyChange={report.inbound} />}</TabsContent>
         {!listener && <TabsContent value="general" keepMounted>{mounted('general') && <GeneralTab node={node} onDirtyChange={report.general} />}</TabsContent>}
       </Tabs>
+      {dialog}
     </>
   )
 }

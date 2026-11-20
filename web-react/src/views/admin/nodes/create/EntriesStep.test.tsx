@@ -231,3 +231,15 @@ describe('setupProblems', () => {
       .toEqual({ sni: 'setup.field_required' })
   })
 })
+
+describe('two CDN entries', () => {
+  it('have their own element ids, so each label points at its own input', () => {
+    const cdn = (key: string, domain: string): SetupRelay => ({ key, line: { name: '', address: '', port: 443, enabled: true, mode: 'cdn', domain } })
+    mount({ initial: [cdn('a', 'one.example.com'), cdn('b', 'two.example.com')] })
+    const domains = screen.getAllByLabelText(/CDN domain/) as HTMLInputElement[]
+    expect(domains.map(d => d.value)).toEqual(['one.example.com', 'two.example.com'])
+    expect(new Set(domains.map(d => d.id)).size).toBe(2)
+    const ids = [...document.querySelectorAll('[id]')].map(e => e.id)
+    expect(ids.length).toBe(new Set(ids).size)
+  })
+})
