@@ -2682,7 +2682,6 @@
       "traffic_factor_direct": "Direct line traffic multiplier"
     },
     "action": {
-      "delete": "Delete",
       "recreate_inbound": "Recreate inbound on server",
       "edit_line": "Edit line",
       "edit_direct": "Edit direct line",
@@ -2723,12 +2722,8 @@
       "undo": "Undo"
     },
     "confirm": {
-      "delete_title": "Delete node",
-      "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
       "recreate_inbound_title": "Re-create inbound on the server?",
-      "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config, relink the node to the new inbound, then provision the members' clients onto it. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Safe to re-click: if the inbound already exists it is NOT re-created, only the clients are re-pushed (to push clients that didn't land).",
-      "batch_delete_title": "Delete nodes",
-      "batch_delete_message": "Delete {{count}} nodes?"
+      "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config, relink the node to the new inbound, then provision the members' clients onto it. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Safe to re-click: if the inbound already exists it is NOT re-created, only the clients are re-pushed (to push clients that didn't land)."
     },
     "separator_preview": {
       "visible": "Shown in: {{groups}}",
@@ -2769,7 +2764,8 @@
     "view": {
       "label": "View",
       "order": "Subscription order",
-      "node": "By node"
+      "node": "By node",
+      "graph": "Topology"
     },
     "search": {
       "placeholder": "Search lines, nodes, servers or addresses"
@@ -2928,6 +2924,65 @@
     "error": {
       "load": "Could not load lines",
       "partial": "Some node details could not be loaded"
+    },
+    "impact": {
+      "node_title": "Delete node \"{{name}}\"?",
+      "loading": "Checking what this deletion affects…",
+      "failed_title": "Could not check what this affects",
+      "failed_hint": "Retry, or continue without the check. Without it the lines and entry listeners that go with the node are not listed here.",
+      "blind_delete": "Delete without checking",
+      "blind_remove": "Remove without checking",
+      "lines_one": "This {{count}} line is deleted with it:",
+      "lines_other": "These {{count}} lines are deleted with it:",
+      "lines_remove_one": "The panel also deletes this {{count}} line:",
+      "lines_remove_other": "The panel also deletes these {{count}} lines:",
+      "listeners": "Entry listeners that close:",
+      "listener_item": "Port {{port}} on {{server}} ({{line}})",
+      "listener_front": "shared port {{port}}",
+      "body": "The inbound is deleted on the server; these lines disappear when subscribers refresh",
+      "prefer_disable": "Only want to stop publishing it?",
+      "disable_instead": "Disable the node instead",
+      "confirm_one": "Delete node and {{count}} line",
+      "confirm_other": "Delete node and {{count}} lines",
+      "remove_confirm_one": "Remove node and {{count}} line from the panel",
+      "remove_confirm_other": "Remove node and {{count}} lines from the panel",
+      "blocked_title": "Node \"{{name}}\" cannot be deleted",
+      "blocked_body": "Shared-port routes on a server still point at this node. Remove these routes first, then delete the node:",
+      "blocked_fix": "On the Servers page, open that server's shared ports and delete these routes, then come back to delete the node",
+      "go_servers": "Go to servers",
+      "plan_title": "The server asks you to confirm these changes",
+      "plan_body": "The server will make these changes:",
+      "plan_confirm": "Confirm and continue",
+      "bulk_title_one": "Delete {{count}} node?",
+      "bulk_title_other": "Delete {{count}} nodes?",
+      "bulk_confirm_one": "Delete {{nodes}} nodes and {{count}} line",
+      "bulk_confirm_other": "Delete {{nodes}} nodes and {{count}} lines",
+      "bulk_skipped_one": "{{count}} of them cannot be deleted and is skipped:",
+      "bulk_skipped_other": "{{count}} of them cannot be deleted and are skipped:",
+      "bulk_blocked_item": "{{name}}: shared-port routes still point at it",
+      "bulk_unread_item": "{{name}}: could not check ({{reason}})",
+      "bulk_node_lines_one": "{{name}} · {{count}} line",
+      "bulk_node_lines_other": "{{name}} · {{count}} lines",
+      "bulk_none": "None of the selected nodes can be deleted",
+      "blocked_remove_title": "Node \"{{name}}\" cannot be removed"
+    },
+    "graph": {
+      "label": "Line relationship graph",
+      "too_many": "Too many lines to draw clearly in one graph",
+      "too_many_count": "{{count}} connections to draw, more than {{max}}",
+      "too_many_hint": "Filter by entry server or landing server, then view again",
+      "show_in_list_one": "View the {{count}} line through \"{{name}}\" in the list",
+      "show_in_list_other": "View the {{count}} lines through \"{{name}}\" in the list",
+      "as_list": "View as list",
+      "col_entry": "Entry",
+      "col_landing": "Landing node",
+      "col_exit": "Exit",
+      "box_direct": "Direct",
+      "box_cdn": "CDN",
+      "box_external": "External entry",
+      "box_local": "Own server",
+      "box_deleted": "{{name}} (deleted)",
+      "hint": "Select an entry or a landing node to see the lines through it. Withdrawn or faulty lines are marked in colour and in words; disabled lines are faded"
     },
     "unmanaged": {
       "server": "Server",
@@ -4059,12 +4114,6 @@
       "upgrade_unavailable": "This instance cannot upgrade that component right now ({{reasons}})."
     },
     "confirm": {
-      "delete_title": "Delete server",
-      "delete_message": "Delete server {{name}}? The server must have no nodes referencing it.",
-      "has_nodes_title": "This server still has nodes",
-      "has_nodes_text": "Remove or move these nodes first. Hidden tunnel listeners are removed by removing their lines on the landing nodes.",
-      "has_nodes_item": "{{node}}",
-      "has_nodes_tunnel_item": "Tunnel line {{line}} of {{landing}}",
       "batch_delete_title": "Delete servers",
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
       "batch_upgrade_xray_title": "Upgrade Xray on selected servers",
@@ -4323,6 +4372,34 @@
         }
       },
       "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect"
+    },
+    "delete": {
+      "title": "Delete server \"{{name}}\"?",
+      "loading": "Checking what is still on this server…",
+      "failed_title": "Could not check what is still on this server",
+      "failed_hint": "Retry to find out whether it can be deleted",
+      "blocked_title_one": "Server \"{{name}}\" cannot be deleted: {{count}} item depends on it",
+      "blocked_title_other": "Server \"{{name}}\" cannot be deleted: {{count}} items depend on it",
+      "blocked_hint": "Deal with these first, then come back to delete it",
+      "nodes": "Nodes on this server",
+      "lines": "Lines that enter through this server",
+      "routes": "Routes that leave through this server",
+      "egress": "Nodes that use this server as their exit",
+      "egress_warning": "After deletion these nodes' exit is unavailable; change their exit first",
+      "listener_of": "{{landing}} · {{line}} (entry listener)",
+      "listener_fix": "Delete this line or switch it to port forwarding",
+      "line_fix": "Delete this line or choose another entry server",
+      "pending_landing": "This line's landing node is being deleted. Wait for its sync task, or remove that node from the panel only",
+      "node_lines_one": "{{count}} line",
+      "node_lines_other": "{{count}} lines",
+      "open_node": "Open node",
+      "open_line": "View line",
+      "open_exit": "View exit",
+      "sync_tasks": "Sync tasks",
+      "routes_of": "Routes {{routes}}",
+      "confirm": "Delete server",
+      "changed": "What depends on the server just changed; it was read again",
+      "blind_delete": "Delete without checking"
     }
   },
   "diagnostics": {
