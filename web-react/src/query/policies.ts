@@ -251,6 +251,16 @@ export const policies = {
     note: 'Admin-managed configuration; writes invalidate, no polling.',
   },
   /**
+   * The nodes page's order: one read builds every line's publication state from the live nodes. Not polled
+   * (an optimistic reorder would be overwritten mid-drag by a poll); revalidated on focus and by writes.
+   */
+  nodeOrder: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Re-read on focus and after any node write; a poll could replace an optimistic move that is still being saved.',
+  },
+  /**
    * Inbounds on a panel PSP does not manage. A working list an operator reads
    * while deciding what to import, so it revalidates on focus but is never
    * polled — the panel is not ours to hammer.
