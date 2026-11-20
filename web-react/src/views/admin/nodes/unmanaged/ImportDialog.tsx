@@ -11,7 +11,7 @@ import { Field } from '@/components/form/Field'
 import { TagsField } from '@/components/form/TagsField'
 import { pushToast } from '@/components/feedback/toasts'
 import { validateHost, validateName } from '@/utils/validators'
-import { serverHost } from '../legacy/inboundModel'
+import { serverHost } from '../inbound/inboundModel'
 import { useNodesT } from '../shared/useNodesT'
 
 const VLESS_FLOWS = ['', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443']

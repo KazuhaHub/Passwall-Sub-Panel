@@ -2,7 +2,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import type { Theme } from '@mui/material'
 import type { TFunction } from 'i18next'
 import type { PanelType } from '@/api/servers'
-import type { InboundFormState } from './inboundModel'
+import type { InboundFormState } from '../inbound/inboundModel'
 
 /** What the legacy inbound form's sections read from InboundFormFields: its state, helpers and labels. */
 export interface SectionCtx {

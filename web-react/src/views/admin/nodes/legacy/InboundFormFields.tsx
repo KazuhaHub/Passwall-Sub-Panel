@@ -1,8 +1,8 @@
 // AUTOIMPORT-BEGIN
 import RealityTargetScannerDialog from '../../RealityTargetScannerDialog'
 import TagsAutocomplete from '../../TagsAutocomplete'
-import { ALPN_HY2, ALPN_TLS, CreateProtocol, InboundFormState, PROTOCOL_OPTIONS, SUI_ONLY_PROTOCOLS, defaultAlpn, serverHost } from './inboundModel'
-import { buildSniffing, buildStreamSettings, settingsBuilderFor } from './inboundSettings'
+import { ALPN_HY2, ALPN_TLS, CreateProtocol, InboundFormState, PROTOCOL_OPTIONS, SUI_ONLY_PROTOCOLS, defaultAlpn, serverHost } from '../inbound/inboundModel'
+import { buildSniffing, buildStreamSettings, settingsBuilderFor } from '../inbound/inboundSettings'
 import { type Cert, fetchPanelWebCert, listCerts } from '@/api/certs'
 import { PanelType, Server } from '@/api/servers'
 import { pushSnack } from '@/components/SnackbarHost'
