@@ -2090,6 +2090,81 @@
       "managed_pending": "Waiting for the relay server; the line stays out of subscriptions until then",
       "name_factor_hint": "Tip: {{placeholder}} is replaced with this line's multiplier (e.g. ×1.5) in subscriptions."
     },
+    "line": {
+      "choose_type": "Choose a line type",
+      "type_summary": "Type: {{type}}",
+      "change_type": "Change",
+      "card": {
+        "forward": "The entry server forwards traffic as is; the landing handles encryption. Lowest overhead",
+        "tunnel": "The entry server accepts the connection itself, then carries it to the landing through a server-to-server tunnel",
+        "cdn": "Clients connect to the CDN, which fetches from this node; PSP cannot see the CDN hop",
+        "external": "Forwarding is set up outside the panel; only the address clients dial is recorded here",
+        "no_server": "Needs another Passwall Node server as the entry",
+        "not_native_landing": "The landing node must run on a Passwall Node server"
+      },
+      "entry_server": "Entry server",
+      "entry_pick": "Choose an entry server",
+      "entry_outside": "Configured outside the panel (external entry)",
+      "entry_address": "Entry address",
+      "entry_port": "Entry port",
+      "entry_port_same": "Leave empty to use the landing's port",
+      "label_preview": "Shown in subscriptions as: {{label}}",
+      "publish_direct": "Publish direct line",
+      "publish_direct_hint": "When off, subscriptions keep only this node's other lines",
+      "direct_address_hint": "The direct line uses the node's address and port; change them under the node's General and Inbound tabs",
+      "listener": "Entry listener",
+      "listener_settings": "Listener settings",
+      "section_display": "In subscriptions",
+      "section_billing": "Billing",
+      "edit_title": "Edit line \"{{name}}\"",
+      "back_to_view": "Back",
+      "gone": "This line was not found; it may have been deleted",
+      "err": {
+        "name_long": "At most 64 characters",
+        "entry_required": "Choose an entry server",
+        "address_required": "Enter the entry address",
+        "port_required": "Enter the entry port",
+        "port_range": "Ports run from 1 to 65535",
+        "region_long": "Region is at most 64 characters"
+      },
+      "action": {
+        "save": "Save line",
+        "to_tunnel": "Switch to encrypted tunnel",
+        "to_forward": "Switch to direct forward",
+        "suggest_port": "Suggest port"
+      },
+      "toast": {
+        "saved": "Line saved",
+        "added": "Line \"{{name}}\" added",
+        "enabled": "Line enabled",
+        "disabled": "Line disabled",
+        "deleted": "Line deleted",
+        "batch_enabled": "Enabled {{count}} lines",
+        "batch_disabled": "Disabled {{count}} lines"
+      },
+      "bulk": {
+        "enable": "Enable lines ({{count}})",
+        "disable": "Disable lines ({{count}})"
+      },
+      "delete": {
+        "title": "Delete line \"{{name}}\"?",
+        "body": "Once deleted, the line disappears from subscriptions when subscribers refresh",
+        "refs": "Rule sets that refer to this line by ID skip it from now on; adding it again gives it a new ID",
+        "closes_listener": "Closes port {{port}} on {{server}} (entry listener)",
+        "prefer_disable": "Only want to stop publishing it?",
+        "disable_instead": "Disable the line instead"
+      },
+      "plan_confirm": "Confirm",
+      "tabs": {
+        "lines": "Lines",
+        "exit": "Exit",
+        "inbound": "Inbound",
+        "general": "General",
+        "lines_question": "How users connect",
+        "no_lines": "No lines to show"
+      },
+      "published_count": "{{published}} of {{total}} lines published"
+    },
     "source": {
       "title": "Source addresses",
       "hint": "The addresses this line's traffic reaches the landing from, one per line (an IP or a CIDR; not wider than /8 for IPv4 or /19 for IPv6). Lines with the same multiplier share their addresses: the landing accepts their identity only from those addresses and refuses the direct identity from them. Lines that arrive from the same addresses must have the same multiplier.",
@@ -2838,7 +2913,7 @@
       "back": "Nodes",
       "admin_only": "Only administrators can view and edit node details",
       "not_found": "This node was not found",
-      "edit_legacy": "Edit details and lines",
+      "edit_legacy": "Edit details and exit",
       "show_lines": "Show this node in the list"
     },
     "empty": {

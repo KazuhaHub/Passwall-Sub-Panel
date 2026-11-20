@@ -14,13 +14,13 @@ import InboundEditDialog from './InboundEditDialog'
 import MetadataEditDialog from './MetadataEditDialog'
 
 type Request =
-  | { kind: 'meta'; node: Node; lineId?: string | null; addLine?: boolean; seq: number }
+  | { kind: 'meta'; node: Node; seq: number }
   | { kind: 'inbound'; node: Node; seq: number }
   | { kind: 'create'; seq: number }
 
 export interface LegacyEditorsApi {
-  /** The metadata and lines editor; `lineId` scrolls to a line, `addLine` appends a blank one. */
-  openEdit: (node: Node | number, opts?: { lineId?: string; addLine?: boolean }) => void
+  /** The node's name, address, region, tags, exit and routes (its lines have their own editor). */
+  openEdit: (node: Node | number) => void
   openInbound: (node: Node | number) => void
   /** False (and nothing opens) while no server can create inbounds; the caller says why. */
   openCreate: () => boolean
@@ -77,7 +77,7 @@ export function LegacyEditorsProvider({ children, onClosed }: { children: ReactN
   const close = useCallback(() => { setRequest(null); onClosed?.() }, [onClosed])
 
   const api = useMemo<LegacyEditorsApi>(() => ({
-    openEdit: (node, opts) => { void resolve(node).then(n => { if (n) setRequest({ kind: 'meta', node: n, lineId: opts?.lineId, addLine: opts?.addLine, seq: ++seq.current }) }) },
+    openEdit: node => { void resolve(node).then(n => { if (n) setRequest({ kind: 'meta', node: n, seq: ++seq.current }) }) },
     openInbound: node => { void resolve(node).then(n => { if (n) setRequest({ kind: 'inbound', node: n, seq: ++seq.current }) }) },
     openCreate: () => {
       if (writable.length === 0) return false
@@ -91,9 +91,8 @@ export function LegacyEditorsProvider({ children, onClosed }: { children: ReactN
     <Ctx.Provider value={api}>
       {children}
       {request?.kind === 'meta' && (
-        <MetadataEditDialog key={request.seq} node={request.node} lineId={request.lineId} addLine={request.addLine}
+        <MetadataEditDialog key={request.seq} node={request.node}
           servers={servers} nodes={nodes} allTags={allTags} onClose={close} mutateManaged={mutateManaged} onSaved={changed}
-          onSwitchNode={n => setRequest({ kind: 'meta', node: n, seq: ++seq.current })}
           onOpenInbound={n => setRequest({ kind: 'inbound', node: n, seq: ++seq.current })} />
       )}
       {request?.kind === 'inbound' && (

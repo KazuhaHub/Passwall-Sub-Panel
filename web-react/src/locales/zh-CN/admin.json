@@ -2087,6 +2087,81 @@
       "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中",
       "name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为该线路的流量倍率（如 ×1.5）。"
     },
+    "line": {
+      "choose_type": "选择线路类型",
+      "type_summary": "类型：{{type}}",
+      "change_type": "更改",
+      "card": {
+        "forward": "入口服务器原样转发，加密由落地负责，开销最低",
+        "tunnel": "入口服务器自己接收连接，再经服务器间隧道送到落地",
+        "cdn": "客户端连接 CDN，由 CDN 回源到此节点；PSP 看不到 CDN 这一跳",
+        "external": "转发在面板外配置，这里只登记客户端连接的地址",
+        "no_server": "需要另一台 Passwall Node 服务器作为入口",
+        "not_native_landing": "落地节点需要运行在 Passwall Node 服务器上"
+      },
+      "entry_server": "入口服务器",
+      "entry_pick": "选择入口服务器",
+      "entry_outside": "面板外配置（外部入口）",
+      "entry_address": "入口地址",
+      "entry_port": "入口端口",
+      "entry_port_same": "留空 = 与落地相同",
+      "label_preview": "订阅中显示为：{{label}}",
+      "publish_direct": "发布直连线路",
+      "publish_direct_hint": "关闭后，订阅里只保留此节点的其他线路",
+      "direct_address_hint": "直连线路使用节点的地址和端口，在节点的“基本信息”和“入站”中修改",
+      "listener": "入口监听",
+      "listener_settings": "监听设置",
+      "section_display": "订阅显示",
+      "section_billing": "计费",
+      "edit_title": "编辑线路“{{name}}”",
+      "back_to_view": "返回",
+      "gone": "找不到这条线路，可能已被删除",
+      "err": {
+        "name_long": "名称最多 64 个字符",
+        "entry_required": "选择一台入口服务器",
+        "address_required": "填写入口地址",
+        "port_required": "填写入口端口",
+        "port_range": "端口范围是 1 到 65535",
+        "region_long": "区域最多 64 个字符"
+      },
+      "action": {
+        "save": "保存线路",
+        "to_tunnel": "改为加密隧道",
+        "to_forward": "改为直接转发",
+        "suggest_port": "建议端口"
+      },
+      "toast": {
+        "saved": "线路已保存",
+        "added": "已添加线路“{{name}}”",
+        "enabled": "已启用线路",
+        "disabled": "已停用线路",
+        "deleted": "已删除线路",
+        "batch_enabled": "已启用 {{count}} 条线路",
+        "batch_disabled": "已停用 {{count}} 条线路"
+      },
+      "bulk": {
+        "enable": "启用线路（{{count}}）",
+        "disable": "停用线路（{{count}}）"
+      },
+      "delete": {
+        "title": "删除线路“{{name}}”？",
+        "body": "删除后，订阅者刷新订阅时这条线路会消失",
+        "refs": "规则集中按 ID 引用这条线路的地方会被跳过；重新添加会得到新的 ID",
+        "closes_listener": "将关闭 {{server}} 上的端口 {{port}}（入口监听）",
+        "prefer_disable": "只想停止发布？",
+        "disable_instead": "改为停用线路"
+      },
+      "plan_confirm": "确认",
+      "tabs": {
+        "lines": "线路",
+        "exit": "出口",
+        "inbound": "入站",
+        "general": "基本信息",
+        "lines_question": "用户怎么连进来",
+        "no_lines": "没有可显示的线路"
+      },
+      "published_count": "已发布 {{published}} / {{total}} 条线路"
+    },
     "source": {
       "title": "来源地址",
       "hint": "这条线路的流量到达落地时的来源地址，每行一个（IP 或 CIDR）。落地只接受这条线路的身份来自这些地址，并拒绝直连身份来自这些地址，所以用户无法借另一条路径按更便宜的线路计费。",
@@ -2834,7 +2909,7 @@
       "back": "节点",
       "admin_only": "只有管理员可以查看和编辑节点详情",
       "not_found": "找不到这个节点",
-      "edit_legacy": "编辑基本信息和线路",
+      "edit_legacy": "编辑基本信息和出口",
       "show_lines": "在列表中查看此节点"
     },
     "empty": {

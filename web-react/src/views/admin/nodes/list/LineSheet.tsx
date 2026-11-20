@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { CopyText } from '@/components/common/CopyButton'
@@ -14,9 +15,10 @@ import { StatusCell } from './cells'
 import type { ListRow } from './types'
 
 /**
- * The right-hand sheet of a line, in VIEW mode (design 2.6): the path, the state in words and the facts. Editing
- * is a separate action (a legacy editor until N2), never an editable form behind a click that only meant to look.
- * It shows the node-level facts a relay row does not repeat (config push, observed listener), so nothing is hidden,
+ * The right-hand sheet of a line (design 2.6). In VIEW mode: the path, the state in words and the facts; editing
+ * is a separate action, never an editable form behind a click that only meant to look. In EDIT mode the same
+ * sheet shows the line editor (`editor`) in place of the facts, so there is no dialog on a sheet and the list stays
+ * where it was; a NEW line has no view, only the editor. It shows the node-level facts a relay row does not repeat (config push, observed listener), so nothing is hidden,
  * only not repeated on every row.
  */
 /** The stored state when it is one the page knows, else "never captured" (an absent field is that too). */
@@ -25,8 +27,12 @@ function configState(raw: string | undefined): ConfigSyncState {
   return (CONFIG_SYNC_STATES as readonly string[]).includes(v) ? (v as ConfigSyncState) : ''
 }
 
-export function LineSheet({ item, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onSelect, onClose }: {
+export function LineSheet({ item, newLine, editor, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onBack, onSelect, onClose }: {
   item: ListRow | null
+  /** A line being added to this node: the sheet opens on the editor alone. */
+  newLine?: { nodeName: string } | null
+  /** The editor, when the sheet is in edit mode (or adding). */
+  editor?: ReactNode
   /** The node's other lines, in list order. */
   siblings: readonly ListRow[]
   colors: Map<string, LandingColor>
@@ -36,6 +42,8 @@ export function LineSheet({ item, siblings, colors, labels, tz, menu, canEdit, n
   canEdit: boolean
   nodeHref?: string
   onEdit: () => void
+  /** From the editor back to the view of the same line. */
+  onBack: () => void
   onSelect: (id: string) => void
   onClose: () => void
 }) {
@@ -56,18 +64,20 @@ export function LineSheet({ item, siblings, colors, labels, tz, menu, canEdit, n
 
   return (
     <DetailSheet
-      open={item !== null}
+      open={item !== null || !!newLine}
       onClose={onClose}
-      title={row?.name ?? ''}
-      status={item && <StatusCell item={item} />}
-      actions={item && (
+      title={newLine ? t('nodes.action.add_line') : editor ? (direct ? t('nodes.action.edit_direct') : t('nodes.line.edit_title', { name: row?.name ?? '' })) : row?.name ?? ''}
+      description={newLine ? newLine.nodeName : undefined}
+      status={item && !newLine && <StatusCell item={item} />}
+      actions={editor ? (item && !newLine && <Button size="sm" variant="outline" onClick={onBack}>{t('nodes.line.back_to_view')}</Button>) : item && (
         <>
           {canEdit && <Button size="sm" onClick={onEdit}>{t(direct ? 'nodes.action.edit_direct' : 'nodes.action.edit_line')}</Button>}
           {menu.length > 0 && <MoreMenu items={menu} label={t('nodes.action.row_menu', { name: row?.name ?? '' })} />}
         </>
       )}
     >
-      {item && row && (
+      {editor}
+      {!editor && item && row && (
         <div className="flex flex-col gap-4">
           <PathDiagram nodes={nodes} edges={edges} />
           {detailKey && <p className="text-sm text-muted-foreground" data-testid="status-detail">{t(detailKey)}</p>}
