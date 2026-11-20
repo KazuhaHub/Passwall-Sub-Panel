@@ -2607,10 +2607,6 @@
       "traffic_factor_direct": "Direct line traffic multiplier"
     },
     "action": {
-<<<<<<< HEAD
-=======
-      "delete": "Delete",
->>>>>>> refs/remotes/origin/kazuha/ui-shadcn
       "recreate_inbound": "Recreate inbound on server",
       "edit_line": "Edit line",
       "edit_direct": "Edit direct line",
@@ -2651,11 +2647,6 @@
       "undo": "Undo"
     },
     "confirm": {
-<<<<<<< HEAD
-=======
-      "delete_title": "Delete node",
-      "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
->>>>>>> refs/remotes/origin/kazuha/ui-shadcn
       "recreate_inbound_title": "Re-create inbound on the server?",
       "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config, relink the node to the new inbound, then provision the members' clients onto it. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Safe to re-click: if the inbound already exists it is NOT re-created, only the clients are re-pushed (to push clients that didn't land)."
     },
@@ -2698,12 +2689,8 @@
     "view": {
       "label": "View",
       "order": "Subscription order",
-<<<<<<< HEAD
       "node": "By node",
       "graph": "Topology"
-=======
-      "node": "By node"
->>>>>>> refs/remotes/origin/kazuha/ui-shadcn
     },
     "search": {
       "placeholder": "Search lines, nodes, servers or addresses"
@@ -2863,7 +2850,6 @@
       "load": "Could not load lines",
       "partial": "Some node details could not be loaded"
     },
-<<<<<<< HEAD
     "impact": {
       "node_title": "Delete node \"{{name}}\"?",
       "loading": "Checking what this deletion affects…",
@@ -2922,8 +2908,6 @@
       "box_deleted": "{{name}} (deleted)",
       "hint": "Select an entry or a landing node to see the lines through it. Withdrawn or faulty lines are marked in colour and in words; disabled lines are faded"
     },
-=======
->>>>>>> refs/remotes/origin/kazuha/ui-shadcn
     "unmanaged": {
       "server": "Server",
       "server_placeholder": "Choose a server",
