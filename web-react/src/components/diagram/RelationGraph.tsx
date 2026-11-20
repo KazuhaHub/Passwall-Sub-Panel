@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { ToneDot } from '@/components/common/StatusDot'
 import { TONE_STYLE } from '@/components/common/tones'
@@ -41,6 +41,15 @@ export interface RelationGraphProps {
   /** Controlled selection; leave undefined for the graph to keep its own. */
   selectedId?: string | null
   onSelect?: (id: string | null) => void
+  /**
+   * Called with how many connections each box has beyond the ones listed (MAX_PATHS
+   * per box), keyed by box id and only for boxes that lost some, and the ids whose count
+   * is a lower bound. Called only when that content changes (a new callback identity or
+   * an equal recomputed record does not call it), and not while nothing is cut. The same figure is written on the box and in the connections list.
+   */
+  onTruncated?: (truncated: Readonly<Record<string, number>>, atLeast: readonly string[]) => void
+  /** Chains counted per direction before counting stops (default 100,000); lower it only in tests. */
+  countCeiling?: number
   /** CSS max-height of the scrolling canvas. Boxes never shrink: a long column scrolls. */
   maxHeight?: string
   /**
@@ -94,8 +103,59 @@ function boxStatus(status: PathTone | undefined, t: (k: string) => string): stri
   return status === 'danger' || status === 'warning' || status === 'pending' ? t(`ui.diagram.status_${status}`) : ''
 }
 
-/** Most paths enumerated per box (and per direction); beyond it the list is cut without a marker. */
+/** Most paths enumerated per box (and per direction); beyond it the list is cut and the box says how many are missing. */
 const MAX_PATHS = 200
+
+/**
+ * Most chains counted in ONE direction before counting stops. Counting is for the
+ * "N more" note, so it only has to be honest, not unbounded: a graph this dense is
+ * reported as at least this many rather than walked to the end.
+ */
+const COUNT_CEILING = 100_000
+
+/**
+ * How many paths run through `id`, counted the way pathsThrough enumerates them but
+ * without the MAX_PATHS cap and without building any path, so a box with thousands
+ * of paths costs a walk, not memory. Capped at COUNT_CEILING chains per direction
+ * (`atLeast` is then true: the count is a lower bound).
+ */
+export function countPathsThrough(id: string, edges: readonly GraphEdge[], ceiling = COUNT_CEILING): { count: number; atLeast: boolean } {
+  const out = new Map<string, GraphEdge[]>()
+  const into = new Map<string, GraphEdge[]>()
+  for (const e of edges) {
+    if (!out.has(e.from)) out.set(e.from, [])
+    out.get(e.from)!.push(e)
+    if (!into.has(e.to)) into.set(e.to, [])
+    into.get(e.to)!.push(e)
+  }
+  const chains = (next: Map<string, GraphEdge[]>, far: (e: GraphEdge) => string): { count: number; trivial: boolean } => {
+    let count = 0
+    let trivial = true
+    const visited = new Set<string>([id])
+    const walk = (node: string) => {
+      if (count >= ceiling) return
+      let any = false
+      for (const e of next.get(node) ?? []) {
+        const to = far(e)
+        if (visited.has(to)) continue
+        any = true
+        visited.add(to)
+        walk(to)
+        visited.delete(to)
+      }
+      if (!any) count++
+      else if (node === id) trivial = false
+    }
+    walk(id)
+    return { count, trivial }
+  }
+  const f = chains(out, e => e.to)
+  const b = chains(into, e => e.from)
+  // A box with no usable edge either way has no paths; the lone trivial x trivial chain is not one.
+  if (f.trivial && b.trivial) return { count: 0, atLeast: false }
+  // Reaching the ceiling in either direction means the walk stopped early: a lower bound.
+  return { count: f.count * b.count, atLeast: f.count >= ceiling || b.count >= ceiling }
+}
 
 export interface GraphPath {
   /** Box ids from where the line enters to where it leaves. */
@@ -154,9 +214,10 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
  * SIZE LIMITS. There is NO cap on boxes or edges: every box is drawn at a fixed size
  * and the canvas scrolls (the list layout scrolls with the page), so nothing is dropped
  * or summarised however many there are. The only cap is on PATHS: the connections of
- * one box, and the count in its name, stop at MAX_PATHS (200). Past that the list is cut
- * silently, with no "and more" row, so the counts are a lower bound for a graph that
- * dense. Work grows with the number of paths per box times the number of boxes (the
+ * one box, and the count in its name, stop at MAX_PATHS (200). Past that the list is cut,
+ * and the cut is SAID: the box carries a "+N" badge and "N more connections not shown" in
+ * its name, the connections list ends with the same sentence when that box is selected,
+ * and `onTruncated` reports the figures. The count in the name stays at the cap. Work grows with the number of paths per box times the number of boxes (the
  * per-box counts are computed up front), so keep graphs to the hundreds of edges.
  * Edges naming a box that is not in `columns` are dropped without a message.
  *
@@ -170,8 +231,8 @@ export function pathsThrough(id: string, edges: readonly GraphEdge[]): GraphPath
  * Boxes are buttons with one tab stop and arrow-key movement (up and down within
  * a column, left and right across columns); Enter or Space selects.
  */
-export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className }: RelationGraphProps) {
-  const { t } = useSpacedT()
+export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight = '32rem', layout = 'auto', className, onTruncated, countCeiling }: RelationGraphProps) {
+  const { t, i18n } = useSpacedT()
   const narrow = useMediaQuery('(max-width: 639px)')
   const asList = layout === 'list' || (layout === 'auto' && narrow)
   const [own, setOwn] = useState<string | null>(null)
@@ -203,6 +264,39 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     for (const c of columns) for (const b of c.boxes) m[b.id] = pathsThrough(b.id, drawn).length
     return m
   }, [columns, drawn])
+  // Connections each box has beyond the MAX_PATHS listed. Counted only for a box whose
+  // list was actually full, so the common graph pays nothing for it.
+  const truncation = useMemo(() => {
+    const more: Record<string, number> = {}
+    const lower: string[] = []
+    for (const c of columns) for (const b of c.boxes) {
+      if ((throughCount[b.id] ?? 0) < MAX_PATHS) continue
+      const { count, atLeast } = countPathsThrough(b.id, drawn, countCeiling)
+      if (count > MAX_PATHS) { more[b.id] = count - MAX_PATHS; if (atLeast) lower.push(b.id) }
+    }
+    return { more, lower }
+  }, [columns, drawn, throughCount, countCeiling])
+  const truncatedBy = truncation.more
+  // The latest callback lives in a ref and the effect depends on the record's CONTENT
+  // only. Keyed on the callback, an inline `r => setCut({ ...r })` would re-fire on every
+  // render of its parent and loop forever; keyed on the record's identity, a recomputed
+  // but equal record would fire again.
+  const onTruncatedRef = useRef(onTruncated)
+  onTruncatedRef.current = onTruncated
+  const truncationKey = JSON.stringify([Object.entries(truncatedBy), truncation.lower])
+  const reportedKey = useRef(JSON.stringify([[], []]))
+  useEffect(() => {
+    if (truncationKey === reportedKey.current) return
+    reportedKey.current = truncationKey
+    onTruncatedRef.current?.(truncation.more, truncation.lower)
+  }, [truncationKey, truncation])
+  const nf = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language])
+  const notShown = (id: string) => {
+    const n = truncatedBy[id]
+    if (!n) return ''
+    return t(truncation.lower.includes(id) ? 'ui.diagram.graph_truncated_atleast' : 'ui.diagram.graph_truncated', { count: n, n: nf.format(n) })
+  }
+  const badgeText = (id: string) => `${truncation.lower.includes(id) ? '≥' : '+'}${nf.format(truncatedBy[id])}`
   // Where each of several lines between the same two boxes is drawn, so they are visibly apart.
   const offsetOf = useMemo(() => {
     const groups = new Map<string, GraphEdge[]>()
@@ -234,19 +328,26 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
 
   const selectedBox = selected !== null ? boxById[selected] : undefined
   const announce = selectedBox
-    ? t('ui.diagram.graph_selected', { name: selectedBox.label, count: throughCount[selectedBox.id] ?? 0 })
+    ? [t('ui.diagram.graph_selected', { name: selectedBox.label, count: throughCount[selectedBox.id] ?? 0 }), notShown(selectedBox.id)].filter(Boolean).join(', ')
     : ''
 
-  const connections = (
+  // The panel scrolls by itself, bounded by the viewport below the shell bar and by 40dvh,
+  // so on a phone the boxes stay in reach while it sticks (see the list layout below).
+  const connections = (bounded: boolean) => (
     <section
       role="region"
       aria-label={`${t('ui.diagram.graph_label')} ${t('ui.diagram.graph_lines_suffix')}`}
       tabIndex={0}
-      className="rounded-lg border bg-muted/30 px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className={cn(
+        'rounded-lg border bg-muted/30 px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
+        bounded && 'max-h-[min(40dvh,calc(100dvh-var(--shell-bar-h,0px)-1rem))] overflow-y-auto overscroll-contain',
+      )}
     >
       {selectedBox ? (
         <>
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">{t('ui.diagram.graph_lines', { name: selectedBox.label })}</h3>
+          {/* At the top, under the heading: at the end of a 200-item list it is out of sight. */}
+          {notShown(selectedBox.id) && <p data-truncated-note="" className="mb-1.5 text-xs font-medium text-foreground/70">{notShown(selectedBox.id)}</p>}
           {paths.length === 0 ? (
             <p className="text-muted-foreground">{t('ui.diagram.graph_lines_empty', { name: selectedBox.label })}</p>
           ) : (
@@ -298,7 +399,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
         ref={el => { refs.current[b.id] = el }}
         type="button"
         aria-pressed={isSel}
-        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_through', { count: throughCount[b.id] ?? 0 })].filter(Boolean).join(', ')}
+        aria-label={[b.label, b.sublabel, boxStatus(b.status, t), t('ui.diagram.graph_through', { count: throughCount[b.id] ?? 0 }), notShown(b.id)].filter(Boolean).join(', ')}
         data-dim={dim ? 'true' : undefined}
         tabIndex={b.id === tabStop ? 0 : -1}
         onClick={() => select(isSel ? null : b.id)}
@@ -316,9 +417,13 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
       >
         {b.landingColor && <span aria-hidden="true" className="h-6 w-1 shrink-0 rounded-full" style={landingColorStyle(b.landingColor)} />}
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm leading-tight font-medium">{b.label}</span>
+          <span title={b.label} className="truncate text-sm leading-tight font-medium">{b.label}</span>
           {b.sublabel && <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground">{b.sublabel}</span>}
         </span>
+        {truncatedBy[b.id] > 0 && (
+          // The full wording is in the button's name; this is the glance for sighted users.
+          <span data-truncated="" aria-hidden="true" title={notShown(b.id)} className="shrink-0 rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-foreground/70">{badgeText(b.id)}</span>
+        )}
         {b.status && <ToneDot tone={toneOfPath(b.status)} />}
       </button>
     )
@@ -328,8 +433,10 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
     return (
       <div data-slot="relation-graph" data-layout="list" role="group" aria-label={t('ui.diagram.graph_label')} className={cn('flex flex-col gap-3', className)}>
         {/* Sticky: a box deep in a long column is tapped far below the top, and its
-            connections must stay in view next to it. */}
-        <div className="sticky top-2 z-10 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">{connections}</div>
+            connections must stay in view next to it. The app shell scrolls the whole page
+            under its own sticky top bar, so the offset starts below that bar (the shell
+            publishes its height); a bare top-2 would slide under it. */}
+        <div className="sticky top-[calc(var(--shell-bar-h,0px)+0.5rem)] z-10 bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">{connections(true)}</div>
         {columns.map(c => (
           <section key={c.id} role="region" aria-label={c.title} className="flex flex-col gap-2">
             <h3 className="text-xs font-medium text-muted-foreground">{c.title} <span className="tabular-nums">{c.boxes.length}</span></h3>
@@ -386,7 +493,7 @@ export function RelationGraph({ columns, edges, selectedId, onSelect, maxHeight 
           ))}
         </div>
       </div>
-      {connections}
+      {connections(false)}
       <p role="status" className="sr-only">{announce}</p>
     </div>
   )

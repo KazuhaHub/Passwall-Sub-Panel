@@ -33,6 +33,11 @@ export function isTunnelConfirmation(e: FrontError | null): e is FrontError {
 
 /** The confirmation text for a tunnel refusal: what is created, what is removed, and that subscribers must refresh. */
 export function tunnelConfirmMessage(e: FrontError): string {
+  return tunnelConfirmLines(e).join('\n')
+}
+
+/** The same text one line per fact, for a caller that lays the plan out itself. */
+export function tunnelConfirmLines(e: FrontError): string[] {
   const t = (key: string, values?: Record<string, unknown>) => i18n.t(`admin:nodes.tunnel.confirm.${key}`, values) as string
   const action = String(e.params.action ?? '')
   const lines: string[] = [t(`${action}_text`)]
@@ -56,11 +61,53 @@ export function tunnelConfirmMessage(e: FrontError): string {
   }
   if (action === 'sync_from_landing') lines.push(t('sync_keeps'))
   if (e.params.refresh_needed) lines.push(t('refresh'))
-  return lines.join('\n')
+  return lines
 }
 
 /** What a confirmed resend echoes back: the server's plan the admin was shown. */
 export interface TunnelConfirmation { plan: string }
+
+/** What a presenter is shown: the server's plan for one refusal, already worded. */
+export interface TunnelPlanView {
+  action: string
+  title: string
+  /** `lines` joined, plus the caller's note: exactly what the default confirmation shows. */
+  message: string
+  /** One line per created or removed listener, port change and the refresh warning. */
+  lines: string[]
+  /** The refusal itself, for a caller that wants the raw `params`. */
+  error: FrontError
+  /** Aborts when the caller gives up (its page or dialog is gone): close the dialog and stop. */
+  signal?: AbortSignal
+}
+
+/**
+ * Shows the plan wherever the caller likes and resolves the admin's decision: true to
+ * go ahead. It MUST settle: resolve false when its dialog is closed or unmounted. A
+ * presenter that never settles leaves the change waiting forever, unless the caller
+ * passed a `signal` (see TunnelConfirmOptions), which ends the wait as a decline.
+ */
+export type TunnelPlanPresenter = (plan: TunnelPlanView) => Promise<boolean>
+
+export interface TunnelConfirmOptions {
+  /** Replaces the shared confirmation; see withTunnelConfirm. */
+  present?: TunnelPlanPresenter
+  /** Aborting while a plan is being presented (or before) counts as declined: nothing is resent. */
+  signal?: AbortSignal
+}
+
+/** Resolves false when the signal aborts first; a presenter that fails after that is ignored, not left unhandled. */
+function decision(ask: Promise<boolean>, signal?: AbortSignal): Promise<boolean> {
+  if (!signal) return ask
+  return new Promise<boolean>((resolve, reject) => {
+    const onAbort = () => resolve(false)
+    signal.addEventListener('abort', onAbort, { once: true })
+    ask.then(
+      v => { signal.removeEventListener('abort', onAbort); resolve(v) },
+      e => { signal.removeEventListener('abort', onAbort); if (!signal.aborted) reject(e) },
+    )
+  })
+}
 
 /**
  * Runs a change and, when the server answers 409 `confirm_required` because it
@@ -71,8 +118,19 @@ export interface TunnelConfirmation { plan: string }
  * between, the server answers a new 409 and the admin is asked again, with the
  * fresh ports. Declining throws the refusal being asked about, so nothing is
  * changed. Other refusals pass through untouched. `note` is added to the text.
+ *
+ * `options.present` replaces the shared confirmation: a page that already has its own
+ * dialog (a delete dialog listing what goes away) renders the plan inside it, so the
+ * admin answers one dialog rather than two. It is asked for every plan, a changed one
+ * included, and a `false` declines exactly as the default does. Without it nothing
+ * changes for the callers that never pass one.
  */
-export async function withTunnelConfirm<T>(run: (confirmation?: TunnelConfirmation) => Promise<T>, note?: string): Promise<T> {
+export async function withTunnelConfirm<T>(
+  run: (confirmation?: TunnelConfirmation) => Promise<T>,
+  note?: string,
+  options?: TunnelConfirmOptions,
+): Promise<T> {
+  const { present, signal } = options ?? {}
   let confirmation: TunnelConfirmation | undefined
   for (;;) {
     try {
@@ -85,11 +143,14 @@ export async function withTunnelConfirm<T>(run: (confirmation?: TunnelConfirmati
       const plan = typeof e.params.plan === 'string' ? e.params.plan : ''
       // The same plan refused after it was confirmed is not something asking again can fix.
       if (confirmation && confirmation.plan === plan) throw err
-      const ok = await confirm({
-        title: i18n.t(`admin:nodes.tunnel.confirm.${action}_title`) as string,
-        message: [tunnelConfirmMessage(e), note].filter(Boolean).join('\n'),
-        destructive: true,
-      })
+      const title = i18n.t(`admin:nodes.tunnel.confirm.${action}_title`) as string
+      const lines = tunnelConfirmLines(e)
+      const message = [...lines, note].filter(Boolean).join('\n')
+      // Nothing is shown for a change whose caller has already gone away.
+      if (present && signal?.aborted) throw err
+      const ok = present
+        ? await decision(present({ action, title, message, lines, error: e, signal }), signal)
+        : await confirm({ title, message, destructive: true })
       if (!ok) throw err
       confirmation = { plan }
     }

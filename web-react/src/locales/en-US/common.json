@@ -97,7 +97,7 @@
       "expand_row": "Expand {{name}}",
       "collapse_row": "Collapse {{name}}",
       "drag_handle": "Drag to reorder: {{name}}",
-      "reorder_hint": "Press Space to pick up, use the arrow keys to move, press Space to drop, Esc to cancel",
+      "reorder_hint": "Press Space to pick up, use the arrow keys to move one place, Home or End to jump to the first or last, Page Up or Page Down to move a screen, press Space to drop, Esc to cancel",
       "reorder_picked": "Picked up {{name}}, position {{pos}} of {{total}}",
       "reorder_moved": "{{name}} moved to position {{pos}} of {{total}}",
       "reorder_dropped": "{{name}} dropped at position {{pos}}",
@@ -209,7 +209,11 @@
       "graph_through_other": "{{count}} lines pass through",
       "graph_lines": "Lines through {{name}}",
       "graph_lines_none": "Select a box to list the lines through it here",
-      "graph_lines_empty": "No lines pass through {{name}}"
+      "graph_lines_empty": "No lines pass through {{name}}",
+      "graph_truncated_one": "{{n}} more line not shown",
+      "graph_truncated_other": "{{n}} more lines not shown",
+      "graph_truncated_atleast_one": "At least {{n}} more line not shown",
+      "graph_truncated_atleast_other": "At least {{n}} more lines not shown"
     },
     "shell": {
       "more": "More",

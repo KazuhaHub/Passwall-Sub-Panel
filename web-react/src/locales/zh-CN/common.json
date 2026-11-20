@@ -97,7 +97,7 @@
       "expand_row": "展开{{name}}",
       "collapse_row": "收起{{name}}",
       "drag_handle": "拖动以调整顺序：{{name}}",
-      "reorder_hint": "按空格键拿起，用上下方向键移动，再按空格键放下，Esc 取消",
+      "reorder_hint": "按空格键拿起，用上下方向键移动一位，Home、End 移到开头或末尾，Page Up、Page Down 移动一屏，再按空格键放下，Esc 取消",
       "reorder_picked": "已拿起{{name}}，当前第{{pos}}位，共{{total}}项",
       "reorder_moved": "{{name}}移到第{{pos}}位，共{{total}}项",
       "reorder_dropped": "{{name}}已放在第{{pos}}位",
@@ -206,7 +206,9 @@
       "graph_through_other": "{{count}}条线路经过",
       "graph_lines": "经过{{name}}的线路",
       "graph_lines_none": "选择一个框，在这里查看经过它的线路",
-      "graph_lines_empty": "没有线路经过{{name}}"
+      "graph_lines_empty": "没有线路经过{{name}}",
+      "graph_truncated_other": "另有{{n}}条线路未列出",
+      "graph_truncated_atleast_other": "至少另有{{n}}条线路未列出"
     },
     "shell": {
       "more": "更多",

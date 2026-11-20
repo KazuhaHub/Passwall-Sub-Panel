@@ -22,6 +22,12 @@ export interface ConfirmOpts {
   confirmText?: string
   cancelText?: string
   destructive?: boolean
+  /**
+   * Which button takes focus when the dialog opens. Default 'confirm', so Enter answers
+   * yes. Use 'cancel' for an irreversible action (a delete): focus then starts on Cancel
+   * and a stray Enter, typed while the dialog was still coming up, cannot confirm it.
+   */
+  initialFocus?: 'confirm' | 'cancel'
 }
 
 interface InternalState {
@@ -64,6 +70,7 @@ export default function ConfirmHost() {
   const { t } = useTranslation('common')
   const [state, setState] = useState<InternalState>({ open: false, opts: null })
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     setStateExternal = setState
@@ -89,8 +96,9 @@ export default function ConfirmHost() {
         // dialog otherwise ignores outside clicks.
         overlay={{ className: ABOVE_EVERY_MODAL, onClick: () => close(false) }}
         className={cn(ABOVE_EVERY_MODAL, 'data-[size=default]:max-w-md')}
-        // The confirm button takes focus, as before: Enter answers yes, Esc no.
-        initialFocus={confirmRef}
+        // The confirm button takes focus by default: Enter answers yes, Esc no. A
+        // destructive caller can ask for Cancel instead (see ConfirmOpts.initialFocus).
+        initialFocus={opts?.initialFocus === 'cancel' ? cancelRef : confirmRef}
       >
         <AlertDialogHeader>
           {destructive && (
@@ -102,7 +110,7 @@ export default function ConfirmHost() {
           <AlertDialogDescription className="whitespace-pre-line">{opts?.message ?? ''}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>{opts?.cancelText ?? t('actions.cancel')}</AlertDialogCancel>
+          <AlertDialogCancel ref={cancelRef}>{opts?.cancelText ?? t('actions.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             ref={confirmRef}
             onClick={() => close(true)}

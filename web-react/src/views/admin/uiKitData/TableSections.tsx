@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ColumnDef, SortingState } from '@tanstack/react-table'
 import { EllipsisIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +11,7 @@ import { RelationGraph } from '@/components/diagram/RelationGraph'
 import type { LandingColor } from '@/components/diagram/landingColor'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { DataTable } from '@/components/data/DataTable'
+import type { DataTableHandle } from '@/components/data/dataTableTypes'
 import { DetailSheet } from '@/components/data/DetailSheet'
 import { FilterBar } from '@/components/data/FilterBar'
 import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
@@ -446,6 +447,60 @@ export function UsersServerSection() {
           </div>
         )}
       />
+    </Section>
+  )
+}
+
+// ---------------------------------------------------------------- long list: windowing + reorder
+
+interface BigRow { id: string; n: number; name: string; entry: string }
+const BIG_ENTRIES = ['Taiwan HiNet Dynamic', 'Hong Kong CN2', 'Singapore Relay', 'Cloudflare', 'External entry']
+const makeBig = (count: number): BigRow[] => Array.from({ length: count }, (_, i) => ({
+  id: `b${i + 1}`, n: i + 1, name: `Line ${i + 1}`, entry: BIG_ENTRIES[i % BIG_ENTRIES.length],
+}))
+const bigColumns: ColumnDef<BigRow>[] = [
+  { accessorKey: 'n', header: '#', enableSorting: false, meta: { className: 'tabular-nums text-muted-foreground w-20' } },
+  { accessorKey: 'name', header: '线路', enableSorting: false, meta: { className: 'font-medium' } },
+  { accessorKey: 'entry', header: '入口', enableSorting: false },
+]
+const BIG_SIZES = [5000, 10000] as const
+
+/**
+ * A long unpaginated list: only the rows near the viewport are in the DOM, the page
+ * scrolls, and reordering works across rows that are not drawn. Generated in memory.
+ */
+export function LongListSection() {
+  const [count, setCount] = useState<(typeof BIG_SIZES)[number]>(5000)
+  const [rows, setRows] = useState(() => makeBig(5000))
+  const [log, setLog] = useState('尚未移动')
+  const [target, setTarget] = useState('3000')
+  const handle = useRef<DataTableHandle>(null)
+  const resize = (n: (typeof BIG_SIZES)[number]) => { setCount(n); setRows(makeBig(n)); setLog('已重新生成') }
+
+  return (
+    <Section id="long-list" title="长列表（窗口化 + 拖动排序）" note="不分页，超过 200 行时只绘制视口附近的行，页面本身滚动。拖动手柄可跨越未绘制的行，靠近视口上下边缘自动滚动（按住越久越快）；键盘拿起后 Home / End 移到首尾，Page Up / Page Down 移动一屏。浏览器的页内查找看不到未绘制的行，用下面的跳转。">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <SegmentedControl aria-label="行数" value={String(count)} onChange={v => resize(Number(v) as (typeof BIG_SIZES)[number])} options={BIG_SIZES.map(n => ({ value: String(n), label: `${n} 行` }))} />
+        <label className="flex items-center gap-2">跳到第
+          <input className="h-8 w-24 rounded-md border bg-background px-2 tabular-nums" inputMode="numeric" value={target} onChange={e => setTarget(e.target.value)} />
+          行
+        </label>
+        <Button size="sm" variant="outline" onClick={() => handle.current?.scrollToRow(`b${Number(target)}`, { align: 'center' })}>跳转</Button>
+        <span className="text-xs text-muted-foreground" data-testid="long-list-drawn">共 {rows.length} 行</span>
+      </div>
+      <DataTable
+        aria-label="长列表"
+        handleRef={handle}
+        data={rows}
+        columns={bigColumns}
+        getRowId={r => r.id}
+        rowLabel={r => r.name}
+        pagination={false}
+        columnMenu={false}
+        selectable
+        onReorder={call => { setRows(prev => applyReorder(prev, r => r.id, call)); setLog(`移动 ${call.movedId}，放到 ${call.beforeId ?? '末尾'} 之前`) }}
+      />
+      <p className="text-xs text-muted-foreground" role="status" data-testid="long-list-log">{log}</p>
     </Section>
   )
 }
