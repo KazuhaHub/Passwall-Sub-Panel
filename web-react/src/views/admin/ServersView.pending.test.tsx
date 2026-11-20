@@ -3,7 +3,6 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { api, installReads, list, mount, server, snack } from '@/test/adminSaveHarness'
 import { nativeServer, provisioning, waiting } from '@/test/installationHarness'
-import ConfirmHost from '@/components/ConfirmHost'
 import ServersView, { NativeInstallationDialog } from './ServersView'
 
 /**
@@ -21,33 +20,26 @@ function deferred<T = void>() {
 
 
 describe('ServersView row delete button', () => {
-  it('shows busy on the delete icon for the whole delete request and ignores a second click', async () => {
-    installReads({ '/admin/servers': list([server]) })
+  it('opens the delete dialog, which reads what is attached first, and sends no delete until it is confirmed there', async () => {
+    installReads({ '/admin/servers': list([server]), '/admin/servers/1/delete-impact': { server_id: 1, nodes: [], lines_entering: [], egress_users: [], route_users: [] } })
     const gate = deferred<{ data: unknown }>()
     api.delete.mockReturnValue(gate.promise)
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<ServersView />)
 
-    const deleteButton = await screen.findByRole('button', { name: 'admin:servers.action.delete' })
-    fireEvent.click(deleteButton)
+    fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.action.delete' }))
+    const dialog = await screen.findByRole('alertdialog')
+    const confirmButton = await within(dialog).findByRole('button', { name: 'admin:servers.delete.confirm' })
+    expect(api.delete).not.toHaveBeenCalled()
 
-    const confirmDialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'admin:servers.action.delete' }))
-
-    // The confirm dialog's exit transition keeps it in the DOM for a moment,
-    // and MUI marks the rest of the page aria-hidden while any modal is
-    // mounted — wait for it to actually leave before reading the row button.
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    await waitFor(() => expect(deleteButton.getAttribute('aria-busy')).toBe('true'))
-    expect((deleteButton as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByRole('progressbar')).toBeTruthy()
-
-    // A second click while the request is in flight must not fire another delete.
-    fireEvent.click(deleteButton)
+    fireEvent.click(confirmButton)
+    // The confirm shows its own wait and a second click cannot send a second delete.
+    await waitFor(() => expect(confirmButton.getAttribute('aria-busy')).toBe('true'))
+    fireEvent.click(confirmButton)
     expect(api.delete).toHaveBeenCalledTimes(1)
 
     gate.resolve({ data: {} })
-    await waitFor(() => expect(deleteButton.getAttribute('aria-busy')).toBeNull())
-    expect(snack).toHaveBeenCalledWith('admin:servers.toast.deleted', 'success')
+    await waitFor(() => expect(snack).toHaveBeenCalledWith('admin:servers.toast.deleted', 'success'))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
   })
 })
 

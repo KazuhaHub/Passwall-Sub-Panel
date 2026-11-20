@@ -8,9 +8,11 @@ import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { DataTable } from '@/components/data/DataTable'
 import type { DataTableHandle } from '@/components/data/dataTableTypes'
+import { FacetFilter } from '@/components/data/FacetFilter'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
+import { TableSkeleton } from '@/components/feedback/LoadingState'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { useTableViewState } from '@/hooks/useTableViewState'
 import { urlCodecs, useUrlStates } from '@/hooks/useUrlState'
@@ -18,6 +20,8 @@ import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { useSeparators } from '@/query/nodes'
 import { useSiteStore } from '@/stores/site'
 import { useCan } from '@/utils/permissions'
+import { useNodeDeletion } from '../delete/useNodeDeletion'
+import { TopologyView } from '../graph/TopologyView'
 import { useLegacyEditors } from '../legacy/LegacyEditors'
 import type { PathLabels } from '../shared/pathOf'
 import { useNodesT } from '../shared/useNodesT'
@@ -37,7 +41,7 @@ import { useNodeList } from './useNodeList'
 import { useOrderMoves } from './useOrderMoves'
 import { useRowHandlers } from './useRowHandlers'
 
-const VIEWS = ['order', 'node'] as const
+const VIEWS = ['order', 'node', 'graph'] as const
 const MAX_ORDER_ROWS = 10_000
 const FACETS = ['type', 'status', 'entry', 'landing'] as const
 const NONE: string[] = []
@@ -91,7 +95,9 @@ export default function LinesTab() {
     }
   }, [admin, serverMap])
 
-  const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)) })
+  // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
+  const deletion = useNodeDeletion({ rows, serverMap })
+  const handlers = useRowHandlers({ legacy, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
   const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
     rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
@@ -108,6 +114,19 @@ export default function LinesTab() {
       children: g.children.map(c => ({ id: rowId(c), group: g, list: byId.get(rowId(c)), child: true })),
     }))
   }, [shown, items, rows])
+
+  // ---- topology (N4) ----
+  // Where a landing leaves through another server (its own egress), for the exit column; null = its own server.
+  const exitOf = useCallback((nodeId: number) => {
+    const id = nodeMap.get(nodeId)?.egress_panel_id
+    return id ? { id, name: serverMap.get(id)?.name ?? `#${id}` } : null
+  }, [nodeMap, serverMap])
+  const graphRows = useMemo(() => shown.map(s => s.row).filter(r => r.kind === 'line'), [shown])
+  // "View in list": the order list narrowed to what the picked box stands for, over whatever else is filtered.
+  const showInList = (facet: 'entry' | 'type', value: string) => {
+    view.setFilters({ ...view.state.filters, [facet]: [value] })
+    setUrl({ view: 'order' })
+  }
 
   // ---- reorder rules ----
   const tooMany = rows.length > MAX_ORDER_ROWS
@@ -175,7 +194,7 @@ export default function LinesTab() {
   }
   const nodeIdsOf = (ids: string[]) => [...new Set(ids.flatMap(id => (id.startsWith('landing:') ? [Number(id.slice(8))] : (items.find(i => i.id === id)?.row.node_id ?? []))))].filter(Number.isFinite) as number[]
   const bulk = (ids: string[], clear: () => void) => (
-    <BulkNodeActions nodeIds={nodeIdsOf(ids)} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} />
+    <BulkNodeActions nodeIds={nodeIdsOf(ids)} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
   )
 
   const common = {
@@ -208,7 +227,7 @@ export default function LinesTab() {
         onClearAll={clearAll}
       >
         <SegmentedControl aria-label={t('nodes.view.label')} size="sm" value={url.view} onChange={v => setUrl({ view: v })}
-          options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }]} />
+          options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }, { value: 'graph', label: t('nodes.view.graph') }]} />
         {moves.undoable && <Button variant="outline" size="sm" onClick={moves.undo} data-testid="undo-move">{t('nodes.toast.undo')}</Button>}
         {admin && url.view === 'order' && filtered && <Button variant="ghost" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
       </FilterBar>
@@ -219,7 +238,18 @@ export default function LinesTab() {
         {!admin && url.view === 'order' && <span className="ml-2">{t('nodes.order.read_only')}</span>}
       </div>
 
-      {url.view === 'order' ? (
+      {url.view === 'graph' ? (
+        <TopologyView
+          rows={graphRows} colors={colors} exitOf={exitOf} admin={admin} empty={loading ? <TableSkeleton rows={4} cols={3} /> : empty}
+          filters={(
+            <>
+              <FacetFilter label={t('nodes.facet.entry')} options={facetData.entry} selected={filters.entry} onChange={setFacet('entry')} />
+              <FacetFilter label={t('nodes.facet.landing_server')} options={facetData.landing} selected={filters.landing} onChange={setFacet('landing')} />
+            </>
+          )}
+          onShowInList={showInList} onAsList={() => setUrl({ view: 'order' })}
+        />
+      ) : url.view === 'order' ? (
         <DataTable<ListRow>
           {...common}
           aria-label={t('nodes.tabs.lines')}
@@ -270,6 +300,7 @@ export default function LinesTab() {
       />
       {moveTarget && admin && <MoveToDialog rows={rows} target={moveTarget} onClose={() => setMoveTarget(null)} onMove={moves.move} />}
       {moves.stale && <StaleOrderDialog stale={moves.stale} onAnswer={moves.resolveStale} />}
+      {deletion.element}
     </div>
   )
 }

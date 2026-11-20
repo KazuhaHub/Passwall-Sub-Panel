@@ -2603,7 +2603,6 @@
       "traffic_factor_direct": "直连线路流量倍率"
     },
     "action": {
-      "delete": "删除",
       "recreate_inbound": "在服务器上重建入站",
       "edit_line": "编辑线路",
       "edit_direct": "编辑直连线路",
@@ -2644,12 +2643,8 @@
       "undo": "撤销"
     },
     "confirm": {
-      "delete_title": "删除节点",
-      "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
       "recreate_inbound_title": "在服务器上重建 inbound？",
-      "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。",
-      "batch_delete_title": "批量删除节点",
-      "batch_delete_message": "确定删除 {{count}} 个节点？"
+      "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。"
     },
     "separator_preview": {
       "visible": "会出现在：{{groups}}",
@@ -2690,7 +2685,8 @@
     "view": {
       "label": "视图",
       "order": "订阅顺序",
-      "node": "按节点"
+      "node": "按节点",
+      "graph": "拓扑"
     },
     "search": {
       "placeholder": "搜索线路、节点、服务器或地址"
@@ -2849,6 +2845,55 @@
     "error": {
       "load": "无法加载线路",
       "partial": "部分节点信息暂时无法加载"
+    },
+    "impact": {
+      "node_title": "删除节点“{{name}}”？",
+      "loading": "正在查看这次删除会影响什么…",
+      "failed_title": "无法查看这次操作会影响什么",
+      "failed_hint": "可以重试，也可以不核对直接继续。不核对时，这里不会列出会一起删除的线路和入口监听。",
+      "blind_delete": "不核对，直接删除",
+      "blind_remove": "不核对，直接移除",
+      "lines": "将一起删除 {{count}} 条线路：",
+      "lines_remove": "面板会一起删除这 {{count}} 条线路：",
+      "listeners": "将关闭的入口监听：",
+      "listener_item": "{{server}} 的端口 {{port}}（{{line}}）",
+      "listener_front": "共用端口 {{port}}",
+      "body": "服务器上的入站会被删除；订阅者刷新后这些线路都会消失",
+      "prefer_disable": "只想停止发布？",
+      "disable_instead": "改为停用节点",
+      "confirm": "删除节点和 {{count}} 条线路",
+      "remove_confirm": "从面板移除节点和 {{count}} 条线路",
+      "blocked_title": "无法删除节点“{{name}}”",
+      "blocked_body": "服务器的共用端口中还有路由指向此节点。先删除这些路由，再删除节点：",
+      "blocked_fix": "到服务器页面，打开对应服务器的共用端口，删除这些路由后再回来删除节点",
+      "go_servers": "前往服务器",
+      "plan_title": "服务器要求再确认这些变动",
+      "plan_body": "下面这些变动不在你刚才看到的列表中：",
+      "plan_confirm": "确认并继续",
+      "bulk_title": "删除 {{count}} 个节点？",
+      "bulk_confirm": "删除 {{nodes}} 个节点和 {{lines}} 条线路",
+      "bulk_skipped": "其中 {{count}} 个节点无法删除，已跳过：",
+      "bulk_blocked_item": "{{name}}：共用端口的路由仍指向它",
+      "bulk_unread_item": "{{name}}：无法查看影响（{{reason}}）",
+      "bulk_node_lines": "{{name}} · {{count}} 条线路",
+      "bulk_none": "所选节点都无法删除"
+    },
+    "graph": {
+      "label": "线路关系图",
+      "too_many": "线路太多，无法清楚地画在一张图里",
+      "too_many_count": "当前有 {{count}} 条连线，超过 {{max}} 条",
+      "too_many_hint": "按入口服务器或落地服务器筛选后再查看",
+      "show_in_list": "在列表中查看经过“{{name}}”的 {{count}} 条线路",
+      "as_list": "以列表查看",
+      "col_entry": "入口",
+      "col_landing": "落地节点",
+      "col_exit": "出口",
+      "box_direct": "直连",
+      "box_cdn": "CDN",
+      "box_external": "外部入口",
+      "box_local": "本服务器出网",
+      "box_deleted": "{{name}}（已删除）",
+      "hint": "点击一个入口或落地节点，查看经过它的线路。已撤下或有问题的线路用颜色和文字标出，已停用的线路变淡"
     },
     "unmanaged": {
       "server": "服务器",
@@ -3979,12 +4024,6 @@
       "upgrade_unavailable": "此实例当前不能升级该组件（{{reasons}}）。"
     },
     "confirm": {
-      "delete_title": "删除服务器",
-      "delete_message": "删除服务器 {{name}}？该服务器必须没有节点引用才能删除。",
-      "has_nodes_title": "该服务器上还有节点",
-      "has_nodes_text": "请先移除或迁走这些节点。隐藏的隧道监听器要到落地节点上删除对应的线路才会移除。",
-      "has_nodes_item": "{{node}}",
-      "has_nodes_tunnel_item": "{{landing}} 的隧道线路 {{line}}",
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "batch_upgrade_xray_title": "批量升级 Xray",
@@ -4241,6 +4280,31 @@
         }
       },
       "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效"
+    },
+    "delete": {
+      "title": "删除服务器“{{name}}”？",
+      "loading": "正在查看这台服务器上还有什么…",
+      "failed_title": "无法查看这台服务器上还有什么",
+      "failed_hint": "重试后才能确认是否可以删除",
+      "blocked_title": "无法删除服务器“{{name}}”：还有 {{count}} 项依赖",
+      "blocked_hint": "先处理下面这些依赖，再回来删除",
+      "nodes": "此服务器上的节点",
+      "lines": "经此服务器进入的线路",
+      "routes": "经此服务器分流的路由",
+      "egress": "以此服务器为出口的节点",
+      "egress_warning": "删除后这些节点的出口将不可用，建议先改为其他出口",
+      "listener_of": "{{landing}} · {{line}}（入口监听）",
+      "listener_fix": "删除这条线路，或改为端口转发",
+      "line_fix": "删除这条线路，或改用其他入口服务器",
+      "pending_landing": "此线路的落地节点正在删除，等待同步任务完成，或仅从面板移除该节点",
+      "node_lines": "{{count}} 条线路",
+      "open_node": "打开节点",
+      "open_line": "查看线路",
+      "open_exit": "查看出口",
+      "sync_tasks": "同步任务",
+      "routes_of": "路由 {{routes}}",
+      "confirm": "删除服务器",
+      "changed": "服务器上的依赖刚刚发生了变化，已重新读取"
     }
   },
   "diagnostics": {
