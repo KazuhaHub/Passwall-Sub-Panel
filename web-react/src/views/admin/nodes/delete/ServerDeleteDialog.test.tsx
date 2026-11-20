@@ -64,4 +64,14 @@ describe('the server delete dialog', () => {
     expect(screen.queryByRole('button', { name: 'Delete server' })).toBeNull()
     expect(onDeleted).not.toHaveBeenCalled()
   })
+
+  it('after an unchecked delete is refused and the re-read fails too, shows the refusal the 409 carried', async () => {
+    api.get.mockRejectedValue(new Error('offline'))
+    api.delete.mockRejectedValue(refusal({ code: 'server_has_lines', error: 'Relay lines still enter through this server', lines: [entering(false)] }))
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete without checking' }))
+    const box = await screen.findByTestId('server-refusal')
+    expect(box.textContent).toContain('Relay lines still enter through this server')
+    expect(within(box).getAllByRole('listitem')).toHaveLength(1)
+  })
 })

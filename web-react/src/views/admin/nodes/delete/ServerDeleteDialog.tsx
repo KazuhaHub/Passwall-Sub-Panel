@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
+import { isAxiosError } from 'axios'
 import { Link } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -53,6 +54,8 @@ export function ServerDeleteDialog({ server, onClose, onDeleted }: {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const [busy, setBusy] = useState(false)
   const [changed, setChanged] = useState(false)
+  // The refusal a delete answered with, kept for when the re-read that should replace it fails too.
+  const [refusal, setRefusal] = useState<{ message: string; lines: DeleteImpactLine[] } | null>(null)
   const close = () => { if (!busy) onClose() }
 
   const send = async () => {
@@ -66,6 +69,8 @@ export function ServerDeleteDialog({ server, onClose, onDeleted }: {
       if (e && e.status === 409 && DEPENDENCY_REFUSALS.includes(e.code)) {
         // Something attached since the read: show it, with its links, rather than a one-line toast.
         setChanged(true)
+        const body = (isAxiosError(err) ? err.response?.data : undefined) as { lines?: DeleteImpactLine[] } | undefined
+        setRefusal({ message: e.message, lines: body?.lines ?? [] })
         void q.refetch()
       } else {
         pushToast({ message: e?.message || t('servers.toast.delete_failed'), severity: 'error' })
@@ -83,10 +88,16 @@ export function ServerDeleteDialog({ server, onClose, onDeleted }: {
         actions={(
           <>
             <Button variant="outline" disabled={busy} onClick={() => void q.refetch()}>{tc('actions.retry')}</Button>
-            <AsyncButton variant="destructive" onClick={send}>{t('servers.delete.confirm')}</AsyncButton>
+            <AsyncButton variant="destructive" onClick={send}>{t('servers.delete.blind_delete')}</AsyncButton>
           </>
         )}>
         <ErrorState compact title={t('servers.delete.failed_title')} reason={describeError(q.error)} hint={t('servers.delete.failed_hint')} />
+        {refusal && (
+          <div data-testid="server-refusal" className="flex flex-col gap-2">
+            <p className="font-medium">{refusal.message}</p>
+            {refusal.lines.length > 0 && <ImpactPathList lines={refusal.lines} entryOf={() => server.name} />}
+          </div>
+        )}
       </ImpactDialogFrame>
     )
   }

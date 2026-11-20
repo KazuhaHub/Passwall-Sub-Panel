@@ -2868,7 +2868,7 @@
       "blocked_fix": "到服务器页面，打开对应服务器的共用端口，删除这些路由后再回来删除节点",
       "go_servers": "前往服务器",
       "plan_title": "服务器要求再确认这些变动",
-      "plan_body": "下面这些变动不在你刚才看到的列表中：",
+      "plan_body": "服务器将执行以下变动：",
       "plan_confirm": "确认并继续",
       "bulk_title": "删除 {{count}} 个节点？",
       "bulk_confirm": "删除 {{nodes}} 个节点和 {{lines}} 条线路",
@@ -2876,7 +2876,8 @@
       "bulk_blocked_item": "{{name}}：共用端口的路由仍指向它",
       "bulk_unread_item": "{{name}}：无法查看影响（{{reason}}）",
       "bulk_node_lines": "{{name}} · {{count}} 条线路",
-      "bulk_none": "所选节点都无法删除"
+      "bulk_none": "所选节点都无法删除",
+      "blocked_remove_title": "无法从面板移除节点“{{name}}”"
     },
     "graph": {
       "label": "线路关系图",
@@ -4304,7 +4305,8 @@
       "sync_tasks": "同步任务",
       "routes_of": "路由 {{routes}}",
       "confirm": "删除服务器",
-      "changed": "服务器上的依赖刚刚发生了变化，已重新读取"
+      "changed": "服务器上的依赖刚刚发生了变化，已重新读取",
+      "blind_delete": "不核对，直接删除"
     }
   },
   "diagnostics": {

@@ -16,11 +16,11 @@ describe('impactViewOf', () => {
     expect(impactViewOf({ isPending: false, isError: true, data: undefined, error: new Error('x') }, 'delete').kind).toBe('failed')
     expect(impactViewOf({ isPending: false, isError: false, data, error: null }, 'delete').kind).toBe('ready')
   })
-  it('blocks a delete behind shared-port routes, but not a remove-from-panel (the server only checks them on delete)', () => {
+  it('blocks a delete and a remove-from-panel alike behind shared-port routes (the server checks them for both)', () => {
     const blocked = { ...data, blocked_by_routes: ['shared port 443, route a.com'] }
     const q = { isPending: false, isError: false, data: blocked, error: null }
     expect(impactViewOf(q, 'delete')).toMatchObject({ kind: 'blocked', routes: ['shared port 443, route a.com'] })
-    expect(impactViewOf(q, 'detach').kind).toBe('ready')
+    expect(impactViewOf(q, 'detach').kind).toBe('blocked')
   })
 })
 

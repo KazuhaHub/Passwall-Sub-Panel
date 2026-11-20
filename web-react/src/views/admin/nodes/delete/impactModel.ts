@@ -13,16 +13,16 @@ export type ImpactView =
   | { kind: 'ready'; impact: NodeDeleteImpact }
 
 /**
- * What a node dialog should show for the state of its impact read. A delete behind shared-port routes is refused by
- * the server (checkRemovalAgainstFronts), so the dialog offers no delete button then. "Remove from panel only" never
- * runs that check, so it is not blocked by the same routes and shows the impact like any other.
+ * What a node dialog should show for the state of its impact read. A delete OR a remove-from-panel behind
+ * shared-port routes is refused by the server (both run checkRemovalAgainstFronts), so the dialog offers no action
+ * button then, only the reason and where to fix it.
  */
 export function impactViewOf(
   q: { isPending: boolean; isError: boolean; data: NodeDeleteImpact | undefined; error: unknown },
-  mode: DeleteMode,
+  _mode?: DeleteMode,
 ): ImpactView {
   if (q.data) {
-    if (mode === 'delete' && q.data.blocked_by_routes.length > 0) return { kind: 'blocked', routes: q.data.blocked_by_routes, impact: q.data }
+    if (q.data.blocked_by_routes.length > 0) return { kind: 'blocked', routes: q.data.blocked_by_routes, impact: q.data }
     return { kind: 'ready', impact: q.data }
   }
   if (q.isError) return { kind: 'failed', reason: q.error }

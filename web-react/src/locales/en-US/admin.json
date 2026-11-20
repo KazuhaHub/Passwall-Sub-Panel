@@ -2876,7 +2876,7 @@
       "blocked_fix": "On the Servers page, open that server's shared ports and delete these routes, then come back to delete the node",
       "go_servers": "Go to servers",
       "plan_title": "The server asks you to confirm these changes",
-      "plan_body": "These changes were not in the list you just saw:",
+      "plan_body": "The server will make these changes:",
       "plan_confirm": "Confirm and continue",
       "bulk_title_one": "Delete {{count}} node?",
       "bulk_title_other": "Delete {{count}} nodes?",
@@ -2888,7 +2888,8 @@
       "bulk_unread_item": "{{name}}: could not check ({{reason}})",
       "bulk_node_lines_one": "{{name}} · {{count}} line",
       "bulk_node_lines_other": "{{name}} · {{count}} lines",
-      "bulk_none": "None of the selected nodes can be deleted"
+      "bulk_none": "None of the selected nodes can be deleted",
+      "blocked_remove_title": "Node \"{{name}}\" cannot be removed"
     },
     "graph": {
       "label": "Line relationship graph",
@@ -4322,7 +4323,8 @@
       "sync_tasks": "Sync tasks",
       "routes_of": "Routes {{routes}}",
       "confirm": "Delete server",
-      "changed": "What depends on the server just changed; it was read again"
+      "changed": "What depends on the server just changed; it was read again",
+      "blind_delete": "Delete without checking"
     }
   },
   "diagnostics": {

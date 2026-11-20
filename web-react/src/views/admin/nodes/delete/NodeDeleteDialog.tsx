@@ -94,7 +94,7 @@ export function NodeDeleteDialog({ target, entryOf, serverName, onDisable, onClo
 
   if (view.kind === 'blocked') {
     return (
-      <ImpactDialogFrame title={t('nodes.impact.blocked_title', { name })} cancelRef={cancelRef} cancelLabel={tc('actions.close')} onClose={onClose}
+      <ImpactDialogFrame title={t(mode === 'delete' ? 'nodes.impact.blocked_title' : 'nodes.impact.blocked_remove_title', { name })} cancelRef={cancelRef} cancelLabel={tc('actions.close')} onClose={onClose}
         actions={<Button render={<Link to="/admin/servers" />}>{t('nodes.impact.go_servers')}</Button>}>
         <p>{t('nodes.impact.blocked_body')}</p>
         {/* The server words these in English and names no server or port to link to (design gap G2): shown as given. */}
@@ -110,7 +110,7 @@ export function NodeDeleteDialog({ target, entryOf, serverName, onDisable, onClo
         actions={(
           <>
             <Button variant="outline" disabled={busy} onClick={() => void q.refetch()}>{tc('actions.retry')}</Button>
-            <AsyncButton variant="destructive" onClick={send}>{t(mode === 'delete' ? 'nodes.impact.blind_delete' : 'nodes.impact.blind_remove')}</AsyncButton>
+            <AsyncButton variant="destructive" pending={busy} onClick={send}>{t(mode === 'delete' ? 'nodes.impact.blind_delete' : 'nodes.impact.blind_remove')}</AsyncButton>
           </>
         )}>
         <ErrorState compact title={t('nodes.impact.failed_title')} reason={describeError(view.reason)} hint={t('nodes.impact.failed_hint')} />
@@ -129,7 +129,7 @@ export function NodeDeleteDialog({ target, entryOf, serverName, onDisable, onClo
   const { impact } = view
   return (
     <ImpactDialogFrame title={title} cancelRef={cancelRef} onClose={closeOrDecline} cancelDisabled={busy}
-      actions={<AsyncButton variant="destructive" onClick={send}>{t(verbKey, { count: impact.lines.length })}</AsyncButton>}>
+      actions={<AsyncButton variant="destructive" pending={busy} onClick={send}>{t(verbKey, { count: impact.lines.length })}</AsyncButton>}>
       <ImpactBody impact={impact} entryOf={entryOf} serverName={serverName} mode={mode} />
       <p className="text-muted-foreground">{t(mode === 'delete' ? 'nodes.impact.body' : 'nodes.delete.remove_body')}</p>
       {mode === 'delete' && onDisable && (

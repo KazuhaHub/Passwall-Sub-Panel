@@ -104,8 +104,28 @@ describe('the node delete dialog', () => {
     await waitFor(() => expect(deletes()).toHaveLength(1))
   })
 
-  it('does not block "remove from panel only" on the routes, and names that verb and the count', async () => {
+  it('blocks "remove from panel only" behind routes too, and keeps the confirm busy while the confirmed request runs', async () => {
     installReads({ '/admin/nodes/5/delete-impact': impact({ blocked_by_routes: ['shared port 443'] }) })
+    open({ mode: 'detach' })
+    expect(await screen.findByText('Node "Tokyo" cannot be removed')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Remove node/ })).toBeNull()
+    cleanup()
+
+    installReads({ '/admin/nodes/5/delete-impact': impact() })
+    let release!: (v: unknown) => void
+    api.delete.mockRejectedValueOnce(tunnelPlan([{ node_id: 11, line_id: 'zz', entry_panel_id: 3, port: 40000 }])).mockReturnValueOnce(new Promise(r => { release = r }))
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete node and 4 lines' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and continue' }))
+    const again = await screen.findByRole('button', { name: 'Delete node and 4 lines' })
+    await waitFor(() => expect(again.getAttribute('aria-busy')).toBe('true'))
+    fireEvent.click(again)
+    expect(deletes()).toHaveLength(2)
+    release({ data: null })
+  })
+
+  it('names the verb and the count when removing from the panel', async () => {
+    installReads({ '/admin/nodes/5/delete-impact': impact() })
     api.post.mockResolvedValue({ data: null })
     const { onDone } = open({ mode: 'detach' })
     fireEvent.click(await screen.findByRole('button', { name: 'Remove node and 4 lines from the panel' }))
