@@ -154,6 +154,12 @@ export function InheritanceField<T>({
     },
   }), [emit])
   useEffect(() => { if (!Object.is(own?.value, lastOut.current)) startRef.current = null }, [own?.value])
+  // A start that was adjusted for one record's level above says nothing about another's: when that level
+  // changes from outside, the note and the editor go, and the new record shows "follows above".
+  useEffect(() => {
+    const start = startRef.current
+    if (start && !Object.is(above?.value, start.parent)) { startRef.current = null; setPending(null) }
+  }, [above?.value])
   // The page's Discard puts its draft back, which this field cannot see; the form tells it.
   useOnFormDiscard(() => { startRef.current = null; setPending(null) })
   if (isSet && pending) setPending(null)

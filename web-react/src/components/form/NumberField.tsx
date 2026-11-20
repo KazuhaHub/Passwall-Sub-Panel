@@ -147,12 +147,12 @@ export function NumberField({
   acceptableRef.current = acceptable
   // A value from outside is a NEW BASELINE for the disable rule below: the earlier record's values
   // (what the parent first gave, what the person typed) belong to something that is gone and must
-  // never be written back. Typing only ever adds to `lastAcceptable`.
+  // never be written back. `lastAcceptable` changes in exactly two places: here, and when the person
+  // COMMITS an acceptable draft (leaving the box or Enter), never while typing.
   useEffect(() => {
-    if (lastEmitted.current !== undefined && Object.is(value, lastEmitted.current)) {
-      if (acceptableRef.current(value)) lastAcceptable.current = value
-      return
-    }
+    // The echo of what was typed changes nothing here: a prefix of what is being typed ("99" on the
+    // way to "9999") must never become the value to fall back to.
+    if (lastEmitted.current !== undefined && Object.is(value, lastEmitted.current)) return
     initial.current = value
     lastAcceptable.current = acceptableRef.current(value) ? value : undefined
     lastEmitted.current = undefined
@@ -234,10 +234,7 @@ export function NumberField({
     setDraft(text)
     setRejected(null)
     const r = readNumberText(text, integer === true)
-    if (r.kind === 'number') {
-      if (acceptable(r.value)) lastAcceptable.current = r.value
-      emit(r.value)
-    }
+    if (r.kind === 'number') emit(r.value)
   }
 
   const commit = () => {
@@ -246,6 +243,7 @@ export function NumberField({
     if (r.kind === 'number') {
       setDraft(String(r.value))
       if (!out) committed.current = r.value
+      if (acceptable(r.value)) lastAcceptable.current = r.value
       if (r.value !== value) { emit(r.value) }
       // Even when the parent already holds it: a refusal during typing shows up here.
       afterCommit.current = { expected: r.value }
@@ -254,6 +252,7 @@ export function NumberField({
     }
     if (r.kind === 'empty' && emptyOk) {
       committed.current = null
+      if (acceptable(null)) lastAcceptable.current = null
       if (value !== null) emit(null)
       afterCommit.current = { expected: null }
       setCommitTick(n => n + 1)

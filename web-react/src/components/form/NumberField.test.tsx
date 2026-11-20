@@ -17,6 +17,8 @@ function Harness(props: { initial: number | null; onValue?: (v: number | null) =
 }
 const box = () => screen.getByLabelText('Limit') as HTMLInputElement
 const type = (text: string) => fireEvent.change(box(), { target: { value: text } })
+// Key by key, as a person types: every prefix of the text is a value the box and the parent see on the way.
+const keys = (text: string) => { for (let i = 1; i <= text.length; i++) type(text.slice(0, i)) }
 const leave = () => fireEvent.blur(box())
 
 function Blocked() {
@@ -354,7 +356,7 @@ describe('NumberField', () => {
       const onValue = vi.fn()
       const ui = (disabled: boolean) => <FormValidityProvider><Harness initial={5} min={1} max={600} onValue={onValue} disabled={disabled} /><Blocked /></FormValidityProvider>
       const { rerender } = render(ui(false))
-      type('9999')
+      keys('9999')
       leave()
       expect(screen.getByTestId('blocked').textContent).toBe('Allowed range is 1 to 600')
       rerender(ui(true))
@@ -371,7 +373,7 @@ describe('NumberField', () => {
     it('puts unreadable text back over a number the parent still holds', () => {
       const ui = (disabled: boolean) => <FormValidityProvider><Harness initial={5} disabled={disabled} /><Blocked /></FormValidityProvider>
       const { rerender } = render(ui(false))
-      type('abc')
+      keys('abc')
       rerender(ui(true))
       expect(box().value).toBe('5')
       expect(screen.getByTestId('blocked').textContent).toBe('ok')
@@ -384,20 +386,58 @@ describe('NumberField', () => {
       return <Harness initial={initial} onValue={onValue} disabled={disabled} {...rest} />
     }
 
-    it('(a) started empty, typed 5, cleared the box: disabling restores the last acceptable value in the box and the parent', () => {
+    it('(a) started empty, typed 5 and cleared it WITHOUT leaving the box: nothing was committed, so back to the start (empty)', () => {
       const onValue = vi.fn()
       const { rerender } = render(shown(false, { initial: null }, onValue))
-      type('5')
+      keys('5')
+      type('')
+      rerender(shown(true, { initial: null }, onValue))
+      expect(box().value).toBe('')
+      expect(onValue).toHaveBeenLastCalledWith(null)
+    })
+
+    it('(a2) typed 5, LEFT the box (a commit), then cleared it: the committed 5 comes back', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: null }, onValue))
+      keys('5')
+      leave()
       type('')
       rerender(shown(true, { initial: null }, onValue))
       expect(box().value).toBe('5')
       expect(onValue).toHaveBeenLastCalledWith(5)
     })
 
+    it('a prefix of what was being typed is never the fallback: 5, then 9999 key by key, disabled gives 5 (not 99)', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: 5, min: 1, max: 600 }, onValue))
+      keys('9999')
+      rerender(shown(true, { initial: 5, min: 1, max: 600 }, onValue))
+      expect(box().value).toBe('5')
+      expect(onValue).toHaveBeenLastCalledWith(5)
+    })
+
+    it('typing 700 key by key is not 70 either', () => {
+      const { rerender } = render(shown(false, { initial: 5, min: 1, max: 600 }, () => {}))
+      keys('700')
+      rerender(shown(true, { initial: 5, min: 1, max: 600 }, () => {}))
+      expect(box().value).toBe('5')
+    })
+
+    it('start 5, type 30 and leave (committed), then type 9999 key by key: disabled gives 30', () => {
+      const onValue = vi.fn()
+      const { rerender } = render(shown(false, { initial: 5, min: 1, max: 600 }, onValue))
+      keys('30')
+      leave()
+      keys('9999')
+      rerender(shown(true, { initial: 5, min: 1, max: 600 }, onValue))
+      expect(box().value).toBe('30')
+      expect(onValue).toHaveBeenLastCalledWith(30)
+    })
+
     it('(b) no acceptable value was ever seen: the parent gets back what it started with (null), and the box is empty', () => {
       const onValue = vi.fn()
       const { rerender } = render(shown(false, { initial: null, min: 10, max: 600 }, onValue))
-      type('5')
+      keys('5')
       expect(onValue).toHaveBeenLastCalledWith(5)
       rerender(shown(true, { initial: null, min: 10, max: 600 }, onValue))
       expect(box().value).toBe('')
@@ -407,7 +447,7 @@ describe('NumberField', () => {
     it('started at 7, typed 9999: disabling goes back to 7', () => {
       const onValue = vi.fn()
       const { rerender } = render(shown(false, { initial: 7, min: 1, max: 600 }, onValue))
-      type('9999')
+      keys('9999')
       rerender(shown(true, { initial: 7, min: 1, max: 600 }, onValue))
       expect(box().value).toBe('7')
       expect(onValue).toHaveBeenLastCalledWith(7)
@@ -416,7 +456,7 @@ describe('NumberField', () => {
     it('an allow-empty field that started empty goes back to empty', () => {
       const onValue = vi.fn()
       const { rerender } = render(shown(false, { initial: null, allowEmpty: true, min: 10 }, onValue))
-      type('5')
+      keys('5')
       rerender(shown(true, { initial: null, allowEmpty: true, min: 10 }, onValue))
       expect(box().value).toBe('')
       expect(onValue).toHaveBeenLastCalledWith(null)
@@ -425,7 +465,7 @@ describe('NumberField', () => {
     it('a decimal is not an acceptable value for a whole-number field', () => {
       const onValue = vi.fn()
       const { rerender } = render(shown(false, { initial: 4, integer: true }, onValue))
-      type('2.5')
+      keys('2.5')
       rerender(shown(true, { initial: 4, integer: true }, onValue))
       expect(box().value).toBe('4')
     })
@@ -434,7 +474,7 @@ describe('NumberField', () => {
       const onValue = vi.fn()
       const ui = (disabled: boolean) => <Harness initial={5} min={1} max={600} onValue={onValue} disabled={disabled} />
       const { rerender } = render(ui(false))
-      type('20')
+      keys('20')
       rerender(ui(true))
       expect(box().value).toBe('20')
     })
@@ -485,7 +525,7 @@ describe('NumberField', () => {
 
     it('(2) a value that was typed and then discarded by a reload does not come back', () => {
       const { rerender } = render(<Record fresh={5} disabled={false} />)
-      type('30')
+      keys('30')
       leave()
       rerender(<Record fresh={9999} disabled={false} />)
       rerender(<Record fresh={9999} disabled />)
@@ -496,7 +536,7 @@ describe('NumberField', () => {
     it('a new record with an acceptable value, then garbage, then disable: the new record\'s value', () => {
       const { rerender } = render(<Record fresh={5} disabled={false} />)
       rerender(<Record fresh={42} disabled={false} />)
-      type('abc')
+      keys('abc')
       rerender(<Record fresh={42} disabled />)
       expect(box().value).toBe('42')
       expect(parent()).toBe('42')
@@ -505,16 +545,16 @@ describe('NumberField', () => {
     it('what the parent echoes back is not a new baseline: started 7, typed 9999, disabled gives 7', () => {
       const { rerender } = render(<Record fresh={7} disabled={false} />)
       rerender(<Record fresh={7} disabled={false} />)
-      type('9999')
+      keys('9999')
       rerender(<Record fresh={7} disabled />)
       expect(parent()).toBe('7')
     })
 
     it('a parent that clamps what was emitted has supplied a new value: it is the baseline', () => {
       const { rerender } = render(<Record fresh={5} disabled={false} clamp />)
-      type('700')
+      keys('700')
       expect(parent()).toBe('600')
-      type('abc')
+      keys('abc')
       rerender(<Record fresh={5} disabled clamp />)
       expect(box().value).toBe('600')
       expect(parent()).toBe('600')
@@ -532,7 +572,7 @@ describe('NumberField', () => {
         )
       }
       const { rerender } = render(<Page disabled={false} />)
-      type('30')
+      keys('30')
       leave()
       fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
       rerender(<Page disabled />)
@@ -544,7 +584,7 @@ describe('NumberField', () => {
   describe('impossible bounds', () => {
     it('give no example, because any number would be refused', () => {
       render(<Harness initial={null} min={10} max={5} />)
-      type('abc')
+      keys('abc')
       expect(screen.getAllByText('Enter a number').length).toBeGreaterThan(0)
     })
   })

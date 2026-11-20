@@ -290,6 +290,27 @@ describe('InheritanceField', () => {
       expect(editorBox().value).toBe('1')
     })
 
+    it('another record whose level above differs: the pending start is dropped and the new record shows "follows above"', () => {
+      function Page({ above }: { above: number }) {
+        const [user, setUser] = useState<number | undefined>(undefined)
+        return (
+          <InheritanceField
+            label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10}
+            levels={lv(100, above, user)} onChange={setUser} fitInherited={v => Math.round(v)}
+            renderEditor={({ id, value, onChange, ...aria }) => <NumberField id={id} {...aria} value={value} onChange={v => { if (v !== null) onChange(v) }} integer min={0} />}
+          />
+        )
+      }
+      const { rerender } = render(<Page above={1.25} />)
+      fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+      expect(screen.getByText(/Starting from 1 GB instead/)).toBeTruthy()
+      rerender(<Page above={2.5} />)
+      expect(screen.queryByText(/Starting from/)).toBeNull()
+      expect(screen.queryByRole('textbox', { name: 'Traffic limit' })).toBeNull()
+      expect(screen.getByRole('radio', { name: 'Follow the level above' }).getAttribute('aria-checked')).toBe('true')
+      expect(screen.getByText(/Following the level above, currently 2.5 GB/)).toBeTruthy()
+    })
+
     it('a value the editor can hold is still written at once, as before', () => {
       const onWrite = vi.fn()
       render(<InheritanceField label="Traffic limit" editLevel="user" renderValue={show} defaultValue={10} levels={lv(100, 50, undefined)} onChange={onWrite} fitInherited={v => Math.round(v)} renderEditor={editor} />)
