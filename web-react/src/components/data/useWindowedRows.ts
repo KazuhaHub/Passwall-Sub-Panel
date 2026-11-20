@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { OVERSCAN, pageRows, revealScrollTop, rowIndexAtOffset, windowRange } from './windowing'
+import { OVERSCAN, pageRows, revealScrollTop, rowIndexAtOffset, runPitch, windowRange } from './windowing'
 
 export interface FrameRect { top: number; bottom: number; left: number; right: number; width: number; height: number }
 
@@ -83,16 +83,18 @@ export function useWindowedRows({ enabled, count, ownScroller, frameRef, bodyRef
     setRange(prev => (prev.start === next.start && prev.end === next.end && prev.first === first ? prev : { ...next, first }))
   }, [bodyRef, viewport, topInset])
 
-  // The pitch between two ADJACENT drawn rows (a spacer between them would be in the gap).
+  // The pitch over the first run of ADJACENT drawn rows (a spacer between rows would be in
+  // the gap), measured from the second row on: see runPitch.
   const measurePitch = useCallback(() => {
     const rows = bodyRef.current?.querySelectorAll<HTMLElement>('[data-row]')
     if (!rows) return
-    for (let i = 0; i + 1 < rows.length && i < 4; i++) {
-      if (rows[i].nextElementSibling !== rows[i + 1]) continue
-      const pitch = rows[i + 1].getBoundingClientRect().top - rows[i].getBoundingClientRect().top
-      if (pitch > 8 && pitch < 400 && Math.abs(pitch - rowHRef.current) > 0.25) setRowH(pitch)
-      return
+    const run: number[] = []
+    for (let i = 0; i < rows.length && run.length < 12; i++) {
+      if (i > 0 && rows[i - 1].nextElementSibling !== rows[i]) { if (run.length >= 3) break; run.length = 0 }
+      run.push(rows[i].getBoundingClientRect().top)
     }
+    const pitch = runPitch(run)
+    if (pitch !== null && Math.abs(pitch - rowHRef.current) > 0.05) setRowH(pitch)
   }, [bodyRef])
 
   useLayoutEffect(() => {

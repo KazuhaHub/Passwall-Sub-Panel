@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   WINDOW_THRESHOLD, autoScrollStep, carryTarget, insertionAtOffset, pageRows, renderPlan, revealScrollTop,
-  rowIndexAtOffset, shouldWindow, windowRange,
+  rowIndexAtOffset, runPitch, shouldWindow, windowRange,
 } from './windowing'
 
 describe('when to window', () => {
@@ -150,5 +150,25 @@ describe('rows per viewport', () => {
   it('counts the rows that fit under the sticky header, at least one', () => {
     expect(pageRows(400, 40, 36)).toBe(10)
     expect(pageRows(30, 0, 36)).toBe(1)
+  })
+})
+
+describe('row pitch from a run of rows', () => {
+  it('ignores the first row, which sits against a spacer and is half a border shorter', () => {
+    // first row after a spacer: 40.5 to the next; every other row 41
+    const tops = [100, 140.5, 181.5, 222.5, 263.5, 304.5]
+    expect(runPitch(tops)).toBe(41)
+    // the naive first-two-rows reading would have been 40.5 and drifted 0.5px per row
+    expect(tops[1] - tops[0]).toBe(40.5)
+  })
+  it('averages out fractional tops over the run', () => {
+    const tops = Array.from({ length: 10 }, (_, i) => 10 + i * 40.4)
+    expect(runPitch(tops)).toBeCloseTo(40.4, 6)
+  })
+  it('needs at least three rows (two intervals after the first) and refuses nonsense', () => {
+    expect(runPitch([0, 40])).toBeNull()
+    expect(runPitch([0, 40, 80])).toBe(40)
+    expect(runPitch([0, 5, 5, 5])).toBeNull()
+    expect(runPitch([])).toBeNull()
   })
 })

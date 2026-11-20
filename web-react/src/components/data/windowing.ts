@@ -144,3 +144,16 @@ export function pageRows(viewport: number, topInset: number, rowH: number): numb
   if (rowH <= 0) return 1
   return Math.max(1, Math.floor((viewport - topInset) / rowH))
 }
+
+/**
+ * The row pitch from the tops of a run of ADJACENT drawn rows (no spacer between them).
+ * The first row is left out: the one right after a spacer collapses its border against
+ * a borderless row and is half a border shorter, so a pitch read from the first two rows
+ * is off by that half px and the error grows with every row. Null when the run is too
+ * short or the result is not a plausible row height.
+ */
+export function runPitch(tops: readonly number[]): number | null {
+  if (tops.length < 3) return null
+  const pitch = (tops[tops.length - 1] - tops[1]) / (tops.length - 2)
+  return pitch > 8 && pitch < 400 ? pitch : null
+}

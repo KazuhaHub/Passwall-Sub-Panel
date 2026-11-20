@@ -79,7 +79,10 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
  * DataTableBase.columns). Nothing breaks, it just gets slow as the list grows or the
  * parent re-renders often.
  *
- * WINDOWED RENDERING. With `pagination={false}` and more than 200 rows (WINDOW_THRESHOLD)
+ * WINDOWED RENDERING. EVERY row, separator and full-width rows included, must have the same
+ * height here: the spacer arithmetic assumes one pitch. A list that can cross 200 rows by
+ * filtering or growth should pass `maxHeight={null}`, or its scroll model flips between the
+ * page and a 70dvh box as it crosses the threshold. With `pagination={false}` and more than 200 rows (WINDOW_THRESHOLD)
  * the body draws only the rows near the viewport, between two blank spacer rows, so a list of
  * thousands stays cheap to render, scroll and reorder. Rows then have ONE fixed height (the
  * density's --row-h, measured): keep a cell to one line, because a taller row would throw the
@@ -87,9 +90,12 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
  * is the whole list and each drawn row carries its real `aria-rowindex`. The PAGE is the
  * scroller (the header sticks below `--shell-bar-h`, the app shell's bar), unless `maxHeight`
  * is given, which makes the table its own scroll box; in that mode, or inside an ancestor
- * that scrolls, the nearest scroller is used. Because the page scrolls, the frame clips
- * horizontally instead of scrolling (`overflow-x: clip`): a scrollable frame would become the
- * header's sticky container. A row that holds focus, is the tab stop, or is being dragged stays
+ * that scrolls, the nearest scroller is used. KNOWN LIMIT: because the page scrolls, the frame
+ * clips horizontally (`overflow-x: clip`) and a table wider than its frame cannot be scrolled
+ * sideways. CSS has no clean way to have both: any `overflow-x` other than visible/clip makes
+ * the frame a scroll container too, and the sticky header would then stick to the frame, which
+ * never scrolls vertically, instead of to the page. A wide table must fit its columns, or be
+ * given a `maxHeight` (its own scroll box scrolls both ways). A row that holds focus, is the tab stop, or is being dragged stays
  * drawn wherever it is, so focus is never lost to scrolling. Column widths are measured once
  * from the first rows drawn and then frozen (fixed table layout) so they cannot change as rows
  * enter and leave; content wider than its column is clipped, and a change of the visible

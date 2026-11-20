@@ -73,7 +73,9 @@ export interface DataTableHandle {
   /**
    * Scroll the row with this id into view: a search hit, or the row a move just landed on.
    * In a windowed table the row need not be drawn yet; it is drawn by the time the scroll
-   * settles. Returns false when no such row is in the list. 'nearest' (default) scrolls
+   * settles. Returns false when no such row is in the list. The index comes from the LAST
+   * RENDER: after a reorder (or any data change) call it from an effect once the new data
+   * has rendered, not synchronously inside `onReorder`, or it scrolls to the old position. 'nearest' (default) scrolls
    * only if the row is hidden, and stops it landing under the sticky header.
    */
   scrollToRow: (id: string, opts?: { align?: 'nearest' | 'center' }) => boolean
