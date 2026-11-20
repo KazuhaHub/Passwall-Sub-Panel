@@ -2046,7 +2046,10 @@
         "link": "Transit tunnel",
         "external": "External entry",
         "cdn": "CDN"
-      }
+      },
+      "field_required": "Fill this in.",
+      "hop_loopback": "loopback :{{port}}",
+      "paths": "Lines to be created"
     },
     "retry": "Retry",
     "cert_source": {
@@ -2363,7 +2366,8 @@
       "target": {
         "label": "Leaves through",
         "local": "Leave from this server (local)",
-        "local_hint": "Leaves from this node's own server, whatever the default exit is"
+        "local_hint": "Leaves from this node's own server, whatever the default exit is",
+        "choose": "Choose a server"
       },
       "entries_one": "{{count}} compiled entry",
       "entries_other": "{{count}} compiled entries",
@@ -2459,6 +2463,12 @@
         "exit_no_link_capability": "The Node agent on {{server}} cannot take the tunnel, so destinations routed there fail.",
         "redundant_route": "{{route}} sends its destinations the same way the default exit already does, so it changes nothing.",
         "routes_not_sent": "The saved routes are not being sent to the server: {{reason}}"
+      },
+      "path": {
+        "ports": "port {{ports}}",
+        "more": "+{{count}} more",
+        "nothing": "Nothing to match yet",
+        "unset": "no server chosen yet"
       }
     },
     "line_labels": {
@@ -2643,7 +2653,17 @@
       "validate_reality_target": "Reality dest and SNI are required",
       "validate_ss2022": "SS-2022 cipher and PSK are required",
       "created": "Created",
-      "queued": "Queued for sync"
+      "queued": "Queued for sync",
+      "anytls_padding": "Padding scheme (one per line)",
+      "anytls_padding_hint": "Leave blank to use S-UI's default AnyTLS padding scheme.",
+      "tuic_congestion_control": "Congestion control",
+      "tuic_auth_timeout": "Auth timeout (s)",
+      "tuic_heartbeat": "Heartbeat (s)",
+      "tuic_zero_rtt": "Zero-RTT handshake",
+      "naive_network": "Network",
+      "naive_network_default": "TCP + UDP (default)",
+      "naive_quic_congestion_control": "QUIC congestion control",
+      "naive_quic_off": "QUIC off"
     },
     "feature_pending": "Feature migration in progress (next iteration)",
     "table": {
@@ -2914,7 +2934,10 @@
       "admin_only": "Only administrators can view and edit node details",
       "not_found": "This node was not found",
       "edit_legacy": "Edit details and exit",
-      "show_lines": "Show this node in the list"
+      "show_lines": "Show this node in the list",
+      "dirty_tabs": "{{tabs}} have unsaved changes",
+      "tab_separator": ", ",
+      "to_line": "Edit this line on the node page"
     },
     "empty": {
       "title": "No nodes yet",
@@ -2941,6 +2964,33 @@
       "col_port": "Port",
       "col_remark": "Remark",
       "col_clients": "Clients"
+    },
+    "inbound_form": {
+      "section_protocol": "Protocol and port",
+      "section_transport": "Transport",
+      "section_security": "Security (TLS / REALITY)",
+      "section_advanced": "Advanced",
+      "sui_section": "{{protocol}} · S-UI / sing-box"
+    },
+    "exit": {
+      "default": "Default exit",
+      "local": "Leave from this server",
+      "remote": "Leave through another server",
+      "server": "Exit server",
+      "tunnel_settings": "Tunnel settings",
+      "not_native": "This node's server is not a Passwall Node server, so traffic can only leave from it",
+      "no_other_server": "Needs another Passwall Node server as the exit",
+      "partial_saved": "Tunnel settings were saved, but the exit server was not: {{reason}}",
+      "pick_server": "Choose the exit server",
+      "pick_server_error": "Choose the exit server, or switch to leaving from this server"
+    },
+    "inbound": {
+      "partial_flow": "The inbound was saved, but its VLESS flow was not: {{reason}}.",
+      "partial_cert": "The inbound was saved, but its certificate source was not: {{reason}}.",
+      "no_update": "This server does not allow changing inbound configuration.",
+      "mode": "Edit as",
+      "mode_form": "Form",
+      "mode_json": "JSON"
     }
   },
   "users": {

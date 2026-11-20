@@ -2043,7 +2043,10 @@
         "link": "服务器间隧道",
         "external": "外部入口",
         "cdn": "CDN"
-      }
+      },
+      "field_required": "请填写此项",
+      "hop_loopback": "回环 :{{port}}",
+      "paths": "将创建的线路"
     },
     "retry": "重试",
     "cert_source": {
@@ -2360,7 +2363,8 @@
       "target": {
         "label": "出站位置",
         "local": "本机直出（从本服务器出站）",
-        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站"
+        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站",
+        "choose": "选择服务器"
       },
       "entries_other": "已编译 {{count}} 条目标",
       "sent": {
@@ -2455,6 +2459,12 @@
         "exit_no_link_capability": "{{server}} 上的 Node 代理无法承载这条隧道，指向它的目标会连接失败。",
         "redundant_route": "{{route}} 的出站方式与默认出口相同，没有任何效果。",
         "routes_not_sent": "已保存的路由没有发给服务器：{{reason}}"
+      },
+      "path": {
+        "ports": "端口 {{ports}}",
+        "more": "另有 {{count}} 项",
+        "nothing": "还没有匹配条件",
+        "unset": "尚未选择服务器"
       }
     },
     "line_labels": {
@@ -2617,7 +2627,17 @@
       "validate_reality_target": "Reality dest 和 SNI 必填",
       "validate_ss2022": "SS-2022 method 和服务端 PSK 必填",
       "created": "已创建",
-      "queued": "已加入同步任务"
+      "queued": "已加入同步任务",
+      "anytls_padding": "Padding scheme（每行一条）",
+      "anytls_padding_hint": "留空时使用 S-UI 的 AnyTLS 默认 padding scheme。",
+      "tuic_congestion_control": "Congestion control",
+      "tuic_auth_timeout": "Auth timeout（秒）",
+      "tuic_heartbeat": "Heartbeat（秒）",
+      "tuic_zero_rtt": "Zero-RTT handshake",
+      "naive_network": "Network",
+      "naive_network_default": "TCP + UDP（默认）",
+      "naive_quic_congestion_control": "QUIC congestion control",
+      "naive_quic_off": "不启用 QUIC"
     },
     "claim": "认领客户端",
     "claim_dialog": {
@@ -2910,7 +2930,10 @@
       "admin_only": "只有管理员可以查看和编辑节点详情",
       "not_found": "找不到这个节点",
       "edit_legacy": "编辑基本信息和出口",
-      "show_lines": "在列表中查看此节点"
+      "show_lines": "在列表中查看此节点",
+      "dirty_tabs": "{{tabs}}有未保存的修改",
+      "tab_separator": "、",
+      "to_line": "在节点页面编辑这条线路"
     },
     "empty": {
       "title": "还没有节点",
@@ -2937,6 +2960,33 @@
       "col_port": "端口",
       "col_remark": "备注",
       "col_clients": "客户端"
+    },
+    "inbound_form": {
+      "section_protocol": "协议与端口",
+      "section_transport": "传输",
+      "section_security": "安全 (TLS / REALITY)",
+      "section_advanced": "高级",
+      "sui_section": "{{protocol}} · S-UI / sing-box"
+    },
+    "exit": {
+      "default": "默认出口",
+      "local": "从本服务器出网",
+      "remote": "经另一台服务器出网",
+      "server": "出口服务器",
+      "tunnel_settings": "隧道设置",
+      "not_native": "此节点所在服务器不是 Passwall Node，流量只能从本服务器出网",
+      "no_other_server": "需要另一台 Passwall Node 服务器作为出口",
+      "partial_saved": "隧道设置已保存，出口服务器未能保存：{{reason}}",
+      "pick_server": "选择出口服务器",
+      "pick_server_error": "请选择出口服务器，或改为从本服务器出网"
+    },
+    "inbound": {
+      "partial_flow": "入站配置已保存，VLESS flow 未能保存：{{reason}}。",
+      "partial_cert": "入站配置已保存，证书来源未能保存：{{reason}}。",
+      "no_update": "这台服务器不允许修改入站配置。",
+      "mode": "编辑方式",
+      "mode_form": "表单",
+      "mode_json": "JSON"
     }
   },
   "users": {
