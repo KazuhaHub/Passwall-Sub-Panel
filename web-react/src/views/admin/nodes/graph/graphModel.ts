@@ -124,7 +124,9 @@ export function buildGraph(
       const to = exit ? `exit:${exit.id}` : 'exit:local'
       // Boxes appear as a landing uses them, so "its own server" is not drawn when every landing leaves elsewhere.
       if (!exitBoxes.has(to)) exitBoxes.set(to, { id: to, label: exit ? exit.name : labels.local })
-      edges.push({ id: `exit:${id}`, from: `landing:${id}`, to, style: 'dashed', label: labels.link })
+      // Only a landing that leaves through ANOTHER server crosses a server-to-server tunnel; leaving from its own
+      // server is a plain, unlabelled hop (drawing it as a tunnel would claim a link that does not exist).
+      edges.push(exit ? { id: `exit:${id}`, from: `landing:${id}`, to, style: 'dashed', label: labels.link } : { id: `exit:${id}`, from: `landing:${id}`, to, style: 'solid' })
     }
     columns.push({ id: 'exit', title: labels.exit, boxes: [...exitBoxes.values()] })
   }

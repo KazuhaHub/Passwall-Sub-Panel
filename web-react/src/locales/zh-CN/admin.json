@@ -2891,7 +2891,7 @@
       "box_direct": "直连",
       "box_cdn": "CDN",
       "box_external": "外部入口",
-      "box_local": "本服务器出网",
+      "box_local": "本服务器",
       "box_deleted": "{{name}}（已删除）",
       "hint": "点击一个入口或落地节点，查看经过它的线路。已撤下或有问题的线路用颜色和文字标出，已停用的线路变淡"
     },

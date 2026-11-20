@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { NodeOrder, OrderRow } from '@/api/nodes'
-import { api, installReads, list, mountPage } from '../testHarness'
+import { installReads, list, mountPage } from '../testHarness'
 import NodesPage from '../NodesPage'
 
 const landing = (id: number) => ({ node_id: id, name: `Node${id}`, region: 'TW', panel_id: id * 10, panel_name: `srv${id}`, enabled: true })

@@ -2904,7 +2904,7 @@
       "box_direct": "Direct",
       "box_cdn": "CDN",
       "box_external": "External entry",
-      "box_local": "Leaves from its own server",
+      "box_local": "Own server",
       "box_deleted": "{{name}} (deleted)",
       "hint": "Select an entry or a landing node to see the lines through it. Withdrawn or faulty lines are marked in colour and in words; disabled lines are faded"
     },

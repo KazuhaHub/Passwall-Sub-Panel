@@ -41,12 +41,15 @@ export function NodeDeleteDialog({ target, entryOf, serverName, onDisable, onClo
   const [plan, setPlan] = useState<{ view: TunnelPlanView; answer: (ok: boolean) => void } | null>(null)
   const shown = useRef<NodeDeleteImpact['tunnels']>([])
   shown.current = q.data?.tunnels ?? []
-  const abort = useRef(new AbortController())
+  const abort = useRef<AbortController | null>(null)
   const answerRef = useRef<((ok: boolean) => void) | null>(null)
 
   // Closing the dialog while the server's plan waits for an answer declines it, so the request ends instead of hanging.
+  // The controller is made when the dialog mounts, not once per component instance: in development React mounts,
+  // unmounts and mounts again, and a controller made earlier would arrive at the second mount already aborted.
   useEffect(() => {
-    const controller = abort.current
+    const controller = new AbortController()
+    abort.current = controller
     return () => { controller.abort(); answerRef.current?.(false) }
   }, [])
 
@@ -62,12 +65,12 @@ export function NodeDeleteDialog({ target, entryOf, serverName, onDisable, onClo
   const send = async () => {
     setBusy(true)
     try {
-      await runRemoval(mode, nodeId, present, abort.current.signal)
+      await runRemoval(mode, nodeId, present, abort.current?.signal)
       onDone()
     } catch {
       // The request layer has already said why. The state may have changed under the dialog (a new route, a new
       // line), so what the dialog shows is read again rather than trusted.
-      if (!abort.current.signal.aborted) { setBusy(false); void q.refetch() }
+      if (!abort.current?.signal.aborted) { setBusy(false); void q.refetch() }
     }
   }
 

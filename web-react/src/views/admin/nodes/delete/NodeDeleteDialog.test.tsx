@@ -2,6 +2,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError } from 'axios'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NodeDeleteImpact } from '@/api/nodes'
@@ -25,10 +26,10 @@ function open(over: Partial<NodeDeleteTarget> = {}, extra: { onDone?: () => void
   const onDone = extra.onDone ?? vi.fn()
   const onClose = extra.onClose ?? vi.fn()
   render(
-    <QueryClientProvider client={makeTestQueryClient()}><MemoryRouter>
+    <StrictMode><QueryClientProvider client={makeTestQueryClient()}><MemoryRouter>
       <NodeDeleteDialog target={{ nodeId: 5, name: 'Tokyo', mode: 'delete', ...over }} entryOf={l => (l.line_id === 'a' ? 'GZ' : undefined)}
         serverName={id => `srv${id}`} onClose={onClose} onDone={onDone} />
-    </MemoryRouter></QueryClientProvider>,
+    </MemoryRouter></QueryClientProvider></StrictMode>,
   )
   return { onDone, onClose }
 }

@@ -30,8 +30,9 @@ export function BulkDeleteDialog({ nodeIds, nameOf, entryOf, serverName, onClose
   const q = useBulkImpact(nodeIds)
   const cancelRef = useRef<HTMLButtonElement>(null)
   const [busy, setBusy] = useState(false)
-  const abort = useRef(new AbortController())
-  useEffect(() => { const c = abort.current; return () => c.abort() }, [])
+  // Made on mount (see NodeDeleteDialog): a controller made with the instance is already aborted by development's second mount.
+  const abort = useRef<AbortController | null>(null)
+  useEffect(() => { const c = new AbortController(); abort.current = c; return () => c.abort() }, [])
 
   const entries = q.data ?? []
   const ready = entries.filter((e): e is Extract<BulkEntry, { kind: 'ready' }> => e.kind === 'ready')
@@ -42,9 +43,9 @@ export function BulkDeleteDialog({ nodeIds, nameOf, entryOf, serverName, onClose
     setBusy(true)
     // A plan that lists more than the node's own dialog section showed is declined: nobody is here to read it per
     // node, and a declined node is counted as failed, so it is reported rather than deleted unseen.
-    const results = await allSettledLimited(ready, e => runRemoval('delete', e.id, async plan => planCovered(plan, e.impact.tunnels), abort.current.signal), 4)
+    const results = await allSettledLimited(ready, e => runRemoval('delete', e.id, async plan => planCovered(plan, e.impact.tunnels), abort.current?.signal), 4)
     const failed = results.filter(r => r.status === 'rejected').length
-    if (!abort.current.signal.aborted) onDone({ ok: ready.length - failed, failed })
+    if (!abort.current?.signal.aborted) onDone({ ok: ready.length - failed, failed })
   }
 
   const title = t('nodes.impact.bulk_title', { count: nodeIds.length })
@@ -61,7 +62,7 @@ export function BulkDeleteDialog({ nodeIds, nameOf, entryOf, serverName, onClose
   }
   return (
     <ImpactDialogFrame title={title} cancelRef={cancelRef} onClose={() => { if (!busy) onClose() }} cancelDisabled={busy} wide
-      actions={ready.length > 0 ? <AsyncButton variant="destructive" onClick={send}>{t('nodes.impact.bulk_confirm', { nodes: ready.length, count: lines, lines })}</AsyncButton> : undefined}>
+      actions={ready.length > 0 ? <AsyncButton variant="destructive" onClick={send}>{ready.length === 1 ? t('nodes.impact.confirm', { count: lines }) : t('nodes.impact.bulk_confirm', { nodes: ready.length, count: lines })}</AsyncButton> : undefined}>
       {ready.length === 0 && <p>{t('nodes.impact.bulk_none')}</p>}
       <div className="flex flex-col gap-2" data-testid="bulk-ready">
         {ready.map(e => (

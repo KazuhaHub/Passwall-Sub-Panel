@@ -54,7 +54,8 @@ describe('buildGraph', () => {
     expect(g.columns).toHaveLength(3)
     expect(g.columns[2].boxes.map(b => b.label)).toEqual(['Own server', 'OSA'])
     const exits = g.edges.filter(e => e.id.startsWith('exit:'))
-    expect(exits.map(e => [e.from, e.to, e.style])).toEqual([['landing:1', 'exit:local', 'dashed'], ['landing:2', 'exit:40', 'dashed']])
+    // Leaving from its own server is a plain hop; only the other server is reached through a tunnel.
+    expect(exits.map(e => [e.from, e.to, e.style, e.label])).toEqual([['landing:1', 'exit:local', 'solid', undefined], ['landing:2', 'exit:40', 'dashed', 'Server link']])
   })
 
   it('says, for a box, which list filter shows its lines (entry server, type) and where a landing node opens', () => {
