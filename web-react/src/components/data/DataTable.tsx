@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { memo, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import {
   flexRender, getCoreRowModel, getExpandedRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
   type ColumnDef, type ExpandedState, type Row, type SortingState, type VisibilityState,
@@ -22,6 +22,8 @@ import type { BulkContext, DataTableProps, PageChangeReason, RowOptions } from '
 import { IconButton } from '@/components/common/IconButton'
 import { TOUCH_HEIGHT } from '@/components/common/touchTarget'
 import { useRowReorder } from './useRowReorder'
+import { useWindowedRows } from './useWindowedRows'
+import { renderPlan, shouldWindow } from './windowing'
 
 // Anything inside a row that does its own thing on click or on keys: a click or
 // Enter there must not also open the row.
@@ -77,6 +79,24 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
  * DataTableBase.columns). Nothing breaks, it just gets slow as the list grows or the
  * parent re-renders often.
  *
+ * WINDOWED RENDERING. With `pagination={false}` and more than 200 rows (WINDOW_THRESHOLD)
+ * the body draws only the rows near the viewport, between two blank spacer rows, so a list of
+ * thousands stays cheap to render, scroll and reorder. Rows then have ONE fixed height (the
+ * density's --row-h, measured): keep a cell to one line, because a taller row would throw the
+ * spacer arithmetic off. The table stays a table for assistive technology: `aria-rowcount`
+ * is the whole list and each drawn row carries its real `aria-rowindex`. The PAGE is the
+ * scroller (the header sticks below `--shell-bar-h`, the app shell's bar), unless `maxHeight`
+ * is given, which makes the table its own scroll box; in that mode, or inside an ancestor
+ * that scrolls, the nearest scroller is used. Because the page scrolls, the frame clips
+ * horizontally instead of scrolling (`overflow-x: clip`): a scrollable frame would become the
+ * header's sticky container. A row that holds focus, is the tab stop, or is being dragged stays
+ * drawn wherever it is, so focus is never lost to scrolling. Column widths are measured once
+ * from the first rows drawn and then frozen (fixed table layout) so they cannot change as rows
+ * enter and leave; content wider than its column is clipped, and a change of the visible
+ * columns or of the table's width measures again. NOT DONE in windowed mode: the browser's
+ * find-in-page cannot see rows that are not drawn (offer your own search and
+ * `handleRef.scrollToRow`), and the phone card layout is not windowed.
+ *
  * ROW OVERRIDES (rowOptions): a row can render as a full-width separator, be
  * excluded from selection or opening, and carry a dimmed / pending state, a class
  * and attributes. onRowHover and highlightedIds let a page light up related rows.
@@ -85,7 +105,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const {
     data, columns, getRowId, mode = 'client', total: serverTotal, pagination = true, pageSizeOptions,
     columnMenu = true, selectable, rowLabel, bulkActions, onRowOpen, activeRowId, rowClassName, toolbar,
-    loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight = '70dvh', className,
+    loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className,
     rowOptions, onRowHover, highlightedIds,
   } = props
   const { t, i18n } = useSpacedT()
@@ -213,11 +233,36 @@ export function DataTable<T>(props: DataTableProps<T>) {
     clearHidden,
   }
 
+  const phone = useMediaQuery('(max-width: 767px)')
+  const cards = phone && renderCard !== undefined
+  const showError = error !== undefined && error !== null && error !== false
+
+  // ---- windowing ----
+  const bodyRef = useRef<HTMLTableSectionElement>(null)
+  const headRef = useRef<HTMLTableSectionElement>(null)
+  const headRowRef = useRef<HTMLTableRowElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
+  const windowed = !cards && !showError && shouldWindow(rows.length, pagination)
+  // The page scrolls unless the caller gave a height (see DataTableBase.maxHeight).
+  const maxHeight = maxHeightProp === undefined ? (windowed ? null : '70dvh') : maxHeightProp
+  const ownScroller = maxHeight !== null
+  const win = useWindowedRows({ enabled: windowed, count: rows.length, ownScroller, frameRef, bodyRef, headRef })
+  const indexOfId = useMemo(() => new Map(rowIds.map((id, i) => [id, i])), [rowIds])
+  const revealIndex = (i: number, align?: 'nearest' | 'center') => {
+    if (windowed) return win.scrollToIndex(i, align)
+    const id = rowIds[i]
+    const el = id === undefined ? null : bodyRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)
+    if (!el) return false
+    el.scrollIntoView?.({ block: align === 'center' ? 'center' : 'nearest' })
+    return true
+  }
+  useImperativeHandle(props.handleRef, () => ({
+    scrollToRow: (id, opts) => { const i = indexOfId.get(id); return i === undefined ? false : revealIndex(i, opts?.align) },
+  }))
+
   // ---- reorder ----
   const hintId = `${useId()}-reorder-hint`
   const reasonId = `${useId()}-reorder-reason`
-  const bodyRef = useRef<HTMLTableSectionElement>(null)
-  const frameRef = useRef<HTMLDivElement>(null)
   const reorderCol = onReorder !== undefined
   const blocked: 'sorted' | 'tree' | 'paged' | 'custom' | null = !reorderCol ? null
     : tree ? 'tree'
@@ -237,11 +282,33 @@ export function DataTable<T>(props: DataTableProps<T>) {
     onReorder,
     bodyRef,
     scrollRef: frameRef,
+    geometry: windowed ? win.geometry : undefined,
+    reveal: i => { revealIndex(i) },
   })
 
   // ---- row focus and keys ----
   const [tabId, setTabId] = useState<string | null>(null)
-  const tabStop = tabId !== null && rowIds.includes(tabId) ? tabId : rowIds[0]
+  // Windowed: with no tab stop chosen yet it is the first row in view, not row 0, or Tab
+  // from the header would jump the page back to the top.
+  const tabStop = tabId !== null && indexOfId.has(tabId) ? tabId : rowIds[windowed ? win.first : 0]
+  // The row holding focus inside (a checkbox, a menu button) and one a key press is about to focus.
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const pendingFocus = useRef<string | null>(null)
+  const focusRowAt = (i: number) => {
+    const id = rowIds[i]
+    if (id === undefined) return
+    win.scrollToIndex(i)
+    const el = bodyRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)
+    if (el) el.focus({ preventScroll: true })
+    else { pendingFocus.current = id; setTabId(id) }
+  }
+  useLayoutEffect(() => {
+    const id = pendingFocus.current
+    if (id === null) return
+    if (!indexOfId.has(id)) { pendingFocus.current = null; return }
+    const el = bodyRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)
+    if (el) { pendingFocus.current = null; el.focus({ preventScroll: true }) }
+  })
   const interactive = onRowOpen !== undefined || selectable === true || tree
 
   const onRowKeyDown = (e: KeyboardEvent<HTMLElement>, row: Row<T>) => {
@@ -254,7 +321,16 @@ export function DataTable<T>(props: DataTableProps<T>) {
     if (tree && e.key === 'ArrowLeft') {
       e.preventDefault()
       if (row.getIsExpanded()) row.toggleExpanded(false)
+      else if (row.getParentRow() && windowed) focusRowAt(indexOfId.get(row.getParentRow()!.id) ?? 0)
       else if (row.getParentRow()) el.parentElement?.querySelector<HTMLElement>(`[data-id="${CSS.escape(row.getParentRow()!.id)}"]`)?.focus()
+      return
+    }
+    if (windowed && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End')) {
+      // The neighbouring row may not be drawn: move by index, not by sibling.
+      e.preventDefault()
+      const at = indexOfId.get(row.id) ?? 0
+      const to = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : at + (e.key === 'ArrowDown' ? 1 : -1)
+      if (to >= 0 && to < rows.length) focusRowAt(to)
       return
     }
     let next: Element | null | undefined
@@ -304,14 +380,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
   })
 
   // ---- layout bits ----
-  const phone = useMediaQuery('(max-width: 767px)')
-  const cards = phone && renderCard !== undefined
   const leadWidth = (reorderCol ? DRAG_W : 0) + (selectable ? SELECT_W : 0)
   const pin = (first: boolean): { className?: string; style?: CSSProperties } =>
     first ? { className: 'sticky z-[1]', style: { left: `${leadWidth}rem` } } : {}
   const colSpan = visibleColumns.length + (reorderCol ? 1 : 0) + (selectable ? 1 : 0)
 
-  const showError = error !== undefined && error !== null && error !== false
   const skeleton = loading === true && data.length === 0 && !showError
   const isEmpty = !loading && !showError && rows.length === 0
   const checkLabel = (row: Row<T>, n: number) => rowLabel ? t('ui.data.select_row_named', { name: nameOf(row) }) : t('ui.data.select_row', { n })
@@ -338,6 +411,31 @@ export function DataTable<T>(props: DataTableProps<T>) {
     blockedText, hintId, reasonId, leadWidth,
   }), [columns, visibility, tree, selectable, reorderCol, interactive, blockedText, hintId, reasonId, leadWidth])
 
+  // Windowed column widths: measured once from the header while the first rows are drawn,
+  // then frozen into a <colgroup> with a fixed table layout, so the widths cannot change as
+  // other rows scroll in. A different set of columns, or a different table width, measures again.
+  const freezeKey = `${visibleColumns.map(c => c.id).join('|')}:${reorderCol}:${selectable === true}`
+  const [frozen, setFrozen] = useState<{ key: string; widths: number[]; frameW: number } | null>(null)
+  const frozenWidths = windowed && frozen?.key === freezeKey ? frozen.widths : null
+  useLayoutEffect(() => {
+    if (!windowed) { setFrozen(prev => (prev ? null : prev)); return }
+    if (frozenWidths) return
+    const cells = headRowRef.current?.children
+    if (!cells || cells.length !== colSpan) return
+    const widths = [...cells].map(c => c.getBoundingClientRect().width)
+    if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, widths, frameW: frameRef.current?.getBoundingClientRect().width ?? 0 })
+  }, [windowed, frozenWidths, freezeKey, colSpan])
+  useLayoutEffect(() => {
+    const frame = frameRef.current
+    if (!windowed || !frame || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const w = frame.getBoundingClientRect().width
+      setFrozen(prev => (prev && Math.abs(prev.frameW - w) > 1 ? null : prev))
+    })
+    ro.observe(frame)
+    return () => ro.disconnect()
+  }, [windowed])
+
   const bodyContent = (): ReactNode => {
     if (showError) {
       return <TableRow className="hover:bg-transparent"><TableCell colSpan={colSpan} className="whitespace-normal"><ErrorState compact reason={error} retry={onRetry} /></TableCell></TableRow>
@@ -360,7 +458,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         </TableRow>
       )
     }
-    return rows.map((row, index) => {
+    const drawRow = (row: Row<T>, index: number) => {
       const o = optsOf(row)
       return (
         <DataRow
@@ -386,9 +484,26 @@ export function DataTable<T>(props: DataTableProps<T>) {
           dropBefore={reorder.insertion === index}
           dropAfter={reorder.insertion === rows.length && index === rows.length - 1}
           moving={reorder.movingId === row.id}
+          ariaRowIndex={windowed ? index + 2 : undefined}
         />
       )
-    })
+    }
+    if (!windowed) return rows.map(drawRow)
+    // Windowed: the rows in view plus the pinned ones, with blank rows standing in for the rest.
+    const pinned = [tabStop, focusId, reorder.movingId, pendingFocus.current].map(id => (id == null ? -1 : indexOfId.get(id) ?? -1))
+    const plan = renderPlan(rows.length, win.range.start, win.range.end, pinned)
+    const gap = (key: string, n: number) => (
+      <tr key={key} data-spacer="" aria-hidden="true" style={{ height: n * win.rowH }}>
+        <td colSpan={colSpan} style={{ padding: 0, border: 0, height: n * win.rowH }} />
+      </tr>
+    )
+    const out: ReactNode[] = []
+    for (const it of plan.items) {
+      if (it.gapBefore > 0) out.push(gap(`gap-${it.index}`, it.gapBefore))
+      out.push(drawRow(rows[it.index], it.index))
+    }
+    if (plan.tail > 0) out.push(gap('gap-end', plan.tail))
+    return out
   }
 
   return (
@@ -400,7 +515,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border bg-card">
+      {/* Windowed with the page as scroller: clip, not hidden. A hidden-overflow ancestor is a scroll container and the sticky header would stick to it, not to the page. */}
+      <div className={cn('rounded-xl border bg-card', windowed && !ownScroller ? 'overflow-clip' : 'overflow-hidden')}>
         {cards ? (
           <ul aria-label={props['aria-label']} aria-busy={loading || undefined} className="divide-y">
             {selectable && rows.length > 0 && (
@@ -433,10 +549,23 @@ export function DataTable<T>(props: DataTableProps<T>) {
             })}
           </ul>
         ) : (
-          <div ref={frameRef} className="scroll-pt-(--row-h) overflow-auto" style={maxHeight ? { maxHeight } : undefined}>
-            <table data-slot="table" aria-label={props['aria-label']} aria-busy={loading || undefined} className="w-full caption-bottom text-sm">
-              <TableHeader className={cn('sticky top-0 z-10 shadow-[0_1px_0_0_var(--border)] [&_tr]:border-b-0', HEAD_BG)}>
-                <tr className="h-(--row-h)">
+          <div ref={frameRef} className={windowed && !ownScroller ? 'overflow-x-clip' : 'scroll-pt-(--row-h) overflow-auto'} style={maxHeight ? { maxHeight } : undefined}>
+            <table
+              data-slot="table"
+              aria-label={props['aria-label']}
+              aria-busy={loading || undefined}
+              aria-rowcount={windowed ? rows.length + 1 : undefined}
+              className={cn('w-full caption-bottom text-sm', frozenWidths && '[&_td]:overflow-hidden [&_td]:text-ellipsis')}
+              style={frozenWidths ? { tableLayout: 'fixed' } : undefined}
+            >
+              {frozenWidths && <colgroup>{frozenWidths.map((w, i) => <col key={i} style={{ width: `${w}px` }} />)}</colgroup>}
+              <TableHeader
+                ref={headRef}
+                className={cn('sticky top-0 z-10 shadow-[0_1px_0_0_var(--border)] [&_tr]:border-b-0', HEAD_BG)}
+                // Below the shell's bar when the page scrolls; 0 in a scroll box of its own.
+                style={windowed && !ownScroller && win.kind === 'window' ? { top: 'var(--shell-bar-h, 0px)' } : undefined}
+              >
+                <tr ref={headRowRef} className="h-(--row-h)" aria-rowindex={windowed ? 1 : undefined}>
                   {reorderCol && <TableHead className={cn('sticky left-0 z-20 w-8 min-w-8 px-0', HEAD_BG)}><span className="sr-only">{t('ui.data.reorder_column')}</span></TableHead>}
                   {selectable && (
                     <TableHead className={cn('sticky z-20 w-10 min-w-10', HEAD_BG)} style={{ left: `${reorderCol ? DRAG_W : 0}rem` }}>
@@ -494,7 +623,13 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   })}
                 </tr>
               </TableHeader>
-              <TableBody ref={bodyRef}>{bodyContent()}</TableBody>
+              <TableBody
+                ref={bodyRef}
+                onFocus={windowed ? e => setFocusId((e.target as HTMLElement).closest('[data-row]')?.getAttribute('data-id') ?? null) : undefined}
+                onBlur={windowed ? e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusId(null) } : undefined}
+              >
+                {bodyContent()}
+              </TableBody>
             </table>
           </div>
         )}
@@ -622,6 +757,8 @@ interface DataRowProps<T> {
   dropBefore: boolean
   dropAfter: boolean
   moving: boolean
+  /** 1-based position in the whole list, header included; set only when the table is windowed. */
+  ariaRowIndex: number | undefined
 }
 
 function DataRowInner<T>(p: DataRowProps<T>) {
@@ -640,6 +777,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       data-row-state={p.state}
       data-highlight={p.highlighted ? 'true' : undefined}
       data-drop={p.dropBefore ? 'before' : p.dropAfter ? 'after' : undefined}
+      aria-rowindex={p.ariaRowIndex}
       {...p.dataAttrs}
       tabIndex={ctx.interactive ? (p.tabStop ? 0 : -1) : undefined}
       onFocus={e => { if (e.target === e.currentTarget) api.current.focus(row.id) }}
