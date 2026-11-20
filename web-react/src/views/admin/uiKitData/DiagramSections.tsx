@@ -68,8 +68,8 @@ export function GraphSection() {
       <RelationGraph columns={small.columns} edges={small.edges} selectedId={sel} onSelect={setSel} maxHeight="22rem" />
       <RelationGraph columns={big.columns} edges={big.edges} maxHeight="30rem" />
       <div className="flex flex-col gap-2">
-        <p className="text-xs text-muted-foreground">超过 200 条连线：选中“Hub”，列表只列出 200 条，其余在框上和列表末尾说明。{Object.keys(cut).length > 0 && <span className="font-mono"> onTruncated：{JSON.stringify(cut)}</span>}</p>
-        <RelationGraph columns={dense.columns} edges={dense.edges} maxHeight="22rem" onTruncated={setCut} />
+        <p className="text-xs text-muted-foreground">超过 200 条连线：选中“Hub”，列表只列出 200 条，其余在框上和列表顶部说明。{Object.keys(cut).length > 0 && <span className="font-mono"> onTruncated：{JSON.stringify(cut)}</span>}</p>
+        <RelationGraph columns={dense.columns} edges={dense.edges} maxHeight="22rem" onTruncated={r => setCut({ ...r })} />
       </div>
     </Section>
   )

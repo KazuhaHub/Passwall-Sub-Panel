@@ -17,21 +17,33 @@ const tunnelRefusal = (action: string) => refusal({ code: 'confirm_required', pa
 beforeEach(() => vi.clearAllMocks())
 
 describe('a presenter passed to the tunnel-confirming calls', () => {
-  const calls: [string, 'put' | 'post' | 'delete', (present: never) => Promise<unknown>][] = [
-    ['updateNodeMetadata', 'put', present => api.updateNodeMetadata(1, {} as never, present)],
-    ['deleteNode', 'delete', present => api.deleteNode(1, present)],
-    ['detachNode', 'post', present => api.detachNode(1, present)],
-    ['switchLineMode', 'post', present => api.switchLineMode(1, 'L1', 'tunnel', 0, present)],
-    ['syncTunnelFromLanding', 'post', present => api.syncTunnelFromLanding(1, 'L1', undefined, present)],
+  const calls: [string, 'put' | 'post' | 'delete', (options: never) => Promise<unknown>][] = [
+    ['updateNodeMetadata', 'put', options => api.updateNodeMetadata(1, {} as never, options)],
+    ['deleteNode', 'delete', options => api.deleteNode(1, options)],
+    ['detachNode', 'post', options => api.detachNode(1, options)],
+    ['switchLineMode', 'post', options => api.switchLineMode(1, 'L1', 'tunnel', 0, options)],
+    ['syncTunnelFromLanding', 'post', options => api.syncTunnelFromLanding(1, 'L1', undefined, options)],
   ]
   it.each(calls)('%s shows the plan through it, not the shared confirmation', async (_name, verb, call) => {
     const present = vi.fn().mockResolvedValue(true)
     http[verb].mockRejectedValueOnce(tunnelRefusal('switch_mode')).mockResolvedValueOnce({ data: { id: 1, relays: [] } })
-    await call(present as never)
+    await call({ present } as never)
     expect(present).toHaveBeenCalledTimes(1)
     expect(present.mock.calls[0][0].action).toBe('switch_mode')
     expect(confirmMock).not.toHaveBeenCalled()
     expect(http[verb]).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('an abort signal passed to a tunnel-confirming call', () => {
+  it('declines while the plan is pending and sends nothing more', async () => {
+    const ctl = new AbortController()
+    http.delete.mockRejectedValue(tunnelRefusal('delete_node'))
+    const pending = api.deleteNode(1, { present: () => new Promise<boolean>(() => {}), signal: ctl.signal })
+    await Promise.resolve(); await Promise.resolve()
+    ctl.abort()
+    await expect(pending).rejects.toBeTruthy()
+    expect(http.delete).toHaveBeenCalledTimes(1)
   })
 })
 
