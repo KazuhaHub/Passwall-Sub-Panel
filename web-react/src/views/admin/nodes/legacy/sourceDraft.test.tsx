@@ -8,7 +8,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { api, installReads, list, node, server } from '@/test/adminSaveHarness'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { createAppTheme } from '@/theme'
-import NodesView from './NodesView'
+import NodeDetailRoute from '../NodeDetailRoute'
 
 const confirmMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)))
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock, default: () => null }))
@@ -25,7 +25,7 @@ const dest = {
 async function mountEdit() {
   installReads({ '/admin/servers': list([{ ...server, panel_type: 'psp' }]), '/admin/nodes': list([node]), '/admin/nodes/1': { node, inbound, clients: [] }, ...dest })
   api.put.mockResolvedValue({ data: { rule: { node_id: 1, countries: [], cidrs: [], state: 'on', updated_at: 5 }, geoip_available: true } })
-  const router = createMemoryRouter([{ path: '/admin/nodes', element: <NodesView /> }], { initialEntries: ['/admin/nodes?inbound=1'] })
+  const router = createMemoryRouter([{ path: '/admin/nodes/:id', element: <NodeDetailRoute /> }], { initialEntries: ['/admin/nodes/1?tab=inbound'] })
   render(<StrictMode><QueryClientProvider client={makeTestQueryClient()}><ThemeProvider theme={theme}><RouterProvider router={router} /></ThemeProvider></QueryClientProvider></StrictMode>)
   const section = await screen.findByTestId('source-rules-section')
   const dialog = screen.getByRole('dialog')

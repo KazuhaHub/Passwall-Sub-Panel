@@ -27,7 +27,9 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
-const NodesView = lazy(viewLoaders['/admin/nodes'])
+const NodesPage = lazy(viewLoaders['/admin/nodes'])
+const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
+const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
 const RuleSetsView = lazy(viewLoaders['/admin/rules'])
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
@@ -109,7 +111,10 @@ export const router = createBrowserRouter([
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
           { path: 'users', element: <UsersView /> },
-          { path: 'nodes', element: <NodesView /> },
+          { path: 'nodes', element: <NodesPage /> },
+          // Admin only (D3); until N2 and N3 these shells offer the legacy editors.
+          { path: 'nodes/new', element: <NodeCreateRoute /> },
+          { path: 'nodes/:id', element: <NodeDetailRoute /> },
           { path: 'rules', element: <RuleSetsView /> },
           { path: 'templates', element: <TemplatesView /> },
           { path: 'sub-clients', element: <SubClientsView /> },

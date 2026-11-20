@@ -31,7 +31,8 @@ describe('pathOf', () => {
     const entry = { panel_id: 2, panel_name: 'SH', missing: false }
     const waiting = pathOf(row({ line_type: 'tunnel', entry, published: false, withheld: 'waiting_entry' }), { colors, labels })
     expect(waiting.edges[0].status).toBe('pending')
-    expect(waiting.nodes[1].status).toBeUndefined()
+    // Only the hop that causes it carries the tone, not the node at its end.
+    expect(waiting.nodes.every(n => n.status === undefined)).toBe(true)
     const egress = pathOf(row({ line_type: 'direct', published: false, withheld: 'egress' }), { colors, labels, exit: { name: 'OSA' } })
     expect(egress.edges[0].status).toBe('warning')
   })

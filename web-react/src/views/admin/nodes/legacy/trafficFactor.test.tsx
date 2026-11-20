@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, waitFor, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
-import NodesView from './NodesView'
+import { api, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { LegacyProbe, openMeta } from './legacyHarness'
 
 vi.mock('@/components/ConfirmHost', () => ({ confirm: vi.fn() }))
 
@@ -15,8 +15,8 @@ const configured = {
 it('shows factors as decimals and omits untouched direct and relay factors so a concurrent change is not reverted', async () => {
   installReads({ '/admin/nodes': list([configured]) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...configured, ...body } }))
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   const inputs = within(dialog).getAllByLabelText(/admin:nodes.field.traffic_factor/) as HTMLInputElement[]
   expect(inputs.map(i => i.value).sort()).toEqual(['0.25', '1.5'])
   fireEvent.change(within(dialog).getByLabelText(/admin:nodes.field.display_name/), { target: { value: 'renamed' } })
@@ -30,8 +30,8 @@ it('shows factors as decimals and omits untouched direct and relay factors so a 
 it('sends a relay factor only after that relay was edited', async () => {
   installReads({ '/admin/nodes': list([configured]) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...configured, ...body } }))
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   const relayInput = (within(dialog).getAllByLabelText(/admin:nodes.field.traffic_factor/) as HTMLInputElement[]).find(i => i.value === '0.25')!
   fireEvent.change(relayInput, { target: { value: '0.5' } })
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
@@ -42,8 +42,8 @@ it('sends a relay factor only after that relay was edited', async () => {
 
 it('blocks saving while a multiplier is invalid or has too many decimals', async () => {
   installReads({ '/admin/nodes': list([configured]) })
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   const direct = within(dialog).getByLabelText('admin:nodes.field.traffic_factor_direct')
   for (const bad of ['', '0.0004', '101']) {
     fireEvent.change(direct, { target: { value: bad } })
@@ -55,8 +55,8 @@ it('blocks saving while a multiplier is invalid or has too many decimals', async
 it('sends the direct factor as milli when it changes', async () => {
   installReads({ '/admin/nodes': list([configured]) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...configured, ...body } }))
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   fireEvent.change(within(dialog).getByLabelText('admin:nodes.field.traffic_factor_direct'), { target: { value: '0' } })
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
   await waitFor(() => expect(writes()).toHaveLength(1))

@@ -2,8 +2,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
-import NodesView from './NodesView'
+import { api, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { LegacyProbe, openMeta } from './legacyHarness'
 
 const confirmation = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
@@ -49,8 +49,8 @@ describe('NodesView tunnel lines', () => {
     })
     api.put.mockImplementation(async (url: string, body: object) =>
       ({ data: { ...(url === '/admin/transit/links/1/2' ? link : landing), ...body } }))
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     const advanced = await within(dialog).findByRole('button', { name: 'admin:nodes.egress.advanced' })
     expect(advanced.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(advanced)
@@ -67,8 +67,8 @@ describe('NodesView tunnel lines', () => {
 
   it('round-trips a saved tunnel line without sending the listener or the running flag', async () => {
     setup([tunnelLine, forwardLine])
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     expect(within(dialog).getByTestId('tunnel-card')).toBeTruthy()
     // The tunnel line has no entry port field: its port is the listener's.
     expect(within(dialog).getAllByLabelText(/admin:nodes.relay.port/)).toHaveLength(1)
@@ -84,8 +84,8 @@ describe('NodesView tunnel lines', () => {
 
   it('sends the mode of a new tunnel line, with no port', async () => {
     setup([])
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.relay.add' }))
     fireEvent.change(within(dialog).getByLabelText(/admin:nodes.relay.address/), { target: { value: 'entry.example' } })
     fireEvent.mouseDown(within(dialog).getByLabelText('admin:nodes.relay.entry'))
@@ -102,8 +102,8 @@ describe('NodesView tunnel lines', () => {
     setup([tunnelLine])
     api.put.mockRejectedValue(tunnelRefusal('remove_line', [{ node_id: 77, name: 'tunnel-77', line_name: 'Mobile', port: 40123 }]))
     confirmation.mockResolvedValue(false)
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.relay.remove' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
     await waitFor(() => expect(confirmation).toHaveBeenCalledTimes(1))
@@ -117,8 +117,8 @@ describe('NodesView tunnel lines', () => {
     api.put.mockRejectedValueOnce(tunnelRefusal('remove_line', [{ node_id: 77, name: 'tunnel-77', line_name: 'Mobile', port: 40123 }]))
       .mockResolvedValueOnce({ data: { ...landing, relays: [] } })
     confirmation.mockResolvedValue(true)
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.relay.remove' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
     await waitFor(() => expect(metadataPuts()).toHaveLength(2))
@@ -129,8 +129,8 @@ describe('NodesView tunnel lines', () => {
     setup([forwardLine, tunnelLine])
     const switched = { ...node, relays: [forwardLine, { ...tunnelLine, mode: undefined, tunnel: undefined, running: undefined, port: 8444 }] }
     api.post.mockResolvedValue({ data: switched })
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.change(within(dialog).getAllByLabelText(/admin:nodes.relay.name/)[0], { target: { value: 'Plain edited' } })
     const card = within(dialog).getByTestId('tunnel-card').closest('[data-testid="tunnel-line"]') as HTMLElement
     fireEvent.click(within(card).getByRole('button', { name: 'admin:nodes.tunnel.mode_forward' }))
@@ -145,8 +145,8 @@ describe('NodesView tunnel lines', () => {
     const reads = api.get.getMockImplementation()!
     api.get.mockImplementation(async (url: string, ...rest: unknown[]) =>
       url === '/admin/nodes/77' ? { data: { node: childNode, clients: [] } } : reads(url, ...rest))
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.tunnel.open_listener' }))
     const banner = await screen.findByTestId('listener-banner')
     expect(banner.textContent).toContain('admin:nodes.tunnel.listener_banner')
@@ -159,8 +159,8 @@ describe('NodesView tunnel lines', () => {
   it('asks before opening the listener when the editor has unsaved changes', async () => {
     setup([tunnelLine])
     confirmation.mockResolvedValue(false)
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.change(within(dialog).getByLabelText(/admin:nodes.field.display_name/), { target: { value: 'renamed' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.tunnel.open_listener' }))
     await waitFor(() => expect(confirmation).toHaveBeenCalledTimes(1))

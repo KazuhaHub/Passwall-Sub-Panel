@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, waitFor, within } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
-import NodesView from './NodesView'
+import { api, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { LegacyProbe, openMeta } from './legacyHarness'
 
 const confirmation = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmation }))
@@ -13,8 +13,8 @@ it('round-trips saved relay labels and prefills a new relay from the node form',
   const configured = { ...node, region: 'HK', tags: ['edge'], relays: [{ id: 'gz', name: 'GZ', address: 'gz.example', port: 0, enabled: true, region: 'CN', tags: ['cmcc'] }] }
   installReads({ '/admin/nodes': list([configured]) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...configured, ...body } }))
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   expect(within(dialog).getByText('admin:nodes.line_labels.node_change_hint')).toBeTruthy()
   const regions = within(dialog).getAllByLabelText('admin:nodes.line_labels.region') as HTMLInputElement[]
   expect(regions.map(input => input.value)).toEqual(['CN'])
@@ -37,8 +37,8 @@ it('keeps a relay without loaded labels free of label fields so the server keeps
   const legacy = { ...node, relays: [{ id: 'gz', name: 'GZ', address: 'gz.example', port: 0, enabled: true }] }
   installReads({ '/admin/nodes': list([legacy]) })
   api.put.mockImplementation(async (_url, body) => ({ data: { ...legacy, ...body } }))
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   fireEvent.change(within(dialog).getByLabelText(/admin:nodes.field.display_name/), { target: { value: 'renamed' } })
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
   await waitFor(() => expect(relayWrites()).toHaveLength(1))
@@ -49,7 +49,7 @@ it('keeps a relay without loaded labels free of label fields so the server keeps
 
 it('shows no node hint for a node without lines', async () => {
   installReads({ '/admin/nodes': list([node]) })
-  mount(<NodesView />)
-  const dialog = await editRow()
+  mount(<LegacyProbe />)
+  const dialog = await openMeta()
   expect(within(dialog).queryByText('admin:nodes.line_labels.node_change_hint')).toBeNull()
 })

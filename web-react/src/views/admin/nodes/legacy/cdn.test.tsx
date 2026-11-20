@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, node, snack } from '@/test/adminSaveHarness'
-import CdnLineFields, { defaultClientTLS } from './CdnLineFields'
-import NodesView from './NodesView'
+import { api, installReads, list, mount, node, snack } from '@/test/adminSaveHarness'
+import CdnLineFields, { defaultClientTLS } from '../../CdnLineFields'
+import { LegacyProbe, openMeta } from './legacyHarness'
 import type { RelayLine } from '@/api/types'
 
 const entry = { id: 2, name: 'entry', url: '', panel_type: 'psp', capabilities: ['inbound.read', 'inbound.update', 'inbound.create', 'inbound.enable'], enabled: true }
@@ -79,8 +79,8 @@ describe('CdnLineFields client TLS', () => {
 describe('NodesView CDN lines', () => {
   it('adds a CDN line and sends a clean payload that leaves defaults to the server', async () => {
     setup([])
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.relay.add' }))
     fireEvent.mouseDown(within(dialog).getByLabelText('admin:nodes.relay.entry'))
     fireEvent.click(await screen.findByRole('option', { name: 'admin:nodes.relay.entry_cdn' }))
@@ -105,8 +105,8 @@ describe('NodesView CDN lines', () => {
 
   it('blocks the save of a CDN line with no domain instead of dropping it', async () => {
     setup([])
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:nodes.relay.add' }))
     fireEvent.mouseDown(within(dialog).getByLabelText('admin:nodes.relay.entry'))
     fireEvent.click(await screen.findByRole('option', { name: 'admin:nodes.relay.entry_cdn' }))
@@ -121,8 +121,8 @@ describe('NodesView CDN lines', () => {
     const landing = setup([cdnLine])
     // The server answers with the issues it finds on the saved node.
     api.put.mockImplementation(async (_url, body) => ({ data: { ...landing, ...body, relays: [cdnLine] } }))
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     expect(within(dialog).getByTestId('cdn-issues')).toBeTruthy()
     // The kind of a saved CDN line cannot change.
     expect(within(dialog).getByLabelText('admin:nodes.relay.entry').getAttribute('aria-disabled')).toBe('true')
@@ -135,8 +135,8 @@ describe('NodesView CDN lines', () => {
 
   it('does not offer a CDN kind on a saved forward line', async () => {
     setup([{ id: 'F1', name: 'Plain', address: 'fwd.example', port: 8443, enabled: true }])
-    mount(<NodesView />)
-    const dialog = await editRow()
+    mount(<LegacyProbe />)
+    const dialog = await openMeta()
     fireEvent.mouseDown(within(dialog).getByLabelText('admin:nodes.relay.entry'))
     const option = await screen.findByRole('option', { name: 'admin:nodes.relay.entry_cdn' })
     expect(option.getAttribute('aria-disabled')).toBe('true')

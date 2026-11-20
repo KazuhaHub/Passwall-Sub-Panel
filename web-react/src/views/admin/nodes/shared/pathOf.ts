@@ -61,18 +61,18 @@ export function pathOf(row: OrderRow, { colors, labels, exit, ends = false, node
       const missing = row.entry?.missing === true
       const entry: PathNode = {
         id: 'entry', kind: 'entry', label: missing ? `${entryName} (${labels.deleted})` : entryName, sublabel: port,
-        status: missing ? 'danger' : entryHop,
+        status: missing ? 'danger' : whole,
       }
       nodes = [user, entry, landing]
       edges = [{ style: 'solid', name: '', status: whole }, { style: row.line_type === 'tunnel' ? 'dashed' : 'solid', status: entryHop }]
       break
     }
     case 'cdn':
-      nodes = [user, { id: 'cdn', kind: 'cdn', label: row.address, status: entryHop }, landing]
+      nodes = [user, { id: 'cdn', kind: 'cdn', label: row.address, status: whole }, landing]
       edges = [{ style: 'solid', status: whole }, { style: 'solid', role: 'origin', label: port, status: entryHop }]
       break
     case 'external':
-      nodes = [user, { id: 'ext', kind: 'external', label: row.address, sublabel: port, status: entryHop }, landing]
+      nodes = [user, { id: 'ext', kind: 'external', label: row.address, sublabel: port, status: whole }, landing]
       edges = [{ style: 'solid', status: whole }, { style: 'solid', name: labels.external, status: entryHop }]
       break
     default:
@@ -80,7 +80,7 @@ export function pathOf(row: OrderRow, { colors, labels, exit, ends = false, node
       edges = [{ style: 'solid', name: '', status: whole }]
   }
   if (exit) {
-    nodes = [...nodes, { id: 'exit', kind: 'exit', label: exit.name, status: exitHop }]
+    nodes = [...nodes, { id: 'exit', kind: 'exit', label: exit.name, status: whole }]
     edges = [...edges, { style: 'dashed', name: labels.link, status: exitHop }]
   }
   if (ends) {
