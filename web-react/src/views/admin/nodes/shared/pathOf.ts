@@ -22,7 +22,7 @@ export interface PathOptions {
 }
 
 /** A status tone as the diagram's: info is the pending kind; a quiet healthy line is drawn plain. */
-function pathTone(status: RowStatus): PathTone | undefined {
+export function pathTone(status: RowStatus): PathTone | undefined {
   if (status.id === 'ok' || status.id === 'unchecked') return undefined
   return status.tone === 'info' ? 'pending' : status.tone === 'success' ? undefined : status.tone
 }
