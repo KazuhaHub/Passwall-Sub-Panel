@@ -30,6 +30,9 @@ import {
   REC_PAGE_SIZES, relativeSince, type RecGroupBy, type RecordsFilter,
 } from './recordsParams'
 
+// The shell's top bar (h-14 = 3.5rem) is sticky over the page, which scrolls as a whole; the day
+// headings stick just below it. (Under the old layout the content scrolled inside its own box, below the bar.)
+const STICKY_TOP = '3.5rem'
 const R = 'admin:access_control.records.'
 
 // Widths of the details table's fixed columns; the destination takes the rest.
@@ -458,7 +461,7 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, exitLabel, sh
       <Box sx={{ display: 'grid', gap: 1 }}>
         {groups.map(g => (
           <Fragment key={g.day + g.ms}>
-            <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, position: 'sticky', top: 0, bgcolor: md.surface, py: 0.5 }}>{dayLabel(g.ms)}</Typography>
+            <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, position: 'sticky', top: STICKY_TOP, bgcolor: md.surface, py: 0.5 }}>{dayLabel(g.ms)}</Typography>
             {g.rows.map((h, i) => (
               <Box key={i} data-testid="hit-row" sx={{ p: 1.5, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, minWidth: 0 }}>
                 <Box data-line sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
@@ -503,7 +506,7 @@ function HitList({ data, folded, tz, now, num, userName, ruleName, exitLabel, sh
           {groups.map(g => (
             <Fragment key={g.day + g.ms}>
               <TableRow>
-                <TableCell colSpan={showExit ? 8 : 7} sx={{ position: 'sticky', top: 0, bgcolor: md.surface, py: 0.5 }}>
+                <TableCell colSpan={showExit ? 8 : 7} sx={{ position: 'sticky', top: STICKY_TOP, bgcolor: md.surface, py: 0.5 }}>
                   <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant }}>{dayLabel(g.ms)}</Typography>
                 </TableCell>
               </TableRow>

@@ -1,6 +1,8 @@
 import { Suspense, type ReactNode } from 'react'
 import { Outlet } from 'react-router'
 
+import { useTranslation } from 'react-i18next'
+
 import { PageSkeleton } from '@/components/feedback/LoadingState'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -23,9 +25,17 @@ export function UserShell({ brand, user, topBarActions, footer, contentClassName
   contentClassName?: string
   children?: ReactNode
 }) {
+  const { t } = useTranslation('common')
   return (
     <TooltipProvider delay={300}>
       <div className="flex min-h-svh flex-col bg-background">
+        {/* Same skip link as the admin shell: the top bar's buttons come first in tab order. */}
+        <a
+          href="#main-content"
+          className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-md ring-1 ring-foreground/10 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        >
+          {t('ui.shell.skip_to_content')}
+        </a>
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur sm:px-4">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <BrandLogo brand={brand} />

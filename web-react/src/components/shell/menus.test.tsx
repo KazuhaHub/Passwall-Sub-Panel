@@ -157,4 +157,16 @@ describe('UserShell', () => {
     expect(screen.queryByRole('navigation')).toBeNull()
     expect(document.querySelector('[data-slot="sidebar"]')).toBeNull()
   })
+
+  // The sidebar's shell has a skip link and the user one must too: the top bar's buttons come
+  // before the content in tab order on every page.
+  it('offers a skip link to the content', () => {
+    render(
+      <MemoryRouter>
+        <UserShell brand={{ name: 'Passwall' }} user={{ label: 'u', role: 'user', onLogout: () => {} }}><p>body</p></UserShell>
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('跳到主要内容').getAttribute('href')).toBe('#main-content')
+    expect(document.getElementById('main-content')).toBeTruthy()
+  })
 })
