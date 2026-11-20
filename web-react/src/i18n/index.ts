@@ -193,7 +193,7 @@ export async function setLanguage(lang: AppLanguage): Promise<void> {
   //
   // Loading CAN reject (stale build chunks after a deploy + an open tab clicks
   // language switch = 404 on a missing chunk; or a removed pack / offline
-  // backend for a custom code). Callers (UserLayout / AdminLayout / LoginView*)
+  // backend for a custom code). Callers (the shells / LoginView*)
   // fire-and-forget; without this try/catch the rejection surfaces as an
   // unhandled promise + the UI silently stays on the old language. Log it and
   // leave changeLanguage uncalled so i18next's resolvedLanguage stays consistent

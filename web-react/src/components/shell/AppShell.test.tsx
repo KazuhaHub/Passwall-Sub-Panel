@@ -16,9 +16,10 @@ function Where() {
   return <div data-testid="where">{useLocation().pathname}</div>
 }
 
-function setViewport(mobile: boolean) {
+function setViewport(mobile: boolean, narrow = false) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-    matches: mobile && query.includes('max-width'), media: query,
+    // Two width queries exist: the sidebar's phone breakpoint, and the top bar's "too narrow for the log button".
+    matches: (mobile && query.includes('max-width: 767px')) || (narrow && query.includes('max-width: 359px')), media: query,
     addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(),
     onchange: null, dispatchEvent: vi.fn(),
   }))
@@ -45,7 +46,7 @@ function mount(props: Partial<AppShellProps> = {}, at = '/admin/dashboard') {
     <MemoryRouter initialEntries={[at]}>
       <Routes>
         <Route element={<AppShell {...baseProps(props)} />}>
-          <Route path="/admin/*" element={<div data-testid="page">page body</div>} />
+          <Route path="/admin/*" element={<><Where /><div data-testid="page">page body</div></>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -91,12 +92,45 @@ describe('navigation', () => {
     expect(onNavIntent).toHaveBeenCalledWith('/admin/nodes')
   })
 
-  it('names the landmark, and offers a skip link to the content', () => {
+  it('names the navigation landmark', () => {
     mount()
     expect(nav().getAttribute('aria-label')).toBe('主导航')
-    const skip = screen.getByText('跳到主要内容')
-    expect(skip.getAttribute('href')).toBe('#main-content')
-    expect(document.getElementById('main-content')).toBeTruthy()
+  })
+
+  // THE PRODUCTION SERVER INJECTS <base href="<panel path>/">, which makes a "#main-content" link
+  // resolve against the base: following it navigated away from the page. The skip control must
+  // move focus itself and never touch the location.
+  it('skips to the content by moving focus, not by navigating, even under a <base href>', () => {
+    const base = document.createElement('base')
+    base.href = 'http://localhost/x/'
+    document.head.appendChild(base)
+    try {
+      mount({}, '/admin/users')
+      const before = window.location.href
+      const skip = screen.getByRole('button', { name: '跳到主要内容' })
+      expect(skip.getAttribute('href')).toBeNull()
+      fireEvent.click(skip)
+      expect(window.location.href).toBe(before)
+      expect(screen.getByTestId('where').textContent).toBe('/admin/users')
+      expect(document.activeElement).toBe(screen.getByRole('main'))
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    } finally {
+      base.remove()
+    }
+  })
+
+  it('has one banner, one main and a navigation, with the top-bar controls in the banner and not in main', () => {
+    mount({ topBarActions: <button>slot-action</button> })
+    expect(screen.getAllByRole('banner')).toHaveLength(1)
+    expect(screen.getAllByRole('main')).toHaveLength(1)
+    const banner = screen.getByRole('banner')
+    const main = screen.getByRole('main')
+    expect(main.id).toBe('main-content')
+    expect(within(banner).getByText('slot-action')).toBeTruthy()
+    expect(within(banner).getByRole('button', { name: /账号菜单/ })).toBeTruthy()
+    expect(main.contains(banner)).toBe(false)
+    expect(within(main).getByTestId('page')).toBeTruthy()
+    expect(nav()).toBeTruthy()
   })
 })
 
@@ -167,6 +201,60 @@ describe('phone width', () => {
   it('shows the current page’s name in the top bar', () => {
     mount({}, '/admin/groups')
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('分组')
+  })
+})
+
+describe('nav tooltips', () => {
+  const tooltip = () => document.querySelector('[data-slot="tooltip-content"]')
+
+  it('are for the icon rail only: none on an expanded desktop sidebar', async () => {
+    mount()
+    fireEvent.focus(within(nav()).getByRole('link', { name: '用户管理' }))
+    await new Promise(r => setTimeout(r, 50))
+    expect(tooltip()).toBeNull()
+  })
+
+  it('are not opened in the phone sheet, so one Escape closes the sheet', async () => {
+    setViewport(true)
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: '展开或收起侧栏' }))
+    const sheet = await screen.findByRole('dialog', { name: '导航菜单' })
+    const link = within(sheet).getByRole('link', { name: '分组' })
+    link.focus()
+    fireEvent.focus(link)
+    await new Promise(r => setTimeout(r, 50))
+    expect(tooltip()).toBeNull()
+    fireEvent.keyDown(link, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '导航菜单' })).toBeNull())
+  })
+})
+
+describe('top bar at 320px', () => {
+  const logButton = () => screen.queryByRole('button', { name: '提示记录' })
+  const openAccount = async () => {
+    const account = screen.getByRole('button', { name: /账号菜单/ })
+    fireEvent.pointerDown(account, { button: 0, pointerType: 'mouse' })
+    fireEvent.mouseDown(account, { button: 0 })
+    fireEvent.click(account)
+    await screen.findByRole('menuitem', { name: '退出登录' })
+  }
+
+  it('keeps the log button in the bar where there is room, and out of the account menu', async () => {
+    mount()
+    expect(logButton()).toBeTruthy()
+    await openAccount()
+    expect(screen.queryByRole('menuitem', { name: '提示记录' })).toBeNull()
+  })
+
+  // Below 360px the bar's seven controls do not fit and the log button overlapped the search
+  // button, the phone's only way to the command palette. The log moves into the account menu.
+  it('moves the log into the account menu where the bar has no room, never in both places', async () => {
+    setViewport(false, true)
+    mount()
+    expect(logButton()).toBeNull()
+    expect(screen.getAllByRole('button', { name: /搜索|打开命令面板/ }).length).toBeGreaterThan(0)
+    await openAccount()
+    expect(screen.getByRole('menuitem', { name: '提示记录' })).toBeTruthy()
   })
 })
 

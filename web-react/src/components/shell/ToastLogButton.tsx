@@ -12,13 +12,8 @@ import { cn } from '@/lib/utils'
  * not the error count); errors are conveyed by the badge turning red and by the accessible
  * name ("N not yet seen, M of them errors"). Capped at 99+ so it never outgrows the button,
  * and it clears the moment the log is opened.
- *
- * `size="bar"` is for the old MUI app bars: the same 40px button and 24px icon as the MUI
- * icon buttons beside it, with a smaller badge tucked into the corner so the icon stays
- * recognisable. Whether the bar has room for it is the layout's decision (it renders this or
- * the account-menu item, never both): see layouts/useLogInBar.ts.
  */
-export function ToastLogButton({ size = 'default', className }: { size?: 'default' | 'bar'; className?: string }) {
+export function ToastLogButton({ className }: { className?: string }) {
   const { t } = useSpacedT()
   const { unread, unreadErrors } = useToastLogSummary()
   const title = t('ui.feedback.log_title')
@@ -27,7 +22,7 @@ export function ToastLogButton({ size = 'default', className }: { size?: 'defaul
       : t('ui.feedback.log_unread', { count: unread })
   const shown = unread
   return (
-    <IconButton label={label} tooltip={title} className={cn('relative', size === 'bar' && "size-10 [&_svg:not([class*='size-'])]:size-6", className)} onClick={openToastLog}>
+    <IconButton label={label} tooltip={title} className={cn('relative', className)} onClick={openToastLog}>
       <IconLogs />
       {unread > 0 && (
         <span
@@ -36,7 +31,7 @@ export function ToastLogButton({ size = 'default', className }: { size?: 'defaul
           data-errors={unreadErrors > 0 ? '' : undefined}
           className={cn(
             'absolute flex items-center justify-center rounded-full font-semibold leading-none tabular-nums',
-            size === 'bar' ? 'top-0.5 right-0.5 h-3.5 min-w-3.5 px-0.5 text-[9px]' : '-top-0.5 -right-0.5 h-4 min-w-4 px-1 text-[10px]',
+            '-top-0.5 -right-0.5 h-4 min-w-4 px-1 text-[10px]',
             unreadErrors > 0 ? 'bg-destructive text-white dark:text-background' : 'bg-muted-foreground text-background',
           )}
         >

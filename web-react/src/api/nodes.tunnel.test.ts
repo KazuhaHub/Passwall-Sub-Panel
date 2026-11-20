@@ -16,6 +16,25 @@ const tunnelRefusal = (action: string) => refusal({ code: 'confirm_required', pa
 
 beforeEach(() => vi.clearAllMocks())
 
+describe('a presenter passed to the tunnel-confirming calls', () => {
+  const calls: [string, 'put' | 'post' | 'delete', (present: never) => Promise<unknown>][] = [
+    ['updateNodeMetadata', 'put', present => api.updateNodeMetadata(1, {} as never, present)],
+    ['deleteNode', 'delete', present => api.deleteNode(1, present)],
+    ['detachNode', 'post', present => api.detachNode(1, present)],
+    ['switchLineMode', 'post', present => api.switchLineMode(1, 'L1', 'tunnel', 0, present)],
+    ['syncTunnelFromLanding', 'post', present => api.syncTunnelFromLanding(1, 'L1', undefined, present)],
+  ]
+  it.each(calls)('%s shows the plan through it, not the shared confirmation', async (_name, verb, call) => {
+    const present = vi.fn().mockResolvedValue(true)
+    http[verb].mockRejectedValueOnce(tunnelRefusal('switch_mode')).mockResolvedValueOnce({ data: { id: 1, relays: [] } })
+    await call(present as never)
+    expect(present).toHaveBeenCalledTimes(1)
+    expect(present.mock.calls[0][0].action).toBe('switch_mode')
+    expect(confirmMock).not.toHaveBeenCalled()
+    expect(http[verb]).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('tunnel line api', () => {
   it('switches a line and sends the confirmation only after the admin agreed', async () => {
     confirmMock.mockResolvedValue(true)
