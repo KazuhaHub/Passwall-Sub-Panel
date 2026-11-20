@@ -6,7 +6,7 @@ import { useAppearanceStore, type Density, type ThemeMode } from '@/stores/appea
 import { useUrlStates, urlCodecs } from '@/hooks/useUrlState'
 import { ControlsDemoSection, FormsDemoSection } from './uiKitData/FormSections'
 import { GraphSection, PathDiagramSection, TokensSection } from './uiKitData/DiagramSections'
-import { LinesViewsSection, NodesTableSection, UsersServerSection } from './uiKitData/TableSections'
+import { LinesViewsSection, LongListSection, NodesTableSection, UsersServerSection } from './uiKitData/TableSections'
 
 // Dev-only gallery for the shared data, form and diagram blocks, mounted at
 // /__ui-kit/data when import.meta.env.DEV (see router/index.tsx). Sample data is
@@ -55,7 +55,7 @@ export default function UiKitData() {
               {SECTIONS.map(s => <Button key={s} size="sm" variant={q.section === s ? 'secondary' : 'ghost'} onClick={() => patch({ section: s })}>{s}</Button>)}
             </div>
           </header>
-          {show('tables') && (<><NodesTableSection /><LinesViewsSection /><UsersServerSection /></>)}
+          {show('tables') && (<><NodesTableSection /><LinesViewsSection /><LongListSection /><UsersServerSection /></>)}
           {show('forms') && (<><FormsDemoSection /><ControlsDemoSection /></>)}
           {show('diagrams') && (<><PathDiagramSection /><GraphSection /><TokensSection /></>)}
         </div>

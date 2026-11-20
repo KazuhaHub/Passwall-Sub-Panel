@@ -1,5 +1,5 @@
 import type { ColumnDef, ExpandedState, RowData, SortingState, VisibilityState } from '@tanstack/react-table'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import type { ReorderCall } from './dataTableLogic'
 
 declare module '@tanstack/react-table' {
@@ -66,6 +66,19 @@ export interface RowOptions {
   className?: string
   /** Extra attributes on the row element, for a page's own hooks (data-kind, ...). */
   data?: Record<string, string>
+}
+
+/** What a page can ask of a mounted table (DataTableProps.handleRef). */
+export interface DataTableHandle {
+  /**
+   * Scroll the row with this id into view: a search hit, or the row a move just landed on.
+   * In a windowed table the row need not be drawn yet; it is drawn by the time the scroll
+   * settles. Returns false when no such row is in the list. The index comes from the LAST
+   * RENDER: after a reorder (or any data change) call it from an effect once the new data
+   * has rendered, not synchronously inside `onReorder`, or it scrolls to the old position. 'nearest' (default) scrolls
+   * only if the row is hidden, and stops it landing under the sticky header.
+   */
+  scrollToRow: (id: string, opts?: { align?: 'nearest' | 'center' }) => boolean
 }
 
 interface DataTableBase<T> {
@@ -154,8 +167,14 @@ interface DataTableBase<T> {
 
   /** At phone width, render each row with this instead of the table. */
   renderCard?: (row: T, ctx: { selected: boolean; active: boolean; open: (() => void) | undefined }) => ReactNode
-  /** Max height of the scrolling table area; the header stays put inside it. null removes the limit. */
+  /**
+   * Max height of the scrolling table area; the header stays put inside it. null removes
+   * the limit. Left out, it is 70dvh, EXCEPT in a windowed table (see DataTable), where it
+   * is null: the page scrolls. Pass a height there to give the table its own scroll box.
+   */
   maxHeight?: string | null
+  /** Imperative access: scrollToRow. */
+  handleRef?: Ref<DataTableHandle>
   className?: string
 }
 
