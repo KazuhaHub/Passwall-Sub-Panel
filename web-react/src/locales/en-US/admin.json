@@ -2048,22 +2048,6 @@
         "cdn": "CDN"
       }
     },
-    "lines": {
-      "title": "Lines",
-      "filter": "Filter by name, server or address",
-      "node": "Landing node",
-      "line": "Subscription line",
-      "entry": "Entry",
-      "exit": "Default exit",
-      "status": "Status",
-      "factor": "Multiplier",
-      "published": "Published",
-      "pending": "Pending",
-      "issue": "Needs attention",
-      "disabled": "Disabled",
-      "empty": "No matching lines."
-    },
-    "load_failed": "Nodes are temporarily unavailable",
     "retry": "Retry",
     "cert_source": {
       "from_panel": "Fetch cert paths from panel",
@@ -2077,26 +2061,7 @@
       "no_active_certs": "No active certificates — issue one on the Certificates page first."
     },
     "title": "Nodes",
-    "subtitle": "Manage 3X-UI inbounds; subscription rendering follows the enabled state set here.",
-    "tab_managed": "Managed",
-    "tab_unmanaged": "Unmanaged",
-    "managed_search_placeholder": "Search display name / server / address / region / tags / ID…",
-    "managed_count": "Showing {{shown}} of {{total}}",
-    "managed_filter_empty": "No nodes match the filter",
-    "managed_search_disables_drag": "Drag-to-reorder is disabled while filtering; clear the search to re-enable",
-    "unmanaged_search_placeholder": "Search protocol / remark / port / ID…",
-    "unmanaged_count": "Showing {{shown}} of {{total}}",
-    "unmanaged_filter_empty": "No entries match the filter",
-    "unmanaged_server_label": "Server",
-    "unmanaged_server_placeholder": "Select a server…",
-    "unmanaged_pick_server": "Select a server to view its unmanaged inbounds",
-    "unmanaged_load_failed": "Failed to load this server's inbounds",
-    "search_group": {
-      "protocol": "Protocol",
-      "remark": "Remark"
-    },
     "create": "New node",
-    "create_separator": "New separator",
     "edit_title": "Edit node",
     "relay": {
       "title": "Transit lines",
@@ -2244,17 +2209,17 @@
         "switch_mode_title": "Switch the line's mode?",
         "switch_mode_text": "Switching the mode replaces what the line runs on.",
         "create_line_title": "Create the tunnel line?",
-  "create_line_text": "Create tunnel line: the ports changed, confirm the new ones",
-  "remove_line_title": "Remove the tunnel line?",
+        "create_line_text": "Create tunnel line: the ports changed, confirm the new ones",
+        "remove_line_title": "Remove the tunnel line?",
         "remove_line_text": "Removing a tunnel line also removes its listener.",
         "delete_node_title": "Delete the node and its tunnel listeners?",
         "delete_node_text": "Deleting this node also removes the listeners of its tunnel lines.",
         "sync_from_landing_title": "Copy the landing's settings?",
         "sync_from_landing_text": "These settings of the listener will change to match the landing:",
         "creates_item": "Creates a listener for line {{line}} of {{landing}}: opens port {{port}} on {{entry}}.",
-  "creates_link": "Opens tunnel port {{port}} on {{exit}}, for the new tunnel between {{entry}} and {{exit}}.",
-  "creates_forward": "Opens forward port {{port}} on {{entry}} for line {{line}} of {{landing}}.",
-  "server_fallback": "server #{{id}}",
+        "creates_link": "Opens tunnel port {{port}} on {{exit}}, for the new tunnel between {{entry}} and {{exit}}.",
+        "creates_forward": "Opens forward port {{port}} on {{entry}} for line {{line}} of {{landing}}.",
+        "server_fallback": "server #{{id}}",
         "removes_item": "Removes listener {{name}} (line {{line}}): closes port {{port}} on {{entry}}.",
         "removes_item_front": "Removes listener {{name}} (line {{line}}): closes port {{port}} on {{entry}}; it leaves the shared port {{front_port}}.",
         "diff_item": "{{field}}: {{from}} → {{to}}",
@@ -2438,14 +2403,7 @@
     "import": "Import",
     "imported": "Imported",
     "import_validate": "Address and Region are required",
-    "create_separator_dialog": {
-      "title": "New separator",
-      "hint": "Separators render as a DIRECT proxy in client node lists for visual grouping only. They don't participate in 3X-UI, traffic accounting, or health checks. Which groups display them is controlled by the \"Show in all groups\" toggle + group picker below — not by node tag_filter."
-    },
-    "edit_separator_dialog": {
-      "title": "Edit separator"
-    },
-    "claim": "Claim",
+    "claim": "Claim client",
     "claim_dialog": {
       "title": "Claim existing client",
       "subtitle": "Link an existing 3X-UI client (identified by email) on inbound #{{id}} to a panel user. Common for migrating legacy inbounds.",
@@ -2454,7 +2412,8 @@
       "client_uuid": "Client UUID (optional; leave blank to keep the existing 3X-UI value)",
       "submit": "Claim",
       "claimed": "Claimed",
-      "validate_required": "Please pick a user and enter the client email"
+      "validate_required": "Please pick a user and enter the client email",
+      "users_loading": "Loading users…"
     },
     "import_dialog": {
       "title": "Import inbound",
@@ -2464,9 +2423,7 @@
       "flow": "Flow (optional)",
       "region": "Region",
       "tags": "Tags",
-      "endpoint": "Endpoint (desired / observed)",
-      "sort_order": "Sort weight",
-      "sort_order_hint": "0 = auto-append to the bottom"
+      "endpoint": "Endpoint (desired / observed)"
     },
     "edit_inbound": "Edit inbound config",
     "edit_inbound_dialog": {
@@ -2614,29 +2571,9 @@
       "queued": "Queued for sync"
     },
     "feature_pending": "Feature migration in progress (next iteration)",
-    "selection_count": "{{count}} selected",
-    "batch_enable": "Bulk enable",
-    "batch_disable": "Bulk disable",
-    "batch_delete": "Bulk delete",
     "table": {
-      "id": "ID",
-      "display_name": "Display name",
-      "panel_name": "Server",
-      "server_address": "Address",
-      "region": "Region",
-      "tags": "Tags",
       "inbound": "Inbound",
-      "sort_order": "Sort",
-      "health": "Status",
-      "enabled": "Enabled",
-      "actions": "Actions"
-    },
-    "endpoint": {
-      "desired_short": "D",
-      "observed_short": "O",
-      "synced": "Observed endpoint matches desired state",
-      "mismatch": "Observed listening endpoint differs from desired state",
-      "unobserved": "No observed endpoint has been reported yet"
+      "sort_order": "Sort"
     },
     "health": {
       "ok": "Healthy",
@@ -2665,24 +2602,31 @@
       "flow": "Flow (optional)",
       "region": "Region",
       "tags": "Tags",
-      "enabled": "Enabled",
-      "separator_mode": "Visibility mode",
-      "separator_mode_global": "Global (show in every group)",
-      "separator_mode_node_bound": "Bound to nodes (show when any linked node appears)",
-      "separator_mode_hint_global": "Visible in every group.",
-      "separator_mode_hint_node_bound": "Only visible when the rendered group contains at least one of the linked nodes. Position is still set by drag-to-reorder.",
-      "separator_node_ids": "Linked nodes",
-      "separator_node_ids_hint": "On subscription render, any group whose user can see at least one of these nodes shows the separator. Leave empty to hide it everywhere.",
       "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the direct line's traffic multiplier (e.g. ×1.5) in subscriptions.",
       "traffic_factor": "Traffic multiplier",
       "traffic_factor_direct": "Direct line traffic multiplier"
     },
     "action": {
-      "edit": "Edit",
       "delete": "Delete",
-      "detach": "Detach",
-      "recreate_inbound": "Re-create inbound on server",
-      "drag_to_reorder": "Drag to reorder"
+      "recreate_inbound": "Recreate inbound on server",
+      "edit_line": "Edit line",
+      "edit_direct": "Edit direct line",
+      "edit_node": "Edit node",
+      "add_line": "Add line",
+      "enable_line": "Enable line",
+      "disable_line": "Disable line",
+      "enable_node": "Enable node",
+      "disable_node": "Disable node",
+      "open_node": "Open node",
+      "move_to": "Move to…",
+      "delete_line": "Delete line",
+      "delete_node": "Delete node",
+      "remove_from_panel": "Remove from panel only",
+      "edit_separator": "Edit separator",
+      "delete_separator": "Delete separator",
+      "create_separator": "New separator",
+      "refresh": "Refresh",
+      "row_menu": "Actions for {{name}}"
     },
     "validate": {
       "address_region_required": "Address and Region are required",
@@ -2691,24 +2635,21 @@
     "toast": {
       "saved": "Saved",
       "deleted": "Deleted",
-      "detached": "Detached",
+      "detached": "Removed from the panel",
       "enabled": "Enabled",
       "disabled": "Disabled",
       "batch_enabled": "Enabled {{count}} nodes",
       "batch_disabled": "Disabled {{count}} nodes",
       "batch_deleted": "Deleted {{count}} nodes",
       "batch_partial": "{{ok}} done, {{fail}} failed",
-      "reordered": "Order updated",
-      "reorder_failed": "Reorder failed",
       "separator_created": "Separator created",
       "separator_updated": "Separator updated",
-      "recreated_inbound": "Inbound re-created; provisioning clients in the background (refresh 3X-UI in a few seconds)"
+      "recreated_inbound": "Inbound re-created; provisioning clients in the background (refresh 3X-UI in a few seconds)",
+      "undo": "Undo"
     },
     "confirm": {
       "delete_title": "Delete node",
       "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
-      "detach_title": "Detach node",
-      "detach_message": "Detach node {{name}}? The panel will drop the node record and forget its clients locally — 3X-UI will NOT be contacted. Any clients Passwall Panel previously created on this inbound stay on 3X-UI for you to clean up there. Use this when the upstream server is offline or decommissioned; otherwise use Delete.",
       "recreate_inbound_title": "Re-create inbound on the server?",
       "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config, relink the node to the new inbound, then provision the members' clients onto it. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Safe to re-click: if the inbound already exists it is NOT re-created, only the clients are re-pushed (to push clients that didn't land).",
       "batch_delete_title": "Delete nodes",
@@ -2737,6 +2678,194 @@
       "tip_measured": "Link quality measured by the entry server",
       "tip_unknown": "No measurement has been reported yet. No data never withholds a line.",
       "tip_reported": "Reported {{time}}"
+    },
+    "list": {
+      "count": "{{count}} lines",
+      "count_filtered": "Showing {{shown}} of {{total}}",
+      "lines_of_node": "{{count}} lines",
+      "scope_note": "This is the subscription order of every line. Each subscriber sees part of it, in this order",
+      "scope_help": "Which lines a subscriber gets depends on their group's node filter, each line's own region and tags, whether the line is published, node-bound separators, the group's own separators, and the subscription format (Clash has no Naive).",
+      "scope_help_label": "Which lines a subscriber sees"
+    },
+    "tabs": {
+      "lines": "Lines",
+      "unmanaged": "Unmanaged inbounds"
+    },
+    "view": {
+      "label": "View",
+      "order": "Subscription order",
+      "node": "By node"
+    },
+    "search": {
+      "placeholder": "Search lines, nodes, servers or addresses"
+    },
+    "facet": {
+      "type": "Type",
+      "status": "Status",
+      "entry": "Entry server",
+      "landing_server": "Landing server"
+    },
+    "col": {
+      "line": "Line",
+      "path": "Path",
+      "address": "Address",
+      "factor": "Multiplier",
+      "status": "Status",
+      "landing_server": "Landing server",
+      "region": "Region",
+      "tags": "Tags",
+      "id": "ID",
+      "protocol": "Protocol",
+      "checked_at": "Last health check",
+      "actions": "Actions"
+    },
+    "kpi": {
+      "lines": "Lines",
+      "published": "Published",
+      "withheld": "Not published",
+      "unreachable": "Unreachable"
+    },
+    "type": {
+      "direct": "Direct",
+      "forward": "Direct forward",
+      "tunnel": "Encrypted tunnel",
+      "cdn": "CDN",
+      "external": "External entry",
+      "link": "Server-to-server tunnel"
+    },
+    "separator": {
+      "global": "All groups",
+      "node_bound": "Node-bound · {{count}} nodes",
+      "disabled": "Disabled",
+      "create_title": "New separator",
+      "edit_title": "Edit separator",
+      "hint": "A separator appears in the client's node list as a DIRECT entry and only groups lines visually. A new separator is added at the end of the order; drag it or use \"Move to…\" afterwards.",
+      "name": "Name",
+      "name_required": "Enter a name",
+      "mode": "Shown in",
+      "node_bound_option": "Node-bound",
+      "mode_hint_global": "Every group shows this separator",
+      "mode_hint_node_bound": "A group shows it only when it can see one of the nodes below",
+      "nodes": "Linked nodes",
+      "nodes_hint": "Left empty, it never appears",
+      "enabled": "Enabled"
+    },
+    "status": {
+      "ok": "Healthy",
+      "unchecked": "Not checked yet",
+      "published": "Published",
+      "config_pending": "Config retry pending",
+      "config_failed": "Config push abandoned",
+      "endpoint_drift": "Listener differs from config",
+      "unreachable": "Unreachable",
+      "server_unreachable": "Server unreachable",
+      "inbound_missing": "Inbound missing",
+      "inbound_disabled": "Inbound disabled",
+      "inconclusive": "Inconclusive"
+    },
+    "withheld": {
+      "landing_disabled": "Node disabled",
+      "hidden_direct": "Direct line hidden",
+      "disabled": "Line disabled",
+      "waiting_entry": "Waiting for entry server",
+      "egress": "Exit not ready",
+      "probe": "Withdrawn: link down",
+      "source_guard": "Sources cannot be told apart",
+      "cdn_unfit": "Node cannot be served through CDN",
+      "entry_missing": "Entry server deleted",
+      "unpublished": "Not published"
+    },
+    "withheld_detail": {
+      "landing_disabled": "While the node is disabled, none of its lines appear in subscriptions",
+      "hidden_direct": "The direct line is hidden; subscriptions keep only this node's other lines",
+      "disabled": "The line is disabled and does not appear in subscriptions",
+      "waiting_entry": "The entry server has not confirmed this line's forward yet. The line is published automatically once it does",
+      "egress": "The default exit's tunnel is not running on both servers yet, or routes by destination have not been applied. The line is published once they are",
+      "probe": "The entry server has not reached this link for a while, so it was taken out of subscriptions. It returns once the link recovers and is never replaced by the direct line",
+      "source_guard": "See the reason below",
+      "cdn_unfit": "This node's settings cannot pass through a CDN; see the reasons below",
+      "entry_missing": "This line's entry server no longer exists. Delete the line or choose another entry server"
+    },
+    "bulk": {
+      "enable_nodes": "Enable nodes ({{count}})",
+      "disable_nodes": "Disable nodes ({{count}})",
+      "delete_nodes": "Delete nodes ({{count}})"
+    },
+    "sheet": {
+      "type": "Type",
+      "entry": "Entry server",
+      "landing": "Landing node",
+      "quality": "Link quality",
+      "health": "Health check",
+      "config_sync": "Config sync",
+      "listener": "Observed listener",
+      "other_lines": "Other lines of this node",
+      "region_tags": "Region / tags",
+      "node_section": "Landing node"
+    },
+    "order": {
+      "saving": "Saving the order",
+      "saved": "Order updated",
+      "undone": "Undone",
+      "failed": "Could not save the order: {{reason}}. The previous order is restored",
+      "blocked_filter": "Clear search and filters to drag, or use \"Move to…\"",
+      "clear_to_drag": "Clear filters to drag",
+      "read_only": "Only administrators can change the order",
+      "too_many": "More than 10,000 rows; the order cannot be saved here",
+      "move_title": "Move \"{{name}}\"",
+      "move_after": "Place after",
+      "move_top": "Move to the top",
+      "move_pick": "Choose a row",
+      "move_none": "No matching row",
+      "move_with_lines": "Also move this node's other {{count}} lines right after it",
+      "move_confirm": "Move",
+      "stale_title": "The order has changed",
+      "stale_body": "While you were reordering, another administrator changed the order or the lines. Changes:",
+      "stale_added": "Added: {{name}}",
+      "stale_removed": "Removed: {{name}}",
+      "stale_moved": "{{count}} other rows moved",
+      "stale_reapply": "Move again on the latest order",
+      "stale_keep": "Keep the latest order",
+      "stale_gone": "\"{{name}}\" no longer exists, so the move cannot be repeated"
+    },
+    "delete": {
+      "remove_title": "Remove \"{{name}}\" from the panel only?",
+      "remove_body": "The panel deletes this node and its lines without contacting the server: the inbound and its clients stay on the server for you to clean up there. Use this only when the server is offline or unreachable",
+      "separator_title": "Delete separator \"{{name}}\"?",
+      "separator_body": "The separator disappears when subscribers refresh"
+    },
+    "detail": {
+      "back": "Nodes",
+      "admin_only": "Only administrators can view and edit node details",
+      "not_found": "This node was not found",
+      "edit_legacy": "Edit details and lines",
+      "show_lines": "Show this node in the list"
+    },
+    "empty": {
+      "title": "No nodes yet",
+      "body": "Once you add a node, each of its lines is listed here",
+      "no_servers_body": "Add a server first, then add a node",
+      "no_servers": "Add a server first",
+      "filtered": "No lines match",
+      "clear": "Clear filters",
+      "filtered_unmanaged": "No inbounds match"
+    },
+    "error": {
+      "load": "Could not load lines",
+      "partial": "Some node details could not be loaded"
+    },
+    "unmanaged": {
+      "server": "Server",
+      "server_placeholder": "Choose a server",
+      "pick_server": "Choose a server to see its unmanaged inbounds",
+      "load_failed": "Could not load this server's inbounds: {{reason}}",
+      "search_placeholder": "Search protocol, remark, inbound ID or port",
+      "none": "This server has no unmanaged inbounds",
+      "col_id": "Inbound ID",
+      "col_protocol": "Protocol",
+      "col_port": "Port",
+      "col_remark": "Remark",
+      "col_clients": "Clients"
     }
   },
   "users": {

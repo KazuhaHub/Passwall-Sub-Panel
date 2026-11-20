@@ -2045,22 +2045,6 @@
         "cdn": "CDN"
       }
     },
-    "lines": {
-      "title": "线路表",
-      "filter": "按名称、服务器或地址筛选",
-      "node": "落地节点",
-      "line": "订阅线路",
-      "entry": "入口",
-      "exit": "默认出口",
-      "status": "状态",
-      "factor": "流量倍率",
-      "published": "已发布",
-      "pending": "等待生效",
-      "issue": "需要检查",
-      "disabled": "已停用",
-      "empty": "没有符合条件的线路。"
-    },
-    "load_failed": "暂时无法加载节点",
     "retry": "重试",
     "cert_source": {
       "from_panel": "从面板获取证书路径",
@@ -2073,27 +2057,8 @@
       "managed_help": "PSP 会把该证书部署到此节点并自动续期。",
       "no_active_certs": "暂无可用证书，请先在「证书」页签发一张。"
     },
-    "title": "节点管理",
-    "subtitle": "管理 3X-UI 入站，订阅生成基于此处的启用状态",
-    "tab_managed": "已管理",
-    "tab_unmanaged": "未管理",
-    "managed_search_placeholder": "搜索显示名 / 服务器 / 地址 / 区域 / 标签 / ID…",
-    "managed_count": "显示 {{shown}} / 共 {{total}} 个",
-    "managed_filter_empty": "没有匹配的节点",
-    "managed_search_disables_drag": "搜索时无法拖拽排序，清空搜索后恢复",
-    "unmanaged_search_placeholder": "搜索协议 / 备注 / 端口 / ID…",
-    "unmanaged_count": "显示 {{shown}} / 共 {{total}} 个",
-    "unmanaged_filter_empty": "没有匹配的结果",
-    "unmanaged_server_label": "服务器",
-    "unmanaged_server_placeholder": "选择服务器…",
-    "unmanaged_pick_server": "选择一个服务器以查看其未托管的 inbound",
-    "unmanaged_load_failed": "加载该服务器的 inbound 失败",
-    "search_group": {
-      "protocol": "协议",
-      "remark": "备注"
-    },
+    "title": "节点",
     "create": "新增节点",
-    "create_separator": "新增分隔标题",
     "edit_title": "编辑节点",
     "relay": {
       "title": "中转线路",
@@ -2241,17 +2206,17 @@
         "switch_mode_title": "切换线路模式？",
         "switch_mode_text": "切换模式会替换这条线路的承载方式。",
         "create_line_title": "新建隧道线路？",
-  "create_line_text": "新建隧道线路；端口已变化，请确认新的端口",
-  "remove_line_title": "删除隧道线路？",
+        "create_line_text": "新建隧道线路；端口已变化，请确认新的端口",
+        "remove_line_title": "删除隧道线路？",
         "remove_line_text": "删除隧道线路会同时删除它的监听器。",
         "delete_node_title": "删除节点及其隧道监听器？",
         "delete_node_text": "删除该节点会同时删除它的隧道线路的监听器。",
         "sync_from_landing_title": "从落地同步设置？",
         "sync_from_landing_text": "监听器的以下设置会改为与落地一致：",
         "creates_item": "将为 {{landing}} 的线路 {{line}} 创建监听器：在 {{entry}} 上开放端口 {{port}}。",
-  "creates_link": "将在 {{exit}} 上开放隧道端口 {{port}}（{{entry}} 与 {{exit}} 之间的新隧道）。",
-  "creates_forward": "将为 {{landing}} 的线路 {{line}} 在 {{entry}} 上开放转发端口 {{port}}。",
-  "server_fallback": "服务器 #{{id}}",
+        "creates_link": "将在 {{exit}} 上开放隧道端口 {{port}}（{{entry}} 与 {{exit}} 之间的新隧道）。",
+        "creates_forward": "将为 {{landing}} 的线路 {{line}} 在 {{entry}} 上开放转发端口 {{port}}。",
+        "server_fallback": "服务器 #{{id}}",
         "removes_item": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}。",
         "removes_item_front": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}，并离开共用端口 {{front_port}}。",
         "diff_item": "{{field}}：{{from}} → {{to}}",
@@ -2434,13 +2399,6 @@
     "import": "纳管",
     "imported": "已纳管",
     "import_validate": "请填写连接地址和 Region",
-    "create_separator_dialog": {
-      "title": "新增分隔标题",
-      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。在哪些分组里显示由下方\"显示在所有分组\"开关 + 分组选择决定，跟节点的 tag_filter 无关。"
-    },
-    "edit_separator_dialog": {
-      "title": "编辑分隔标题"
-    },
     "edit_inbound": "编辑 Inbound 配置",
     "edit_inbound_dialog": {
       "title": "编辑 Inbound 配置",
@@ -2586,7 +2544,7 @@
       "created": "已创建",
       "queued": "已加入同步任务"
     },
-    "claim": "Claim",
+    "claim": "认领客户端",
     "claim_dialog": {
       "title": "Claim 已存在的 client",
       "subtitle": "把 3X-UI inbound #{{id}} 上已存在的 client（按 email 标识）关联到面板用户。常用于历史 inbound 迁移。",
@@ -2595,7 +2553,8 @@
       "client_uuid": "Client UUID（可选；留空让 panel 沿用 3X-UI 现有值）",
       "submit": "Claim",
       "claimed": "已关联",
-      "validate_required": "请选择用户并填写 client email"
+      "validate_required": "请选择用户并填写 client email",
+      "users_loading": "正在加载用户…"
     },
     "import_dialog": {
       "title": "纳管 inbound",
@@ -2605,34 +2564,12 @@
       "flow": "Flow（可选）",
       "region": "Region",
       "tags": "Tags",
-      "endpoint": "端点（期望 / 实际）",
-      "sort_order": "排序权重",
-      "sort_order_hint": "0 = 自动排到列表末尾"
+      "endpoint": "端点（期望 / 实际）"
     },
     "feature_pending": "功能迁移中（下个版本）",
-    "selection_count": "已选 {{count}}",
-    "batch_enable": "批量启用",
-    "batch_disable": "批量停用",
-    "batch_delete": "批量删除",
     "table": {
-      "id": "ID",
-      "display_name": "显示名",
-      "panel_name": "服务器",
-      "server_address": "连接地址",
-      "region": "Region",
-      "tags": "Tags",
       "inbound": "Inbound",
-      "sort_order": "排序",
-      "health": "状态",
-      "enabled": "启用",
-      "actions": "操作"
-    },
-    "endpoint": {
-      "desired_short": "期",
-      "observed_short": "实",
-      "synced": "实际端点与期望一致",
-      "mismatch": "实际监听端点与期望配置不一致",
-      "unobserved": "尚未收到实际端点上报"
+      "sort_order": "排序"
     },
     "health": {
       "ok": "健康",
@@ -2661,24 +2598,31 @@
       "flow": "Flow（可选）",
       "region": "Region",
       "tags": "Tags",
-      "enabled": "启用",
-      "separator_mode": "可见模式",
-      "separator_mode_global": "全局（所有分组显示）",
-      "separator_mode_node_bound": "按节点关联（节点出现时显示）",
-      "separator_mode_hint_global": "所有分组都显示此分隔符。",
-      "separator_mode_hint_node_bound": "仅当该分组包含下方关联的任意节点时才显示。位置仍由拖拽排序决定。",
-      "separator_node_ids": "关联节点",
-      "separator_node_ids_hint": "订阅渲染时，凡是用户能看到这里任一节点的分组都会显示此分隔符；不填则永远不出现。",
       "display_name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为直连线路的流量倍率（如 ×1.5）。",
       "traffic_factor": "流量倍率",
       "traffic_factor_direct": "直连线路流量倍率"
     },
     "action": {
-      "edit": "编辑",
       "delete": "删除",
-      "detach": "脱离",
-      "recreate_inbound": "在服务器上重建 inbound",
-      "drag_to_reorder": "拖动排序"
+      "recreate_inbound": "在服务器上重建入站",
+      "edit_line": "编辑线路",
+      "edit_direct": "编辑直连线路",
+      "edit_node": "编辑节点",
+      "add_line": "添加线路",
+      "enable_line": "启用线路",
+      "disable_line": "停用线路",
+      "enable_node": "启用节点",
+      "disable_node": "停用节点",
+      "open_node": "打开节点",
+      "move_to": "移动到…",
+      "delete_line": "删除线路",
+      "delete_node": "删除节点",
+      "remove_from_panel": "仅从面板移除",
+      "edit_separator": "编辑分隔标题",
+      "delete_separator": "删除分隔标题",
+      "create_separator": "新增分隔标题",
+      "refresh": "刷新",
+      "row_menu": "“{{name}}”的操作"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region",
@@ -2687,24 +2631,21 @@
     "toast": {
       "saved": "已保存",
       "deleted": "已删除",
-      "detached": "已脱离",
+      "detached": "已从面板移除",
       "enabled": "已启用",
       "disabled": "已禁用",
       "batch_enabled": "已启用 {{count}} 个节点",
       "batch_disabled": "已停用 {{count}} 个节点",
       "batch_deleted": "已删除 {{count}} 个节点",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个",
-      "reordered": "排序已更新",
-      "reorder_failed": "排序更新失败",
       "separator_created": "分隔标题已创建",
       "separator_updated": "分隔标题已更新",
-      "recreated_inbound": "inbound 已重建，正在后台下发 client（稍等几秒刷新 3X-UI）"
+      "recreated_inbound": "inbound 已重建，正在后台下发 client（稍等几秒刷新 3X-UI）",
+      "undo": "撤销"
     },
     "confirm": {
       "delete_title": "删除节点",
       "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
-      "detach_title": "脱离节点",
-      "detach_message": "确定脱离节点 {{name}}？面板只会删除本地节点记录并清空本地 ownership 白名单，**不会**联系 3X-UI；之前由 Passwall Panel 创建的 client 会留在 3X-UI 上，需要的话请到 3X-UI 自行清理。建议仅在上游服务器已下线 / 面板不可达时使用，否则请用「删除」。",
       "recreate_inbound_title": "在服务器上重建 inbound？",
       "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。",
       "batch_delete_title": "批量删除节点",
@@ -2733,6 +2674,194 @@
       "tip_measured": "由入口服务器测得的链路质量",
       "tip_unknown": "尚未收到探测结果。暂无数据不会导致撤下。",
       "tip_reported": "上报于 {{time}}"
+    },
+    "list": {
+      "count": "{{count}} 条线路",
+      "count_filtered": "显示 {{shown}} / 共 {{total}} 条",
+      "lines_of_node": "{{count}} 条线路",
+      "scope_note": "这是全部线路的订阅顺序。每位订阅者看到的是其中一部分，顺序不变",
+      "scope_help": "订阅者看到哪些线路，取决于其分组的节点筛选、线路自己的区域和标签、线路是否已发布、按节点关联的分隔标题、分组里的分隔标题，以及订阅格式（Clash 不支持 Naive）。",
+      "scope_help_label": "订阅者看到哪些线路"
+    },
+    "tabs": {
+      "lines": "线路",
+      "unmanaged": "未纳管入站"
+    },
+    "view": {
+      "label": "视图",
+      "order": "订阅顺序",
+      "node": "按节点"
+    },
+    "search": {
+      "placeholder": "搜索线路、节点、服务器或地址"
+    },
+    "facet": {
+      "type": "类型",
+      "status": "状态",
+      "entry": "入口服务器",
+      "landing_server": "落地服务器"
+    },
+    "col": {
+      "line": "线路",
+      "path": "路径",
+      "address": "地址",
+      "factor": "倍率",
+      "status": "状态",
+      "landing_server": "落地服务器",
+      "region": "区域",
+      "tags": "标签",
+      "id": "ID",
+      "protocol": "协议",
+      "checked_at": "上次健康检查",
+      "actions": "操作"
+    },
+    "kpi": {
+      "lines": "线路",
+      "published": "已发布",
+      "withheld": "未发布",
+      "unreachable": "不可达"
+    },
+    "type": {
+      "direct": "直连",
+      "forward": "直接转发",
+      "tunnel": "加密隧道",
+      "cdn": "CDN",
+      "external": "外部入口",
+      "link": "服务器间隧道"
+    },
+    "separator": {
+      "global": "全局",
+      "node_bound": "按节点关联 · {{count}} 个节点",
+      "disabled": "已停用",
+      "create_title": "新增分隔标题",
+      "edit_title": "编辑分隔标题",
+      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，只用于视觉分组。新的分隔标题排在订阅顺序的末尾，之后可以拖动或用“移动到…”调整。",
+      "name": "名称",
+      "name_required": "请填写名称",
+      "mode": "显示范围",
+      "node_bound_option": "按节点关联",
+      "mode_hint_global": "所有分组都显示此分隔标题",
+      "mode_hint_node_bound": "只有分组能看到下方任一关联节点时才显示",
+      "nodes": "关联节点",
+      "nodes_hint": "不填则永远不出现",
+      "enabled": "启用"
+    },
+    "status": {
+      "ok": "正常",
+      "unchecked": "尚未检查",
+      "published": "已发布",
+      "config_pending": "配置待重试",
+      "config_failed": "配置下发已放弃",
+      "endpoint_drift": "实际监听与配置不一致",
+      "unreachable": "不可达",
+      "server_unreachable": "服务器不可达",
+      "inbound_missing": "入站缺失",
+      "inbound_disabled": "入站已关闭",
+      "inconclusive": "无法判定"
+    },
+    "withheld": {
+      "landing_disabled": "节点已停用",
+      "hidden_direct": "已隐藏直连线路",
+      "disabled": "线路已停用",
+      "waiting_entry": "等待入口服务器生效",
+      "egress": "出口未就绪",
+      "probe": "链路中断，已撤下",
+      "source_guard": "无法按来源区分",
+      "cdn_unfit": "节点无法经 CDN 访问",
+      "entry_missing": "入口服务器已删除",
+      "unpublished": "未发布"
+    },
+    "withheld_detail": {
+      "landing_disabled": "节点停用后，它的所有线路都不会出现在订阅中",
+      "hidden_direct": "直连线路已隐藏，订阅中只保留此节点的其他线路",
+      "disabled": "线路已停用，不会出现在订阅中",
+      "waiting_entry": "入口服务器还没有确认这条线路的转发。确认后线路会自动发布",
+      "egress": "默认出口的隧道尚未在两台服务器上生效，或按目标分流尚未下发。生效后自动发布",
+      "probe": "入口服务器持续探测不到这条链路，已从订阅中撤下。链路恢复后自动回到订阅，不会改用直连",
+      "source_guard": "原因见下方",
+      "cdn_unfit": "此节点的配置无法经过 CDN，原因见下方",
+      "entry_missing": "这条线路的入口服务器已不存在。删除这条线路，或改用其他入口服务器"
+    },
+    "bulk": {
+      "enable_nodes": "启用节点（{{count}}）",
+      "disable_nodes": "停用节点（{{count}}）",
+      "delete_nodes": "删除节点（{{count}}）"
+    },
+    "sheet": {
+      "type": "类型",
+      "entry": "入口服务器",
+      "landing": "落地节点",
+      "quality": "链路质量",
+      "health": "健康检查",
+      "config_sync": "配置同步",
+      "listener": "实际监听",
+      "other_lines": "此节点的其他线路",
+      "region_tags": "区域 / 标签",
+      "node_section": "落地节点"
+    },
+    "order": {
+      "saving": "正在保存顺序",
+      "saved": "已更新顺序",
+      "undone": "已撤销",
+      "failed": "无法保存顺序：{{reason}}。已恢复原来的顺序",
+      "blocked_filter": "清除搜索和筛选后才能拖动；也可以用“移动到…”",
+      "clear_to_drag": "清除筛选以拖动排序",
+      "read_only": "只有管理员可以调整顺序",
+      "too_many": "超过 10000 行，无法在此保存整体顺序",
+      "move_title": "移动“{{name}}”",
+      "move_after": "放在此行之后",
+      "move_top": "移到最前",
+      "move_pick": "选择一行",
+      "move_none": "没有匹配的行",
+      "move_with_lines": "同时移动此节点的其他 {{count}} 条线路，紧跟其后",
+      "move_confirm": "移动",
+      "stale_title": "顺序已被修改",
+      "stale_body": "在你调整顺序时，其他管理员修改了顺序或线路。下面是变化：",
+      "stale_added": "新增：{{name}}",
+      "stale_removed": "删除：{{name}}",
+      "stale_moved": "另有 {{count}} 行位置变化",
+      "stale_reapply": "在最新顺序上重新移动",
+      "stale_keep": "保留最新顺序",
+      "stale_gone": "“{{name}}”已不存在，无法重新移动"
+    },
+    "delete": {
+      "remove_title": "仅从面板移除“{{name}}”？",
+      "remove_body": "面板会删除此节点和它的线路，但不会连接服务器：服务器上的入站和客户端会保留，需要时在服务器上自行清理。仅在服务器已下线或无法连接时使用",
+      "separator_title": "删除分隔标题“{{name}}”？",
+      "separator_body": "订阅者刷新订阅后，这个分隔标题会消失"
+    },
+    "detail": {
+      "back": "节点",
+      "admin_only": "只有管理员可以查看和编辑节点详情",
+      "not_found": "找不到这个节点",
+      "edit_legacy": "编辑基本信息和线路",
+      "show_lines": "在列表中查看此节点"
+    },
+    "empty": {
+      "title": "还没有节点",
+      "body": "新增一个节点后，它的每条线路都会在这里列出",
+      "no_servers_body": "先添加一台服务器，再新增节点",
+      "no_servers": "先添加服务器",
+      "filtered": "没有符合条件的线路",
+      "clear": "清除筛选",
+      "filtered_unmanaged": "没有符合条件的入站"
+    },
+    "error": {
+      "load": "无法加载线路",
+      "partial": "部分节点信息暂时无法加载"
+    },
+    "unmanaged": {
+      "server": "服务器",
+      "server_placeholder": "选择服务器",
+      "pick_server": "选择一台服务器，查看它上面未纳管的入站",
+      "load_failed": "无法加载此服务器的入站：{{reason}}",
+      "search_placeholder": "搜索协议、备注、入站 ID 或端口",
+      "none": "这台服务器上没有未纳管的入站",
+      "col_id": "入站 ID",
+      "col_protocol": "协议",
+      "col_port": "端口",
+      "col_remark": "备注",
+      "col_clients": "客户端"
     }
   },
   "users": {

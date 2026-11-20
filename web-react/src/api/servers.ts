@@ -744,3 +744,17 @@ export async function cleanRetiredRoutes(id: number, revision: string): Promise<
   const { data } = await client.post<RetiredRoutePreview>(`/admin/servers/${id}/retired-route-cleanup`, { confirm: true, revision }, { _skipErrorToast: true })
   return data
 }
+
+/** What is still attached to a server (GET /admin/servers/:id/delete-impact). */
+export interface ServerDeleteImpact {
+  server_id: number
+  nodes: Record<string, unknown>[]
+  lines_entering: { node_id: number; line_id: string; landing_name: string; line_name: string; line_type: string; landing_pending_delete: boolean }[]
+  egress_users: { node_id: number; node: string }[]
+  route_users: Record<string, unknown>[]
+}
+
+export async function getServerDeleteImpact(id: number, signal?: AbortSignal): Promise<ServerDeleteImpact> {
+  const { data } = await client.get<ServerDeleteImpact>(`/admin/servers/${id}/delete-impact`, { signal })
+  return data
+}

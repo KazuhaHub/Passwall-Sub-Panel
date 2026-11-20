@@ -22,6 +22,10 @@ describe('route access helpers', () => {
     expect(isAdminOnlyPath('/admin/settings/security')).toBe(true)
     expect(isAdminOnlyPath('/admin/servers/1')).toBe(true)
     expect(isAdminOnlyPath('/admin/users')).toBe(false)
+    // The nodes list is staff; a node's page and the create page are not.
+    expect(isAdminOnlyPath('/admin/nodes')).toBe(false)
+    expect(isAdminOnlyPath('/admin/nodes/12')).toBe(true)
+    expect(isAdminOnlyPath('/admin/nodes/new')).toBe(true)
     expect(isAdminOnlyPath('/admin/settings-extra')).toBe(false)
   })
 

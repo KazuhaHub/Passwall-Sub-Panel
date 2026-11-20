@@ -35,5 +35,8 @@ const ADMIN_ONLY_ROUTES = [
 ]
 
 export function isAdminOnlyPath(path: string): boolean {
+  // The nodes LIST is staff, but a node's detail page and the create page are admin-only (its reads include
+  // admin endpoints: routes, transit links, source guard), so everything below /admin/nodes is.
+  if (path.startsWith('/admin/nodes/')) return true
   return ADMIN_ONLY_ROUTES.some(r => path === r || path.startsWith(r + '/'))
 }

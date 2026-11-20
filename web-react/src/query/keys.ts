@@ -70,6 +70,10 @@ export const nodeKeys = {
   list: (s: QueryScope, params: NodeListParams) => [...nodeKeys.lists(s), params] as const,
   /** The interleaved separator rows shown among the nodes. */
   separators: (s: QueryScope) => [...nodeKeys.all(s), 'separators'] as const,
+  /** The global subscription order: every line and separator, with its publication state. */
+  order: (s: QueryScope) => [...nodeKeys.all(s), 'order'] as const,
+  /** Every node, all pages read and joined to the order by node id. */
+  allNodes: (s: QueryScope) => [...nodeKeys.lists(s), 'all'] as const,
   /** Inbounds on a panel that PSP does not manage, for one panel. */
   unmanaged: (s: QueryScope, panelId: number) => [...nodeKeys.all(s), 'unmanaged', panelId] as const,
 }

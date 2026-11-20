@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
-import NodesView from './NodesView'
+import { api, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { LegacyProbe, openMeta } from './legacyHarness'
 
 /**
  * The node editor opens on the list's copy of a node, which says whether its
@@ -36,8 +36,8 @@ describe('NodesView egress status', () => {
   it('turns pending into ready once the tunnel runs on both servers', async () => {
     let ready = false
     reads(() => ({ node: { ...tunnelled, egress_ready: ready }, clients: [] }), tunnelled)
-    mount(<NodesView />)
-    await editRow()
+    mount(<LegacyProbe />)
+    await openMeta()
 
     const status = await screen.findByTestId('egress-status')
     expect(status.textContent).toBe('admin:nodes.egress.pending')
@@ -57,7 +57,7 @@ describe('NodesView egress status', () => {
     // The list row learned it too: reopening shows ready without asking.
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await editRow()
+    await openMeta()
     expect((await screen.findByTestId('egress-status')).textContent).toBe('admin:nodes.egress.ready')
     await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
     expect(nodeReads()).toBe(asked)
@@ -65,8 +65,8 @@ describe('NodesView egress status', () => {
 
   it('does not ask while the editor already shows ready', async () => {
     reads(() => ({ node: { ...tunnelled, egress_ready: true }, clients: [] }), { ...tunnelled, egress_ready: true })
-    mount(<NodesView />)
-    await editRow()
+    mount(<LegacyProbe />)
+    await openMeta()
 
     expect((await screen.findByTestId('egress-status')).textContent).toBe('admin:nodes.egress.ready')
     await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
@@ -77,8 +77,8 @@ describe('NodesView egress status', () => {
     const probe = { state: 'degraded', median_rtt_ms: 80, loss_percent: 5, withheld: false }
     reads(() => ({ node: { ...tunnelled, egress_ready: true, egress_probe: probe, egress_withheld: true }, clients: [] }),
       { ...tunnelled, egress_ready: true, egress_probe: probe, egress_withheld: true })
-    mount(<NodesView />)
-    await editRow()
+    mount(<LegacyProbe />)
+    await openMeta()
     const chip = await screen.findByTestId('egress-probe')
     expect(chip.dataset.state).toBe('degraded')
     expect(screen.getByTestId('egress-probe-withheld')).toBeTruthy()

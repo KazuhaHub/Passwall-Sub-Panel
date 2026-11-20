@@ -2,7 +2,7 @@ import { withFrontConfirm } from '@/utils/frontConfirm'
 import { withTunnelConfirm, type TunnelConfirmation, type TunnelConfirmOptions } from '@/utils/tunnelConfirm'
 import { client } from './client'
 import type { RouteInput } from './routes'
-import type { ListResponse, Node, RelayLine, UnmanagedInbound } from './types'
+import type { CdnIssue, ListResponse, Node, ProbeQuality, RelayLine, UnmanagedInbound } from './types'
 
 export interface AdminInbound {
   id: number
@@ -520,5 +520,126 @@ export interface SeparatorGroupsPreview {
 export async function previewSeparatorGroups(mode: 'global' | 'node_bound', nodeIds: number[], signal?: AbortSignal): Promise<SeparatorGroupsPreview> {
   const { data } = await client.post<SeparatorGroupsPreview>('/admin/nodes/separator/group-preview', { mode, node_ids: nodeIds }, { signal, _skipErrorToast: true })
   if (!data || !Array.isArray(data.groups) || !Array.isArray(data.visible)) throw new Error('malformed separator preview')
+  return data
+}
+
+// ---- The global subscription order (GET/PUT /admin/nodes/order) ----------------------------------------------
+
+export type OrderLineType = 'direct' | 'forward' | 'tunnel' | 'cdn' | 'external'
+
+/** Why a line is not published; "" (absent) when it is. Mirrors node.OrderRow.Withheld. */
+export type OrderWithheld =
+  | '' | 'hidden_direct' | 'landing_disabled' | 'disabled' | 'egress' | 'probe' | 'source_guard' | 'waiting_entry' | 'cdn_unfit'
+
+export interface OrderLanding {
+  node_id: number
+  name: string
+  region: string
+  panel_id: number
+  panel_name: string
+  enabled: boolean
+}
+
+export interface OrderEntry {
+  panel_id: number
+  panel_name: string
+  /** The entry server no longer exists. */
+  missing: boolean
+}
+
+export interface OrderHealth {
+  state: string
+  checked_at: string | null
+  detail?: string
+}
+
+/** One row of the order: a separator, or one line (the direct line or a relay line) of a node. */
+export interface OrderRow {
+  kind: 'separator' | 'line'
+  /** Separator rows. */
+  id?: number
+  mode?: SeparatorMode
+  /** Line rows. */
+  node_id?: number
+  line_id?: string
+  name: string
+  enabled: boolean
+  position: number
+  positioned: boolean
+  landing?: OrderLanding
+  entry?: OrderEntry
+  line_type?: OrderLineType
+  hidden_direct?: boolean
+  published?: boolean
+  withheld?: OrderWithheld
+  address?: string
+  port?: number
+  traffic_factor_milli?: number
+  running?: boolean
+  probe?: ProbeQuality
+  source_withheld?: string
+  cdn_issues?: CdnIssue[]
+  health?: OrderHealth
+}
+
+export interface NodeOrder {
+  order_version: string
+  rows: OrderRow[]
+}
+
+/** The order's refs: separators and lines come from independent id sequences, so a ref is typed. */
+export type OrderRef =
+  | { kind: 'separator'; id: number }
+  | { kind: 'line'; node_id: number; line_id: string }
+
+export async function getNodeOrder(signal?: AbortSignal): Promise<NodeOrder> {
+  const { data } = await client.get<NodeOrder>('/admin/nodes/order', { signal })
+  return data
+}
+
+/** A reorder refused because the order changed since it was read; `current` is the order as it is now. */
+export class OrderStaleError extends Error {
+  readonly current: NodeOrder
+  constructor(current: NodeOrder) {
+    super('order_stale')
+    this.name = 'OrderStaleError'
+    this.current = current
+  }
+}
+
+/**
+ * Writes the COMPLETE arrangement, top to bottom, against the version it was built from. The failure toast is
+ * the caller's (the stale case has its own dialog), so the request layer stays quiet.
+ */
+export async function putNodeOrder(baseVersion: string, items: OrderRef[]): Promise<string> {
+  try {
+    const { data } = await client.put<{ order_version: string }>('/admin/nodes/order', { base_version: baseVersion, items }, { _skipErrorToast: true })
+    return data.order_version
+  } catch (err) {
+    const res = (err as { response?: { status?: number; data?: { code?: string; order?: NodeOrder } } }).response
+    if (res?.status === 409 && res.data?.code === 'order_stale' && res.data.order) throw new OrderStaleError(res.data.order)
+    throw err
+  }
+}
+
+export interface DeleteImpactLine {
+  node_id: number
+  line_id: string
+  landing_name: string
+  line_name: string
+  line_type: OrderLineType
+}
+
+export interface NodeDeleteImpact {
+  node: { id: number; name: string }
+  lines: DeleteImpactLine[]
+  /** Tunnel listeners that close with the node (tunnel.go TunnelItem). */
+  tunnels: { node_id?: number; name?: string; line_id: string; line_name: string; entry_panel_id: number; port?: number; front_port?: number }[]
+  /** English text from the server, one entry per blocking shared-port route. */
+  blocked_by_routes: string[]
+}
+
+export async function getNodeDeleteImpact(id: number, signal?: AbortSignal): Promise<NodeDeleteImpact> {
+  const { data } = await client.get<NodeDeleteImpact>(`/admin/nodes/${id}/delete-impact`, { signal })
   return data
 }

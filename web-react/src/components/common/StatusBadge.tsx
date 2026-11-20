@@ -38,12 +38,12 @@ export function StatusBadge({ tone = 'neutral', label, quiet, className, testId 
       data-tone={tone}
       data-testid={testId}
       className={cn(
-        'inline-flex w-fit shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs/5 font-medium whitespace-nowrap text-foreground ring-1 ring-inset',
+        'inline-flex w-fit max-w-full shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs/5 font-medium whitespace-nowrap text-foreground ring-1 ring-inset',
         style.tint, style.ring, className,
       )}
     >
       <Icon aria-hidden className={cn('size-3.5 shrink-0', style.ink)} />
-      {label}
+      <span className="min-w-0 truncate">{label}</span>
     </span>
   )
 }
