@@ -1,8 +1,6 @@
 {
   "title": "外观",
   "density": {
-    "switch_to_comfortable": "切换为舒适布局",
-    "switch_to_compact": "切换为紧凑布局",
     "section": "密度",
     "compact": "紧凑",
     "comfortable": "舒适"

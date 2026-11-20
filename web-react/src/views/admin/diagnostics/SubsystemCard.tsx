@@ -51,8 +51,10 @@ export default function SubsystemCard({ card, sentence, extra, children, familie
   const title = t(`admin:diagnostics.cards.${card.id}.title`)
 
   return (
+    // No scrollMarginTop of its own: the stylesheet's html scroll-padding-top already clears the
+    // shell's sticky top bar, and the two add (a 72px margin on top of it left a 136px gap).
     <Card id={`diag-card-${card.id}`} data-state={card.state} component="section"
-      sx={{ p: 2, bgcolor: md.surfaceContainerLow, minWidth: 0, gridColumn: wide ? '1 / -1' : undefined, scrollMarginTop: 72 }}>
+      sx={{ p: 2, bgcolor: md.surfaceContainerLow, minWidth: 0, gridColumn: wide ? '1 / -1' : undefined }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         <Typography component="h3" sx={{ fontWeight: 600, fontSize: 16 }}>{title}</Typography>
         <CardStateBadge state={card.state} />

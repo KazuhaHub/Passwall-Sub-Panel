@@ -19,8 +19,8 @@ const RegisterView = lazy(() => import('@/views/RegisterView'))
 const Enroll2FAView = lazy(() => import('@/views/Enroll2FAView'))
 const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const LegalView = lazy(() => import('@/views/LegalView'))
-const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
-const UserLayout = lazy(() => import('@/layouts/UserLayout'))
+const AdminShellRoute = lazy(() => import('./AdminShellRoute'))
+const UserShellRoute = lazy(() => import('./UserShellRoute'))
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
 const DashboardView = lazy(viewLoaders['/admin/dashboard'])
 const ServersView = lazy(viewLoaders['/admin/servers'])
@@ -101,7 +101,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth adminOnly />,
     children: [
       {
-        element: <AdminLayout />,
+        element: <AdminShellRoute />,
         children: [
           { index: true, element: <Navigate to="dashboard" replace /> },
           { path: 'dashboard', element: <DashboardView /> },
@@ -134,7 +134,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [
       {
-        element: <UserLayout />,
+        element: <UserShellRoute />,
         children: [
           { index: true, element: <Navigate to="me" replace /> },
           { path: 'me', element: <MeView /> },

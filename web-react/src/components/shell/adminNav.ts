@@ -4,10 +4,9 @@ import {
 } from '@/lib/icons'
 import type { NavSection } from './nav'
 
-// The admin console's navigation, as the data the shell takes. Same entries, order,
-// grouping and `adminOnly` flags as ADMIN_NAV in layouts/AdminLayout.tsx, which this
-// replaces when the shell is mounted; nav.test.ts reads that file and fails if
-// the two disagree, so the swap cannot change who sees what.
+// The admin console's navigation, as the data the shell takes. nav.test.ts pins the
+// entries, order, grouping and `adminOnly` flags by hand, so a change here is a
+// deliberate change to who sees what.
 export const ADMIN_NAV: NavSection[] = [
   { items: [
     { to: '/admin/dashboard', labelKey: 'nav:admin.dashboard', icon: IconDashboard },
