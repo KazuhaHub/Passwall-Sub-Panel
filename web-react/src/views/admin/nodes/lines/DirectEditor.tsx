@@ -22,12 +22,14 @@ export function DirectEditor({ node, onDirtyChange, onSaved }: { node: Node; onD
   const t = useNodesT()
   const apply = useApplyNode()
   const { present, dialog } = usePlanPresenter()
-  const [published, setPublished] = useState(!node.hide_direct)
+  // null: not touched, so it follows the node (a refetch that changes it must not look like an edit).
+  const [edited, setPublished] = useState<boolean | null>(null)
+  const published = edited ?? !node.hide_direct
   const [factor, setFactor] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const factorText = factor ?? milliToFactorText(node.traffic_factor_milli)
   const factorBad = factor !== null && factorTextToMilli(factor) === null
-  const dirty = published !== !node.hide_direct || factor !== null
+  const dirty = edited !== null && edited !== !node.hide_direct || factor !== null
   useEffect(() => { onDirtyChange(dirty) }, [dirty, onDirtyChange])
   useEffect(() => () => onDirtyChange(false), [onDirtyChange])
 
@@ -39,6 +41,7 @@ export function DirectEditor({ node, onDirtyChange, onSaved }: { node: Node; onD
       apply(saved)
       pushToast({ message: t('nodes.line.toast.saved'), severity: 'success' })
       setFactor(null)
+      setPublished(null)
       onSaved({ isNew: false })
     } catch { /* The request layer already surfaced the failure. */ } finally { setPending(false) }
   }
@@ -61,7 +64,7 @@ export function DirectEditor({ node, onDirtyChange, onSaved }: { node: Node; onD
           </span>
         </div>
         <SaveBar dirty={dirty} pending={pending} saveLabel={t('nodes.line.action.save')} onSave={() => void save()}
-          onDiscard={() => { setPublished(!node.hide_direct); setFactor(null) }} />
+          onDiscard={() => { setPublished(null); setFactor(null) }} />
       </form>
       {dialog}
     </FormValidityProvider>

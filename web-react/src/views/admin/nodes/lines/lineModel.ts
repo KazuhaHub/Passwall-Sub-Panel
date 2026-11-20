@@ -85,9 +85,12 @@ export type LineField = 'name' | 'entry' | 'address' | 'port' | 'domain' | 'fact
 export type LineProblems = Partial<Record<LineField, string>>
 
 /** The messages' keys (under `admin:nodes.`): what is wrong and, where it can be said, how to fix it. */
-export function validateDraft(d: LineDraft): LineProblems {
+/**
+ * `kind` is the kind the admin CHOSE (the selected card of a new line, the stored type of a saved one). It is not
+ * derived from the draft: a forward or tunnel line with no entry server yet would read as external.
+ */
+export function validateDraft(d: LineDraft, kind: LineKind = kindOf(d)): LineProblems {
   const out: LineProblems = {}
-  const kind = kindOf(d)
   if (d.name.trim().length > 64) out.name = 'line.err.name_long'
   if ((kind === 'forward' || kind === 'tunnel') && !(d.entry_panel_id && d.entry_panel_id > 0)) out.entry = 'line.err.entry_required'
   if (kind === 'cdn') { if (!d.domain?.trim()) out.domain = 'cdn.domain_required' }

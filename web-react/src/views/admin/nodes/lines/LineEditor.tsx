@@ -88,7 +88,8 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
   const [kind, setKind] = useState<LineKind | null>(live ? kindOf(live) : null)
   const [choosing, setChoosing] = useState(false)
   const [draft, setDraft] = useState<LineDraft | null>(() => (live ? draftOf(live) : null))
-  const baseline = useRef(draft ? draftKey(draft) : '')
+  // The draft as it was last saved or read. Server-side actions merge into it only the fields they changed.
+  const baseline = useRef<LineDraft | null>(draft)
   const [touched, setTouched] = useState<ReadonlySet<LineField>>(new Set())
   const [attempted, setAttempted] = useState(false)
   const [pending, setPending] = useState(false)
@@ -104,7 +105,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
   const patch = useCallback((p: Partial<LineDraft>) => setDraft(d => (d ? { ...d, ...p } : d)), [])
 
   // A new line is "changed" once anything differs from the blank line of its kind.
-  const dirty = (draft !== null && (isNew ? draftKey(draft) !== draftKey(blankDraft(kind ?? 'external', node)) : draftKey(draft) !== baseline.current)) || listenerDirty
+  const dirty = (draft !== null && (isNew ? draftKey(draft) !== draftKey(blankDraft(kind ?? 'external', node)) : draftKey(draft) !== (baseline.current ? draftKey(baseline.current) : ''))) || listenerDirty
   useEffect(() => { onDirtyChange(dirty) }, [dirty, onDirtyChange])
   useEffect(() => () => onDirtyChange(false), [onDirtyChange])
 
@@ -115,7 +116,9 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
     return () => c.abort()
   }, [nodeId])
 
-  const problems = draft ? validateDraft(draft) : {}
+  // A new line has the kind that was chosen (a forward has no entry server until one is picked, which would read as external); a saved one has the kind its entry and mode say, which the entry field can change.
+  const cur = isNew ? kind : draft ? kindOf(draft) : kind
+  const problems = draft && cur ? validateDraft(draft, cur) : {}
   const error = (f: LineField) => (attempted || touched.has(f) ? problems[f] : undefined)
   const blur = (f: LineField) => setTouched(s => (s.has(f) ? s : new Set(s).add(f)))
   const fields: FieldsProps | null = draft && { draft, patch, error, blur }
@@ -166,7 +169,8 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
     if (!fresh) return
     const server = { mode: fresh.mode, port: fresh.port, sni: fresh.sni ?? '', host: fresh.host ?? '' }
     setDraft(d => (d ? { ...d, ...server } : d))
-    baseline.current = draftKey({ ...(JSON.parse(JSON.stringify(draftOf(fresh))) as LineDraft), ...(draft ? { ...draft, ...server } : {}) })
+    // Only what the server decided goes into the baseline too: the admin's own edits stay edits.
+    baseline.current = baseline.current ? { ...baseline.current, ...server } : baseline.current
     setKind(kindOf(fresh))
   }
   const onRelays = (relays: RelayLine[]) => applyServerLine({ ...node, relays })
@@ -191,7 +195,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
     try {
       const saved = await addRefusedSource(nodeId, live.id, ip)
       setDraft(d => (d ? { ...d, source_cidrs: saved, _source_text: undefined } : d))
-      baseline.current = draftKey({ ...draftOf(live), ...(draft ?? {}), source_cidrs: saved, _source_text: undefined } as LineDraft)
+      baseline.current = baseline.current ? { ...baseline.current, source_cidrs: saved } : baseline.current
       pushToast({ message: t('nodes.source.added', { ip }), severity: 'success' })
       setSourceGuard(await getNodeSourceGuard(nodeId))
     } catch { /* The request layer already surfaced the failure. */ } finally { setSourceBusy(false) }
@@ -199,7 +203,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
 
   async function save() {
     if (!draft) return
-    const bad = Object.keys(validateDraft(draft)) as LineField[]
+    const bad = Object.keys(validateDraft(draft, cur ?? kindOf(draft))) as LineField[]
     if (bad.length > 0) {
       setAttempted(true)
       const first = (['name', 'entry', 'domain', 'address', 'port', 'factor', 'region'] as LineField[]).find(f => bad.includes(f))
@@ -215,7 +219,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
       pushToast(warned
         ? { message: t('nodes.cdn.saved_warnings', { lines: mine?.name || mine?.domain || '' }), severity: 'warning' }
         : { message: isNew ? t('nodes.line.toast.added', { name: draft.name.trim() || draft.domain?.trim() || draft.address.trim() }) : t('nodes.line.toast.saved'), severity: 'success' })
-      baseline.current = draftKey(draft)
+      baseline.current = draft
       setListenerDirty(false)
       onSaved({ addedId, isNew })
     } catch { /* The request layer already surfaced the failure; a declined plan changed nothing. */ } finally { setPending(false) }
@@ -227,8 +231,6 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
   }
 
   const showCards = isNew && (kind === null || choosing)
-  // A new line has the kind that was chosen (a forward has no entry server until one is picked, which would read as external); a saved one has the kind its entry and mode say, which the entry field can change.
-  const cur = isNew ? kind : draft ? kindOf(draft) : kind
   const labelPreview = draft && (draft.only_line_name ? draft.name.trim() : [node.display_name, draft.name.trim()].filter(Boolean).join(' · '))
   const savedEntry = live?.entry_panel_id ?? 0
   const canSwitchMode = !!live?.id && savedEntry > 0 && (draft?.entry_panel_id ?? 0) === savedEntry && (cur === 'forward' || cur === 'tunnel')

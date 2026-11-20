@@ -168,6 +168,55 @@ describe('switching a saved line between direct forward and encrypted tunnel', (
   })
 })
 
+describe('server-side actions keep the admin\'s unsaved edits', () => {
+  it('a mode switch takes the server\'s fields and leaves a typed name unsaved: the save bar stays and the sheet still counts as dirty', async () => {
+    serve(landing([forward]))
+    api.post.mockResolvedValue({ data: { groups: [], node_groups: [], saved_node_groups: [], relays: [[]] } })
+    api.post.mockRejectedValueOnce(plan('switch_mode')).mockResolvedValueOnce({ data: landing([{ ...forward, mode: 'tunnel', port: 0, tunnel: listener, running: false }]) })
+    const props = open('F1')
+    fireEvent.change(await screen.findByLabelText(/Line name/), { target: { value: 'GZ renamed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to encrypted tunnel' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Confirm' }))
+    await screen.findByTestId('tunnel-card', {}, { timeout: 4000 })
+    expect((screen.getByLabelText(/Line name/) as HTMLInputElement).value).toBe('GZ renamed')
+    expect(screen.getByRole('button', { name: 'Save line' })).toBeTruthy()
+    expect(props.onDirtyChange).toHaveBeenLastCalledWith(true)
+  })
+})
+
+describe('the chosen kind decides what is required', () => {
+  it.each([['Direct forward'], ['Encrypted tunnel']])('%s without an entry server is blocked', async name => {
+    serve(landing())
+    open(null)
+    fireEvent.click(await screen.findByRole('radio', { name }))
+    fireEvent.change(await screen.findByLabelText(/Entry address/), { target: { value: 'x.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    expect((await screen.findAllByText('Choose an entry server')).length).toBeGreaterThan(0)
+    expect(metadataPuts()).toHaveLength(0)
+  })
+
+  it('an external entry needs no entry server', async () => {
+    serve(landing())
+    open(null)
+    fireEvent.click(await screen.findByRole('radio', { name: 'External entry' }))
+    fireEvent.change(await screen.findByLabelText(/Entry address/), { target: { value: 'x.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    await waitFor(() => expect(metadataPuts()).toHaveLength(1))
+  })
+})
+
+describe('the CDN warning after a save', () => {
+  it('warns instead of just confirming when the saved CDN line is likely not to work', async () => {
+    serve(landing())
+    api.put.mockImplementation(async (_u: string, body: { relays: RelayLine[] }) => ({ data: { ...landing(), relays: body.relays.map(r => ({ ...r, id: 'C9', cdn_issues: [{ code: 'cert_not_covering', warn: true, params: { domain: 'cdn.example.com' } }] })) } }))
+    open(null)
+    fireEvent.click(await screen.findByRole('radio', { name: 'CDN' }))
+    fireEvent.change(await screen.findByLabelText(/CDN domain/), { target: { value: 'cdn.example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warning', message: expect.stringContaining('likely to not work') })))
+  })
+})
+
 describe('the entry listener of a tunnel line', () => {
   it('saves only the listener, on its own endpoint, and then shows what the server settled', async () => {
     serve(landing([tunnel]))
