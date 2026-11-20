@@ -2987,6 +2987,14 @@
       "mode": "编辑方式",
       "mode_form": "表单",
       "mode_json": "JSON"
+    },
+    "create_page": {
+      "steps": "步骤",
+      "step_inbound": "入站",
+      "step_lines": "线路",
+      "step_exit": "出口",
+      "step_review": "核对",
+      "basics": "基本信息"
     }
   },
   "users": {

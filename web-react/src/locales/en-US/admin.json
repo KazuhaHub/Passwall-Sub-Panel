@@ -2991,6 +2991,14 @@
       "mode": "Edit as",
       "mode_form": "Form",
       "mode_json": "JSON"
+    },
+    "create_page": {
+      "steps": "Steps",
+      "step_inbound": "Inbound",
+      "step_lines": "Lines",
+      "step_exit": "Exit",
+      "step_review": "Review",
+      "basics": "Basics"
     }
   },
   "users": {
