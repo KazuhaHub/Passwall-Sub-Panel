@@ -28,7 +28,11 @@ export function CdnIssues({ issues }: { issues: readonly CdnIssue[] }) {
 }
 
 /** The fields of a CDN line: the domain, the optimised address, the port, and the SNI and Host the CDN routes by. */
-export function CdnFields({ draft, patch, error, blur, issues }: FieldsProps & { issues: readonly CdnIssue[] }) {
+/**
+ * `idPrefix` is for a page that draws several CDN lines at once (the create wizard): the editor's ids are fixed so a
+ * failed save can focus the field, but two copies would share them and a label would point at the other line's input.
+ */
+export function CdnFields({ draft, patch, error, blur, issues, idPrefix = '' }: FieldsProps & { issues: readonly CdnIssue[]; idPrefix?: string }) {
   const t = useNodesT()
   const placeholder = draft.domain?.trim() || 'cdn.example.com'
   return (
@@ -39,14 +43,14 @@ export function CdnFields({ draft, patch, error, blur, issues }: FieldsProps & {
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Field label={t('nodes.cdn.domain')} required hint={t('nodes.cdn.domain_hint')} error={error('domain') && t(`nodes.${error('domain')}`)}>
-          <Input id={ID.domain} value={draft.domain ?? ''} placeholder="cdn.example.com" onChange={e => patch({ domain: e.target.value })} onBlur={() => blur('domain')} />
+          <Input id={`${idPrefix}${ID.domain}`} value={draft.domain ?? ''} placeholder="cdn.example.com" onChange={e => patch({ domain: e.target.value })} onBlur={() => blur('domain')} />
         </Field>
         <Field label={t('nodes.cdn.port')} hint={t('nodes.cdn.port_hint')} error={error('port') && t(`nodes.${error('port')}`)}>
-          <PortInput id={ID.port} value={draft.port} placeholder={String(CDN_DEFAULT_PORT)} onChange={port => patch({ port })} onBlur={() => blur('port')} />
+          <PortInput id={`${idPrefix}${ID.port}`} value={draft.port} placeholder={String(CDN_DEFAULT_PORT)} onChange={port => patch({ port })} onBlur={() => blur('port')} />
         </Field>
       </div>
       <Field label={t('nodes.cdn.address')} hint={t('nodes.cdn.address_hint')}>
-        <Input id={ID.address} value={draft.address} placeholder={placeholder} onChange={e => patch({ address: e.target.value })} />
+        <Input id={`${idPrefix}${ID.address}`} value={draft.address} placeholder={placeholder} onChange={e => patch({ address: e.target.value })} />
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label={t('nodes.relay.sni')} hint={t('nodes.cdn.sni_hint')}>

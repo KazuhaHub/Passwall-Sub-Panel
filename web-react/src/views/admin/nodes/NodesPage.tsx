@@ -11,7 +11,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useCan } from '@/utils/permissions'
 import { useQueryClient } from '@tanstack/react-query'
 import { nodeKeys } from '@/query/keys'
-import { LegacyEditorsProvider, useLegacyEditors } from './legacy/LegacyEditors'
+import { writableServers } from './create/writable'
 import LinesTab from './list/LinesTab'
 import { useNodesT } from './shared/useNodesT'
 import UnmanagedTab from './unmanaged/UnmanagedTab'
@@ -42,11 +42,10 @@ function CreateButton() {
   const navigate = useNavigate()
   const scope = useQueryScope()
   const servers = useAllServers(scope)
-  const legacy = useLegacyEditors()
   const loading = servers.isPending
   const none = !loading && (servers.data?.length ?? 0) === 0
   // Disabled WITH its reason: a button that does nothing, or a toast after the click, says why too late.
-  const reason = loading ? undefined : none ? t('nodes.create_dialog.no_servers') : !legacy.canCreate ? t('nodes.create_dialog.no_writable_servers') : undefined
+  const reason = loading ? undefined : none ? t('nodes.create_dialog.no_servers') : writableServers(servers.data ?? []).length === 0 ? t('nodes.create_dialog.no_writable_servers') : undefined
   const off = loading || reason !== undefined
   const button = (
     <Button aria-disabled={off || undefined} className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50" onClick={() => { if (!off) navigate('/admin/nodes/new') }}>
@@ -92,5 +91,5 @@ export default function NodesPage() {
   const [params] = useSearchParams()
   const redirect = legacyRedirect(params.toString(), admin)
   if (redirect !== null) return <Navigate to={redirect} replace />
-  return <LegacyEditorsProvider><Page /></LegacyEditorsProvider>
+  return <Page />
 }

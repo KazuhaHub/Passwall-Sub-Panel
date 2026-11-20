@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { releaseCatalog, nativeServer, provisioning, waiting, selectVersion, mountExpanded } from '@/test/installationHarness'
 import { api } from '@/test/adminSaveHarness'
 import { isNodeReleaseVersion, NativeInstallationDialog } from './ServersView'
-import { hostFromURL, serverHost } from './nodes/legacy/inboundModel'
+import { hostFromURL, serverHost } from './nodes/inbound/inboundModel'
 
 // WHAT THIS FILE DRIVES: the dialog's own inputs, and the two flows that replace
 // what is already installed — an in-place upgrade and an identity replacement.
