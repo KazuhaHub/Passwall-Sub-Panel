@@ -1,125 +1,109 @@
 // @vitest-environment jsdom
-import { StrictMode, type ReactElement } from 'react'
-import { MemoryRouter } from 'react-router'
-import { ThemeProvider } from '@mui/material/styles'
-import { render, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
-import { queryWrapper, makeTestQueryClient } from '@/test/queryTestUtils'
-import { api, installReads } from '@/test/adminSaveHarness'
+import { api, mountMe, profile, serve, snack, zeroUsage } from './testHarness'
 import MeView from './MeView'
 
-const confirmMock = vi.hoisted(() => vi.fn(async () => true))
-vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock }))
+// The page's own confirmation is the subject here, so it is replaced by a spy; the real dialog has its own tests.
+const confirmMock = vi.hoisted(() => vi.fn(async (_opts: Record<string, unknown>) => true))
+vi.mock('@/components/ConfirmHost', () => ({ default: () => null, confirm: confirmMock }))
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
-function mount(ui: ReactElement) {
-  return render(
-    <StrictMode>
-      <MemoryRouter>
-        <ThemeProvider theme={theme}>{ui}</ThemeProvider>
-      </MemoryRouter>
-    </StrictMode>,
-    { wrapper: queryWrapper(makeTestQueryClient()) },
-  )
-}
-
-// A deferred promise the test resolves on its own schedule, standing in for a
-// slow (3-10s) upstream response.
+// A deferred promise the test resolves on its own schedule, standing in for a slow (3-10s) upstream response.
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(res => { resolve = res })
   return { promise, resolve }
 }
 
-const profile = {
-  id: 1,
-  upn: 'user@example.test',
-  display_name: 'User',
-  role: 'user',
-  enabled: true,
-  can_change_password: true,
-  can_edit_personal_rules: true,
-  sub_url: 'https://sub.example.test/token',
-  uuid: 'uuid-1',
-  traffic_limit_bytes: 10 * 1024 * 1024 * 1024, // 10 GB
-  traffic_reset_period: 'monthly',
-  expire_at: null,
-}
+const tenGB = { traffic_limit_bytes: 10 * 1024 ** 3, traffic_reset_period: 'monthly' }
 
-const emptyHistory = { points: [] }
+describe('usage card while the usage read is still in flight', () => {
+  it('shows a loading state instead of 0.00/X GB and 0%', async () => {
+    const pendingUsage = deferred<{ data: typeof zeroUsage }>()
+    serve({}, tenGB)
+    const reads = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => (url === '/user/me/traffic' ? pendingUsage.promise : reads(url)))
 
-describe('usage panel while the usage read is still in flight', () => {
-  it('shows a loading state instead of 0.00/X GB, 0% and today 0', async () => {
-    const pendingUsage = deferred<{ data: { user_id: number; permanent_total_bytes: number; period_used_bytes: number; today_used_bytes: number } }>()
-    installReads({
-      '/user/me': profile,
-      '/user/me/traffic/history': emptyHistory,
-    })
-    api.get.mockImplementation(async (url: string) => {
-      if (url === '/user/me') return { data: profile }
-      if (url === '/user/me/traffic/history') return { data: emptyHistory }
-      if (url === '/user/me/traffic') return pendingUsage.promise
-      throw new Error(`Unexpected GET ${url}`)
-    })
+    mountMe(<StrictMode><MeView /></StrictMode>)
 
-    mount(<MeView />)
-
-    // The profile (which gates the page-level spinner) loads fast; the usage
-    // card must not lie about a zero reading while ITS OWN request is still
-    // in flight — that's a separate, slower query.
-    await screen.findByText('user:profile.usage_section')
+    // The profile gates the page-level skeleton; the usage card must not lie about a zero reading while ITS OWN request is still in flight.
+    await screen.findByText('My usage')
     expect(screen.queryByText('0.00 / 10 GB')).toBeNull()
     expect(screen.queryByText('0.0%')).toBeNull()
-    // Both the period line and the "today" figure switch to the loading
-    // string while usageLoading is true.
-    expect(screen.getAllByText('common:status.loading').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Loading').length).toBeGreaterThan(0)
 
-    pendingUsage.resolve({
-      data: { user_id: 1, permanent_total_bytes: 0, period_used_bytes: 2 * 1024 * 1024 * 1024, today_used_bytes: 5 * 1024 * 1024 },
-    })
+    pendingUsage.resolve({ data: { ...zeroUsage, period_used_bytes: 2 * 1024 ** 3, today_used_bytes: 5 * 1024 * 1024 } })
 
     await waitFor(() => expect(screen.getByText('2.00 / 10 GB')).toBeTruthy())
     expect(screen.getByText('20.0%')).toBeTruthy()
+    expect(screen.getByText('8.00 GB left')).toBeTruthy()
     expect(screen.getByText('5.00 MB')).toBeTruthy()
-    expect(screen.queryByText('common:status.loading')).toBeNull()
+    expect(screen.queryByText('Loading')).toBeNull()
+  })
+
+  it('prints an unlimited account as used traffic with no bar and no "left"', async () => {
+    serve({ '/user/me/traffic': { ...zeroUsage, period_used_bytes: 3 * 1024 ** 3 } })
+    mountMe(<MeView />)
+    await screen.findByText('3.00 GB')
+    expect(screen.getByText('Unlimited')).toBeTruthy()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.queryByText(/left$/)).toBeNull()
   })
 })
 
 describe('reset credentials button', () => {
-  it('stays busy until the reset settles, and ignores a second click', async () => {
-    installReads({
-      '/user/me': profile,
-      '/user/me/traffic': { user_id: 1, permanent_total_bytes: 0, period_used_bytes: 0, today_used_bytes: 0 },
-      '/user/me/traffic/history': emptyHistory,
-    })
+  it('confirms by naming the consequence, stays busy until the reset settles, and ignores a second click', async () => {
+    serve({}, tenGB)
     const pending = deferred<{ data: { sub_token: string; sub_url: string; uuid: string } }>()
     api.post.mockImplementation(async (url: string) => {
       if (url === '/user/me/reset-credentials') return pending.promise
       throw new Error(`Unexpected POST ${url}`)
     })
 
-    mount(<MeView />)
+    mountMe(<StrictMode><MeView /></StrictMode>)
 
-    const button = await screen.findByRole('button', { name: 'user:sub.reset' })
+    const button = await screen.findByRole('button', { name: 'Reset credentials' })
     fireEvent.click(button)
 
-    // Busy immediately — before the confirm dialog's own promise, let alone
-    // the reset request, has had a chance to settle.
+    // Busy at once, before the confirm's own promise has settled, let alone the request.
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(button.getAttribute('aria-busy')).toBe('true')
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/user/me/reset-credentials'))
-    // A second click while still busy must not re-open the confirm dialog or
-    // fire a second reset (which the finding calls out as "double reset").
+    // A second click while busy must not ask again or send a second reset.
     fireEvent.click(button)
     expect(confirmMock).toHaveBeenCalledTimes(1)
     expect(api.post).toHaveBeenCalledTimes(1)
-    expect(within(button).getByRole('progressbar')).toBeTruthy()
+    expect(button.querySelector('svg.animate-spin')).toBeTruthy()
+
+    // The confirmation says what breaks, names the verb, and starts on Cancel.
+    expect(confirmMock.mock.calls[0][0]).toMatchObject({
+      title: 'Reset credentials', confirmText: 'Reset credentials', destructive: true, initialFocus: 'cancel',
+      message: expect.stringContaining('invalidates the old subscription URL'),
+    })
 
     pending.resolve({ data: { sub_token: 'tok2', sub_url: 'https://sub.example.test/new', uuid: 'uuid-2' } })
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false))
-    expect(button.getAttribute('aria-busy')).toBeNull()
+    expect(snack).toHaveBeenCalledWith('Credentials reset. New UUID: uuid-2', 'success')
+  })
+
+  it('sends nothing when the confirmation is declined', async () => {
+    serve({}, tenGB)
+    confirmMock.mockResolvedValueOnce(false)
+    mountMe(<MeView />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Reset credentials' }))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Reset credentials' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
+describe('page frame', () => {
+  it('pads itself, as the shell gives its content no padding', async () => {
+    serve({}, { ...profile })
+    const { container } = mountMe(<MeView />)
+    await screen.findByText('My usage')
+    expect(container.firstElementChild!.className).toContain('p-4')
+    expect(container.firstElementChild!.className).toContain('sm:p-6')
   })
 })

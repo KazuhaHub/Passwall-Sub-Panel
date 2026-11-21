@@ -1,8 +1,8 @@
 import { Fragment, useMemo } from 'react'
-import { Box, Typography, useTheme } from '@mui/material'
 import Markdown, { type Components } from 'react-markdown'
 import { useTranslation } from 'react-i18next'
 
+import { cn } from '@/lib/utils'
 import { DATA_COLLECTION_MARKER, type DataCollection } from '@/api/legal'
 import DataCollectionCard from './DataCollectionCard'
 import { legalLinkComponents, legalMarkdownProps, markdownBlocks, markdownLists } from './ReleaseNotes'
@@ -28,15 +28,15 @@ export function splitAtMarker(content: string): string[] {
 // The document is the first-class text of its page, so its headings keep their
 // sizes (unlike a release note's). The page's own title is the h1: the text's
 // "#" is drawn as a section heading.
-const sized = (variant: 'h2' | 'h3' | 'h4', size: number): Components['h1'] => ({ children }) =>
-  <Typography component={variant} sx={{ fontSize: size, fontWeight: 600, mt: 3, mb: 1, lineHeight: 1.4 }}>{children}</Typography>
+const sized = (Tag: 'h2' | 'h3' | 'h4', size: string): Components['h1'] => ({ children }) =>
+  <Tag className={cn('mt-6 mb-2 leading-snug font-semibold', size)}>{children}</Tag>
 
 const components: Components = {
-  h1: sized('h2', 22), h2: sized('h3', 18), h3: sized('h4', 16), h4: sized('h4', 15), h5: sized('h4', 15), h6: sized('h4', 15),
-  p: ({ children }) => <Typography sx={{ fontSize: 15, lineHeight: 1.75, my: 1 }}>{children}</Typography>,
+  h1: sized('h2', 'text-[22px]'), h2: sized('h3', 'text-lg'), h3: sized('h4', 'text-base'), h4: sized('h4', 'text-[15px]'), h5: sized('h4', 'text-[15px]'), h6: sized('h4', 'text-[15px]'),
+  p: ({ children }) => <p className="my-2 text-[15px] leading-[1.75]">{children}</p>,
   ...markdownLists,
   ...markdownBlocks,
-  li: ({ children }) => <Typography component="li" sx={{ fontSize: 15, lineHeight: 1.75 }}>{children}</Typography>,
+  li: ({ children }) => <li className="text-[15px] leading-[1.75]">{children}</li>,
   ...legalLinkComponents,
 }
 
@@ -47,28 +47,19 @@ const components: Components = {
  * `dataCollection` null is the editor preview before there is anything to list.
  */
 export default function LegalDocument({ content, dataCollection }: { content: string; dataCollection: DataCollection | null | undefined }) {
-  const md = useTheme().palette.md
   const { t } = useTranslation('auth')
   const parts = useMemo(() => splitAtMarker(content), [content])
+  // Only theme tokens, no layout of its own: it sits in the public page's column and in the editor's preview pane alike.
   return (
-    <Box sx={{
-      overflowWrap: 'anywhere', color: md.onSurface,
-      '& table': { borderCollapse: 'collapse', my: 1, display: 'block', overflowX: 'auto' },
-      '& th, & td': { border: `1px solid ${md.outlineVariant}`, px: 1, py: 0.5, fontSize: 14 },
-      '& blockquote': { m: 0, my: 1, pl: 2, borderLeft: `3px solid ${md.outlineVariant}`, color: md.onSurfaceVariant },
-      '& hr': { border: 0, borderTop: `1px solid ${md.outlineVariant}`, my: 2 },
-      '& code': { fontFamily: 'monospace', fontSize: 13 },
-    }}>
+    <div data-slot="legal-document" className="text-foreground [overflow-wrap:anywhere]">
       {parts.map((part, i) => (
         <Fragment key={i}>
           {i > 0 && (dataCollection
             ? <DataCollectionCard data={dataCollection} />
-            : <Typography sx={{ my: 2, p: 2, borderRadius: 3, fontSize: 14, bgcolor: md.surfaceContainer, color: md.onSurfaceVariant }}>
-              {t('legal.collect_placeholder')}
-            </Typography>)}
+            : <p className="my-4 rounded-xl bg-muted p-4 text-sm text-muted-foreground">{t('legal.collect_placeholder')}</p>)}
           {part.trim() && <Markdown {...legalMarkdownProps} components={components}>{part}</Markdown>}
         </Fragment>
       ))}
-    </Box>
+    </div>
   )
 }

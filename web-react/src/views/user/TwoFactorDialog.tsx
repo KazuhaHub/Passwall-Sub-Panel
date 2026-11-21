@@ -1,161 +1,128 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  TextField,
-  Typography,
-} from '@mui/material'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { QRCodeSVG } from 'qrcode.react'
-import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
-import FingerprintIcon from '@mui/icons-material/Fingerprint'
-
 import { begin2FA, disable2FA, disableTOTPWithPasskey, enable2FA } from '@/api/me'
-import type { M3Tokens } from '@/theme'
-import { pushSnack } from '@/components/SnackbarHost'
-import { copyToClipboard } from '@/utils/clipboard'
+import { IconFingerprint } from '@/lib/icons'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { CopyButton } from '@/components/common/CopyButton'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { RecoveryCodeList } from './RecoveryCodeList'
+import { useMeT } from './me/useMeT'
+import { ceremonyCancelled, webAuthnSupported } from './webauthn'
 
 interface Props {
   open: boolean
   /** Whether 2FA is currently enabled on the account (drives enroll vs disable). */
   enabled: boolean
-  /** Whether the account has a passkey — enables disabling TOTP via a passkey
-   *  assertion (for users who lost their authenticator). */
+  /** Whether the account has a passkey: enables turning TOTP off with a passkey assertion (for a user who lost the authenticator). */
   hasPasskey: boolean
-  md: M3Tokens
+  /** Accepted and ignored. The enrolment page still passes the colour tokens the old dialog needed. */
+  md?: unknown
   onClose: () => void
-  /** Called after a successful enable/disable so the parent can refresh profile. */
+  /** Called after a successful enable/disable so the parent can refresh the profile. */
   onChanged: () => void
 }
 
-// TwoFactorDialog drives the authenticator (TOTP) self-service flow in one modal:
-//   not enabled → intro → (begin) enroll(QR+code) → (enable) recovery codes → done
-//   enabled     → disable (requires a current code, or a passkey assertion)
-// Recovery-code regeneration lives in RecoveryCodesDialog — kept out of here so the
-// disable flow stays single-purpose and the footer isn't crowded.
-export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose, onChanged }: Props) {
-  const { t } = useTranslation('user')
-  type Step = 'intro' | 'enroll' | 'recovery' | 'disable'
+type Step = 'intro' | 'enroll' | 'recovery' | 'disable'
+
+/**
+ * The authenticator (TOTP) flow in one dialog:
+ *   off -> intro -> (begin) enroll: QR + code -> (enable) recovery codes -> done
+ *   on  -> disable: a current code, or a passkey assertion
+ * Recovery-code regeneration lives in RecoveryCodesDialog, so turning it off stays a single-purpose step.
+ */
+export default function TwoFactorDialog({ open, enabled, hasPasskey, onClose, onChanged }: Props) {
+  const { t } = useMeT()
   const [step, setStep] = useState<Step>(enabled ? 'disable' : 'intro')
   const [busy, setBusy] = useState(false)
+  // A wrong or missing code is said under the code field; anything else (an expired begin-session, a server fault) is not
+  // about the field and is said above the buttons.
+  const [codeError, setCodeError] = useState('')
   const [error, setError] = useState('')
+  // A cancelled or unsupported passkey prompt: told calmly, not as an error.
+  const [note, setNote] = useState('')
   const [otpauthURL, setOtpauthURL] = useState('')
   const [secret, setSecret] = useState('')
   const [code, setCode] = useState('')
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
 
-  // Reset to the correct starting step every time the dialog (re)opens.
+  // Start from the right step every time the dialog (re)opens.
   useEffect(() => {
     if (open) {
       setStep(enabled ? 'disable' : 'intro')
-      setError('')
-      setCode('')
-      setOtpauthURL('')
-      setSecret('')
-      setRecoveryCodes([])
+      setCodeError(''); setError(''); setNote(''); setCode(''); setOtpauthURL(''); setSecret(''); setRecoveryCodes([])
     }
   }, [open, enabled])
 
-  function inlineError(err: unknown): string {
-    const e = err as AxiosError<{ error?: string }>
-    return e.response?.data?.error || t('twofa.generic_error')
+  const reason = (err: unknown) => (err as AxiosError<{ error?: string }>).response?.data?.error || t('twofa.generic_error')
+
+  /** A 401 means the code itself was wrong (the localized message); anything else carries a real reason worth showing, not a misleading "invalid code". */
+  function showCodeFailure(err: unknown) {
+    if ((err as AxiosError).response?.status === 401) { setCodeError(t('twofa.code_invalid')); setCode('') }
+    else setError(reason(err))
   }
 
   async function startEnroll() {
-    setBusy(true)
-    setError('')
+    setBusy(true); setError('')
     try {
-      const { otpauth_url, secret } = await begin2FA()
-      setOtpauthURL(otpauth_url)
-      setSecret(secret)
+      const begun = await begin2FA()
+      setOtpauthURL(begun.otpauth_url)
+      setSecret(begun.secret)
       setStep('enroll')
     } catch (err) {
-      setError(inlineError(err))
-    } finally {
-      setBusy(false)
-    }
+      setError(reason(err))
+    } finally { setBusy(false) }
   }
 
   async function confirmEnroll(e: FormEvent) {
     e.preventDefault()
     const c = code.trim()
-    if (!c) {
-      setError(t('twofa.code_required'))
-      return
-    }
-    setBusy(true)
-    setError('')
+    if (!c) { setCodeError(t('twofa.code_required')); return }
+    setBusy(true); setError(''); setCodeError('')
     try {
-      const codes = await enable2FA(c)
-      setRecoveryCodes(codes)
+      setRecoveryCodes(await enable2FA(c))
       setStep('recovery')
     } catch (err) {
-      // 401 = the code itself was wrong (show the localized message); anything
-      // else (e.g. an expired/missing begin-session, 400) carries a real reason
-      // worth surfacing instead of a misleading "invalid code".
-      const e = err as AxiosError<{ error?: string }>
-      if (e.response?.status === 401) {
-        setError(t('twofa.code_invalid'))
-        setCode('')
-      } else {
-        setError(e.response?.data?.error || t('twofa.generic_error'))
-      }
-    } finally {
-      setBusy(false)
-    }
+      showCodeFailure(err)
+    } finally { setBusy(false) }
   }
 
   async function submitDisable(e: FormEvent) {
     e.preventDefault()
     const c = code.trim()
-    if (!c) {
-      setError(t('twofa.code_required'))
-      return
-    }
-    setBusy(true)
-    setError('')
+    if (!c) { setCodeError(t('twofa.code_required')); return }
+    setBusy(true); setError(''); setCodeError('')
     try {
       await disable2FA(c)
       pushSnack(t('twofa.disabled_toast'), 'success')
       onChanged()
       onClose()
     } catch (err) {
-      const e = err as AxiosError<{ error?: string }>
-      if (e.response?.status === 401) {
-        setError(t('twofa.code_invalid'))
-        setCode('')
-      } else {
-        setError(e.response?.data?.error || t('twofa.generic_error'))
-      }
-    } finally {
-      setBusy(false)
-    }
+      showCodeFailure(err)
+    } finally { setBusy(false) }
   }
 
-  // Disable TOTP proven by a passkey assertion — for a user who has a passkey but
-  // no longer has their authenticator (or recovery codes) to type a code.
+  // Turning TOTP off proven by a passkey assertion: for someone who has a passkey but no longer has the authenticator
+  // (or a recovery code) to type a code from. A cancelled browser prompt is not an error.
   async function disableViaPasskey() {
+    setError(''); setCodeError(''); setNote('')
+    if (!webAuthnSupported()) { setNote(t('passkey.unsupported')); return }
     setBusy(true)
-    setError('')
     try {
       await disableTOTPWithPasskey()
       pushSnack(t('twofa.disabled_toast'), 'success')
       onChanged()
       onClose()
     } catch (err) {
-      const name = (err as { name?: string })?.name
-      if (name !== 'NotAllowedError' && name !== 'AbortError') setError(inlineError(err))
-    } finally {
-      setBusy(false)
-    }
+      if (ceremonyCancelled(err)) setNote(t('passkey.cancelled'))
+      else setError(reason(err))
+    } finally { setBusy(false) }
   }
 
   function finishRecovery() {
@@ -164,144 +131,84 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
     onClose()
   }
 
-  const recoveryText = recoveryCodes.join('\n')
+  // In the recovery step nothing but the Done button may close the dialog. The codes are stored server-side only as hashes,
+  // so a stray click outside or Escape would lose them for good, and would skip finishRecovery, leaving the profile showing
+  // the authenticator "off" although it is now on.
+  const locked = step === 'recovery'
+  const intro = { intro: t('twofa.intro'), enroll: t('twofa.scan_hint'), disable: t('twofa.disable_hint') } as const
+  const alert = (
+    <>
+      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+      {note && <Alert><AlertDescription>{note}</AlertDescription></Alert>}
+    </>
+  )
 
   return (
-    <Dialog
-      open={open}
-      onClose={(_e, reason) => {
-        if (busy) return
-        // In the recovery step a backdrop click / Escape would silently lose the
-        // one-time recovery codes (stored server-side only as hashes) AND skip
-        // finishRecovery → onChanged, leaving the profile showing 2FA "off" even
-        // though it's now active. Force the explicit Done button there.
-        if (step === 'recovery' && (reason === 'backdropClick' || reason === 'escapeKeyDown')) return
-        onClose()
-      }}
-      fullWidth
-      maxWidth="xs"
-    >
-      <DialogTitle>{t('twofa.title')}</DialogTitle>
+    <Dialog open={open} onOpenChange={o => { if (!o && !busy && !locked) onClose() }}>
+      <DialogContent showCloseButton={!locked}>
+        <DialogHeader>
+          <DialogTitle>{t('twofa.title')}</DialogTitle>
+          {/* The recovery step's explanation is the warning drawn with the codes, so it is not said twice. */}
+          {step !== 'recovery' && <DialogDescription>{intro[step]}</DialogDescription>}
+        </DialogHeader>
 
-      {step === 'intro' && (
-        <>
-          <DialogContent>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
-              {t('twofa.intro')}
-            </Typography>
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
-            <Button variant="contained" onClick={startEnroll} disabled={busy}
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-              {t('twofa.start')}
-            </Button>
-          </DialogActions>
-        </>
-      )}
+        {step === 'intro' && (
+          <>
+            {alert}
+            <DialogFooter>
+              <Button variant="outline" disabled={busy} onClick={onClose}>{t('twofa.cancel')}</Button>
+              <AsyncButton pending={busy} onClick={startEnroll}>{t('twofa.start')}</AsyncButton>
+            </DialogFooter>
+          </>
+        )}
 
-      {step === 'enroll' && (
-        <Box component="form" onSubmit={confirmEnroll}>
-          <DialogContent>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 2 }}>
-              {t('twofa.scan_hint')}
-            </Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-              <Box sx={{ p: 1.5, bgcolor: '#fff', borderRadius: 1, display: 'inline-flex' }}>
-                {otpauthURL && <QRCodeSVG value={otpauthURL} size={176} />}
-              </Box>
-            </Box>
-            <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
-              {t('twofa.manual_hint')}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, mt: 0.5 }}>
-              <Typography sx={{ fontFamily: 'monospace', fontSize: 14, wordBreak: 'break-all', flex: 1 }}>
-                {secret}
-              </Typography>
-              <Button size="small" startIcon={<ContentCopyIcon fontSize="small" />}
-                onClick={() => { void copyToClipboard(secret) }}>
-                {t('twofa.copy')}
-              </Button>
-            </Box>
-            <TextField
-              label={t('twofa.code')}
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              autoFocus
-              fullWidth
-              autoComplete="one-time-code"
-              placeholder="123456"
-            />
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
-            <Button type="submit" variant="contained" disabled={busy}
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-              {t('twofa.confirm')}
-            </Button>
-          </DialogActions>
-        </Box>
-      )}
+        {step === 'enroll' && (
+          <form onSubmit={confirmEnroll} className="grid gap-4">
+            {/* A QR code needs a white ground in both themes. */}
+            <div className="mx-auto rounded-lg border bg-white p-3 leading-none">{otpauthURL && <QRCodeSVG value={otpauthURL} size={176} />}</div>
+            <div>
+              <p className="text-xs text-muted-foreground">{t('twofa.manual_hint')}</p>
+              <div className="mt-1 flex items-center gap-1">
+                <code data-testid="totp-secret" className="min-w-0 flex-1 font-mono text-sm break-all">{secret}</code>
+                <CopyButton value={secret} name={t('twofa.title')} />
+              </div>
+            </div>
+            <Field label={t('twofa.code')} required error={codeError || undefined}>
+              <Input autoFocus inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={code} onChange={e => setCode(e.target.value)} />
+            </Field>
+            {alert}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{t('twofa.cancel')}</Button>
+              <AsyncButton type="submit" pending={busy}>{t('twofa.confirm')}</AsyncButton>
+            </DialogFooter>
+          </form>
+        )}
 
-      {step === 'recovery' && (
-        <>
-          <DialogContent>
-            <Alert severity="warning" sx={{ mb: 2 }}>{t('twofa.recovery_warning')}</Alert>
-            <Box sx={{
-              p: 2, bgcolor: md.surfaceContainerHigh, borderRadius: 1,
-              fontFamily: 'monospace', fontSize: 14, lineHeight: 1.9,
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5,
-            }}>
-              {recoveryCodes.map(c => <Box key={c}>{c}</Box>)}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
-              <Button size="small" startIcon={<ContentCopyIcon fontSize="small" />}
-                onClick={() => { void copyToClipboard(recoveryText) }}>
-                {t('twofa.copy_all')}
-              </Button>
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button variant="contained" onClick={finishRecovery}>{t('twofa.done')}</Button>
-          </DialogActions>
-        </>
-      )}
+        {step === 'recovery' && (
+          <>
+            <RecoveryCodeList codes={recoveryCodes} warning={t('twofa.recovery_warning')} />
+            <DialogFooter><Button onClick={finishRecovery}>{t('twofa.done')}</Button></DialogFooter>
+          </>
+        )}
 
-      {step === 'disable' && (
-        <Box component="form" onSubmit={submitDisable}>
-          <DialogContent>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 2 }}>
-              {t('twofa.disable_hint')}
-            </Typography>
-            <TextField
-              label={t('twofa.code')}
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              autoFocus
-              fullWidth
-              autoComplete="one-time-code"
-              placeholder="123456"
-              helperText={t('twofa.disable_code_hint')}
-            />
+        {step === 'disable' && (
+          <form onSubmit={submitDisable} className="grid gap-4">
+            <Field label={t('twofa.code')} required hint={t('twofa.disable_code_hint')} error={codeError || undefined}>
+              <Input autoFocus autoComplete="one-time-code" placeholder="123456" value={code} onChange={e => setCode(e.target.value)} />
+            </Field>
             {hasPasskey && (
-              <Button size="small" startIcon={<FingerprintIcon />} disabled={busy} sx={{ mt: 1 }}
-                onClick={disableViaPasskey}>
-                {t('twofa.disable_passkey', { defaultValue: '或用通行密钥停用' })}
+              <Button type="button" variant="outline" className="self-start" disabled={busy} onClick={() => void disableViaPasskey()}>
+                <IconFingerprint />{t('twofa.disable_passkey')}
               </Button>
             )}
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
-            <Button type="submit" color="error" variant="contained" disabled={busy}
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-              {t('twofa.disable')}
-            </Button>
-          </DialogActions>
-        </Box>
-      )}
+            {alert}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy} onClick={onClose}>{t('twofa.cancel')}</Button>
+              <AsyncButton type="submit" variant="destructive" pending={busy}>{t('twofa.disable')}</AsyncButton>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
     </Dialog>
   )
 }

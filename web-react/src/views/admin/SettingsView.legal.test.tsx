@@ -27,8 +27,8 @@ describe('Settings > Privacy and terms tab', () => {
 
     const enabled = screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }) as HTMLInputElement
     const usage = screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }) as HTMLInputElement
-    expect(enabled.checked).toBe(false)
-    expect(usage.checked).toBe(false)
+    expect(enabled.getAttribute('aria-checked')).toBe('false')
+    expect(usage.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(enabled)
     fireEvent.click(usage)
     api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
@@ -38,8 +38,8 @@ describe('Settings > Privacy and terms tab', () => {
 
   it('shows the stored switches', async () => {
     const enabled = await openLegalTab({ legal_enabled: true, legal_disclose_usage: true })
-    expect(enabled.checked).toBe(true)
-    expect((screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }) as HTMLInputElement).checked).toBe(true)
+    expect(enabled.getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }).getAttribute('aria-checked')).toBe('true')
   })
 
   it('after a save the footer links and the consent dialog follow the server\'s own answer (/auth/methods), not the raw switch', async () => {

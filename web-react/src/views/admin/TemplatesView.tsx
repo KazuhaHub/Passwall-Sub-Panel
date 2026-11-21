@@ -1,540 +1,230 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import {
-  Box,
-  Button,
-  Card,
-  Checkbox,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormControlLabel,
-  IconButton,
-  InputLabel,
-  ListItemText,
-  MenuItem,
-  OutlinedInput,
-  Select,
-  Switch,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
-import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
-import EditIcon from '@mui/icons-material/EditOutlined'
-import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useCan } from '@/utils/permissions'
-import { allSettledLimited } from '@/utils/promises'
-import { AsyncIconButton } from '@/components/AsyncButton'
+import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteTemplate, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import type { RuleSet } from '@/api/rules'
+import { deleteTemplate, resetTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import type { ListResponse } from '@/api/types'
+import { confirm } from '@/components/ConfirmHost'
+import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { PageHeader } from '@/components/common/PageHeader'
+import { DataTable } from '@/components/data/DataTable'
+import { FilterBar } from '@/components/data/FilterBar'
+import { filterRows } from '@/components/data/dataTableLogic'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { useUrlSelection } from '@/hooks/useUrlSelection'
+import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
+import { IconDelete } from '@/lib/icons'
 import { templateKeys } from '@/query/keys'
 import { useRuleSets, useTemplates } from '@/query/rules'
 import { useQueryScope } from '@/query/useQueryScope'
-import { useQueryClient } from '@tanstack/react-query'
-import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import { PagedTableFooter } from '@/components/PagedTableFooter'
-import PageHeader from '@/components/PageHeader'
+import { useCan } from '@/utils/permissions'
+import { allSettledLimited } from '@/utils/promises'
+import { RowActions } from './subscription/RowActions'
+import { RowCard } from './subscription/RowCard'
+import { Badge } from '@/components/ui/badge'
+import { templateColumns } from './templates/columns'
+import { duplicateOf, TemplateSheet, type TemplateTarget } from './templates/TemplateSheet'
 
-const EMPTY: Template = {
-  slug: '', name: '', client_type: 'mihomo', is_default: false, rule_sets: [], content: '',
-}
+const NONE: never[] = []
 
-const BUILTIN_TARGETS = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS'])
-
-function normalizeTarget(raw: string) { return raw.trim().replace(/^['"]|['"]$/g, ''); }
-
-function extractProxyGroups(content: string): Set<string> {
-  const groups = new Set<string>()
-  let inProxyGroups = false
-  for (const line of content.split('\n')) {
-    if (/^proxy-groups\s*:/.test(line)) { inProxyGroups = true; continue }
-    if (inProxyGroups && /^\S/.test(line) && !/^proxy-groups\s*:/.test(line)) break
-    const match = line.match(/^\s*-\s*name:\s*(.+?)\s*$/)
-    if (inProxyGroups && match) groups.add(normalizeTarget(match[1]))
-  }
-  return groups
-}
-
-function usesDynamicProxyGroups(content: string) {
-  return /\{\{\s*proxy_groups\s*\}\}/.test(content) || /\{\{\s*outbounds\s*\}\}/.test(content);
-}
-
-function extractRuleTargets(sets: RuleSet[]): Set<string> {
-  const targets = new Set<string>()
-  for (const rs of sets) {
-    if (!rs.enabled) continue
-    for (const rawLine of rs.content.split('\n')) {
-      const line = rawLine.trim().replace(/^-\s*/, '')
-      if (!line || line.startsWith('#') || line.includes('{{')) continue
-      const parts = line.split(',').map(p => normalizeTarget(p))
-      if (parts.length < 2) continue
-      const useful = parts.filter(p => p && p !== 'no-resolve')
-      const target = useful[useful.length - 1]
-      if (target && !BUILTIN_TARGETS.has(target)) targets.add(target)
-    }
-  }
-  return targets
-}
-
-function missingTargets(groups: Set<string>, targets: Set<string>): string[] {
-  if (groups.size === 0) return Array.from(targets)
-  return Array.from(targets).filter(t => !groups.has(t))
-}
-
+/**
+ * Templates: a client format plus the rule sets bound to it; subscription rendering uses the bindings set here.
+ * The list is here; one is edited in a wide sheet (templates/TemplateSheet), opened from the address
+ * (`?edit=<slug>`, `?edit=new`, or `?edit=new&copy=<slug>` for a duplicate).
+ */
 export default function TemplatesView() {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
-
-  const qScope = useQueryScope()
+  const scope = useQueryScope()
   const queryClient = useQueryClient()
-  const templatesQuery = useTemplates(qScope)
-  const ruleSetsQuery = useRuleSets(qScope)
-  const items = templatesQuery.data?.items ?? []
-  const ruleSets = ruleSetsQuery.data?.items ?? []
-  const loading = templatesQuery.isPending
-  const templatesFailed = templatesQuery.isError || ruleSetsQuery.isError
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const templatesQuery = useTemplates(scope)
+  const ruleSetsQuery = useRuleSets(scope)
+  const items = templatesQuery.data?.items ?? NONE
+  const ruleSets = ruleSetsQuery.data?.items ?? NONE
+  const failed = templatesQuery.isError || ruleSetsQuery.isError
+  const [q, setQ] = useUrlState('q', urlCodecs.string())
+  const edit = useUrlSelection('edit')
+  const copy = useUrlSelection('copy')
+  const [checked, setChecked] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
+  const ruleSetMap = useMemo(() => new Map<string, RuleSet>(ruleSets.map(r => [r.slug, r])), [ruleSets])
 
-  /** Patch the cached template list after a write, so the table updates
-   *  without a round-trip. */
-  function mutateTemplateItems(updater: (prev: Template[]) => Template[]) {
-    queryClient.setQueryData<ListResponse<Template>>(templateKeys.list(qScope, {}), prev =>
-      prev ? { ...prev, items: updater(prev.items) } : prev)
+  /** Patch the cached list after a write, so the table updates without a round-trip. */
+  function mutateItems(updater: (prev: Template[]) => Template[]) {
+    queryClient.setQueryData<ListResponse<Template>>(templateKeys.list(scope, {}), prev => (prev ? { ...prev, items: updater(prev.items) } : prev))
   }
-
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<Template>(EMPTY)
-  const [busy, setBusy] = useState(false)
-
-  // Client-side pagination — template lists are small but consistent
-  // UX wants the same footer everywhere.
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem('psp_page_size')
-      const n = raw ? parseInt(raw, 10) : 25
-      return Number.isFinite(n) && n > 0 ? n : 25
-    } catch { return 25 }
-  })
-  function changePageSize(n: number) {
-    setPageSize(n)
-    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
-    setPage(1)
-  }
-  const pagedItems = useMemo(
-    () => items.slice((page - 1) * pageSize, page * pageSize),
-    [items, page, pageSize],
-  )
-
-  const selectableSlugs = pagedItems.filter(i => !i.is_default).map(i => i.slug)
-  const allChecked = selectableSlugs.length > 0 && selectableSlugs.every(s => selected.has(s))
-  const someChecked = selected.size > 0 && !allChecked
-
-  const ruleSetMap = useMemo(() => new Map(ruleSets.map(r => [r.slug, r])), [ruleSets])
-
-  // Reload after a write. Clearing the selection is deliberate (the rows it
-  // referred to may be gone), and the mount-time call is a no-op.
+  // Reload after a write. Clearing the selection is deliberate (the rows it referred to may be gone).
   function load() {
-    setSelected(new Set())
+    setChecked({})
     return Promise.all([templatesQuery.refetch(), ruleSetsQuery.refetch()])
   }
-
-  function toggleAll(checked: boolean) {
-    // Per-page semantics matching ServersView / RuleSetsView /
-    // GroupsView: only flip the currently visible page's selectable
-    // rows. Pre-v3.6.1-beta.5 the box wiped or replaced the entire
-    // cross-page selection, which surprised admins who had checked
-    // rows on a different page.
-    setSelected(prev => {
-      const next = new Set(prev)
-      selectableSlugs.forEach(s => { if (checked) next.add(s); else next.delete(s) })
-      return next
-    })
-  }
-  function toggleOne(slug: string, checked: boolean) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (checked) next.add(slug); else next.delete(slug)
-      return next
-    })
-  }
-
-  function openCreate() { setEditing(false); setForm(EMPTY); setDialogOpen(true) }
-  function openEdit(tpl: Template) {
-    setEditing(true)
-    setForm({ ...tpl, rule_sets: tpl.rule_sets ? [...tpl.rule_sets] : [] })
-    setDialogOpen(true)
-  }
-  // Duplicate clones the row into the create flow so the admin can
-  // tweak the slug + name before saving. is_default is forced off so
-  // the new copy doesn't fight the original for the per-client-type
-  // default — and so the seeded original keeps its protection /
-  // canonical-default semantics.
-  function openDuplicate(tpl: Template) {
-    setEditing(false)
-    setForm({
-      ...tpl,
-      slug: tpl.slug + '-copy',
-      name: tpl.name + ' (Copy)',
-      is_default: false,
-      rule_sets: tpl.rule_sets ? [...tpl.rule_sets] : [],
-    })
-    setDialogOpen(true)
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    if (!form.slug || !form.name) {
-      pushSnack(t('admin:templates.validate.slug_name_required'), 'warning'); return
+  const seeded = (tpl: Template) => SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)
+  /** The default template and the seeded ones cannot be deleted (nor selected for a bulk delete). */
+  const protectedRow = (tpl: Template) => tpl.is_default || seeded(tpl)
+  const withBusy = async (slug: string, run: () => Promise<void>) => {
+    setBusy(prev => new Set(prev).add(slug))
+    try { await run() } catch { /* The request layer already surfaced the failure. */ } finally {
+      setBusy(prev => { const next = new Set(prev); next.delete(slug); return next })
     }
-    setBusy(true)
-    try {
-      await saveTemplate(form)
-      if (editing) {
-        mutateTemplateItems(prev => prev.map(item => item.slug === form.slug ? form : item))
-      }
-      pushSnack(t('admin:templates.toast.saved'), 'success')
-      setDialogOpen(false)
-      if (!editing) void load().catch(() => {})
-    } finally { setBusy(false) }
   }
 
   async function confirmDelete(tpl: Template) {
     const ok = await confirm({
       title: t('admin:templates.confirm.delete_title'),
       message: t('admin:templates.confirm.delete_message', { slug: tpl.slug }),
+      confirmText: t('common:actions.delete'),
       destructive: true,
+      initialFocus: 'cancel',
     })
     if (!ok) return
-    await deleteTemplate(tpl.slug)
-    pushSnack(t('admin:templates.toast.deleted'), 'success')
-    await load()
+    await withBusy(tpl.slug, async () => {
+      await deleteTemplate(tpl.slug)
+      pushToast({ message: t('admin:templates.toast.deleted'), severity: 'success' })
+      await load()
+    })
   }
 
   async function confirmReset(tpl: Template) {
     const ok = await confirm({
       title: t('admin:templates.confirm.reset_title'),
       message: t('admin:templates.confirm.reset_message', { slug: tpl.slug }),
+      confirmText: t('admin:templates.reset_to_default'),
       destructive: true,
+      initialFocus: 'cancel',
     })
     if (!ok) return
-    await resetTemplate(tpl.slug)
-    pushSnack(t('admin:templates.toast.reset'), 'success')
-    await load()
+    await withBusy(tpl.slug, async () => {
+      await resetTemplate(tpl.slug)
+      pushToast({ message: t('admin:templates.toast.reset'), severity: 'success' })
+      await load()
+    })
   }
 
-  async function batchDelete() {
-    const rows = items.filter(i => selected.has(i.slug))
+  function menuOf(tpl: Template): MoreMenuItem[] {
+    const wait = busy.has(tpl.slug)
+    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:templates.duplicate'), disabled: wait, onSelect: () => { copy.select(tpl.slug); edit.select('new') } }]
+    if (seeded(tpl)) menu.push({ id: 'reset', label: t('admin:templates.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(tpl) })
+    // A protected template keeps its Delete item, off, saying why, instead of silently having none.
+    menu.push(protectedRow(tpl)
+      ? { id: 'delete', label: t(seeded(tpl) ? 'admin:templates.cannot_delete_seeded' : 'admin:templates.cannot_delete_default'), icon: IconDelete, destructive: true, disabled: true }
+      : { id: 'delete', label: t('admin:templates.row_delete'), icon: IconDelete, destructive: true, disabled: wait, onSelect: () => void confirmDelete(tpl) })
+    return menu
+  }
+
+  async function batchDelete(rows: Template[], hidden: number, clear: () => void) {
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:templates.confirm.batch_delete_title'),
-      message: t('admin:templates.confirm.batch_delete_message', { count: rows.length }),
+      message: t('admin:templates.confirm.batch_delete_message', { count: rows.length }) + (hidden > 0 ? ' ' + t('admin:templates.confirm.batch_delete_hidden', { count: hidden }) : ''),
+      confirmText: t('common:actions.delete'),
       destructive: true,
+      initialFocus: 'cancel',
     })
     if (!ok) return
     setBatchBusy(true)
     try {
       const results = await allSettledLimited(rows, r => deleteTemplate(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
-      const failed = rows.length - okSlugs.length
-      mutateTemplateItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
-      setSelected(new Set())
-      if (failed > 0) pushSnack(t('admin:templates.toast.batch_partial', { ok: okSlugs.length, fail: failed }), 'warning')
-      else pushSnack(t('admin:templates.toast.batch_deleted', { count: okSlugs.length }), 'success')
+      const fail = rows.length - okSlugs.length
+      mutateItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
+      clear()
+      if (fail > 0) pushToast({ message: t('admin:templates.toast.batch_partial', { ok: okSlugs.length, fail }), severity: 'warning' })
+      else pushToast({ message: t('admin:templates.toast.batch_deleted', { count: okSlugs.length }), severity: 'success' })
     } finally { setBatchBusy(false) }
   }
 
-  function ruleSetSummary(tpl: Template): string {
-    if (!tpl.rule_sets?.length) return t('admin:templates.status.no_binding')
-    return tpl.rule_sets.map(s => ruleSetMap.get(s)?.name || s).join('、')
-  }
+  const columns = useMemo(() => templateColumns({
+    t, ruleSets: ruleSetMap, canConfig, busy, onEdit: tpl => edit.select(tpl.slug), menuOf,
+  // The row handlers close over the lists they read; they are rebuilt with the columns when those change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [t, ruleSetMap, canConfig, busy, items])
 
-  function coverageBadge(tpl: Template) {
-    const sets = (tpl.rule_sets || []).map(s => ruleSetMap.get(s)).filter((x): x is RuleSet => Boolean(x))
-    if (sets.length === 0) return badge(t('admin:templates.status.no_binding'), md.surfaceContainerHighest, md.onSurfaceVariant)
-    if (usesDynamicProxyGroups(tpl.content)) return badge(t('admin:templates.status.auto_generated'), md.tertiaryContainer, md.onTertiaryContainer)
-    const groups = extractProxyGroups(tpl.content)
-    const missing = missingTargets(groups, extractRuleTargets(sets))
-    if (missing.length > 0) return badge(t('admin:templates.status.missing_n', { n: missing.length }), md.errorContainer, md.onErrorContainer)
-    return badge(t('admin:templates.status.ok'), md.tertiaryContainer, md.onTertiaryContainer)
-  }
+  const shown = useMemo(() => filterRows(items, r => `${r.slug} ${r.name} ${r.client_type}`, q), [items, q])
+  const filtered = q.trim() !== ''
 
-  function badge(label: string, bg: string, fg: string) {
-    return <Box sx={{
-      display: 'inline-block', px: 1.25, py: 0.25,
-      borderRadius: 1, fontSize: 12, fontWeight: 500,
-      bgcolor: bg, color: fg, whiteSpace: 'nowrap',
-    }}>{label}</Box>
-  }
+  const target: TemplateTarget | null = useMemo(() => {
+    if (!canConfig || !edit.selected) return null
+    if (edit.selected === 'new') {
+      const source = copy.selected ? items.find(r => r.slug === copy.selected) : undefined
+      return source ? { kind: 'copy', draft: duplicateOf(source) } : { kind: 'new' }
+    }
+    const found = items.find(r => r.slug === edit.selected)
+    return found ? { kind: 'edit', template: found } : null
+  }, [canConfig, edit.selected, copy.selected, items])
 
-  // Form analysis
-  const formSelectedRuleSets = form.rule_sets.map(s => ruleSetMap.get(s)).filter((x): x is RuleSet => Boolean(x))
-  const formProxyGroups = extractProxyGroups(form.content)
-  const formRuleTargets = extractRuleTargets(formSelectedRuleSets)
-  const formMissing = missingTargets(formProxyGroups, formRuleTargets)
-  const formDynamic = usesDynamicProxyGroups(form.content)
+  const closeSheet = () => { copy.clear(); edit.clear() }
 
-  function formHint() {
-    if (formDynamic && form.rule_sets.length > 0) {
-      return { color: md.tertiary, text: t('admin:templates.hint.auto_groups') }
-    }
-    if (formMissing.length > 0 && form.content.length > 50) {
-      return {
-        color: md.error,
-        text: t('admin:templates.hint.missing_targets', {
-          names: formMissing.slice(0, 8).join('、') + (formMissing.length > 8 ? ` +${formMissing.length - 8}` : ''),
-        }),
-      }
-    }
-    if (form.rule_sets.length > 0 && formProxyGroups.size > 0) {
-      return { color: md.tertiary, text: t('admin:templates.hint.groups_ok', { n: formProxyGroups.size }) }
-    }
-    if (form.rule_sets.length === 0) {
-      return { color: md.onSurfaceVariant, text: t('admin:templates.hint.no_binding') }
-    }
-    if (form.content.length < 50) {
-      return { color: md.onSurfaceVariant, text: t('admin:templates.hint.incomplete') }
-    }
-    return null
-  }
-  const hint = formHint()
-
-  // The loader had no catch on two parallel reads, so a failure raised an
-  // unhandled rejection and rendered an empty table — indistinguishable from
-  // "no templates are configured".
-  if (templatesFailed) {
+  if (failed) {
     return (
-      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
-        <Typography sx={{ color: md.onSurfaceVariant }}>
-          {t('admin:templates.load_failed', { defaultValue: '暂时无法加载配置方案' })}
-        </Typography>
-        <Button variant="outlined" onClick={() => void load()}>
-          {t('admin:templates.retry', { defaultValue: '重试' })}
-        </Button>
-      </Box>
+      <div className="p-4 sm:p-6">
+        <PageHeader title={t('admin:templates.title')} description={t('admin:templates.subtitle')} />
+        <ErrorState title={t('admin:templates.load_failed')} reason={templatesQuery.error ?? ruleSetsQuery.error} retry={() => load()} />
+      </div>
     )
   }
 
+  const loading = templatesQuery.isPending
   return (
-    <Box sx={{ p: 3 }}>
+    <div className="p-4 sm:p-6">
       <PageHeader
         title={t('admin:templates.title')}
-        subtitle={t('admin:templates.subtitle')}
-        actions={canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-          {t('admin:templates.create')}
-        </Button>}
+        count={loading ? undefined : items.length}
+        description={t('admin:templates.subtitle')}
+        primary={canConfig && <Button onClick={() => { copy.clear(); edit.select('new') }}>{t('admin:templates.create')}</Button>}
       />
-      {selected.size > 0 && canConfig && (
-        <Box sx={{
-          display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
-          borderRadius: 9999, bgcolor: md.secondaryContainer, color: md.onSecondaryContainer,
-          width: 'fit-content',
-        }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 500, mr: 1 }}>
-            {t('admin:templates.selection_count', { count: selected.size })}
-          </Typography>
-          <Button size="small" variant="text" color="error"
-            startIcon={batchBusy ? <CircularProgress size={14} /> : <DeleteIcon />}
-            disabled={batchBusy} onClick={batchDelete}>
-            {t('admin:templates.batch_delete')}
-          </Button>
-        </Box>
-      )}
-      <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                <TableCell padding="checkbox">
-                  <Checkbox indeterminate={someChecked} checked={allChecked}
-                    onChange={(_, c) => toggleAll(c)} disabled={selectableSlugs.length === 0} />
-                </TableCell>
-                <TableCell>{t('admin:templates.table.slug')}</TableCell>
-                <TableCell>{t('admin:templates.table.name')}</TableCell>
-                <TableCell>{t('admin:templates.table.client_type')}</TableCell>
-                <TableCell>{t('admin:templates.table.rule_sets')}</TableCell>
-                <TableCell>{t('admin:templates.table.coverage')}</TableCell>
-                <TableCell>{t('admin:templates.table.default')}</TableCell>
-                <TableCell align="right">{t('admin:templates.table.actions')}</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6 }}>
-                  <CircularProgress size={24} />
-                </TableCell></TableRow>
-              )}
-              {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
-              )}
-              {pagedItems.map(tpl => (
-                <TableRow key={tpl.slug} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                  <TableCell padding="checkbox">
-                    <Checkbox checked={selected.has(tpl.slug)}
-                      disabled={tpl.is_default || SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)}
-                      onChange={(_, c) => toggleOne(tpl.slug, c)} />
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 13 }}>{tpl.slug}</TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{tpl.name}</TableCell>
-                  <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{tpl.client_type}</TableCell>
-                  <TableCell sx={{ fontSize: 13, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {ruleSetSummary(tpl)}
-                  </TableCell>
-                  <TableCell>{coverageBadge(tpl)}</TableCell>
-                  <TableCell>
-                    {tpl.is_default && badge(t('admin:templates.status.default'), md.primaryContainer, md.onPrimaryContainer)}
-                  </TableCell>
-                  <TableCell align="right">
-                    {canConfig && <>
-                    <Tooltip title={t('admin:templates.edit_title')}>
-                      <IconButton size="small" onClick={() => openEdit(tpl)}><EditIcon fontSize="small" /></IconButton>
-                    </Tooltip>
-                    <Tooltip title={t('admin:templates.duplicate')}>
-                      <IconButton size="small" onClick={() => openDuplicate(tpl)}
-                        sx={{ color: md.onSurfaceVariant }}>
-                        <ContentCopyIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                    {SEEDED_TEMPLATE_SLUGS.includes(tpl.slug) && (
-                      <Tooltip title={t('admin:templates.reset_to_default')}>
-                        {/* AsyncIconButton, not a plain IconButton: reset hits the
-                            upstream and a slow link left this clickable with no
-                            feedback for the whole round-trip, inviting a repeat
-                            click that re-opened the confirm dialog mid-request. */}
-                        <AsyncIconButton size="small" onClick={() => confirmReset(tpl)}
-                          sx={{ color: md.onSurfaceVariant }}>
-                          <RestartAltIcon fontSize="small" />
-                        </AsyncIconButton>
-                      </Tooltip>
-                    )}
-                    <Tooltip title={SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)
-                      ? t('admin:templates.cannot_delete_seeded')
-                      : t('admin:templates.batch_delete')}>
-                      <span>
-                        <AsyncIconButton size="small" onClick={() => confirmDelete(tpl)}
-                          disabled={tpl.is_default || SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)}
-                          sx={{ color: md.error }}>
-                          <DeleteIcon fontSize="small" />
-                        </AsyncIconButton>
-                      </span>
-                    </Tooltip>
-                    </>}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <PagedTableFooter
-          total={items.length} page={page} pageSize={pageSize}
-          onPageChange={setPage} onPageSizeChange={changePageSize}
-        />
-      </Card>
-      {/* Create/Edit dialog */}
-      <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 900, maxWidth: '95vw' } }
-        }}>
-        <DialogTitle>
-          {editing ? t('admin:templates.edit_title') : t('admin:templates.create')}
-        </DialogTitle>
-        <DialogContent>
-          <Box component="form" id="tpl-form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField required label={t('admin:templates.field.slug')}
-                value={form.slug} disabled={editing}
-                onChange={e => setForm({ ...form, slug: e.target.value })}
-                sx={{ flex: 1, '& input': {  } }} />
-              <TextField required label={t('admin:templates.field.name')}
-                value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                sx={{ flex: 1 }} />
-            </Box>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <TextField select size="small" label={t('admin:templates.field.client_type')}
-                value={form.client_type}
-                onChange={e => setForm({ ...form, client_type: e.target.value })}
-                sx={{ minWidth: 220 }}>
-                <MenuItem value="mihomo">mihomo</MenuItem>
-                <MenuItem value="sing-box">Sing-box</MenuItem>
-              </TextField>
-              <FormControlLabel
-                label={t('admin:templates.field.is_default')}
-                control={<Switch checked={form.is_default} onChange={(_, c) => setForm({ ...form, is_default: c })} />}
-                sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
-              />
-            </Box>
-            <Box>
-              <FormControl fullWidth size="small">
-                <InputLabel shrink>{t('admin:templates.field.rule_sets')}</InputLabel>
-                <Select multiple
-                  value={form.rule_sets}
-                  onChange={e => setForm({ ...form, rule_sets: e.target.value as string[] })}
-                  input={<OutlinedInput notched label={t('admin:templates.field.rule_sets')} />}
-                  displayEmpty
-                  renderValue={(sel) =>
-                    (sel as string[]).length === 0
-                      ? <Typography sx={{ color: md.onSurfaceVariant, fontSize: 14 }}>{t('admin:templates.placeholder.rule_sets')}</Typography>
-                      : (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                          {(sel as string[]).map(s => {
-                            const rs = ruleSetMap.get(s)
-                            return <Chip key={s} label={rs?.name || s} size="small" />
-                          })}
-                        </Box>
-                      )}
-                >
-                  {ruleSets.map(rs => (
-                    <MenuItem key={rs.slug} value={rs.slug} disabled={!rs.enabled}>
-                      <Checkbox checked={form.rule_sets.includes(rs.slug)} sx={{ mr: 1, p: 0.5 }} />
-                      <ListItemText primary={`${rs.name} (${rs.slug})`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.5 }}>
-                {t('admin:templates.hint.rule_sets')}
-              </Typography>
-              {hint && (
-                <Typography sx={{ fontSize: 12, color: hint.color, mt: 1 }}>{hint.text}</Typography>
-              )}
-            </Box>
-            <TextField fullWidth multiline minRows={14} maxRows={28}
-              label={t('admin:templates.field.content')}
-              placeholder={t('admin:templates.placeholder.content')}
-              value={form.content}
-              onChange={e => setForm({ ...form, content: e.target.value })}
-              sx={{ '& textarea': { fontSize: 13 } }} />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="tpl-form" variant="contained" disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('common:actions.ok')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
-  );
+      <DataTable<Template>
+        aria-label={t('admin:templates.title')}
+        data={shown}
+        columns={columns}
+        getRowId={r => r.slug}
+        rowLabel={r => r.name || r.slug}
+        loading={loading}
+        selectable={canConfig}
+        selection={checked}
+        onSelectionChange={setChecked}
+        onRowOpen={canConfig ? tpl => edit.select(tpl.slug) : undefined}
+        activeRowId={edit.selected && edit.selected !== 'new' ? edit.selected : null}
+        rowOptions={r => ({ selectable: !protectedRow(r), state: busy.has(r.slug) ? 'pending' : undefined })}
+        renderCard={(r, ctx) => (
+          <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
+            status={r.is_default ? <Badge variant="secondary">{t('admin:templates.status.default')}</Badge> : undefined}
+            detail={`${r.client_type} · ${r.rule_sets?.length ? r.rule_sets.map(s => ruleSetMap.get(s)?.name || s).join('、') : t('admin:templates.status.no_binding')}`}
+            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:templates.edit_title')} menuLabel={t('admin:templates.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => edit.select(r.slug)} menu={menuOf(r)} /> : undefined} />
+        )}
+        toolbar={(
+          <FilterBar
+            search={{ value: q, onChange: setQ, placeholder: t('admin:templates.search_placeholder') }}
+            onClearAll={() => setQ('')}
+          />
+        )}
+        empty={filtered
+          ? <EmptyState compact title={t('admin:templates.no_match')} action={<Button variant="outline" onClick={() => setQ('')}>{t('admin:templates.clear_search')}</Button>} />
+          : <EmptyState compact title={t('admin:templates.empty')} description={t('admin:templates.empty_hint')} action={canConfig ? <Button onClick={() => edit.select('new')}>{t('admin:templates.create')}</Button> : undefined} />}
+        bulkActions={canConfig ? (ctx => {
+          const rows = items.filter(i => ctx.ids.includes(i.slug))
+          return (
+            <Button variant="outline" size="sm" disabled={batchBusy} className="text-destructive" onClick={() => void batchDelete(rows, ctx.hiddenCount, ctx.clear)}>
+              <IconDelete />{t('admin:templates.batch_delete')}
+            </Button>
+          )
+        }) : undefined}
+      />
+      <TemplateSheet
+        target={target}
+        existingSlugs={items.map(r => r.slug)}
+        ruleSets={ruleSets}
+        onClose={closeSheet}
+        onSaved={(saved, wasEdit) => {
+          if (wasEdit) mutateItems(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
+          closeSheet()
+          if (!wasEdit) void load().catch(() => {})
+        }}
+      />
+    </div>
+  )
 }
