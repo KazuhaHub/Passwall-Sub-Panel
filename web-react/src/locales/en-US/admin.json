@@ -750,13 +750,15 @@
         "switch_title": "Switch language?",
         "switch_message": "This language has unsaved changes, which are lost when you switch.",
         "usage_missing_summary": "The preview has no per-site usage line",
-        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings."
+        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings.",
+        "unpublished": "This text is not published yet",
+        "empty": "The text is empty and cannot be published"
       },
       "publish": {
         "title": "Publish {{doc}} ({{locale}}) version {{version}}?",
         "diff": "{{added}} characters added, {{removed}} removed since the last version",
         "first": "This is the first version in this language.",
-        "bump": "Material change: ask users to consent again",
+        "bump": "Material change: ask users to accept again",
         "bump_hint": "When checked, about {{users}} ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
         "bump_hint_loading": "When checked, ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
         "cancel": "Cancel",
@@ -764,7 +766,12 @@
         "done": "Version {{version}} published",
         "conflict": "Another administrator just published a new version; reloaded",
         "too_large": "The text is over {{max}} bytes and cannot be published",
-        "failed": "Could not publish. Please try again."
+        "failed": "Could not publish. Please try again.",
+        "kind_label": "Kind of change",
+        "minor": "Minor change",
+        "minor_hint": "Users are not asked again. Use it for typo fixes and rewording.",
+        "bump_effect": "You are about to ask every ordinary user to accept this document again.",
+        "confirm_bump": "Publish and ask users to accept again"
       },
       "history_sheet": {
         "title": "{{doc}} version history",

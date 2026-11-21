@@ -748,7 +748,9 @@
         "switch_title": "切换语言？",
         "switch_message": "当前语言有未保存的修改，切换后会丢失。",
         "usage_missing_summary": "预览里没有按网站用量",
-        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。"
+        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。",
+        "unpublished": "此文本尚未发布",
+        "empty": "文本为空，无法发布"
       },
       "publish": {
         "title": "发布{{doc}}（{{locale}}）第 {{version}} 版？",
@@ -762,7 +764,12 @@
         "done": "已发布第 {{version}} 版",
         "conflict": "其他管理员刚发布了新版本，已重新载入",
         "too_large": "正文超过 {{max}} 字节，无法发布",
-        "failed": "发布失败，请重试"
+        "failed": "发布失败，请重试",
+        "kind_label": "变更类型",
+        "minor": "一般修改",
+        "minor_hint": "不会再次询问用户。适用于修正错别字和调整措辞。",
+        "bump_effect": "你将要求所有普通用户重新同意此文档。",
+        "confirm_bump": "发布并要求用户重新同意"
       },
       "history_sheet": {
         "title": "{{doc}}版本历史",
