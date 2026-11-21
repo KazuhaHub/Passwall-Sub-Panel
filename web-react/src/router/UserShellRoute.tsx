@@ -15,7 +15,7 @@ const TOP_BAR_ACTIONS = <><LanguageMenu /><ThemeMenu /></>
 const FOOTER = (
   <SiteFooter
     component="footer"
-    sx={{ py: 1.25, textAlign: 'center', fontSize: 11, color: 'text.secondary', borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}
+    className="border-t bg-card py-2.5 text-center text-[11px] text-muted-foreground"
   />
 )
 
