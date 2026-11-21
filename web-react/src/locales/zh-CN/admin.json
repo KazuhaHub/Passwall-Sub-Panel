@@ -4273,7 +4273,6 @@
       "delete_text": "删除后，放在这个端口后面的监听器会回到自己的公网端口，它们的用户会重新连接一次；指向这个端口的中转线路不再下发，直到重新配置。",
       "deleted": "已删除共用端口",
       "saved": "已保存共用端口",
-      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
       "port": "共用的端口",
       "port_hint": "任意 TCP 端口，默认 443。",
       "listeners": "放在这个端口后面的监听器",
@@ -4302,7 +4301,8 @@
         "listener": "监听器 {{name}}",
         "forward": "中转线路 {{node}} / {{line}}",
         "link": "来自服务器 {{entry}} 的隧道 {{link}}（独立端口 {{port}}）",
-        "forward_short": "中转线路 {{node}} / {{line}}"
+        "forward_short": "中转线路 {{node}} / {{line}}",
+        "link_short": "隧道 {{link}}"
       },
       "refusal": {
         "no_sni": "没有可读的 SNI（如 Shadowsocks / SS-2022），保持自己的端口",
@@ -4445,7 +4445,36 @@
           "contract": "节点协议拒绝了它"
         }
       },
-      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效"
+      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效",
+      "back": "共用端口",
+      "discard_title": "放弃未保存的修改？",
+      "discard_message": "离开后，对这个共用端口所做的修改会丢失。",
+      "discard_confirm": "放弃",
+      "delete_confirm": "删除端口 {{port}}",
+      "plan": {
+        "listeners": "会回到各自公网端口的监听器：",
+        "lines": "会停止下发的中转线路：",
+        "tunnels": "受影响的隧道："
+      },
+      "graph": {
+        "title": "共用端口的分流",
+        "caption": "客户端连接共用端口，由 TLS 握手里的服务器名称（SNI）选择路由，再交给监听器、中转线路或伪装站点。选中一个方框可查看经过它的连接。",
+        "col_port": "客户端连接",
+        "col_sni": "握手里的 SNI",
+        "col_target": "交给",
+        "routes_other": "{{count}} 条路由",
+        "other": "其他或没有 SNI",
+        "loopback": "127.0.0.1:{{port}}",
+        "preview": "此共用端口的预览",
+        "no_default": "还没有伪装站点"
+      },
+      "more_routes_other": "另有 {{count}} 条路由",
+      "status": "状态",
+      "active": "生效中",
+      "actions": "操作",
+      "confirm_needed": "确认端点变更后才能保存",
+      "choose_target": "选择交给谁",
+      "empty_title": "还没有共用端口"
     },
     "delete": {
       "title": "删除服务器“{{name}}”？",

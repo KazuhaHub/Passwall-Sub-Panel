@@ -4291,7 +4291,6 @@
       "delete_text": "Listeners behind this port return to their own public ports and their users reconnect once; relay lines that enter on this port are no longer sent until they are set up again.",
       "deleted": "Shared port deleted",
       "saved": "Shared port saved",
-      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
       "port": "Shared port",
       "port_hint": "Any TCP port; 443 by default.",
       "listeners": "Listeners behind this port",
@@ -4320,7 +4319,8 @@
         "listener": "Listener {{name}}",
         "forward": "Relay line {{node}} / {{line}}",
         "link": "Tunnel {{link}} from server {{entry}} (standalone port {{port}})",
-        "forward_short": "Relay line {{node}} / {{line}}"
+        "forward_short": "Relay line {{node}} / {{line}}",
+        "link_short": "Tunnel {{link}}"
       },
       "refusal": {
         "no_sni": "No readable SNI (for example Shadowsocks / SS-2022); keeps its own port",
@@ -4463,7 +4463,38 @@
           "contract": "the node protocol refused it"
         }
       },
-      "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect"
+      "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect",
+      "back": "Shared ports",
+      "discard_title": "Discard unsaved changes?",
+      "discard_message": "The changes to this shared port are lost if you leave.",
+      "discard_confirm": "Discard",
+      "delete_confirm": "Delete port {{port}}",
+      "plan": {
+        "listeners": "Listeners that go back to their own public ports:",
+        "lines": "Relay lines that stop being sent:",
+        "tunnels": "Tunnels affected:"
+      },
+      "graph": {
+        "title": "Routing of shared ports",
+        "caption": "A client connects to a shared port. The server name (SNI) in its TLS handshake picks the route, and the route hands the connection to a listener, a relay line or a camouflage site. Select a box to see what goes through it.",
+        "col_port": "Client connects to",
+        "col_sni": "SNI in the handshake",
+        "col_target": "Goes to",
+        "routes_one": "{{count}} route",
+        "routes_other": "{{count}} routes",
+        "other": "Other or no SNI",
+        "loopback": "127.0.0.1:{{port}}",
+        "preview": "Preview of this shared port",
+        "no_default": "No camouflage site yet"
+      },
+      "more_routes_one": "1 more route",
+      "more_routes_other": "{{count}} more routes",
+      "status": "Status",
+      "active": "In effect",
+      "actions": "Actions",
+      "confirm_needed": "Confirm the endpoint changes to save",
+      "choose_target": "Choose where it goes",
+      "empty_title": "No shared ports yet"
     },
     "delete": {
       "title": "Delete server \"{{name}}\"?",
