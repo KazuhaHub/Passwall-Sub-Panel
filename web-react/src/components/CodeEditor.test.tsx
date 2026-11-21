@@ -44,7 +44,19 @@ it('turns minRows into a height unless a height is given', () => {
   expect(screen.getByTestId('code-mirror').style.height).toBe('50px')
 })
 
-it('follows the theme mode when dark is not given', () => {
+it('names the text area for assistive technology when asked', () => {
+  render(<CodeEditor value="" onChange={() => {}} language="plain" ariaLabel="Main rules" />)
+  expect(propsSpy.mock.calls.at(-1)![0].extensions).toHaveLength(1)
+})
+
+// Tab indents (YAML needs it); CodeMirror's own Escape-then-Tab is the way out, and the pages say so.
+// Turning indentWithTab off here would silently remove indenting from every editor.
+it('leaves CodeMirror\'s Tab handling on', () => {
+  render(<CodeEditor value="" onChange={() => {}} />)
+  expect(propsSpy.mock.calls.at(-1)![0].indentWithTab).toBeUndefined()
+})
+
+it('follows the stored appearance mode when dark is not given', () => {
   render(<CodeEditor value="" onChange={() => {}} />)
   expect(propsSpy.mock.calls.at(-1)![0].theme).toBe('light')
   cleanup()
