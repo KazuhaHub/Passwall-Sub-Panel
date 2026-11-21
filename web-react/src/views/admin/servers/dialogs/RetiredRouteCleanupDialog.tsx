@@ -37,7 +37,9 @@ export default function RetiredRouteCleanupDialog({ server, onClose }: { server:
   }
 
   async function apply() {
-    if (!preview?.rule_tags.length) return
+    if (!preview?.rule_tags.length || busy) return
+    // Busy BEFORE the confirm opens, so a second fast click cannot stack another confirm.
+    setBusy('cleanup')
     const ok = await confirm({
       title: t('admin:servers.retired_routes.title', { server: server.name }),
       message: t('admin:servers.retired_routes.confirm', { count: preview.rule_tags.length }),
@@ -45,8 +47,7 @@ export default function RetiredRouteCleanupDialog({ server, onClose }: { server:
       destructive: true,
       initialFocus: 'cancel',
     })
-    if (!ok) return
-    setBusy('cleanup')
+    if (!ok) { setBusy(null); return }
     setError('')
     try {
       const result = await cleanRetiredRoutes(server.id, preview.revision)

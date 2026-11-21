@@ -18,13 +18,15 @@ import { DialogNotice } from './DialogNotice'
  * The dialog says what will happen first; a release that narrows REALITY client compatibility asks a second time,
  * naming the version, because it silently changes what subscriptions contain.
  */
-export function CoreDialog({ server, onClose, onSelected, onUpgraded }: {
+export function CoreDialog({ server, onClose, onSelected, onUpgraded, onBusy }: {
   server: Server
   onClose: () => void
   /** A Passwall Node's desired core was saved. */
   onSelected: (server: Server, engine: NativeCoreEngine, version: string) => void
   /** A 3X-UI core was upgraded; the caller re-probes the server. */
   onUpgraded: (server: Server) => void
+  /** The row's menu stays disabled while a core request is in flight (as the old page's upgrading flag did). */
+  onBusy?: (id: number | null) => void
 }) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const native = server.panel_type === 'psp'
@@ -79,6 +81,7 @@ export function CoreDialog({ server, onClose, onSelected, onUpgraded }: {
 
   async function submit() {
     setBusy(true)
+    onBusy?.(server.id)
     try {
       let confirmRestricted = false
       if (native) {
@@ -111,6 +114,7 @@ export function CoreDialog({ server, onClose, onSelected, onUpgraded }: {
         ?? (err as { message?: string }).message ?? 'unknown', 'error')
     } finally {
       setBusy(false)
+      onBusy?.(null)
     }
   }
 

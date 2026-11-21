@@ -133,6 +133,7 @@ export default function ServersPage() {
   const [accessNode, setAccessNode] = useState<{ node: DestNodeStatus; name: string } | null>(null)
   const [install, setInstall] = useState<{ server: Server; provisioning: NativeServerProvisioning | null; creating: boolean } | null>(null)
   const [rotatingId, setRotatingId] = useState<number | null>(null)
+  const [coreBusyId, setCoreBusyId] = useState<number | null>(null)
   // Bumped on every open and close of the installation, so a rotation that completes after the administrator moved on
   // does not reopen a flow they closed or overwrite the one they switched to.
   const installIntent = useRef(0)
@@ -171,7 +172,7 @@ export default function ServersPage() {
     } finally { setRotatingId(null) }
   }
 
-  const busyId = up.upgrading ?? rotatingId
+  const busyId = up.upgrading ?? rotatingId ?? coreBusyId
   const menuOf = (s: Server) => rowMenu(s, {
     edit: openEdit, install: setReinstallTarget, upgradeAgent: setUpgradeTarget, upgradePanel: x => void up.runUpgradePanel(x),
     core: setCoreTarget, rotate: x => void rotateCredential(x), lineFactors: setLineFactorsTarget, sharedPorts: setSharedPortsTarget,
@@ -284,7 +285,7 @@ export default function ServersPage() {
       {coreTarget && (
         <CoreDialog key={coreTarget.id} server={coreTarget} onClose={() => setCoreTarget(null)}
           onSelected={(s, engine, version) => mutateItems(prev => prev.map(i => (i.id === s.id ? { ...i, desired_core_engine: engine, desired_core_version: version } : i)))}
-          onUpgraded={s => void probes.probeServer(s)} />
+          onUpgraded={s => void probes.probeServer(s)} onBusy={setCoreBusyId} />
       )}
       {deleteTarget && (
         <ServerDeleteDialog server={deleteTarget} onClose={() => setDeleteTarget(null)}
