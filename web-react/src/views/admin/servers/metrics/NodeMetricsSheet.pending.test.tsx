@@ -1,35 +1,17 @@
 // @vitest-environment jsdom
+import { render, fireEvent, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { ThemeProvider } from '@mui/material/styles'
-import { QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { createAppTheme } from '@/theme'
-import { makeTestQueryClient } from '@/test/queryTestUtils'
-import { api, installReads } from '@/test/adminSaveHarness'
-import NodeMetricsDialog from './NodeMetricsDialog'
+import { api, installReads } from '../testHarness'
+import NodeMetricsSheet from './NodeMetricsSheet'
 import type { NodeMetricsCurrent } from '@/api/nodeMetrics'
 import type { Server } from '@/api/servers'
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
-// This dialog's data-load effect runs for the first time at mount (`open` is
-// always true here), which is exactly when React's dev-only StrictMode
-// double-invokes an effect to check its cleanup — so adminSaveHarness's own
-// StrictMode-wrapped `mount` would double the very first fetch and throw off
-// every call-count assertion below. Repeats its wrapper stack minus
-// <StrictMode>.
-function mount(page: ReactElement) {
-  const client = makeTestQueryClient()
-  return render(
-    <MemoryRouter>
-      <ThemeProvider theme={theme}>
-        <QueryClientProvider client={client}>{page}</QueryClientProvider>
-      </ThemeProvider>
-    </MemoryRouter>,
-  )
-}
+// The data-load effect runs for the first time at mount (`open` is always true here), which is when
+// React's dev-only StrictMode double-invokes an effect to check its cleanup: the harness's own
+// StrictMode-wrapped `mount` would double the very first fetch and throw off every call-count
+// assertion below. The sheet needs no router or query client, so it renders bare.
+function mount(page: ReactElement) { return render(page) }
 
 /**
  * SLOW-NETWORK FEEDBACK for the metrics dialog: switching the range chip or
@@ -72,7 +54,7 @@ function currentBody(overrides: Partial<NodeMetricsCurrent> = {}): NodeMetricsCu
 
 const emptyHistory = { resolution: 'minute', from: '', to: '', series: [] }
 
-describe('NodeMetricsDialog range switch', () => {
+describe('NodeMetricsSheet range switch', () => {
   it('keeps the stale chart visible and shows progress instead of going silent while a new range loads', async () => {
     let currentCalls = 0
     const gate = deferred<{ data: NodeMetricsCurrent }>()
@@ -84,25 +66,23 @@ describe('NodeMetricsDialog range switch', () => {
       if (url === '/admin/servers/7/node-metrics/history') return Promise.resolve({ data: emptyHistory })
       throw new Error(`Unexpected GET ${url}`)
     })
-    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
 
     // First load settles: the CPU figure from the initial fetch is on screen.
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
     expect(screen.queryAllByRole('progressbar')).toHaveLength(0)
 
     // Switching range re-fetches; the stale 41.2% must stay up rather than
-    // blanking, and something has to say a fetch is running. (Both the
-    // LinearProgress above the chart and the active chip's own spinner icon
-    // carry role="progressbar", hence the plural query.)
+    // blanking, and something has to say a fetch is running (the thin progress bar).
     fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabPerformance' }))
-    fireEvent.click(screen.getByRole('button', { name: '24h' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '24h' }))
     await waitFor(() => expect(currentCalls).toBe(2))
     expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0)
     expect(screen.getByText('41.2%')).toBeTruthy()
 
     // A second range click while the first is still in flight must not start
     // a third overlapping request.
-    fireEvent.click(screen.getByText('7d'))
+    fireEvent.click(screen.getByRole('radio', { name: '7d' }))
     expect(currentCalls).toBe(2)
 
     gate.resolve({ data: currentBody({ summary: summary({ cpu_percent: 55.5 }) }) })
@@ -111,13 +91,13 @@ describe('NodeMetricsDialog range switch', () => {
   })
 })
 
-describe('NodeMetricsDialog Diagnostics tab', () => {
+describe('NodeMetricsSheet Diagnostics tab', () => {
   it('uses the same health snapshot as the overview and explains missing exit telemetry', async () => {
     installReads({
       '/admin/servers/7/node-metrics/current': currentBody({ health: { status: 'healthy', findings: [] } }),
       '/admin/servers/7/node-metrics/history': emptyHistory,
     })
-    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
     fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabDiagnostics' }))
     expect(screen.getByText('admin:nodeMetrics.restartReasonUnavailable')).toBeTruthy()
@@ -126,7 +106,7 @@ describe('NodeMetricsDialog Diagnostics tab', () => {
   })
 })
 
-describe('NodeMetricsDialog manual refresh', () => {
+describe('NodeMetricsSheet manual refresh', () => {
   it('shows a spinner on Refresh now for the whole request and ignores a second click', async () => {
     installReads({
       '/admin/servers/7/node-metrics/current': currentBody(),
@@ -134,14 +114,14 @@ describe('NodeMetricsDialog manual refresh', () => {
     })
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
 
     const refreshButton = screen.getByRole('button', { name: 'admin:nodeMetrics.refresh' })
     fireEvent.click(refreshButton)
 
     await waitFor(() => expect((refreshButton as HTMLButtonElement).disabled).toBe(true))
-    expect(screen.getByRole('progressbar')).toBeTruthy()
+    expect(refreshButton.getAttribute('aria-busy')).toBe('true')
 
     fireEvent.click(refreshButton)
     expect(api.post).toHaveBeenCalledTimes(1)

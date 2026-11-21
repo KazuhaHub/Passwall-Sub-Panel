@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Box, Button, Card, CircularProgress, Divider, FormControlLabel, IconButton, Switch, TextField, Tooltip, Typography, useTheme } from '@mui/material'
-import SaveIcon from '@mui/icons-material/Save'
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import { useTranslation } from 'react-i18next'
 import {
   getTransitProbeSettings, putTransitProbeSettings, transitProbeErrorOf,
   type TransitProbeSettingKey, type TransitProbeSettings, type TransitProbeSettingsView,
 } from '@/api/transitProbe'
-import { pushSnack } from '@/components/SnackbarHost'
+import { InfoTip } from '@/components/common/HelpTip'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { Field, type FieldControlProps } from '@/components/form/Field'
+import { FormValidityProvider } from '@/components/form/FormValidity'
+import { SaveBar } from '@/components/form/SaveBar'
+import { useFieldErrors, type FieldRules } from '@/components/form/useFieldErrors'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { useLeaveGuard } from '@/hooks/useLeaveGuard'
+import { discardChangesConfirm } from './accessControl/confirmCopy'
 
 // The link-probe section of the settings page. It has its own load and Save
 // against /admin/transit/probe-settings; the page's system-settings form does
-// not carry these keys.
+// not carry these keys. Empty (or 0) in a number box means "use the default" and
+// an empty URL means transport-only; neither is ever replaced by the default on
+// the way to the server.
 
 type NumKey = 'transit_probe_interval_seconds' | 'transit_probe_timeout_ms' | 'transit_probe_withhold_after' | 'transit_probe_restore_after'
 type BoolKey = 'transit_probe_enabled' | 'transit_probe_withhold'
@@ -64,13 +76,6 @@ function urlValid(text: string): boolean {
   } catch { return false }
 }
 
-function validate(d: Draft): Partial<Record<TransitProbeSettingKey, true>> {
-  const bad: Partial<Record<TransitProbeSettingKey, true>> = {}
-  for (const f of NUM_FIELDS) if (!numberOf(d[f.key], f.min, f.max).ok) bad[f.key] = true
-  if (!urlValid(d.transit_probe_url)) bad.transit_probe_url = true
-  return bad
-}
-
 function toSettings(d: Draft): TransitProbeSettings {
   const n = (k: NumKey) => numberOf(d[k], 0, Number.MAX_SAFE_INTEGER).value
   return {
@@ -84,43 +89,64 @@ function toSettings(d: Draft): TransitProbeSettings {
   }
 }
 
+
 export default function LinkProbeSettings() {
-  const md = useTheme().palette.md
   const { t } = useTranslation('admin')
   const [view, setView] = useState<TransitProbeSettingsView | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [serverErrors, setServerErrors] = useState<Partial<Record<string, string>>>({})
 
+  // Each box says what is wrong with it when it is left, in words that tell how to fix it.
+  const rules: FieldRules<Draft> = {
+    transit_probe_url: d => (urlValid(d.transit_probe_url) ? null : t('settings.probe.err_url')),
+    ...Object.fromEntries(NUM_FIELDS.map(f => [f.key, (d: Draft) => (numberOf(d[f.key], f.min, f.max).ok ? null : t('settings.probe.err_range', { min: f.min, max: f.max }))])),
+  }
+  const fe = useFieldErrors<Draft>(rules)
+
+  const resetErrors = fe.reset
   const adopt = useCallback((v: TransitProbeSettingsView) => {
     setView(v)
     setDraft(toDraft(v.settings))
-    setServerErrors({})
-  }, [])
+    resetErrors()
+  }, [resetErrors])
 
   useEffect(() => {
     let live = true
-    getTransitProbeSettings().then(v => { if (live) adopt(v) }).catch(() => { if (live) setLoadFailed(true) })
+    setLoadError(null)
+    getTransitProbeSettings().then(v => { if (live) adopt(v) }).catch(err => { if (live) setLoadError(err ?? true) })
     return () => { live = false }
-  }, [adopt])
+  }, [adopt, attempt])
 
-  const invalid = useMemo(() => (draft ? validate(draft) : {}), [draft])
+  const dirtyKeys = useMemo(() => {
+    if (!view || !draft) return []
+    const next = toSettings(draft)
+    return (Object.keys(next) as TransitProbeSettingKey[]).filter(k => next[k] !== view.settings[k])
+  }, [view, draft])
+  const dirty = dirtyKeys.length > 0
 
-  if (loadFailed) {
+  // Probe settings are one section of the settings page: leaving to another route would lose the unsaved boxes.
+  useLeaveGuard(dirty, discardChangesConfirm(t), (next, current) => next.pathname !== current.pathname)
+
+  if (loadError) {
     return (
-      <Card sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-        <Typography sx={{ color: md.error, fontSize: 13 }}>{t('settings.probe.load_failed')}</Typography>
+      <Card data-testid="link-probe-settings" className="mt-5 max-w-3xl">
+        <CardContent>
+          <ErrorState compact title={t('settings.probe.load_failed')} reason={loadError === true ? undefined : loadError}
+            retry={() => { setLoadError(null); setAttempt(n => n + 1) }} />
+        </CardContent>
       </Card>
     )
   }
   if (!view || !draft) {
-    return <Box sx={{ p: 2, display: 'grid', placeItems: 'center' }}><CircularProgress size={20} /></Box>
+    return <Card className="mt-5 max-w-3xl"><CardContent><CardSkeleton lines={4} /></CardContent></Card>
   }
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
-    setDraft(prev => (prev ? { ...prev, [key]: value } : prev))
-    setServerErrors(prev => { if (!prev[key]) return prev; const next = { ...prev }; delete next[key]; return next })
+    const next = { ...draft, [key]: value }
+    setDraft(next)
+    fe.change(key, next)
   }
 
   const defaultText = (key: TransitProbeSettingKey) => {
@@ -128,124 +154,96 @@ export default function LinkProbeSettings() {
     return v === undefined ? '' : String(v)
   }
 
-  const help = (key: string) => (
-    <Tooltip title={t(`settings.probe.${key}`)} enterTouchDelay={0}>
-      <IconButton size="small" aria-label={t(`settings.probe.${key}`)} sx={{ color: md.onSurfaceVariant }}>
-        <InfoOutlinedIcon fontSize="small" />
-      </IconButton>
-    </Tooltip>
-  )
-
-  const fieldError = (key: TransitProbeSettingKey, rangeText?: string): string | undefined => {
-    if (serverErrors[key]) return serverErrors[key]
-    if (!invalid[key]) return undefined
-    return rangeText
-  }
-
-  const dirtyKeys = (Object.keys(toSettings(draft)) as TransitProbeSettingKey[])
-    .filter(k => toSettings(draft)[k] !== view.settings[k])
-  const canSave = dirtyKeys.length > 0 && Object.keys(invalid).length === 0 && !saving
-
   const save = async () => {
-    if (!canSave) return
+    // The SaveBar is off while a box shows a problem, but a box never left has shown nothing yet: check them all.
+    if (!fe.validateAll(draft)) return
     const next = toSettings(draft)
     const changed: Partial<TransitProbeSettings> = {}
     for (const k of dirtyKeys) (changed as Record<string, unknown>)[k] = next[k]
     setSaving(true)
-    setServerErrors({})
     try {
       adopt(await putTransitProbeSettings(changed))
-      pushSnack(t('settings.probe.saved'), 'success')
+      pushToast({ message: t('settings.probe.saved'), severity: 'success' })
     } catch (err) {
       const e = transitProbeErrorOf(err)
-      if (e?.status === 400 && e.field) {
-        setServerErrors({ [e.field]: e.message || t('settings.probe.save_failed') })
+      if (e?.status === 400 && e.field && e.field in draft) {
+        // The server's refusal sits on the field it names; it does not stop a retry.
+        fe.setError(e.field as keyof Draft, e.message || t('settings.probe.save_failed'))
       } else {
-        pushSnack(e?.message || t('settings.probe.save_failed'), 'error')
+        pushToast({ message: e?.message || t('settings.probe.save_failed'), severity: 'error' })
       }
     } finally {
       setSaving(false)
     }
   }
 
+  const numberField = (f: typeof NUM_FIELDS[number]) => (
+    <Field key={f.key} label={t(`settings.probe.${f.label}`)} error={fe.errors[f.key]} errorBlocksSave={fe.blocks(f.key)}
+      hint={t('settings.probe.default_hint', { value: defaultText(f.key) })}>
+      {p => (
+        <div className="flex items-center gap-1">
+          <Input {...pick(p)} inputMode="numeric" value={draft[f.key]} placeholder={defaultText(f.key)}
+            onChange={e => patch(f.key, e.target.value)} onBlur={() => fe.blur(f.key, draft)} />
+          <InfoTip text={t(`settings.probe.${f.help}`)} />
+        </div>
+      )}
+    </Field>
+  )
+  const switchField = (key: BoolKey, label: string, help: string) => (
+    <Field orientation="horizontal" label={label} error={fe.errors[key]} errorBlocksSave={fe.blocks(key)}>
+      {p => (
+        <div className="flex items-center gap-1">
+          <Switch id={p.id} aria-describedby={p['aria-describedby']} checked={draft[key]} onCheckedChange={c => patch(key, c)} />
+          <InfoTip text={help} />
+        </div>
+      )}
+    </Field>
+  )
+  const defaultUrl = defaultText('transit_probe_url')
+
   return (
-    <Card data-testid="link-probe-settings" sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, maxWidth: 880, mt: 2.5 }}>
-      <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1, color: md.onSurface }}>{t('settings.probe.section')}</Typography>
-      <Divider sx={{ mb: 1.5 }} />
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('settings.probe.intro')}</Typography>
+    <Card data-testid="link-probe-settings" className="mt-5 max-w-3xl">
+      <CardHeader>
+        <CardTitle>{t('settings.probe.section')}</CardTitle>
+        <CardDescription>{t('settings.probe.intro')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FormValidityProvider>
+          <form className="flex flex-col gap-5" noValidate onSubmit={e => { e.preventDefault(); void save() }}>
+            {switchField('transit_probe_enabled', t('settings.probe.enabled'), t('settings.probe.enabled_help'))}
 
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <FormControlLabel
-            control={<Switch checked={draft.transit_probe_enabled} onChange={(_, c) => patch('transit_probe_enabled', c)} />}
-            label={t('settings.probe.enabled')} />
-          {help('enabled_help')}
-        </Box>
+            <div className="grid gap-4 sm:grid-cols-2">{NUM_FIELDS.slice(0, 2).map(numberField)}</div>
 
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-          {NUM_FIELDS.slice(0, 2).map(f => (
-            <NumberField key={f.key} f={f} draft={draft} patch={patch} defaultText={defaultText} fieldError={fieldError} help={help} />
-          ))}
-        </Box>
+            <Field label={t('settings.probe.url')} error={fe.errors.transit_probe_url} errorBlocksSave={fe.blocks('transit_probe_url')}
+              hint={t('settings.probe.url_default_hint', { value: defaultUrl })}>
+              {p => (
+                <div className="flex items-center gap-1">
+                  <Input {...pick(p)} value={draft.transit_probe_url} placeholder={defaultUrl}
+                    onChange={e => patch('transit_probe_url', e.target.value)} onBlur={() => fe.blur('transit_probe_url', draft)} />
+                  {defaultUrl !== '' && draft.transit_probe_url !== defaultUrl && (
+                    <Button type="button" variant="outline" className="shrink-0" onClick={() => patch('transit_probe_url', defaultUrl)}>
+                      {t('settings.probe.url_reset')}
+                    </Button>
+                  )}
+                  <InfoTip text={t('settings.probe.url_help')} />
+                </div>
+              )}
+            </Field>
 
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
-          <TextField size="small" fullWidth label={t('settings.probe.url')} value={draft.transit_probe_url}
-            placeholder={defaultText('transit_probe_url')}
-            onChange={e => patch('transit_probe_url', e.target.value)}
-            error={!!fieldError('transit_probe_url', t('settings.probe.err_url'))}
-            helperText={fieldError('transit_probe_url', t('settings.probe.err_url'))
-              ?? t('settings.probe.url_default_hint', { value: defaultText('transit_probe_url') })} />
-          {defaultText('transit_probe_url') !== '' && draft.transit_probe_url !== defaultText('transit_probe_url') && (
-            <Button size="small" sx={{ mt: 0.5, flexShrink: 0 }}
-              onClick={() => patch('transit_probe_url', defaultText('transit_probe_url'))}>
-              {t('settings.probe.url_reset')}
-            </Button>
-          )}
-          {help('url_help')}
-        </Box>
+            {switchField('transit_probe_withhold', t('settings.probe.withhold'), t('settings.probe.withhold_help'))}
 
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <FormControlLabel
-            control={<Switch checked={draft.transit_probe_withhold} onChange={(_, c) => patch('transit_probe_withhold', c)} />}
-            label={t('settings.probe.withhold')} />
-          {help('withhold_help')}
-        </Box>
+            <div className="grid gap-4 sm:grid-cols-2">{NUM_FIELDS.slice(2).map(numberField)}</div>
 
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-          {NUM_FIELDS.slice(2).map(f => (
-            <NumberField key={f.key} f={f} draft={draft} patch={patch} defaultText={defaultText} fieldError={fieldError} help={help} />
-          ))}
-        </Box>
-
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" size="small" startIcon={<SaveIcon />} disabled={!canSave} onClick={() => { void save() }}>
-            {t('settings.probe.save')}
-          </Button>
-        </Box>
-      </Box>
+            <SaveBar dirty={dirty} pending={saving} saveLabel={t('settings.probe.save')}
+              onSave={() => void save()} onDiscard={() => { setDraft(toDraft(view.settings)); fe.reset() }} />
+          </form>
+        </FormValidityProvider>
+      </CardContent>
     </Card>
   )
 }
 
-function NumberField({ f, draft, patch, defaultText, fieldError, help }: {
-  f: typeof NUM_FIELDS[number]
-  draft: Draft
-  patch: <K extends keyof Draft>(key: K, value: Draft[K]) => void
-  defaultText: (key: TransitProbeSettingKey) => string
-  fieldError: (key: TransitProbeSettingKey, rangeText?: string) => string | undefined
-  help: (key: string) => React.ReactNode
-}) {
-  const { t } = useTranslation('admin')
-  const err = fieldError(f.key, t('settings.probe.err_range', { min: f.min, max: f.max }))
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, flex: '1 1 260px' }}>
-      <TextField size="small" fullWidth label={t(`settings.probe.${f.label}`)} value={draft[f.key]}
-        placeholder={defaultText(f.key)}
-        onChange={e => patch(f.key, e.target.value)}
-        slotProps={{ htmlInput: { inputMode: 'numeric' } }}
-        error={!!err}
-        helperText={err ?? t('settings.probe.default_hint', { value: defaultText(f.key) })} />
-      {help(f.help)}
-    </Box>
-  )
+/** The Field wiring a text box takes. */
+function pick(p: FieldControlProps) {
+  return { id: p.id, 'aria-describedby': p['aria-describedby'], 'aria-invalid': p['aria-invalid'], 'aria-required': p['aria-required'] }
 }

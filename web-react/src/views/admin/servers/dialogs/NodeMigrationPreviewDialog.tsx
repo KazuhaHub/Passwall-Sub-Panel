@@ -1,13 +1,17 @@
-import { useEffect, useId, useRef, useState } from 'react'
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, Typography } from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { createNodeMigrationCommand, getNodeMigrationPreview, type NativeInstallationSelection, type NodeMigrationIssue, type NodeMigrationPreview, type Server } from '@/api/servers'
-import NodeReleaseSelector from '@/components/NodeReleaseSelector'
-import NodeInstallCommand from '@/components/NodeInstallCommand'
+import NodeInstallCommand from '../install/NodeInstallCommand'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { IconChevronRight, IconSpinner } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { useCan } from '@/utils/permissions'
 import { canonicalReleaseVersion } from '@/utils/productVersion'
+import NodeReleaseSelector from '../install/NodeReleaseSelector'
+import { DialogNotice } from './DialogNotice'
 
 const knownIssues = new Set([
   'missing_snapshot', 'unsupported_protocol', 'inbound_expiry', 'external_files', 'fallback_dependency',
@@ -54,6 +58,7 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
   onNativeInstall?: (server: Server) => void
 }) {
   const { t } = useTranslation(['admin', 'common'])
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const detailsID = useId()
   const canRead = useCan('config.write')
   const serverID = server?.id
@@ -229,93 +234,127 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
     'core_version_changed', 'connection_limits_not_enforced'].includes(issue.code)) ?? []
   const detailsWarnings = preview?.warnings.filter(issue => !criticalWarnings.includes(issue)) ?? []
 
-  return <Dialog open={!!server} onClose={closeDialog} fullWidth maxWidth="md">
-    <DialogTitle>{t('admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
-    <DialogContent>
-      <Stack spacing={2} sx={{ pt: 1 }}>
-        {supported && <Typography variant="body2" color="text.secondary">{t('admin:servers.migration.online_hint')}</Typography>}
+  const closeAfterNative = () => { if (server) { closeDialog(); onNativeInstall?.(server) } }
+
+  return <Dialog open={!!server} onOpenChange={open => { if (!open) closeDialog() }}>
+    {/* Wide, and the body scrolls on its own: a preview can list dozens of issues, and the title and the Retry/Close
+        row must stay in reach. Focus opens on Close, so a stray Enter cannot start anything. */}
+    <DialogContent showCloseButton={false} initialFocus={cancelRef}
+      className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>{t('admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
+        {supported && <DialogDescription>{t('admin:servers.migration.online_hint')}</DialogDescription>}
+      </DialogHeader>
+      <div className="-mx-4 flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-1">
         {supported && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={installationSelection} value={version}
           onChange={next => { clearCommand(); setReleaseChoice({ serverID, version: next }) }} />}
-        {loading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CircularProgress size={18} /><Typography variant="body2">{t('admin:servers.migration.loading')}</Typography>
-        </Box>}
-        {error && <Alert severity={server?.panel_type === 'psp' && canRead ? 'info' : 'error'}>{t(error)}</Alert>}
-        {server?.panel_type === 'psp' && canRead && onNativeInstall && <Button variant="contained" sx={{ alignSelf: 'flex-start' }}
-          onClick={() => { closeDialog(); onNativeInstall(server) }}>{t('admin:servers.migration.continue_native_install')}</Button>}
-        {error && server?.panel_type !== 'psp' && !supported && <Typography variant="body2">{t('admin:servers.migration.unsupported_next')}</Typography>}
+        {loading && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <IconSpinner aria-hidden className="size-4 animate-spin" /><span>{t('admin:servers.migration.loading')}</span>
+        </div>}
+        {error && <DialogNotice tone={server?.panel_type === 'psp' && canRead ? 'info' : 'danger'}>{t(error)}</DialogNotice>}
+        {server?.panel_type === 'psp' && canRead && onNativeInstall &&
+          <Button className="self-start" onClick={closeAfterNative}>{t('admin:servers.migration.continue_native_install')}</Button>}
+        {error && server?.panel_type !== 'psp' && !supported && <p className="text-sm">{t('admin:servers.migration.unsupported_next')}</p>}
         {preview && canRead && <>
-          <Typography variant="body2">{t('admin:servers.migration.summary', {
+          <p className="text-sm">{t('admin:servers.migration.summary', {
             server: preview.server_id, nodes: preview.node_count, clients: preview.client_count, core: preview.core_version,
-          })}</Typography>
-          {preview.blockers.length > 0 && <Alert severity="error">
-            <Typography variant="subtitle2">{t('admin:servers.migration.blockers')}</Typography>
-            {preview.blockers.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
-          </Alert>}
+          })}</p>
+          {preview.blockers.length > 0 && <DialogNotice tone="danger">
+            <p className="font-medium">{t('admin:servers.migration.blockers')}</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {preview.blockers.map((issue, index) => <li key={`${issue.code}:${index}`}>{issueMessage(issue)}</li>)}
+            </ul>
+          </DialogNotice>}
           {preview.blockers.some(issue => issue.code === 'config_not_synced' || issue.code === 'missing_snapshot') &&
-            <Button component={RouterLink} to="/admin/nodes" sx={{ alignSelf: 'flex-start' }} variant="outlined" onClick={closeDialog}>
+            // A real link (role link, openable in a new tab), styled as the outline button beside it.
+            <RouterLink to="/admin/nodes" className={buttonVariants({ variant: 'outline', className: 'self-start' })} onClick={closeDialog}>
               {t('admin:servers.migration.resolve_nodes')}
-            </Button>}
-          {preview.blockers.some(issue => issue.code === 'source_not_3xui') && <Typography variant="body2">
+            </RouterLink>}
+          {preview.blockers.some(issue => issue.code === 'source_not_3xui') && <p className="text-sm">
             {t('admin:servers.migration.source_changed_next')}
-          </Typography>}
-          {criticalWarnings.length > 0 && <Alert severity="warning">
-            <Typography variant="subtitle2">{t('admin:servers.migration.warnings')}</Typography>
-            {criticalWarnings.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
-          </Alert>}
-          {preview.core_requires_ack && <FormControlLabel sx={{ mx: 0 }}
-            control={<Checkbox checked={acknowledged} onChange={(_event, checked) => {
+          </p>}
+          {criticalWarnings.length > 0 && <DialogNotice tone="warning">
+            <p className="font-medium">{t('admin:servers.migration.warnings')}</p>
+            <ul className="mt-1 flex flex-col gap-1">
+              {criticalWarnings.map((issue, index) => <li key={`${issue.code}:${index}`}>{issueMessage(issue)}</li>)}
+            </ul>
+          </DialogNotice>}
+          {preview.core_requires_ack && <CheckLine checked={acknowledged} label={t('admin:servers.migration.ack_restricted_core')}
+            onChange={checked => {
               clearCommand()
               setChoice({ serverID, core: selectedCore, acknowledge: checked })
             }} />}
-            label={t('admin:servers.migration.ack_restricted_core')} />}
           {preview.recommended_core_version && coreToken(preview.recommended_core_version) && preview.recommended_core_version !== preview.core_version &&
-            <Button variant="outlined" onClick={() => {
+            <Button variant="outline" className="self-start" onClick={() => {
               clearCommand()
               setChoice({ serverID, core: preview.recommended_core_version!, acknowledge: false })
             }}>{t('admin:servers.migration.use_recommended_core', { version: preview.recommended_core_version })}</Button>}
           {ready ? <>
-            <Typography variant="body2" color="success.main">{t('admin:servers.migration.ready')}</Typography>
-            <Typography variant="body2">{t('admin:servers.migration.deployment_safety')}</Typography>
-            <FormControlLabel sx={{ mx: 0 }} control={<Checkbox checked={managedOnly} onChange={(_event, checked) => {
+            <DialogNotice tone="success">{t('admin:servers.migration.ready')}</DialogNotice>
+            <p className="text-sm">{t('admin:servers.migration.deployment_safety')}</p>
+            <CheckLine checked={managedOnly} label={t('admin:servers.migration.ack_managed_only')} onChange={checked => {
               clearCommand()
               setConfirmation({ serverID, managedOnly: checked, singleInstance })
-            }} />} label={t('admin:servers.migration.ack_managed_only')} />
-            <FormControlLabel sx={{ mx: 0 }} control={<Checkbox checked={singleInstance} onChange={(_event, checked) => {
+            }} />
+            <CheckLine checked={singleInstance} label={t('admin:servers.migration.single_instance_confirmation')} onChange={checked => {
               clearCommand()
               setConfirmation({ serverID, managedOnly, singleInstance: checked })
-            }} />} label={t('admin:servers.migration.single_instance_confirmation')} />
-          </> : preview.can_migrate && <Alert severity="error">{t('admin:servers.migration.invalid_command')}</Alert>}
+            }} />
+          </> : preview.can_migrate && <DialogNotice tone="danger">{t('admin:servers.migration.invalid_command')}</DialogNotice>}
         </>}
         {supported && <>
-          <Button variant="contained" sx={{ alignSelf: 'flex-start' }} disabled={!canGenerate || commandBusy}
-            startIcon={commandBusy ? <CircularProgress size={16} color="inherit" /> : undefined}
-            onClick={() => void generateCommand()}>{t('admin:servers.migration.generate_node_command')}</Button>
-          {commandError && <Alert severity="error">{t(commandError)}</Alert>}
+          {/* What the button does, with the server and the release named, before it is pressed. Issuing the command
+              changes nothing on the server: the conversion starts only when it is run on the node host. */}
+          {canGenerate && <p className="text-sm font-medium" data-testid="migration-summary">
+            {t('admin:servers.migration.generate_summary', { name: server?.name ?? '', version })}
+          </p>}
+          <Button className="self-start" disabled={!canGenerate || commandBusy} onClick={() => void generateCommand()}>
+            {commandBusy && <IconSpinner aria-hidden className="animate-spin" />}{t('admin:servers.migration.generate_node_command')}
+          </Button>
+          {commandError && <DialogNotice tone="danger">{t(commandError)}</DialogNotice>}
           {command && <NodeInstallCommand key={command.binding} command={command.command} expiresAt={command.expires_at}
             disabled={command.expired || !canGenerate} onExpired={() => setIssuedCommand({ ...command, command: '', expired: true })} />}
-          {command && !command.expired && <Typography variant="body2">{t('admin:servers.migration.command_next')}</Typography>}
-          <Accordion disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
-            <AccordionSummary id={detailsID} aria-controls={`${detailsID}-details`} expandIcon={<ExpandMoreIcon />}>
-              <Typography variant="body2">{t('admin:servers.migration.details')}</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Stack spacing={1.5}>
-                <Typography variant="body2">{t('admin:servers.migration.preserved')}</Typography>
-                <Typography variant="body2">{t('admin:servers.migration.scope')}</Typography>
-                <Typography variant="body2">{t('admin:servers.migration.supported_deployment_hint')}</Typography>
-                <Typography variant="body2">{t('admin:servers.migration.node_command_hint')}</Typography>
-                {detailsWarnings.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
-              </Stack>
-            </AccordionDetails>
-          </Accordion>
+          {command && !command.expired && <p className="text-sm">{t('admin:servers.migration.command_next')}</p>}
+          <Fold id={detailsID} label={t('admin:servers.migration.details')}>
+            <div className="flex flex-col gap-3 text-sm">
+              <p>{t('admin:servers.migration.preserved')}</p>
+              <p>{t('admin:servers.migration.scope')}</p>
+              <p>{t('admin:servers.migration.supported_deployment_hint')}</p>
+              <p>{t('admin:servers.migration.node_command_hint')}</p>
+              {detailsWarnings.map((issue, index) => <p key={`${issue.code}:${index}`}>{issueMessage(issue)}</p>)}
+            </div>
+          </Fold>
         </>}
-      </Stack>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => setRetry(current => current + 1)} disabled={loading || !canRead || server?.panel_type !== '3xui'}>
+          {t('common:actions.retry')}
+        </Button>
+        <Button ref={cancelRef} variant="outline" onClick={closeDialog}>{t('common:actions.close')}</Button>
+      </DialogFooter>
     </DialogContent>
-    <DialogActions>
-      <Button onClick={() => setRetry(current => current + 1)} disabled={loading || !canRead || server?.panel_type !== '3xui'}>
-        {t('common:actions.retry')}
-      </Button>
-      <Button onClick={closeDialog}>{t('common:actions.close')}</Button>
-    </DialogActions>
   </Dialog>
+}
+
+// A confirmation the operator ticks: the sentence is the control's label, wired by id so the whole line is the target.
+function CheckLine({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  const id = useId()
+  return <div className="flex items-start gap-2.5 text-sm">
+    <Checkbox id={id} checked={checked} onCheckedChange={next => onChange(next === true)} className="mt-0.5" />
+    <label htmlFor={id} className="min-w-0 flex-1 leading-snug">{label}</label>
+  </div>
+}
+
+// The compatibility details are folded: they are reference text, and the blockers and warnings that need action are
+// shown above it regardless. Not mounted until opened.
+function Fold({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <div className="rounded-lg border">
+    <button type="button" id={id} aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(v => !v)}
+      className="flex min-h-(--control-h) w-full items-center gap-1.5 rounded-lg px-3 text-left text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <IconChevronRight aria-hidden className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} />
+      {label}
+    </button>
+    {open && <div id={`${id}-details`} role="region" aria-labelledby={id} className="border-t px-3 py-2.5">{children}</div>}
+  </div>
 }

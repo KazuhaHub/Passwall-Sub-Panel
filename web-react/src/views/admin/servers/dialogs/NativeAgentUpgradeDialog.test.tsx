@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it } from 'vitest'
-import { api, installReads, mount } from '@/test/adminSaveHarness'
+import { api, installReads, mount } from '../testHarness'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import type { NativeAgentUpgrade, Server } from '@/api/servers'
 import { releaseTag } from '@/utils/productVersion'
@@ -17,27 +17,29 @@ beforeEach(() => installReads({ '/admin/servers/node-releases': catalog,
 
 it('preselects the newest reviewed release on the upgrade page', async () => {
   mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.textContent).toContain(queued.version))
+  await waitFor(() => expect(shown('admin:servers.native.agent_version')).toContain(queued.version))
   expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(false)
   expect(api.post).not.toHaveBeenCalled()
 })
+
+// A native select: wait until the catalog has made it usable, then pick by value.
+async function selectOption(label: string, value: string) {
+  const field = screen.getByRole('combobox', { name: label }) as HTMLSelectElement
+  await waitFor(() => expect(field.disabled).toBe(false))
+  fireEvent.change(field, { target: { value } })
+}
+const shown = (label: string) => (screen.getByRole('combobox', { name: label }) as HTMLSelectElement).selectedOptions[0]?.textContent
 
 async function selectRelease(savedBeta = false) {
   if (!savedBeta) {
     // The empty-state text is used as a SYNCHRONISATION point — wait until the
     // catalog has loaded and rendered nothing — not as a claim about the
-    // wording. The key changed because this dialog now asks the upgrade
-    // question, whose empty answer is "nothing applies to this node" rather
-    // than "this channel has no releases"; the wait means the same thing.
+    // wording. This dialog asks the upgrade question, whose empty answer is
+    // "nothing applies to this node" rather than "this channel has no releases".
     await screen.findByText('admin:servers.native.release_no_target_for_node')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_beta' }))
+    await selectOption('admin:servers.native.release_channel', 'beta')
   }
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
-  fireEvent.click(await screen.findByRole('option', { name: queued.version }))
+  await selectOption('admin:servers.native.agent_version', queued.version)
 }
 
 it('requires explicit confirmation and displays queued rather than a success toast', async () => {
@@ -125,22 +127,21 @@ it('uses the saved beta preference but still requires an exact reviewed version 
       <button onClick={() => setCurrent(current ? { ...current } : saved)}>refresh upgrade parent</button></>
   }
   mount(<Parent />)
-  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
+  expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_beta')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
   await selectRelease(true)
   expect(button.disabled).toBe(false)
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-  fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
+  await selectOption('admin:servers.native.release_channel', 'stable')
   expect(button.disabled).toBe(true)
   fireEvent.click(screen.getByText('refresh upgrade parent'))
-  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_stable')
+  expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_stable')
   expect(api.post).not.toHaveBeenCalled()
   expect(api.put).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   fireEvent.click(screen.getByText('refresh upgrade parent'))
-  expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
+  expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_beta')
   expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(true)
 })
 
@@ -170,9 +171,8 @@ it('offers exactly the targets the instance reports', async () => {
   })
   mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
 
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+  await waitFor(() => expect(field.disabled).toBe(false))
   expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
   expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
   // IN THE CATALOG BUT NOT IN THE ANSWER, so it is not offered — the instance's
@@ -193,9 +193,8 @@ it('falls back to offering what is newer when the instance cannot answer', async
   })
   mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
 
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+  await waitFor(() => expect(field.disabled).toBe(false))
   expect(await screen.findByRole('option', { name: '4.0.6' })).toBeTruthy()
 })
 
@@ -225,10 +224,7 @@ it('upgrades a node that reports a product-scheme version', async () => {
   expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('4.0.0')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
-  fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+  await selectOption('admin:servers.native.agent_version', '4.0.1')
   await waitFor(() => expect(button.disabled).toBe(false))
 })
 
@@ -258,10 +254,7 @@ it('upgrades a node that reports a version from the replaced scheme', async () =
   expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('v0.0.1-beta9')
   const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
   expect(button.disabled).toBe(true)
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
-  fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+  await selectOption('admin:servers.native.agent_version', '4.0.1')
   await waitFor(() => expect(button.disabled).toBe(false))
 })
 
@@ -287,10 +280,7 @@ it('accepts whatever version the node reports about itself', async () => {
       },
     })
     const view = mount(<NativeAgentUpgradeDialog server={{ ...server, panel_version }} onClose={() => {}} />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
-    fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+    await selectOption('admin:servers.native.agent_version', '4.0.1')
     const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
     await waitFor(() => expect(button.disabled, panel_version).toBe(false))
     view.unmount()

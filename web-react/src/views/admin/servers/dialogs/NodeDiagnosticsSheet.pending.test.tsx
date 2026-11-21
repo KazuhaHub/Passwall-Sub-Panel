@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, installReads, mount } from '@/test/adminSaveHarness'
-import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
+import { api, installReads, mount } from '../testHarness'
+import NodeDiagnosticsSheet from './NodeDiagnosticsSheet'
 import type { Server } from '@/api/servers'
 
 
@@ -24,18 +24,18 @@ const server: Server = {
   has_api_token: false, has_password: false, auth_method: '', insecure_https: false,
 }
 
-describe('NodeDiagnosticsDialog Collect button', () => {
+describe('NodeDiagnosticsSheet Collect button', () => {
   it('shows a spinner for the whole request and ignores a second click', async () => {
     installReads({})
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NodeDiagnosticsDialog server={server} open onClose={() => {}} />)
+    mount(<NodeDiagnosticsSheet server={server} open onClose={() => {}} />)
 
     const collectButton = screen.getByText('admin:nodeDiagnostics.collect').closest('button')!
     fireEvent.click(collectButton)
 
     await waitFor(() => expect(collectButton.disabled).toBe(true))
-    expect(screen.getByRole('progressbar')).toBeTruthy()
+    expect(collectButton.getAttribute('aria-busy')).toBe('true')
 
     fireEvent.click(collectButton)
     expect(api.post).toHaveBeenCalledTimes(1)
@@ -48,6 +48,6 @@ describe('NodeDiagnosticsDialog Collect button', () => {
       },
     })
     await waitFor(() => expect(collectButton.disabled).toBe(false))
-    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(collectButton.getAttribute('aria-busy')).toBeNull()
   })
 })

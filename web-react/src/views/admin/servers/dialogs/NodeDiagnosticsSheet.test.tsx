@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, installReads, mount } from '@/test/adminSaveHarness'
-import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
+import { api, installReads, mount } from '../testHarness'
+import NodeDiagnosticsSheet from './NodeDiagnosticsSheet'
 import type { Server } from '@/api/servers'
 
 /**
@@ -42,11 +42,11 @@ function diagnostic(overrides: Record<string, unknown> = {}) {
 async function openAndCollect(body: unknown) {
   api.post.mockResolvedValue({ data: body })
   installReads({})
-  mount(<NodeDiagnosticsDialog server={server} open onClose={() => {}} />)
+  mount(<NodeDiagnosticsSheet server={server} open onClose={() => {}} />)
   fireEvent.click(screen.getByText('admin:nodeDiagnostics.collect'))
 }
 
-describe('NodeDiagnosticsDialog', () => {
+describe('NodeDiagnosticsSheet', () => {
   it('shows the lifecycle and no result while the node has not answered', async () => {
     await openAndCollect(diagnostic({ status: 'offered', result: undefined }))
     await waitFor(() => expect(screen.getByText('admin:nodeDiagnostics.status.offered')).toBeTruthy())
@@ -107,5 +107,21 @@ describe('NodeDiagnosticsDialog', () => {
     }))
     await waitFor(() => expect(screen.getByText('admin:nodeDiagnostics.truncated')).toBeTruthy())
     expect(screen.getByText('a sync round failed')).toBeTruthy()
+  })
+})
+
+describe('NodeDiagnosticsSheet request', () => {
+  it('posts the ticked sections, and lets them be changed again once a result is in', async () => {
+    await openAndCollect(diagnostic())
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+    expect(api.post.mock.calls[0][0]).toBe('/admin/servers/7/node-diagnostics')
+    expect(api.post.mock.calls[0][1]).toEqual({ sections: ['host', 'runtime', 'state'], max_events: 0 })
+    await screen.findByText('collector.host')
+    const events = screen.getByRole('checkbox', { name: 'admin:nodeDiagnostics.section.events' })
+    expect(events.hasAttribute('disabled') || events.getAttribute('aria-disabled') === 'true').toBe(false)
+    fireEvent.click(events)
+    fireEvent.click(screen.getByText('admin:nodeDiagnostics.collect'))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls[1][1]).toEqual({ sections: ['host', 'runtime', 'state', 'events'], max_events: 0 })
   })
 })

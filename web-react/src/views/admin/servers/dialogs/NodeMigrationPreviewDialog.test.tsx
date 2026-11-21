@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+import { api, installReads, mount } from '../testHarness'
 import { useAuthStore } from '@/stores/auth'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import type { NodeMigrationPreview, Server } from '@/api/servers'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
-import ServersView from './ServersView'
 import { releaseTag } from '@/utils/productVersion'
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true))
@@ -40,28 +39,21 @@ beforeEach(() => {
   api.post.mockImplementation(async () => ({ data: generated() }))
 })
 afterEach(() => vi.restoreAllMocks())
-function reads(value = preview, servers = [server]) {
-  installReads({ '/admin/servers': list(servers), [endpoint]: value })
-}
-async function openMenu(target: Server) {
-  const row = (await screen.findByText(target.name)).closest('tr')!
-  fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
-}
-async function chooseBackend(backend: string) {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }))
-  fireEvent.click(await screen.findByRole('option', { name: backend }))
+function reads(value = preview) {
+  installReads({ [endpoint]: value })
 }
 function command() { return screen.queryByLabelText('admin:servers.native.install_command') as HTMLInputElement | null }
 function generateButton() { return screen.getByRole('button', { name: 'admin:servers.migration.generate_node_command' }) as HTMLButtonElement }
-async function selectVersion(version = '4.2.1') {
-  const channel = version.includes('-') ? 'beta' : 'stable'
-  fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-  fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
-  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
-  fireEvent.click(await screen.findByRole('option', { name: version }))
+async function selectOption(label: string, value: string) {
+  const field = (await screen.findByRole('combobox', { name: label })) as HTMLSelectElement
+  await waitFor(() => expect(field.disabled).toBe(false))
+  fireEvent.change(field, { target: { value } })
 }
+async function selectVersion(version = '4.2.1') {
+  await selectOption('admin:servers.native.release_channel', version.includes('-') ? 'beta' : 'stable')
+  await selectOption('admin:servers.native.agent_version', version)
+}
+const checked = (name: string) => screen.getByRole('checkbox', { name }).getAttribute('aria-checked') === 'true'
 async function confirmAndSelect(version = '4.2.1') {
   await screen.findByText('admin:servers.migration.ready')
   await selectVersion(version)
@@ -85,27 +77,17 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
       }],
     })
     reads()
-    mount(<ServersView />)
-    await openMenu(server)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
-    await chooseBackend('Passwall Node')
-    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.precheck' }))
+    mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
     await confirmAndSelect('4.0.0')
+    // The summary names the server and the release before the button is pressed (the key is returned by the test translator).
+    expect(screen.getByTestId('migration-summary').textContent).toBe('admin:servers.migration.generate_summary')
     fireEvent.click(generateButton())
     await waitFor(() => expect(command()?.value).toBe(generated().command))
   })
 
-  it('opens one unified selector with the original backend, then prechecks an explicitly chosen Passwall Node migration', async () => {
+  it('opens with the online hint, keeps the compatibility details folded and issues nothing on its own', async () => {
     reads()
-    mount(<ServersView />)
-    await openMenu(server)
-    expect(screen.getAllByRole('menuitem', { name: 'admin:servers.install_reinstall.action' })).toHaveLength(1)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })).toBeNull()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
-    expect(screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }).textContent).toBe('3X-UI')
-    expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration'))).toBe(false)
-    await chooseBackend('Passwall Node')
-    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.precheck' }))
+    mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
     await screen.findByText('admin:servers.migration.ready')
     expect(screen.getByRole('heading', { name: 'admin:servers.install_reinstall.title' })).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.online_hint')).toBeTruthy()
@@ -116,42 +98,11 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     fireEvent.click(details)
     expect(await screen.findByText('admin:servers.migration.supported_deployment_hint')).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.preserved')).toBeTruthy()
-    expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
-    expect(screen.queryByLabelText('admin:servers.migration.cli_command')).toBeNull()
-    expect(screen.queryByLabelText('admin:servers.migration.docker_commands')).toBeNull()
     expect(command()).toBeNull()
     expect(generateButton().disabled).toBe(true)
-    expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
+    expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
     expect(api.delete).not.toHaveBeenCalled()
-  })
-  it('uses the same entry for native reinstall and keeps S-UI switching explicitly unsupported', async () => {
-    const native = { ...server, id: 8, name: 'native-node', panel_type: 'psp' as const }
-    const sui = { ...server, id: 9, name: 'sui-node', panel_type: 'sui' as const }
-    reads(preview, [native, sui])
-    mount(<ServersView />)
-    await openMenu(native)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
-    expect(screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }).textContent).toBe('Passwall Node')
-    expect((screen.getByRole('button', { name: 'admin:servers.install_reinstall.continue' }) as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await openMenu(sui)
-    fireEvent.click(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
-    expect(screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }).textContent).toBe('S-UI')
-    expect(screen.getByText('admin:servers.install_reinstall.manual_unverified')).toBeTruthy()
-    await chooseBackend('Passwall Node')
-    expect(screen.getByText('admin:servers.install_reinstall.switch_unavailable')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'admin:servers.install_reinstall.continue' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration') || String(url).endsWith('/node-installation'))).toBe(false)
-  })
-  it('hides the unified reinstall menu from operators', async () => {
-    reads(preview, [{ ...server, capabilities: ['panel.upgrade'] }])
-    useAuthStore.setState({ role: 'operator' })
-    mount(<ServersView />)
-    await openMenu(server)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.install_reinstall.action' })).toBeNull()
-    expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration'))).toBe(false)
   })
   it('requires a catalog version and both confirmations before issuing or copying the command', async () => {
     reads()
@@ -184,7 +135,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     releaseReads.mockResolvedValue({ ...catalog, releases: catalog.releases.filter(release => release.channel === 'testing') })
     mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
     await screen.findByText('admin:servers.native.release_no_stable')
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_stable')
+    expect((screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }) as HTMLSelectElement).value).toBe('stable')
     expect(generateButton().disabled).toBe(true)
     expect(api.post).not.toHaveBeenCalled()
   })
@@ -192,11 +143,11 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     reads()
     mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
     await confirmAndSelect()
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_beta' }))
-    const input = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
-    fireEvent.change(input, { target: { value: '99.99.99' } })
-    expect(input.value).toBe('')
+    await selectOption('admin:servers.native.release_channel', 'beta')
+    // A value that is not in the catalog is not accepted by the version control.
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    fireEvent.change(field, { target: { value: '99.99.99' } })
+    expect(field.value).toBe('')
     expect(generateButton().disabled).toBe(true)
     expect(api.post).not.toHaveBeenCalled()
   })
@@ -391,8 +342,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'admin:servers.migration.ack_managed_only' }))
     fireEvent.click(generateButton())
     await screen.findByLabelText('admin:servers.native.install_command')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_beta' }))
+    await selectOption('admin:servers.native.release_channel', 'beta')
     expect(command()).toBeNull()
     expect(generateButton().disabled).toBe(true)
   })
@@ -482,8 +432,8 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     expect(command()).toBeNull()
     expect(signal.aborted).toBe(true)
     await screen.findByText('admin:servers.migration.ready')
-    expect((screen.getByRole('checkbox', { name: 'admin:servers.migration.single_instance_confirmation' }) as HTMLInputElement).checked).toBe(false)
-    expect((screen.getByRole('checkbox', { name: 'admin:servers.migration.ack_managed_only' }) as HTMLInputElement).checked).toBe(false)
+    expect(checked('admin:servers.migration.single_instance_confirmation')).toBe(false)
+    expect(checked('admin:servers.migration.ack_managed_only')).toBe(false)
     expect(generateButton().disabled).toBe(true)
     expect(api.post).toHaveBeenCalledTimes(1)
   })

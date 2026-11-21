@@ -1,13 +1,21 @@
 import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { getNativeAgentUpgrade, requestNativeAgentUpgrade, upgradeOptions, type NativeAgentUpgrade, type Server } from '@/api/servers'
-import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Field } from '@/components/form/Field'
+import { Input } from '@/components/ui/input'
+import { IconSpinner } from '@/lib/icons'
 import { canonicalReleaseVersion } from '@/utils/productVersion'
+import NodeReleaseSelector from '../install/NodeReleaseSelector'
+import { DialogNotice } from './DialogNotice'
+
+const ENDED = ['verified', 'failed', 'manual_attention', 'dispatch_closed']
 
 export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server | null, onClose: () => void }) {
-  const { t } = useTranslation()
+  const { t } = useTranslation(['admin', 'common'])
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const [version, setVersion] = useState('')
   const [task, setTask] = useState<NativeAgentUpgrade | null>(null)
   const [busy, setBusy] = useState(false)
@@ -78,7 +86,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   }, [server?.id])
 
   useEffect(() => {
-    if (!server || !task || ['verified', 'failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state)) return
+    if (!server || !task || ENDED.includes(task.upgrade_state)) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
@@ -86,7 +94,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         const status = await getNativeAgentUpgrade(server.id, task.task_id, controller.signal)
         if (controller.signal.aborted) return
         setTask(status); setError('')
-        if (!['verified', 'failed', 'manual_attention', 'dispatch_closed'].includes(status.upgrade_state)) timer = setTimeout(poll, 3000)
+        if (!ENDED.includes(status.upgrade_state)) timer = setTimeout(poll, 3000)
       } catch {
         if (!controller.signal.aborted) setError(t('admin:servers.agent_upgrade.poll_failed'))
       }
@@ -108,34 +116,42 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     } finally { if (!controller.signal.aborted) setBusy(false) }
   }
 
-  return <Dialog open={!!server} onClose={busy ? undefined : onClose} fullWidth maxWidth="sm">
-    <DialogTitle>{t('admin:servers.agent_upgrade.title', { name: server?.name ?? '' })}</DialogTitle>
-    <DialogContent>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-        <Alert severity="warning">{t('admin:servers.agent_upgrade.warning')}</Alert>
-        <Typography variant="body2">{t('admin:servers.agent_upgrade.requirements')}</Typography>
-        <TextField label={t('admin:servers.agent_upgrade.current')} value={expected} slotProps={{ input: { readOnly: true } }} />
+  const target = version.trim()
+  const canSubmit = !busy && exact(target) && target !== expected
+  // The confirm names the server and both versions in one sentence, so what the button does is read before it is pressed.
+  const stateTone = task?.upgrade_state === 'verified' ? 'success' : task && ENDED.includes(task.upgrade_state) ? 'warning' : 'info'
+
+  return <Dialog open={!!server} onOpenChange={open => { if (!open && !busy) onClose() }}>
+    <DialogContent showCloseButton={false} initialFocus={cancelRef} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+      <DialogHeader>
+        <DialogTitle>{t('admin:servers.agent_upgrade.title', { name: server?.name ?? '' })}</DialogTitle>
+        <DialogDescription>{t('admin:servers.agent_upgrade.requirements')}</DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-col gap-4">
+        <DialogNotice tone="warning">{t('admin:servers.agent_upgrade.warning')}</DialogNotice>
+        <Field label={t('admin:servers.agent_upgrade.current')}>
+          <Input value={expected} readOnly />
+        </Field>
         {blocked
-          ? <Alert severity="warning">{blocked}</Alert>
+          ? <DialogNotice tone="warning">{blocked}</DialogNotice>
           : <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
-          initialChannel={effectiveUpdateChannel(server?.update_channel)} value={version}
-          onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
-          newerThan={expected} targets={targets} disabled={busy || !!task || !!error} />}
-        <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>
-        {error && <Alert severity="error">{error}</Alert>}
+            initialChannel={effectiveUpdateChannel(server?.update_channel)} value={version}
+            onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
+            newerThan={expected} targets={targets} disabled={busy || !!task || !!error} />}
+        <p className="text-xs text-muted-foreground">{t('admin:servers.agent_upgrade.version_hint')}</p>
+        {!task && !blocked && canSubmit && <p className="text-sm font-medium" data-testid="upgrade-summary">
+          {t('admin:servers.agent_upgrade.summary', { name: server?.name ?? '', from: expected, to: target })}
+        </p>}
+        {error && <DialogNotice tone="danger">{error}</DialogNotice>}
         {task && <>
-          <Alert severity={task.upgrade_state === 'verified' ? 'success' : ['failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state) ? 'warning' : 'info'}>
-            {t(`admin:servers.agent_upgrade.state.${task.upgrade_state}`)}
-          </Alert>
-          {reason && <Box>
-            <Typography variant="body2">{t('admin:servers.agent_upgrade.reason')}</Typography>
-            <Typography variant="caption" component="div" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-              {reason}
-            </Typography>
-          </Box>}
-          <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{t('admin:servers.agent_upgrade.task', { id: task.task_id })}</Typography>
-          {task.binary_sha256 && <Typography variant="caption" sx={{ overflowWrap: 'anywhere' }}>SHA-256: {task.binary_sha256}</Typography>}
-          {(error || task.dispatch_closed) && <Button onClick={() => {
+          <DialogNotice tone={stateTone}>{t(`admin:servers.agent_upgrade.state.${task.upgrade_state}`)}</DialogNotice>
+          {reason && <div className="flex flex-col gap-1">
+            <p className="text-sm">{t('admin:servers.agent_upgrade.reason')}</p>
+            <div className="font-mono text-xs break-words whitespace-pre-wrap">{reason}</div>
+          </div>}
+          <p className="text-sm break-all">{t('admin:servers.agent_upgrade.task', { id: task.task_id })}</p>
+          {task.binary_sha256 && <p className="text-xs break-all">SHA-256: {task.binary_sha256}</p>}
+          {(error || task.dispatch_closed) && <Button variant="outline" className="self-start" onClick={() => {
             requestController.current?.abort()
             const controller = new AbortController(); requestController.current = controller
             void getNativeAgentUpgrade(server!.id, task.task_id, controller.signal).then(status => {
@@ -144,13 +160,13 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
             setRetry(n => n + 1)
           }}>{t('admin:servers.agent_upgrade.refresh')}</Button>}
         </>}
-      </Box>
+      </div>
+      <DialogFooter>
+        <Button ref={cancelRef} variant="outline" onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
+        {!task && !blocked && <Button onClick={() => void submit()} disabled={!canSubmit}>
+          {busy && <IconSpinner aria-hidden className="animate-spin" />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
+        </Button>}
+      </DialogFooter>
     </DialogContent>
-    <DialogActions>
-      <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
-      {!task && !blocked && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || version.trim() === expected}>
-        {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
-      </Button>}
-    </DialogActions>
   </Dialog>
 }
