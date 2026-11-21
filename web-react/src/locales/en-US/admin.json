@@ -65,7 +65,6 @@
   },
   "dashboard": {
     "summary_failed": "Dashboard data is temporarily unavailable",
-    "retry": "Retry",
     "title": "Dashboard",
     "metric": {
       "users": "Total users",
@@ -95,7 +94,8 @@
         "today_used": "Today"
       },
       "empty": "No traffic data yet (the first 5-minute collection window hasn't completed)."
-    }
+    },
+    "attention_title": "Needs attention"
   },
   "settings": {
     "title": "System settings",
@@ -779,7 +779,6 @@
   "traffic": {
     "title": "Traffic",
     "load_failed": "Traffic data is temporarily unavailable",
-    "retry": "Retry",
     "poll_now": "Poll now",
     "poll_done": "Poll complete",
     "node_tunnel_line": "{{parent}} · tunnel line {{line}}",
@@ -827,7 +826,19 @@
       "summary_down": "Down",
       "summary_range": "Range",
       "chart_note": "Chart is derived from cumulative snapshot deltas.",
-      "timezone": "Timezone"
+      "timezone": "Timezone",
+      "range": "Range",
+      "granularity": "Granularity",
+      "no_match": "No match",
+      "timezone_unknown": "Unknown time zone. Use a name such as Asia/Shanghai."
+    },
+    "scope_label": "View by",
+    "rank_limit": "Show",
+    "chart": {
+      "empty": "No traffic in this range",
+      "aria": "Traffic from {{from}} to {{to}}, {{total}} in total",
+      "table": "Show as table",
+      "col_date": "Date"
     }
   },
   "templates": {
