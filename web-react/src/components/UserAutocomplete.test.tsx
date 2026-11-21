@@ -1,22 +1,18 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
+import i18n from '@/test/initI18n'
+import { flatten, type Nested } from '@/i18n/options'
+import enAdmin from '@/locales/en-US/admin.json'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import UserAutocomplete from './UserAutocomplete'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? k,
-    i18n: { language: 'zh-CN' },
-  }),
-}))
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
+// The real English strings, so an assertion reads what a person reads and a missing key shows as a raw key.
+i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 
 const alice = { id: 7, upn: 'alice', display_name: 'Alice', role: 'user', group_id: 1 }
 
@@ -44,7 +40,7 @@ describe('UserAutocomplete', () => {
   it('debounces the keyword', async () => {
     const onChange = vi.fn()
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={onChange} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={onChange} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     const input = screen.getByRole('combobox')
@@ -63,10 +59,12 @@ describe('UserAutocomplete', () => {
   it('picks a user by id', async () => {
     const onChange = vi.fn()
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={onChange} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={onChange} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
-    fireEvent.mouseDown(screen.getByRole('combobox'))
+    const input = screen.getByRole('combobox')
+    fireEvent.mouseDown(input)
+    fireEvent.change(input, { target: { value: 'al' } })
     fireEvent.click(await screen.findByRole('option', { name: 'Alice (alice)' }))
     expect(onChange).toHaveBeenCalledWith(7)
   })
@@ -80,7 +78,7 @@ describe('UserAutocomplete', () => {
       throw new Error(`unexpected GET ${url}`)
     })
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={7} onChange={vi.fn()} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={7} onChange={vi.fn()} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Alice (alice)'))
@@ -88,10 +86,13 @@ describe('UserAutocomplete', () => {
 
   it('fullWidth fills the parent and has no fixed pixel width (a 375px sheet must not overflow)', () => {
     const { container } = render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={() => {}} label="user" fullWidth /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={() => {}} label="user" fullWidth />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
-    const root = container.querySelector('.MuiAutocomplete-root') as HTMLElement
-    expect(getComputedStyle(root).width).toBe('100%')
+    // jsdom has no stylesheet, so the contract is checked at its source: the fill-the-parent class and
+    // no inline pixel width.
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain('w-full')
+    expect(root.style.width).toBe('')
   })
 })
