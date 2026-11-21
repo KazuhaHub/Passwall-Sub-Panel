@@ -1,0 +1,133 @@
+// @vitest-environment jsdom
+import { render, fireEvent, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { describe, expect, it } from 'vitest'
+import { api, installReads } from '../testHarness'
+import NodeMetricsSheet from './NodeMetricsSheet'
+import type { NodeMetricsCurrent } from '@/api/nodeMetrics'
+import type { Server } from '@/api/servers'
+
+// The data-load effect runs for the first time at mount (`open` is always true here), which is when
+// React's dev-only StrictMode double-invokes an effect to check its cleanup: the harness's own
+// StrictMode-wrapped `mount` would double the very first fetch and throw off every call-count
+// assertion below. The sheet needs no router or query client, so it renders bare.
+function mount(page: ReactElement) { return render(page) }
+
+/**
+ * SLOW-NETWORK FEEDBACK for the metrics dialog: switching the range chip or
+ * the Diagnostics tab re-fetches over data that is already on screen, and a
+ * long-running Refresh keeps the button disabled with no spinner. These pin
+ * that all three now show progress instead of going silent.
+ */
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => { resolve = res })
+  return { promise, resolve }
+}
+
+const server: Server = {
+  id: 7, name: 'node-1', panel_type: 'psp', capabilities: [], url: 'psp://agt_1',
+  has_api_token: false, has_password: false, auth_method: '', insecure_https: false,
+}
+
+function summary(overrides: Partial<NodeMetricsCurrent['summary']> = {}) {
+  const blank = {
+    cpu_percent: null, cpu_scope: null, system_cpu_percent: null, cgroup_cpu_cores_percent: null,
+    cgroup_cpu_quota_percent: null, cgroup_cpu_capacity_percent: null,
+    cgroup_cpu_throttled_period_percent: null, memory_used_percent: null, memory_scope: null,
+    disk_used_percent: null, rx_bps: null, tx_bps: null, tcp_retrans_percent: null, core_rss_bytes: null,
+  }
+  return { ...blank, ...overrides }
+}
+
+function currentBody(overrides: Partial<NodeMetricsCurrent> = {}): NodeMetricsCurrent {
+  return {
+    available: true,
+    freshness: 'fresh',
+    received_at: '2026-09-18T12:00:00Z',
+    collected_at: '2026-09-18T11:59:59Z',
+    summary: summary({ cpu_percent: 41.2 }),
+    ...overrides,
+  }
+}
+
+const emptyHistory = { resolution: 'minute', from: '', to: '', series: [] }
+
+describe('NodeMetricsSheet range switch', () => {
+  it('keeps the stale chart visible and shows progress instead of going silent while a new range loads', async () => {
+    let currentCalls = 0
+    const gate = deferred<{ data: NodeMetricsCurrent }>()
+    api.get.mockImplementation((url: string) => {
+      if (url === '/admin/servers/7/node-metrics/current') {
+        currentCalls += 1
+        return currentCalls === 1 ? Promise.resolve({ data: currentBody() }) : gate.promise
+      }
+      if (url === '/admin/servers/7/node-metrics/history') return Promise.resolve({ data: emptyHistory })
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+
+    // First load settles: the CPU figure from the initial fetch is on screen.
+    await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
+    expect(screen.queryAllByRole('progressbar')).toHaveLength(0)
+
+    // Switching range re-fetches; the stale 41.2% must stay up rather than
+    // blanking, and something has to say a fetch is running (the thin progress bar).
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabPerformance' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '24h' }))
+    await waitFor(() => expect(currentCalls).toBe(2))
+    expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0)
+    expect(screen.getByText('41.2%')).toBeTruthy()
+
+    // A second range click while the first is still in flight must not start
+    // a third overlapping request.
+    fireEvent.click(screen.getByRole('radio', { name: '7d' }))
+    expect(currentCalls).toBe(2)
+
+    gate.resolve({ data: currentBody({ summary: summary({ cpu_percent: 55.5 }) }) })
+    await waitFor(() => expect(screen.getByText('55.5%')).toBeTruthy())
+    expect(screen.queryAllByRole('progressbar')).toHaveLength(0)
+  })
+})
+
+describe('NodeMetricsSheet Diagnostics tab', () => {
+  it('uses the same health snapshot as the overview and explains missing exit telemetry', async () => {
+    installReads({
+      '/admin/servers/7/node-metrics/current': currentBody({ health: { status: 'healthy', findings: [] } }),
+      '/admin/servers/7/node-metrics/history': emptyHistory,
+    })
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabDiagnostics' }))
+    expect(screen.getByText('admin:nodeMetrics.restartReasonUnavailable')).toBeTruthy()
+    expect(screen.getByText('admin:nodeMetrics.freshness.healthy')).toBeTruthy()
+    expect(api.get.mock.calls.filter(call => call[0] === '/admin/servers/7/node-health')).toHaveLength(0)
+  })
+})
+
+describe('NodeMetricsSheet manual refresh', () => {
+  it('shows a spinner on Refresh now for the whole request and ignores a second click', async () => {
+    installReads({
+      '/admin/servers/7/node-metrics/current': currentBody(),
+      '/admin/servers/7/node-metrics/history': emptyHistory,
+    })
+    const gate = deferred<{ data: unknown }>()
+    api.post.mockImplementation(() => gate.promise)
+    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
+
+    const refreshButton = screen.getByRole('button', { name: 'admin:nodeMetrics.refresh' })
+    fireEvent.click(refreshButton)
+
+    await waitFor(() => expect((refreshButton as HTMLButtonElement).disabled).toBe(true))
+    expect(refreshButton.getAttribute('aria-busy')).toBe('true')
+
+    fireEvent.click(refreshButton)
+    expect(api.post).toHaveBeenCalledTimes(1)
+
+    // The refresh then polls node-metrics/current on a real 2s cadence for up
+    // to 30s looking for a changed sample — unrelated to the busy indicator
+    // this test pins, so it stops here rather than chasing that loop closed.
+  })
+})

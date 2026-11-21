@@ -3844,6 +3844,8 @@
   },
   "servers": {
     "retired_routes": {
+      "previewing": "正在读取路由模板…",
+      "cleaning": "正在从模板中移除规则…",
       "upgrade_notice": "如果升级前用过 3X-UI 的 VLESS 路由线路，可在对应服务器上打开清理入口，预览旧功能留下的规则。",
       "open": "清理旧 VLESS 路由",
       "title": "{{server}} 的旧 VLESS 路由",
@@ -3899,6 +3901,7 @@
       "command_next": "执行后刷新此原服务器，并核对 Agent、内核及实际客户端连接。仅生成命令不代表安装成功。",
       "node_command_hint": "请以 root 身份在这台节点机执行一键命令，不是在 PSP 主机上执行。私有脚本领取令牌仅可使用一次、15 分钟后过期。安装成功不等于代理服务已就绪：完成后仍须核对原服务器的 Agent、内核、受管节点及客户端实际连接。",
       "single_instance_confirmation": "我确认此部署仅有一个 PSP 进程使用该数据库；在线转换暂不支持多实例部署。",
+      "generate_summary": "生成命令不会更改 {{name}}。它会签发一条一次性命令，在节点主机上执行后，才会把该服务器转换为 Passwall Node {{version}}。",
       "generate_node_command": "生成节点端更换后端与安装命令",
       "command_failed": "未能生成有效节点端命令，请重新核对预检、核验版本及必要确认；没有完成后端转换。",
       "supported_deployment_hint": "自动节点接管仅支持标准 Linux/systemd 3X-UI（x-ui）部署，或已干净重装操作系统的节点机。旧标准安装会备份、禁用并保留，而非删除。转换前须确认没有面板／内核升级任务或外部自动化能够重启旧服务。自定义目录与第三方面板容器部署须手动处理，此包装器不支持这些形式，也不会恢复非受管配置。",
@@ -3974,6 +3977,7 @@
       "requirements": "需要已启用升级助手的 Linux/systemd，或生成 Docker 文件时已开启“高级”中的远程升级选项。旧版本需先手动维护一次。新进程重新同步并完成配置收敛后才算成功；Docker 失败时会自动恢复保留的旧容器。数据库格式改变时仍需手动迁移。",
       "current": "当前 Passwall Node 版本（最近上报）",
       "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签。比当前版本旧的发行版会被标注出来，但仍可选择——面板不阻止降级，安全性由发行物签名、校验和与节点侧的状态 schema 检查保证。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
+      "summary": "将把 {{name}} 从 {{from}} 升级到 {{to}}，其代理连接会短暂中断。",
       "confirm": "确认并下发升级",
       "retry": "重试同一个升级请求",
       "refresh": "重新查询原任务",
@@ -4003,14 +4007,13 @@
     "search_placeholder": "搜索名称 / URL",
     "no_match": "没有匹配的服务器",
     "edit_title": "编辑 {{name}}",
-    "selection_count": "已选 {{count}}",
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
       "region": "地区",
-      "tags": "标签（逗号分隔）",
+      "tags": "标签",
       "panel_type": "服务器类型",
       "update_channel": "Passwall Node 更新频道",
       "name": "服务器名称",
@@ -4050,8 +4053,6 @@
       "update_channel": "默认更新通道：stable 只接收正式版，rc 接收候选版与正式版，beta 接收所有阶段。Docker 跟随同名标签，latest 仅指向 stable；testing 兼容 beta。保存不会自动升级。",
       "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
-      "unconfigured": "未配置",
-      "change": "修改",
       "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "native": {
@@ -4069,7 +4070,6 @@
       },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",
-      "metadata_details": "可选备注与技术说明",
       "create_continue": "创建并继续安装",
       "method_label": "选择安装方式",
       "method": {
@@ -4258,8 +4258,10 @@
       "url": "URL",
       "status": "状态",
       "version": "版本",
-      "remark": "备注",
-      "actions": "操作"
+      "actions": "操作",
+      "type": "类型",
+      "counts": "节点 / 线路",
+      "remark": "备注"
     },
     "status": {
       "checking": "检测中",
@@ -4290,7 +4292,6 @@
     },
     "action": {
       "test": "测试连接",
-      "edit": "编辑",
       "delete": "删除",
       "more": "更多操作",
       "upgrade": "升级",
@@ -4300,7 +4301,10 @@
       "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据",
       "line_factors": "线路倍率",
-      "shared_ports": "共用端口（SNI）"
+      "shared_ports": "共用端口（SNI）",
+      "refresh": "刷新",
+      "more_for": "{{name}} 的更多操作",
+      "edit": "编辑"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -4662,7 +4666,30 @@
       "confirm": "删除服务器",
       "changed": "服务器上的依赖刚刚发生了变化，已重新读取",
       "blind_delete": "不核对，直接删除"
-    }
+    },
+    "count": "{{count}} 台服务器",
+    "counts": {
+      "title": "{{nodes}} 个节点，{{lines}} 条线路"
+    },
+    "menu": {
+      "unsupported": "{{action}}（{{reason}}）",
+      "not_ready": "节点尚未就绪",
+      "not_supported": "{{type}} 不支持"
+    },
+    "empty": {
+      "title": "还没有服务器",
+      "description": "添加 Passwall Node、3X-UI 或 S-UI 服务器后，即可接入节点。"
+    },
+    "clear_search": "清除搜索",
+    "form": {
+      "group_type": "服务器类型",
+      "group_basics": "基本信息",
+      "group_node": "Passwall Node",
+      "group_connection": "连接",
+      "group_test": "连接测试",
+      "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
+    },
+    "resource_state": "资源：{{state}}"
   },
   "diagnostics": {
     "title": "运行诊断",
