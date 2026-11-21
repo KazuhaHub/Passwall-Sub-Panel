@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { WATCH_BUDGET_MS, WATCH_INTERVAL_MS } from '@/query/syncStatus'
 import { announcePending } from '@/api/syncPending'
@@ -25,8 +23,6 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
 function statusBody(over: Record<string, unknown> = {}) {
   return {
     target_type: 'user', target_id: 7, target_exists: true,
@@ -48,9 +44,7 @@ const pendingTask = {
 
 function mount(userId = 7) {
   render(
-    <ThemeProvider theme={theme}>
-      <SyncStatusCard userId={userId} />
-    </ThemeProvider>,
+    <SyncStatusCard userId={userId} />,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -253,15 +247,11 @@ describe('SyncStatusCard', () => {
     })
 
     const { rerender } = render(
-      <ThemeProvider theme={theme}>
-        <SyncStatusCard userId={7} />
-      </ThemeProvider>,
+      <SyncStatusCard userId={7} />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     rerender(
-      <ThemeProvider theme={theme}>
-        <SyncStatusCard userId={9} />
-      </ThemeProvider>,
+      <SyncStatusCard userId={9} />,
     )
 
     await waitFor(() => expect(screen.getByText('user_delete')).toBeTruthy())

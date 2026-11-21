@@ -23,13 +23,6 @@ vi.mock('react-router', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }))
-vi.mock('@mui/material', () => ({
-  Box: ({ children }: { children?: unknown }) => <div>{children as never}</div>,
-  CircularProgress: () => <div />,
-  Typography: ({ children }: { children?: unknown }) => <div>{children as never}</div>,
-  useTheme: () => ({ palette: { md: {} } }),
-}))
-
 import SsoCallbackView from './SsoCallbackView'
 
 const unauthorized = { response: { status: 401, data: { error: 'No sso session' } } }
