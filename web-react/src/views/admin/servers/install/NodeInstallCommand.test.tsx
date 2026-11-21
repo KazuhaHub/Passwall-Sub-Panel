@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ThemeProvider } from '@mui/material'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
-import { mount } from '@/test/adminSaveHarness'
+import { mount } from '../testHarness'
 import NodeInstallCommand from './NodeInstallCommand'
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 const copy = vi.hoisted(() => vi.fn())
 vi.mock('@/utils/clipboard', () => ({ copyToClipboard: copy }))
 const command = 'curl -fsSL https://panel.test/bootstrap/one-private-ticket -o /tmp/node-installer'
@@ -78,9 +75,9 @@ describe('private one-line node command', () => {
     document.body.appendChild(host)
     const root = createRoot(host)
     root.render(
-      <StrictMode><ThemeProvider theme={theme}>
+      <StrictMode>
         <NodeInstallCommand command={command} expiresAt={future()} onExpired={vi.fn()} />
-      </ThemeProvider></StrictMode>,
+      </StrictMode>,
     )
     await new Promise(resolve => setTimeout(resolve, 20))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))

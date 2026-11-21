@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { api, installReads, mount } from '@/test/adminSaveHarness'
+import { api, installReads, mount } from '../testHarness'
 import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import NodeReleaseSelector from './NodeReleaseSelector'
@@ -56,17 +56,19 @@ function Controlled({ enabled = true, selection = linux, disabled = false, initi
 
 function selected() { return screen.getByTestId('selected-version').textContent }
 
-async function choose(label: string, option: string) {
-  const field = screen.getByRole('combobox', { name: label })
-  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(field)
-  fireEvent.click(await screen.findByRole('option', { name: option }))
+async function choose(label: string, value: string) {
+  const field = screen.getByRole('combobox', { name: label }) as HTMLSelectElement
+  await waitFor(() => expect(field.disabled).toBe(false))
+  fireEvent.change(field, { target: { value } })
 }
+
+// The text of the option a select currently shows (a native select's textContent is every option).
+const shown = (label: string) => (screen.getByRole('combobox', { name: label }) as HTMLSelectElement).selectedOptions[0]?.textContent
 
 const chooseVersion = (version: string) => choose('admin:servers.native.agent_version', version)
 // Publication details are folded on every surface; open them before reading them.
 const openReview = () => fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.release_review' }))
-const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_beta')
+const chooseTesting = () => choose('admin:servers.native.release_channel', 'beta')
 
 describe('Passwall Node release selection', () => {
   it.each([
@@ -93,18 +95,18 @@ describe('Passwall Node release selection', () => {
     reads([testing, stable])
     const view = mount(<Controlled initialChannel="testing" />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
+    expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_beta')
     expect(selected()).toBe('')
-    await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
+    await choose('admin:servers.native.release_channel', 'stable')
     await chooseVersion(stable.version)
     fireEvent.click(screen.getByRole('button', { name: 'refresh selector parent' }))
     expect(selected()).toBe(stable.version)
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_stable')
+    expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_stable')
     view.rerender(<Controlled enabled={false} initialChannel="testing" />)
     view.rerender(<Controlled initialChannel="testing" />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     expect(selected()).toBe('')
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_beta')
+    expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_beta')
     expect(api.get.mock.calls.every(([url]) => url === endpoint)).toBe(true)
     expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
@@ -115,7 +117,7 @@ describe('Passwall Node release selection', () => {
     mount(<Controlled />)
     await screen.findByText('admin:servers.native.release_no_stable')
     expect(selected()).toBe('')
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).getAttribute('aria-disabled')).toBe('true')
+    expect((screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement).disabled).toBe(true)
     await chooseTesting()
     expect(selected()).toBe('')
     await chooseVersion(testing.version)
@@ -128,14 +130,12 @@ describe('Passwall Node release selection', () => {
     reads([testing, stable])
     mount(<Controlled selection={{ ...linux, method: 'docker' }} initialChannel="testing" />)
     await waitFor(() => expect(selected()).toBe('beta'))
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).textContent)
-      .toContain('admin:servers.native.release_follow_beta')
+    expect(shown('admin:servers.native.agent_version')).toContain('admin:servers.native.release_follow_beta')
     await chooseVersion(testing.version)
     expect(selected()).toBe(testing.version)
-    await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
+    await choose('admin:servers.native.release_channel', 'stable')
     await waitFor(() => expect(selected()).toBe('stable'))
-    expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).textContent)
-      .toContain('admin:servers.native.release_follow_stable')
+    expect(shown('admin:servers.native.agent_version')).toContain('admin:servers.native.release_follow_stable')
     expect(api.post).not.toHaveBeenCalled()
   })
 
@@ -304,7 +304,7 @@ describe('Passwall Node release selection', () => {
     reads([stable])
     mount(<Controlled disabled />)
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
-    expect(screen.getAllByRole('combobox').every(field => field.getAttribute('aria-disabled') === 'true')).toBe(true)
+    expect(screen.getAllByRole('combobox').every(field => (field as HTMLSelectElement).disabled)).toBe(true)
     expect(selected()).toBe('')
   })
 })
@@ -354,11 +354,9 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     reads([beta('4.1.1'), beta('4.1.0'), beta('4.0.6')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.1.0" />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    // The field is disabled until the catalog resolves, so opening it before
-    // then opens nothing — wait for it to become usable first.
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    // The field is disabled until the catalog resolves; wait for it to become usable before reading its options.
+    await waitFor(() => expect(field.disabled).toBe(false))
 
     // THE PANEL PERMITS A DOWNGRADE, so the list may not pretend otherwise. The
     // write path has no ordering rule at all and records why: the signature, the
@@ -386,9 +384,8 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     reads([beta('4.0.6')])
     mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
       initialChannel="testing" newerThan="4.1.0" />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    await waitFor(() => expect(field.disabled).toBe(false))
     const only = await screen.findByRole('option', { name: '4.0.6' })
     expect(only.textContent).toContain('admin:servers.native.release_older_than_current')
     expect(only.textContent).not.toContain('admin:servers.native.release_recommended')
@@ -402,9 +399,8 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     reads([beta('4.1.1')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.0.6" />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    await waitFor(() => expect(field.disabled).toBe(false))
     const ahead = await screen.findByRole('option', { name: '4.1.1' })
     expect(ahead.textContent).not.toContain('admin:servers.native.release_older_than_current')
   })
@@ -422,9 +418,8 @@ describe('an explicit target list wins over being merely newer', () => {
     reads([beta('4.1.0'), beta('4.1.1'), beta('4.2.0')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.0.6" targets={['4.1.1']} />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    await waitFor(() => expect(field.disabled).toBe(false))
     expect(await screen.findByRole('option', { name: '4.1.1' })).toBeTruthy()
     // Ahead, but nobody walked a path to it.
     expect(screen.queryByRole('option', { name: '4.2.0' })).toBeNull()
@@ -594,8 +589,7 @@ describe('a node saved on the testing channel', () => {
     await chooseVersion(testing.version)
     expect(selected()).toBe(testing.version)
     // The released target is reachable from the same surface.
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
-    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
+    await choose('admin:servers.native.release_channel', 'stable')
     await chooseVersion(stable.version)
     expect(selected()).toBe(stable.version)
   })
@@ -620,9 +614,8 @@ describe('the recommendation is strictly ahead, not merely not-older', () => {
     reads([beta('4.1.0'), beta('4.0.6')])
     mount(<NodeReleaseSelector enabled autoSelectLatest selection={linux} value="" onChange={onChange}
       initialChannel="testing" newerThan="4.1.0" />)
-    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(field)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+    await waitFor(() => expect(field.disabled).toBe(false))
 
     // Both are listed — the panel permits a downgrade and does not hide one.
     const own = await screen.findByRole('option', { name: '4.1.0' })
@@ -639,7 +632,7 @@ describe('RC preference and legacy testing migration', () => {
     reads([testing, stable, rc])
     mount(<Controlled initialChannel="rc" selection={{...linux,method:'docker'}} />)
     await waitFor(() => expect(selected()).toBe('rc'))
-    fireEvent.mouseDown(screen.getByRole('combobox', {name:'admin:servers.native.agent_version'}))
+    await waitFor(() => expect((screen.getByRole('combobox', {name:'admin:servers.native.agent_version'}) as HTMLSelectElement).disabled).toBe(false))
     expect(await screen.findByRole('option', {name:rc.version})).toBeTruthy()
     expect(screen.getByRole('option', {name:stable.version})).toBeTruthy()
     expect(screen.queryByRole('option', {name:testing.version})).toBeNull()
@@ -647,9 +640,7 @@ describe('RC preference and legacy testing migration', () => {
   it('opens an old testing preference as Beta with three selectable channels', async () => {
     reads([stable, testing, rc])
     mount(<Controlled initialChannel="testing" />)
-    const field=screen.getByRole('combobox', {name:'admin:servers.native.release_channel'})
-    expect(field.textContent).toBe('admin:servers.native.release_beta')
-    fireEvent.mouseDown(field)
+    expect(shown('admin:servers.native.release_channel')).toBe('admin:servers.native.release_beta')
     for (const stage of ['stable','rc','beta']) expect(await screen.findByRole('option',{name:`admin:servers.native.release_${stage}`})).toBeTruthy()
   })
 })

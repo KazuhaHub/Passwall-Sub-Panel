@@ -1,7 +1,11 @@
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, Link, MenuItem, Stack, TextField, Typography } from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import { lazy, Suspense, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ChevronRightIcon, LoaderCircleIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Field } from '@/components/form/Field'
+import { cn } from '@/lib/utils'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import { compareReleaseVersion, releaseTag } from '@/utils/productVersion'
@@ -10,7 +14,7 @@ import { acceptsRelease, effectiveUpdateChannel } from '@/utils/nodeReleaseUpdat
 
 // Loaded when the notes are first expanded: the Markdown renderer is only ever
 // needed behind the fold, so the dialogs do not carry it until someone asks.
-const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
+const ReleaseNotes = lazy(() => import('@/components/ReleaseNotes'))
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -207,71 +211,90 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     ? published.toLocaleDateString(i18n.language, { timeZone: 'UTC' })
     : ''
 
-  const details = selected && <Stack spacing={0.5}>
-    {publishedLabel && <Typography variant="body2" color="text.secondary">
+  const details = selected && <div className="space-y-1.5">
+    {publishedLabel && <p className="text-sm text-muted-foreground">
       {t('admin:servers.native.release_published', { date: publishedLabel })}
-    </Typography>}
-    {selected.notes && <Suspense fallback={<CircularProgress size={16} />}>
+    </p>}
+    {selected.notes && <Suspense fallback={<LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" aria-hidden />}>
       <ReleaseNotes>{selected.notes}</ReleaseNotes>
     </Suspense>}
-    {selectedURL && <Link href={selectedURL} target="_blank" rel="noopener noreferrer" variant="body2">
+    {selectedURL && <a href={selectedURL} target="_blank" rel="noopener noreferrer"
+      className="text-sm text-primary underline underline-offset-2 hover:no-underline">
       {t('admin:servers.native.release_details')}
-    </Link>}
-  </Stack>
+    </a>}
+  </div>
 
-  return <Stack spacing={1.5}>
-    <Stack direction={compact ? { xs: 'column', sm: 'row' } : 'column'} spacing={1.5}>
-    <TextField select fullWidth label={t('admin:servers.native.release_channel')} value={channel} disabled={disabled}
-      onChange={event => {
-        const next = event.target.value as typeof channel
-        if (next !== channel) {
-          onChangeRef.current('')
-          setChannel(next)
-        }
-      }}>
-      <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
-      <MenuItem value="rc">{t('admin:servers.native.release_rc')}</MenuItem>
-      <MenuItem value="beta">{t('admin:servers.native.release_beta')}</MenuItem>
-    </TextField>
-    <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={acceptedValue ? value : ''}
-      disabled={disabled || loading || failed || options.length === 0}
-      helperText={compact ? undefined : t(selection.method === 'docker'
-        ? 'admin:servers.native.release_version_hint_docker'
-        : 'admin:servers.native.release_version_hint')}
-      onChange={event => {
-        const next = event.target.value
-        if (next === '' || (selection.method === 'docker' && next === channelTag) || options.some(release => release.version === next)) onChangeRef.current(next)
-      }}>
-      <MenuItem value="">{t('admin:servers.native.release_choose_version')}</MenuItem>
-      {selection.method === 'docker' && options.length > 0 && <MenuItem value={channelTag} aria-label={channelTag}>
-        {t(`admin:servers.native.release_follow_${channel}`)}
-        {` (${t('admin:servers.native.release_recommended')})`}
-      </MenuItem>}
-      {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}
-        {isOlder(release.version) ? ` (${t('admin:servers.native.release_older_than_current')})` : ''}
-        {release.version === recommended?.version ? ` (${t('admin:servers.native.release_recommended')})` : ''}
-      </MenuItem>)}
-    </TextField>
-    </Stack>
-    {loading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      <CircularProgress size={18} />
-      <Typography variant="body2">{t('admin:servers.native.release_loading')}</Typography>
-    </Box>}
-    {failed && <Alert severity="error" action={<Button color="inherit" size="small" disabled={disabled}
-      onClick={() => setAttempt(current => current + 1)}>{t('admin:servers.native.release_retry')}</Button>}>
-      {t('admin:servers.native.release_failed')}
+  return <div className="flex flex-col gap-3">
+    <div className={cn('flex flex-col gap-3', compact && 'sm:flex-row')}>
+      <Field label={t('admin:servers.native.release_channel')} className={compact ? 'sm:flex-1' : undefined}>
+        <NativeSelect value={channel} disabled={disabled}
+          onChange={event => {
+            const next = event.target.value as typeof channel
+            if (next !== channel) {
+              onChangeRef.current('')
+              setChannel(next)
+            }
+          }}>
+          <option value="stable">{t('admin:servers.native.release_stable')}</option>
+          <option value="rc">{t('admin:servers.native.release_rc')}</option>
+          <option value="beta">{t('admin:servers.native.release_beta')}</option>
+        </NativeSelect>
+      </Field>
+      <Field label={t('admin:servers.native.agent_version')} className={compact ? 'sm:flex-1' : undefined}
+        hint={compact ? undefined : t(selection.method === 'docker'
+          ? 'admin:servers.native.release_version_hint_docker'
+          : 'admin:servers.native.release_version_hint')}>
+        <NativeSelect value={acceptedValue ? value : ''}
+          disabled={disabled || loading || failed || options.length === 0}
+          onChange={event => {
+            const next = event.target.value
+            if (next === '' || (selection.method === 'docker' && next === channelTag) || options.some(release => release.version === next)) onChangeRef.current(next)
+          }}>
+          <option value="">{t('admin:servers.native.release_choose_version')}</option>
+          {selection.method === 'docker' && options.length > 0 && <option value={channelTag} aria-label={channelTag}>
+            {t(`admin:servers.native.release_follow_${channel}`)}
+            {` (${t('admin:servers.native.release_recommended')})`}
+          </option>}
+          {options.map(release => <option key={release.version} value={release.version} aria-label={release.version}>
+            {release.version}
+            {isOlder(release.version) ? ` (${t('admin:servers.native.release_older_than_current')})` : ''}
+            {release.version === recommended?.version ? ` (${t('admin:servers.native.release_recommended')})` : ''}
+          </option>)}
+        </NativeSelect>
+      </Field>
+    </div>
+    {loading && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+      <LoaderCircleIcon className="size-4 animate-spin" aria-hidden />
+      <span>{t('admin:servers.native.release_loading')}</span>
+    </div>}
+    {failed && <Alert variant="destructive" className="has-data-[slot=alert-action]:pr-24">
+      <AlertDescription>{t('admin:servers.native.release_failed')}</AlertDescription>
+      <AlertAction>
+        <Button variant="outline" size="sm" disabled={disabled}
+          onClick={() => setAttempt(current => current + 1)}>{t('admin:servers.native.release_retry')}</Button>
+      </AlertAction>
     </Alert>}
-    {!loading && !failed && releases !== null && options.length === 0 && <Alert severity="info">
-      {context === 'upgrade'
-        ? t('admin:servers.native.release_no_target_for_node')
-        : t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
+    {!loading && !failed && releases !== null && options.length === 0 && <Alert>
+      <AlertDescription>
+        {context === 'upgrade'
+          ? t('admin:servers.native.release_no_target_for_node')
+          : t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
+      </AlertDescription>
     </Alert>}
-    {details && <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
-      <AccordionSummary id={reviewID} aria-controls={`${reviewID}-details`} expandIcon={<ExpandMoreIcon />}>
-        <Typography variant="body2">{t('admin:servers.native.release_review')}</Typography>
-      </AccordionSummary>
-      <AccordionDetails>{details}</AccordionDetails>
-    </Accordion>}
-  </Stack>
+    {details && <ReviewFold key={value} id={reviewID} label={t('admin:servers.native.release_review')}>{details}</ReviewFold>}
+  </div>
+}
+
+// The publication details are folded on every surface. Remounted per selected version (key) so each new choice
+// starts closed, and the body is not mounted until opened, which is what keeps the Markdown renderer unloaded.
+function ReviewFold({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return <div className="rounded-lg border">
+    <button type="button" id={id} aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(v => !v)}
+      className="flex min-h-(--control-h) w-full items-center gap-1.5 rounded-lg px-3 text-left text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <ChevronRightIcon className={cn('size-4 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden />
+      {label}
+    </button>
+    {open && <div id={`${id}-details`} role="region" aria-labelledby={id} className="border-t px-3 py-2.5">{children}</div>}
+  </div>
 }

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect } from 'vitest'
 import type { NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioning, Server } from '@/api/servers'
-import { installReads, list, mount } from '@/test/adminSaveHarness'
+import { installReads, list, mount } from '../testHarness'
 import { releaseTag } from '@/utils/productVersion'
 
 // THE SHARED FIXTURES AND HELPERS FOR THE PASSWALL NODE INSTALLATION FLOWS.
@@ -50,8 +50,8 @@ export function reads(status: NativeAgentStatus = waiting) {
   })
 }
 
-export function versionInput(): HTMLInputElement {
-  return screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
+export function versionInput(): HTMLSelectElement {
+  return screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
 }
 
 export async function selectVersion(version: string, publishedAs?: NodeReleaseChannel) {
@@ -67,12 +67,11 @@ export async function selectVersion(version: string, publishedAs?: NodeReleaseCh
     channel = entry.channel
   }
   const channelSelect = await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' })
-  fireEvent.mouseDown(channelSelect)
-  fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
-  const versionSelect = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
-  await waitFor(() => expect(versionSelect.getAttribute('aria-disabled')).not.toBe('true'))
-  fireEvent.mouseDown(versionSelect)
-  fireEvent.click(await screen.findByRole('option', { name: version }))
+  fireEvent.change(channelSelect, { target: { value: channel } })
+  const versionSelect = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
+  await waitFor(() => expect(versionSelect.disabled).toBe(false))
+  await waitFor(() => expect(within(versionSelect).queryByRole('option', { name: new RegExp(`^${version.replace(/[.+]/g, '\\$&')}`) })).not.toBeNull())
+  fireEvent.change(versionSelect, { target: { value: version } })
 }
 
 export function copyScript(): HTMLButtonElement {
@@ -95,14 +94,24 @@ export function mountExpanded(component: Parameters<typeof mount>[0]) {
 }
 
 export async function selectMethod(method: 'linux' | 'github' | 'docker' | 'manual', container: HTMLElement = document.body) {
-  fireEvent.mouseDown(within(container).getByRole('combobox', { name: 'admin:servers.native.method_label' }))
-  fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.method.${method}` }))
+  fireEvent.change(within(container).getByRole('combobox', { name: 'admin:servers.native.method_label' }), { target: { value: method } })
+}
+
+/** The row's More menu, opened. */
+export async function openMenuOf(server: Server) {
+  const row = (await screen.findByText(server.name)).closest('tr')!
+  fireEvent.click(await within(row).findByRole('button', { name: 'admin:servers.action.more_for' }))
+  await screen.findAllByRole('menuitem')
+}
+
+/** Open the row's More menu and pick an entry by its label key. */
+export async function pickRowAction(server: Server, action: string) {
+  await openMenuOf(server)
+  fireEvent.click(await screen.findByRole('menuitem', { name: action }))
 }
 
 export async function openInstallation(server: Server) {
-  const row = (await screen.findByText(server.name)).closest('tr')!
-  fireEvent.click(await within(row).findByRole('button', { name: 'admin:servers.action.more' }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
+  await pickRowAction(server, 'admin:servers.install_reinstall.action')
   fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
 }
 
