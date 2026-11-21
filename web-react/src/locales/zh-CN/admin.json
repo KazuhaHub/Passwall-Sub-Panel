@@ -890,7 +890,8 @@
       "incomplete": "模板内容尚未完整，请继续编辑。"
     },
     "validate": {
-      "slug_name_required": "slug 和 name 必填"
+      "slug_name_required": "slug 和 name 必填",
+      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug"
     },
     "toast": {
       "saved": "已保存",
@@ -905,11 +906,21 @@
       "reset_title": "恢复为内置默认？",
       "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
       "batch_delete_title": "批量删除配置方案",
-      "batch_delete_message": "确定删除 {{count}} 个配置方案？"
+      "batch_delete_message": "确定删除 {{count}} 个配置方案？",
+      "batch_delete_hidden": "其中 {{count}} 个不在当前列表中。"
     },
     "reset_to_default": "恢复内置默认",
     "cannot_delete_seeded": "内置默认配置方案不可删除，使用「恢复内置默认」可还原",
-    "duplicate": "复制为新的配置方案"
+    "duplicate": "复制为新的配置方案",
+    "row_menu": "{{name}} 的更多操作",
+    "row_delete": "删除",
+    "search_placeholder": "按 slug、名称或客户端搜索",
+    "no_match": "没有符合搜索条件的配置方案",
+    "clear_search": "清除搜索",
+    "empty": "还没有配置方案",
+    "empty_hint": "订阅渲染需要为每种客户端类型至少配置一个方案。",
+    "cannot_delete_default": "默认配置方案不可删除，请先把其他方案设为默认",
+    "no_rule_sets": "没有规则集"
   },
   "sync_tasks": {
     "title": "同步任务",
@@ -1970,7 +1981,9 @@
         "invalid_strategy": "未知负载均衡策略：{{value}}",
         "insufficient_auto_members": "自动测速或负载均衡通常至少需要两个可用成员",
         "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出站或 Rematch 出站，请按节点或线路选择成员，或引用代理组"
-      }
+      },
+      "kind_label": "成员类型",
+      "no_match": "没有匹配项"
     },
     "table": {
       "slug": "Slug",
@@ -2010,11 +2023,21 @@
       "cleanup_groups_title": "同时删除代理组配置？",
       "cleanup_groups_message": "当前主规则已不再包含以下代理组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
       "batch_delete_title": "批量删除规则集",
-      "batch_delete_message": "确定删除 {{count}} 个规则集？"
+      "batch_delete_message": "确定删除 {{count}} 个规则集？",
+      "cleanup_groups_action": "删除并保存",
+      "batch_delete_hidden": "其中 {{count}} 个不在当前列表中。"
     },
     "reset_to_default": "恢复内置默认",
     "cannot_delete_seeded": "内置默认规则集不可删除，使用「恢复内置默认」可还原",
-    "duplicate": "复制为新的规则集"
+    "duplicate": "复制为新的规则集",
+    "row_menu": "{{name}} 的更多操作",
+    "row_delete": "删除",
+    "search_placeholder": "按 slug 或名称搜索",
+    "no_match": "没有符合搜索条件的规则集",
+    "clear_search": "清除搜索",
+    "empty": "还没有规则集",
+    "empty_hint": "规则集只有绑定到配置方案后才会参与订阅渲染。",
+    "editor_keyboard_hint": "Tab 键用于缩进。要把焦点移出编辑器，先按 Esc 再按 Tab；Ctrl+M（macOS 为 Shift+Alt+M）可切换 Tab 键是缩进还是移动焦点。"
   },
   "nodes": {
     "setup": {
