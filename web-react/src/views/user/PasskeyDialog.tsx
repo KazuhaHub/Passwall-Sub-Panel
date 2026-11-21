@@ -69,9 +69,11 @@ export default function PasskeyDialog({ open, available, credentials, onClose, o
       pushSnack(t('passkey.added'), 'success')
       setAdding(false)
       setNewName('')
-      onChanged()
-      // The first passkey: show the one-time recovery codes before anything else.
+      // The first passkey: show the one-time recovery codes before anything else, and tell the parent only when they are
+      // acknowledged. A parent may react to onChanged by closing this dialog and leaving the page (the forced-enrolment page
+      // does), which would take the codes, shown exactly once, away unseen.
       if (recovery_codes && recovery_codes.length > 0) setRecoveryCodes(recovery_codes)
+      else onChanged()
     } catch (err) {
       if (ceremonyCancelled(err)) setAddNote(t('passkey.cancelled'))
       else failed(err, 'passkey.add_failed')
@@ -120,7 +122,7 @@ export default function PasskeyDialog({ open, available, credentials, onClose, o
               <DialogTitle>{t('passkey.recovery_title')}</DialogTitle>
             </DialogHeader>
             <RecoveryCodeList codes={recoveryCodes} warning={t('passkey.recovery_warning')} />
-            <DialogFooter><Button onClick={() => setRecoveryCodes(null)}>{t('passkey.recovery_done')}</Button></DialogFooter>
+            <DialogFooter><Button onClick={() => { setRecoveryCodes(null); onChanged() }}>{t('passkey.recovery_done')}</Button></DialogFooter>
           </>
         ) : (
           <>

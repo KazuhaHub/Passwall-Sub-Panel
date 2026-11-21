@@ -21,7 +21,7 @@ const NEAR_LIMIT_PERCENT = 90
  * otherwise working. The held states are the ones the old page printed as coloured banners, with the same texts.
  * "About to ..." is judged from the same numbers the usage card prints, so the two cannot disagree.
  */
-export function StatusCard({ profile, usage }: { profile: MeProfile; usage: UsageReport | null }) {
+export function StatusCard({ profile, usage, usageLoading = false }: { profile: MeProfile; usage: UsageReport | null; usageLoading?: boolean }) {
   const { t, i18n } = useMeT()
 
   const notice = serviceNotice(profile, t, i18n.language)
@@ -46,6 +46,9 @@ export function StatusCard({ profile, usage }: { profile: MeProfile; usage: Usag
       when: expiry.days === 0 ? t('profile.today') : t('profile.expire_in', { days: expiry.days }),
       date: expiry.dateStr,
     })
+  } else if (usageLoading && profile.traffic_limit_bytes > 0) {
+    // The traffic figure has not answered, so neither the all-clear nor the near-limit warning can be told yet; a hold above still shows at once.
+    return null
   } else if (percent >= NEAR_LIMIT_PERCENT) {
     tone = 'warning'
     title = t('summary.near_limit_title')

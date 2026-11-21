@@ -196,6 +196,30 @@ describe('status card: the service axis in words', () => {
   })
 })
 
+describe('status card while usage is unknown', () => {
+  it('shows no all-clear until the usage read has answered, but a hold at once', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    serve({}, { traffic_limit_bytes: 100 * 1024 ** 3 })
+    const reads = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => { if (url === '/user/me/traffic') await gate; return reads(url) })
+    mountMe(<MeView />)
+    await screen.findByText('My usage')
+    expect(screen.queryByTestId('service-status')).toBeNull()
+    release()
+    await screen.findByText('Service active')
+  })
+
+  it('shows a hold at once, before usage answers', async () => {
+    const gate = new Promise<void>(() => {})
+    serve({}, { service_status: 'expired', traffic_limit_bytes: 100 * 1024 ** 3 })
+    const reads = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string) => { if (url === '/user/me/traffic') await gate; return reads(url) })
+    mountMe(<MeView />)
+    await screen.findByText('Service expired')
+  })
+})
+
 describe('MeView header', () => {
   it('names the account and shows the sign-in name and email under it', async () => {
     serve({}, { email: 'user@mail.test' })

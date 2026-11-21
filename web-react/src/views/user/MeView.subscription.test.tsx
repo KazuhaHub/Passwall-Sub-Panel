@@ -13,8 +13,8 @@ describe('the subscription link is a secret', () => {
     await screen.findByText('Subscription URL')
     expect(screen.getByTestId('sub-url').textContent).toBe(masked)
     expect(document.body.textContent).not.toContain('secret-token')
-    // The QR (an SVG of the same link) is blurred and covered until revealed.
-    expect(document.querySelector('.blur-\\[8px\\]')).toBeTruthy()
+    // The QR is not drawn at all until revealed, so the link is not in the page.
+    expect(screen.getByTestId('qr-placeholder')).toBeTruthy()
   })
 
   it('shows the whole link and unblurs the QR code only when asked, and hides again on a reload', async () => {
@@ -22,7 +22,7 @@ describe('the subscription link is a secret', () => {
     await screen.findByText('Subscription URL')
     fireEvent.click(screen.getAllByRole('button', { name: 'Show' })[0])
     expect(screen.getByTestId('sub-url').textContent).toBe(URL_)
-    expect(document.querySelector('.blur-\\[8px\\]')).toBeNull()
+    expect(screen.queryByTestId('qr-placeholder')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
     expect(screen.getByTestId('sub-url').textContent).toBe(masked)
   })

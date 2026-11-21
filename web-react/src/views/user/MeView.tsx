@@ -143,7 +143,7 @@ export default function MeView() {
       />
       <div className="flex flex-col gap-4">
         {announcement?.enabled && announcement.title && <AnnouncementBanner announcement={announcement} />}
-        {(tab === 'overview' || held) && <StatusCard profile={profile} usage={usage} />}
+        {(tab === 'overview' || held) && <StatusCard profile={profile} usage={usage} usageLoading={usageQuery.isPending} />}
 
         <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
           <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { IconHide, IconKey, IconRules, IconShow } from '@/lib/icons'
 import { AsyncButton } from '@/components/common/AsyncButton'
@@ -26,8 +26,12 @@ export function SubscriptionCard({ subUrl, maskSignal, onReset, onOpenRules }: {
   onOpenRules: () => void
 }) {
   const { t } = useMeT()
-  const [revealed, setRevealed] = useState(false)
-  useEffect(() => { setRevealed(false) }, [maskSignal, subUrl])
+  // "Shown" is remembered FOR the link and reload it was shown for, not as a bare flag reset by an effect: an effect runs
+  // after the render, so a changed link would be drawn in clear for one frame first.
+  const key = `${maskSignal}|${subUrl}`
+  const [shownFor, setShownFor] = useState<string | null>(null)
+  const revealed = shownFor === key
+  const setRevealed = (v: boolean) => setShownFor(v ? key : null)
 
   return (
     <Card>
@@ -39,7 +43,7 @@ export function SubscriptionCard({ subUrl, maskSignal, onReset, onOpenRules }: {
         <div className="flex items-center gap-1 rounded-lg bg-muted py-1 pr-1 pl-3 text-sm">
           {/* The whole link is one unbroken string: break-all so a long token wraps instead of widening the page. */}
           <span data-testid="sub-url" className="min-w-0 flex-1 font-mono text-[0.8125rem] break-all">{revealed ? subUrl : maskUrl(subUrl)}</span>
-          <IconButton label={revealed ? t('sub.hide') : t('sub.reveal')} onClick={() => setRevealed(v => !v)}>
+          <IconButton label={revealed ? t('sub.hide') : t('sub.reveal')} onClick={() => setRevealed(!revealed)}>
             {revealed ? <IconHide /> : <IconShow />}
           </IconButton>
           <CopyButton value={subUrl} name={t('sub.title')} size="icon" />
@@ -47,9 +51,10 @@ export function SubscriptionCard({ subUrl, maskSignal, onReset, onOpenRules }: {
         <div className="flex flex-col items-center gap-2">
           {/* A QR code needs a white ground and dark modules in both themes, so the frame is white on purpose. */}
           <div className="relative rounded-lg border bg-white p-3 leading-none">
-            <div className={revealed ? undefined : 'blur-[8px]'} aria-hidden={!revealed}>
-              <QRCodeSVG value={subUrl} size={160} level="M" />
-            </div>
+            {/* While hidden the code is not drawn at all: a blurred SVG still carries the whole link in the page. */}
+            {revealed
+              ? <QRCodeSVG value={subUrl} size={160} level="M" />
+              : <div data-testid="qr-placeholder" aria-hidden className="size-40 rounded bg-muted" />}
             {!revealed && (
               <button
                 type="button" aria-label={t('sub.reveal')} onClick={() => setRevealed(true)}
