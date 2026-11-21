@@ -900,9 +900,8 @@
   "sync_tasks": {
     "title": "Sync tasks",
     "pending_count": "Waiting for retry: {{count}}",
-    "purge": "Purge finished",
+    "purge": "Purge finished tasks",
     "refresh": "Refresh",
-    "selection_count": "{{count}} selected",
     "batch_retry": "Bulk retry",
     "batch_cancel": "Bulk cancel",
     "filter_status": "Status",
@@ -941,13 +940,16 @@
     "action": {
       "detail": "Detail",
       "retry": "Retry",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "row_menu": "More actions for task #{{id}}"
     },
     "confirm": {
       "purge_title": "Purge finished tasks",
       "purge_message": "Purge all non-active (succeeded / canceled) sync task records? Pending / running tasks are unaffected.",
       "batch_cancel_title": "Cancel tasks",
-      "batch_cancel_message": "Cancel {{count}} selected sync tasks?"
+      "batch_cancel_message": "Cancel {{count}} selected sync tasks?",
+      "cancel_title": "Cancel sync task",
+      "cancel_message": "Cancel task #{{id}} ({{type}})? It will not be retried."
     },
     "toast": {
       "purged": "Purged {{count}} records",
@@ -955,7 +957,23 @@
       "batch_canceled": "Canceled {{count}} tasks",
       "batch_partial": "{{ok}} done, {{fail}} failed"
     },
-    "detail_title": "Task detail"
+    "detail_title": "Task detail",
+    "reason": {
+      "waiting_retry_other": "Tried {{count}} times, waiting to retry",
+      "waiting_retry_one": "Tried {{count}} time, waiting to retry",
+      "not_started": "Not run yet"
+    },
+    "empty": "No sync tasks",
+    "empty_hint": "Changes the panel could not push to a server wait here to be retried. An empty queue means nothing is waiting to be pushed.",
+    "empty_filtered": "No tasks match the filters",
+    "load_failed": "Sync tasks are temporarily unavailable",
+    "refresh_failed": "Could not refresh. The tasks below are from the last successful load.",
+    "detail": {
+      "created": "Created",
+      "updated": "Updated",
+      "finished": "Finished",
+      "record": "Full record"
+    }
   },
   "sync_status": {
     "title": "Background sync tasks",
@@ -1686,8 +1704,6 @@
   "logs": {
     "title": "Logs",
     "load_failed": "Log data is temporarily unavailable",
-    "cert_load_failed": "Certificate log is temporarily unavailable",
-    "retry": "Retry",
     "tab_sub": "Subscription logs",
     "tab_audit": "Audit logs",
     "tab_auth": "Auth logs",
@@ -1708,7 +1724,6 @@
       "ok": "OK",
       "fail": "Failed"
     },
-    "auth_filter_all": "All",
     "auth_outcome": {
       "success": "Success",
       "failure": "Failure"
@@ -1727,7 +1742,6 @@
     "retention_hint": "0 = never auto-purge. The current value is used by the 'Purge expired' button.",
     "clear_all": "Clear all",
     "purge_old": "Purge expired",
-    "view_detail": "Details",
     "region_hint": "Region is estimated from the offline IP database; city-level is approximate only.",
     "sub_table": {
       "id": "ID",
@@ -1752,18 +1766,21 @@
       "user": "User",
       "to": "Recipient",
       "kind": "Kind",
-      "at": "Sent at"
+      "at": "Sent at",
+      "window": "Notification window"
     },
     "filter": {
       "audit_search": "Search actor / action / target",
       "auth_search": "Search user / IP / reason",
       "sub_search": "Search user / IP / UA / client",
       "email_search": "Search user / recipient / kind",
-      "user_chip": "User: {{upn}}"
+      "user_chip": "User: {{upn}}",
+      "user_remove": "Remove the user filter"
     },
     "detail": {
       "before": "Before",
-      "after": "After"
+      "after": "After",
+      "region": "Region"
     },
     "confirm": {
       "clear_sub_title": "Clear subscription logs",
@@ -1771,11 +1788,36 @@
       "clear_audit_title": "Clear audit logs",
       "clear_audit_message": "Clear all audit logs? This cannot be undone.",
       "clear_email_title": "Clear email logs",
-      "clear_email_message": "Clear all email logs? This cannot be undone."
+      "clear_email_message": "Clear all email logs? This cannot be undone.",
+      "purge_sub_title": "Purge expired subscription logs",
+      "purge_sub_message": "Delete subscription logs older than the retention period? Check or change the period under Retention. This cannot be undone.",
+      "purge_email_title": "Purge expired email logs",
+      "purge_email_message": "Delete email logs older than the retention period? Check or change the period under Retention. This cannot be undone."
     },
     "toast": {
       "cleared": "Cleared",
       "purged": "Purged {{count}} expired logs"
+    },
+    "result_count_other": "{{count}} results",
+    "result_count_one": "{{count}} result",
+    "empty": "No log entries yet",
+    "empty_sub": "Entries appear here when someone fetches a subscription.",
+    "empty_audit": "Changes made by administrators and operators are recorded here.",
+    "empty_auth": "Successful and failed sign-ins are recorded here.",
+    "empty_email": "Entries appear here after the panel sends a notification email.",
+    "empty_certs": "Entries appear here after a certificate is issued or renewed.",
+    "empty_filtered": "No entries match the filters",
+    "clear_filters": "Clear filters",
+    "refresh_failed": "Could not refresh. The entries below are from the last successful load.",
+    "maintenance": "Clean-up options",
+    "retention_open": "Retention",
+    "retention_unit": "days",
+    "retention_label_email": "Email log retention (days)",
+    "retention_load_failed": "Could not load the current retention",
+    "auth_method": {
+      "local": "Local",
+      "saml": "SAML",
+      "oidc": "OIDC"
     }
   },
   "rules": {
