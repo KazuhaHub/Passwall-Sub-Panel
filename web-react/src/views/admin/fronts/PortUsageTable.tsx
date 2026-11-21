@@ -1,18 +1,24 @@
-import { Alert, Box, Button, Chip, CircularProgress, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material'
+import { useMemo, useRef } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
 import { deleteNode } from '@/api/nodes'
-import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import { frontKeys } from '@/query/keys'
 import { frontErrorOf, type PortBehind, type PortUsage } from '@/api/fronts'
-import InfoTip from '@/components/InfoTip'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { InfoTip } from '@/components/common/HelpTip'
+import { DataTable } from '@/components/data/DataTable'
+import { confirm } from '@/components/ConfirmHost'
+import { pushSnack } from '@/components/feedback/toasts'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { frontKeys } from '@/query/keys'
 import { useServerPorts } from '@/query/fronts'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useAdminT } from '../useAdminT'
 import { listenerLabel } from './listenerLabel'
 
+type Translate = (key: string, values?: Record<string, unknown>) => string
+
 /** What a front's target is, in the admin's words. */
-export function behindText(t: (key: string, values?: Record<string, unknown>) => string, b: PortBehind): string {
+export function behindText(t: Translate, b: PortBehind): string {
   const target = b.target
   switch (target.kind) {
     case 'listener': return b.parent_node_id
@@ -23,7 +29,7 @@ export function behindText(t: (key: string, values?: Record<string, unknown>) =>
   }
 }
 
-function what(t: (key: string, values?: Record<string, unknown>) => string, u: PortUsage): string {
+function what(t: Translate, u: PortUsage): string {
   switch (u.kind) {
     case 'listener': return u.orphan ? u.label : u.parent_node_id
       ? t('admin:servers.fronts.ports.kind.tunnel_listener', { label: listenerLabel(t, '', u), protocol: u.protocol ?? '' })
@@ -44,9 +50,36 @@ function what(t: (key: string, values?: Record<string, unknown>) => string, u: P
   }
 }
 
-/** Every port the server uses, read only. */
+function UsedBy({ u, t, onRemove }: { u: PortUsage; t: ReturnType<typeof useAdminT>; onRemove: (u: PortUsage) => Promise<void> }) {
+  return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{what(t, u)}</span>
+          {!u.enabled && <StatusBadge tone="neutral" quiet label={t('admin:servers.fronts.ports.disabled')} />}
+          {u.inactive && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.inactive', { why: t(`admin:servers.fronts.withheld.reason.${u.inactive}`, { defaultValue: t(`admin:servers.fronts.unsupported.${u.inactive}`, { defaultValue: u.inactive }) }) })} />}
+          {u.orphan && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.orphan')} />}
+          {u.unrouted && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.unrouted')} />}
+          {u.orphan && u.node_id !== undefined && (
+            <AsyncButton variant="outline" size="sm" onClick={() => onRemove(u)}>{t('admin:servers.fronts.ports.orphan_remove')}</AsyncButton>
+          )}
+        </div>
+        {u.behind?.map((b, j) => (
+          <span key={j} className="pl-3 text-[13px] text-muted-foreground">
+            {b.is_default
+              ? t('admin:servers.fronts.ports.default_arrow', { to: behindText(t, b) })
+              : t('admin:servers.fronts.ports.route_arrow', { names: b.server_names.join(', '), to: behindText(t, b) })}
+            {!b.is_default && b.target.kind !== 'listener' && ` — ${b.label}`}
+          </span>
+        ))}
+      </div>
+  )
+}
+
+const rowKey = (u: PortUsage, i: number) => `${u.kind}-${u.port}-${u.node_id ?? 0}-${u.line_id ?? ''}-${i}`
+
+/** Every port the server uses, read only, except that a hidden tunnel listener whose line is gone can be removed here. */
 export default function PortUsageTable({ panelId }: { panelId: number }) {
-  const { t } = useTranslation(['admin'])
+  const t = useAdminT()
   const scope = useQueryScope()
   const ports = useServerPorts(scope, panelId)
   const queryClient = useQueryClient()
@@ -58,6 +91,7 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
       message: t('admin:servers.fronts.ports.orphan_remove_message', { name: u.node_name ?? `#${u.node_id}`, port: u.port }),
       destructive: true,
       confirmText: t('admin:servers.fronts.ports.orphan_remove'),
+      initialFocus: 'cancel',
     })
     if (!ok || !u.node_id) return
     try {
@@ -69,55 +103,51 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
       if (!frontErrorOf(err)) throw err
     }
   }
-  if (ports.isPending) {
-    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }} role="status" aria-label={t('admin:servers.fronts.loading')}><CircularProgress size={24} /></Box>
-  }
-  if (ports.isError) return <Alert severity="error">{t('admin:servers.fronts.ports.load_failed')}</Alert>
+
+  const removeOrphanRef = useRef(removeOrphan)
+  removeOrphanRef.current = removeOrphan
+
+  // Rows carry their position: the same port can appear for several uses, and nothing else tells them apart.
+  const rows = useMemo(() => (ports.data ?? []).map((u, i) => ({ u, key: rowKey(u, i) })), [ports.data])
+  type Row = (typeof rows)[number]
+
+  const columns = useMemo<ColumnDef<Row>[]>(() => [
+    {
+      id: 'port', header: t('admin:servers.fronts.ports.port'), accessorFn: r => r.u.port, meta: { label: t('admin:servers.fronts.ports.port'), hideable: false, className: 'tabular-nums whitespace-nowrap font-medium' },
+      cell: c => (c.row.original.u.range_high ? `${c.row.original.u.port}–${c.row.original.u.range_high}` : c.row.original.u.port),
+    },
+    {
+      id: 'bind', header: t('admin:servers.fronts.ports.bind'), enableSorting: false, meta: { label: t('admin:servers.fronts.ports.bind'), className: 'whitespace-nowrap' },
+      cell: c => c.row.original.u.listen || t(`admin:servers.fronts.ports.bind_${c.row.original.u.bind}`),
+    },
+    {
+      id: 'used_by', header: t('admin:servers.fronts.ports.used_by'), enableSorting: false, meta: { label: t('admin:servers.fronts.ports.used_by'), hideable: false },
+      cell: c => <UsedBy u={c.row.original.u} t={t} onRemove={u => removeOrphanRef.current(u)} />,
+    },
+  // removeOrphan closes over the query client and scope only; it is stable for the life of this table.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t])
+
   return (
-    <Box>
-      <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+    <div className="flex flex-col gap-2">
+      <p className="flex items-center text-sm text-muted-foreground">
         {t('admin:servers.fronts.ports.hint')}
         <InfoTip text={t('admin:servers.fronts.help.ports')} />
-      </Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>{t('admin:servers.fronts.ports.port')}</TableCell>
-            <TableCell>{t('admin:servers.fronts.ports.bind')}</TableCell>
-            <TableCell>{t('admin:servers.fronts.ports.used_by')}</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {ports.data.map((u, i) => (
-            <TableRow key={`${u.kind}-${u.port}-${u.node_id ?? 0}-${u.line_id ?? ''}-${i}`}>
-              <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                {u.range_high ? `${u.port}–${u.range_high}` : u.port}
-              </TableCell>
-              <TableCell>{u.listen || t(`admin:servers.fronts.ports.bind_${u.bind}`)}</TableCell>
-              <TableCell>
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span>{what(t, u)}</span>
-                  {!u.enabled && <Chip size="small" label={t('admin:servers.fronts.ports.disabled')} />}
-                  {u.inactive && <Chip size="small" color="warning" label={t('admin:servers.fronts.ports.inactive', { why: t(`admin:servers.fronts.withheld.reason.${u.inactive}`, { defaultValue: t(`admin:servers.fronts.unsupported.${u.inactive}`, { defaultValue: u.inactive }) }) })} />}
-                  {u.orphan && <Chip size="small" color="warning" label={t('admin:servers.fronts.ports.orphan')} />}
-                  {u.orphan && u.node_id !== undefined && (
-                    <Button size="small" color="error" onClick={() => void removeOrphan(u)}>{t('admin:servers.fronts.ports.orphan_remove')}</Button>
-                  )}
-                  {u.unrouted && <Chip size="small" color="warning" label={t('admin:servers.fronts.ports.unrouted')} />}
-                </Box>
-                {u.behind?.map((b, j) => (
-                  <Box key={j} sx={{ pl: 2, fontSize: 13 }}>
-                    {b.is_default
-                      ? t('admin:servers.fronts.ports.default_arrow', { to: behindText(t, b) })
-                      : t('admin:servers.fronts.ports.route_arrow', { names: b.server_names.join(', '), to: behindText(t, b) })}
-                    {!b.is_default && b.target.kind !== 'listener' && ` — ${b.label}`}
-                  </Box>
-                ))}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Box>
+      </p>
+      <DataTable<Row>
+        data={rows} columns={columns} getRowId={r => r.key} pagination={false} columnMenu={false} maxHeight={null}
+        loading={ports.isPending} error={ports.isError ? (ports.error as Error) : null} onRetry={() => void ports.refetch()}
+        aria-label={t('admin:servers.fronts.tab_ports')}
+        renderCard={r => (
+          <div className="flex flex-col gap-1 border-b px-3 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <span className="font-medium tabular-nums">{r.u.range_high ? `${r.u.port}–${r.u.range_high}` : r.u.port}</span>
+              <span className="text-xs text-muted-foreground">{r.u.listen || t(`admin:servers.fronts.ports.bind_${r.u.bind}`)}</span>
+            </div>
+            <UsedBy u={r.u} t={t} onRemove={u => removeOrphanRef.current(u)} />
+          </div>
+        )}
+      />
+    </div>
   )
 }

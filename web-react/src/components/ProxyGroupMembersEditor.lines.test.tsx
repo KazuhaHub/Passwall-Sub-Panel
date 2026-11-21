@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { api, mount } from '@/test/adminSaveHarness'
 import type { ProxyGroupInspection, ProxyGroupMember, ProxyGroupOptions, ProxyGroupType } from '@/api/rules'
@@ -33,8 +33,23 @@ function OptionsEditor({ initialOptions, changed }: { initialOptions: Record<str
 }
 
 async function chooseType(type: ProxyGroupType) {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:rules.members.group_type' }))
-  fireEvent.click(await screen.findByRole('option', { name: `admin:rules.members.type.${type}` }))
+  fireEvent.change(await screen.findByRole('combobox', { name: 'admin:rules.members.group_type' }), { target: { value: type } })
+}
+
+/** The member kind of the add row ("select by node", "select by line", ...). */
+async function chooseKind(kind: string) {
+  fireEvent.change(await screen.findByRole('combobox', { name: 'admin:rules.members.kind_label' }), { target: { value: kind } })
+}
+
+/** Types into a combobox and shows its list (the list opens when the person types or presses the down arrow). */
+function typeInto(input: HTMLElement, text: string) {
+  fireEvent.change(input, { target: { value: text } })
+  openList(input)
+}
+
+/** Opens a combobox's list the way a keyboard user does. */
+function openList(input: HTMLElement) {
+  fireEvent.keyDown(input, { key: 'ArrowDown' })
 }
 
 async function setup() {
@@ -42,15 +57,12 @@ async function setup() {
   const changed = vi.fn()
   mount(<Controlled changed={changed} />)
   expect(screen.queryByText('admin:rules.members.groups_hint')).toBeNull()
-  const kind = await screen.findByText('admin:rules.members.kind_node')
-  fireEvent.mouseDown(kind.closest('[role="combobox"]')!)
-  fireEvent.click(await screen.findByRole('option', { name: 'admin:rules.members.kind_line' }))
+  await chooseKind('line')
   return changed
 }
 
 async function chooseNode(name: string) {
-  const input = screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' })
-  fireEvent.click(within(input.closest('.MuiAutocomplete-root') as HTMLElement).getByRole('button', { name: 'Open' }))
+  openList(screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }))
   fireEvent.click(await screen.findByRole('option', { name }))
 }
 
@@ -114,9 +126,9 @@ it('preserves all edited parameters across types and inspection refreshes, inclu
     } else {
       expect((screen.getByLabelText('admin:rules.members.interval') as HTMLInputElement).value).toBe('0')
       expect((screen.getByLabelText('admin:rules.members.timeout') as HTMLInputElement).value).toBe('1234')
-      expect((screen.getByLabelText('admin:rules.members.lazy') as HTMLInputElement).checked).toBe(false)
+      expect(screen.getByRole('switch', { name: 'admin:rules.members.lazy' }).getAttribute('aria-checked')).toBe('false')
     }
-    if (type === 'load-balance') expect(screen.getByRole('combobox', { name: 'admin:rules.members.strategy' }).textContent).toBe('admin:rules.members.strategy_value.round-robin')
+    if (type === 'load-balance') expect((screen.getByRole('combobox', { name: 'admin:rules.members.strategy' }) as HTMLSelectElement).value).toBe('round-robin')
     if (type === 'url-test') expect((screen.getByLabelText('admin:rules.members.tolerance') as HTMLInputElement).value).toBe('73')
   }
   expect(saved).not.toHaveProperty('tolerance')
@@ -148,10 +160,10 @@ it('first chooses a node, then lists only its own named lines and saves stable r
   await chooseNode('Alpha')
   const line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
   expect(line.disabled).toBe(false)
-  fireEvent.change(line, { target: { value: '[' } })
+  typeInto(line, '[')
   expect(await screen.findByRole('option', { name: '[admin:rules.members.line_type_direct]' })).toBeTruthy()
   expect(screen.queryByRole('option', { name: /Alpha \[/ })).toBeNull()
-  fireEvent.change(line, { target: { value: 'my-' } })
+  typeInto(line, 'my-')
   const relay = await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' })
   expect(screen.queryByRole('option', { name: /beta-only/ })).toBeNull()
   expect(screen.queryByRole('option', { name: /Alpha my-/ })).toBeNull()
@@ -160,13 +172,11 @@ it('first chooses a node, then lists only its own named lines and saves stable r
   await waitFor(() => expect(changed).toHaveBeenCalledWith({ Pick: [...initialMembers.Pick, { kind: 'line', node_id: 1, line_id: 'relay-a' }] }))
   expect((screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement).value).toBe('Alpha')
   expect(screen.queryByText('line:1:relay-a')).toBeNull()
+  // The full identity is the name's title (and the name takes focus), not a tooltip.
   const memberName = screen.getByText('admin:rules.members.member_label_relay')
   expect(memberName.tagName).toBe('SPAN')
-  expect(memberName.classList.contains('MuiTypography-noWrap')).toBe(true)
   expect(memberName.getAttribute('title')).toBe('line:1:relay-a')
-  fireEvent.mouseOver(memberName)
-  expect((await screen.findByRole('tooltip')).textContent).toBe('line:1:relay-a')
-  fireEvent.mouseLeave(memberName)
+  expect(memberName.getAttribute('tabindex')).toBe('0')
 })
 
 it('prefixes sortable cards by member type without changing identities or inspection payloads', async () => {
@@ -203,14 +213,9 @@ it('prefixes sortable cards by member type without changing identities or inspec
 
 it('shows a category-specific explanation for every member category', async () => {
   await setup()
-  for (const [kind, label] of [
-    ['line', 'line'], ['node', 'node'], ['remaining', 'remaining'], ['region', 'region'],
-    ['tag', 'tag'], ['builtin', 'builtin'], ['proxy_group', 'group'], ['rematch', 'rematch'],
-  ]) {
-    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
-    const current = screen.getAllByRole('combobox').find(element => element.textContent?.startsWith('admin:rules.members.kind_'))!
-    fireEvent.mouseDown(current)
-    fireEvent.click(await screen.findByRole('option', { name: `admin:rules.members.kind_${label}` }))
+  // The select's values are the kinds themselves ('group' is the proxy_group kind's value in the list).
+  for (const kind of ['line', 'node', 'remaining', 'region', 'tag', 'builtin', 'proxy_group', 'rematch']) {
+    await chooseKind(kind)
     expect(screen.getByText(`admin:rules.members.kind_${kind}_hint`)).toBeTruthy()
   }
 })
@@ -219,19 +224,19 @@ it('clears the selected line when changing or clearing its node and keeps unavai
   const changed = await setup()
   await chooseNode('Alpha')
   let line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
-  fireEvent.change(line, { target: { value: 'my-relay' } })
+  typeInto(line, 'my-relay')
   fireEvent.click(await screen.findByRole('option', { name: 'my-relay-line [admin:rules.members.line_type_relay]' }))
   await chooseNode('Beta')
   line = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
   expect(line.value).toBe('')
   expect((screen.getByRole('button', { name: 'admin:rules.members.add' }) as HTMLButtonElement).disabled).toBe(true)
-  fireEvent.change(line, { target: { value: 'beta' } })
+  typeInto(line, 'beta')
   expect(await screen.findByRole('option', { name: /beta-only \[admin:rules.members.line_type_relay\]/ })).toBeTruthy()
   expect(screen.getByText('admin:rules.members.line_unavailable')).toBeTruthy()
   expect(screen.queryByRole('option', { name: /my-relay/ })).toBeNull()
   fireEvent.keyDown(line, { key: 'Escape' })
   const parent = screen.getByRole('combobox', { name: 'admin:rules.members.select_line_node' }) as HTMLInputElement
-  fireEvent.click(within(parent.closest('.MuiAutocomplete-root') as HTMLElement).getByRole('button', { name: 'Clear' }))
+  fireEvent.click(parent.closest('[data-slot="input-group"]')!.querySelector('[data-slot="combobox-clear"]')!)
   expect(parent.value).toBe('')
   const clearedLine = screen.getByRole('combobox', { name: 'admin:rules.members.select_line' }) as HTMLInputElement
   expect(clearedLine.value).toBe('')

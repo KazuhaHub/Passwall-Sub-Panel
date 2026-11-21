@@ -1,12 +1,20 @@
 import { useState } from 'react'
-import { Alert, Box, Button, Card, Chip, FormControlLabel, Skeleton, Switch, Typography, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
 
 import type { AdminLegal, LegalKind } from '@/api/legal'
+import { StatusBadge } from '@/components/common/StatusBadge'
 import DataCollectionCard from '@/components/DataCollectionCard'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { Field } from '@/components/form/Field'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
+import { useTranslation } from 'react-i18next'
 import { useAdminLegal } from '@/query/legal'
 import { useQueryScope } from '@/query/useQueryScope'
-import LegalEditorDialog from './LegalEditorDialog'
+import { Notice } from '../Notice'
+import { useAdminT } from '../useAdminT'
+import LegalEditorSheet from './LegalEditorSheet'
 import LegalHistorySheet from './LegalHistorySheet'
 
 interface Props {
@@ -22,8 +30,7 @@ const FALLBACK: Record<string, string> = { 'zh-CN': 'en-US', 'en-US': 'zh-CN' }
 
 /** Settings > Privacy and terms (S21). */
 export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDiscloseUsageChange }: Props) {
-  const md = useTheme().palette.md
-  const { t } = useTranslation('admin')
+  const t = useAdminT()
   const scope = useQueryScope()
   const terms = useAdminLegal(scope, 'terms')
   const privacy = useAdminLegal(scope, 'privacy')
@@ -37,28 +44,32 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
   const collection = privacy.data?.data_collection ?? terms.data?.data_collection
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>
-      <Card sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-        <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1, color: md.onSurface }}>{t('settings.legal.title')}</Typography>
-        <FormControlLabel label={t('settings.legal.enabled')} sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
-          control={<Switch checked={enabled} onChange={(_, c) => onEnabledChange(c)} />} />
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('settings.legal.enabled_hint')}</Typography>
-        {consentVersion !== undefined && (
-          <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.5 }}>{t('settings.legal.consent_version', { version: consentVersion })}</Typography>
-        )}
-        <Box sx={{ mt: 1.5 }}>
-          <FormControlLabel label={t('settings.legal.disclose_usage')} sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
-            control={<Switch checked={discloseUsage} onChange={(_, c) => onDiscloseUsageChange(c)} />} />
-          <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('settings.legal.disclose_usage_hint')}</Typography>
-        </Box>
+    <div className="flex max-w-3xl flex-col gap-4">
+      <Card>
+        <CardHeader><CardTitle>{t('admin:settings.legal.title')}</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div>
+            <Field orientation="horizontal" label={t('admin:settings.legal.enabled')} hint={t('admin:settings.legal.enabled_hint')}>
+              <Switch checked={enabled} onCheckedChange={c => onEnabledChange(c)} />
+            </Field>
+            {consentVersion !== undefined && (
+              <p className="mt-1 text-xs text-muted-foreground">{t('admin:settings.legal.consent_version', { version: consentVersion })}</p>
+            )}
+          </div>
+          <Field orientation="horizontal" label={t('admin:settings.legal.disclose_usage')} hint={t('admin:settings.legal.disclose_usage_hint')}>
+            <Switch checked={discloseUsage} onCheckedChange={c => onDiscloseUsageChange(c)} />
+          </Field>
+        </CardContent>
       </Card>
 
-      {failed && <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => { void terms.refetch(); void privacy.refetch() }}>{t('settings.legal.retry')}</Button>}>{t('settings.legal.load_failed')}</Alert>}
+      {failed && (
+        <ErrorState compact title={t('admin:settings.legal.load_failed')} retry={() => Promise.all([terms.refetch(), privacy.refetch()])} />
+      )}
 
       {enabled && nothingPublished && (
-        <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setEditing('privacy')}>{t('settings.legal.go_edit')}</Button>}>
-          {t('settings.legal.empty_alert')}
-        </Alert>
+        <Notice action={<Button variant="outline" size="sm" onClick={() => setEditing('privacy')}>{t('admin:settings.legal.go_edit')}</Button>}>
+          {t('admin:settings.legal.empty_alert')}
+        </Notice>
       )}
 
       {!failed && (['terms', 'privacy'] as const).map(kind => (
@@ -67,23 +78,21 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
       ))}
 
       {!failed && (
-        <Box>
-          <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>{t('settings.legal.collect_note')}</Typography>
-          {collection
-            ? <DataCollectionCard data={collection} />
-            : <Skeleton variant="rounded" height={120} />}
-        </Box>
+        <div>
+          <p className="mb-1 text-xs text-muted-foreground">{t('admin:settings.legal.collect_note')}</p>
+          {collection ? <DataCollectionCard data={collection} /> : <Skeleton className="h-28 rounded-xl" />}
+        </div>
       )}
 
-      {editing && <LegalEditorDialog kind={editing} discloseUsage={discloseUsage} onClose={() => setEditing(null)} />}
+      {editing && <LegalEditorSheet kind={editing} discloseUsage={discloseUsage} onClose={() => setEditing(null)} />}
       {history && <LegalHistorySheet kind={history} onClose={() => setHistory(null)} />}
-    </Box>
+    </div>
   )
 }
 
 function DocumentCard({ kind, data, onEdit, onHistory }: { kind: LegalKind; data: AdminLegal | undefined; onEdit: () => void; onHistory: () => void }) {
-  const md = useTheme().palette.md
-  const { t, i18n } = useTranslation('admin')
+  const t = useAdminT()
+  const { i18n } = useTranslation()
   const name = t(`auth:legal.kind.${kind}`)
   const date = (iso: string) => new Date(iso).toLocaleDateString(i18n.language, { month: 'long', day: 'numeric' })
 
@@ -92,30 +101,32 @@ function DocumentCard({ kind, data, onEdit, onHistory }: { kind: LegalKind; data
   const missing = ['zh-CN', 'en-US'].filter(l => !have.has(l))
 
   return (
-    <Card component="section" aria-label={name} sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography component="h3" sx={{ flex: 1, fontWeight: 600, fontSize: 14, color: md.onSurface }}>{name}</Typography>
-        <Button size="small" onClick={onHistory}>{t('settings.legal.history')}</Button>
-        <Button size="small" variant="outlined" onClick={onEdit}>{t('settings.legal.edit')}</Button>
-      </Box>
-      {!data ? <Skeleton variant="text" width="60%" /> : (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mt: 1 }}>
-          {docs.length > 0 && <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('settings.legal.published_label')}</Typography>}
-          {docs.map(d => (
-            <Chip key={d.locale} size="small" label={t('settings.legal.locale_chip', { locale: d.locale, version: d.version, date: date(d.published_at) })} />
-          ))}
-          {missing.map(l => {
-            const fb = FALLBACK[l]
-            return (
-              <Typography key={l} sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                {have.has(fb)
-                  ? t('settings.legal.not_published_fallback', { locale: l, fallback: fb })
-                  : t('settings.legal.not_published', { locale: l })}
-              </Typography>
-            )
-          })}
-        </Box>
-      )}
+    <section aria-label={name}>
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center gap-2">
+        <h3 className="flex-1 text-base leading-snug font-medium">{name}</h3>
+        <Button variant="ghost" size="sm" onClick={onHistory}>{t('admin:settings.legal.history')}</Button>
+        <Button variant="outline" size="sm" onClick={onEdit}>{t('admin:settings.legal.edit')}</Button>
+      </CardHeader>
+      <CardContent>
+        {!data ? <Skeleton className="h-5 w-3/5" /> : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {docs.length > 0 && <span className="text-xs text-muted-foreground">{t('admin:settings.legal.published_label')}</span>}
+            {docs.map(d => (
+              <StatusBadge key={d.locale} tone="neutral" quiet label={t('admin:settings.legal.locale_chip', { locale: d.locale, version: d.version, date: date(d.published_at) })} />
+            ))}
+            {missing.map(l => {
+              const fb = FALLBACK[l]
+              return (
+                <span key={l} className="text-xs text-muted-foreground">
+                  {have.has(fb) ? t('admin:settings.legal.not_published_fallback', { locale: l, fallback: fb }) : t('admin:settings.legal.not_published', { locale: l })}
+                </span>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
     </Card>
+    </section>
   )
 }

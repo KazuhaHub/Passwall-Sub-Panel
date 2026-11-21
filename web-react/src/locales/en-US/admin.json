@@ -2,36 +2,65 @@
   "languagePacks": {
     "title": "Language packs",
     "load_failed": "Language packs are temporarily unavailable",
-    "subtitle": "Upload custom UI language packs. After uploading, reload the page to pick the language from the language menu.",
+    "subtitle": "Add interface languages. After uploading, reload the page to pick the language from the language menu.",
     "upload": "Upload",
     "upload_title": "Upload language pack",
-    "upload_help": "Choose or paste a JSON language-pack file. Tip: export the base template first, translate its strings, then upload.",
+    "upload_help": "Choose a pack file, drop it here or paste its JSON. Tip: export the base template first, translate its strings, then upload.",
     "choose_file": "Choose file",
+    "drop_hint": "or drop a .json file here",
+    "paste_label": "Language pack JSON",
     "paste_placeholder": "Paste language-pack JSON here…",
     "export_base": "Export base template",
-    "empty": "No custom language packs yet",
     "size_hint": "Maximum {{max}} KB per language pack.",
-    "stale_warning": "Translated against {{base}}; the panel is now {{current}} — consider re-exporting the base and re-translating.",
+    "problems_title_one": "1 problem to fix before uploading",
+    "problems_title_other": "{{count}} problems to fix before uploading",
+    "server_refused": "The server refused this pack",
+    "upload_failed": "The language pack could not be uploaded.",
+    "problem": {
+      "too_large": "The file is larger than {{max}} KB.",
+      "invalid_json": "The text is not valid JSON: {{detail}}",
+      "not_object": "The top level must be a JSON object with the pack's fields.",
+      "format": "\"psp_language_pack\" must be {{expected}} (found {{found}}).",
+      "code_required": "\"code\" is required.",
+      "code_chars": "\"code\" {{code}} may only contain letters, numbers, \"_\" and \"-\".",
+      "code_builtin": "{{code}} is a built-in language and cannot be overwritten. Use another code.",
+      "name_required": "\"name\" is required: the name shown in the language menu.",
+      "namespaces_required": "\"namespaces\" is required and must be an object.",
+      "unknown_namespace": "Unknown namespace \"{{ns}}\". Allowed: {{known}}.",
+      "namespace_shape": "Namespace \"{{ns}}\" must be an object of translations.",
+      "leaf": "{{path}} must be a string (found {{kind}}).",
+      "leaf_more_one": "1 more value is not a string.",
+      "leaf_more_other": "{{count}} more values are not strings."
+    },
+    "source": {
+      "builtin": "Built in",
+      "uploaded": "Uploaded"
+    },
+    "builtin_reason": "Built-in languages are part of the panel and cannot be overwritten or deleted.",
+    "stale": "Out of date",
+    "stale_warning": "Translated against {{base}}; the panel is now {{current}}. Consider re-exporting the base and re-translating.",
+    "download": "Download {{name}}",
     "table": {
       "code": "Code",
-      "name": "Name",
+      "name": "Language",
+      "source": "Source",
       "author": "Author",
       "base_version": "Base version",
       "actions": "Actions"
     },
     "confirm": {
-      "delete_title": "Delete language pack",
+      "delete_title": "Delete language pack {{name}}?",
       "delete_message": "Delete language pack {{name}} ({{code}})? This cannot be undone."
     },
     "toast": {
       "saved": "Language pack saved",
       "deleted": "Language pack deleted",
       "reload_hint": "Reload the page to see this language in the language menu.",
-      "invalid_json": "Could not parse JSON — please check the file contents.",
-      "missing_fields": "Pack is missing required fields (code / name / namespaces).",
       "read_failed": "Failed to read file",
-      "too_large": "Language pack too large — maximum {{max}} KB."
-    }
+      "download_failed": "Could not download the language pack."
+    },
+    "summary_one": "Ready to upload: {{name}} ({{code}}), 1 namespace.",
+    "summary_other": "Ready to upload: {{name}} ({{code}}), {{count}} namespaces."
   },
   "alerts": {
     "bell_title": "Notifications",
@@ -674,14 +703,29 @@
         "name": "Name",
         "keywords": "Keywords",
         "format": "Format",
-        "enabled": "Enabled"
+        "enabled": "Enabled",
+        "apps": "Apps",
+        "disabled": "Disabled",
+        "actions": "Actions"
       },
       "client_table": {
         "name": "Client",
         "platforms": "Platforms",
         "format": "Format",
         "enabled": "Enabled"
-      }
+      },
+      "order_note": "Order matters. A client is matched against the families from top to bottom and the first match wins, so keep a more specific family above a more general one (for example V2rayNG above V2RayN). Drag a row, or use its handle with the keyboard, to change the order.",
+      "name_required": "Enter a name for this family.",
+      "unnamed_family": "Unnamed family",
+      "edit_family": "Edit family",
+      "sheet_done": "Done",
+      "row_menu": "Actions for {{name}}",
+      "remove_app": "Remove app {{name}}",
+      "delete_family_title": "Delete {{name}}?",
+      "delete_family_body": "{{name}} and its import apps are removed from the list. The change takes effect when you save.",
+      "apps_count_one": "{{count}} app",
+      "apps_count_other": "{{count}} apps",
+      "format_uri_list": "URI list (V2rayN / Passwall)"
     },
     "legal": {
       "title": "Privacy and terms page",
@@ -722,21 +766,28 @@
         "switch_title": "Switch language?",
         "switch_message": "This language has unsaved changes, which are lost when you switch.",
         "usage_missing_summary": "The preview has no per-site usage line",
-        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings."
+        "usage_missing_detail": "\"What we collect\" lists per-site usage only when the \"Disclose usage\" switch is saved and at least one node records usage. The preview is built from the saved settings.",
+        "unpublished": "This text is not published yet",
+        "empty": "The text is empty and cannot be published"
       },
       "publish": {
         "title": "Publish {{doc}} ({{locale}}) version {{version}}?",
         "diff": "{{added}} characters added, {{removed}} removed since the last version",
         "first": "This is the first version in this language.",
-        "bump": "Material change: ask users to consent again",
-        "bump_hint": "When checked, about {{users}} ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
-        "bump_hint_loading": "When checked, ordinary users will see the consent dialog the next time they open the portal; subscriptions are not interrupted. Leave it off for typo fixes.",
+        "bump": "Material change: ask users to accept again",
+        "bump_hint": "About {{users}} ordinary users will see the consent dialog the next time they open the portal. Subscriptions are not interrupted.",
+        "bump_hint_loading": "Ordinary users will see the consent dialog the next time they open the portal. Subscriptions are not interrupted.",
         "cancel": "Cancel",
         "confirm": "Publish",
         "done": "Version {{version}} published",
         "conflict": "Another administrator just published a new version; reloaded",
         "too_large": "The text is over {{max}} bytes and cannot be published",
-        "failed": "Could not publish. Please try again."
+        "failed": "Could not publish. Please try again.",
+        "kind_label": "Kind of change",
+        "minor": "Minor change",
+        "minor_hint": "Users are not asked again. Use it for typo fixes and rewording.",
+        "bump_effect": "You are about to ask every ordinary user to accept this document again.",
+        "confirm_bump": "Publish and ask users to accept again"
       },
       "history_sheet": {
         "title": "{{doc}} version history",
@@ -887,7 +938,8 @@
       "incomplete": "Template content is too short to analyze."
     },
     "validate": {
-      "slug_name_required": "Slug and name are required"
+      "slug_name_required": "Slug and name are required",
+      "slug_exists": "A template with slug \"{{slug}}\" already exists — choose a different slug"
     },
     "toast": {
       "saved": "Saved",
@@ -902,11 +954,21 @@
       "reset_title": "Restore seeded default?",
       "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
       "batch_delete_title": "Delete templates",
-      "batch_delete_message": "Delete {{count}} templates?"
+      "batch_delete_message": "Delete {{count}} templates?",
+      "batch_delete_hidden": "{{count}} of them are not in the current list."
     },
     "reset_to_default": "Restore seeded default",
     "cannot_delete_seeded": "Seeded templates can't be deleted — use Restore to recover the default content",
-    "duplicate": "Duplicate as a new template"
+    "duplicate": "Duplicate as a new template",
+    "row_menu": "More actions for {{name}}",
+    "row_delete": "Delete",
+    "search_placeholder": "Search by slug, name or client",
+    "no_match": "No templates match the search",
+    "clear_search": "Clear search",
+    "empty": "No templates yet",
+    "empty_hint": "Subscription rendering needs at least one template for each client type.",
+    "cannot_delete_default": "The default template can't be deleted — make another template the default first",
+    "no_rule_sets": "No rule sets"
   },
   "sync_tasks": {
     "title": "Sync tasks",
@@ -2003,7 +2065,9 @@
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
         "insufficient_auto_members": "Automatic latency testing or load balancing usually needs at least two available members",
         "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in or Rematch outbounds; select members by node or line, or reference a proxy group instead"
-      }
+      },
+      "kind_label": "Member type",
+      "no_match": "No match"
     },
     "table": {
       "slug": "Slug",
@@ -2043,11 +2107,21 @@
       "cleanup_groups_title": "Delete related proxy-group settings?",
       "cleanup_groups_message": "The current main rules no longer contain these proxy groups: {{names}}. Continuing will also delete their custom members, type, and ordering settings.",
       "batch_delete_title": "Delete rule sets",
-      "batch_delete_message": "Delete {{count}} rule sets?"
+      "batch_delete_message": "Delete {{count}} rule sets?",
+      "cleanup_groups_action": "Delete and save",
+      "batch_delete_hidden": "{{count}} of them are not in the current list."
     },
     "reset_to_default": "Restore seeded default",
     "cannot_delete_seeded": "Seeded rule sets can't be deleted — use Restore to recover the default content",
-    "duplicate": "Duplicate as a new rule set"
+    "duplicate": "Duplicate as a new rule set",
+    "row_menu": "More actions for {{name}}",
+    "row_delete": "Delete",
+    "search_placeholder": "Search by slug or name",
+    "no_match": "No rule sets match the search",
+    "clear_search": "Clear search",
+    "empty": "No rule sets yet",
+    "empty_hint": "A rule set only takes part in subscriptions once a template binds it.",
+    "editor_keyboard_hint": "Tab indents. To move focus out of the editor, press Escape and then Tab; Ctrl+M (Shift+Alt+M on macOS) switches Tab between indenting and moving focus."
   },
   "nodes": {
     "setup": {
@@ -4386,7 +4460,6 @@
       "delete_text": "Listeners behind this port return to their own public ports and their users reconnect once; relay lines that enter on this port are no longer sent until they are set up again.",
       "deleted": "Shared port deleted",
       "saved": "Shared port saved",
-      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
       "port": "Shared port",
       "port_hint": "Any TCP port; 443 by default.",
       "listeners": "Listeners behind this port",
@@ -4415,7 +4488,8 @@
         "listener": "Listener {{name}}",
         "forward": "Relay line {{node}} / {{line}}",
         "link": "Tunnel {{link}} from server {{entry}} (standalone port {{port}})",
-        "forward_short": "Relay line {{node}} / {{line}}"
+        "forward_short": "Relay line {{node}} / {{line}}",
+        "link_short": "Tunnel {{link}}"
       },
       "refusal": {
         "no_sni": "No readable SNI (for example Shadowsocks / SS-2022); keeps its own port",
@@ -4558,7 +4632,38 @@
           "contract": "the node protocol refused it"
         }
       },
-      "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect"
+      "row_inactive": "Shared ports (SNI): {{count}} saved port(s) not in effect",
+      "back": "Shared ports",
+      "discard_title": "Discard unsaved changes?",
+      "discard_message": "The changes to this shared port are lost if you leave.",
+      "discard_confirm": "Discard",
+      "delete_confirm": "Delete port {{port}}",
+      "plan": {
+        "listeners": "Listeners that go back to their own public ports:",
+        "lines": "Relay lines that stop being sent:",
+        "tunnels": "Tunnels affected:"
+      },
+      "graph": {
+        "title": "Routing of shared ports",
+        "caption": "A client connects to a shared port. The server name (SNI) in its TLS handshake picks the route, and the route hands the connection to a listener, a relay line or a camouflage site. Select a box to see what goes through it.",
+        "col_port": "Client connects to",
+        "col_sni": "SNI in the handshake",
+        "col_target": "Goes to",
+        "routes_one": "{{count}} route",
+        "routes_other": "{{count}} routes",
+        "other": "Other or no SNI",
+        "loopback": "127.0.0.1:{{port}}",
+        "preview": "Preview of this shared port",
+        "no_default": "No camouflage site yet"
+      },
+      "more_routes_one": "1 more route",
+      "more_routes_other": "{{count}} more routes",
+      "status": "Status",
+      "active": "In effect",
+      "actions": "Actions",
+      "confirm_needed": "Confirm the endpoint changes to save",
+      "choose_target": "Choose where it goes",
+      "empty_title": "No shared ports yet"
     },
     "delete": {
       "title": "Delete server \"{{name}}\"?",

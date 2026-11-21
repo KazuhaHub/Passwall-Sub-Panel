@@ -1,8 +1,9 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
-import type { EditorView } from '@codemirror/view'
-import { useTheme } from '@mui/material'
+import { EditorView } from '@codemirror/view'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { resolveEffectiveMode, useAppearanceStore } from '@/stores/appearance'
 
 /** What a parent can ask of the editor. */
 export interface CodeEditorHandle {
@@ -20,7 +21,15 @@ const CHROME_PX = 8
 // CodeEditor wraps CodeMirror 6 for editing rule-set content (Clash/Mihomo
 // YAML payloads) and, with language="plain", the access-control lists. CM6
 // virtualizes the document, so it stays smooth on multi-thousand-line lists
-// where an autosizing <textarea> janks on every keystroke. This module pulls
+// where an autosizing <textarea> janks on every keystroke.
+//
+// KEYBOARD: Tab indents (the rule lists are YAML, where indentation is the syntax), which is
+// @uiw/react-codemirror's default. CodeMirror itself provides the way out, so Tab never traps a
+// keyboard user: press Escape, then Tab within two seconds to move focus on (Shift+Tab to move
+// back), or Ctrl+M (Shift+Alt+M on macOS) to switch Tab between indenting and moving focus. Pages
+// that show an editor say so beside it (admin:rules.editor_keyboard_hint). Do not turn
+// `indentWithTab` off to "fix" this: that removes indenting for everyone.
+// This module pulls
 // in the heavy CM deps, so consumers should React.lazy() it — that keeps it
 // out of the initial SPA bundle (loaded only when an editor opens). Default
 // export for lazy().
@@ -36,8 +45,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
   /** 'yaml' (the default, for the old callers) or 'plain': no language, so
    *  `domain:example.com` is not drawn as a YAML key. */
   language?: 'yaml' | 'plain'
-}>(function CodeEditor({ value, onChange, height, minRows, readOnly = false, dark, language = 'yaml' }, ref) {
-  const mode = useTheme().palette.mode
+  /** The accessible name of the text area (the editor has no <label> of its own). */
+  ariaLabel?: string
+}>(function CodeEditor({ value, onChange, height, minRows, readOnly = false, dark, language = 'yaml', ariaLabel }, ref) {
+  // The concrete mode, resolved the way App.tsx does for the page (the stored choice, 'auto' following the OS).
+  const stored = useAppearanceStore(s => s.mode)
+  const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
+  const mode = resolveEffectiveMode(stored, systemDark)
   const view = useRef<EditorView | null>(null)
   useImperativeHandle(ref, () => ({
     revealLine(n: number) {
@@ -66,7 +80,10 @@ const CodeEditor = forwardRef<CodeEditorHandle, {
       theme={(dark ?? mode === 'dark') ? 'dark' : 'light'}
       editable={!readOnly}
       readOnly={readOnly}
-      extensions={language === 'yaml' ? [yaml()] : []}
+      extensions={[
+        ...(language === 'yaml' ? [yaml()] : []),
+        ...(ariaLabel ? [EditorView.contentAttributes.of({ 'aria-label': ariaLabel })] : []),
+      ]}
       onChange={onChange}
       onCreateEditor={v => { view.current = v }}
       basicSetup={{

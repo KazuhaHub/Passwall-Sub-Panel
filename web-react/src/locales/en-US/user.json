@@ -5,7 +5,8 @@
     "overview": "Overview",
     "traffic": "Traffic",
     "clients": "Clients",
-    "server_status": "Server status"
+    "server_status": "Server status",
+    "security": "Security"
   },
   "status": {
     "title": "Server status",
@@ -33,7 +34,9 @@
     "suspended_title": "Service suspended",
     "suspended_body": "An administrator has paused your subscription and proxy service.",
     "geo_auto_title": "Service temporarily paused",
-    "geo_auto_body": "Your account was used from several places at the same time, so proxy service is paused for a while and will resume automatically. Contact an administrator if you think this is a mistake."
+    "geo_auto_body": "Your account was used from several places at the same time, so proxy service is paused for a while and will resume automatically. Contact an administrator if you think this is a mistake.",
+    "account_title": "Account disabled",
+    "account_body": "This account is disabled, so subscription and proxy service are unavailable."
   },
   "profile": {
     "title": "My subscription",
@@ -57,19 +60,20 @@
       "quarterly": "Quarterly",
       "yearly": "Yearly"
     },
-    "traffic_used_charged": "Period used (charged)"
+    "traffic_used_charged": "Period used (charged)",
+    "traffic_left": "{{value}} left"
   },
   "sub": {
     "title": "Subscription URL",
     "intro": "Import this URL into a supported client. Resetting credentials immediately invalidates the old URL.",
-    "qr_hint": "Scan the QR code on the left from your mobile client to import directly.",
-    "masked_hint": "Subscription URL is hidden — tap 👁 to reveal both URL and QR. The copy button works without revealing.",
+    "qr_hint": "Scan the QR code from your mobile client to import directly.",
+    "masked_hint": "The subscription URL and QR code are hidden. Show them to see the full URL; Copy works without showing it.",
     "reveal": "Show",
     "hide": "Hide",
     "copy": "Copy",
     "reset": "Reset credentials",
-    "reset_warn": "Resetting credentials immediately invalidates the old subscription URL and forces all connections to drop. Continue?",
-    "reset_ok": "Reset OK! New UUID: {{uuid}}"
+    "reset_warn": "Resetting credentials immediately invalidates the old subscription URL and drops all connections. Afterwards every client must import the new URL. Continue?",
+    "reset_ok": "Credentials reset. New UUID: {{uuid}}"
   },
   "actions": {
     "change_password": "Change password",
@@ -90,7 +94,6 @@
     "recovery_title": "Save your recovery codes",
     "recovery_warning": "These are your one-time recovery codes — use one to sign in when you can't use your passkey. Save them somewhere safe; they're shown only once.",
     "recovery_done": "I've saved them",
-    "copy_all": "Copy all",
     "count": "{{count}} registered",
     "title": "Passkeys",
     "intro": "Passkeys let you sign in with your device's fingerprint/face or a security key — no password to remember, and phishing-resistant. Once added, you can sign in from the login page with one tap.",
@@ -110,7 +113,9 @@
     "confirm_delete_message": "Delete \"{{name}}\"? That device will no longer be able to sign in with it.",
     "add_failed": "Could not add the passkey. Please try again.",
     "rename_failed": "Could not rename. Please try again.",
-    "delete_failed": "Could not delete. Please try again."
+    "delete_failed": "Could not delete. Please try again.",
+    "unsupported": "This browser does not support passkeys. Use a current version of Chrome, Safari, Edge or Firefox, or another device.",
+    "cancelled": "The passkey prompt was closed before it finished. Nothing was changed."
   },
   "twofa": {
     "status_on": "Enabled",
@@ -138,7 +143,8 @@
     "disabled_toast": "Authenticator disabled",
     "regenerate": "Regenerate recovery codes",
     "regenerate_hint": "Enter a current authenticator code or a recovery code to generate a fresh set. Your old recovery codes stop working immediately.",
-    "regen_done_toast": "Recovery codes regenerated"
+    "regen_done_toast": "Recovery codes regenerated",
+    "download": "Download"
   },
   "password": {
     "title": "Change password",
@@ -189,7 +195,9 @@
     "range_30": "Last 30 days",
     "range_90": "Last 90 days",
     "range_180": "Last 6 months",
-    "range_365": "Last year"
+    "range_365": "Last year",
+    "range_label": "Time range",
+    "period_label": "Granularity"
   },
   "import": {
     "title": "Import to client",
@@ -230,5 +238,21 @@
     "consent_accepted": "Your agreement was recorded",
     "consent_failed": "Could not submit. Please try again.",
     "consent_outdated": "The terms were just updated again. Please read them again."
+  },
+  "summary": {
+    "active_title": "Service active",
+    "active_body": "Your subscription and proxy service are working.",
+    "expiring_title": "Expiring soon",
+    "expiring_body": "Your subscription expires {{when}} ({{date}}). Proxy service is paused after that.",
+    "near_limit_title": "Traffic almost used up",
+    "near_limit_body": "{{percent}}% of this period's traffic is used. Proxy service pauses when the limit is reached.",
+    "emergency_title": "Emergency access is on",
+    "emergency_body": "Emergency access is on."
+  },
+  "security": {
+    "title": "Account security",
+    "change": "Change",
+    "manage": "Manage",
+    "set_up": "Set up"
   }
 }
