@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Box, CircularProgress, Typography, useTheme } from '@mui/material'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+
+import { IconSpinner } from '@/lib/icons'
+import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth'
 
 export default function SsoCallbackView() {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation('auth')
   const auth = useAuthStore()
   const navigate = useNavigate()
@@ -42,16 +42,23 @@ export default function SsoCallbackView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // No card and no menus: this page lasts a moment and nobody is meant to act on it, so it
+  // is a centred status line. A failure keeps the server's own text, as before.
   return (
-    <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface }}>
+    <div className="grid min-h-svh place-items-center bg-background p-4 text-foreground">
       {error
-        ? <Typography sx={{ color: md.error, fontSize: 14 }}>{error}</Typography>
+        ? (
+          <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+            <p role="alert" className="text-sm text-destructive">{error}</p>
+            <Button variant="outline" onClick={() => navigate('/login', { replace: true })}>{t('back_to_login')}</Button>
+          </div>
+        )
         : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-            <CircularProgress />
-            <Typography variant="body2">{t('sso_callback_progress')}</Typography>
-          </Box>
+          <div role="status" className="flex flex-col items-center gap-3">
+            <IconSpinner aria-hidden className="size-7 animate-spin text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{t('sso_callback_progress')}</p>
+          </div>
         )}
-    </Box>
+    </div>
   )
 }

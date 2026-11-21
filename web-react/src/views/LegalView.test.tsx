@@ -61,7 +61,7 @@ describe('the public terms and privacy page (S22)', () => {
   it('shows a skeleton while loading', () => {
     vi.mocked(legalApi.getPublicLegal).mockReturnValue(new Promise(() => {}))
     open()
-    expect(document.querySelectorAll('.MuiSkeleton-root').length).toBeGreaterThan(0)
+    expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true')
   })
 
   it('links the other document in the footer', async () => {
@@ -84,7 +84,7 @@ describe('the public terms and privacy page (S22)', () => {
     const { router } = open()
     await screen.findByRole('heading', { level: 1 })
     fireEvent.click(screen.getByRole('button', { name: '语言' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'English' }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: 'English' }))
     expect(setLanguageMock).toHaveBeenCalledWith('en-US')
     await waitFor(() => expect(whereIs(router)).toBe('/legal/privacy?lang=en-US'))
     await waitFor(() => expect(legalApi.getPublicLegal).toHaveBeenLastCalledWith('privacy', 'en-US', expect.anything()))
