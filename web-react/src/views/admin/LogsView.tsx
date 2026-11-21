@@ -41,7 +41,8 @@ export default function LogsView() {
     <div className="p-4 sm:p-6">
       <PageHeader title={t('logs.title')} />
       <Tabs value={url.tab} onValueChange={v => switchTab(v as (typeof TABS)[number])}>
-        <TabsList>
+        {/* Five tabs are wider than a phone: the list scrolls inside itself, the page does not. */}
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           {TABS.map(tab => <TabsTrigger key={tab} value={tab}>{label(tab)}</TabsTrigger>)}
         </TabsList>
       </Tabs>

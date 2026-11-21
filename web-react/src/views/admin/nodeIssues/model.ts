@@ -37,3 +37,19 @@ export function reviewOf(group: NodeIssueGroup): GroupReview {
 
 /** A report nobody has looked at is the thing to notice; a reviewed one is quiet. */
 export const REVIEW_TONE: Record<GroupReview, Tone> = { unacknowledged: 'warning', mixed: 'warning', acknowledged: 'neutral' }
+
+/**
+ * A group's id is the JSON of [agent id, category]; in the address that reads as `%5B%22agt…`. The address
+ * spells it `agent.category` instead (a category never contains the separator, an agent id may, so the
+ * last one splits).
+ */
+export const groupParam = {
+  format: (id: string): string => {
+    const [agent, category] = JSON.parse(id) as [string, string]
+    return `${agent}.${category}`
+  },
+  parse: (raw: string | null): string | null => {
+    const at = raw ? raw.lastIndexOf('.') : -1
+    return raw && at > 0 ? JSON.stringify([raw.slice(0, at), raw.slice(at + 1)]) : null
+  },
+}

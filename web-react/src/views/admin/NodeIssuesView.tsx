@@ -30,7 +30,7 @@ import { useCan } from '@/utils/permissions'
 import { FIT, RecordCard, ResultCount, TimeCell, legacyPageSize, plainColumns, useAdminT } from './logs/shared'
 import { ProblemCell, ReviewBadge, ServerCell } from './nodeIssues/cells'
 import { GroupDetail } from './nodeIssues/GroupDetail'
-import { REVIEW_STATES, VIEWS, acknowledgedParam, issueTitle, pendingIds, serverNameOf, type IssueView, type ReviewState } from './nodeIssues/model'
+import { REVIEW_STATES, VIEWS, acknowledgedParam, groupParam, issueTitle, pendingIds, serverNameOf, type IssueView, type ReviewState } from './nodeIssues/model'
 
 /**
  * What the node agents reported, grouped by server and kind of problem so a hundred repeats of one
@@ -48,7 +48,7 @@ export default function NodeIssuesView() {
     q: urlCodecs.string(),
     page: urlCodecs.int(1, { min: 1 }),
   })
-  const sel = useUrlSelection('row')
+  const sel = useUrlSelection<string>('row', groupParam)
   const table = useTableViewState('admin.nodeIssues', { pageSize: legacyPageSize() })
   const pageSize = table.state.pageSize
   const keyword = url.q.trim()
@@ -261,7 +261,8 @@ export default function NodeIssuesView() {
         title={shown ? issueTitle(shown, url.view, t) : ''}
         description={shown ? serverNameOf(shown, t) : undefined}
         status={shown ? <ReviewBadge group={shown} /> : undefined}
-        actions={shown && canOperate && pendingIds(shown).length > 0 && (
+        // One report has its own button in the list; "all" only helps when there is more than one to review.
+        actions={shown && canOperate && pendingIds(shown).length > 1 && (
           <AsyncButton size="sm" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany(pendingIds(shown))}>
             {t('node_issues.acknowledge_all', { count: pendingIds(shown).length })}
           </AsyncButton>
