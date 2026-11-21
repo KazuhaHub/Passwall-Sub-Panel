@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as acApi from '@/api/accessControl'
 import { renderAccess } from '@/test/accessControlHarness'
-import ServersView from './ServersView'
+import ServersPage from './ServersPage'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -16,7 +16,7 @@ vi.mock('@/api/servers', async importOriginal => ({ ...await importOriginal<type
 vi.mock('@/query/servers', async () => ({
   useServersList: () => ({ data: servers.data, isPending: false, isError: false, isFetching: false, refetch: vi.fn() }),
 }))
-vi.mock('./ServerAccessDialog', () => ({
+vi.mock('./dialogs/ServerAccessDialog', () => ({
   default: ({ node, serverName }: { node: unknown; serverName: string }) => node ? <p data-testid="access-dialog">{serverName}</p> : null,
 }))
 
@@ -39,7 +39,7 @@ beforeEach(() => {
 
 describe('Servers page: access-control line', () => {
   it('shows on a native row only, and opens the dialog', async () => {
-    renderAccess(<ServersView />, { route: '/admin/servers' })
+    renderAccess(<ServersPage />, { route: '/admin/servers' })
     const line = await screen.findByTestId('access-line')
     expect(screen.getAllByTestId('access-line')).toHaveLength(1)
     expect(line.textContent).toBe('访问控制：已生效')
@@ -49,7 +49,7 @@ describe('Servers page: access-control line', () => {
 
   it('shows nothing when the status cannot be read', async () => {
     vi.mocked(acApi.getDestStatus).mockRejectedValue(new Error('503'))
-    renderAccess(<ServersView />, { route: '/admin/servers' })
+    renderAccess(<ServersPage />, { route: '/admin/servers' })
     await screen.findByText('tokyo')
     await waitFor(() => expect(acApi.getDestStatus).toHaveBeenCalled())
     expect(screen.queryByTestId('access-line')).toBeNull()
@@ -57,7 +57,7 @@ describe('Servers page: access-control line', () => {
 
   it('shows nothing while the fleet has no policy', async () => {
     vi.mocked(acApi.getDestStatus).mockResolvedValue(st({ generation: 0, published_generation: 0 }))
-    renderAccess(<ServersView />, { route: '/admin/servers' })
+    renderAccess(<ServersPage />, { route: '/admin/servers' })
     await screen.findByText('tokyo')
     await waitFor(() => expect(acApi.getDestStatus).toHaveBeenCalled())
     expect(screen.queryByTestId('access-line')).toBeNull()

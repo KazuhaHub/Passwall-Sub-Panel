@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, installReads, list, mount, server } from '@/test/adminSaveHarness'
-import ServersView from './ServersView'
+import { api, installReads, list, mount, server } from './testHarness'
+import { openMenuOf, pickRowAction } from './install/installationHarness'
+import ServersPage from './ServersPage'
 
 const psp = { ...server, panel_type: 'psp' }
 
@@ -27,22 +28,21 @@ function install(fronts: unknown, ports: unknown[] = []) {
 }
 
 async function openDialog() {
-  const row = (await screen.findByText('server')).closest('tr')!
-  fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.shared_ports' }))
+  await pickRowAction(server as never, 'admin:servers.action.shared_ports')
   return screen.findByRole('dialog')
 }
 
-describe('ServersView shared ports', () => {
+describe('ServersPage shared ports', () => {
   it('offers the dialog for a Passwall Node server only', async () => {
     installReads({ '/admin/servers': list([server]) })
-    mount(<ServersView />)
-    const row = (await screen.findByText('server')).closest('tr')!
-    expect(within(row).queryByRole('button', { name: 'admin:servers.action.shared_ports' })).toBeNull()
+    mount(<ServersPage />)
+    await openMenuOf(server as never)
+    expect(screen.queryByRole('menuitem', { name: 'admin:servers.action.shared_ports' })).toBeNull()
   })
 
   it('says Xray is needed and disables adding when the server cannot run fronts', async () => {
     install(view({ support: { supported: false, reason: 'engine_not_xray' } }))
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const dialog = await openDialog()
     await within(dialog).findByText('admin:servers.fronts.unsupported.engine_not_xray')
     // Off with its reason (a tooltip), not removed: aria-disabled keeps it focusable.

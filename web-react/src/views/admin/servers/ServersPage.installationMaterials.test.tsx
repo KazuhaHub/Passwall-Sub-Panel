@@ -3,9 +3,11 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioning, Server } from '@/api/servers'
-import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, copyScript, showIdentity, mountExpanded, selectMethod, openInstallation, generatedFiles, generatedManualFiles } from '@/test/installationHarness'
-import { api, installReads, list, mount } from '@/test/adminSaveHarness'
-import ServersView, { NativeInstallationDialog, PUBLIC_NODE_INSTALL_COMMAND, PUBLIC_NODE_INSTALL_ONLY_COMMAND } from './ServersView'
+import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, copyScript, showIdentity, mountExpanded, selectMethod, openInstallation, generatedFiles, generatedManualFiles } from './install/installationHarness'
+import { api, installReads, list, mount } from './testHarness'
+import ServersPage from './ServersPage'
+import { NativeInstallationSheet } from './install/NativeInstallationSheet'
+import { PUBLIC_NODE_INSTALL_COMMAND, PUBLIC_NODE_INSTALL_ONLY_COMMAND } from './install/installModel'
 
 // WHAT THIS FILE DRIVES: what an operator leaves with — the selected method, the private
 // files and scripts, and the downloads and offline materials built from a release.
@@ -24,7 +26,7 @@ describe('Passwall Node installation', () => {
     let finishDocker!: (response: { data: NativeInstallationFiles }) => void
     const obsolete = { ...generatedFiles(), files: [{ name: 'obsolete.yaml', content: 'obsolete private response' }] }
     api.post.mockImplementation(() => new Promise<{ data: NativeInstallationFiles }>(resolve => { finishDocker = resolve }))
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -55,7 +57,7 @@ describe('Passwall Node installation', () => {
     api.post.mockImplementation((url: string) => url.endsWith('/node-installation-files')
       ? new Promise<{ data: NativeInstallationFiles }>(resolve => { finish = resolve })
       : Promise.resolve({ data: { ok: true } }))
-    mount(<ServersView />)
+    mount(<ServersPage />)
     await openInstallation(nativeServer)
     await showIdentity()
     await selectMethod('docker')
@@ -78,7 +80,7 @@ describe('Passwall Node installation', () => {
   })
   it('uses the public GitHub installer without release, OS, architecture, or file-generation requests', async () => {
     reads()
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('github')
     expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
     expect((screen.getByLabelText('admin:servers.native.github_install_only_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_ONLY_COMMAND)
@@ -93,7 +95,7 @@ describe('Passwall Node installation', () => {
   })
   it('copies the public command and each connection value separately without embedding the credential in the command', async () => {
     reads()
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mount(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('github')
     expect(PUBLIC_NODE_INSTALL_COMMAND).not.toContain(provisioning.credential)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_github_command' }))
@@ -114,7 +116,7 @@ describe('Passwall Node installation', () => {
     reads()
     const materials = generatedManualFiles()
     api.post.mockResolvedValue({ data: materials })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -145,7 +147,7 @@ describe('Passwall Node installation', () => {
     releaseReads.mockResolvedValue(product)
     const materials = generatedManualFiles('4.0.0', 'release/4.0.0')
     api.post.mockResolvedValue({ data: materials })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
     await selectVersion('4.0.0', 'stable')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -173,7 +175,7 @@ describe('Passwall Node installation', () => {
     releaseReads.mockResolvedValue(product)
     // Untagged path: what a URL built from the version looks like.
     api.post.mockResolvedValue({ data: generatedManualFiles('4.0.0', '4.0.0') })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
     await selectVersion('4.0.0', 'stable')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -183,7 +185,7 @@ describe('Passwall Node installation', () => {
   it('invalidates displayed files after a release change instead of allowing obsolete files to be copied', async () => {
     reads()
     api.post.mockResolvedValue({ data: generatedFiles() })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -198,7 +200,7 @@ describe('Passwall Node installation', () => {
   it('keeps a generation failure local and retryable without rendering or copying an error as a private file', async () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: { error: 'Chosen release unavailable' } } })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -213,7 +215,7 @@ describe('Passwall Node installation', () => {
     const materials = generatedFiles()
     materials.os = 'windows'
     api.post.mockResolvedValue({ data: materials })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -232,7 +234,7 @@ describe('Passwall Node installation', () => {
     const command = '  printf "%s\\n" "$NODE_AGENT_ID"\n'
     materials.steps[0].commands = [command, 'docker compose ps']
     api.post.mockResolvedValue({ data: materials })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -247,7 +249,7 @@ describe('Passwall Node installation', () => {
     let status: NativeAgentStatus = waiting
     api.get.mockImplementation(async () => ({ data: status }))
     const onClose = vi.fn()
-    const view = mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={onClose} onRotate={vi.fn()} />)
+    const view = mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={onClose} onRotate={vi.fn()} />)
     await act(async () => {})
     expect(screen.getByText('admin:servers.native.agent_status.waiting')).toBeTruthy()
     status = { state: 'applying', configured_nodes: 1, last_seen: '2026-09-12T08:00:00Z' }
@@ -278,7 +280,7 @@ describe('Passwall Node installation', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       downloads.push({ file: this.download, url: this.href })
     })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.download_script' }))
     await waitFor(() => expect(downloads).toEqual([{ file: 'passwall-node-install-agt_7.sh', url: 'blob:private-install-script' }]))
@@ -289,7 +291,7 @@ describe('Passwall Node installation', () => {
   it('renders a plain-text API failure locally without downloading or copying it', async () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: '{"error":"Release has no installation assets"}' } })
-    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationSheet server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     fireEvent.click(copyScript())
     await screen.findByText('Release has no installation assets')

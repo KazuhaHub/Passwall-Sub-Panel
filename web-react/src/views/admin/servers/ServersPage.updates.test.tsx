@@ -3,15 +3,15 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Server } from '@/api/servers'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
-import { api, installReads, list, mount, snack } from '@/test/adminSaveHarness'
+import { api, installReads, list, mount, snack } from './testHarness'
 import ConfirmHost from '@/components/ConfirmHost'
 import { useAuthStore } from '@/stores/auth'
 import english from '@/locales/en-US/admin.json'
-import ServersView from './ServersView'
+import ServersPage from './ServersPage'
 
 const releaseReads = vi.hoisted(() => vi.fn())
 vi.mock('@/api/nodeReleases', () => ({ listNodeReleases: releaseReads }))
-vi.mock('./NativeAgentUpgradeDialog', () => ({
+vi.mock('./dialogs/NativeAgentUpgradeDialog', () => ({
   NativeAgentUpgradeDialog: ({ server }: { server: Server | null }) => server
     ? <div role="dialog" aria-label="native-upgrade-preview">{server.id}</div> : null,
 }))
@@ -50,18 +50,13 @@ const rowFor = async (name: string) => (await screen.findByText(name)).closest('
 const upgradeWrites = () => api.post.mock.calls.filter(([url]) => url !== '/admin/servers/probe')
 
 describe('Server update hints and paired tray icons', () => {
-  it('uses matching tray icons for install, Node upgrade and core selection', async () => {
+  it('offers install, Node upgrade and core selection in the More menu, with the remark column off by default', async () => {
     installReads({ '/admin/servers': list([native]) })
-    mount(<ServersView />)
-    fireEvent.click(within(await rowFor(native.name)).getByRole('button', { name: 'admin:servers.action.more' }))
-    expect(within(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
-      .getByTestId('DownloadOutlinedIcon')).toBeTruthy()
-    expect(within(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }))
-      .getByTestId('UploadOutlinedIcon')).toBeTruthy()
-    expect(within(screen.getByRole('menuitem', { name: 'admin:servers.action.select_core' }))
-      .getByTestId('TuneOutlinedIcon')).toBeTruthy()
-    expect(screen.queryByTestId('UpgradeIcon')).toBeNull()
-    expect(screen.queryByTestId('SystemUpdateAltIcon')).toBeNull()
+    mount(<ServersPage />)
+    fireEvent.click(within(await rowFor(native.name)).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    for (const name of ['admin:servers.install_reinstall.action', 'admin:servers.agent_upgrade.action', 'admin:servers.action.select_core']) {
+      expect(screen.getByRole('menuitem', { name }).getAttribute('aria-disabled')).not.toBe('true')
+    }
     expect(screen.queryByText('admin:servers.table.remark')).toBeNull()
     expect(english.servers.install_reinstall.action).toBe('Install / Reinstall')
     expect(english.servers.install_reinstall.title).toBe('Install / Reinstall · {{name}}')
@@ -71,14 +66,13 @@ describe('Server update hints and paired tray icons', () => {
     const stable = { ...native, id: 10, name: 'native stable', update_channel: 'stable' as const }
     const current = { ...native, id: 11, name: 'native current', panel_version: '4.0.3' }
     installReads({ '/admin/servers': list([native, stable, current]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const target = await rowFor(native.name)
     expect(await within(target).findByText('admin:servers.update_available')).toBeTruthy()
     const version = within(target).getByText('Passwall Node 4.0.2')
     expect(version).toBeTruthy()
     expect(within(target).queryByText('Passwall Node 4.0.2 (abcdef0)')).toBeNull()
-    fireEvent.mouseOver(version)
-    expect(await screen.findByText('commit: abcdef0')).toBeTruthy()
+    expect(version.getAttribute('title')).toContain('commit: abcdef0')
     expect(within(target).queryByText('admin:servers.native.compatibility.compatible')).toBeNull()
     expect(within(target).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     expect(within(await rowFor(stable.name)).queryByText('admin:servers.update_available')).toBeNull()
@@ -93,7 +87,7 @@ describe('Server update hints and paired tray icons', () => {
   it('distinguishes a catalog failure from an available update and makes no upgrade request', async () => {
     releaseReads.mockRejectedValue(new Error('offline catalog'))
     installReads({ '/admin/servers': list([native]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     expect(await screen.findByText('admin:servers.native.update_check_failed')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     expect(upgradeWrites()).toHaveLength(0)
@@ -102,7 +96,7 @@ describe('Server update hints and paired tray icons', () => {
   it('keeps update metadata visible without an upgrade action for an operator', async () => {
     useAuthStore.setState({ role: 'operator' })
     installReads({ '/admin/servers': list([native]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     expect(await screen.findByText('admin:servers.update_available')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
@@ -112,7 +106,7 @@ describe('Server update hints and paired tray icons', () => {
   it('shows limited Node compatibility and blocks remote upgrade without hiding release metadata', async () => {
     const limited = { ...native, node_compatibility: 'limited' as const, node_upgrade_ready: false }
     installReads({ '/admin/servers': list([limited]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const row = await rowFor(limited.name)
     expect(within(row).getByText('admin:servers.native.compatibility.limited')).toBeTruthy()
     // AWAITED, UNLIKE THE BADGE ABOVE. The compatibility badge is server row
@@ -122,21 +116,25 @@ describe('Server update hints and paired tray icons', () => {
     // failed under load — which is how this test flaked, not the code.
     expect(await within(row).findByText('admin:servers.update_available')).toBeTruthy()
     expect(within(row).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
-    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    // Shown disabled with its reason in the label, not hidden: the upgrade is the one thing this node cannot do yet.
+    expect(screen.getByRole('menuitem', { name: 'admin:servers.menu.unsupported' }).getAttribute('aria-disabled')).toBe('true')
     expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
   })
 
   it('keeps S-UI and 3X-UI update hints informational and non-interactive', async () => {
     installReads({ '/admin/servers': list([sui, xui]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const suiRow = await rowFor(sui.name)
     expect(within(suiRow).getByText('admin:servers.update_available')).toBeTruthy()
     expect(within(suiRow).queryByRole('link')).toBeNull()
     expect(within(await rowFor(xui.name)).getByText('admin:servers.update_available')).toBeTruthy()
-    fireEvent.click(within(suiRow).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(suiRow).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    // S-UI has no remote upgrade: both entries are shown disabled with the reason, never hidden and never offered and refused.
+    const unsupported = screen.getAllByRole('menuitem', { name: 'admin:servers.menu.unsupported' })
+    expect(unsupported).toHaveLength(2)
+    expect(unsupported.every(item => item.getAttribute('aria-disabled') === 'true')).toBe(true)
     expect(screen.queryByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.action.upgrade_xray' })).toBeNull()
     expect(releaseReads).not.toHaveBeenCalled()
     expect(upgradeWrites()).toHaveLength(0)
   })
@@ -144,7 +142,7 @@ describe('Server update hints and paired tray icons', () => {
   it('merges fresh upstream update fields from a successful probe, including false to clear an old hint', async () => {
     installReads({ '/admin/servers': list([sui]) })
     api.post.mockResolvedValue({ data: { ok: true, panel_version: '1.6.2', latest_sui_version: 'v1.6.2', update_available: false } })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const target = await rowFor(sui.name)
     await waitFor(() => expect(within(target).getByText('S-UI 1.6.2')).toBeTruthy())
     expect(within(target).queryByRole('link', { name: 'admin:servers.sui_update.available' })).toBeNull()
@@ -162,7 +160,7 @@ describe('Server update hints and paired tray icons', () => {
     api.post.mockImplementation(async (_url: string, body: { id: number }) => ({
       data: { ok: true, panel_version: body.id === cold.id ? '1.5.0' : '1.6.2' },
     }))
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const target = await rowFor(cold.name)
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
     expect(within(target).queryByRole('link')).toBeNull()
@@ -193,10 +191,10 @@ describe('the 3X-UI upgrade confirm states what the target is not', () => {
         upgrade_mode: 'latest_only',
       },
     })
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<><ConfirmHost /><ServersPage /></>)
 
     const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
 
     // The dialog body is one joined string whose lines are i18n KEYS in this
@@ -215,10 +213,10 @@ describe('the 3X-UI upgrade confirm states what the target is not', () => {
         target_pinnable: true,
       },
     })
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<><ConfirmHost /><ServersPage /></>)
 
     const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
 
     // The target line is present, so the dialog did open; the caveat is absent
@@ -241,10 +239,10 @@ describe('the upgrade action asks the instance before it fires', () => {
 
   it.each(['unsupported', 'blocked'])('does not fire when the instance answers %s', async state => {
     installReads({ '/admin/servers': list([xui]), ...optionRead(state) })
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<><ConfirmHost /><ServersPage /></>)
 
     const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
 
     // The harness mocks pushSnack, so the message is read from the spy rather
@@ -268,10 +266,10 @@ describe('the upgrade action asks the instance before it fires', () => {
         compat_status: 'supported', target_pinnable: false,
       },
     })
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<><ConfirmHost /><ServersPage /></>)
 
     const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
 
     expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
@@ -285,10 +283,10 @@ describe('the upgrade action asks the instance before it fires', () => {
       '/admin/servers': list([xui]),
       '/admin/servers/9/upgrade-preview': { update_available: true, current_version: '3.4.2', target_version: 'v3.7.0' },
     })
-    mount(<><ConfirmHost /><ServersView /></>)
+    mount(<><ConfirmHost /><ServersPage /></>)
 
     const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
 
     expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
@@ -308,21 +306,21 @@ describe('the fleet-level compatibility state', () => {
       '/admin/servers/compat-status': { ...working,
         xui: { min_version: '3.4.2', max_tested: '3.8.5', refreshed_at: '2026-09-19T00:00:00Z', last_error: 'github unreachable' } },
     })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     expect(await screen.findByText(/compat_notice\.range-stale/)).toBeTruthy()
   })
 
   it('says nothing when the state is ordinary', async () => {
     // A banner for every non-ideal state is how banners stop being read.
     installReads({ '/admin/servers': list([xui]), '/admin/servers/compat-status': working })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     await screen.findByText('admin:servers.title')
     expect(screen.queryByText(/compat_notice\./)).toBeNull()
   })
 
   it('says nothing when the panel cannot answer', async () => {
     installReads({ '/admin/servers': list([xui]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     await screen.findByText('admin:servers.title')
     expect(screen.queryByText(/compat_notice\./)).toBeNull()
   })
@@ -335,7 +333,7 @@ describe('the fleet-level compatibility state', () => {
 describe('the S-UI manual-upgrade hint', () => {
   it('tells an S-UI operator the release is theirs to install', async () => {
     installReads({ '/admin/servers': list([sui]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const row = await rowFor(sui.name)
     expect(await within(row).findByText('admin:servers.sui_update.manual_hint')).toBeTruthy()
   })
@@ -343,7 +341,7 @@ describe('the S-UI manual-upgrade hint', () => {
   it('does not say it when there is no update to install', async () => {
     // The hint is a step, not a permanent caveat about the backend.
     installReads({ '/admin/servers': list([{ ...sui, update_available: false, latest_sui_version: undefined }]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const row = await rowFor(sui.name)
     await within(row).findByText('S-UI 1.5.0')
     expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()
@@ -353,7 +351,7 @@ describe('the S-UI manual-upgrade hint', () => {
     // 3X-UI has a managed path from the row menu; telling its operator to
     // maintain it by hand would be the opposite of true.
     installReads({ '/admin/servers': list([xui]) })
-    mount(<ServersView />)
+    mount(<ServersPage />)
     const row = await rowFor(xui.name)
     expect(await within(row).findByText(/admin:servers.update_available/)).toBeTruthy()
     expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()

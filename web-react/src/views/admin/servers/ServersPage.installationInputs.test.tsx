@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { releaseCatalog, nativeServer, provisioning, waiting, selectVersion, mountExpanded } from '@/test/installationHarness'
-import { api } from '@/test/adminSaveHarness'
-import { isNodeReleaseVersion, NativeInstallationDialog } from './ServersView'
-import { hostFromURL, serverHost } from './nodes/inbound/inboundModel'
+import { releaseCatalog, nativeServer, provisioning, waiting, selectVersion, mountExpanded } from './install/installationHarness'
+import { api } from './testHarness'
+import { NativeInstallationSheet } from './install/NativeInstallationSheet'
+import { isNodeReleaseVersion } from './install/installModel'
+import { hostFromURL, serverHost } from '../nodes/inbound/inboundModel'
 
 // WHAT THIS FILE DRIVES: the dialog's own inputs, and the two flows that replace
 // what is already installed — an in-place upgrade and an identity replacement.
@@ -72,13 +73,13 @@ describe('Passwall Node in-place upgrade', () => {
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
 
     const installed = { ...nativeServer, panel_version: '4.0.0 (abcdef1)' }
-    mountExpanded(<NativeInstallationDialog server={installed}
+    mountExpanded(<NativeInstallationSheet server={installed}
       initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
 
     // The switch is off and the panel says what that means here.
-    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.upgrade_in_place' }) as HTMLInputElement
-    expect(toggle.checked).toBe(false)
+    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.upgrade_in_place' }) as HTMLElement
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText('admin:servers.native.upgrade_in_place_needed')).toBeTruthy()
 
     fireEvent.click(toggle)
@@ -92,7 +93,7 @@ describe('Passwall Node in-place upgrade', () => {
       ? { data: provisioning }
       : { data: waiting }))
     const installed = { ...nativeServer, panel_version: '4.1.0 (abcdef1)' }
-    mountExpanded(<NativeInstallationDialog server={installed}
+    mountExpanded(<NativeInstallationSheet server={installed}
       initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     expect(screen.queryByText('admin:servers.native.upgrade_in_place_needed')).toBeNull()
@@ -110,7 +111,7 @@ describe('Passwall Node identity replacement', () => {
     api.post.mockResolvedValue({ data: { server_id: 7, command: 'curl -fsSL https://panel.test/private-once | sudo bash',
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
     const installed = { ...nativeServer, panel_version: panelVersion }
-    mountExpanded(<NativeInstallationDialog server={installed}
+    mountExpanded(<NativeInstallationSheet server={installed}
       initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
   }
 
@@ -118,8 +119,8 @@ describe('Passwall Node identity replacement', () => {
     mountReplaceable('4.0.0 (abcdef1)')
     await selectVersion('4.1.0')
 
-    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.replace_identity' }) as HTMLInputElement
-    expect(toggle.checked).toBe(false)
+    const toggle = screen.getByRole('checkbox', { name: 'admin:servers.native.replace_identity' }) as HTMLElement
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(screen.queryByText('admin:servers.native.replace_identity_warning')).toBeNull()
 
     fireEvent.click(toggle)
@@ -140,10 +141,10 @@ describe('Passwall Node identity replacement', () => {
     const replace = screen.getByRole('checkbox', { name: 'admin:servers.native.replace_identity' }) as HTMLInputElement
 
     fireEvent.click(replace)
-    expect(replace.checked).toBe(true)
+    expect(replace.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(upgrade)
-    expect(upgrade.checked).toBe(true)
-    expect(replace.checked).toBe(false)
+    expect(upgrade.getAttribute('aria-checked')).toBe('true')
+    expect(replace.getAttribute('aria-checked')).toBe('false')
     expect(screen.queryByText('admin:servers.native.replace_identity_warning')).toBeNull()
   })
 })

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { api, installReads, list, mount, server, snack } from '@/test/adminSaveHarness'
-import { nativeServer, provisioning, waiting } from '@/test/installationHarness'
-import ServersView, { NativeInstallationDialog } from './ServersView'
+import { api, installReads, list, mount, server, snack } from './testHarness'
+import { pickRowAction } from './install/installationHarness'
+import { nativeServer, provisioning, waiting } from './install/installationHarness'
+import ServersPage from './ServersPage'
+import { NativeInstallationSheet } from './install/NativeInstallationSheet'
 
 /**
  * SLOW-NETWORK FEEDBACK: on a 3-10s link, a row action that only disables its
@@ -19,14 +21,14 @@ function deferred<T = void>() {
 }
 
 
-describe('ServersView row delete button', () => {
+describe('ServersPage row delete', () => {
   it('opens the delete dialog, which reads what is attached first, and sends no delete until it is confirmed there', async () => {
     installReads({ '/admin/servers': list([server]), '/admin/servers/1/delete-impact': { server_id: 1, nodes: [], lines_entering: [], egress_users: [], route_users: [] } })
     const gate = deferred<{ data: unknown }>()
     api.delete.mockReturnValue(gate.promise)
-    mount(<ServersView />)
+    mount(<ServersPage />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.action.delete' }))
+    await pickRowAction(server as never, 'admin:servers.action.delete')
     const dialog = await screen.findByRole('alertdialog')
     const confirmButton = await within(dialog).findByRole('button', { name: 'admin:servers.delete.confirm' })
     expect(api.delete).not.toHaveBeenCalled()
@@ -43,7 +45,7 @@ describe('ServersView row delete button', () => {
   })
 })
 
-describe('ServersView native installation credential import', () => {
+describe('ServersPage native installation credential import', () => {
   it('shows a spinner on Import credential for the whole request, not just disabled', async () => {
     // The legacy-credential prompt only appears when the installation read comes
     // back 409 node_credential_unavailable — same trigger as the existing
@@ -56,7 +58,7 @@ describe('ServersView native installation credential import', () => {
     })
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={null} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mount(<NativeInstallationSheet server={nativeServer} initialProvisioning={null} onClose={vi.fn()} onRotate={vi.fn()} />)
 
     await screen.findByText('admin:servers.native.legacy_credential_hint')
     fireEvent.change(screen.getByLabelText('admin:servers.native.old_credential'), { target: { value: provisioning.credential } })
@@ -65,7 +67,7 @@ describe('ServersView native installation credential import', () => {
     fireEvent.click(importButton)
 
     await waitFor(() => expect((importButton as HTMLButtonElement).disabled).toBe(true))
-    expect(screen.getByRole('progressbar')).toBeTruthy()
+    expect(importButton.getAttribute('aria-busy')).toBe('true')
     // The field beside it must stay locked too, or the operator could edit the
     // value that is already mid-flight.
     expect((screen.getByLabelText('admin:servers.native.old_credential') as HTMLInputElement).disabled).toBe(true)
