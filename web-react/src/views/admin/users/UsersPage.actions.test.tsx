@@ -36,7 +36,8 @@ it('renews by 30 days with the same request, and the row shows the wait', async 
   await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
   expect(api.put.mock.calls[0][0]).toBe('/admin/users/2')
   expect(Object.keys(api.put.mock.calls[0][1])).toEqual(['expire_at'])
-  expect((await rowOf()).getAttribute('data-row-state')).toBe('pending')
+  // The busy mark is state set just before the request: it renders a tick after the request is seen, so wait for it.
+  await waitFor(() => expect(document.querySelector('tr[data-id="2"]')?.getAttribute('data-row-state')).toBe('pending'))
 
   pending.resolve({ data: {} })
   await waitFor(() => expect((document.querySelector('tr[data-id="2"]') as HTMLElement).getAttribute('data-row-state')).toBeNull())
@@ -76,7 +77,8 @@ it('resumes a suspended service with the same request, once', async () => {
 
   await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
   expect(api.post.mock.calls[0]).toEqual(['/admin/users/2/set-service-status', { enabled: true, reason: undefined, detail: undefined }])
-  expect((await rowOf()).getAttribute('data-row-state')).toBe('pending')
+  // The busy mark is state set just before the request: it renders a tick after the request is seen, so wait for it.
+  await waitFor(() => expect(document.querySelector('tr[data-id="2"]')?.getAttribute('data-row-state')).toBe('pending'))
   pending.resolve({ data: {} })
   await waitFor(() => expect(toast).toHaveBeenCalledWith('Proxy service resumed', 'success'))
 })

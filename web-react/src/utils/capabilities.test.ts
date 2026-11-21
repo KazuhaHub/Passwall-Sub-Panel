@@ -79,7 +79,7 @@ describe('the views that collect a device cap consult the predicate', () => {
   // silently matched nothing would report success. Deleting either call site
   // is the regression this exists to catch.
   it.each([
-    ['UsersView', '../views/admin/UsersView.tsx'],
+    ['UsersView', '../views/admin/users/capHints.tsx'],
     ['GroupsView', '../views/admin/GroupsView.tsx'],
   ])('%s imports and calls deviceCapIsInert', async (_name, rel) => {
     const fs = await import('node:fs')
@@ -145,10 +145,10 @@ describe('the views that surface a dead IP cap consult the helpers', () => {
   // dialogs and table cells that a locator-based test could silently fail to
   // reach. Deleting either one is the regression — the code would still work,
   // and a node whose IP cap does nothing would go back to looking fine.
-  it('UsersView warns where the limit is typed', async () => {
+  it('the users form warns where the limit is typed (users/capHints.tsx)', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
-    const src = fs.readFileSync(path.resolve(__dirname, '../views/admin/UsersView.tsx'), 'utf8')
+    const src = fs.readFileSync(path.resolve(__dirname, '../views/admin/users/capHints.tsx'), 'utf8')
     expect(src).toMatch(/import \{[^}]*ipCapUnenforcedPanels[^}]*\} from '@\/utils\/capabilities'/)
     expect(src).toContain('ipCapUnenforcedPanels(')
     expect(src).toContain('ip_limit_unenforced')
