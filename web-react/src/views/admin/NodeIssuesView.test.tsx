@@ -1,301 +1,318 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import type { NodeAgentIssue } from '@/api/types'
-import type { NodeIssueListParams } from '@/api/nodeIssues'
-import { api, installReads, list, mount, snack } from '@/test/adminSaveHarness'
+import { api, installReads, lastParams, list, mountPage, toast } from './logs/testHarness'
 import { useAuthStore } from '@/stores/auth'
 import NodeIssuesView from './NodeIssuesView'
 
-const narrowScreen = vi.hoisted(() => vi.fn(() => false))
-vi.mock('@mui/material', async importOriginal => ({
-  ...await importOriginal<typeof import('@mui/material')>(),
-  useMediaQuery: narrowScreen,
-}))
+const mount = (entry = '/admin/node-issues') => mountPage(<NodeIssuesView />, entry, '/admin/node-issues')
+const here = (m: ReturnType<typeof mount>) => m.router.state.location.pathname + m.router.state.location.search
 
-function issue(id: number, overrides: Partial<NodeAgentIssue> = {}): NodeAgentIssue {
+function issue(id: number, over: Partial<NodeAgentIssue> = {}): NodeAgentIssue {
   return {
-    id, agent_id: 'agt_long_original_agent_identity_123456789',
-    server_id: 7, server_name: 'Canada test server',
-    code: 'core_telemetry_failed', key: 'xray/26.7.28',
-    detail: `original diagnostic for record ${id}`,
+    id, agent_id: 'agt_long_original_agent_identity_123456789', server_id: 7, server_name: 'Canada test server',
+    code: 'core_telemetry_failed', key: 'xray/26.7.28', detail: `original diagnostic for record ${id}`,
     first_seen_at: '2026-09-14T00:00:00Z', last_seen_at: '2026-09-14T01:00:00Z',
-    created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T01:00:00Z',
-    ...overrides,
+    created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T01:00:00Z', ...over,
   }
 }
+const reads = (items: NodeAgentIssue[], total = items.length) => installReads({ '/admin/node-issues': list(items, total) })
+const url = '/admin/node-issues'
+const calls = () => api.get.mock.calls.filter(([u]) => u === url)
+const rowOf = async (text: string) => (await screen.findByText(text)).closest('tr') as HTMLElement
+const openFirst = async () => { fireEvent.click(await screen.findByText('Canada test server')); return screen.findByRole('dialog') }
 
-beforeEach(() => {
-  narrowScreen.mockReturnValue(false)
-})
-
-const reads = () => api.get.mock.calls.filter(([url]) => url === '/admin/node-issues')
-const lastParams = () => reads().at(-1)![1].params as NodeIssueListParams
-const searchInput = () => screen.getByRole('textbox', { name: 'admin:node_issues.search' })
-const detailButtons = () => screen.getAllByRole('button', { name: 'admin:node_issues.open_details' })
-
-async function openDetails(index = 0) {
-  await waitFor(() => expect(detailButtons().length).toBeGreaterThan(index))
-  fireEvent.click(detailButtons()[index])
-  return screen.findByRole('dialog')
-}
-
-async function closeDetails() {
-  fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-}
-
-async function chooseReview(value: 'all' | 'acknowledged' | 'unacknowledged') {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:node_issues.table.state' }))
-  fireEvent.click(await screen.findByRole('option', { name: `admin:node_issues.filter.${value}` }))
-}
-
-describe('Node issues presentation and durable record actions', () => {
-  it('groups summaries by agent/code, but opens every original record and unabridged diagnostic', async () => {
+describe('Node issues: grouping, the sheet and the review of single reports', () => {
+  it('groups by agent and kind of problem, but the sheet lists every original report and the unabridged diagnostic', async () => {
     const items = [
       issue(407, { key: 'cli_407', detail: 'roster object is pending\nfull first detail' }),
-      issue(406, { key: 'cli_406', detail: 'roster object is pending\nfull second detail' }),
+      issue(406, { key: 'cli_406' }),
       issue(408, { code: 'object_pending_timeout', key: 'cli_408' }),
     ]
-    installReads({ '/admin/node-issues': list(items) })
-    mount(<NodeIssuesView />)
-    await waitFor(() => expect(detailButtons()).toHaveLength(2))
-    const rows = within(screen.getByRole('table')).getAllByRole('row')
-    expect(rows).toHaveLength(3)
-    expect(within(rows[1]).getByText('2')).toBeTruthy()
+    reads(items)
+    const m = mount()
+    await screen.findAllByText('Canada test server')
+    // Two summaries (statistics, sync) for three reports; no technical identity in the list.
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3)
     expect(screen.queryByText(items[0].agent_id)).toBeNull()
     expect(screen.queryByText('cli_407')).toBeNull()
-    const dialog = await openDetails()
-    expect(within(dialog).getByText('core_telemetry_failed')).toBeTruthy()
-    expect(within(dialog).getByText(items[0].agent_id)).toBeTruthy()
-    expect(within(dialog).getByText('cli_407')).toBeTruthy()
-    expect(within(dialog).getByText('cli_406')).toBeTruthy()
-    expect(within(dialog).getByText('roster object is pending full first detail')).toBeTruthy()
-    expect(within(dialog).getByText('roster object is pending full second detail')).toBeTruthy()
-    expect(within(dialog).getAllByText('admin:node_issues.record_id')).toHaveLength(2)
+    fireEvent.click(screen.getByText('Node statistics could not be read'))
+    const sheet = await screen.findByRole('dialog')
+    expect(here(m)).toBe('/admin/node-issues?row=agt_long_original_agent_identity_123456789.statistics')
+    expect(within(sheet).getAllByText(/^Report #/)).toHaveLength(2)
+    expect(within(sheet).getByText(items[0].agent_id)).toBeTruthy()
+    expect(within(sheet).getByText('cli_407')).toBeTruthy()
+    expect(within(sheet).getByText('cli_406')).toBeTruthy()
+    expect(within(sheet).getByText(/roster object is pending\s+full first detail/)).toBeTruthy()
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('keeps matching codes on different agents separate even when their server names match', async () => {
-    installReads({ '/admin/node-issues': list([
-      issue(1), issue(2, { agent_id: 'agt_other_agent_identity', server_id: 8 }),
-    ]) })
-    mount(<NodeIssuesView />)
-    await waitFor(() => expect(detailButtons()).toHaveLength(2))
-    const dialog = await openDetails(1)
-    expect(within(dialog).getByText('agt_other_agent_identity')).toBeTruthy()
-    expect(within(dialog).queryByText(issue(1).agent_id)).toBeNull()
-    expect(within(dialog).getAllByText('admin:node_issues.record_id')).toHaveLength(1)
-  })
-
-  it('uses available server display metadata without guessing names for detached agents', async () => {
-    const detached = issue(2, {
-      agent_id: 'agt_detached_identity_with_long_suffix', server_id: undefined, server_name: undefined,
-    })
-    installReads({ '/admin/node-issues': list([
-      issue(1, { server_name: '' }), issue(3, { server_name: 'Server display name' }), detached,
-    ]) })
-    mount(<NodeIssuesView />)
-    expect(await screen.findByText('Server display name')).toBeTruthy()
-    expect(screen.getByText('admin:node_issues.unknown_server')).toBeTruthy()
+  it('keeps the same code on different agents apart, and does not guess a name for a detached agent', async () => {
+    const detached = issue(2, { agent_id: 'agt_detached_identity_with_long_suffix', server_id: undefined, server_name: undefined })
+    reads([issue(1), detached])
+    mount()
+    expect(await screen.findByText('Canada test server')).toBeTruthy()
+    expect(screen.getByText('Unlinked node agent')).toBeTruthy()
     expect(screen.queryByText(`${detached.agent_id.slice(0, 12)}…`)).toBeNull()
-    const dialog = await openDetails(1)
-    expect(within(dialog).getByText(detached.agent_id)).toBeTruthy()
-    expect(within(dialog).getByText('admin:node_issues.unknown_server')).toBeTruthy()
+    fireEvent.click(screen.getByText('Unlinked node agent'))
+    const sheet = await screen.findByRole('dialog')
+    expect(within(sheet).getByText(detached.agent_id)).toBeTruthy()
+    expect(within(sheet).queryByText(issue(1).agent_id)).toBeNull()
   })
 
-  it('shows acknowledgement state only as review metadata, retaining acknowledged records in all-review results', async () => {
-    installReads({ '/admin/node-issues': list([
-      issue(1), issue(2, { acknowledged_at: '2026-09-14T02:00:00Z' }),
-    ]) })
-    mount(<NodeIssuesView />)
-    await openDetails()
-    expect(within(screen.getByRole('dialog')).getAllByText('admin:node_issues.record_id')).toHaveLength(2)
-    await closeDetails()
-    await chooseReview('all')
-    expect(await screen.findByText('admin:node_issues.state.mixed')).toBeTruthy()
-    expect(lastParams()).not.toHaveProperty('acknowledged')
-  })
-
-  it('acknowledges only the selected original ID and never reports recovery or writes other records', async () => {
+  it('reviews exactly the report that was chosen: one request, the list is read again, no recovery claimed', async () => {
     const first = issue(407, { key: 'cli_407' })
     const second = issue(406, { key: 'cli_406' })
-    installReads({ '/admin/node-issues': list([first, second]) })
-    api.post.mockImplementation(async (url: string) => {
-      expect(url).toBe('/admin/node-issues/406/acknowledge')
-      installReads({ '/admin/node-issues': list([first]) })
+    reads([first, second])
+    api.post.mockImplementation(async (u: string) => {
+      expect(u).toBe('/admin/node-issues/406/acknowledge')
+      reads([first])
       return { data: {} }
     })
-    mount(<NodeIssuesView />)
-    const dialog = await openDetails()
-    fireEvent.click(within(dialog).getAllByRole('button', { name: 'admin:node_issues.acknowledge' })[1])
-    await waitFor(() => expect(snack).toHaveBeenCalledWith('admin:node_issues.acknowledged', 'success'))
-    await waitFor(() => expect(within(screen.getByRole('dialog')).queryByText('cli_406')).toBeNull())
-    expect(within(screen.getByRole('dialog')).getByText('cli_407')).toBeTruthy()
+    mount()
+    const sheet = await openFirst()
+    fireEvent.click(within(sheet).getAllByRole('button', { name: 'Mark as reviewed' })[1])
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Marked as reviewed', 'success'))
+    await waitFor(() => expect(within(screen.getByRole('dialog')).queryByText('Report #406')).toBeNull())
     expect(api.post.mock.calls).toEqual([['/admin/node-issues/406/acknowledge']])
-    expect(snack.mock.calls.some(([message]) => /recover|resolved|恢复/i.test(message))).toBe(false)
+    expect(toast.mock.calls.some(([m]) => /recover/i.test(m))).toBe(false)
     expect(api.put).not.toHaveBeenCalled()
     expect(api.delete).not.toHaveBeenCalled()
   })
 
-  it('does not hide or falsely mark a record reviewed when acknowledgement fails', async () => {
-    installReads({ '/admin/node-issues': list([issue(407, { key: 'cli_407' })]) })
-    api.post.mockRejectedValue(new Error('acknowledgement refused'))
-    mount(<NodeIssuesView />)
-    const dialog = await openDetails()
-    const initialReadCount = reads().length
-    fireEvent.click(within(dialog).getByRole('button', { name: 'admin:node_issues.acknowledge' }))
+  it('does not hide or mark a report reviewed when the review fails', async () => {
+    reads([issue(407, { key: 'cli_407' })])
+    api.post.mockRejectedValue(new Error('refused'))
+    mount()
+    const sheet = await openFirst()
+    const before = calls().length
+    const button = within(sheet).getByRole('button', { name: 'Mark as reviewed' })
+    fireEvent.click(button)
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/node-issues/407/acknowledge'))
-    await waitFor(() => expect((within(dialog).getByRole('button', { name: 'admin:node_issues.acknowledge' }) as HTMLButtonElement).disabled).toBe(false))
-    expect(within(dialog).getByText('cli_407')).toBeTruthy()
-    expect(within(dialog).getByText('admin:node_issues.state.unacknowledged')).toBeTruthy()
-    expect(within(dialog).queryByText('admin:node_issues.state.acknowledged')).toBeNull()
-    expect(snack).not.toHaveBeenCalled()
-    expect(reads()).toHaveLength(initialReadCount)
+    await waitFor(() => expect((within(sheet).getByRole('button', { name: 'Mark as reviewed' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(within(sheet).getAllByText(/Needs review/).length).toBeGreaterThan(0)
+    expect(toast).not.toHaveBeenCalled()
+    expect(calls()).toHaveLength(before)
   })
 
-  it('allows read-only accounts to inspect diagnostics without acknowledgement buttons', async () => {
+  it('lets an account without the operate capability read everything and review nothing', async () => {
     useAuthStore.setState({ role: 'user' })
-    installReads({ '/admin/node-issues': list([issue(1)]) })
-    mount(<NodeIssuesView />)
-    const dialog = await openDetails()
-    expect(within(dialog).getByText(issue(1).agent_id)).toBeTruthy()
-    expect(within(dialog).queryByRole('button', { name: 'admin:node_issues.acknowledge' })).toBeNull()
+    reads([issue(1)])
+    mount()
+    const sheet = await openFirst()
+    expect(within(sheet).getByText(issue(1).agent_id)).toBeTruthy()
+    expect(within(sheet).queryByRole('button', { name: 'Mark as reviewed' })).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('asks the server for the page, the review state and the trimmed keyword, all from the address', async () => {
+    reads([issue(1)], 60)
+    const m = mount('/admin/node-issues?page=2&state=acknowledged&q=%20pending%20')
+    await screen.findByText('Canada test server')
+    expect(lastParams(url)).toEqual({ page: 2, page_size: 25, view: 'attention', acknowledged: true, keyword: 'pending' })
+    fireEvent.click(screen.getByRole('radio', { name: 'All review states' }))
+    await waitFor(() => expect(lastParams(url)).toEqual({ page: 1, page_size: 25, view: 'attention', keyword: 'pending' }))
+    expect(here(m)).toBe('/admin/node-issues?state=all&q=+pending+')
+  })
+
+  it('shows the range in records, not in groups, and steps back when a page no longer exists', async () => {
+    let ack = false
+    const a = issue(1, { server_name: 'First page server' })
+    const b = issue(26, { server_name: 'Last page server' })
+    api.get.mockImplementation(async (_u: string, cfg: { params: { page: number } }) => ({
+      data: { items: cfg.params.page === 2 ? (ack ? [] : [b]) : [a], total: ack ? 25 : 26 },
+    }))
+    api.post.mockImplementation(async () => { ack = true; return { data: {} } })
+    mount('/admin/node-issues?page=2')
+    fireEvent.click(await screen.findByText('Last page server'))
+    const sheet = await screen.findByRole('dialog')
+    // Counted in reports, as the server counts: the one report on the last page, not one group.
+    expect(screen.getByText('26–26 of 26', { exact: false })).toBeTruthy()
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Mark as reviewed' }))
+    await waitFor(() => expect(lastParams(url)).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false }))
+    expect(await screen.findByText('First page server')).toBeTruthy()
+    expect(screen.queryByText('No important reports need review. Startup records remain available under Diagnostics.')).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('tells a failed first load from an empty result, and keeps the last records when a refresh fails', async () => {
+    installReads({ [url]: new Error('offline') })
+    const m = mount()
+    expect(await screen.findByText('Node issue reports are temporarily unavailable')).toBeTruthy()
+    expect(screen.queryByText('No important reports need review. Startup records remain available under Diagnostics.')).toBeNull()
+    reads([])
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('No important reports need review. Startup records remain available under Diagnostics.')).toBeTruthy()
+    m.unmount()
+
+    reads([issue(1)])
+    mount()
+    await screen.findByText('Canada test server')
+    installReads({ [url]: new Error('offline refresh') })
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByText(/Could not load reports/)).toBeTruthy()
+    expect(screen.getByText('Canada test server')).toBeTruthy()
+  })
+
+  it('does not let an older response overwrite a newer keyword result', async () => {
+    const old: Array<{ signal: AbortSignal; resolve: (v: unknown) => void }> = []
+    api.get.mockImplementation((_u: string, cfg: { params: { keyword?: string }; signal: AbortSignal }) => {
+      if (cfg.params.keyword === 'new') return Promise.resolve({ data: list([issue(2, { server_name: 'New selection server' })]) })
+      return new Promise(resolve => { old.push({ signal: cfg.signal, resolve }) })
+    })
+    mount()
+    await waitFor(() => expect(old.length).toBeGreaterThan(0))
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'new' } })
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Enter' })
+    expect(await screen.findByText('New selection server')).toBeTruthy()
+    expect(old.every(r => r.signal.aborted)).toBe(true)
+    old.forEach(r => r.resolve({ data: list([issue(1, { server_name: 'Obsolete server' })]) }))
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.getByText('New selection server')).toBeTruthy()
+    expect(screen.queryByText('Obsolete server')).toBeNull()
+  })
+})
+
+describe('Node issues: the views and the bulk review', () => {
+  const sync = (id: number, code: string, over: Partial<NodeAgentIssue> = {}) => issue(id, { code, ...over })
+
+  it('starts on the important issues and carries view, keyword and a reset page across views', async () => {
+    reads([issue(1)], 60)
+    mount('/admin/node-issues?page=2&q=Canada')
+    await screen.findByText('Canada test server')
+    expect(lastParams(url)).toMatchObject({ view: 'attention', page: 2, keyword: 'Canada', acknowledged: false })
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }))
+    await waitFor(() => expect(lastParams(url)).toMatchObject({ view: 'diagnostic', page: 1, keyword: 'Canada' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'All records' }))
+    await waitFor(() => expect(lastParams(url)).toMatchObject({ view: 'all', page: 1, keyword: 'Canada' }))
+  })
+
+  it('shows what the server returns for the diagnostic view as the startup record', async () => {
+    api.get.mockImplementation(async (_u: string, cfg: { params: { view: string } }) => ({
+      data: list(cfg.params.view === 'diagnostic' ? [issue(2, { server_name: 'Statistics report server' })] : [issue(1, { code: 'task_replay_fenced', server_name: 'Task report server' })]),
+    }))
+    mount()
+    expect(await screen.findByText('Task report server')).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }))
+    expect(await screen.findByText('Statistics report server')).toBeTruthy()
+    expect(screen.getByText('Node startup records')).toBeTruthy()
+    expect(screen.queryByText('Task report server')).toBeNull()
+  })
+
+  it('keeps unknown codes visible, and keeps stable codes and agent ids out of the list', async () => {
+    const unknown = issue(1, { code: 'future_unknown_safety_condition', server_id: undefined, server_name: undefined, agent_id: 'agt_detached_full_technical_identity_1234567890', detail: 'Raw unknown safety diagnostic' })
+    const task = issue(2, { code: 'task_identity_conflict', detail: 'Original task identity failure' })
+    reads([unknown, task])
+    mount()
+    await screen.findByText('Other reports need checking')
+    expect(screen.getByText('Task status needs checking')).toBeTruthy()
+    for (const r of [unknown, task]) {
+      expect(screen.queryByText(r.code)).toBeNull()
+      expect(screen.queryByText(r.agent_id)).toBeNull()
+      expect(screen.queryByText(r.detail!)).toBeNull()
+    }
+    fireEvent.click(screen.getByText('Other reports need checking'))
+    const sheet = await screen.findByRole('dialog')
+    const fold = within(sheet).getByText('Technical details and original logs').closest('details') as HTMLDetailsElement
+    expect(fold.open).toBe(false)
+    expect(within(sheet).getAllByText(unknown.code).length).toBeGreaterThan(0)
+    expect(within(sheet).getByText('Raw unknown safety diagnostic')).toBeTruthy()
+  })
+
+  it('merges related synchronization codes into one line, and a bulk review posts every unreviewed original id after a confirmation', async () => {
+    const records = [
+      sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout'), sync(405, 'directives_ahead_of_roster'),
+      sync(404, 'attachment_unknown_listener', { acknowledged_at: '2026-09-14T02:00:00Z' }),
+    ]
+    reads(records)
+    mount()
+    await screen.findByText('Configuration or clients could not be synchronized')
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(2)
+    records.forEach(r => expect(screen.queryByText(r.code)).toBeNull())
+    fireEvent.click(screen.getByRole('checkbox', { name: /Configuration or clients could not be synchronized/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark selected as reviewed' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(api.post).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Marked 3 records as reviewed', 'success'))
+    expect(api.post.mock.calls).toEqual([
+      ['/admin/node-issues/407/acknowledge', undefined, { _skipErrorToast: true }],
+      ['/admin/node-issues/406/acknowledge', undefined, { _skipErrorToast: true }],
+      ['/admin/node-issues/405/acknowledge', undefined, { _skipErrorToast: true }],
+    ])
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+
+  it('keeps the failed ones selected when part of a bulk review fails', async () => {
+    const records = [sync(2, 'core_convergence_failed'), issue(1)]
+    reads(records)
+    api.post.mockImplementation(async (u: string) => { if (u.includes('/2/')) throw new Error('refused'); return { data: {} } })
+    mount()
+    await screen.findByText('Configuration or clients could not be synchronized')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all rows on this page' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark selected as reviewed' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Reviewed 1; 1 failed. Failed reports still on this page remain selected for retry.', 'warning'))
+    const row = await rowOf('Configuration or clients could not be synchronized')
+    await waitFor(() => expect(within(row).getByRole('checkbox').getAttribute('aria-checked')).toBe('true'))
+    expect(within(await rowOf('Node statistics could not be read')).getByRole('checkbox').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('locks the filters while a bulk confirmation is waiting, and unlocks after Cancel', async () => {
+    reads([issue(1)])
+    mount()
+    await screen.findByText('Canada test server')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Node statistics could not be read/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark selected as reviewed' }))
+    const dialog = await screen.findByRole('alertdialog')
+    // The tab is disabled behind the dialog; what is asked of the server cannot change under it.
+    expect(screen.getByRole('tab', { name: 'Diagnostics', hidden: true }).hasAttribute('data-disabled')).toBe(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Diagnostics' }).hasAttribute('data-disabled')).toBe(false))
     expect(api.post).not.toHaveBeenCalled()
   })
 
-  it('submits trimmed keyword only on search and clears it back to the default filter', async () => {
-    installReads({ '/admin/node-issues': list([issue(1)]) })
-    mount(<NodeIssuesView />)
-    await openDetails()
-    await closeDetails()
-    const initialReadCount = reads().length
-    fireEvent.change(searchInput(), { target: { value: '  pending record  ' } })
-    expect(reads()).toHaveLength(initialReadCount)
-    fireEvent.submit(searchInput().closest('form')!)
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false, keyword: 'pending record' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'admin:node_issues.clear_search' }))
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false }))
-    expect((searchInput() as HTMLInputElement).value).toBe('')
+  it('a bulk review from the sheet reviews that group only', async () => {
+    reads([sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout'), issue(1)])
+    mount()
+    fireEvent.click(await screen.findByText('Configuration or clients could not be synchronized'))
+    const sheet = await screen.findByRole('dialog')
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Mark all 2 as reviewed' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/406/acknowledge', '/admin/node-issues/407/acknowledge'])
   })
 
-  it('re-runs an unchanged submitted keyword on an explicit search action', async () => {
-    installReads({ '/admin/node-issues': list([issue(1)]) })
-    mount(<NodeIssuesView />)
-    await screen.findByText('Canada test server')
-    const initialReadCount = reads().length
-    fireEvent.click(screen.getByRole('button', { name: 'admin:node_issues.search_action' }))
-    await waitFor(() => expect(reads()).toHaveLength(initialReadCount + 1))
-    expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false })
+  it('acts only on the reports that were chosen: one that arrives in a ticked group later is left alone', async () => {
+    const two = [sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout')]
+    reads(two)
+    const m = mount()
+    await screen.findByText('Configuration or clients could not be synchronized')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Configuration or clients could not be synchronized/ }))
+    // A refetch (window focus) brings a third report into the same group.
+    reads([sync(408, 'core_convergence_failed'), ...two])
+    await m.client.invalidateQueries()
+    await waitFor(() => expect(lastParams(url)).toBeDefined())
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark selected as reviewed' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText(/2 records/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/406/acknowledge', '/admin/node-issues/407/acknowledge'])
   })
 
-  it('keeps review filters and pagination in API requests, resetting page when the filter changes', async () => {
-    installReads({ '/admin/node-issues': { ...list([issue(1)]), total: 60 } })
-    mount(<NodeIssuesView />)
-    await screen.findByText('Canada test server')
-    expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false })
-    fireEvent.click(screen.getByRole('button', { name: 'Go to next page' }))
-    await waitFor(() => expect(lastParams()).toEqual({ page: 2, page_size: 25, view: 'attention', acknowledged: false }))
-    await chooseReview('acknowledged')
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: true }))
-    await chooseReview('all')
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention' }))
-    await chooseReview('unacknowledged')
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false }))
-  })
-
-  it('returns to the last valid page after acknowledging its last filtered record', async () => {
-    let acknowledged = false
-    const firstPage = issue(1, { server_name: 'First page server' })
-    const lastRecord = issue(26, { server_name: 'Last page server' })
-    api.get.mockImplementation(async (_url: string, config: { params: NodeIssueListParams }) => ({
-      data: {
-        items: config.params.page === 2 ? (acknowledged ? [] : [lastRecord]) : [firstPage],
-        total: acknowledged ? 25 : 26,
-        page: config.params.page,
-        page_size: config.params.page_size,
-      },
-    }))
-    api.post.mockImplementation(async (url: string) => {
-      expect(url).toBe('/admin/node-issues/26/acknowledge')
-      acknowledged = true
-      return { data: {} }
-    })
-    mount(<NodeIssuesView />)
-    await screen.findByText('First page server')
-    fireEvent.click(screen.getByRole('button', { name: 'Go to next page' }))
-    await screen.findByText('Last page server')
-    const dialog = await openDetails()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'admin:node_issues.acknowledge' }))
-    await waitFor(() => expect(lastParams()).toEqual({ page: 1, page_size: 25, view: 'attention', acknowledged: false }))
-    expect(await screen.findByText('First page server')).toBeTruthy()
-    expect(screen.queryByText('Last page server')).toBeNull()
-    expect(screen.queryByText('admin:node_issues.empty_attention')).toBeNull()
-    expect(api.post.mock.calls).toEqual([['/admin/node-issues/26/acknowledge']])
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect((screen.getByRole('button', { name: 'Go to next page' }) as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('distinguishes a successful empty-review result from a failed initial load and allows retry', async () => {
-    api.get.mockRejectedValue(new Error('offline'))
-    mount(<NodeIssuesView />)
-    expect(await screen.findByText('admin:node_issues.load_failed')).toBeTruthy()
-    expect(screen.queryByText('admin:node_issues.empty_attention')).toBeNull()
-    expect(screen.queryByText('admin:node_issues.empty')).toBeNull()
-    installReads({ '/admin/node-issues': list([]) })
-    fireEvent.click(screen.getByRole('button', { name: 'admin:node_issues.refresh' }))
-    expect(await screen.findByText('admin:node_issues.empty_attention')).toBeTruthy()
-    expect(screen.queryByText('admin:node_issues.load_failed')).toBeNull()
-    await chooseReview('all')
-    expect(await screen.findByText('admin:node_issues.empty')).toBeTruthy()
-    expect(screen.queryByText('admin:node_issues.empty_attention')).toBeNull()
-  })
-
-  it('preserves last-known diagnostics when refresh fails instead of showing an empty result', async () => {
-    installReads({ '/admin/node-issues': list([issue(1)]) })
-    mount(<NodeIssuesView />)
-    await screen.findByText('Canada test server')
-    api.get.mockRejectedValue(new Error('offline refresh'))
-    fireEvent.click(screen.getByRole('button', { name: 'admin:node_issues.refresh' }))
-    expect(await screen.findByText('admin:node_issues.load_failed')).toBeTruthy()
-    expect(screen.getByText('Canada test server')).toBeTruthy()
-    expect(screen.queryByText('admin:node_issues.empty_attention')).toBeNull()
-    expect(detailButtons()).toHaveLength(1)
-  })
-
-  it('does not let an older page response overwrite a newer keyword result', async () => {
-    const oldRequests: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> = []
-    api.get.mockImplementation((_url: string, config: { params: NodeIssueListParams; signal: AbortSignal }) => {
-      if (config.params.keyword === 'new selection') return Promise.resolve({ data: list([issue(2, { server_name: 'New selection server' })]) })
-      return new Promise(resolve => { oldRequests.push({ signal: config.signal, resolve }) })
-    })
-    mount(<NodeIssuesView />)
-    await waitFor(() => expect(oldRequests.length).toBeGreaterThan(0))
-    fireEvent.change(searchInput(), { target: { value: 'new selection' } })
-    fireEvent.submit(searchInput().closest('form')!)
-    expect(await screen.findByText('New selection server')).toBeTruthy()
-    expect(oldRequests.every(request => request.signal.aborted)).toBe(true)
-    await act(async () => {
-      oldRequests.forEach(request => request.resolve({ data: list([issue(1, { server_name: 'Obsolete server' })]) }))
-    })
-    expect(screen.getByText('New selection server')).toBeTruthy()
-    expect(screen.queryByText('Obsolete server')).toBeNull()
-    expect(screen.queryByText('admin:node_issues.load_failed')).toBeNull()
-  })
-
-  it('renders compact cards, not a wide summary table, on narrow screens', async () => {
-    narrowScreen.mockReturnValue(true)
-    installReads({ '/admin/node-issues': list([
-      issue(407, { key: 'cli_407' }), issue(406, { key: 'cli_406' }),
-    ]) })
-    mount(<NodeIssuesView />)
-    expect(await screen.findByText('Canada test server')).toBeTruthy()
-    expect(screen.queryByRole('table')).toBeNull()
-    expect(screen.getByText('admin:node_issues.mobile_meta')).toBeTruthy()
-    expect(detailButtons()).toHaveLength(1)
-    const dialog = await openDetails()
-    expect(within(dialog).getByText('cli_407')).toBeTruthy()
-    expect(within(dialog).getByText('cli_406')).toBeTruthy()
+  it('reviews a chosen subset of one group from the sheet', async () => {
+    reads([sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout'), sync(405, 'directives_ahead_of_roster')])
+    mount()
+    fireEvent.click(await screen.findByText('Configuration or clients could not be synchronized'))
+    const sheet = await screen.findByRole('dialog')
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Select report #407' }))
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Select report #405' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Mark 2 selected as reviewed' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/405/acknowledge', '/admin/node-issues/407/acknowledge'])
   })
 })
