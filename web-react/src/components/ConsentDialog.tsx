@@ -1,7 +1,4 @@
 import { useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Link, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
@@ -13,6 +10,10 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const LATER_KEY = 'psp_legal_later'
 
@@ -41,14 +42,11 @@ export default function ConsentDialog() {
 }
 
 function PendingConsent() {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation('user')
   const scope = useQueryScope()
   const qc = useQueryClient()
   const userId = useAuthStore(s => s.userId)
   const siteVersion = useSiteStore(s => s.legalConsentVersion)
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const profile = useMyProfile(scope)
 
   // A 409 carries the version that is current now; it replaces the one the page
@@ -86,31 +84,34 @@ function PendingConsent() {
   }
 
   const link = (kind: 'terms' | 'privacy', label: string) => (
-    <Link href={panelURL(`/legal/${kind}`)} target="_blank" rel="noopener noreferrer"
-      sx={{ display: 'inline-flex', alignItems: 'center', minHeight: phone ? 44 : 'auto', mr: 2 }}>{label}</Link>
+    <a href={panelURL(`/legal/${kind}`)} target="_blank" rel="noopener noreferrer"
+      className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline sm:min-h-0">{label}</a>
   )
 
   return (
-    <Dialog open maxWidth="sm" fullWidth fullScreen={phone}
-      // Only Esc closes it, and it means Later: a click on the backdrop is easy
-      // to make by accident and would record a decision nobody made.
-      onClose={(_, reason) => { if (reason === 'escapeKeyDown') later() }}
-      aria-labelledby="consent-title">
-      <DialogTitle id="consent-title">{t('legal.consent_title')}</DialogTitle>
-      <DialogContent>
-        <Typography sx={{ color: md.onSurfaceVariant }}>{t('legal.consent_body')}</Typography>
-        <Box sx={{ mt: 1.5 }}>
+    <Dialog open
+      // Only Esc closes it, and it means Later: a click outside is easy to make by
+      // accident and would record a decision nobody made.
+      disablePointerDismissal
+      onOpenChange={(open, details) => { if (!open && details.reason === 'escape-key') later() }}>
+      {/* Full screen on a phone, a dialog from sm up. No close button: Later is the way out. */}
+      <DialogContent showCloseButton={false}
+        className="max-sm:inset-0 max-sm:top-0 max-sm:left-0 max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none max-sm:content-start sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('legal.consent_title')}</DialogTitle>
+          <DialogDescription>{t('legal.consent_body')}</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap gap-x-4">
           {link('terms', t('legal.consent_terms'))}
           {link('privacy', t('legal.consent_privacy'))}
-        </Box>
-        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        </div>
+        {error && <Alert variant="destructive">{error}</Alert>}
+        {/* Later above Agree when stacked, Later left of Agree from sm up. */}
+        <DialogFooter className="flex-col sm:flex-row max-sm:mt-auto">
+          <Button variant="outline" onClick={later} disabled={busy} className="max-sm:h-11">{t('legal.consent_later')}</Button>
+          <AsyncButton onClick={() => accept()} pending={busy} className="max-sm:h-11">{t('legal.consent_accept')}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2, ...(phone ? { flexDirection: 'column', alignItems: 'stretch', gap: 1, '& > :not(style) ~ :not(style)': { ml: 0 } } : {}) }}>
-        <Button fullWidth={phone} onClick={later} disabled={busy} sx={phone ? { minHeight: 44 } : undefined}>{t('legal.consent_later')}</Button>
-        <Button fullWidth={phone} variant="contained" onClick={() => void accept()} disabled={busy} sx={phone ? { minHeight: 44 } : undefined}>
-          {t('legal.consent_accept')}
-        </Button>
-      </DialogActions>
     </Dialog>
   )
 }

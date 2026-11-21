@@ -24,7 +24,8 @@ function fill() {
   fireEvent.change(screen.getByLabelText('确认密码'), { target: { value: 'abcdefg1' } })
 }
 const submit = () => screen.getByRole('button', { name: '创建账户' }) as HTMLButtonElement
-const box = () => screen.queryByRole('checkbox') as HTMLInputElement | null
+const box = () => screen.queryByRole('checkbox')
+const ticked = () => box()!.getAttribute('aria-checked') === 'true'
 
 beforeEach(() => {
   vi.mocked(authApi.getAuthMethods).mockReset()
@@ -59,7 +60,7 @@ describe('the register form with the terms on (S23)', () => {
   it('links the two documents from the label without ticking the box', async () => {
     vi.mocked(authApi.getAuthMethods).mockResolvedValue(methods({ enabled: true, consent_version: 3 }))
     mount()
-    const cb = await screen.findByRole('checkbox') as HTMLInputElement
+    const cb = await screen.findByRole('checkbox')
     const label = cb.closest('label')!
     expect(label.textContent).toBe('我已阅读并同意《服务条款》和《隐私政策》')
     const terms = screen.getByRole('link', { name: '《服务条款》' })
@@ -67,7 +68,7 @@ describe('the register form with the terms on (S23)', () => {
     expect(terms.getAttribute('target')).toBe('_blank')
     expect(screen.getByRole('link', { name: '《隐私政策》' }).getAttribute('href')).toBe('/legal/privacy')
     fireEvent.click(terms)
-    expect(cb.checked).toBe(false)
+    expect(ticked()).toBe(false)
   })
 
   it('a refused version says the terms changed, unticks the box, and takes the new version', async () => {
@@ -81,7 +82,7 @@ describe('the register form with the terms on (S23)', () => {
     fireEvent.click(submit())
     expect(await screen.findByText('条款刚刚更新，请重新阅读后再提交')).toBeTruthy()
     expect(screen.queryByText('该邮箱已被注册')).toBeNull()
-    expect(box()!.checked).toBe(false)
+    expect(ticked()).toBe(false)
     fireEvent.click(box()!)
     fireEvent.click(submit())
     await waitFor(() => expect(authApi.registerUser).toHaveBeenLastCalledWith(expect.objectContaining({ accepted_consent_version: 4 })))
@@ -110,5 +111,17 @@ describe('the register form with the terms on (S23)', () => {
     mount()
     const cb = await screen.findByRole('checkbox')
     expect(cb.closest('label')!.textContent).toBe('I have read and agree to the Terms of Service and the Privacy Policy.')
+  })
+
+  it('submitting with the confirmation empty says so under it, focuses it and sends nothing', async () => {
+    vi.mocked(authApi.getAuthMethods).mockResolvedValue(methods({ enabled: false, consent_version: 0 }))
+    mount()
+    fireEvent.change(await screen.findByLabelText('邮箱地址'), { target: { value: 'a@example.test' } })
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'abcdefg1' } })
+    expect(screen.queryByText('请再次输入密码')).toBeNull()
+    fireEvent.click(submit())
+    expect(await screen.findByText('请再次输入密码')).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('确认密码')))
+    expect(authApi.registerUser).not.toHaveBeenCalled()
   })
 })
