@@ -949,7 +949,8 @@
       "batch_cancel_title": "Cancel tasks",
       "batch_cancel_message": "Cancel {{count}} selected sync tasks?",
       "cancel_title": "Cancel sync task",
-      "cancel_message": "Cancel task #{{id}} ({{type}})? It will not be retried."
+      "cancel_message": "Cancel task #{{id}} ({{type}})? It will not be retried.",
+      "cancel_confirm": "Cancel task"
     },
     "toast": {
       "purged": "Purged {{count}} records",

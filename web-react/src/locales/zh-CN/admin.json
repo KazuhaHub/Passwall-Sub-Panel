@@ -949,7 +949,8 @@
       "batch_cancel_title": "批量中止任务",
       "batch_cancel_message": "确定中止选中的 {{count}} 个同步任务？",
       "cancel_title": "中止同步任务",
-      "cancel_message": "确定中止任务 #{{id}}（{{type}}）？中止后不会再重试。"
+      "cancel_message": "确定中止任务 #{{id}}（{{type}}）？中止后不会再重试。",
+      "cancel_confirm": "中止任务"
     },
     "toast": {
       "purged": "已清空 {{count}} 条记录",
