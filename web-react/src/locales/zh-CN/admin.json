@@ -674,14 +674,28 @@
         "name": "名称",
         "keywords": "关键词",
         "format": "渲染格式",
-        "enabled": "启用"
+        "enabled": "启用",
+        "apps": "App 数",
+        "disabled": "已停用",
+        "actions": "操作"
       },
       "client_table": {
         "name": "客户端",
         "platforms": "平台",
         "format": "格式",
         "enabled": "启用"
-      }
+      },
+      "order_note": "顺序很重要。客户端按从上到下的顺序匹配检测族，命中第一个即停止，因此请把更具体的族放在更通用的族之前（例如 V2rayNG 放在 V2RayN 之前）。拖动行，或用键盘操作行上的拖动手柄，即可调整顺序。",
+      "name_required": "请填写该检测族的名称。",
+      "unnamed_family": "未命名检测族",
+      "edit_family": "编辑检测族",
+      "sheet_done": "完成",
+      "row_menu": "{{name}} 的操作",
+      "remove_app": "移除 App {{name}}",
+      "delete_family_title": "删除 {{name}}？",
+      "delete_family_body": "{{name}} 及其导入 App 将从列表中移除，保存后生效。",
+      "apps_count_other": "{{count}} 个 App",
+      "format_uri_list": "URI 列表（V2rayN / Passwall）"
     },
     "legal": {
       "title": "隐私与协议页",

@@ -674,14 +674,29 @@
         "name": "Name",
         "keywords": "Keywords",
         "format": "Format",
-        "enabled": "Enabled"
+        "enabled": "Enabled",
+        "apps": "Apps",
+        "disabled": "Disabled",
+        "actions": "Actions"
       },
       "client_table": {
         "name": "Client",
         "platforms": "Platforms",
         "format": "Format",
         "enabled": "Enabled"
-      }
+      },
+      "order_note": "Order matters. A client is matched against the families from top to bottom and the first match wins, so keep a more specific family above a more general one (for example V2rayNG above V2RayN). Drag a row, or use its handle with the keyboard, to change the order.",
+      "name_required": "Enter a name for this family.",
+      "unnamed_family": "Unnamed family",
+      "edit_family": "Edit family",
+      "sheet_done": "Done",
+      "row_menu": "Actions for {{name}}",
+      "remove_app": "Remove app {{name}}",
+      "delete_family_title": "Delete {{name}}?",
+      "delete_family_body": "{{name}} and its import apps are removed from the list. The change takes effect when you save.",
+      "apps_count_one": "{{count}} app",
+      "apps_count_other": "{{count}} apps",
+      "format_uri_list": "URI list (V2rayN / Passwall)"
     },
     "legal": {
       "title": "Privacy and terms page",
