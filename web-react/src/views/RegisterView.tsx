@@ -131,7 +131,7 @@ export default function RegisterView() {
                       {/* A link inside the label does not tick the box; it opens
                           the document in another tab so the form is kept. */}
                       <RouterLink to={`/legal/${kind}`} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline sm:min-h-0">
+                        className="text-primary underline underline-offset-4">
                         {t(`auth:legal.register_${kind}_link`)}
                       </RouterLink>
                     </Fragment>
