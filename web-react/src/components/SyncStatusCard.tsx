@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Box, Button, Chip, CircularProgress, Typography, useTheme } from '@mui/material'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import type { SyncStatus } from '@/api/syncStatus'
 import { observeUser, onPendingForUser } from '@/api/syncPending'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import type { Tone } from '@/components/common/tones'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { Button } from '@/components/ui/button'
 import { syncStatusKeys } from '@/query/keys'
 import { syncStatusErrorStatus, useObservationWindow, useSyncStatus } from '@/query/syncStatus'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -14,6 +17,9 @@ import { formatDualTz } from '@/utils/datetime'
 /** Statuses that are an answer rather than a failure. Neither changes on its
  *  own, so neither is worth another nineteen reads. */
 const REFUSAL_STATUSES = [403, 404]
+
+/** A task still queued is neutral; one being worked is a notice; a failed one is a failure. The words are always shown too. */
+const TASK_TONE: Record<string, Tone> = { pending: 'neutral', running: 'info', failed: 'danger' }
 
 /**
  * SyncStatusCard shows what LOCAL sync work is observable for one user: what is
@@ -33,7 +39,6 @@ const REFUSAL_STATUSES = [403, 404]
  * snapshot of a past observation, and is labelled with its time as one.
  */
 export default function SyncStatusCard({ userId }: { userId: number }) {
-  const md = useTheme().palette.md
   const { t } = useTranslation('admin')
   const panelTz = useSiteStore(s => s.timezone)
   const scope = useQueryScope()
@@ -93,15 +98,15 @@ export default function SyncStatusCard({ userId }: { userId: number }) {
   const observedAt = status?.observed_at ? formatDualTz(status.observed_at, panelTz) : null
 
   return (
-    <Box sx={{ mt: 1 }}>
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant }}>
+    <section className="mt-2 space-y-1" aria-label={t('sync_status.title', { defaultValue: '后台同步任务' })}>
+      <div className="flex items-center gap-1">
+        <h3 className="text-[0.8125rem] font-semibold text-muted-foreground">
           {t('sync_status.title', { defaultValue: '后台同步任务' })}
-        </Typography>
+        </h3>
         <Button
-          size="small"
-          variant="text"
-          sx={{ minWidth: 0, fontSize: 11, py: 0 }}
+          type="button"
+          size="sm"
+          variant="ghost"
           onClick={() => {
             // A new observation window, not just a read: the budget starts over.
             // Clearing the refusal is what makes this an actual retry — an admin
@@ -113,93 +118,95 @@ export default function SyncStatusCard({ userId }: { userId: number }) {
         >
           {t('sync_status.refresh', { defaultValue: '刷新' })}
         </Button>
-      </Box>
+      </div>
 
       {refused && (
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+        <p className="text-xs text-muted-foreground">
           {t('sync_status.target_unavailable', { defaultValue: '目标已不可查询' })}
-        </Typography>
+        </p>
       )}
 
-      {!refused && query.isPending && <CircularProgress size={18} />}
+      {!refused && query.isPending && <CardSkeleton lines={2} />}
 
       {/* A failed read with nothing to fall back on is unknown — never "no
           pending tasks", which is a claim about the store. */}
       {!refused && query.isError && !status && (
-        <Typography sx={{ fontSize: 12, color: md.error }}>
+        <p className="text-xs text-destructive">
           {t('sync_status.unknown', { defaultValue: '同步状态暂时未知' })}
-        </Typography>
+        </p>
       )}
 
       {!refused && status && (
         <>
           {active.length === 0 ? (
             // Not "upstream synced" — only that nothing is queued locally.
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+            <p className="text-xs text-muted-foreground">
               {t('sync_status.none', { defaultValue: '当前未发现待处理任务' })}
-            </Typography>
+            </p>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+            <ul className="flex flex-col gap-1">
               {active.map(task => (
-                <Box key={task.id} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, fontSize: 12 }}>
-                  <Chip size="small" label={t(`sync_tasks.status.${task.status}`, { defaultValue: task.status })} sx={{ height: 20 }} />
+                <li key={task.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                  <StatusBadge tone={TASK_TONE[task.status] ?? 'neutral'} label={t(`sync_tasks.status.${task.status}`, { defaultValue: task.status })} />
                   <span>{t(`sync_tasks.type.${task.type}`, { defaultValue: task.type })}</span>
                   {task.attempts > 0 && (
-                    <Typography component="span" sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
+                    <span className="text-muted-foreground">
                       {t('sync_status.attempts', { count: task.attempts, defaultValue: '重试 {{count}} 次' })}
-                    </Typography>
+                    </span>
                   )}
                   {/* Only that an error was recorded. The text can quote an
                       upstream endpoint or token, so it never leaves the server:
                       it is not in the DTO at all. */}
                   {task.has_error && (
-                    <Typography component="span" sx={{ fontSize: 11, color: md.error }}>
+                    <span className="text-destructive">
                       {t('sync_status.has_error', { defaultValue: '有执行错误记录，任务待重试' })}
-                    </Typography>
+                    </span>
                   )}
-                </Box>
+                </li>
               ))}
               {status.active_tasks_truncated && (
-                <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
+                <li className="text-xs text-muted-foreground">
                   {t('sync_status.truncated', { defaultValue: '仅显示最近的部分任务' })}
-                </Typography>
+                </li>
               )}
-            </Box>
+            </ul>
           )}
 
           {terminal.length > 0 && (
-            <Box sx={{ mt: 0.75 }}>
-              <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
+            <div className="pt-1.5">
+              <p className="text-xs text-muted-foreground">
                 {/* Absence from this list is not evidence a task never ran. */}
                 {t('sync_status.recent', { defaultValue: '最近结果（仅保留的记录）' })}
-              </Typography>
-              {terminal.map(task => (
-                <Box key={task.id} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, fontSize: 11, color: md.onSurfaceVariant }}>
-                  <span>{t(`sync_tasks.type.${task.type}`, { defaultValue: task.type })}</span>
-                  <span>{t(`sync_tasks.status.${task.status}`, { defaultValue: task.status })}</span>
-                </Box>
-              ))}
-            </Box>
+              </p>
+              <ul>
+                {terminal.map(task => (
+                  <li key={task.id} className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <span>{t(`sync_tasks.type.${task.type}`, { defaultValue: task.type })}</span>
+                    <span>{t(`sync_tasks.status.${task.status}`, { defaultValue: task.status })}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </>
       )}
 
       {/* Both of these mean the snapshot above is historical, and say so. */}
       {!refused && query.isError && status && (
-        <Typography sx={{ fontSize: 11, color: md.error, mt: 0.5 }}>
+        <p className="text-xs text-destructive">
           {t('sync_status.read_failed', { defaultValue: '读取失败，以下为上次观察结果，可能已经变化' })}
-        </Typography>
+        </p>
       )}
       {!refused && watch.expired && !query.isError && (
-        <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mt: 0.5 }}>
+        <p className="text-xs text-muted-foreground">
           {t('sync_status.watch_paused', { defaultValue: '自动刷新已暂停，以下为上次观察结果，可能已经变化' })}
-        </Typography>
+        </p>
       )}
       {!refused && observedAt && (
-        <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mt: 0.5 }}>
+        <p className="text-xs text-muted-foreground">
           {t('sync_status.observed_at', { defaultValue: '最后观察时间：{{time}}', time: observedAt })}
-        </Typography>
+        </p>
       )}
-    </Box>
+    </section>
   )
 }
