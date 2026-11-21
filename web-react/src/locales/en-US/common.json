@@ -35,8 +35,8 @@
     "range": "{{from}}–{{to}} of {{count}}"
   },
   "placeholder": {
-    "title": "Page not yet migrated",
-    "body": "This page hasn't been moved from the Vue version to React + MUI yet. Current path:"
+    "title": "Page not available yet",
+    "body": "This page has not been built yet. Current path:"
   },
   "errors": {
     "network": "Network error — please check your connection and try again.",

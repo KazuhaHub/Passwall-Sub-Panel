@@ -2,35 +2,61 @@
   "languagePacks": {
     "title": "语言包",
     "load_failed": "暂时无法加载语言包",
-    "subtitle": "上传自定义界面语言包，上传后重新载入页面即可在语言菜单中选择。",
+    "subtitle": "添加界面语言。上传后重新载入页面，即可在语言菜单中选择。",
     "upload": "上传",
     "upload_title": "上传语言包",
-    "upload_help": "选择或粘贴一个 JSON 语言包文件。可先“导出基准模板”，翻译其中的文本后再上传。",
+    "upload_help": "选择语言包文件、拖放到此处，或粘贴其 JSON。建议先导出基准模板，翻译其中的文本后再上传。",
     "choose_file": "选择文件",
+    "drop_hint": "或把 .json 文件拖放到此处",
+    "paste_label": "语言包 JSON",
     "paste_placeholder": "在此粘贴语言包 JSON…",
     "export_base": "导出基准模板",
-    "empty": "暂无自定义语言包",
     "size_hint": "单个语言包最大 {{max}} KB。",
-    "stale_warning": "该翻译基于 {{base}},当前面板为 {{current}},建议重新导出基准并翻译。",
+    "summary": "可以上传：{{name}}（{{code}}），共 {{count}} 个命名空间。",
+    "problems_title_other": "上传前需要修正 {{count}} 个问题",
+    "server_refused": "服务器拒绝了这个语言包",
+    "upload_failed": "无法上传语言包。",
+    "problem": {
+      "too_large": "文件超过 {{max}} KB。",
+      "invalid_json": "文本不是有效的 JSON：{{detail}}",
+      "not_object": "最外层必须是包含语言包字段的 JSON 对象。",
+      "format": "“psp_language_pack” 必须是 {{expected}}（当前为 {{found}}）。",
+      "code_required": "必须填写 “code”。",
+      "code_chars": "“code” {{code}} 只能包含字母、数字、“_” 和 “-”。",
+      "code_builtin": "{{code}} 是内置语言，不能覆盖。请换一个代码。",
+      "name_required": "必须填写 “name”：显示在语言菜单中的名称。",
+      "namespaces_required": "必须提供 “namespaces”，且必须是对象。",
+      "unknown_namespace": "未知的命名空间 “{{ns}}”。可用：{{known}}。",
+      "namespace_shape": "命名空间 “{{ns}}” 必须是翻译对象。",
+      "leaf": "{{path}} 必须是字符串（当前为 {{kind}}）。",
+      "leaf_more_other": "另有 {{count}} 个值不是字符串。"
+    },
+    "source": {
+      "builtin": "内置",
+      "uploaded": "已上传"
+    },
+    "builtin_reason": "内置语言是面板的一部分，不能覆盖或删除。",
+    "stale": "已过期",
+    "stale_warning": "该翻译基于 {{base}}，当前面板为 {{current}}，建议重新导出基准并翻译。",
+    "download": "下载 {{name}}",
     "table": {
       "code": "语言代码",
-      "name": "名称",
+      "name": "语言",
+      "source": "来源",
       "author": "作者",
       "base_version": "基准版本",
       "actions": "操作"
     },
     "confirm": {
-      "delete_title": "删除语言包",
+      "delete_title": "删除语言包 {{name}}？",
       "delete_message": "确定删除语言包 {{name}}（{{code}}）吗？此操作不可撤销。"
     },
     "toast": {
       "saved": "语言包已保存",
       "deleted": "语言包已删除",
       "reload_hint": "重新载入页面后即可在语言菜单中看到该语言。",
-      "invalid_json": "JSON 解析失败，请检查文件内容。",
-      "missing_fields": "语言包缺少必填字段（code / name / namespaces）。",
       "read_failed": "读取文件失败",
-      "too_large": "语言包过大，最大 {{max}} KB。"
+      "download_failed": "无法下载语言包。"
     }
   },
   "alerts": {
