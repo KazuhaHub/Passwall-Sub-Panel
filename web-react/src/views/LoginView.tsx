@@ -15,7 +15,6 @@ import { Input } from '@/components/ui/input'
 import { useAuthStore, selectIsAdmin } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { homeForRole, isAdminPath } from '@/router/home'
-import { useSiteBootstrap } from '@/router/shellBootstrap'
 import { pushSnack } from '@/components/SnackbarHost'
 import { AuthLayout } from '@/views/auth/AuthLayout'
 import { PasswordField } from '@/views/auth/PasswordField'
@@ -86,10 +85,6 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
   // render the same "正在前往 SSO" intermediate as sso_redirect so every
   // SSO entry point (auto-bounce OR explicit click) feels the same.
   const [manualSsoRedirect, setManualSsoRedirect] = useState(false)
-
-  // Branding is loaded here as well as in AuthLayout so it is fetched while the methods are
-  // being probed, not after: the layout only mounts once the probe has answered.
-  useSiteBootstrap()
 
   const returnTo =
     (location.state as LocationState | null)?.returnTo

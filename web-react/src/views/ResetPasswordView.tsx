@@ -35,20 +35,26 @@ export default function ResetPasswordView() {
   const [confirm, setConfirm] = useState('')
   const [pwSeen, setPwSeen] = useState(false)
   const [confirmSeen, setConfirmSeen] = useState(false)
+  // Set by the first submit: an empty box is only reported as missing once the person has tried to go on.
+  const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
 
-  const pwError = pwSeen && pw && !strongEnough(pw)
-    ? t('auth:password_too_weak', { defaultValue: '密码至少 8 位，且含字母和数字' }) : undefined
-  const confirmError = confirmSeen && confirm && pw !== confirm ? t('auth:reset_password_mismatch') : undefined
+  const pwError = pw
+    ? (pwSeen && !strongEnough(pw) ? t('auth:password_too_weak', { defaultValue: '密码至少 8 位，且含字母和数字' }) : undefined)
+    : (submitted ? t('auth:password_required') : undefined)
+  const confirmError = confirm
+    ? (confirmSeen && pw !== confirm ? t('auth:reset_password_mismatch') : undefined)
+    : (submitted ? t('auth:password_confirm_required') : undefined)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
     setPwSeen(true)
     setConfirmSeen(true)
-    if (pw !== confirm || !strongEnough(pw)) { focusFirstInvalid(form.current); return }
+    setSubmitted(true)
+    if (!pw || !confirm || pw !== confirm || !strongEnough(pw)) { focusFirstInvalid(form.current); return }
     if (otpMode && (!ident.trim() || !code.trim())) return
     setBusy(true)
     try {

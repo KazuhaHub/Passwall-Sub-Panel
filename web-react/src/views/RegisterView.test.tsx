@@ -112,4 +112,16 @@ describe('the register form with the terms on (S23)', () => {
     const cb = await screen.findByRole('checkbox')
     expect(cb.closest('label')!.textContent).toBe('I have read and agree to the Terms of Service and the Privacy Policy.')
   })
+
+  it('submitting with the confirmation empty says so under it, focuses it and sends nothing', async () => {
+    vi.mocked(authApi.getAuthMethods).mockResolvedValue(methods({ enabled: false, consent_version: 0 }))
+    mount()
+    fireEvent.change(await screen.findByLabelText('邮箱地址'), { target: { value: 'a@example.test' } })
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'abcdefg1' } })
+    expect(screen.queryByText('请再次输入密码')).toBeNull()
+    fireEvent.click(submit())
+    expect(await screen.findByText('请再次输入密码')).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('确认密码')))
+    expect(authApi.registerUser).not.toHaveBeenCalled()
+  })
 })

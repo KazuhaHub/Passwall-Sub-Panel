@@ -33,6 +33,8 @@ export default function RegisterView() {
   // is still being typed.
   const [pwSeen, setPwSeen] = useState(false)
   const [confirmSeen, setConfirmSeen] = useState(false)
+  // Set by the first submit: an empty box is only reported as missing once the person has tried to go on.
+  const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [doneMsg, setDoneMsg] = useState('')
@@ -46,15 +48,20 @@ export default function RegisterView() {
 
   useEffect(() => { getAuthMethods().then(setMethods).catch(() => {}) }, [])
 
-  const pwError = pwSeen && pw && !strongEnough(pw) ? t('auth:password_too_weak') : undefined
-  const confirmError = confirmSeen && confirm && pw !== confirm ? t('auth:reset_password_mismatch') : undefined
+  const pwError = pw
+    ? (pwSeen && !strongEnough(pw) ? t('auth:password_too_weak') : undefined)
+    : (submitted ? t('auth:password_required') : undefined)
+  const confirmError = confirm
+    ? (confirmSeen && pw !== confirm ? t('auth:reset_password_mismatch') : undefined)
+    : (submitted ? t('auth:password_confirm_required') : undefined)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
     setPwSeen(true)
     setConfirmSeen(true)
-    if (pw !== confirm || !strongEnough(pw)) {
+    setSubmitted(true)
+    if (!pw || !confirm || pw !== confirm || !strongEnough(pw)) {
       // The messages are drawn from the two flags set above; this only has to stop and focus.
       focusFirstInvalid(form.current)
       return
