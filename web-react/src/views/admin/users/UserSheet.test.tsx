@@ -215,3 +215,15 @@ describe('creating a user', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 })
+
+it('does not save on Enter while a limit box holds an out-of-range value, as the blocked Save button does not', async () => {
+  serve([user])
+  mountPage(<UsersPage />)
+  const name = await openSettings()
+  fireEvent.change(name, { target: { value: 'changed' } })
+  const limit = await screen.findByRole('textbox', { name: /Concurrent IP limit/ })
+  fireEvent.change(limit, { target: { value: '-5' } })
+  fireEvent.submit(limit.closest('form')!)
+  await new Promise(r => setTimeout(r, 100))
+  expect(api.put).not.toHaveBeenCalled()
+})

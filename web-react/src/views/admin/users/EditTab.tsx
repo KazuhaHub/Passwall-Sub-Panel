@@ -17,6 +17,7 @@ import { userKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useAuthStore } from '@/stores/auth'
 import { accountEnabledForEdit } from '@/utils/userAccess'
+import { GuardedForm } from './GuardedForm'
 import { useCapHints } from './capHints'
 import { useUsers } from './context'
 import { draftOfUser, periodUsedMoved, updateRequest } from './draft'
@@ -120,7 +121,7 @@ export function EditTab({ user, onDirtyChange }: { user: User; onDirtyChange: (d
 
   return (
     <FormValidityProvider>
-      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); void save() }} noValidate>
+      <GuardedForm onSubmit={() => void save()}>
         {moved && (
           <Alert>
             <AlertDescription>{t('users.edit.row_changed')}</AlertDescription>
@@ -153,7 +154,7 @@ export function EditTab({ user, onDirtyChange }: { user: User; onDirtyChange: (d
           emergency={<EmergencyBlock user={user} />}
         />
         <SaveBar dirty={form.dirty} pending={pending} onSave={() => void save()} onDiscard={() => { form.reset(); setSeen(null) }} />
-      </form>
+      </GuardedForm>
     </FormValidityProvider>
   )
 }

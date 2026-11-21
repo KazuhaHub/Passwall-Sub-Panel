@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createUser } from '@/api/users'
 import { FormValidityProvider } from '@/components/form/FormValidity'
 import { SaveBar } from '@/components/form/SaveBar'
+import { GuardedForm } from './GuardedForm'
 import { useCapHints } from './capHints'
 import { useUsers } from './context'
 import { blankDraft, createRequest } from './draft'
@@ -44,10 +45,10 @@ export function CreateTab({ onDirtyChange, onCreated }: { onDirtyChange: (dirty:
 
   return (
     <FormValidityProvider>
-      <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); void save() }} noValidate>
+      <GuardedForm onSubmit={() => void save()}>
         <UserForm mode="create" draft={form.draft} patch={form.patch} error={form.error} blur={form.blur} groups={groups} hints={hints} />
         <SaveBar dirty={form.dirty} pending={pending} saveLabel={t('users.create')} onSave={() => void save()} onDiscard={form.reset} />
-      </form>
+      </GuardedForm>
     </FormValidityProvider>
   )
 }
