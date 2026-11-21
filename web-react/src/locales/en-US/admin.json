@@ -703,14 +703,29 @@
         "name": "Name",
         "keywords": "Keywords",
         "format": "Format",
-        "enabled": "Enabled"
+        "enabled": "Enabled",
+        "apps": "Apps",
+        "disabled": "Disabled",
+        "actions": "Actions"
       },
       "client_table": {
         "name": "Client",
         "platforms": "Platforms",
         "format": "Format",
         "enabled": "Enabled"
-      }
+      },
+      "order_note": "Order matters. A client is matched against the families from top to bottom and the first match wins, so keep a more specific family above a more general one (for example V2rayNG above V2RayN). Drag a row, or use its handle with the keyboard, to change the order.",
+      "name_required": "Enter a name for this family.",
+      "unnamed_family": "Unnamed family",
+      "edit_family": "Edit family",
+      "sheet_done": "Done",
+      "row_menu": "Actions for {{name}}",
+      "remove_app": "Remove app {{name}}",
+      "delete_family_title": "Delete {{name}}?",
+      "delete_family_body": "{{name}} and its import apps are removed from the list. The change takes effect when you save.",
+      "apps_count_one": "{{count}} app",
+      "apps_count_other": "{{count}} apps",
+      "format_uri_list": "URI list (V2rayN / Passwall)"
     },
     "legal": {
       "title": "Privacy and terms page",
@@ -923,7 +938,8 @@
       "incomplete": "Template content is too short to analyze."
     },
     "validate": {
-      "slug_name_required": "Slug and name are required"
+      "slug_name_required": "Slug and name are required",
+      "slug_exists": "A template with slug \"{{slug}}\" already exists — choose a different slug"
     },
     "toast": {
       "saved": "Saved",
@@ -938,11 +954,21 @@
       "reset_title": "Restore seeded default?",
       "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
       "batch_delete_title": "Delete templates",
-      "batch_delete_message": "Delete {{count}} templates?"
+      "batch_delete_message": "Delete {{count}} templates?",
+      "batch_delete_hidden": "{{count}} of them are not in the current list."
     },
     "reset_to_default": "Restore seeded default",
     "cannot_delete_seeded": "Seeded templates can't be deleted — use Restore to recover the default content",
-    "duplicate": "Duplicate as a new template"
+    "duplicate": "Duplicate as a new template",
+    "row_menu": "More actions for {{name}}",
+    "row_delete": "Delete",
+    "search_placeholder": "Search by slug, name or client",
+    "no_match": "No templates match the search",
+    "clear_search": "Clear search",
+    "empty": "No templates yet",
+    "empty_hint": "Subscription rendering needs at least one template for each client type.",
+    "cannot_delete_default": "The default template can't be deleted — make another template the default first",
+    "no_rule_sets": "No rule sets"
   },
   "sync_tasks": {
     "title": "Sync tasks",
@@ -2039,7 +2065,9 @@
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
         "insufficient_auto_members": "Automatic latency testing or load balancing usually needs at least two available members",
         "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in or Rematch outbounds; select members by node or line, or reference a proxy group instead"
-      }
+      },
+      "kind_label": "Member type",
+      "no_match": "No match"
     },
     "table": {
       "slug": "Slug",
@@ -2079,11 +2107,21 @@
       "cleanup_groups_title": "Delete related proxy-group settings?",
       "cleanup_groups_message": "The current main rules no longer contain these proxy groups: {{names}}. Continuing will also delete their custom members, type, and ordering settings.",
       "batch_delete_title": "Delete rule sets",
-      "batch_delete_message": "Delete {{count}} rule sets?"
+      "batch_delete_message": "Delete {{count}} rule sets?",
+      "cleanup_groups_action": "Delete and save",
+      "batch_delete_hidden": "{{count}} of them are not in the current list."
     },
     "reset_to_default": "Restore seeded default",
     "cannot_delete_seeded": "Seeded rule sets can't be deleted — use Restore to recover the default content",
-    "duplicate": "Duplicate as a new rule set"
+    "duplicate": "Duplicate as a new rule set",
+    "row_menu": "More actions for {{name}}",
+    "row_delete": "Delete",
+    "search_placeholder": "Search by slug or name",
+    "no_match": "No rule sets match the search",
+    "clear_search": "Clear search",
+    "empty": "No rule sets yet",
+    "empty_hint": "A rule set only takes part in subscriptions once a template binds it.",
+    "editor_keyboard_hint": "Tab indents. To move focus out of the editor, press Escape and then Tab; Ctrl+M (Shift+Alt+M on macOS) switches Tab between indenting and moving focus."
   },
   "nodes": {
     "setup": {
