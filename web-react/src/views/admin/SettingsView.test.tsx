@@ -1,129 +1,56 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { UISettings } from '@/api/settings'
-import { api, installReads, list, mount, snack } from '@/test/adminSaveHarness'
+import { api, installReads, mountAdmin } from './adminTestHarness'
+import { echoPut, group, reads, uiSettings } from './settings/testSupport'
 import SettingsView from './SettingsView'
 
-// Only the General tab mounts in these tests. Supply its ordinary controls as
-// well as the new policy so an unrelated legacy validator cannot mask a save.
-function generalSettings(overrides: Partial<UISettings> = {}): UISettings {
-  return {
-    sub_base_url: 'https://panel.example.test',
-    panel_path: '',
-    timezone: 'UTC',
-    cron_traffic_pull_minutes: 5,
-    cron_reconcile_minutes: 5,
-    node_poll_seconds: 30,
-    full_report_seconds: 60,
-    node_task_offline_reconcile_days: 30,
-    node_task_backup_restore_days: 30,
-    node_task_result_retention_days: 90,
-    max_panel_concurrency: 8,
-    audit_retention_days: 90,
-    auth_event_retention_days: 90,
-    sync_task_retention_days: 90,
-    traffic_history_days: 730,
-    expire_before_days: 7,
-    traffic_remain_percent: 10,
-    emergency_access_enabled: false,
-    emergency_access_hours: 1,
-    emergency_access_max_count: 1,
-    emergency_access_quota_gb: 0,
-    geo_ip_enabled: false,
-    geo_ip_auto_update: false,
-    geo_ip_update_source: 'dbip',
-    geo_anomaly_scope: '',
-    geo_anomaly_max_places: 1,
-    geo_anomaly_max_regions: 0,
-    geo_anomaly_max_cities: 0,
-    geo_anomaly_min_placed_ratio: 0.8,
-    geo_anomaly_flag_after_polls: 2,
-    geo_anomaly_clear_after_polls: 3,
-    geo_anomaly_co_travel: '',
-    geo_anomaly_allow_anywhere: false,
-    geo_anomaly_ignore_addresses: '',
-    geo_anomaly_ban_enabled: false,
-    geo_anomaly_ban_max_countries: 0,
-    geo_anomaly_ban_max_regions: 0,
-    geo_anomaly_ban_max_cities: 0,
-    geo_anomaly_ban_after_polls: 0,
-    geo_anomaly_ban_duration_minutes: 0,
-    risk_sub_spread_off: false,
-    risk_devices_off: false,
-    risk_usage_shift_off: false,
-    risk_login_country_off: false,
-    risk_min_days: 0,
-    risk_max_devices: 0,
-    risk_usage_ratio: 0,
-    risk_usage_floor_gb: 0,
-    risk_hwid_capture_off: false,
-    sub_clients: [],
-    quick_links: [],
-    ...overrides,
-  } as UISettings
-}
-
 const policyFields = [
-  'node_task_offline_reconcile_days',
-  'node_task_backup_restore_days',
-  'node_task_result_retention_days',
+  ['node_task_offline_reconcile_days', 'Offline auto-reconciliation window'],
+  ['node_task_backup_restore_days', 'Maximum backup restore age'],
+  ['node_task_result_retention_days', 'Full task-result retention'],
 ] as const
-type PolicyField = typeof policyFields[number]
+type PolicyField = typeof policyFields[number][0]
+const labelOf = (field: PolicyField) => policyFields.find(f => f[0] === field)![1]
 
-function input(field: PolicyField): HTMLInputElement {
-  return screen.getByRole('spinbutton', { name: `admin:settings.general.${field}` })
-}
-
+const box = (name: string) => screen.getByRole('textbox', { name }) as HTMLInputElement
+const input = (field: PolicyField) => box(labelOf(field))
 function edit(field: PolicyField, value: number | string) {
   fireEvent.change(input(field), { target: { value: String(value) } })
 }
+const saveBar = () => screen.queryByRole('region', { name: 'You have unsaved changes' })
+const saveButton = () => within(screen.getByRole('region', { name: 'You have unsaved changes' })).getByRole('button', { name: 'Save' })
+const save = () => fireEvent.click(saveButton())
 
-function save() {
-  fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
-}
-
-async function mountSettings(settings = generalSettings()) {
-  installReads({
-    '/admin/settings/ui': settings,
-    '/admin/groups': list([]),
-  })
-  mount(<SettingsView />)
-  await screen.findByRole('spinbutton', { name: 'admin:settings.general.node_task_offline_reconcile_days' })
+async function mountSettings(settings: Partial<UISettings> = {}, route = '/admin/settings') {
+  reads({}, settings)
+  const view = mountAdmin(<SettingsView />, route)
+  await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
+  return view
 }
 
 describe('native-task lifecycle settings', () => {
-  it('shows the server defaults with units, bounds, and conservative policy notices', async () => {
+  it('shows the server defaults with their unit and the conservative policy notices', async () => {
     await mountSettings()
 
-    // The read now goes through the query cache, so it carries an AbortSignal
-    // config. The assertion is about the endpoint being read, not the arity.
+    // The read goes through the query cache, so it carries an AbortSignal config: the assertion is about the endpoint.
     expect(api.get).toHaveBeenCalledWith('/admin/settings/ui', expect.anything())
     expect(input('node_task_offline_reconcile_days').value).toBe('30')
     expect(input('node_task_backup_restore_days').value).toBe('30')
     expect(input('node_task_result_retention_days').value).toBe('90')
-    for (const field of policyFields) {
-      expect(input(field).min).toBe('1')
-      expect(input(field).max).toBe('3650')
-      expect(input(field).step).toBe('1')
-    }
-    expect(screen.getByText('admin:settings.general.section_node_task_lifecycle')).toBeTruthy()
-    expect(screen.getByText('admin:settings.general.node_task_lifecycle_hint')).toBeTruthy()
-    expect(screen.getByText('admin:settings.general.node_task_policy_safety_hint')).toBeTruthy()
+    expect(screen.getByText('Native-task lifecycle policy')).toBeTruthy()
+    expect(screen.getByText(/Global policy configuration in days/)).toBeTruthy()
+    expect(screen.getByText(/Smaller windows affect new task policies only/)).toBeTruthy()
+    expect(saveBar()).toBeNull()
   })
 
   it('loads configured policy values, sends the exact edited API fields, and adopts the saved response', async () => {
-    await mountSettings(generalSettings({
-      node_task_offline_reconcile_days: 14,
-      node_task_backup_restore_days: 21,
-      node_task_result_retention_days: 60,
-    }))
+    await mountSettings({ node_task_offline_reconcile_days: 14, node_task_backup_restore_days: 21, node_task_result_retention_days: 60 })
     expect(input('node_task_offline_reconcile_days').value).toBe('14')
     expect(input('node_task_backup_restore_days').value).toBe('21')
     expect(input('node_task_result_retention_days').value).toBe('60')
-    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({
-      data: { ...data, node_task_result_retention_days: 180 },
-    }))
+    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data: { ...data, node_task_result_retention_days: 180 } }))
 
     edit('node_task_offline_reconcile_days', 45)
     edit('node_task_backup_restore_days', 60)
@@ -137,41 +64,45 @@ describe('native-task lifecycle settings', () => {
       node_task_result_retention_days: 120,
     }))
     await waitFor(() => expect(input('node_task_result_retention_days').value).toBe('180'))
-    expect(snack).toHaveBeenCalledWith('admin:settings.saved', 'success')
   })
 
-  it('uses defaults only for keys omitted by an older server, not an explicit zero', async () => {
-    const settings = generalSettings({ node_task_offline_reconcile_days: 0 })
-    // The HTTP shape of an older server can omit these newer required DTO keys.
-    const olderResponse: Partial<UISettings> = { ...settings }
-    delete olderResponse.node_task_backup_restore_days
-    delete olderResponse.node_task_result_retention_days
-    await mountSettings(olderResponse as UISettings)
+  it('uses defaults only for keys omitted by an older server, and keeps an explicit zero as it is, flagged', async () => {
+    const stored: Partial<UISettings> = { node_task_offline_reconcile_days: 0 }
+    reads({ '/admin/settings/ui': (() => { const s = uiSettings(stored) as Partial<UISettings>; delete s.node_task_backup_restore_days; delete s.node_task_result_retention_days; return s })() })
+    mountAdmin(<SettingsView />, '/admin/settings')
+    await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
 
     expect(input('node_task_offline_reconcile_days').value).toBe('0')
     expect(input('node_task_backup_restore_days').value).toBe('30')
     expect(input('node_task_result_retention_days').value).toBe('90')
+    // The zero is shown, not replaced, and it is what the form reports as wrong.
+    expect(input('node_task_offline_reconcile_days').getAttribute('aria-invalid')).toBe('true')
+    // Any other edit then cannot be saved until it is fixed.
+    fireEvent.change(box('Reconcile interval'), { target: { value: '9' } })
     save()
     expect(api.put).not.toHaveBeenCalled()
-    expect(snack).toHaveBeenLastCalledWith(expect.stringContaining('admin:settings.general.node_task_days_range'), 'warning')
   })
 
-  it.each(policyFields)('blocks every invalid boundary for %s before any write', async field => {
+  it.each(policyFields)('blocks every out-of-range or unreadable value for %s before any write', async field => {
     await mountSettings()
-    for (const invalid of [-1, 0, 1.5, 3651, '']) {
-      edit(field, invalid)
+    for (const bad of [-1, 0, 3651]) {
+      edit(field, bad)
       save()
       expect(api.put).not.toHaveBeenCalled()
-      expect(snack).toHaveBeenLastCalledWith(
-        `admin:settings.general.${field}: admin:settings.general.node_task_days_range`, 'warning',
-      )
+      expect(input(field).getAttribute('aria-invalid')).toBe('true')
     }
+    // A fraction or an empty box is not even handed to the form: it keeps the last number and says why.
+    for (const bad of [1.5, '']) {
+      edit(field, bad)
+      expect(input(field).getAttribute('aria-invalid')).toBe('true')
+    }
+    expect(api.put).not.toHaveBeenCalled()
   })
 
   it.each([1, 3650])('accepts the inclusive %i-day boundary for all policy fields', async days => {
     await mountSettings()
-    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
-    for (const field of policyFields) edit(field, days)
+    echoPut()
+    for (const [field] of policyFields) edit(field, days)
     save()
 
     await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
@@ -182,126 +113,113 @@ describe('native-task lifecycle settings', () => {
     }))
   })
 
-  it('requires retention to cover each window independently, including across tabs', async () => {
+  it('requires retention to cover each window independently', async () => {
     await mountSettings()
     for (const field of ['node_task_offline_reconcile_days', 'node_task_backup_restore_days'] as const) {
       edit(field, 91)
       save()
       expect(api.put).not.toHaveBeenCalled()
-      expect(snack).toHaveBeenLastCalledWith('admin:settings.general.node_task_retention_minimum', 'warning')
+      expect(screen.getAllByText(/must cover both the offline reconciliation window/).length).toBeGreaterThan(0)
       edit(field, 30)
     }
     edit('node_task_result_retention_days', 29)
-    fireEvent.click(screen.getByRole('tab', { name: 'admin:settings.tab_subscription' }))
     save()
     expect(api.put).not.toHaveBeenCalled()
-    expect(snack).toHaveBeenLastCalledWith('admin:settings.general.node_task_retention_minimum', 'warning')
+    expect(screen.getAllByText(/must cover both the offline reconciliation window/).length).toBeGreaterThan(0)
   })
 })
 
-// The detector policy moved to the risk center's 策略 tab, which owns it on
-// the server too (the settings PUT keeps whatever policy it loaded). A copy
-// of those fields left here would be a second editor whose saves are
-// silently discarded, so the page keeps none — only the way there.
+// The detector policy moved to the risk center's policy tab, which owns it on the server too (the settings PUT keeps
+// whatever policy it loaded). A copy of those fields left here would be a second editor whose saves are silently
+// discarded, so the page keeps none, only the way there.
 describe('the risk policy lives in the risk center', () => {
   it('shows no detector section in General, only a pointer to the policy tab', async () => {
     await mountSettings()
 
-    for (const section of ['settings.geo_anomaly.section', 'settings.risk.section', 'settings.risk_center.section']) {
-      expect(screen.queryByText(`admin:${section}`), section).toBeNull()
+    for (const section of ['Concurrent-location detection', 'Risk signals', 'Risk center']) {
+      expect(screen.queryByText(section), section).toBeNull()
     }
-    // Not one of the policy's fields is left to edit on this page.
-    const policyField = /^admin:settings\.(geo_anomaly|risk|risk_center)\./
-    expect(screen.queryAllByRole('spinbutton', { name: policyField })).toEqual([])
-    expect(screen.queryAllByRole('switch', { name: policyField })).toEqual([])
-    expect(screen.queryAllByRole('textbox', { name: policyField })).toEqual([])
-
-    expect(screen.getByText('admin:settings.geo.policy_pointer')).toBeTruthy()
-    const link = screen.getByRole('link', { name: 'admin:settings.geo.open_policy' })
-    expect(link.getAttribute('href')).toBe('/admin/risk?tab=policy')
+    expect(screen.getByText('Concurrent-location and risk-signal settings are in Risk center › Policy.')).toBeTruthy()
+    expect(screen.getByText('Open policy').closest('a')?.getAttribute('href')).toBe('/admin/risk?tab=policy')
   })
 
-  it("offers only notify and emergency in a group's General rail", async () => {
-    installReads({
-      '/admin/settings/ui': generalSettings(),
-      '/admin/groups': list([{ id: 1, slug: 'test', name: 'group', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '', require_2fa: false }]),
+  it("offers only notify and emergency in a group's General audience", async () => {
+    reads({
       '/admin/groups/1/scope-settings': {
         overrides: {},
-        overridable: [
-          'notify.expire_before_days', 'security.emergency_access_enabled',
-          'geo_anomaly.max_places', 'geo_anomaly.ban_enabled', 'risk.min_days', 'risk.usage_ratio',
-        ],
+        overridable: ['notify.expire_before_days', 'security.emergency_access_enabled', 'geo_anomaly.max_places', 'geo_anomaly.ban_enabled', 'risk.min_days', 'risk.usage_ratio'],
       },
     })
-    mount(<SettingsView />)
-    fireEvent.click(await screen.findByRole('button', { name: 'group' }))
+    mountAdmin(<SettingsView />, '/admin/settings')
+    const audience = await screen.findByRole('combobox', { name: 'Audience' })
+    await screen.findByRole('option', { name: group.name })
+    fireEvent.change(audience, { target: { value: String(group.id) } })
 
-    expect(await screen.findByText('admin:groups.scope.cat_notify')).toBeTruthy()
-    expect(screen.getByText('admin:groups.scope.cat_emergency')).toBeTruthy()
-    for (const text of [
-      'cat_geo', 'cat_geo_ban', 'cat_risk', 'geo_max_countries', 'geo_ban_enabled', 'risk_min_days', 'risk_usage_ratio',
-    ]) {
-      expect(screen.queryByText(`admin:groups.scope.${text}`), text).toBeNull()
+    expect(await screen.findByText('Notification thresholds')).toBeTruthy()
+    expect(screen.getByText('Emergency access (over-limit break-glass)')).toBeTruthy()
+    for (const text of ['Concurrent-location detection', 'Concurrent locations · auto-suspension', 'Risk signals (observe only)']) {
+      expect(screen.queryByText(text), text).toBeNull()
     }
   })
 })
 
 describe('read failure', () => {
   it('reports a failed settings read instead of spinning forever', async () => {
-    // The loader had no catch: `loading` went false but `settings` stayed null,
-    // and the render guard is `loading || !settings` — so a failed read left the
-    // page on a spinner that could never resolve.
     api.get.mockRejectedValue(new Error('offline'))
-    mount(<SettingsView />)
-
-    await waitFor(() => expect(screen.getByText('admin:settings.load_failed')).toBeTruthy())
+    mountAdmin(<SettingsView />, '/admin/settings')
+    expect(await screen.findByText('Settings are temporarily unavailable')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy()
   })
 
   it('reports a failed mail read instead of spinning forever', async () => {
-    // Same shape inside the Mail tab: `loading || !mail` with an uncatch'd loader.
-    installReads({
-      '/admin/settings/ui': generalSettings(),
-      '/admin/groups': list([]),
-    })
-    api.get.mockImplementation(async (url: string) => {
-      if (url === '/admin/settings/mail') throw new Error('offline')
-      if (url === '/admin/settings/ui') return { data: generalSettings() }
-      if (url === '/admin/groups') return { data: list([]) }
-      throw new Error(`Unexpected GET ${url}`)
-    })
-    mount(<SettingsView />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'admin:settings.tab_mail' }))
-
-    await waitFor(() => expect(screen.getByText('admin:settings.mail_load_failed')).toBeTruthy())
+    reads({ '/admin/settings/mail': new Error('offline') })
+    mountAdmin(<SettingsView />, '/admin/settings?tab=mail')
+    expect(await screen.findByText('Mail settings are temporarily unavailable')).toBeTruthy()
   })
 
   it('reports a failed SSO read instead of spinning forever', async () => {
-    // Both SSO halves share the shape: `loading || !cfg` with an uncatch'd load.
-    const reads: Record<string, unknown> = {
-      '/admin/settings/ui': generalSettings(),
-      '/admin/groups': list([]),
-    }
-    api.get.mockImplementation(async (url: string) => {
-      if (url in reads) return { data: reads[url] }
-      if (url === '/admin/settings/saml' || url === '/admin/settings/oidc') throw new Error('offline')
-      throw new Error(`Unexpected GET ${url}`)
-    })
-    mount(<SettingsView />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'admin:settings.tab_sso' }))
-
-    await waitFor(() => expect(screen.getByText('admin:settings.saml_load_failed')).toBeTruthy())
+    reads({ '/admin/settings/saml': new Error('offline'), '/admin/settings/oidc': new Error('offline') })
+    mountAdmin(<SettingsView />, '/admin/settings?tab=sso')
+    expect(await screen.findByText('SAML configuration is temporarily unavailable')).toBeTruthy()
   })
 })
 
 describe('Cloudflare auto-fetch setting', () => {
   it('reads as on when the server does not say, and sends the switch the admin sets', async () => {
     await mountSettings()
-    const toggle = screen.getByRole('switch', { name: 'admin:settings.general.cloudflare_auto_fetch' }) as HTMLInputElement
-    expect(toggle.checked).toBe(true)
-    api.put.mockImplementationOnce(async (_url: string, data: UISettings) => ({ data }))
+    const toggle = screen.getByRole('switch', { name: 'Fetch Cloudflare address ranges automatically' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    echoPut()
     fireEvent.click(toggle)
     save()
     await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({ cloudflare_ips_auto_fetch: false }))
+  })
+})
+
+describe('the page frame', () => {
+  it('keeps the section in ?tab= and the old values still open their sections', async () => {
+    for (const [tab, heading] of [['security', 'Account lockout'], ['brand', 'Site text'], ['subscription', 'Abuse protection'], ['portal', 'Quick links']] as const) {
+      const { unmount } = await (async () => { reads(); const v = mountAdmin(<SettingsView />, `/admin/settings?tab=${tab}`); await screen.findByText(heading); return v })()
+      unmount()
+    }
+  })
+
+  it('shows the sections in the order of the navigation', async () => {
+    reads(); mountAdmin(<SettingsView />, '/admin/settings')
+    await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
+    const names = within(screen.getByRole('navigation', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
+    expect(names).toEqual(['General', 'Login & Security', 'Brand', 'Subscription', 'User portal', 'Mail', 'SSO', 'Privacy and terms'])
+  })
+
+  it('asks once when leaving with unsaved changes and names the sections', async () => {
+    const { router } = await mountSettings()
+    edit('node_task_offline_reconcile_days', 31)
+    // Another section is edited too.
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: /^Brand/ }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Site title' }), { target: { value: 'New' } })
+    void router.navigate('/elsewhere')
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog.textContent).toContain('General, Brand')
   })
 })

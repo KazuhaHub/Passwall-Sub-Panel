@@ -52,5 +52,6 @@ export function loginHazards(saved: LoginDraft, next: LoginDraft, sso: SsoState,
 
 /** The panel path moves this very page, and the subscription path changes every link already handed out. */
 export function addressHazard(kind: 'panel_path' | 'sub_path', from: string, to: string, t: T): ConfirmOpts {
-  return ask(t, kind, { from: from || '/', to: to || '/' })
+  // `url` is where this page is after a panel path change ("" is the domain root).
+  return ask(t, kind, { from: from || '/', to: to || '/', url: `${to === '/' ? '' : to}/admin/settings` })
 }

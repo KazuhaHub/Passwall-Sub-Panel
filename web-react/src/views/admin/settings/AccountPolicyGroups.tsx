@@ -6,7 +6,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useAdminT } from '../useAdminT'
 import type { KeysOf } from './model'
 import { settingId } from './model'
-import { Group, Hint, Nested, NumField, Pair, SelectRow, SwitchField, TextRow } from './parts'
+import { Group, Nested, NumField, Pair, SelectRow, SwitchField, TextRow } from './parts'
 import type { UiSection } from './useUiSection'
 
 type Delivery = NonNullable<UISettings['password_recovery_delivery']>
@@ -91,7 +91,6 @@ export function AccountPolicyGroups({ form }: { form: UiSection<KeysOf<'security
               hint={t('settings.general.code_resend_cooldown_hint')} value={v.code_resend_cooldown_sec} onChange={n => patch({ code_resend_cooldown_sec: n })} />
           </div>
         )}
-        <Hint>{t('settings.general.registration_group_note')}</Hint>
       </Group>
     </>
   )

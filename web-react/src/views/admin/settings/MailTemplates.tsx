@@ -81,7 +81,7 @@ export function MailTemplates({ templates, onDirtyChange }: { templates: MailTem
 
   const label = (k: MailReminderKind) => t(`settings.mail.kind.${k}`) + (dirtyKinds.includes(k) ? ` (${t('settings.unsaved_short')})` : '')
   return (
-    <Group title={t('settings.mail.section_templates')}>
+    <Group id="setting-mail_templates" title={t('settings.mail.section_templates')}>
       <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
         {/* A list on a wide screen (it scales as the set grows), a select on a phone. */}
         <nav aria-label={t('settings.mail.section_templates')} className="hidden md:block">

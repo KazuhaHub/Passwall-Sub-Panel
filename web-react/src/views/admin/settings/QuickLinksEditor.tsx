@@ -74,7 +74,7 @@ export function QuickLinksEditor({ links, onChange, problems, show }: {
   const move = (from: number, to: number) => onChange(moved(links, from, to).map((l, idx) => ({ ...l, sort: (idx + 1) * 10 })))
 
   return (
-    <Group title={t('settings.portal.section_quick_links')}>
+    <Group id="setting-quick_links" title={t('settings.portal.section_quick_links')}>
       {links.length === 0 ? (
         <EmptyState compact title={t('settings.portal.no_links')} />
       ) : (

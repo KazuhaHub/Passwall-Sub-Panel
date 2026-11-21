@@ -4,6 +4,7 @@ import { putUISettings, type UISettings } from '@/api/settings'
 import { getAuthMethods } from '@/api/auth'
 import { pushSnack } from '@/components/feedback/toasts'
 import { settingsKeys } from '@/query/keys'
+import { uiSettingsQuery } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
 import { panelPath } from '@/panelPath'
 import { useSiteStore } from '@/stores/site'
@@ -13,8 +14,11 @@ import { normalizeSettings, sameValue, settingId, WRITE_ONLY_KEYS } from './mode
 interface UiData {
   /** The latest record the server has given (or accepted), normalised. */
   saved: UISettings
-  /** Writes the whole record and adopts the server's answer. */
-  write: (body: UISettings) => Promise<UISettings>
+  /**
+   * Writes the whole record: the latest one the server has, with `edits` laid over it, and adopts the answer.
+   * Secrets that are empty are left out (empty means "keep the stored one").
+   */
+  write: (edits: Partial<UISettings>) => Promise<UISettings>
 }
 
 const UiDataContext = createContext<UiData | null>(null)
@@ -35,8 +39,17 @@ export function UiDataProvider({ raw, children }: { raw: UISettings; children: R
   const scope = useQueryScope()
   const site = useSiteStore()
   const saved = useMemo(() => normalizeSettings(raw), [raw])
+  const savedRef = useRef(saved)
+  savedRef.current = saved
 
-  const write = useCallback(async (body: UISettings) => {
+  const write = useCallback(async (edits: Partial<UISettings>) => {
+    // The record is written whole, so what goes out for the keys this section did NOT edit is whatever the server holds
+    // at this moment, read now: another admin's change to another section, or another page's (sub clients), is not
+    // written back over. If that read fails the copy already held stands.
+    let base = savedRef.current
+    try { base = normalizeSettings(await queryClient.fetchQuery({ ...uiSettingsQuery(scope), staleTime: 0 })) } catch { /* keep the cached copy */ }
+    const body: UISettings = { ...base, ...edits }
+    for (const k of WRITE_ONLY_KEYS) if (!body[k]) delete body[k]
     const answer = normalizeSettings(await putUISettings(body))
     queryClient.setQueryData(settingsKeys.ui(scope), answer)
     // Mirror the brand-relevant fields into the live site store so the header and title follow without a reload.
@@ -118,23 +131,21 @@ export function useUiSection<K extends keyof UISettings>(
   const discard = useCallback(() => { setEdits({}); setTouched(new Set()); setAttempted(false) }, [])
 
   // Read at the moment of saving, so a confirmation that awaits the admin does not save a stale draft.
-  const latest = useRef({ saved, value, problems })
-  latest.current = { saved, value, problems }
+  const latest = useRef({ edits, problems })
+  latest.current = { edits, problems }
 
   /** Returns true when the record was written. `quiet` is for a save that is a step of another action (no toast). */
   async function save(opts: { quiet?: boolean } = {}): Promise<boolean> {
-    const { saved: base, value: draft, problems: bad } = latest.current
+    const { edits: draft, problems: bad } = latest.current
     const first = Object.keys(bad).find(k => bad[k])
     if (first) {
       setAttempted(true)
       setTimeout(() => document.getElementById(settingId(first))?.focus(), 0)
       return false
     }
-    const body: UISettings = { ...base, ...draft }
-    for (const k of WRITE_ONLY_KEYS) if (!body[k]) delete body[k]
     setPending(true)
     try {
-      await write(body)
+      await write(draft)
       setEdits({}); setTouched(new Set()); setAttempted(false)
       if (!opts.quiet) pushSnack(t('settings.saved'), 'success')
       return true
