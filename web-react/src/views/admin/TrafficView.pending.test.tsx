@@ -1,17 +1,13 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter } from 'react-router'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { createMemoryRouter, RouterProvider } from 'react-router'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import TrafficView from './TrafficView'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 vi.mock('@/i18n', () => ({ default: { t: (k: string) => k, language: 'zh-CN' } }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
-vi.mock('@/components/ConfirmHost', () => ({ confirm: vi.fn(async () => true) }))
 // ECharts has no layout in jsdom and throws on dispose; not what this tests.
 vi.mock('@/components/TrafficChart', () => ({ default: () => null }))
 vi.mock('react-i18next', () => ({
@@ -21,17 +17,9 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
 function mount() {
-  render(
-    <MemoryRouter>
-      <ThemeProvider theme={theme}>
-        <TrafficView />
-      </ThemeProvider>
-    </MemoryRouter>,
-    { wrapper: queryWrapper(makeTestQueryClient()) },
-  )
+  const router = createMemoryRouter([{ path: '/', element: <TrafficView /> }])
+  render(<RouterProvider router={router} />, { wrapper: queryWrapper(makeTestQueryClient()) })
 }
 
 // A promise the test resolves on its own schedule, so it can inspect the
@@ -87,7 +75,7 @@ describe('TrafficView refresh buttons', () => {
 
     await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'))
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(within(button).getByRole('progressbar')).toBeTruthy()
+    expect(button.querySelector('svg.animate-spin')).toBeTruthy()
 
     // A second click while the first refetch is still pending must not fire
     // a second request.
@@ -134,7 +122,7 @@ describe('TrafficView refresh buttons', () => {
     fireEvent.click(button)
     await waitFor(() => expect(button.getAttribute('aria-busy')).toBe('true'))
     expect((button as HTMLButtonElement).disabled).toBe(true)
-    expect(within(button).getByRole('progressbar')).toBeTruthy()
+    expect(button.querySelector('svg.animate-spin')).toBeTruthy()
 
     fireEvent.click(button)
     expect(historyCalls).toBe(2)
