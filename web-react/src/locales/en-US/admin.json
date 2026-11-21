@@ -3501,7 +3501,6 @@
     "edit_title": "Edit group",
     "search_placeholder": "Search name / slug",
     "no_match": "No groups match the search",
-    "selection_count": "{{count}} selected",
     "batch_delete": "Delete selected",
     "field": {
       "slug": "Slug",
@@ -3519,10 +3518,11 @@
       "limits_hint": "Empty = the group states nothing (unlimited). 0 = explicitly uncapped. A member's own value always wins.",
       "traffic_limit_gb": "Traffic limit (GB)",
       "ip_limit": "Concurrent IP limit",
-      "device_limit": "Device limit"
+      "device_limit": "Device limit",
+      "slug_hint": "Set when the group is created; it cannot be changed afterwards.",
+      "require_2fa_hint": "Members who sign in with a password and have not set up two-step verification must do so before they can use the panel again."
     },
     "scope": {
-      "title": "Per-group overrides (else inherit global)",
       "cat_2fa": "Two-factor (2FA) methods",
       "cat_notify": "Notification thresholds",
       "cat_emergency": "Emergency access (over-limit break-glass)",
@@ -3583,28 +3583,32 @@
       "risk_login_warmup_logins": "Login warm-up",
       "risk_login_hold_days": "New-country hold (days)",
       "default_suffix": " (default)",
-      "override": "Override",
-      "inherit": "Inherit",
       "global_prefix": "Global",
       "on": "On",
       "off": "Off",
       "save_error": "Some overrides failed to save — reopen to verify",
       "create_hint": "Save the group first, then set per-group overrides here.",
       "policy_pointer": "Group exceptions for locations and risk signals are set in Risk center › Policy.",
-      "open_policy": "Open in a new tab"
+      "open_policy": "Open the risk center",
+      "level_group": "This group",
+      "loading": "Loading overrides",
+      "load_failed": "Could not load this group's overrides"
     },
     "tabs": {
-      "node_access": "Node access",
-      "policies": "Policies",
-      "members": "Members",
-      "destination": "Destinations"
+      "destination": "Destinations",
+      "general": "General",
+      "nodes": "Nodes and lines",
+      "layout": "Layout",
+      "limits": "Limits",
+      "overrides": "Overrides"
     },
     "members": {
-      "count": "This group has {{count}} member(s)",
+      "count": "Members in this group: {{count}}",
       "hint": "Filter by this group under Users to view and manage members."
     },
     "placeholder": {
-      "tags": "Pick region:XX / tag:YY from the dropdown, or type custom"
+      "tags": "Pick region:XX / tag:YY from the dropdown, or type custom",
+      "pick": "Pick or type a value"
     },
     "hint": {
       "mode": "AND = every condition must match; OR = at least one matches",
@@ -3622,23 +3626,24 @@
       "slug": "Slug",
       "tag_filter": "Tag conditions",
       "members": "Members",
-      "remark": "Remark",
-      "actions": "Actions"
+      "actions": "Actions",
+      "nodes": "Nodes and lines",
+      "quota": "Default limits",
+      "two_factor": "Two-step verification",
+      "overrides": "Overrides"
     },
     "tag": {
       "all": "All nodes"
     },
     "action": {
-      "edit": "Edit",
-      "delete": "Delete"
+      "delete": "Delete",
+      "members": "View members"
     },
     "validate": {
       "slug_required": "Slug is required",
       "name_required": "Name is required"
     },
-    "warn": {
-      "has_members": "This group still has {{count}} member(s); move them out first."
-    },
+    "warn": {},
     "toast": {
       "created": "Created",
       "updated": "Updated",
@@ -3648,18 +3653,30 @@
       "batch_partial": "Deleted {{ok}} groups, {{fail}} failed"
     },
     "confirm": {
-      "delete_title": "Delete group",
-      "delete_message": "Delete group {{name}}?",
       "batch_delete_title": "Delete groups",
-      "batch_delete_message": "Delete {{names}}{{suffix}}?"
+      "batch_delete_message": "Delete {{names}}{{suffix}}?",
+      "require_2fa_on": {
+        "title": "Require two-step verification?",
+        "message": "This group has {{count}} members. Those who sign in with a password and have not set up two-step verification will have to do so before they can use the panel.",
+        "action": "Require"
+      },
+      "require_2fa_off": {
+        "title": "Stop requiring two-step verification?",
+        "message": "This group has {{count}} members, and they will no longer be required to set up two-step verification. Anyone who already set it up keeps it.",
+        "action": "Stop requiring"
+      },
+      "batch_delete_hidden": "{{count}} of the selected groups are not in the current list."
     },
     "preview": {
-      "nodes": "Matched nodes ({{count}}): {{names}}",
-      "more": "{{names}} and {{count}} in total",
+      "nodes": "Matches {{count}} nodes; {{visible}} of their {{total}} lines are visible to this group",
       "none": "No node matches; members of this group will get empty subscriptions",
       "unknown": "Matched nodes cannot be determined right now",
       "excluded_allowlist": "Matched but excluded because the allowlist cannot be enforced: {{names}}",
-      "change": "After saving, {{members}} members gain {{added}} and lose {{removed}} nodes; the change is pushed to the upstream panels at once"
+      "change": "After saving, {{members}} members gain {{added}} and lose {{removed}} nodes; the change is pushed to the upstream panels at once",
+      "loading": "Checking which nodes match",
+      "more_nodes": "and {{count}} more",
+      "node_lines": "{{visible}} / {{total}} lines",
+      "none_short": "No nodes"
     },
     "destination": {
       "tab": "Destinations",
@@ -3690,6 +3707,59 @@
       "list_separator": ", ",
       "not_open_item": "{{name}} · {{reason}}",
       "detail_separator": "; "
+    },
+    "subtitle": "Decide which nodes and lines a group's users get, how their subscription is laid out, and their limits.",
+    "empty": "No groups yet",
+    "empty_hint": "Create a group to decide which nodes its users get.",
+    "clear_search": "Clear search",
+    "row_menu": "More actions for {{name}}",
+    "list": {
+      "matches": "{{nodes}} nodes · {{lines}} lines",
+      "matches_title": "{{visible}} of the {{total}} lines on the matched nodes are visible to this group",
+      "quota_traffic": "Traffic {{value}}",
+      "quota_ip": "IP {{value}}",
+      "quota_devices": "Devices {{value}}",
+      "gb": "{{gb}} GB",
+      "unlimited": "unlimited",
+      "quota_none": "Not set",
+      "two_factor_required": "Required",
+      "conditions_more": "+{{count}}"
+    },
+    "general": {
+      "security_title": "Security"
+    },
+    "nodes": {
+      "intro": "A group's users get the nodes and lines that match these conditions."
+    },
+    "layout": {
+      "order_note": "The order of nodes and lines is set once for everyone by dragging on the Nodes page; a group's sort strategy and sort weights only order lines that tie, that is, lines that were never positioned.",
+      "open_nodes": "Open the Nodes page",
+      "saved_title": "This group's saved layout",
+      "saved_note": "Shown for reference; this page does not change them.",
+      "separators": "Separators",
+      "sort_strategy": "Sort strategy",
+      "sort_weights": "Sort weights",
+      "strategy_default": "Default",
+      "none": "None",
+      "flag_title": "Region flags",
+      "create_hint": "Save the group first, then set its region flag here."
+    },
+    "limits": {
+      "empty": "Not set",
+      "zero": "Unlimited"
+    },
+    "overrides": {
+      "intro": "Each setting shows the global value this group inherits. Set a value here to change it for this group's members, or follow the level above to use the global value again.",
+      "count": "{{count}} overridden",
+      "none": "All follow global",
+      "risk_other": "Overridden in the risk center: {{count}}."
+    },
+    "delete": {
+      "title": "Delete group {{name}}?",
+      "message": "This group has no members. Its setting overrides and its destination allowlist are deleted with it. This can't be undone.",
+      "blocked_title": "Group {{name}} still has members",
+      "blocked_message": "{{count}} users are in this group, and a group with members can't be deleted. Move them to another group on the Users page (filter by this group to find them), then delete this one.",
+      "blocked_action": "Go to Users"
     }
   },
   "certs": {

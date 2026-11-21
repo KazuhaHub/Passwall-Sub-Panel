@@ -1,27 +1,33 @@
 // ScopeOverridesEditor renders the per-field inherit/override controls for one
 // scope (a group). Pure controlled component: `scope` in, `onChange` out — it
-// performs no I/O. Used by the group detail Policies tab and the Settings scope
-// rail. Restrict to a subset of categories via `categories`; default = all.
+// performs no I/O. Used by the group sheet's Overrides and Layout tabs, the
+// Settings scope rail and the risk center's group card. Restrict to a subset
+// with `categories` (default = all) and `keys` / `omitKeys` (default = every
+// key the backend allows for the scope).
 //
-// Each row is three columns — label (flex) | toggle + state (fixed) | value
-// (fixed, right-aligned) — so the switches and values line up across every row
-// regardless of inherit/override state. On a phone the two fixed columns leave
-// the label a sliver, so there the label (and its hint) takes a line of its
-// own and the toggle and value share the line under it.
-import { Box, MenuItem, Switch, TextField, Typography, useMediaQuery, useTheme } from '@mui/material'
+// Every row is an InheritanceField over two levels, Global -> This group, so
+// the person always sees (1) the global value the group would inherit, (2)
+// whether the group overrides it, and (3) the way back to "follow global".
+// Only keys the backend lists in `scope.overridable` are offered: a key it
+// refuses never gets a control.
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { InheritanceField, type InheritanceLevel } from '@/components/form/InheritanceField'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { goParseFloat } from '@/utils/goParseFloat'
 
 import { SCOPE_CATEGORIES, SCOPE_KEYS, type ScopeKeyMeta, type ScopeState } from './scopeOverrides'
-
-const TOGGLE_COL = 124
-const VALUE_COL = 168
 
 export default function ScopeOverridesEditor({
   scope,
   onChange,
   categories,
+  keys,
+  omitKeys,
   hideCategoryCaptions,
   showHints,
 }: {
@@ -29,16 +35,19 @@ export default function ScopeOverridesEditor({
   onChange: (next: ScopeState) => void
   /** Restrict to these category ids; omit for all categories. */
   categories?: string[]
-  /** Suppress the per-category caption (e.g. when the surrounding tab already
-   *  names the single category being shown). */
+  /** Restrict to these "type.name" keys (still only those the backend allows). */
+  keys?: readonly string[]
+  /** Leave these "type.name" keys out (a host that shows them elsewhere). */
+  omitKeys?: readonly string[]
+  /** Suppress the per-category caption (e.g. when the surrounding section
+   *  already names the single category being shown). */
   hideCategoryCaptions?: boolean
-  /** Show each row's hint (ScopeKeyMeta.hintKey) under its label. The risk
+  /** Show each row's hint (ScopeKeyMeta.hintKey) under it. The risk
    *  center's group card asks for it: there the rows stand without the
    *  global fields beside them that explain the same knobs. */
   showHints?: boolean
 }) {
   const { t } = useTranslation(['admin', 'common'])
-  const phone = useMediaQuery(useTheme().breakpoints.down('sm'))
   const cats = categories
     ? SCOPE_CATEGORIES.filter(c => categories.includes(c.id))
     : SCOPE_CATEGORIES
@@ -49,11 +58,11 @@ export default function ScopeOverridesEditor({
   }
   const defaultSuffix = () => t('admin:groups.scope.default_suffix', { defaultValue: '（默认）' })
 
-  // Localized display of an inherited value. Bools render as the language's
-  // On/Off; an enum renders its option's label, and an unset one ('') the
-  // label of the value the server uses for it. A key with an unsetValue shows
-  // that default for a stored ''/'0', because there 0 means "never
-  // configured", not zero. Everything else shows the raw string.
+  // Localized display of a value at either level. Bools render as the
+  // language's On/Off; an enum renders its option's label, and an unset one
+  // ('') the label of the value the server uses for it. A key with an
+  // unsetValue shows that default for a stored ''/'0', because there 0 means
+  // "never configured", not zero. Everything else shows the raw string.
   const fmtVal = (k: ScopeKeyMeta, raw: string) => {
     if (k.kind === 'bool') {
       return raw === '1'
@@ -68,7 +77,7 @@ export default function ScopeOverridesEditor({
     if (k.unsetValue !== undefined && (raw === '' || raw === '0')) {
       return `${k.unsetValue}${defaultSuffix()}`
     }
-    return raw
+    return raw === '' ? '—' : raw
   }
 
   // What an OVERRIDDEN value of such a key will mean, since the number in the
@@ -110,112 +119,100 @@ export default function ScopeOverridesEditor({
     return v > 0 ? null : `= ${k.unsetValue}${defaultSuffix()}`
   }
 
-  // Switching an override on copies the inherited value, so the field opens
-  // on what the admin was just looking at. For an enum whose inherited value
-  // is not an option ('' = unset), that is the default it stands for — a
-  // select opened on '' shows blank and would save ''.
-  const seedValue = (k: ScopeKeyMeta, inherited: string) =>
-    k.kind === 'enum' && k.enumDefault !== undefined && !k.options?.some(o => o.value === inherited)
-      ? k.enumDefault
-      : inherited
+  const globalLabel = t('admin:groups.scope.global_prefix', { defaultValue: '全局' })
+  const groupLabel = t('admin:groups.scope.level_group', { defaultValue: '本组' })
+
+  const row = (k: ScopeKeyMeta) => {
+    const st = scope.edit[k.key]
+    const levels: InheritanceLevel<string>[] = [
+      { id: 'global', label: globalLabel, value: scope.global[k.key] },
+      { id: 'group', label: groupLabel, value: st.on ? st.value : undefined },
+    ]
+    const hint: ReactNode[] = []
+    if (showHints && k.hintKey) hint.push(<span key="hint" className="block">{t(k.hintKey)}</span>)
+    const own = st.on ? overrideHint(k, st.value) : null
+    if (own) hint.push(<span key="own" className="block">{own}</span>)
+    return (
+      <InheritanceField<string>
+        key={k.key}
+        label={t(`admin:groups.scope.${k.labelKey}`, { defaultValue: k.def })}
+        levels={levels}
+        editLevel="group"
+        // The group's value is a raw string; undefined is "follow global", which
+        // stores nothing and puts the global value back as the editor's baseline.
+        onChange={next => onChange({
+          ...scope,
+          edit: { ...scope.edit, [k.key]: next === undefined ? { on: false, value: scope.global[k.key] } : { on: true, value: next } },
+        })}
+        renderValue={v => fmtVal(k, v)}
+        defaultValue={k.kind === 'enum' && k.enumDefault !== undefined ? k.enumDefault : scope.global[k.key]}
+        // An inherited '' is not one of an enum's options: the select starts on
+        // the default it stands for, and nothing is written until it is edited.
+        fitInherited={k.kind === 'enum' && k.enumDefault !== undefined
+          ? v => (k.options?.some(o => o.value === v) ? v : k.enumDefault!)
+          : undefined}
+        hint={hint.length > 0 ? hint : undefined}
+        renderEditor={p => {
+          const set = (value: string) => p.onChange(value)
+          if (k.kind === 'bool') {
+            return (
+              <label className="flex w-fit items-center gap-2 text-sm">
+                <Switch id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+                  checked={p.value === '1'} onCheckedChange={c => set(c ? '1' : '0')} />
+                <span>{fmtVal(k, p.value)}</span>
+              </label>
+            )
+          }
+          if (k.kind === 'enum') {
+            return (
+              <NativeSelect id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+                className="sm:max-w-xs" value={p.value} onChange={e => set(e.target.value)}>
+                {(k.options ?? []).map(o => (
+                  <option key={o.value} value={o.value}>{t(`admin:groups.scope.${o.labelKey}`, { defaultValue: o.def })}</option>
+                ))}
+              </NativeSelect>
+            )
+          }
+          if (k.kind === 'str') {
+            return k.multiline
+              ? <Textarea id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+                  rows={3} className="font-mono text-[13px]" value={p.value} onChange={e => set(e.target.value)} />
+              : <Input id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+                  value={p.value} onChange={e => set(e.target.value)} />
+          }
+          // The box keeps what was typed (an empty or odd value is meaningful to
+          // the server, see overrideHint), so it is a plain number input rather
+          // than a NumberField that would rewrite it.
+          return (
+            <Input id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+              type="number" inputMode="decimal" className="w-28"
+              min={0} step={k.kind === 'float' ? 'any' : 1}
+              value={p.value} onChange={e => set(e.target.value)} />
+          )
+        }}
+      />
+    )
+  }
 
   return (
     <>
       {cats.map(cat => {
-        const keys = SCOPE_KEYS.filter(k => k.cat === cat.id && scope.overridable.includes(k.key))
-        if (!keys.length) return null
+        const shown = SCOPE_KEYS.filter(k => k.cat === cat.id
+          && scope.overridable.includes(k.key)
+          && (!keys || keys.includes(k.key))
+          && !omitKeys?.includes(k.key))
+        if (!shown.length) return null
         return (
-          <Box key={cat.id} sx={{ mt: 1.5 }}>
+          <div key={cat.id} className="flex flex-col gap-4">
             {!hideCategoryCaptions && (
-              <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 600, color: 'text.secondary' }}>
+              <h4 className="text-xs font-semibold text-muted-foreground">
                 {t(`admin:groups.scope.${cat.labelKey}`, { defaultValue: cat.def })}
-              </Typography>
+              </h4>
             )}
-            {keys.map(k => {
-              const st = scope.edit[k.key]
-              const setEdit = (v: { on: boolean; value: string }) =>
-                onChange({ ...scope, edit: { ...scope.edit, [k.key]: v } })
-              const label = (
-                <Box sx={{ flex: 1, minWidth: 0, fontSize: 14 }}>
-                  <span>{t(`admin:groups.scope.${k.labelKey}`, { defaultValue: k.def })}</span>
-                  {showHints && k.hintKey && (
-                    <Typography variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: 1.5 }}>
-                      {t(k.hintKey)}
-                    </Typography>
-                  )}
-                </Box>
-              )
-              const controls = (
-                <>
-                  {/* toggle + state — fixed column so switches line up across rows */}
-                  <Box sx={{ width: TOGGLE_COL, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Switch size="small" checked={st.on}
-                      onChange={(_, c) => setEdit({ on: c, value: c ? seedValue(k, st.value) : scope.global[k.key] })} />
-                    <Typography variant="caption" sx={{ color: st.on ? 'primary.main' : 'text.secondary' }}>
-                      {st.on
-                        ? t('admin:groups.scope.override', { defaultValue: '覆盖' })
-                        : t('admin:groups.scope.inherit', { defaultValue: '继承' })}
-                    </Typography>
-                  </Box>
-                  {/* value — fixed column, right-aligned */}
-                  <Box sx={{ width: VALUE_COL, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                    {st.on ? (
-                      k.kind === 'bool' ? (
-                        <Switch size="small" checked={st.value === '1'}
-                          onChange={(_, c) => setEdit({ on: true, value: c ? '1' : '0' })} />
-                      ) : k.kind === 'enum' ? (
-                        <TextField select size="small" fullWidth value={st.value}
-                          onChange={e => setEdit({ on: true, value: e.target.value })}>
-                          {(k.options ?? []).map(o => (
-                            <MenuItem key={o.value} value={o.value}>
-                              {t(`admin:groups.scope.${o.labelKey}`, { defaultValue: o.def })}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                      ) : k.kind === 'str' ? (
-                        <TextField size="small" fullWidth value={st.value}
-                          multiline={k.multiline} minRows={k.multiline ? 2 : undefined}
-                          onChange={e => setEdit({ on: true, value: e.target.value })} />
-                      ) : (
-                        // The box stays 100px, flush right; the root spans the
-                        // value column so the hint under it gets the column's
-                        // width (right-aligned under the box) before it wraps.
-                        // helperText rather than a caption beside it: MUI ties
-                        // it to the input via aria-describedby.
-                        <TextField size="small" type="number" value={st.value} fullWidth
-                          onChange={e => setEdit({ on: true, value: e.target.value })}
-                          helperText={overrideHint(k, st.value)}
-                          slotProps={{
-                          input: { sx: { width: 100, alignSelf: 'flex-end' } },
-                          htmlInput: k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 },
-                          formHelperText: { sx: { mx: 0, textAlign: 'right' } },
-                        }} />
-                      )
-                    ) : (
-                      <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'right' }}>
-                        {t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: {fmtVal(k, scope.global[k.key])}
-                      </Typography>
-                    )}
-                  </Box>
-                </>
-              )
-              return phone ? (
-                <Box key={k.key} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, py: 0.75 }}>
-                  {label}
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minHeight: 38 }}>
-                    {controls}
-                  </Box>
-                </Box>
-              ) : (
-                <Box key={k.key} sx={{ display: 'flex', alignItems: 'center', gap: 2, minHeight: 38, py: 0.25 }}>
-                  {label}
-                  {controls}
-                </Box>
-              );
-            })}
-          </Box>
-        );
+            <div className="flex flex-col gap-5 divide-y [&>*:not(:first-child)]:pt-5">{shown.map(row)}</div>
+          </div>
+        )
       })}
     </>
-  );
+  )
 }
