@@ -12,7 +12,6 @@
     "paste_placeholder": "在此粘贴语言包 JSON…",
     "export_base": "导出基准模板",
     "size_hint": "单个语言包最大 {{max}} KB。",
-    "summary": "可以上传：{{name}}（{{code}}），共 {{count}} 个命名空间。",
     "problems_title_other": "上传前需要修正 {{count}} 个问题",
     "server_refused": "服务器拒绝了这个语言包",
     "upload_failed": "无法上传语言包。",
@@ -57,7 +56,8 @@
       "reload_hint": "重新载入页面后即可在语言菜单中看到该语言。",
       "read_failed": "读取文件失败",
       "download_failed": "无法下载语言包。"
-    }
+    },
+    "summary_other": "可以上传：{{name}}（{{code}}），共 {{count}} 个命名空间。"
   },
   "alerts": {
     "bell_title": "通知",
@@ -757,8 +757,8 @@
         "diff": "比上一版多 {{added}} 字、少 {{removed}} 字",
         "first": "这是该语言的第一个版本。",
         "bump": "重大变更：要求用户重新同意",
-        "bump_hint": "勾选后，约 {{users}} 名普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
-        "bump_hint_loading": "勾选后，普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
+        "bump_hint": "约 {{users}} 名普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
+        "bump_hint_loading": "普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
         "cancel": "取消",
         "confirm": "发布",
         "done": "已发布第 {{version}} 版",

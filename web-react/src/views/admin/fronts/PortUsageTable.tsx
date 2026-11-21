@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useQueryClient } from '@tanstack/react-query'
 import { deleteNode } from '@/api/nodes'
@@ -50,6 +50,31 @@ function what(t: Translate, u: PortUsage): string {
   }
 }
 
+function UsedBy({ u, t, onRemove }: { u: PortUsage; t: ReturnType<typeof useAdminT>; onRemove: (u: PortUsage) => Promise<void> }) {
+  return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{what(t, u)}</span>
+          {!u.enabled && <StatusBadge tone="neutral" quiet label={t('admin:servers.fronts.ports.disabled')} />}
+          {u.inactive && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.inactive', { why: t(`admin:servers.fronts.withheld.reason.${u.inactive}`, { defaultValue: t(`admin:servers.fronts.unsupported.${u.inactive}`, { defaultValue: u.inactive }) }) })} />}
+          {u.orphan && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.orphan')} />}
+          {u.unrouted && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.unrouted')} />}
+          {u.orphan && u.node_id !== undefined && (
+            <AsyncButton variant="outline" size="sm" onClick={() => onRemove(u)}>{t('admin:servers.fronts.ports.orphan_remove')}</AsyncButton>
+          )}
+        </div>
+        {u.behind?.map((b, j) => (
+          <span key={j} className="pl-3 text-[13px] text-muted-foreground">
+            {b.is_default
+              ? t('admin:servers.fronts.ports.default_arrow', { to: behindText(t, b) })
+              : t('admin:servers.fronts.ports.route_arrow', { names: b.server_names.join(', '), to: behindText(t, b) })}
+            {!b.is_default && b.target.kind !== 'listener' && ` — ${b.label}`}
+          </span>
+        ))}
+      </div>
+  )
+}
+
 const rowKey = (u: PortUsage, i: number) => `${u.kind}-${u.port}-${u.node_id ?? 0}-${u.line_id ?? ''}-${i}`
 
 /** Every port the server uses, read only, except that a hidden tunnel listener whose line is gone can be removed here. */
@@ -79,6 +104,9 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
     }
   }
 
+  const removeOrphanRef = useRef(removeOrphan)
+  removeOrphanRef.current = removeOrphan
+
   // Rows carry their position: the same port can appear for several uses, and nothing else tells them apart.
   const rows = useMemo(() => (ports.data ?? []).map((u, i) => ({ u, key: rowKey(u, i) })), [ports.data])
   type Row = (typeof rows)[number]
@@ -94,31 +122,7 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
     },
     {
       id: 'used_by', header: t('admin:servers.fronts.ports.used_by'), enableSorting: false, meta: { label: t('admin:servers.fronts.ports.used_by'), hideable: false },
-      cell: c => {
-        const u = c.row.original.u
-        return (
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span>{what(t, u)}</span>
-              {!u.enabled && <StatusBadge tone="neutral" quiet label={t('admin:servers.fronts.ports.disabled')} />}
-              {u.inactive && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.inactive', { why: t(`admin:servers.fronts.withheld.reason.${u.inactive}`, { defaultValue: t(`admin:servers.fronts.unsupported.${u.inactive}`, { defaultValue: u.inactive }) }) })} />}
-              {u.orphan && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.orphan')} />}
-              {u.unrouted && <StatusBadge tone="warning" label={t('admin:servers.fronts.ports.unrouted')} />}
-              {u.orphan && u.node_id !== undefined && (
-                <AsyncButton variant="outline" size="sm" onClick={() => removeOrphan(u)}>{t('admin:servers.fronts.ports.orphan_remove')}</AsyncButton>
-              )}
-            </div>
-            {u.behind?.map((b, j) => (
-              <span key={j} className="pl-3 text-[13px] text-muted-foreground">
-                {b.is_default
-                  ? t('admin:servers.fronts.ports.default_arrow', { to: behindText(t, b) })
-                  : t('admin:servers.fronts.ports.route_arrow', { names: b.server_names.join(', '), to: behindText(t, b) })}
-                {!b.is_default && b.target.kind !== 'listener' && ` — ${b.label}`}
-              </span>
-            ))}
-          </div>
-        )
-      },
+      cell: c => <UsedBy u={c.row.original.u} t={t} onRemove={u => removeOrphanRef.current(u)} />,
     },
   // removeOrphan closes over the query client and scope only; it is stable for the life of this table.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,6 +138,15 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
         data={rows} columns={columns} getRowId={r => r.key} pagination={false} columnMenu={false} maxHeight={null}
         loading={ports.isPending} error={ports.isError ? (ports.error as Error) : null} onRetry={() => void ports.refetch()}
         aria-label={t('admin:servers.fronts.tab_ports')}
+        renderCard={r => (
+          <div className="flex flex-col gap-1 border-b px-3 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <span className="font-medium tabular-nums">{r.u.range_high ? `${r.u.port}–${r.u.range_high}` : r.u.port}</span>
+              <span className="text-xs text-muted-foreground">{r.u.listen || t(`admin:servers.fronts.ports.bind_${r.u.bind}`)}</span>
+            </div>
+            <UsedBy u={r.u} t={t} onRemove={u => removeOrphanRef.current(u)} />
+          </div>
+        )}
       />
     </div>
   )

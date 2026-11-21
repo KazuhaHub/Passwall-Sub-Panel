@@ -33,7 +33,7 @@ const PREVIEW_DELAY_MS = 300
 // The built-in languages come first; zh-TW is generated from zh-CN and never written by hand.
 const BUILTIN = ['zh-CN', 'en-US']
 // Both panes are as tall as the sheet's body leaves room for, so each scrolls by itself and the bar below stays in view.
-const PANE_HEIGHT = 'calc(100dvh - 15rem)'
+const PANE_HEIGHT = 'calc(100dvh - 20rem)'
 
 /** The preview is the right-hand pane's alone: a document that cannot be drawn says so there, and the editor and the publish button keep working. */
 export class PreviewBoundary extends Component<{ message: string; children: ReactNode }, { failed: boolean }> {

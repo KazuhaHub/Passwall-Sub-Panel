@@ -67,7 +67,7 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
   return (
     <Dialog open onOpenChange={o => { if (!o) onClose() }}>
       <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
+        <DialogHeader className="pr-8">
           <DialogTitle>{t('admin:languagePacks.upload_title')}</DialogTitle>
           <DialogDescription>{t('admin:languagePacks.upload_help')}</DialogDescription>
         </DialogHeader>
@@ -82,7 +82,7 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
           <input ref={input} type="file" accept="application/json,.json" hidden tabIndex={-1} aria-hidden onChange={onPick} data-testid="pack-file" />
         </div>
         <Field label={t('admin:languagePacks.paste_label')} hint={t('admin:languagePacks.size_hint', { max: Math.round(MAX_LOCALE_PACK_BYTES / 1024) })}>
-          <Textarea rows={10} spellCheck={false} className="max-h-[40dvh] overflow-auto font-mono text-xs md:text-xs"
+          <Textarea spellCheck={false} className="max-h-[40dvh] min-h-44 overflow-auto font-mono text-xs md:text-xs"
             placeholder={t('admin:languagePacks.paste_placeholder')} value={text}
             onChange={e => { setText(e.target.value); setServerError('') }} />
         </Field>

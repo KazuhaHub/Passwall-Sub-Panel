@@ -215,11 +215,12 @@ export default function FrontEditor({ panelId, front, options, defaults, onDone,
   return (
     <FormValidityProvider>
       <div className="flex flex-col gap-6">
-        <FormSection title={t('admin:servers.fronts.port')} actions={<InfoTip text={t('admin:servers.fronts.help.what')} />}>
-          <Field label={t('admin:servers.fronts.port')} hint={t('admin:servers.fronts.port_hint')} error={shown('port')} className="max-w-56">
+        <div className="flex items-start gap-1">
+          <Field label={t('admin:servers.fronts.port')} hint={t('admin:servers.fronts.port_hint')} error={shown('port')} className="max-w-56 flex-1">
             <Input id={ids.port} inputMode="numeric" value={draft.port} onChange={e => patch({ port: e.target.value })} onBlur={() => touch('port')} />
           </Field>
-        </FormSection>
+          <InfoTip text={t('admin:servers.fronts.help.what')} className="mt-5" />
+        </div>
 
         <FormSection title={t('admin:servers.fronts.listeners')} description={t('admin:servers.fronts.help.listeners')}>
           {listeners.length === 0 && <p className="text-sm text-muted-foreground">{t('admin:servers.fronts.no_listeners')}</p>}

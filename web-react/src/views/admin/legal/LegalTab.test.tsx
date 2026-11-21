@@ -318,7 +318,7 @@ describe('publishing', () => {
   it('a material change says how many ordinary users will be asked and when, and the button says it too', async () => {
     const pub = await toPublish()
     fireEvent.click(major(pub))
-    expect(await within(pub).findByText(/about 1,240 ordinary users/)).toBeTruthy()
+    expect(await within(pub).findByText(/About 1,240 ordinary users/)).toBeTruthy()
     // Users are asked when they next open the portal, not at a sign-in (a session can be days old).
     expect(within(pub).getByText(/next time they open the portal/)).toBeTruthy()
     expect(within(pub).getByText('You are about to ask every ordinary user to accept this document again.')).toBeTruthy()

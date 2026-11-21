@@ -81,7 +81,7 @@ export default function LegalPublishDialog({ kind, locale, version, previous, co
   return (
     <Dialog open onOpenChange={o => { if (!o) onClose() }}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+        <DialogHeader className="pr-8">
           <DialogTitle>{t('admin:settings.legal.publish.title', { doc, locale, version })}</DialogTitle>
           <DialogDescription>{size ? t('admin:settings.legal.publish.diff', size) : t('admin:settings.legal.publish.first')}</DialogDescription>
         </DialogHeader>

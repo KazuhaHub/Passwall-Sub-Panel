@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { confirm } from '@/components/ConfirmHost'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useFrontOptions, useFronts } from '@/query/fronts'
 import { frontKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -41,6 +42,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
   const fronts = useFronts(scope, server.id)
   const options = useFrontOptions(scope, server.id)
   const names = useFrontNames(options.data)
+  const phone = useMediaQuery('(max-width: 639px)')
   const [tab, setTab] = useState<'fronts' | 'ports'>('fronts')
   const [view, setView] = useState<View>({ kind: 'list' })
   const [dirty, setDirty] = useState(false)
@@ -140,7 +142,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
                   <ErrorState compact title={t('admin:servers.fronts.load_failed')} retry={() => fronts.refetch()} />
                 ) : data && (
                   <>
-                    {data.fronts.length > 0 && <FrontGraphPanel fronts={data.fronts} inactive={inactive} names={names} />}
+                    {data.fronts.length > 0 && !phone && <FrontGraphPanel fronts={data.fronts} inactive={inactive} names={names} />}
                     <FrontList
                       fronts={data.fronts} inactive={inactive} names={names}
                       canEdit={supported && !!options.data} editOffReason={unsupportedReason ?? t('admin:servers.fronts.unsupported_short')}
@@ -148,6 +150,13 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
                       empty={<EmptyState compact title={t('admin:servers.fronts.empty_title')} description={t('admin:servers.fronts.empty')} />}
                       onEdit={f => setView({ kind: 'edit', front: f })} onDelete={f => void remove(f)}
                     />
+                    {/* On a phone the picture stacks its three columns into one long list, so the rows come first and it opens on request. */}
+                    {data.fronts.length > 0 && phone && (
+                      <details className="rounded-lg border px-3 py-2">
+                        <summary className="cursor-pointer text-sm font-medium">{t('admin:servers.fronts.graph.title')}</summary>
+                        <div className="mt-2"><FrontGraphPanel fronts={data.fronts} inactive={inactive} names={names} /></div>
+                      </details>
+                    )}
                   </>
                 )}
               </>
