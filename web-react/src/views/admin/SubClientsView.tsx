@@ -77,7 +77,6 @@ export default function SubClientsView() {
     <PageHeader
       title={t('nav:admin.sub_clients')}
       primary={settings && <Button onClick={actions.addFamily}><IconAdd />{t('admin:settings.subscription.add_family')}</Button>}
-      secondary={settings && <PresetMenu families={families} onPick={actions.addPreset} />}
       more={settings ? [{ id: 'reset', label: t('admin:settings.subscription.reset_to_presets'), icon: IconReset, destructive: true, onSelect: () => void actions.reset() }] : undefined}
     />
   )
@@ -115,7 +114,10 @@ export default function SubClientsView() {
 
           <section className="flex flex-col gap-3">
             <div>
-              <h2 className="text-sm font-medium">{t('admin:settings.subscription.section_clients')}</h2>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-medium">{t('admin:settings.subscription.section_clients')}</h2>
+                <PresetMenu families={families} onPick={actions.addPreset} />
+              </div>
               {/* Always on: the order is what the server matches in, so it is stated where it can be changed. */}
               <p className="mt-1 max-w-3xl text-sm text-foreground">{t('admin:settings.subscription.order_note')}</p>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t('admin:settings.subscription.registry_hint')}</p>

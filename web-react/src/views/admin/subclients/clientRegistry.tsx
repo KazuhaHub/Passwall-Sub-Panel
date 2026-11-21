@@ -11,6 +11,7 @@ import { applyReorder } from '@/components/data/dataTableLogic'
 import { DataTable } from '@/components/data/DataTable'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Button } from '@/components/ui/button'
+import { RowCard } from '../subscription/RowCard'
 import { FamilySheet } from './FamilySheet'
 import type { useRegistryActions } from './useRegistryActions'
 
@@ -70,6 +71,18 @@ export default function ClientRegistry({ families, onChange, actions }: {
         onRowOpen={r => setOpen(r.i)}
         activeRowId={open === null ? null : String(open)}
         rowOptions={r => ({ state: r.f.enabled ? undefined : 'dimmed' })}
+        renderCard={(r, ctx) => {
+          const name = r.f.name.trim() || t('settings.subscription.unnamed_family')
+          return (
+            <RowCard title={name} subtitle={r.f.keywords.join(', ')} open={ctx.open}
+              status={<StatusDot tone={r.f.enabled ? 'success' : 'neutral'} label={t(r.f.enabled ? 'settings.subscription.rule_field.enabled' : 'settings.subscription.rule_table.disabled')} />}
+              detail={`${r.f.render_format} · ${t('settings.subscription.apps_count', { count: r.f.apps.length })}`}
+              actions={<MoreMenu size="icon-xs" label={t('settings.subscription.row_menu', { name })} items={[
+                { id: 'edit', label: t('settings.subscription.edit_family'), icon: IconEdit, onSelect: () => setOpen(r.i) },
+                { id: 'delete', label: t('settings.subscription.delete_row'), icon: IconDelete, destructive: true, onSelect: () => void remove(r.i) },
+              ]} />} />
+          )
+        }}
         onReorder={call => {
           // Only the order changes; every family keeps its content. The sheet closes because positions moved.
           setOpen(null)
