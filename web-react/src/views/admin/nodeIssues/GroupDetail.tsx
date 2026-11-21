@@ -1,4 +1,5 @@
 import { AsyncButton } from '@/components/common/AsyncButton'
+import { Checkbox } from '@/components/ui/checkbox'
 import { IconCheck } from '@/lib/icons'
 import { CodeSection, DetailList, DetailRow, TimeCell, useAdminT } from '../logs/shared'
 import type { NodeAgentIssue } from '@/api/types'
@@ -10,10 +11,13 @@ import { suggestedAction, type IssueView } from './model'
  * review state); the stable code, agent identity, object key and unabridged diagnostic are in a fold
  * below, so they are one click away for a bug report and out of the way for everyone else.
  */
-export function GroupDetail({ group, view, canOperate, busyId, locked, onAcknowledge }: {
+export function GroupDetail({ group, view, canOperate, chosen, onToggle, busyId, locked, onAcknowledge }: {
   group: NodeIssueGroup
   view: IssueView
   canOperate: boolean
+  /** The reports chosen for a bulk review (shared with the list's checkboxes). */
+  chosen: ReadonlySet<number>
+  onToggle: (id: number, on: boolean) => void
   /** The record whose single review is in flight. */
   busyId: number | null
   /** Another review (or a refresh) is running; every action waits. */
@@ -32,6 +36,10 @@ export function GroupDetail({ group, view, canOperate, busyId, locked, onAcknowl
       <ul className="mt-4 divide-y rounded-md border">
         {group.issues.map(issue => (
           <li key={issue.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+            {!issue.acknowledged_at && canOperate && (
+              <Checkbox checked={chosen.has(issue.id)} disabled={locked} aria-label={t('node_issues.bulk.select_record', { id: issue.id })}
+                onCheckedChange={v => onToggle(issue.id, v === true)} />
+            )}
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium">{t('node_issues.record_id', { id: issue.id })}</div>
               <div className="text-xs text-muted-foreground">

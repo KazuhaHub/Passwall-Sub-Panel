@@ -1038,7 +1038,8 @@
       "confirm_message": "Mark the selected {{records}} from this page as reviewed, including folded records? This does not delete reports or repair the node.",
       "progress": "Processed {{done}} / {{total}} reports",
       "done": "Marked {{records}} as reviewed",
-      "partial": "Reviewed {{ok}}; {{fail}} failed. Failed reports still on this page remain selected for retry."
+      "partial": "Reviewed {{ok}}; {{fail}} failed. Failed reports still on this page remain selected for retry.",
+      "select_record": "Select report #{{id}}"
     },
     "code_titles": {
       "core_telemetry_failed": "Core statistics unavailable",
@@ -1121,7 +1122,9 @@
       "last_seen": "Last seen"
     },
     "load_failed_title": "Node issue reports are temporarily unavailable",
-    "acknowledge_all": "Mark all {{count}} as reviewed"
+    "acknowledge_all": "Mark all {{count}} as reviewed",
+    "acknowledge_selected_other": "Mark {{count}} selected as reviewed",
+    "acknowledge_selected_one": "Mark {{count}} selected as reviewed"
   },
   "geo_anomalies": {
     "incomplete": "A panel could not be read, so this number is a floor rather than a total.",

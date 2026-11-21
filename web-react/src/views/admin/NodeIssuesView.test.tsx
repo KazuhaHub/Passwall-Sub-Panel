@@ -284,5 +284,35 @@ describe('Node issues: the views and the bulk review', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
     expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/406/acknowledge', '/admin/node-issues/407/acknowledge'])
   })
-})
 
+  it('acts only on the reports that were chosen: one that arrives in a ticked group later is left alone', async () => {
+    const two = [sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout')]
+    reads(two)
+    const m = mount()
+    await screen.findByText('Configuration or clients could not be synchronized')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Configuration or clients could not be synchronized/ }))
+    // A refetch (window focus) brings a third report into the same group.
+    reads([sync(408, 'core_convergence_failed'), ...two])
+    await m.client.invalidateQueries()
+    await waitFor(() => expect(lastParams(url)).toBeDefined())
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark selected as reviewed' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText(/2 records/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/406/acknowledge', '/admin/node-issues/407/acknowledge'])
+  })
+
+  it('reviews a chosen subset of one group from the sheet', async () => {
+    reads([sync(407, 'core_convergence_failed'), sync(406, 'object_pending_timeout'), sync(405, 'directives_ahead_of_roster')])
+    mount()
+    fireEvent.click(await screen.findByText('Configuration or clients could not be synchronized'))
+    const sheet = await screen.findByRole('dialog')
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Select report #407' }))
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Select report #405' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Mark 2 selected as reviewed' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Mark selected as reviewed' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls.map(([u]) => u).sort()).toEqual(['/admin/node-issues/405/acknowledge', '/admin/node-issues/407/acknowledge'])
+  })
+})

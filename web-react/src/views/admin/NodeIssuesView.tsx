@@ -10,7 +10,6 @@ import { DataTable } from '@/components/data/DataTable'
 import { DataTablePagination } from '@/components/data/DataTablePagination'
 import { DetailSheet } from '@/components/data/DetailSheet'
 import { FilterBar } from '@/components/data/FilterBar'
-import type { BulkContext } from '@/components/data/dataTableTypes'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
@@ -68,10 +67,32 @@ export default function NodeIssuesView() {
   const groups = useMemo(() => groupNodeIssues(items ?? []), [items])
   const openGroup = sel.selected === null ? undefined : groups.find(g => g.id === sel.selected)
 
-  // ---- selection: by group row, acting on the group's unreviewed record ids ----
-  const [selection, setSelection] = useState<Record<string, boolean>>({})
-  useEffect(() => { setSelection({}) }, [url.page, pageSize, url.view, url.state, keyword])
-  useEffect(() => { if (!canOperate) setSelection({}) }, [canOperate])
+  // ---- selection: REPORT ids, as at the moment each was ticked ----
+  // Ticking a group row stores that group's unreviewed ids as they are then. A refetch (the list
+  // revalidates on window focus) can bring more reports into a ticked group; those were never chosen
+  // and are never acted on. A group shows ticked while any of its reports is chosen; unticking it drops them all.
+  const [chosen, setChosen] = useState<ReadonlySet<number>>(new Set())
+  useEffect(() => { setChosen(new Set()) }, [url.page, pageSize, url.view, url.state, keyword])
+  useEffect(() => { if (!canOperate) setChosen(new Set()) }, [canOperate])
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+  const selection = useMemo(() => Object.fromEntries(groups
+    .filter(g => pendingIds(g).some(id => chosen.has(id)))
+    .map(g => [g.id, true])), [groups, chosen])
+  function onGroupSelection(next: Record<string, boolean>) {
+    setChosen(prev => {
+      const out = new Set(prev)
+      for (const g of groups) {
+        const ids = pendingIds(g)
+        if (next[g.id] && !selection[g.id]) ids.forEach(id => out.add(id))
+        else if (!next[g.id] && selection[g.id]) ids.forEach(id => out.delete(id))
+      }
+      return out
+    })
+  }
+  function toggleRecord(id: number, on: boolean) {
+    setChosen(prev => { const out = new Set(prev); if (on) out.add(id); else out.delete(id); return out })
+  }
 
   // ---- actions: one at a time. A second review while one runs would read stale rows. ----
   const lock = useRef(false)
@@ -99,7 +120,10 @@ export default function NodeIssuesView() {
     if (!canOperate || rawIds.length === 0 || lock.current) return
     // The exact ids, fixed before the question is asked: never widened to another page, a fresh
     // filter result or records that arrived meanwhile.
-    const ids = [...new Set(rawIds)]
+    // Only ids that were chosen AND still show as unreviewed now: one already reviewed elsewhere is dropped.
+    const stillPending = new Set((itemsRef.current ?? []).filter(i => !i.acknowledged_at).map(i => i.id))
+    const ids = [...new Set(rawIds)].filter(id => stillPending.has(id))
+    if (ids.length === 0) return
     lock.current = true
     setBatch({ state: 'confirming', done: 0, total: ids.length })
     try {
@@ -120,8 +144,8 @@ export default function NodeIssuesView() {
       const fresh = await query.refetch()
       // Only the failures that still show as unreviewed stay selected: a success must not leave a
       // ticked row behind, and no review time is made up locally.
-      setSelection(Object.fromEntries(groupNodeIssues(fresh.data?.items ?? [])
-        .filter(g => pendingIds(g).some(id => failed.has(id))).map(g => [g.id, true])))
+      const open = new Set((fresh.data?.items ?? []).filter(i => !i.acknowledged_at).map(i => i.id))
+      setChosen(new Set([...failed].filter(id => open.has(id))))
     } finally {
       lock.current = false
       setBatch({ state: '', done: 0, total: 0 })
@@ -176,6 +200,7 @@ export default function NodeIssuesView() {
   }
 
   const shown = openGroup
+  const chosenIn = (g: NodeIssueGroup) => pendingIds(g).filter(id => chosen.has(id))
   return frame(
     <>
       <Tabs value={url.view} onValueChange={v => { if (!lock.current) setUrl({ view: v as IssueView, page: 1 }) }}>
@@ -202,13 +227,13 @@ export default function NodeIssuesView() {
           maxHeight={null}
           selectable={canOperate}
           selection={selection}
-          onSelectionChange={setSelection}
+          onSelectionChange={onGroupSelection}
           rowLabel={g => `${issueTitle(g, url.view, t)} · ${serverNameOf(g, t)}`}
           rowOptions={g => (pendingIds(g).length === 0 ? { selectable: false } : undefined)}
-          bulkActions={(ctx: BulkContext<NodeIssueGroup>) => (
+          bulkActions={() => (
             <>
               {batch.state === 'running' && <span role="status" className="text-sm text-muted-foreground tabular-nums">{t('node_issues.bulk.progress', { done: batch.done, total: batch.total })}</span>}
-              <AsyncButton size="sm" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany(ctx.loadedRows.flatMap(pendingIds))}>
+              <AsyncButton size="sm" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany([...chosen])}>
                 {t('node_issues.bulk.acknowledge')}
               </AsyncButton>
             </>
@@ -262,13 +287,22 @@ export default function NodeIssuesView() {
         description={shown ? serverNameOf(shown, t) : undefined}
         status={shown ? <ReviewBadge group={shown} /> : undefined}
         // One report has its own button in the list; "all" only helps when there is more than one to review.
-        actions={shown && canOperate && pendingIds(shown).length > 1 && (
-          <AsyncButton size="sm" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany(pendingIds(shown))}>
-            {t('node_issues.acknowledge_all', { count: pendingIds(shown).length })}
-          </AsyncButton>
+        actions={shown && canOperate && (
+          <>
+            {chosenIn(shown).length > 0 && (
+              <AsyncButton size="sm" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany(chosenIn(shown))}>
+                {t('node_issues.acknowledge_selected', { count: chosenIn(shown).length })}
+              </AsyncButton>
+            )}
+            {pendingIds(shown).length > 1 && (
+              <AsyncButton size="sm" variant="outline" icon={<IconCheck />} disabled={locked} pending={batch.state === 'running'} onClick={() => acknowledgeMany(pendingIds(shown))}>
+                {t('node_issues.acknowledge_all', { count: pendingIds(shown).length })}
+              </AsyncButton>
+            )}
+          </>
         )}
       >
-        {shown && <GroupDetail group={shown} view={url.view} canOperate={canOperate} busyId={busyId} locked={locked} onAcknowledge={acknowledgeOne} />}
+        {shown && <GroupDetail group={shown} view={url.view} canOperate={canOperate} chosen={chosen} onToggle={toggleRecord} busyId={busyId} locked={locked} onAcknowledge={acknowledgeOne} />}
       </DetailSheet>
     </>,
   )

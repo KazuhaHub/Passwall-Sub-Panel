@@ -1036,7 +1036,8 @@
       "confirm_message": "将所选的 {{records}} 标记为已查看？仅包含本页记录（含折叠记录），不会删除记录或修复节点。",
       "progress": "已处理 {{done}} / {{total}} 条记录",
       "done": "已将 {{records}} 标记为已查看",
-      "partial": "已确认 {{ok}} 条，{{fail}} 条失败；仍在本页的失败记录保留勾选，可重试。"
+      "partial": "已确认 {{ok}} 条，{{fail}} 条失败；仍在本页的失败记录保留勾选，可重试。",
+      "select_record": "选择上报记录 #{{id}}"
     },
     "code_titles": {
       "core_telemetry_failed": "无法读取内核状态或流量",
@@ -1119,7 +1120,8 @@
       "last_seen": "最近出现"
     },
     "load_failed_title": "暂时无法加载节点问题",
-    "acknowledge_all": "确认全部 {{count}} 条已查看"
+    "acknowledge_all": "确认全部 {{count}} 条已查看",
+    "acknowledge_selected_other": "确认所选 {{count}} 条已查看"
   },
   "geo_anomalies": {
     "incomplete": "有面板读取失败，这个数字是下限而不是总数。",

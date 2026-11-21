@@ -192,10 +192,10 @@ export default function SyncTasksView() {
           rowOptions: r => (isRetired(r) ? { selectable: false, state: 'dimmed' } : undefined),
           bulkActions: (ctx: BulkContext<SyncTask>) => (
             <>
-              <AsyncButton size="sm" variant="outline" icon={<IconRefresh />} disabled={batchBusy !== ''} pending={batchBusy === 'retry'} onClick={() => runBatch('retry', ctx.loadedRows)}>
+              <AsyncButton size="sm" variant="outline" icon={<IconRefresh />} disabled={batchBusy !== ''} pending={batchBusy === 'retry'} onClick={() => runBatch('retry', ctx.loadedRows.filter(r => !isRetired(r)))}>
                 {t('sync_tasks.batch_retry')}
               </AsyncButton>
-              <AsyncButton size="sm" variant="outline" className="text-destructive" disabled={batchBusy !== ''} pending={batchBusy === 'cancel'} onClick={() => batchCancel(ctx.loadedRows)}>
+              <AsyncButton size="sm" variant="outline" className="text-destructive" disabled={batchBusy !== ''} pending={batchBusy === 'cancel'} onClick={() => batchCancel(ctx.loadedRows.filter(r => !isRetired(r)))}>
                 {t('sync_tasks.batch_cancel')}
               </AsyncButton>
             </>
