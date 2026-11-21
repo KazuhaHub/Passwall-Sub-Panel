@@ -1,31 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Alert,
-  Autocomplete,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Divider,
-  FormControlLabel,
-  IconButton,
-  List,
-  ListItemButton,
-  ListItemText,
-  MenuItem,
-  Stack,
-  Switch,
-  TextField,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
-import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
-import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -41,6 +14,17 @@ import {
   type MihomoSubRule,
 } from '@/api/rules'
 import type { Group } from '@/api/types'
+import { LevelAlert } from '@/components/LevelAlert'
+import { OptionCombobox, type ComboOption } from '@/components/OptionCombobox'
+import { IconButton } from '@/components/common/IconButton'
+import { Field } from '@/components/form/Field'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Switch } from '@/components/ui/switch'
+import { IconAdd, IconArrowDown, IconArrowUp, IconDelete, IconDrag, IconReset, IconSpinner } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from '@/utils/proxyGroupMembers'
 
 type MemberMap = Record<string, ProxyGroupMember[]>
@@ -65,11 +49,9 @@ interface Props {
 }
 
 type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
-type AddOption = { value: string | number; label: string; unavailable?: boolean }
+type AddOption = ComboOption<string | number>
 
 export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
   const [inspection, setInspection] = useState<ProxyGroupInspection | null>(null)
   const [selected, setSelected] = useState('')
@@ -241,7 +223,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   const lineNodeOptions = useMemo<AddOption[]>(() => (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name })), [inspection])
   const addOptions = useMemo<AddOption[]>(() => {
     switch (addKind) {
-      case 'line': return (inspection?.lines || []).filter(line => line.node_id === lineNode?.id).map(line => ({ value: JSON.stringify([line.node_id, line.line_id]), label: `${line.kind === 'direct' ? '' : `${line.name} `}[${t(`admin:rules.members.line_type_${line.kind}`)}]`, unavailable: !line.available }))
+      case 'line': return (inspection?.lines || []).filter(line => line.node_id === lineNode?.id).map(line => ({ value: JSON.stringify([line.node_id, line.line_id]), label: `${line.kind === 'direct' ? '' : `${line.name} `}[${t(`admin:rules.members.line_type_${line.kind}`)}]`, note: line.available ? undefined : t('admin:rules.members.line_unavailable') }))
       case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))
@@ -253,6 +235,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   }, [addKind, inspection, lineNode?.id, mihomoRematchOutbounds, selected, t])
 
   const selectedAddOption = addOptions.find(option => option.value === addValue) || null
+  const noMatch = t('admin:rules.members.no_match')
 
   function addMember() {
     if (addKind === 'line' && (!lineNode || !selectedAddOption)) return
@@ -275,194 +258,193 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
     setAddValue(null)
   }
 
+  const dot = (title: string) => (
+    <span role="img" aria-label={title} title={title} className="size-2 shrink-0 rounded-full bg-primary" />
+  )
+
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px minmax(0, 1fr)' }, height: { xs: 'auto', md: 560 }, minHeight: 560, border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
-      <Box sx={{ borderRight: { md: `1px solid ${md.outlineVariant}` }, bgcolor: md.surfaceContainerLow, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <Box sx={{ p: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 1, minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.groups_title')}</Typography>
-              {groupOrderDirty && (
-                <Tooltip title={t('admin:rules.members.order_unsaved')}>
-                  <Box component="span" sx={{ width: 10, height: 10, flexShrink: 0, borderRadius: '50%', bgcolor: md.primary }} />
-                </Tooltip>
-              )}
-            </Stack>
-            <Tooltip title={t('admin:rules.members.restore_group_order')}>
-              <IconButton size="small" onClick={() => onGroupOrderChange([])}>
-                <RestartAltIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-        </Box>
-        {loading && !inspection ? <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={22} /></Box> : (
-          <List dense disablePadding sx={{ overflowY: 'auto', minHeight: 0 }}>
-            {orderedGroups.map((group, index) => (
-              <ListItemButton key={group.name} selected={group.name === selected} draggable
-                onClick={() => setSelected(group.name)}
-                onDragStart={() => setGroupDragIndex(index)} onDragEnd={() => setGroupDragIndex(null)}
-                onDragOver={event => event.preventDefault()}
-                onDrop={() => { if (groupDragIndex !== null) moveGroup(groupDragIndex, index); setGroupDragIndex(null) }}
-                sx={{ gap: 0.25, borderBottom: `1px solid ${md.outlineVariant}`, opacity: groupDragIndex === index ? 0.5 : 1 }}>
-                <DragIndicatorIcon fontSize="small" sx={{ flexShrink: 0, cursor: 'grab', color: md.onSurfaceVariant }} />
-                <ListItemText primary={group.name} secondary={group.members[0] ? memberLabel(group.members[0]) : '—'}
-                  sx={{ minWidth: 0, mr: 0.25 }} slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }} />
-                {(!proxyGroupMemberListsEqual(members[group.name], initialMembers[group.name]) || !proxyGroupOptionsEqual(options[group.name], initialOptions[group.name])) && (
-                  <Tooltip title={t('admin:rules.members.unsaved')}>
-                    <Box component="span" sx={{ width: 10, height: 10, flexShrink: 0, borderRadius: '50%', bgcolor: md.primary }} />
-                  </Tooltip>
-                )}
-                <Tooltip title={t('admin:rules.members.move_group_up')}>
-                  <span>
-                    <IconButton size="small" disabled={index === 0} onClick={event => { event.stopPropagation(); moveGroup(index, index - 1) }}>
-                      <ArrowUpwardIcon sx={{ fontSize: 17 }} />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-                <Tooltip title={t('admin:rules.members.move_group_down')}>
-                  <span>
-                    <IconButton size="small" disabled={index === orderedGroups.length - 1} onClick={event => { event.stopPropagation(); moveGroup(index, index + 1) }}>
-                      <ArrowDownwardIcon sx={{ fontSize: 17 }} />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              </ListItemButton>
-            ))}
-          </List>
+    <div className="grid min-h-[35rem] grid-cols-1 overflow-hidden rounded-lg border md:h-[35rem] md:grid-cols-[17.5rem_minmax(0,1fr)]">
+      <div className="flex min-h-0 flex-col border-b bg-muted/30 md:border-r md:border-b-0">
+        <div className="flex items-center justify-between gap-2 border-b p-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="text-sm font-semibold">{t('admin:rules.members.groups_title')}</h3>
+            {groupOrderDirty && dot(t('admin:rules.members.order_unsaved'))}
+          </div>
+          <IconButton label={t('admin:rules.members.restore_group_order')} size="icon-sm" onClick={() => onGroupOrderChange([])}>
+            <IconReset />
+          </IconButton>
+        </div>
+        {loading && !inspection ? <div className="flex justify-center p-6"><IconSpinner className="animate-spin text-muted-foreground" aria-hidden /></div> : (
+          <ul className="max-h-60 min-h-0 overflow-y-auto md:max-h-none">
+            {orderedGroups.map((group, index) => {
+              const edited = !proxyGroupMemberListsEqual(members[group.name], initialMembers[group.name]) || !proxyGroupOptionsEqual(options[group.name], initialOptions[group.name])
+              return (
+                <li key={group.name}
+                  draggable
+                  onDragStart={() => setGroupDragIndex(index)} onDragEnd={() => setGroupDragIndex(null)}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={() => { if (groupDragIndex !== null) moveGroup(groupDragIndex, index); setGroupDragIndex(null) }}
+                  className={cn('flex items-center gap-0.5 border-b pr-1 pl-1', group.name === selected && 'bg-accent', groupDragIndex === index && 'opacity-50')}>
+                  <IconDrag aria-hidden className="size-4 shrink-0 cursor-grab text-muted-foreground" />
+                  <button type="button" aria-current={group.name === selected ? 'true' : undefined} onClick={() => setSelected(group.name)}
+                    className="min-w-0 flex-1 rounded-md px-1.5 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                    <span className="block truncate text-sm font-medium" title={group.name}>{group.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{group.members[0] ? memberLabel(group.members[0]) : '—'}</span>
+                  </button>
+                  {edited && dot(t('admin:rules.members.unsaved'))}
+                  <IconButton label={t('admin:rules.members.move_group_up')} size="icon-xs" disabled={index === 0} onClick={() => moveGroup(index, index - 1)}><IconArrowUp /></IconButton>
+                  <IconButton label={t('admin:rules.members.move_group_down')} size="icon-xs" disabled={index === orderedGroups.length - 1} onClick={() => moveGroup(index, index + 1)}><IconArrowDown /></IconButton>
+                </li>
+              )
+            })}
+          </ul>
         )}
-      </Box>
+      </div>
 
-      <Box sx={{ p: 2.5, minWidth: 0, overflowY: 'auto' }}>
+      <div className="min-w-0 overflow-y-auto p-4 sm:p-5">
         {!current ? (
-          <Box sx={{ py: 10, textAlign: 'center', color: md.onSurfaceVariant }}>{t('admin:rules.members.no_groups')}</Box>
+          <p className="py-16 text-center text-sm text-muted-foreground">{t('admin:rules.members.no_groups')}</p>
         ) : <>
-          <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1, alignItems: { sm: 'center' } }}>
-            <Box>
-              <Typography variant="h6">{current.name}</Typography>
-              <Typography variant="caption" color="text.secondary">{t(`admin:rules.members.type_hint.${currentType}`)}</Typography>
-            </Box>
-            <Button size="small" startIcon={<RestartAltIcon />} onClick={resetCurrent} disabled={!currentConfigured && !currentOptionsConfigured}>
-              {t('admin:rules.members.restore_default')}
+          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold break-words">{current.name}</h3>
+              <p className="text-xs text-muted-foreground">{t(`admin:rules.members.type_hint.${currentType}`)}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={resetCurrent} disabled={!currentConfigured && !currentOptionsConfigured}>
+              <IconReset />{t('admin:rules.members.restore_default')}
             </Button>
-          </Stack>
+          </div>
 
-          <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerLow }}>
-            <TextField select fullWidth size="small" label={t('admin:rules.members.group_type')}
-              value={currentType} onChange={e => changeType(e.target.value as ProxyGroupType)}>
-              <MenuItem value="select">{t('admin:rules.members.type.select')}</MenuItem>
-              <MenuItem value="url-test">{t('admin:rules.members.type.url-test')}</MenuItem>
-              <MenuItem value="fallback">{t('admin:rules.members.type.fallback')}</MenuItem>
-              <MenuItem value="load-balance">{t('admin:rules.members.type.load-balance')}</MenuItem>
-            </TextField>
-
-            <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
-              <TextField size="small" label={t('admin:rules.members.test_url')} value={currentOptions.url || ''}
-                onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
+          <div className="mt-4 flex flex-col gap-3 rounded-lg bg-muted/40 p-3">
+            <Field label={t('admin:rules.members.group_type')}>
+              <NativeSelect value={currentType} onChange={e => changeType(e.target.value as ProxyGroupType)}>
+                <option value="select">{t('admin:rules.members.type.select')}</option>
+                <option value="url-test">{t('admin:rules.members.type.url-test')}</option>
+                <option value="fallback">{t('admin:rules.members.type.fallback')}</option>
+                <option value="load-balance">{t('admin:rules.members.type.load-balance')}</option>
+              </NativeSelect>
+            </Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label={t('admin:rules.members.test_url')} className="sm:col-span-2">
+                <Input value={currentOptions.url || ''} onChange={e => updateOptions({ url: e.target.value })} />
+              </Field>
               {currentType !== 'select' && <>
-                <TextField size="small" type="number" label={t('admin:rules.members.interval')}
-                  value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })}
-                  slotProps={{ htmlInput: { min: 0, step: 1 } }} />
-                <TextField size="small" type="number" label={t('admin:rules.members.timeout')}
-                  value={currentOptions.timeout ?? ''} onChange={e => updateOptions({ timeout: Number(e.target.value) })}
-                  slotProps={{ htmlInput: { min: 1, step: 1 } }} />
+                <Field label={t('admin:rules.members.interval')}>
+                  <Input type="number" min={0} step={1} value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })} />
+                </Field>
+                <Field label={t('admin:rules.members.timeout')}>
+                  <Input type="number" min={1} step={1} value={currentOptions.timeout ?? ''} onChange={e => updateOptions({ timeout: Number(e.target.value) })} />
+                </Field>
                 {currentType === 'url-test' && (
-                  <TextField size="small" type="number" label={t('admin:rules.members.tolerance')}
-                    value={currentOptions.tolerance ?? ''} onChange={e => updateOptions({ tolerance: Number(e.target.value) })}
-                    slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                  <Field label={t('admin:rules.members.tolerance')}>
+                    <Input type="number" min={0} step={1} value={currentOptions.tolerance ?? ''} onChange={e => updateOptions({ tolerance: Number(e.target.value) })} />
+                  </Field>
                 )}
                 {currentType === 'load-balance' && (
-                  <TextField select size="small" label={t('admin:rules.members.strategy')}
-                    value={currentOptions.strategy || 'consistent-hashing'} onChange={e => updateOptions({ strategy: e.target.value as ProxyGroupOptions['strategy'] })}
-                    helperText={t(`admin:rules.members.strategy_hint.${currentOptions.strategy || 'consistent-hashing'}`)} sx={{ gridColumn: '1 / -1' }}>
-                    <MenuItem value="round-robin">{t('admin:rules.members.strategy_value.round-robin')}</MenuItem>
-                    <MenuItem value="consistent-hashing">{t('admin:rules.members.strategy_value.consistent-hashing')}</MenuItem>
-                    <MenuItem value="sticky-sessions">{t('admin:rules.members.strategy_value.sticky-sessions')}</MenuItem>
-                  </TextField>
+                  <Field label={t('admin:rules.members.strategy')} hint={t(`admin:rules.members.strategy_hint.${currentOptions.strategy || 'consistent-hashing'}`)} className="sm:col-span-2">
+                    <NativeSelect value={currentOptions.strategy || 'consistent-hashing'} onChange={e => updateOptions({ strategy: e.target.value as ProxyGroupOptions['strategy'] })}>
+                      <option value="round-robin">{t('admin:rules.members.strategy_value.round-robin')}</option>
+                      <option value="consistent-hashing">{t('admin:rules.members.strategy_value.consistent-hashing')}</option>
+                      <option value="sticky-sessions">{t('admin:rules.members.strategy_value.sticky-sessions')}</option>
+                    </NativeSelect>
+                  </Field>
                 )}
-                <FormControlLabel sx={{ m: 0, minHeight: 40, columnGap: 1 }}
-                  control={<Switch size="small" checked={currentOptions.lazy ?? true} onChange={(_, checked) => updateOptions({ lazy: checked })} />}
-                  label={t('admin:rules.members.lazy')} />
+                <Field label={t('admin:rules.members.lazy')} orientation="horizontal" className="sm:col-span-2">
+                  <Switch checked={currentOptions.lazy ?? true} onCheckedChange={checked => updateOptions({ lazy: checked })} />
+                </Field>
               </>}
-            </Box>
-            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.client_compatibility')}</Alert>
-          </Box>
+            </div>
+            <LevelAlert level="info">{t('admin:rules.members.client_compatibility')}</LevelAlert>
+          </div>
 
-          <Stack spacing={1} sx={{ mt: 2 }}>
-            {currentMembers.map((member, index) => (
-              <Box key={`${memberKey(member)}:${index}`} draggable
-                onDragStart={() => setDragIndex(index)} onDragEnd={() => setDragIndex(null)}
-                onDragOver={e => e.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null) }}
-                sx={{ display: 'grid', gridTemplateColumns: { xs: '20px 24px minmax(0, 1fr)', sm: '20px 24px minmax(0, 1fr) auto' }, alignItems: 'center', gap: 1, p: 1, border: `1px solid ${md.outlineVariant}`, borderRadius: 1.5, bgcolor: index === 0 && emphasizeFirst ? md.primaryContainer : md.surfaceContainer, opacity: dragIndex === index ? 0.5 : 1 }}>
-                <DragIndicatorIcon fontSize="small" sx={{ cursor: 'grab', color: md.onSurfaceVariant }} />
-                <Chip size="small" label={index + 1} color={index === 0 && emphasizeFirst ? 'primary' : 'default'} />
-                <Box sx={{ minWidth: 0 }}>
-                  <Tooltip title={memberKey(member)} placement="top" describeChild>
-                    <Typography component="span" noWrap tabIndex={0} sx={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle', fontSize: 14, fontWeight: 500, color: md.onSurface }}>{memberOrderLabel(member)}</Typography>
-                  </Tooltip>
-                </Box>
-                <Stack direction="row" sx={{ gridColumn: { xs: '3', sm: 'auto' }, justifySelf: 'end' }}>
-                <Tooltip title={t('admin:rules.members.move_up')}><span><IconButton size="small" disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUpwardIcon fontSize="small" /></IconButton></span></Tooltip>
-                <Tooltip title={t('admin:rules.members.move_down')}><span><IconButton size="small" disabled={index === currentMembers.length - 1} onClick={() => move(index, index + 1)}><ArrowDownwardIcon fontSize="small" /></IconButton></span></Tooltip>
-                <IconButton size="small" color="error" aria-label={`${t('common:actions.delete')} ${memberOrderLabel(member)}`} disabled={currentMembers.length <= 1} onClick={() => remove(index)}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-                </Stack>
-              </Box>
-            ))}
-          </Stack>
+          <ol className="mt-4 flex flex-col gap-2">
+            {currentMembers.map((member, index) => {
+              const first = index === 0 && emphasizeFirst
+              return (
+                <li key={`${memberKey(member)}:${index}`} draggable
+                  onDragStart={() => setDragIndex(index)} onDragEnd={() => setDragIndex(null)}
+                  onDragOver={e => e.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null) }}
+                  className={cn('grid grid-cols-[1.25rem_auto_minmax(0,1fr)] items-center gap-2 rounded-lg border p-2 sm:grid-cols-[1.25rem_auto_minmax(0,1fr)_auto]', first ? 'bg-accent' : 'bg-card', dragIndex === index && 'opacity-50')}>
+                  <IconDrag aria-hidden className="size-4 cursor-grab text-muted-foreground" />
+                  <Badge variant={first ? 'default' : 'secondary'} className="tabular-nums">{index + 1}</Badge>
+                  <span tabIndex={0} title={memberKey(member)} className="min-w-0 truncate rounded-sm text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">{memberOrderLabel(member)}</span>
+                  <div className="col-span-3 flex justify-self-end sm:col-span-1">
+                    <IconButton label={t('admin:rules.members.move_up')} size="icon-sm" disabled={index === 0} onClick={() => move(index, index - 1)}><IconArrowUp /></IconButton>
+                    <IconButton label={t('admin:rules.members.move_down')} size="icon-sm" disabled={index === currentMembers.length - 1} onClick={() => move(index, index + 1)}><IconArrowDown /></IconButton>
+                    <IconButton label={`${t('common:actions.delete')} ${memberOrderLabel(member)}`} size="icon-sm" disabled={currentMembers.length <= 1} onClick={() => remove(index)}><IconDelete /></IconButton>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
 
-          <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerLow }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 600, mb: 1 }}>{t('admin:rules.members.add_title')}</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{t(`admin:rules.members.kind_${addKind}_hint`)}</Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField select size="small" value={addKind} onChange={e => { setAddKind(e.target.value as AddKind); setAddValue(null); setLineNodeID(null) }} sx={{ minWidth: 150 }}>
-                <MenuItem value="node">{t('admin:rules.members.kind_node')}</MenuItem>
-                <MenuItem value="line">{t('admin:rules.members.kind_line')}</MenuItem>
-                <MenuItem value="remaining">{t('admin:rules.members.kind_remaining')}</MenuItem>
-                <MenuItem value="region">{t('admin:rules.members.kind_region')}</MenuItem>
-                <MenuItem value="tag">{t('admin:rules.members.kind_tag')}</MenuItem>
-                <MenuItem value="builtin">{t('admin:rules.members.kind_builtin')}</MenuItem>
-                <MenuItem value="proxy_group">{t('admin:rules.members.kind_group')}</MenuItem>
-                <MenuItem value="rematch">{t('admin:rules.members.kind_rematch')}</MenuItem>
-              </TextField>
-              {addKind === 'line' ? <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1, flex: 1, minWidth: { xs: 0, sm: 180 } }}>
-                <Autocomplete<AddOption> size="small" options={lineNodeOptions} value={lineNodeOptions.find(option => option.value === lineNodeID) || null}
-                  onChange={(_, option) => { setLineNodeID(option ? Number(option.value) : null); setAddValue(null) }}
-                  getOptionLabel={option => option.label} getOptionKey={option => option.value}
-                  sx={{ minWidth: 0 }} renderInput={params => <TextField {...params} label={t('admin:rules.members.select_line_node')} />} />
-                <Autocomplete<AddOption> key={lineNode?.id ?? 'no-node'} size="small" options={addOptions} value={selectedAddOption} disabled={!lineNode}
-                  onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label} getOptionKey={option => option.value}
-                  renderOption={({ key, ...props }, option) => <li key={key} {...props}><Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{option.label}{option.unavailable && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{t('admin:rules.members.line_unavailable')}</Typography>}</Box></li>}
-                  sx={{ minWidth: 0 }} renderInput={params => <TextField {...params} label={t('admin:rules.members.select_line')} />} />
-              </Box> : <Autocomplete<AddOption> size="small" options={addOptions} value={selectedAddOption}
-                onChange={(_, option) => setAddValue(option?.value ?? null)} getOptionLabel={option => option.label}
-                sx={{ flex: 1, minWidth: 180 }} renderInput={params => <TextField {...params} placeholder={t('admin:rules.members.search_placeholder')} />} />}
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={addMember} disabled={addKind === 'line' ? !lineNode || !selectedAddOption : addKind !== 'remaining' && addValue === null}>{t('admin:rules.members.add')}</Button>
-            </Stack>
-          </Box>
+          <div className="mt-4 rounded-lg bg-muted/40 p-3">
+            <h4 className="text-[13px] font-semibold">{t('admin:rules.members.add_title')}</h4>
+            <p className="mt-0.5 mb-2 text-xs text-muted-foreground">{t(`admin:rules.members.kind_${addKind}_hint`)}</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="sm:w-44">
+                <NativeSelect aria-label={t('admin:rules.members.kind_label')} value={addKind} onChange={e => { setAddKind(e.target.value as AddKind); setAddValue(null); setLineNodeID(null) }}>
+                  <option value="node">{t('admin:rules.members.kind_node')}</option>
+                  <option value="line">{t('admin:rules.members.kind_line')}</option>
+                  <option value="remaining">{t('admin:rules.members.kind_remaining')}</option>
+                  <option value="region">{t('admin:rules.members.kind_region')}</option>
+                  <option value="tag">{t('admin:rules.members.kind_tag')}</option>
+                  <option value="builtin">{t('admin:rules.members.kind_builtin')}</option>
+                  <option value="proxy_group">{t('admin:rules.members.kind_group')}</option>
+                  <option value="rematch">{t('admin:rules.members.kind_rematch')}</option>
+                </NativeSelect>
+              </div>
+              {addKind === 'line' ? (
+                <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                  <OptionCombobox aria-label={t('admin:rules.members.select_line_node')} placeholder={t('admin:rules.members.select_line_node')} emptyText={noMatch}
+                    options={lineNodeOptions} value={lineNodeID}
+                    onChange={next => { setLineNodeID(next === null ? null : Number(next)); setAddValue(null) }} />
+                  <OptionCombobox key={lineNode?.id ?? 'no-node'} aria-label={t('admin:rules.members.select_line')} placeholder={t('admin:rules.members.select_line')} emptyText={noMatch}
+                    options={addOptions} value={selectedAddOption?.value ?? null} disabled={!lineNode}
+                    onChange={next => setAddValue(next)} />
+                </div>
+              ) : (
+                <div className="min-w-0 flex-1">
+                  <OptionCombobox key={addKind} aria-label={t(`admin:rules.members.kind_${addKind}`)} placeholder={t('admin:rules.members.search_placeholder')} emptyText={noMatch}
+                    options={addOptions} value={selectedAddOption?.value ?? null} onChange={next => setAddValue(next)} />
+                </div>
+              )}
+              <Button variant="outline" onClick={addMember}
+                disabled={addKind === 'line' ? !lineNode || !selectedAddOption : addKind !== 'remaining' && addValue === null}>
+                <IconAdd />{t('admin:rules.members.add')}
+              </Button>
+            </div>
+          </div>
 
-          {currentIssues.map((issue, index) => <Alert key={`${issue.message}:${index}`} severity={issue.level} sx={{ mt: 1.5 }}>{issueLabel(issue)}</Alert>)}
-          <Divider sx={{ my: 2 }} />
-          <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1, alignItems: { sm: 'center' } }}>
-            <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.preview_title')}</Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}>
-              <Typography variant="body2" sx={{ flexShrink: 0 }}>{t('admin:rules.members.preview_group_label')}</Typography>
-              <TextField select size="small" value={previewGroupID ?? resolvedPreviewGroupID ?? ''} onChange={e => setPreviewGroupID(Number(e.target.value))} sx={{ minWidth: { xs: 0, sm: 220 } }}>
-                {previewGroups.map(group => <MenuItem key={group.id} value={group.id}>{group.name}</MenuItem>)}
-              </TextField>
-            </Stack>
-          </Stack>
-          <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-            {previewLoading ? <CircularProgress size={18} /> : previewError ? <Alert severity="error">{previewError}</Alert>
-              : preview?.status !== 'ready' ? preview && <Alert severity="info">{t(`admin:rules.members.preview_${preview.status}`)}</Alert>
+          <div className="mt-3 flex flex-col gap-2">
+            {currentIssues.map((issue, index) => <LevelAlert key={`${issue.message}:${index}`} level={issue.level}>{issueLabel(issue)}</LevelAlert>)}
+          </div>
+
+          <hr className="my-4" />
+          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+            <h3 className="text-sm font-semibold">{t('admin:rules.members.preview_title')}</h3>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="text-sm text-muted-foreground">{t('admin:rules.members.preview_group_label')}</span>
+              <div className="sm:w-56">
+                <NativeSelect aria-label={t('admin:rules.members.preview_group_label')} value={previewGroupID ?? resolvedPreviewGroupID ?? ''} onChange={e => setPreviewGroupID(Number(e.target.value))}>
+                  {previewGroupID === undefined && resolvedPreviewGroupID === undefined && <option value="" disabled />}
+                  {previewGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </NativeSelect>
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {previewLoading ? <IconSpinner className="animate-spin text-muted-foreground" aria-hidden />
+              : previewError ? <LevelAlert level="error" className="w-full">{previewError}</LevelAlert>
+              : preview?.status !== 'ready' ? preview && <LevelAlert level="info" className="w-full">{t(`admin:rules.members.preview_${preview.status}`)}</LevelAlert>
               : currentPreview ? <>
-                {['url-test', 'load-balance'].includes(currentPreview.type || '') && currentPreview.members.length < 2 && <Alert severity="warning">{t('admin:rules.members.issues.insufficient_auto_members')}</Alert>}
-                {currentPreview.members.map((name, index) => <Chip key={`${name}:${index}`} size="small" color={index === 0 ? 'primary' : 'default'} label={`${index + 1}. ${name}`} />)}
-                {!currentPreview.members.length && <Typography variant="caption">{t('admin:rules.members.preview_empty')}</Typography>}
-              </> : preview && <Typography variant="caption">{t('admin:rules.members.preview_absent')}</Typography>}
-          </Box>
+                {['url-test', 'load-balance'].includes(currentPreview.type || '') && currentPreview.members.length < 2 && <LevelAlert level="warning" className="w-full">{t('admin:rules.members.issues.insufficient_auto_members')}</LevelAlert>}
+                {currentPreview.members.map((name, index) => <Badge key={`${name}:${index}`} variant={index === 0 ? 'default' : 'secondary'}>{`${index + 1}. ${name}`}</Badge>)}
+                {!currentPreview.members.length && <span className="text-xs text-muted-foreground">{t('admin:rules.members.preview_empty')}</span>}
+              </> : preview && <span className="text-xs text-muted-foreground">{t('admin:rules.members.preview_absent')}</span>}
+          </div>
         </>}
-      </Box>
-    </Box>
+      </div>
+    </div>
   )
 }
