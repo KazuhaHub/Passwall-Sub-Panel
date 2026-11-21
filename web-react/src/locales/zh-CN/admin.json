@@ -4606,7 +4606,8 @@
       "group_connection": "连接",
       "group_test": "连接测试",
       "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
-    }
+    },
+    "resource_state": "资源：{{state}}"
   },
   "diagnostics": {
     "title": "运行诊断",

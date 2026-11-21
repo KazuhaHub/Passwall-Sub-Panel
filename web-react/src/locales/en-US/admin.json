@@ -4632,7 +4632,8 @@
       "group_connection": "Connection",
       "group_test": "Connection test",
       "test_hint": "The test reaches the server with the saved settings and records its version. Save your changes first."
-    }
+    },
+    "resource_state": "Resources: {{state}}"
   },
   "diagnostics": {
     "title": "Diagnostics",

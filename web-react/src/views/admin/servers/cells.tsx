@@ -94,7 +94,7 @@ export function StatusCell({ s, probe, access, onOpenAccess }: {
       {capTone !== 'none' && (
         <span title={t(`admin:servers.ip_cap.${capTip}`)}><StatusBadge tone={ipCapTone[capTone]} label={t(`admin:servers.ip_cap.${capKey}`)} /></span>
       )}
-      {resource && <StatusBadge tone={resource.tone} label={t(`admin:nodeMetrics.freshness.${s.node_resource_health}`)} />}
+      {resource && <StatusBadge tone={resource.tone} label={t('admin:servers.resource_state', { state: t(`admin:nodeMetrics.freshness.${s.node_resource_health}`) })} />}
       {!!s.fronts_inactive && s.panel_type === 'psp' && (
         <span title={t('admin:servers.fronts.row_inactive', { count: s.fronts_inactive })}><StatusBadge tone="warning" label={t('admin:servers.fronts.row_inactive', { count: s.fronts_inactive })} /></span>
       )}
@@ -170,10 +170,10 @@ export function VersionCell({ s, nodeReleases, nodeReleaseCheckFailed, suiReleas
       </div>
       {badge && <StatusBadge tone={badge.tone} label={badge.label} quiet={false} />}
       {update && <Badge variant="secondary">{t('admin:servers.update_available', { latest: update })}</Badge>}
-      {native && nodeReleaseCheckFailed && <span className="text-xs text-muted-foreground">{t('admin:servers.native.update_check_failed')}</span>}
+      {native && nodeReleaseCheckFailed && <span className="whitespace-normal text-xs text-muted-foreground">{t('admin:servers.native.update_check_failed')}</span>}
       {/* S-UI KEEPS A MANUAL UPGRADE, and saying so is the difference between "there is a newer release" and "there is
           something for you to do". Shown only when there is an update, so it reads as a step and not as a permanent caveat. */}
-      {s.panel_type === 'sui' && !!update && <span className="text-xs text-muted-foreground">{t('admin:servers.sui_update.manual_hint')}</span>}
+      {s.panel_type === 'sui' && !!update && <span className="whitespace-normal text-xs text-muted-foreground">{t('admin:servers.sui_update.manual_hint')}</span>}
     </div>
   )
 }
