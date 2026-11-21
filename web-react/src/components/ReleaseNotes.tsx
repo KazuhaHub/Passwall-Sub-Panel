@@ -1,7 +1,8 @@
-import { Box, Link, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
 import Markdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+
+import { cn } from '@/lib/utils'
 
 // A RELEASE BODY IS MARKDOWN WRITTEN FOR A GITHUB RELEASE PAGE — a heading, one
 // bulleted pull request per line, a bold "Full Changelog" line — and GitHub
@@ -44,9 +45,11 @@ export const legalMarkdownProps: typeof safeMarkdownProps = {
   urlTransform: url => safeURL(url, legalProtocols),
 }
 
+const LINK = 'text-primary underline underline-offset-2 hover:no-underline'
+
 export const safeLinkComponents: Pick<Components, 'a' | 'img'> = {
   a: ({ href, children }) => href
-    ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
+    ? <a href={href} target="_blank" rel="noopener noreferrer" className={LINK}>{children}</a>
     : <>{children}</>,
   img: ({ alt }) => alt ? <>{alt}</> : null,
 }
@@ -55,13 +58,13 @@ export const safeLinkComponents: Pick<Components, 'a' | 'img'> = {
 export const legalLinkComponents: typeof safeLinkComponents = {
   ...safeLinkComponents,
   a: ({ href, children }) => href?.startsWith('mailto:')
-    ? <Link href={href}>{children}</Link>
+    ? <a href={href} className={LINK}>{children}</a>
     : href
-      ? <Link href={href} target="_blank" rel="noopener noreferrer">{children}</Link>
+      ? <a href={href} target="_blank" rel="noopener noreferrer" className={LINK}>{children}</a>
       : <>{children}</>,
 }
 
-// Tailwind's reset (global now) strips what a browser gives these elements by
+// Tailwind's reset (global) strips what a browser gives these elements by
 // default: list markers and indentation, block-quote and code-block styling, and
 // table borders and padding. In a terms document the numbering IS content
 // ("clause 3"), so both markdown renderers put it back here, in one place.
@@ -71,12 +74,12 @@ export const legalLinkComponents: typeof safeLinkComponents = {
 // marker, so a bullet beside it is a second one. Such a list drops its marker and its
 // indent; the items of an ordinary list around it keep theirs.
 const isTaskList = (className?: string) => className?.split(' ').includes('contains-task-list') === true
-const taskListSx = { listStyleType: 'none', pl: 0.5, '& input': { mr: 0.75, verticalAlign: 'middle' } }
+const TASK_LIST = 'list-none pl-1 [&_input]:mr-1.5 [&_input]:align-middle'
 
 export const markdownLists: Pick<Components, 'ul' | 'ol'> = {
-  ul: ({ children, className }) => <Box component="ul" sx={{ my: 0.5, pl: 3, listStyleType: 'disc', '& ul': { listStyleType: 'circle' }, '& ol, & ul': { my: 0 }, ...(isTaskList(className) && taskListSx) }}>{children}</Box>,
+  ul: ({ children, className }) => <ul className={cn('my-1 list-disc pl-6 [&_ol]:my-0 [&_ul]:my-0 [&_ul]:list-[circle]', isTaskList(className) && TASK_LIST)}>{children}</ul>,
   // `start` is what makes "3. third" render as 3, not 1: dropping it renumbered a list that continues across a block.
-  ol: ({ children, className, start }) => <Box component="ol" start={start ?? undefined} sx={{ my: 0.5, pl: 3, listStyleType: 'decimal', '& ol': { listStyleType: 'lower-alpha' }, '& ol, & ul': { my: 0 }, ...(isTaskList(className) && taskListSx) }}>{children}</Box>,
+  ol: ({ children, className, start }) => <ol start={start ?? undefined} className={cn('my-1 list-decimal pl-6 [&_ol]:list-[lower-alpha] [&_ol]:my-0 [&_ul]:my-0', isTaskList(className) && TASK_LIST)}>{children}</ol>,
 }
 
 // GFM column alignment (`:-:`, `-:`) arrives as a style prop on th and td; the cell
@@ -84,41 +87,43 @@ export const markdownLists: Pick<Components, 'ul' | 'ol'> = {
 type Align = 'left' | 'center' | 'right'
 const alignOf = (style?: { textAlign?: string }): Align | undefined =>
   style?.textAlign === 'left' || style?.textAlign === 'center' || style?.textAlign === 'right' ? style.textAlign : undefined
+// The alignment goes on as a class, not an inline style, and only for the three values above: nothing else from the document reaches the DOM.
+const ALIGN: Record<Align, string> = { left: 'text-left', center: 'text-center', right: 'text-right' }
 
 export const markdownBlocks: Pick<Components, 'blockquote' | 'pre' | 'code' | 'table' | 'th' | 'td' | 'hr'> = {
   blockquote: ({ children }: { children?: ReactNode }) =>
-    <Box component="blockquote" sx={{ my: 1, mx: 0, pl: 2, py: 0.25, borderLeft: 3, borderColor: 'divider', borderStyle: 'solid', borderWidth: '0 0 0 3px', color: 'text.secondary' }}>{children}</Box>,
+    <blockquote className="my-2 border-l-[3px] border-border py-0.5 pl-4 text-muted-foreground">{children}</blockquote>,
   pre: ({ children }: { children?: ReactNode }) =>
-    <Box component="pre" sx={{ my: 1, p: 1.5, overflow: 'auto', whiteSpace: 'pre', borderRadius: 1, bgcolor: 'action.hover', fontSize: 13, '& code': { bgcolor: 'transparent', p: 0 } }}>{children}</Box>,
+    <pre className="my-2 overflow-auto rounded-md bg-muted p-3 text-[13px] whitespace-pre [&_code]:bg-transparent [&_code]:p-0">{children}</pre>,
   code: ({ children }: { children?: ReactNode }) =>
-    <Box component="code" sx={{ px: 0.5, borderRadius: 0.5, bgcolor: 'action.hover', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: '0.9em' }}>{children}</Box>,
+    <code className="rounded-sm bg-muted px-1 font-mono text-[0.9em]">{children}</code>,
   table: ({ children }: { children?: ReactNode }) =>
-    <Box sx={{ my: 1, overflowX: 'auto' }}><Box component="table" sx={{ borderCollapse: 'collapse' }}>{children}</Box></Box>,
+    <div className="my-2 overflow-x-auto"><table className="border-collapse">{children}</table></div>,
   th: ({ children, style }: { children?: ReactNode; style?: { textAlign?: string } }) =>
-    <Box component="th" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: alignOf(style) ?? 'left', fontWeight: 600 }}>{children}</Box>,
+    <th className={cn('border border-border px-2 py-1 font-semibold', ALIGN[alignOf(style) ?? 'left'])}>{children}</th>,
   td: ({ children, style }: { children?: ReactNode; style?: { textAlign?: string } }) =>
-    <Box component="td" sx={{ border: 1, borderColor: 'divider', borderStyle: 'solid', px: 1, py: 0.5, textAlign: alignOf(style) }}>{children}</Box>,
-  hr: () => <Box component="hr" sx={{ my: 1.5, border: 0, borderTop: 1, borderColor: 'divider', borderStyle: 'solid', borderWidth: '1px 0 0' }} />,
+    <td className={cn('border border-border px-2 py-1', alignOf(style) && ALIGN[alignOf(style)!])}>{children}</td>,
+  hr: () => <hr className="my-3 border-0 border-t border-border" />,
 }
 
-// Headings are demoted to one small size: the dialog title is the page's
+// Headings are demoted to one small size: the sheet's title is the page's
 // heading, and a release body's "##" would otherwise render larger than it.
 const heading: Components['h1'] = ({ children }) =>
-  <Typography component="h4" variant="subtitle2" sx={{ mt: 1, '&:first-of-type': { mt: 0 } }}>{children}</Typography>
+  <h4 className="mt-2 text-sm font-medium first-of-type:mt-0">{children}</h4>
 
 const components: Components = {
   h1: heading, h2: heading, h3: heading, h4: heading, h5: heading, h6: heading,
-  p: ({ children }) => <Typography variant="body2" sx={{ my: 0.5 }}>{children}</Typography>,
+  p: ({ children }) => <p className="my-1 text-sm">{children}</p>,
   ...markdownLists,
   ...markdownBlocks,
-  li: ({ children }) => <Typography component="li" variant="body2" sx={{ my: 0.25 }}>{children}</Typography>,
+  li: ({ children }) => <li className="my-0.5 text-sm">{children}</li>,
   ...safeLinkComponents,
 }
 
 export default function ReleaseNotes({ children }: { children: string }) {
-  return <Box sx={{ overflowWrap: 'anywhere' }}>
+  return <div className="[overflow-wrap:anywhere]">
     <Markdown {...safeMarkdownProps} components={components}>
       {children}
     </Markdown>
-  </Box>
+  </div>
 }

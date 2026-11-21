@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
-import { ThemeProvider } from '@mui/material/styles'
-import { createAppTheme } from '@/theme'
 import { renderAccess } from '@/test/accessControlHarness'
 import ReleaseNotes from './ReleaseNotes'
 import LegalDocument from './LegalDocument'
@@ -11,11 +9,11 @@ import LegalDocument from './LegalDocument'
 // them dropped: a table's column alignment, an ordered list's start number, and the
 // task-list marker. Both renderers share the same components, so both are held to it.
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#0061A4', language: 'en-US' })
-const style = (el: Element, prop: string) => getComputedStyle(el).getPropertyValue(prop)
+// The stylesheet is not loaded in jsdom: alignment and list style are the utility classes that carry them.
+const align = (el: Element) => ['left', 'center', 'right'].find(a => el.classList.contains(`text-${a}`)) ?? null
 
 const mounts = [
-  ['ReleaseNotes', (md: string) => render(<ThemeProvider theme={theme}><ReleaseNotes>{md}</ReleaseNotes></ThemeProvider>).container],
+  ['ReleaseNotes', (md: string) => render(<ReleaseNotes>{md}</ReleaseNotes>).container],
   ['LegalDocument', (md: string) => renderAccess(<LegalDocument content={md} dataCollection={null} />).container],
 ] as const
 
@@ -24,8 +22,8 @@ describe.each(mounts)('%s', (_name, mount) => {
     const c = mount('| left | centre | right | plain |\n| :-- | :-: | --: | --- |\n| a | b | c | d |\n')
     const th = [...c.querySelectorAll('th')]
     const td = [...c.querySelectorAll('td')]
-    expect(th.map(el => style(el, 'text-align'))).toEqual(['left', 'center', 'right', 'left'])
-    expect(td.map(el => style(el, 'text-align'))).toEqual(['left', 'center', 'right', 'start'])
+    expect(th.map(align)).toEqual(['left', 'center', 'right', 'left'])
+    expect(td.map(align)).toEqual(['left', 'center', 'right', null])
   })
 
   it('numbers an ordered list from its start', () => {
@@ -42,12 +40,12 @@ describe.each(mounts)('%s', (_name, mount) => {
     const ul = c.querySelector('ul')!
     expect(ul.querySelectorAll('input[type="checkbox"]')).toHaveLength(2)
     expect((ul.querySelector('input') as HTMLInputElement).checked).toBe(true)
-    expect(style(ul, 'list-style-type')).toBe('none')
+    expect(ul.classList.contains('list-none')).toBe(true)
   })
 
   it('still bullets an ordinary list that sits next to a task list', () => {
     const c = mount('- [x] done\n\ntext\n\n- plain\n')
     const lists = [...c.querySelectorAll('ul')]
-    expect(lists.map(l => style(l, 'list-style-type'))).toEqual(['none', 'disc'])
+    expect(lists.map(l => l.classList.contains('list-none') ? 'none' : l.classList.contains('list-disc') ? 'disc' : '?')).toEqual(['none', 'disc'])
   })
 })
