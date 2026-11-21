@@ -3157,7 +3157,6 @@
   "users": {
     "title": "用户管理",
     "create": "新增用户",
-    "edit_title": "编辑用户",
     "edit": {
       "row_changed": "该用户已被其他操作修改。当前编辑内容不会自动更新。",
       "reload_saved": "重新载入已保存值"
@@ -3199,7 +3198,6 @@
     },
     "result_title": "用户已创建",
     "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
-    "filter_group_all": "全部分组",
     "refresh": "刷新",
     "field": {
       "upn": "UPN",
@@ -3210,15 +3208,12 @@
       "group": "分组",
       "role": "角色",
       "expire_days": "有效期（天，0=永久）",
-      "expire_at": "到期时间",
-      "expire_mode_date": "到期时间",
+      "expire_mode_date": "指定日期",
       "expire_mode_permanent": "永久",
       "expire_tz_hint": "日期按面板时区 {{tz}} 计算",
-      "traffic_limit_gb": "流量上限 (GB，0=无限)",
       "period_used_gb": "本周期已用 (GB)",
       "account_enabled": "账户状态",
       "account_self_locked": "不能停用自己的账户",
-      "service_status": "代理服务状态",
       "block_violations": "违规次数：{{count}}",
       "emergency_used_count": "紧急访问已用 {{count}} 次",
       "emergency_window_until": "生效至 {{time}}（剩余 {{hours}} 小时）",
@@ -3228,7 +3223,6 @@
       "ip_limit": "并发 IP 上限",
       "device_limit": "设备数上限",
       "limit_zero_hint": "0 = 不限",
-      "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
       "ip_limit_unenforced": "以下面板会保存该上限但不执行（节点上没有可用的 fail2ban）：{{panels}}",
@@ -3243,7 +3237,11 @@
       "cap_no_clients_short": "暂无处执行",
       "device_limit_inert_short": "当前不生效",
       "limit_unsupported_short": "部分面板不支持",
-      "ip_limit_unenforced_short": "部分面板不执行"
+      "ip_limit_unenforced_short": "部分面板不执行",
+      "expire_mode": "到期",
+      "expire_date": "到期日期",
+      "level_user": "此用户",
+      "traffic_limit": "流量上限"
     },
     "role": {
       "admin": "管理员",
@@ -3269,10 +3267,16 @@
       "unlimited": "不限",
       "lifetime": "Lifetime 总量",
       "view_usage": "查看用量",
-      "created_at": "创建于"
+      "created_at": "创建于",
+      "status": "状态",
+      "validity": "有效期",
+      "subscription": "订阅",
+      "account": "账户信息",
+      "sub_hidden": "管理员和运营人员账户的订阅链接对运营人员隐藏。",
+      "not_found": "该用户已不存在",
+      "close": "关闭"
     },
     "table": {
-      "upn": "UPN",
       "display_name": "显示名",
       "group": "分组",
       "role": "角色",
@@ -3281,7 +3285,8 @@
       "status": "状态",
       "risk": "风控",
       "last_online": "最近活跃",
-      "actions": "操作"
+      "actions": "操作",
+      "user": "用户"
     },
     "relative_time": {
       "just_now": "刚刚",
@@ -3290,7 +3295,6 @@
       "days_ago": "{{count}} 天前"
     },
     "status": {
-      "enabled": "启用",
       "disabled": "禁用",
       "account_active": "账户正常",
       "service_active": "代理服务正常",
@@ -3318,19 +3322,25 @@
       "renew": "续期 30 天",
       "enable": "启用账户",
       "disable": "停用账户",
-      "delete": "删除"
+      "delete": "删除",
+      "row_menu": "{{upn}} 的操作"
     },
     "result": {
       "intro": "用户 {{upn}} 已创建。请记录初始密码 —— 这是唯一一次显示。",
       "password_label": "初始密码",
       "sub_url_label": "订阅 URL",
-      "copy": "复制"
+      "copy": "复制",
+      "reset_title": "密码已重置",
+      "reset_intro": "{{upn}} 的密码已重置。请立即记录，该密码只显示一次。"
     },
     "reason": {
       "enable_title": "启用账户",
       "disable_title": "停用账户",
       "enable_placeholder": "启用原因（可选）",
-      "disable_placeholder": "停用原因（可选）"
+      "disable_placeholder": "停用原因（可选）",
+      "label": "原因（可选）",
+      "disable_hint": "用户将无法登录，订阅也会停用。",
+      "enable_hint": "用户可再次登录，订阅是否可用取决于服务状态。"
     },
     "validate": {
       "upn_required": "请填写 UPN",
@@ -3344,14 +3354,13 @@
       "disabled": "已禁用",
       "renewed": "已续期 {{days}} 天",
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
-      "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
       "service_resumed": "代理服务已恢复",
       "service_suspended": "代理服务已暂停"
     },
     "confirm": {
       "delete_title": "删除用户",
-      "delete_message": "确定删除用户 {{upn}}？该操作将从所有 3X-UI inbound 清除其 client。",
+      "delete_message": "删除 {{upn}}？账户、订阅链接以及它在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "demote_title": "确认降级",
       "reset_credentials_title": "重置凭证",
       "reset_credentials_message": "重置 {{upn}} 的凭证会让旧订阅链接立即失效，现有连接被强制断开。继续？",
@@ -3360,7 +3369,7 @@
       "batch_unlink_sso_title": "批量解除 SSO 绑定",
       "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。",
+      "batch_delete_message": "删除 {{names}}{{suffix}}（共 {{count}} 个用户）？他们的账户、订阅链接以及在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "reset_2fa_title": "重置验证器 App（TOTP）",
       "reset_2fa_message": "将清除 {{upn}} 的验证器 App（TOTP）及其备用码；该用户的通行密钥（若有）不受影响。清除后该用户可仅凭密码登录（若无其它因素），并需要重新绑定。仅在用户丢失验证器且无备用码时使用。"
     },
@@ -3394,13 +3403,17 @@
       "regen_recovery_confirm": "重新生成",
       "regen_recovery_title": "重新生成备用码",
       "regen_recovery_message": "将作废 {{upn}} 现有的全部备用码并生成一组新的。请把新备用码通过安全渠道转交给用户——它只会显示这一次。",
-      "regen_recovery_done": "新备用码（只显示一次，请转交用户）："
+      "regen_recovery_done": "新备用码（只显示一次，请转交用户）：",
+      "passkey_count": "已注册 {{count}} 个"
     },
     "reset_password": {
       "title": "重置登录密码",
       "hint": "留空将生成随机密码；也可以点击右侧骰子按钮自动填充后再手动修改。",
       "field": "新密码（留空 = 随机）",
-      "gen": "随机生成"
+      "gen": "随机生成",
+      "confirm": "重置密码",
+      "hide": "隐藏密码",
+      "show": "显示密码"
     },
     "batch": {
       "selected": "已选 {{count}}",
@@ -3430,13 +3443,14 @@
       "placeholder": "每行一条规则，支持 mihomo / sing-box 格式",
       "saved": "个人规则已保存",
       "reset": "撤销修改",
-      "save": "保存"
+      "save": "保存",
+      "hint": "添加到该用户的订阅中，每行一条规则。"
     },
     "reconcile": {
       "trigger": "一键同步 Reconcile",
       "result_title": "巡检结果",
-      "summary_no_fix": "巡检完成！共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
-      "summary_fixed": "巡检完成！共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
+      "summary_no_fix": "巡检完成，共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
+      "summary_fixed": "巡检完成，共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
       "issues_title": "未修复问题",
       "show_details": "显示详情",
       "hide_details": "隐藏详情",
@@ -3444,7 +3458,7 @@
       "unfixed_section": "未能修复"
     },
     "credentials": {
-      "result": "已重置！新 UUID: {{uuid}}",
+      "result": "凭据已重置。新的 UUID：{{uuid}}",
       "emergency_reset": "已重置紧急使用次数",
       "twofa_reset": "已重置两步验证"
     },
@@ -3464,7 +3478,8 @@
       "revoke_all_message": "将吊销 {{upn}} 的全部 {{count}} 个通行密钥。仅在账号丢失全部设备或疑似被盗时使用。",
       "revoked_all": "已吊销 {{count}} 个通行密钥",
       "load_failed": "加载通行密钥失败",
-      "close": "关闭"
+      "close": "关闭",
+      "revoke_named": "吊销通行密钥 {{name}}"
     },
     "risk_lookup": "风控查询",
     "risk_chip_hint": "打开风控详情",
@@ -3472,6 +3487,51 @@
       "change": "改组后新增 {{added}} 个节点（{{added_names}}），移出 {{removed}} 个节点（{{removed_names}}）",
       "same": "改组后可用节点不变",
       "unknown": "改组影响暂时无法计算"
+    },
+    "empty": "还没有用户",
+    "empty_hint": "创建第一个用户后，对方即可获得订阅。",
+    "empty_filtered": "没有符合当前筛选条件的用户",
+    "load_failed": "无法加载用户列表",
+    "refresh_failed": "无法刷新列表，下面显示的是上次成功加载的内容。",
+    "readonly_operator": "运营人员不能修改管理员或运营人员的账户。",
+    "tabs": {
+      "overview": "概览",
+      "settings": "设置",
+      "usage": "用量",
+      "activity": "登录记录",
+      "security": "账户安全",
+      "unsaved": "有未保存的修改"
+    },
+    "axis": {
+      "intro": "账户决定用户能否登录面板，服务决定用户的订阅能否使用。两者相互独立，可以单独关闭。",
+      "account_title": "账户",
+      "account_caption": "登录面板",
+      "service_title": "代理服务",
+      "service_caption": "订阅",
+      "account_active": "用户可以登录面板。",
+      "account_disabled": "用户无法登录，订阅也已停用。",
+      "pending_approval": "等待管理员批准注册。",
+      "pending_email_verify": "等待用户验证邮箱地址。",
+      "pending_delete": "正在删除，其在服务器上的客户端正在清理。",
+      "service_active": "订阅可以正常使用。",
+      "emergency_active": "紧急访问已开启，订阅在限定时间内可用，不受到期或配额限制。",
+      "traffic_exceeded": "本周期的流量配额已用完，订阅已停用，直到下次重置或提高上限。用户仍可登录面板。",
+      "expired": "已过到期日，订阅已停用，续期后恢复。用户仍可登录面板。",
+      "blocked_client": "因使用不被允许的客户端而被暂停。",
+      "suspended_manual": "订阅已被主动暂停，在有人恢复之前保持停用。",
+      "suspended_geo_auto": "因出现异常地点的连接而被自动暂停。",
+      "suspended_geo_manual": "管理员因地点告警而暂停。",
+      "service_unavailable": "账户已停用，订阅随之停用。"
+    },
+    "filter_group_none": "没有匹配的分组",
+    "form": {
+      "identity": "身份",
+      "group": "分组",
+      "quota": "配额与重置",
+      "expiry": "到期",
+      "access": "访问权限",
+      "notes": "备注",
+      "create_limits_note": "保持为“跟随上级”的限额使用分组的值。创建时设定的值必须大于 0；若要让此用户不受分组限制，请在创建后编辑该用户。"
     }
   },
   "groups": {

@@ -1,28 +1,22 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
+import i18n from '@/test/initI18n'
+import { flatten, type Nested } from '@/i18n/options'
+import enAdmin from '@/locales/en-US/admin.json'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { UserNodeUsage } from './UserNodeUsage'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-    i18n: { language: 'en-US' },
-  }),
-}))
+// The real English strings, so an assertion reads what a person reads and a missing key shows as a raw key.
+i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 function mount(userId = 2) {
   render(
-    <ThemeProvider theme={theme}>
-      <UserNodeUsage userId={userId} />
-    </ThemeProvider>,
+    <UserNodeUsage userId={userId} />,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -38,16 +32,16 @@ describe('UserNodeUsage', () => {
     api.get.mockRejectedValue(new Error('boom'))
     mount()
 
-    await waitFor(() => expect(screen.getByText('暂时无法获取节点用量')).toBeTruthy())
-    expect(screen.queryByText('该用户暂无节点')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Node usage is temporarily unavailable')).toBeTruthy())
+    expect(screen.queryByText('No nodes for this user')).toBeNull()
   })
 
   it('reports an empty breakdown as empty when the request succeeds', async () => {
     api.get.mockResolvedValue({ data: { items: [] } })
     mount()
 
-    await waitFor(() => expect(screen.getByText('该用户暂无节点')).toBeTruthy())
-    expect(screen.queryByText('暂时无法获取节点用量')).toBeNull()
+    await waitFor(() => expect(screen.getByText('No nodes for this user')).toBeTruthy())
+    expect(screen.queryByText('Node usage is temporarily unavailable')).toBeNull()
   })
 
   const row = {
@@ -69,7 +63,7 @@ describe('UserNodeUsage', () => {
     expect(screen.getAllByText('2.0K').length).toBeGreaterThan(0)
     expect(screen.queryByText('↑1.0K ↓1.0K')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '原始' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Raw' }))
     expect(screen.getByText('4.0K')).toBeTruthy()
     expect(screen.getAllByText('↑1.0K ↓1.0K').length).toBeGreaterThan(0)
   })

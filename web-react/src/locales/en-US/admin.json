@@ -3176,7 +3176,6 @@
   "users": {
     "title": "Users",
     "create": "New user",
-    "edit_title": "Edit user",
     "edit": {
       "row_changed": "This user was changed elsewhere. Your edits are not updated automatically.",
       "reload_saved": "Reload saved values"
@@ -3218,7 +3217,6 @@
     },
     "result_title": "User created",
     "search_placeholder": "Search UPN / display name / email…",
-    "filter_group_all": "All groups",
     "refresh": "Refresh",
     "field": {
       "upn": "UPN",
@@ -3229,15 +3227,12 @@
       "group": "Group",
       "role": "Role",
       "expire_days": "Validity (days, 0 = permanent)",
-      "expire_at": "Expires at",
-      "expire_mode_date": "Expires at",
+      "expire_mode_date": "On a date",
       "expire_mode_permanent": "Permanent",
       "expire_tz_hint": "Date is in panel timezone {{tz}}",
-      "traffic_limit_gb": "Traffic limit (GB, 0 = unlimited)",
       "period_used_gb": "Period used (GB)",
       "account_enabled": "Account status",
       "account_self_locked": "You cannot disable your own account",
-      "service_status": "Proxy service status",
       "block_violations": "Violations: {{count}}",
       "emergency_used_count": "Emergency access used {{count}} time(s)",
       "emergency_window_until": "Active until {{time}} ({{hours}}h remaining)",
@@ -3247,7 +3242,6 @@
       "ip_limit": "Concurrent IP limit",
       "device_limit": "Device limit",
       "limit_zero_hint": "0 = unlimited",
-      "inherit_from_group": "Follow group",
       "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
       "device_limit_inert": "Not enforced yet: 3X-UI counts devices only when a client fetches the panel's own subscription, and PSP serves subscriptions itself. The value is saved but does nothing.",
       "ip_limit_unenforced": "Stored but not enforced on: {{panels}} — no usable fail2ban on those nodes.",
@@ -3262,7 +3256,11 @@
       "cap_no_clients_short": "Nothing to enforce yet",
       "device_limit_inert_short": "Not enforced",
       "limit_unsupported_short": "Unsupported on some panels",
-      "ip_limit_unenforced_short": "Not enforced on some panels"
+      "ip_limit_unenforced_short": "Not enforced on some panels",
+      "expire_mode": "Expiry",
+      "expire_date": "Expiry date",
+      "level_user": "This user",
+      "traffic_limit": "Traffic limit"
     },
     "role": {
       "admin": "Admin",
@@ -3288,10 +3286,16 @@
       "unlimited": "Unlimited",
       "lifetime": "Lifetime total",
       "view_usage": "View usage",
-      "created_at": "Created"
+      "created_at": "Created",
+      "status": "Status",
+      "validity": "Validity",
+      "subscription": "Subscription",
+      "account": "Account details",
+      "sub_hidden": "The subscription link of an admin or operator account is hidden from operators.",
+      "not_found": "This user no longer exists",
+      "close": "Close"
     },
     "table": {
-      "upn": "UPN",
       "display_name": "Display name",
       "group": "Group",
       "role": "Role",
@@ -3300,7 +3304,8 @@
       "status": "Status",
       "risk": "Risk",
       "last_online": "Last online",
-      "actions": "Actions"
+      "actions": "Actions",
+      "user": "User"
     },
     "relative_time": {
       "just_now": "just now",
@@ -3309,7 +3314,6 @@
       "days_ago": "{{count}}d ago"
     },
     "status": {
-      "enabled": "Enabled",
       "disabled": "Disabled",
       "account_active": "Account active",
       "service_active": "Proxy service active",
@@ -3337,19 +3341,25 @@
       "renew": "Renew 30 days",
       "enable": "Enable account",
       "disable": "Disable account",
-      "delete": "Delete"
+      "delete": "Delete",
+      "row_menu": "Actions for {{upn}}"
     },
     "result": {
       "intro": "User {{upn}} created. Record the initial password — this is shown only once.",
       "password_label": "Initial password",
       "sub_url_label": "Subscription URL",
-      "copy": "Copy"
+      "copy": "Copy",
+      "reset_title": "Password reset",
+      "reset_intro": "{{upn}}'s password was reset. Record it now: it is shown only once."
     },
     "reason": {
       "enable_title": "Enable account",
       "disable_title": "Disable account",
       "enable_placeholder": "Enable reason (optional)",
-      "disable_placeholder": "Disable reason (optional)"
+      "disable_placeholder": "Disable reason (optional)",
+      "label": "Reason (optional)",
+      "disable_hint": "The user can no longer sign in, and their subscription stops working.",
+      "enable_hint": "The user can sign in again. Whether their subscription works depends on the service state."
     },
     "validate": {
       "upn_required": "UPN is required",
@@ -3363,14 +3373,13 @@
       "disabled": "Disabled",
       "renewed": "Renewed by {{days}} days",
       "renew_permanent_skip": "Permanent accounts don't need quick renewal; edit the user to set an expiry first.",
-      "copied": "Copied",
       "sso_unlinked": "SSO binding cleared",
       "service_resumed": "Proxy service resumed",
       "service_suspended": "Proxy service suspended"
     },
     "confirm": {
       "delete_title": "Delete user",
-      "delete_message": "Delete user {{upn}}? This removes their client from every 3X-UI inbound.",
+      "delete_message": "Delete {{upn}}? The account, its subscription link and its clients on every server are removed. This cannot be undone.",
       "demote_title": "Confirm demotion",
       "reset_credentials_title": "Reset credentials",
       "reset_credentials_message": "Resetting {{upn}}'s credentials immediately invalidates the old subscription URL and forces existing connections to drop. Continue?",
@@ -3379,7 +3388,7 @@
       "batch_unlink_sso_title": "Unlink SSO bindings",
       "batch_unlink_sso_message": "Unlink the SSO binding for {{names}}{{suffix}} — {{count}} users in total? Their next SSO sign-in will re-bind to whatever identity the IdP returns at that moment.",
       "batch_delete_title": "Delete users",
-      "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound.",
+      "batch_delete_message": "Delete {{names}}{{suffix}} ({{count}} users in total)? Their accounts, subscription links and clients on every server are removed. This cannot be undone.",
       "reset_2fa_title": "Reset authenticator app (TOTP)",
       "reset_2fa_message": "This clears {{upn}}'s authenticator app (TOTP) and its recovery codes; their passkeys, if any, are unaffected. They'll be able to sign in with just their password (unless another factor remains) and will need to re-enroll. Use only when the user lost their authenticator and has no recovery codes."
     },
@@ -3413,13 +3422,17 @@
       "regen_recovery_confirm": "Regenerate",
       "regen_recovery_title": "Regenerate recovery codes",
       "regen_recovery_message": "This invalidates all of {{upn}}'s current recovery codes and issues a new set. Relay the new codes to the user over a secure channel — they're shown only once.",
-      "regen_recovery_done": "New recovery codes (shown once — relay to the user):"
+      "regen_recovery_done": "New recovery codes (shown once — relay to the user):",
+      "passkey_count": "{{count}} registered"
     },
     "reset_password": {
       "title": "Reset login password",
       "hint": "Leave blank to generate a random password, or use the dice button to auto-fill then edit.",
       "field": "New password (blank = random)",
-      "gen": "Generate random"
+      "gen": "Generate random",
+      "confirm": "Reset password",
+      "hide": "Hide password",
+      "show": "Show password"
     },
     "batch": {
       "selected": "{{count}} selected",
@@ -3449,7 +3462,8 @@
       "placeholder": "One rule per line; mihomo / sing-box syntax",
       "saved": "Personal rules saved",
       "reset": "Revert",
-      "save": "Save"
+      "save": "Save",
+      "hint": "Added to this user's subscription. One rule per line."
     },
     "reconcile": {
       "trigger": "Reconcile",
@@ -3463,7 +3477,7 @@
       "unfixed_section": "Unresolved"
     },
     "credentials": {
-      "result": "Reset OK! New UUID: {{uuid}}",
+      "result": "Credentials reset. New UUID: {{uuid}}",
       "emergency_reset": "Emergency-access count reset",
       "twofa_reset": "Two-factor auth reset"
     },
@@ -3483,7 +3497,8 @@
       "revoke_all_message": "This revokes all {{count}} of {{upn}}'s passkeys. Use only when the account lost every device or is suspected compromised.",
       "revoked_all": "Revoked {{count}} passkey(s)",
       "load_failed": "Failed to load passkeys",
-      "close": "Close"
+      "close": "Close",
+      "revoke_named": "Revoke passkey {{name}}"
     },
     "risk_lookup": "Risk lookup",
     "risk_chip_hint": "Open risk details",
@@ -3491,6 +3506,51 @@
       "change": "Moving gains {{added}} nodes ({{added_names}}) and loses {{removed}} nodes ({{removed_names}})",
       "same": "Moving does not change the available nodes",
       "unknown": "The effect of moving cannot be determined right now"
+    },
+    "empty": "No users yet",
+    "empty_hint": "Create the first user to give someone a subscription.",
+    "empty_filtered": "No users match the current filters",
+    "load_failed": "The users could not be loaded",
+    "refresh_failed": "The list could not be refreshed. The rows shown are from the last successful load.",
+    "readonly_operator": "Operators cannot modify admin or operator accounts.",
+    "tabs": {
+      "overview": "Overview",
+      "settings": "Settings",
+      "usage": "Usage",
+      "activity": "Sign-ins",
+      "security": "Security",
+      "unsaved": "Unsaved changes"
+    },
+    "axis": {
+      "intro": "The account decides whether the user can sign in to the panel. The service decides whether their subscription works. They are separate, and either can be off on its own.",
+      "account_title": "Account",
+      "account_caption": "signing in to the panel",
+      "service_title": "Proxy service",
+      "service_caption": "the subscription",
+      "account_active": "The user can sign in to the panel.",
+      "account_disabled": "The user cannot sign in, and the subscription is off.",
+      "pending_approval": "Waiting for an administrator to approve the registration.",
+      "pending_email_verify": "Waiting for the user to verify their email address.",
+      "pending_delete": "Being deleted. Their clients on the servers are being removed.",
+      "service_active": "The subscription works.",
+      "emergency_active": "Emergency access is open, so the subscription works for a limited window despite the expiry or quota.",
+      "traffic_exceeded": "This period's quota is used up, so the subscription is off until the next reset or a higher limit. The user can still sign in.",
+      "expired": "The account has passed its expiry date, so the subscription is off until it is renewed. The user can still sign in.",
+      "blocked_client": "Suspended for using a client app that is not allowed.",
+      "suspended_manual": "The subscription was suspended on purpose and stays off until someone resumes it.",
+      "suspended_geo_auto": "Suspended automatically after connections from unusual locations.",
+      "suspended_geo_manual": "Suspended by an administrator after a location alert.",
+      "service_unavailable": "The subscription is off because the account is disabled."
+    },
+    "filter_group_none": "No matching group",
+    "form": {
+      "identity": "Identity",
+      "group": "Group",
+      "quota": "Quota and reset",
+      "expiry": "Expiry",
+      "access": "Access",
+      "notes": "Notes",
+      "create_limits_note": "A limit left on “Follow the level above” takes the group's value. A value set here must be above zero; to make this user unlimited regardless of the group, edit the user after creating it."
     }
   },
   "groups": {
