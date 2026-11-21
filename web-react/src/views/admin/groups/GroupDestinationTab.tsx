@@ -1,103 +1,112 @@
 import type { ReactNode } from 'react'
-import { Box, Button, Skeleton, Typography, useTheme } from '@mui/material'
 import { useNavigate } from 'react-router'
-import { useTranslation } from 'react-i18next'
 
-import type { DestGroup } from '@/api/accessControl'
-import FieldHint from '@/components/FieldHint'
-import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
-import { groupHasAllowlist, stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
+import type { DestGroup, DestState } from '@/api/accessControl'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useDestGroups } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
+import { groupHasAllowlist, stateDay } from '../accessControl/allowlist/allowlistState'
+import { useGroupsT } from './useGroupsT'
 
 const D = 'admin:groups.destination.'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
-  const md = useTheme().palette.md
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '96px minmax(0, 1fr)' }, columnGap: 2, rowGap: 0.25, alignItems: 'baseline' }}>
-      <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{label}</Typography>
-      <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{children}</Box>
-    </Box>
+    <div className="grid grid-cols-1 items-baseline gap-x-4 gap-y-0.5 sm:grid-cols-[6rem_minmax(0,1fr)]">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 break-words">{children}</div>
+    </div>
   )
 }
 
+/** The group's allowlist state with what it is ("Allowlist · on"); the report-only state counts its day. */
+function StateLabel({ state, day }: { state: Exclude<DestState, 'off'>; day: number | null }) {
+  const t = useGroupsT()
+  const label = state === 'report' && day !== null
+    ? t(`${D}report`, { days: day })
+    : t(`${D}${state === 'report' ? 'report_nodays' : 'on'}`)
+  return <StatusBadge tone="info" quiet={false} testId="allowlist-state" label={label} />
+}
+
 /**
- * A group's destination access in the group dialog (S17): a summary and the way
- * to the access-control page, never an editor. The allowlist lives in one place
- * (its tab on the access-control page), so the dialog's save cannot overwrite
- * it with a stale copy. A group with no allowlist is unrestricted and can be
- * given one from here.
+ * A group's destination access in the group sheet (S17): a summary and the way to the access-control page, never
+ * an editor. The allowlist lives in one place (its tab on the access-control page), so the sheet's save cannot
+ * overwrite it with a stale copy. A group with no allowlist is unrestricted and can be given one from here.
+ * Going to that page is an ordinary navigation: the sheet's own guard asks before a draft is dropped.
  */
-export default function GroupDestinationTab({ groupId, onLeave }: {
+export default function GroupDestinationTab({ groupId }: {
   /** Null for a group that is not saved yet. */
   groupId: number | null
-  /** Asked before leaving for the access-control page: closes the dialog (after the discard question when it holds unsaved changes) and says whether to go. */
-  onLeave: () => Promise<boolean>
 }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const t = useGroupsT()
   const navigate = useNavigate()
   const scope = useQueryScope()
   const read = useDestGroups(scope, { enabled: groupId !== null })
 
-  if (groupId === null) return <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}save_first`)}</Typography>
-  if (read.isPending) return <Box sx={{ display: 'grid', gap: 1 }}>{[0, 1, 2].map(i => <Skeleton key={i} variant="rounded" height={24} />)}</Box>
+  if (groupId === null) return <p className="text-sm text-muted-foreground">{t(`${D}save_first`)}</p>
+  if (read.isPending) return <div className="grid gap-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-6 w-full" />)}</div>
   if (read.isError) {
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography variant="body2" sx={{ color: md.error }}>{t(`${D}read_failed`)}</Typography>
-        <Button size="small" onClick={() => void read.refetch()}>{t(`${D}retry`)}</Button>
-      </Box>
+      <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-destructive">{t(`${D}read_failed`)}</span>
+        <Button type="button" size="sm" variant="outline" onClick={() => void read.refetch()}>{t(`${D}retry`)}</Button>
+      </div>
     )
   }
 
   const g: DestGroup | undefined = read.data?.find(x => x.group_id === groupId)
-  const go = async (search: string) => { if (await onLeave()) void navigate(`/admin/access-control?tab=allowlist&${search}`) }
+  const go = (search: string) => void navigate(`/admin/access-control?tab=allowlist&${search}`)
   const enforced = g !== undefined && g.state !== 'off'
   const kept = g !== undefined && g.state === 'off' && groupHasAllowlist(g)
 
   return (
-    <Box sx={{ display: 'grid', gap: 1.5 }}>
+    <div className="grid gap-4">
       <Row label={t(`${D}mode`)}>
         {enforced && g
-          ? <StateBadge scope="group" state={g.state} day={stateDay(g.state_changed_at, Date.now())} />
-          : <Typography component="span" sx={{ fontWeight: 500 }}>{t(`${D}open`)}</Typography>}
+          ? <StateLabel state={g.state as Exclude<DestState, 'off'>} day={stateDay(g.state_changed_at, Date.now())} />
+          : <span className="font-medium">{t(`${D}open`)}</span>}
       </Row>
       {enforced && g && (
         <>
           <Row label={t(`${D}lists`)}>
-            <Typography variant="body2">{t(`${D}lists_line`, {
+            <span className="text-sm">{t(`${D}lists_line`, {
               lists: g.lists.length > 0 ? g.lists.map(l => t(`${D}list_item`, { name: l.name, entries: l.entry_count })).join(t(`${D}list_separator`)) : t(`${D}lists_none`),
               base: g.base_count,
-            })}</Typography>
+            })}</span>
           </Row>
           <Row label={t(`${D}nodes`)}>
-            <Typography variant="body2" component="span">{t(`${D}nodes_line`, { ok: g.eligible_nodes, total: g.total_nodes })}</Typography>
+            <span className="text-sm">{t(`${D}nodes_line`, { ok: g.eligible_nodes, total: g.total_nodes })}</span>
             {g.ineligible.length > 0 && (
-              <Typography variant="body2" component="span" sx={{ ml: 1.5 }}>
-                <FieldHint tone="muted" summary={t(`${D}not_open`, { count: g.ineligible.length })}
-                  detail={g.ineligible.map(n => t(`${D}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${D}detail_separator`))} />
-              </Typography>
+              <Popover>
+                <PopoverTrigger render={<Button type="button" variant="link" size="sm" className="ml-3 h-auto p-0 text-sm" />}>
+                  {t(`${D}not_open`, { count: g.ineligible.length })}
+                </PopoverTrigger>
+                <PopoverContent className="w-80 text-sm">
+                  {g.ineligible.map(n => t(`${D}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${D}detail_separator`))}
+                </PopoverContent>
+              </Popover>
             )}
           </Row>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}summary_note`)}</Typography>
-          <Box sx={{ display: 'flex', justifyContent: { sm: 'flex-end' } }}>
-            <Button variant="outlined" onClick={() => go(`al_group=${groupId}`)}>{t(`${D}edit`)}</Button>
-          </Box>
+          <p className="text-sm text-muted-foreground">{t(`${D}summary_note`)}</p>
+          <div className="flex sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => go(`al_group=${groupId}`)}>{t(`${D}edit`)}</Button>
+          </div>
         </>
       )}
       {!enforced && (
         <>
-          <Box>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}open_hint`)}</Typography>
-            {kept && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}open_kept`)}</Typography>}
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: { sm: 'flex-end' } }}>
-            <Button variant="outlined" onClick={() => go(`al_enable=${groupId}`)}>{t(`${D}enable`)}</Button>
-          </Box>
+          <div className="text-sm text-muted-foreground">
+            <p>{t(`${D}open_hint`)}</p>
+            {kept && <p>{t(`${D}open_kept`)}</p>}
+          </div>
+          <div className="flex sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => go(`al_enable=${groupId}`)}>{t(`${D}enable`)}</Button>
+          </div>
         </>
       )}
-    </Box>
+    </div>
   )
 }
