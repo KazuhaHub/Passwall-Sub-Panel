@@ -1,76 +1,66 @@
 import { useEffect, useState } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  List,
-  ListItem,
-  ListItemText,
-  TextField,
-  Tooltip,
-  Typography,
-} from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
-import EditIcon from '@mui/icons-material/EditOutlined'
-import CheckIcon from '@mui/icons-material/Check'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { startRegistration } from '@simplewebauthn/browser'
-import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
 import { beginPasskeyEnroll, deletePasskey, finishPasskeyEnroll, renamePasskey } from '@/api/me'
 import type { PasskeyCredential } from '@/api/types'
-import type { M3Tokens } from '@/theme'
+import { IconAdd, IconCheck, IconClose, IconDelete, IconEdit } from '@/lib/icons'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { IconButton } from '@/components/common/IconButton'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import { copyToClipboard } from '@/utils/clipboard'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { RecoveryCodeList } from './RecoveryCodeList'
+import { useMeT } from './me/useMeT'
+import { ceremonyCancelled, webAuthnSupported } from './webauthn'
 
 interface Props {
   open: boolean
   available: boolean
   credentials: PasskeyCredential[]
-  md: M3Tokens
+  /** Accepted and ignored. The enrolment page still passes the colour tokens the old dialog needed. */
+  md?: unknown
   onClose: () => void
   onChanged: () => void
 }
 
-// PasskeyDialog manages a user's registered passkeys: list, rename, delete, and
-// register a new one (which runs the browser WebAuthn create() ceremony).
-export default function PasskeyDialog({ open, available, credentials, md, onClose, onChanged }: Props) {
-  const { t } = useTranslation('user')
+/**
+ * A person's passkeys: list, rename, delete, and add one (which runs the browser's WebAuthn create() ceremony).
+ *
+ * The FIRST passkey also mints one-time recovery codes, because a passkey is a second factor and its holder needs a
+ * fallback. They are returned once and stored hashed, so they take over the dialog until acknowledged, and nothing but
+ * that button closes it. The page behind must not unmount this dialog while it holds them (MeView only shows a spinner
+ * for its FIRST load for that reason), or the codes are lost between the server returning them and the person seeing them.
+ */
+export default function PasskeyDialog({ open, available, credentials, onClose, onChanged }: Props) {
+  const { t } = useMeT()
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
+  // What went wrong with the add ceremony that is not a request failure: an unsupported browser, a cancelled prompt.
+  const [addNote, setAddNote] = useState('')
   const [editId, setEditId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
-  // One-time recovery codes returned when this is the account's FIRST passkey —
-  // a passkey is a second factor, so the user needs a printable fallback. Shown
-  // until acknowledged; never re-fetchable (stored hashed server-side).
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
 
   useEffect(() => {
-    if (open) {
-      setAdding(false)
-      setNewName('')
-      setEditId(null)
-      setRecoveryCodes(null)
-    }
+    if (open) { setAdding(false); setNewName(''); setAddNote(''); setEditId(null); setRecoveryCodes(null) }
   }, [open])
 
-  function inlineErr(err: unknown, fallbackKey: string) {
-    const e = err as AxiosError<{ error?: string }>
-    pushSnack(e.response?.data?.error || t(fallbackKey), 'error')
+  function failed(err: unknown, fallbackKey: string) {
+    pushSnack((err as AxiosError<{ error?: string }>).response?.data?.error || t(fallbackKey), 'error')
   }
 
   async function addPasskey() {
     const name = newName.trim() || t('passkey.default_name')
+    setAddNote('')
+    // Said before anything is sent: asking the server to begin a ceremony the browser cannot finish only leaves a pending session.
+    if (!webAuthnSupported()) { setAddNote(t('passkey.unsupported')); return }
     setBusy(true)
     try {
       const { session_id, publicKey } = await beginPasskeyEnroll()
@@ -80,37 +70,25 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
       setAdding(false)
       setNewName('')
       onChanged()
-      // First passkey → show the one-time recovery codes before anything else.
-      if (recovery_codes && recovery_codes.length > 0) {
-        setRecoveryCodes(recovery_codes)
-      }
+      // The first passkey: show the one-time recovery codes before anything else.
+      if (recovery_codes && recovery_codes.length > 0) setRecoveryCodes(recovery_codes)
     } catch (err) {
-      const errName = (err as { name?: string })?.name
-      // Quietly ignore a user-cancelled browser prompt.
-      if (errName !== 'NotAllowedError' && errName !== 'AbortError') {
-        inlineErr(err, 'passkey.add_failed')
-      }
-    } finally {
-      setBusy(false)
-    }
+      if (ceremonyCancelled(err)) setAddNote(t('passkey.cancelled'))
+      else failed(err, 'passkey.add_failed')
+    } finally { setBusy(false) }
   }
 
   async function saveRename(id: number) {
     const name = editName.trim()
-    if (!name) {
-      setEditId(null)
-      return
-    }
+    if (!name) { setEditId(null); return }
     setBusy(true)
     try {
       await renamePasskey(id, name)
       setEditId(null)
       onChanged()
     } catch (err) {
-      inlineErr(err, 'passkey.rename_failed')
-    } finally {
-      setBusy(false)
-    }
+      failed(err, 'passkey.rename_failed')
+    } finally { setBusy(false) }
   }
 
   async function removePasskey(c: PasskeyCredential) {
@@ -119,6 +97,7 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
       message: t('passkey.confirm_delete_message', { name: c.name }),
       destructive: true,
       confirmText: t('passkey.delete'),
+      initialFocus: 'cancel',
     })
     if (!ok) return
     setBusy(true)
@@ -127,130 +106,86 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
       pushSnack(t('passkey.deleted'), 'success')
       onChanged()
     } catch (err) {
-      inlineErr(err, 'passkey.delete_failed')
-    } finally {
-      setBusy(false)
-    }
+      failed(err, 'passkey.delete_failed')
+    } finally { setBusy(false) }
   }
 
-  // First-passkey recovery codes take over the dialog until acknowledged so they
-  // can't be lost to a stray backdrop click (they're shown only once).
-  if (recoveryCodes) {
-    return (
-      <Dialog open={open} onClose={() => { /* force the explicit button */ }} fullWidth maxWidth="xs"
-        slotProps={{
-          paper: { sx: { bgcolor: md.surfaceContainerHigh } }
-        }}>
-        <DialogTitle>{t('passkey.recovery_title', { defaultValue: '保存你的备用码' })}</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            {t('passkey.recovery_warning', { defaultValue: '这是你的一次性备用码——当你无法使用通行密钥时，可用它登录。请妥善保存，它只显示这一次。' })}
-          </Alert>
-          <Box sx={{
-            p: 2, bgcolor: md.surfaceContainerHighest, borderRadius: 1,
-            fontFamily: 'monospace', fontSize: 14, lineHeight: 1.9,
-            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5,
-          }}>
-            {recoveryCodes.map(c => <Box key={c}>{c}</Box>)}
-          </Box>
-          <Button size="small" startIcon={<ContentCopyIcon fontSize="small" />} sx={{ mt: 1.5 }}
-            onClick={() => { void copyToClipboard(recoveryCodes.join('\n')) }}>
-            {t('passkey.copy_all', { defaultValue: '全部复制' })}
-          </Button>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="contained" onClick={() => setRecoveryCodes(null)}>
-            {t('passkey.recovery_done', { defaultValue: '我已保存' })}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    );
-  }
-
+  const showingCodes = recoveryCodes !== null
   return (
-    <Dialog open={open} onClose={() => !busy && onClose()} fullWidth maxWidth="xs"
-      slotProps={{
-        paper: { sx: { bgcolor: md.surfaceContainerHigh } }
-      }}>
-      <DialogTitle>{t('passkey.title')}</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1.5 }}>
-          {t('passkey.intro')}
-        </Typography>
+    <Dialog open={open} onOpenChange={o => { if (!o && !busy && !showingCodes) onClose() }}>
+      <DialogContent showCloseButton={!showingCodes}>
+        {showingCodes ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>{t('passkey.recovery_title')}</DialogTitle>
+            </DialogHeader>
+            <RecoveryCodeList codes={recoveryCodes} warning={t('passkey.recovery_warning')} />
+            <DialogFooter><Button onClick={() => setRecoveryCodes(null)}>{t('passkey.recovery_done')}</Button></DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>{t('passkey.title')}</DialogTitle>
+              <DialogDescription>{t('passkey.intro')}</DialogDescription>
+            </DialogHeader>
 
-        {credentials.length === 0 && !adding && (
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant, py: 2, textAlign: 'center' }}>
-            {t('passkey.list_empty')}
-          </Typography>
-        )}
+            {credentials.length === 0 && !adding && <EmptyState compact title={t('passkey.list_empty')} />}
+            {credentials.length > 0 && (
+              <ul className="divide-y">
+                {credentials.map(c => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 py-2 first:pt-0 last:pb-0">
+                    {editId === c.id ? (
+                      <>
+                        <Input
+                          autoFocus aria-label={t('passkey.rename')} value={editName} onChange={e => setEditName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') { e.preventDefault(); void saveRename(c.id) }
+                            // Escape ends the edit, not the dialog.
+                            if (e.key === 'Escape') { e.stopPropagation(); setEditId(null) }
+                          }}
+                        />
+                        <div className="flex shrink-0">
+                          <IconButton label={t('passkey.rename')} disabled={busy} onClick={() => void saveRename(c.id)}><IconCheck /></IconButton>
+                          <IconButton label={t('passkey.cancel')} onClick={() => setEditId(null)}><IconClose /></IconButton>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="min-w-0">
+                          <div className="truncate font-medium" title={c.name}>{c.name}</div>
+                          <div className="text-xs text-muted-foreground">{t('passkey.added_at', { date: new Date(c.created_at).toLocaleDateString() })}</div>
+                        </div>
+                        <div className="flex shrink-0">
+                          <IconButton label={t('passkey.rename')} disabled={busy} onClick={() => { setEditId(c.id); setEditName(c.name) }}><IconEdit /></IconButton>
+                          <IconButton label={t('passkey.delete')} disabled={busy} onClick={() => void removePasskey(c)}><IconDelete /></IconButton>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
 
-        <List dense disablePadding>
-          {credentials.map(c => (
-            <ListItem key={c.id} disableGutters
-              secondaryAction={editId === c.id ? (
-                <IconButton edge="end" onClick={() => saveRename(c.id)} disabled={busy}>
-                  <CheckIcon fontSize="small" />
-                </IconButton>
-              ) : (
-                <Box>
-                  <Tooltip title={t('passkey.rename')}>
-                    <IconButton edge="end" onClick={() => { setEditId(c.id); setEditName(c.name) }} disabled={busy}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title={t('passkey.delete')}>
-                    <IconButton edge="end" onClick={() => removePasskey(c)} disabled={busy}>
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              )}>
-              {editId === c.id ? (
-                <TextField size="small" fullWidth autoFocus value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') void saveRename(c.id) }}
-                  sx={{ mr: 6 }} />
-              ) : (
-                <ListItemText
-                  primary={c.name}
-                  secondary={t('passkey.added_at', { date: new Date(c.created_at).toLocaleDateString() })}
-                  slotProps={{
-                    primary: { sx: { fontSize: 14 } },
-                    secondary: { sx: { fontSize: 12 } }
-                  }} />
-              )}
-            </ListItem>
-          ))}
-        </List>
+            {adding && (
+              <form className="grid gap-3" onSubmit={e => { e.preventDefault(); void addPasskey() }}>
+                <Field label={t('passkey.name_label')}>
+                  <Input autoFocus placeholder={t('passkey.default_name')} value={newName} onChange={e => setNewName(e.target.value)} />
+                </Field>
+                {addNote && <Alert><AlertDescription>{addNote}</AlertDescription></Alert>}
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" disabled={busy} onClick={() => { setAdding(false); setNewName(''); setAddNote('') }}>{t('passkey.cancel')}</Button>
+                  <AsyncButton type="submit" pending={busy}>{t('passkey.continue')}</AsyncButton>
+                </div>
+              </form>
+            )}
 
-        {adding && (
-          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            <TextField size="small" fullWidth autoFocus
-              label={t('passkey.name_label')}
-              placeholder={t('passkey.default_name')}
-              value={newName}
-              onChange={e => setNewName(e.target.value)} />
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-              <Button size="small" onClick={() => { setAdding(false); setNewName('') }} disabled={busy}>
-                {t('passkey.cancel')}
-              </Button>
-              <Button size="small" variant="contained" onClick={addPasskey} disabled={busy}
-                startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}>
-                {t('passkey.continue')}
-              </Button>
-            </Box>
-          </Box>
+            <DialogFooter>
+              {available && !adding && <Button variant="outline" className="sm:mr-auto" disabled={busy} onClick={() => setAdding(true)}><IconAdd />{t('passkey.add')}</Button>}
+              <Button variant="outline" disabled={busy} onClick={onClose}>{t('passkey.close')}</Button>
+            </DialogFooter>
+          </>
         )}
       </DialogContent>
-      <DialogActions>
-        {available && !adding && (
-          <Button startIcon={<AddIcon />} onClick={() => setAdding(true)} disabled={busy}>
-            {t('passkey.add')}
-          </Button>
-        )}
-        <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose} disabled={busy}>{t('passkey.close')}</Button>
-      </DialogActions>
     </Dialog>
-  );
+  )
 }
