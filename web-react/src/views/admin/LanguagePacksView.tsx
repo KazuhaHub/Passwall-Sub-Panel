@@ -1,274 +1,174 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  Box,
-  Button,
-  Card,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import UploadIcon from '@mui/icons-material/UploadFileOutlined'
-import DownloadIcon from '@mui/icons-material/DownloadOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
-import WarningAmberIcon from '@mui/icons-material/WarningAmberOutlined'
-import { useTranslation } from 'react-i18next'
-
-import { useCan } from '@/utils/permissions'
-import { AsyncIconButton } from '@/components/AsyncButton'
-import { saveLocale, deleteLocale, MAX_LOCALE_PACK_BYTES, type LocaleMeta, type LocalePack } from '@/api/locales'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { IconDelete, IconDownload } from '@/lib/icons'
+import { deleteLocale, type LocaleMeta } from '@/api/locales'
+import { getVersion } from '@/api/version'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { IconButton } from '@/components/common/IconButton'
+import { MoreMenu } from '@/components/common/MoreMenu'
+import { PageHeader } from '@/components/common/PageHeader'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { DataTable } from '@/components/data/DataTable'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { confirm } from '@/components/ConfirmHost'
+import { isBuiltinLanguage } from '@/i18n'
 import { useLocales } from '@/query/locales'
 import { useQueryScope } from '@/query/useQueryScope'
-import { loadBuiltinSource, LANGUAGE_PACK_FORMAT } from '@/i18n'
-import { getVersion } from '@/api/version'
-import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import PageHeader from '@/components/PageHeader'
+import { useCan } from '@/utils/permissions'
+import { downloadPack, exportBaseTemplate } from './languagePacks/packFiles'
+import { UploadDialog } from './languagePacks/UploadDialog'
+import { useAdminT } from './useAdminT'
 
-// Admin surface for runtime-uploaded UI language packs. A pack is a single JSON
-// file (see api/locales.ts LocalePack); uploading it makes the language
-// selectable after a page reload. Writes are admin-only (gated on config.write
-// here + adminGroup server-side); the public read endpoints serve the pack to
-// every client, including the pre-auth login screen.
+// The languages compiled into the bundle, listed beside the uploaded ones so "which languages does this
+// panel have, and which can I change" is one table. zh-TW is generated from zh-CN at build time.
+const BUILTIN_CODES = ['zh-CN', 'zh-TW', 'en-US']
+
+interface Row { code: string; name: string; author: string; baseVersion: string; builtin: boolean; meta?: LocaleMeta }
+
+// Admin surface for runtime-uploaded UI language packs. A pack is a single JSON file (see api/locales.ts
+// LocalePack); uploading it makes the language selectable after a page reload. Writes are admin-only (gated
+// on config.write here + adminGroup server-side); the public read endpoints serve the pack to every client,
+// including the pre-auth login screen.
 export default function LanguagePacksView() {
-  const theme = useTheme()
-  const md = theme.palette.md
-  const { t } = useTranslation(['admin', 'common'])
+  const t = useAdminT()
   const canConfig = useCan('config.write')
-
-  const qScope = useQueryScope()
-  const localesQuery = useLocales(qScope)
-  const items = localesQuery.data ?? []
-  const localesFailed = localesQuery.isError
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [jsonText, setJsonText] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  // Current panel version, for the base_version staleness warning.
+  const scope = useQueryScope()
+  const query = useLocales(scope)
+  const [uploading, setUploading] = useState(false)
+  // The row whose delete is in flight: it is dimmed and its menu item is off, so a second click cannot
+  // re-open the confirmation mid-request.
+  const [deleting, setDeleting] = useState<string | null>(null)
+  // Current panel version, for the base_version staleness note. Advisory only.
   const [currentVersion, setCurrentVersion] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { void getVersion().then(v => setCurrentVersion(v.version)).catch(() => { /* advisory */ }) }, [])
 
-  useEffect(() => { void load(); void loadVersion() }, [])
+  const rows = useMemo<Row[]>(() => [
+    ...BUILTIN_CODES.map(code => ({ code, name: t(`language:${code}`), author: '', baseVersion: '', builtin: true })),
+    ...(query.data ?? []).filter(m => !isBuiltinLanguage(m.code)).map(m => ({
+      code: m.code, name: m.name, author: m.author ?? '', baseVersion: m.base_version ?? '', builtin: false, meta: m,
+    })),
+  ], [query.data, t])
 
-  async function load() {
-    await localesQuery.refetch()
-  }
-
-  async function loadVersion() {
-    try { setCurrentVersion((await getVersion()).version) } catch { /* advisory only */ }
-  }
-
-  function openUpload() {
-    setJsonText('')
-    setDialogOpen(true)
-  }
-
-  function pickFile() {
-    fileInputRef.current?.click()
-  }
-
-  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    // Reset the input so choosing the same file again re-fires change.
-    e.target.value = ''
-    if (!file) return
-    try {
-      setJsonText(await file.text())
-    } catch {
-      pushSnack(t('admin:languagePacks.toast.read_failed'), 'error')
-    }
-  }
-
-  async function submit() {
-    // Client-side size guard so the user gets a clear message rather than a raw
-    // 413 from the backend cap.
-    if (new Blob([jsonText]).size > MAX_LOCALE_PACK_BYTES) {
-      pushSnack(t('admin:languagePacks.toast.too_large', { max: Math.round(MAX_LOCALE_PACK_BYTES / 1024) }), 'error')
-      return
-    }
-    let pack: LocalePack
-    try {
-      pack = JSON.parse(jsonText)
-    } catch {
-      pushSnack(t('admin:languagePacks.toast.invalid_json'), 'error')
-      return
-    }
-    // Cheap client-side guardrails; the server re-validates authoritatively.
-    if (!pack || typeof pack !== 'object' || !pack.code || !pack.name || !pack.namespaces) {
-      pushSnack(t('admin:languagePacks.toast.missing_fields'), 'warning')
-      return
-    }
-    setBusy(true)
-    try {
-      await saveLocale(pack)
-      await load()
-      pushSnack(t('admin:languagePacks.toast.saved'), 'success')
-      setDialogOpen(false)
-      // The switcher's language list is built at boot, so a freshly-uploaded
-      // pack only appears after a reload.
-      pushSnack(t('admin:languagePacks.toast.reload_hint'), 'info')
-    } finally { setBusy(false) }
-  }
-
-  async function confirmDelete(m: LocaleMeta) {
+  async function remove(m: LocaleMeta) {
     const ok = await confirm({
-      title: t('admin:languagePacks.confirm.delete_title'),
+      title: t('admin:languagePacks.confirm.delete_title', { name: m.name }),
       message: t('admin:languagePacks.confirm.delete_message', { code: m.code, name: m.name }),
+      confirmText: t('common:actions.delete'),
       destructive: true,
+      initialFocus: 'cancel',
     })
     if (!ok) return
-    await deleteLocale(m.code)
-    pushSnack(t('admin:languagePacks.toast.deleted'), 'success')
-    await load()
+    setDeleting(m.code)
+    try {
+      await deleteLocale(m.code)
+      pushSnack(t('admin:languagePacks.toast.deleted'), 'success')
+      await query.refetch()
+    } catch { /* the request layer already surfaced it */ } finally { setDeleting(null) }
   }
 
-  // Export the shipped en-US strings as a fill-in-the-blank pack template so a
-  // translator starts from the exact current keys. Entirely client-side — the
-  // base lives in the JS bundle, not the backend.
-  async function exportBase() {
-    setExporting(true)
-    try {
-      const namespaces = await loadBuiltinSource('en-US')
-      let baseVersion = ''
-      try { baseVersion = (await getVersion()).version } catch { /* version is advisory */ }
-      const pack: LocalePack = {
-        psp_language_pack: LANGUAGE_PACK_FORMAT,
-        code: '',
-        name: '',
-        author: '',
-        base_language: 'en-US',
-        base_version: baseVersion,
-        namespaces: namespaces as Record<string, Record<string, unknown>>,
-      }
-      const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'psp-language-pack-base-en-US.json'
-      a.click()
-      URL.revokeObjectURL(url)
-    } finally { setExporting(false) }
-  }
+  const removeRef = useRef(remove)
+  removeRef.current = remove
+  const stale = (r: Row) => !!r.baseVersion && !!currentVersion && r.baseVersion !== currentVersion
+
+  const columns = useMemo<ColumnDef<Row>[]>(() => [
+    {
+      id: 'name', header: t('admin:languagePacks.table.name'), accessorFn: r => r.name,
+      meta: { label: t('admin:languagePacks.table.name'), hideable: false },
+      cell: c => <span className="font-medium">{c.row.original.name}</span>,
+    },
+    { id: 'code', header: t('admin:languagePacks.table.code'), accessorFn: r => r.code, meta: { label: t('admin:languagePacks.table.code'), className: 'font-mono text-[13px]' } },
+    {
+      id: 'source', header: t('admin:languagePacks.table.source'), accessorFn: r => (r.builtin ? 0 : 1), enableSorting: false, meta: { label: t('admin:languagePacks.table.source') },
+      cell: c => c.row.original.builtin
+        ? <span title={t('admin:languagePacks.builtin_reason')}>{t('admin:languagePacks.source.builtin')}</span>
+        : <span>{t('admin:languagePacks.source.uploaded')}</span>,
+    },
+    {
+      id: 'author', header: t('admin:languagePacks.table.author'), accessorFn: r => r.author, meta: { label: t('admin:languagePacks.table.author'), className: 'text-muted-foreground' },
+      cell: c => <span className="block max-w-48 truncate" title={c.row.original.author}>{c.row.original.author || '—'}</span>,
+    },
+    {
+      id: 'base_version', header: t('admin:languagePacks.table.base_version'), accessorFn: r => r.baseVersion, meta: { label: t('admin:languagePacks.table.base_version') },
+      cell: c => (
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">{c.row.original.baseVersion || '—'}</span>
+          {stale(c.row.original) && (
+            <span title={t('admin:languagePacks.stale_warning', { base: c.row.original.baseVersion, current: currentVersion })}>
+              <StatusBadge tone="warning" label={t('admin:languagePacks.stale')} />
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('admin:languagePacks.table.actions') },
+      cell: c => <RowActions row={c.row.original} t={t} canConfig={canConfig} busy={deleting === c.row.original.code} onDelete={m => void removeRef.current(m)} />,
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, currentVersion, canConfig, deleting])
 
   return (
-    <Box sx={{ p: 3 }}>
+    <div className="p-4 sm:p-6">
       <PageHeader
         title={t('admin:languagePacks.title')}
-        subtitle={t('admin:languagePacks.subtitle')}
-        actions={canConfig && (
-          <>
-            <Button variant="outlined" startIcon={exporting ? <CircularProgress size={16} /> : <DownloadIcon />}
-              disabled={exporting} onClick={exportBase}>
-              {t('admin:languagePacks.export_base')}
-            </Button>
-            <Button variant="contained" startIcon={<UploadIcon />} onClick={openUpload}>
-              {t('admin:languagePacks.upload')}
-            </Button>
-          </>
-        )}
+        description={t('admin:languagePacks.subtitle')}
+        secondary={canConfig && <AsyncButton variant="outline" icon={<IconDownload />} onClick={exportBaseTemplate}>{t('admin:languagePacks.export_base')}</AsyncButton>}
+        primary={canConfig && <Button onClick={() => setUploading(true)}>{t('admin:languagePacks.upload')}</Button>}
       />
-      <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                <TableCell>{t('admin:languagePacks.table.code')}</TableCell>
-                <TableCell>{t('admin:languagePacks.table.name')}</TableCell>
-                <TableCell>{t('admin:languagePacks.table.author')}</TableCell>
-                <TableCell>{t('admin:languagePacks.table.base_version')}</TableCell>
-                <TableCell align="right">{t('admin:languagePacks.table.actions')}</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {localesQuery.isPending && (
-                <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
-              )}
-              {/* A failed read is NOT "no packs uploaded". */}
-              {localesFailed && (
-                <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.error }}>
-                  {t('admin:languagePacks.load_failed', { defaultValue: '暂时无法加载语言包' })}
-                </TableCell></TableRow>
-              )}
-              {!localesQuery.isPending && !localesFailed && items.length === 0 && (
-                <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
-                  {t('admin:languagePacks.empty')}
-                </TableCell></TableRow>
-              )}
-              {items.map(m => (
-                <TableRow key={m.code} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                  <TableCell sx={{ fontSize: 13 }}>{m.code}</TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{m.name}</TableCell>
-                  <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{m.author || '—'}</TableCell>
-                  <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
-                      {m.base_version || '—'}
-                      {m.base_version && currentVersion && m.base_version !== currentVersion && (
-                        <Tooltip title={t('admin:languagePacks.stale_warning', { base: m.base_version, current: currentVersion })}>
-                          <WarningAmberIcon sx={{ fontSize: 16, color: md.error }} />
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right">
-                    {canConfig && (
-                      <Tooltip title={t('common:actions.delete')}>
-                        {/* AsyncIconButton, not a plain IconButton: delete hits the
-                            upstream and a slow link left this clickable with no
-                            feedback for the whole round-trip, inviting a repeat
-                            click that re-opened the confirm dialog mid-request. */}
-                        <AsyncIconButton size="small" onClick={() => confirmDelete(m)} sx={{ color: md.error }}>
-                          <DeleteIcon fontSize="small" />
-                        </AsyncIconButton>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Card>
-      <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={onFileChosen} />
-      <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        slotProps={{
-          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }
-        }}>
-        <DialogTitle>{t('admin:languagePacks.upload_title')}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 2 }}>
-            {t('admin:languagePacks.upload_help')}
-          </Typography>
-          <Button variant="outlined" size="small" startIcon={<UploadIcon />} onClick={pickFile} sx={{ mb: 2 }}>
-            {t('admin:languagePacks.choose_file')}
-          </Button>
-          <TextField fullWidth multiline minRows={10} maxRows={20}
-            placeholder={t('admin:languagePacks.paste_placeholder')}
-            value={jsonText}
-            onChange={e => setJsonText(e.target.value)}
-            sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 12 } }} />
-          <Typography variant="caption" sx={{ color: md.onSurfaceVariant, mt: 1, display: 'block' }}>
-            {t('admin:languagePacks.size_hint', { max: Math.round(MAX_LOCALE_PACK_BYTES / 1024) })}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button onClick={submit} variant="contained" disabled={busy || !jsonText.trim()}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('admin:languagePacks.upload')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
-  );
+      {/* A failed read is NOT "no packs uploaded". */}
+      {query.isError ? (
+        <ErrorState title={t('admin:languagePacks.load_failed')} reason={query.error} retry={() => query.refetch()} />
+      ) : (
+        <DataTable<Row>
+          data={rows} columns={columns} getRowId={r => r.code} pagination={false} columnMenu={false}
+          loading={query.isPending} maxHeight={null}
+          rowOptions={r => (deleting === r.code ? { state: 'dimmed' } : undefined)}
+          renderCard={r => <PackCard row={r} t={t} stale={stale(r)} actions={<RowActions row={r} t={t} canConfig={canConfig} busy={deleting === r.code} onDelete={m => void removeRef.current(m)} />} />}
+        />
+      )}
+      {uploading && <UploadDialog onClose={() => setUploading(false)} onUploaded={() => query.refetch()} />}
+    </div>
+  )
+}
+
+function PackCard({ row, t, stale, actions }: { row: Row; t: ReturnType<typeof useAdminT>; stale: boolean; actions: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b px-3 py-3">
+      <div className="min-w-0">
+        <div className="truncate font-medium">{row.name} <span className="font-mono text-[13px] font-normal text-muted-foreground">{row.code}</span></div>
+        <div className="text-xs text-muted-foreground">
+          {row.builtin ? t('admin:languagePacks.source.builtin') : t('admin:languagePacks.source.uploaded')}
+          {row.author && ` · ${row.author}`}
+          {row.baseVersion && ` · ${row.baseVersion}`}
+        </div>
+        {stale && <StatusBadge className="mt-1" tone="warning" label={t('admin:languagePacks.stale')} />}
+      </div>
+      <div className="shrink-0">{actions}</div>
+    </div>
+  )
+}
+
+function RowActions({ row, t, canConfig, busy, onDelete }: { row: Row; t: ReturnType<typeof useAdminT>; canConfig: boolean; busy: boolean; onDelete: (m: LocaleMeta) => void }) {
+  if (row.builtin) {
+    // Disabled WITH its reason (aria-disabled keeps it focusable, so the tooltip is reachable): hiding the
+    // button would leave "can I remove English?" unanswered.
+    return (
+      <IconButton label={t('common:actions.delete')} tooltip={t('admin:languagePacks.builtin_reason')} aria-disabled>
+        <IconDelete />
+      </IconButton>
+    )
+  }
+  const meta = row.meta!
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <IconButton label={t('admin:languagePacks.download', { name: meta.name })} onClick={() => { void downloadPack(meta).catch(() => pushSnack(t('admin:languagePacks.toast.download_failed'), 'error')) }}>
+        <IconDownload />
+      </IconButton>
+      {canConfig && (
+        <MoreMenu items={[{ id: 'delete', label: t('common:actions.delete'), icon: IconDelete, destructive: true, disabled: busy, onSelect: () => onDelete(meta) }]} />
+      )}
+    </div>
+  )
 }

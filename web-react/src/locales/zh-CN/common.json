@@ -35,8 +35,8 @@
     "range": "{{from}}–{{to}} / 共 {{count}}"
   },
   "placeholder": {
-    "title": "页面待迁移",
-    "body": "此页面尚未从 Vue 版本迁移到 React + MUI。当前路径："
+    "title": "页面尚未提供",
+    "body": "此页面尚未提供。当前路径："
   },
   "errors": {
     "network": "网络异常，请检查连接后重试",

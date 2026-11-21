@@ -1,4 +1,3 @@
-import { Box, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { DataCollection, DataCollectionItem } from '@/api/legal'
@@ -17,8 +16,6 @@ const ORDER = [
  * the data (a retention of 0 is "kept for ever"); no text here states one.
  */
 export default function DataCollectionCard({ data }: { data: DataCollection }) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation('auth')
 
   const retention = (days: number) => days === 0 ? t('legal.retention_forever') : t('legal.retention_days', { days })
@@ -36,21 +33,16 @@ export default function DataCollectionCard({ data }: { data: DataCollection }) {
   const rows = ORDER.filter(k => data[k]?.enabled)
 
   return (
-    <Box component="section" aria-label={t('legal.collect_title')} sx={{
-      my: 2.5, p: { xs: 2, sm: 2.5 }, borderRadius: 3, bgcolor: md.surfaceContainer, border: `1px solid ${md.outlineVariant}`,
-    }}>
-      <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1, color: md.onSurface }}>{t('legal.collect_title')}</Typography>
-      <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0 }}>
+    <section aria-label={t('legal.collect_title')} className="my-5 rounded-xl border bg-muted/50 p-4 sm:p-5">
+      <h2 className="mb-2 text-base font-semibold">{t('legal.collect_title')}</h2>
+      <ul className="m-0 list-none p-0">
         {rows.map(key => (
-          <Box component="li" key={key} sx={{
-            display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between',
-            gap: { xs: 0, sm: 2 }, py: 0.75, borderTop: `1px solid ${md.outlineVariant}`, '&:first-of-type': { borderTop: 0 },
-          }}>
-            <Box component="span" sx={{ fontSize: 14, color: md.onSurface }}>{t(`legal.item.${key}`)}</Box>
-            <Box component="span" sx={{ fontSize: 14, color: md.onSurfaceVariant, flexShrink: 0 }}>{value(key, data[key])}</Box>
-          </Box>
+          <li key={key} className="flex flex-col justify-between gap-0 border-t py-1.5 first:border-t-0 sm:flex-row sm:gap-4">
+            <span className="text-sm">{t(`legal.item.${key}`)}</span>
+            <span className="shrink-0 text-sm text-muted-foreground">{value(key, data[key])}</span>
+          </li>
         ))}
-      </Box>
-    </Box>
+      </ul>
+    </section>
   )
 }

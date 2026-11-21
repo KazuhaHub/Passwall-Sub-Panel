@@ -2,36 +2,62 @@
   "languagePacks": {
     "title": "语言包",
     "load_failed": "暂时无法加载语言包",
-    "subtitle": "上传自定义界面语言包，上传后重新载入页面即可在语言菜单中选择。",
+    "subtitle": "添加界面语言。上传后重新载入页面，即可在语言菜单中选择。",
     "upload": "上传",
     "upload_title": "上传语言包",
-    "upload_help": "选择或粘贴一个 JSON 语言包文件。可先“导出基准模板”，翻译其中的文本后再上传。",
+    "upload_help": "选择语言包文件、拖放到此处，或粘贴其 JSON。建议先导出基准模板，翻译其中的文本后再上传。",
     "choose_file": "选择文件",
+    "drop_hint": "或把 .json 文件拖放到此处",
+    "paste_label": "语言包 JSON",
     "paste_placeholder": "在此粘贴语言包 JSON…",
     "export_base": "导出基准模板",
-    "empty": "暂无自定义语言包",
     "size_hint": "单个语言包最大 {{max}} KB。",
-    "stale_warning": "该翻译基于 {{base}},当前面板为 {{current}},建议重新导出基准并翻译。",
+    "problems_title_other": "上传前需要修正 {{count}} 个问题",
+    "server_refused": "服务器拒绝了这个语言包",
+    "upload_failed": "无法上传语言包。",
+    "problem": {
+      "too_large": "文件超过 {{max}} KB。",
+      "invalid_json": "文本不是有效的 JSON：{{detail}}",
+      "not_object": "最外层必须是包含语言包字段的 JSON 对象。",
+      "format": "“psp_language_pack” 必须是 {{expected}}（当前为 {{found}}）。",
+      "code_required": "必须填写 “code”。",
+      "code_chars": "“code” {{code}} 只能包含字母、数字、“_” 和 “-”。",
+      "code_builtin": "{{code}} 是内置语言，不能覆盖。请换一个代码。",
+      "name_required": "必须填写 “name”：显示在语言菜单中的名称。",
+      "namespaces_required": "必须提供 “namespaces”，且必须是对象。",
+      "unknown_namespace": "未知的命名空间 “{{ns}}”。可用：{{known}}。",
+      "namespace_shape": "命名空间 “{{ns}}” 必须是翻译对象。",
+      "leaf": "{{path}} 必须是字符串（当前为 {{kind}}）。",
+      "leaf_more_other": "另有 {{count}} 个值不是字符串。"
+    },
+    "source": {
+      "builtin": "内置",
+      "uploaded": "已上传"
+    },
+    "builtin_reason": "内置语言是面板的一部分，不能覆盖或删除。",
+    "stale": "已过期",
+    "stale_warning": "该翻译基于 {{base}}，当前面板为 {{current}}，建议重新导出基准并翻译。",
+    "download": "下载 {{name}}",
     "table": {
       "code": "语言代码",
-      "name": "名称",
+      "name": "语言",
+      "source": "来源",
       "author": "作者",
       "base_version": "基准版本",
       "actions": "操作"
     },
     "confirm": {
-      "delete_title": "删除语言包",
+      "delete_title": "删除语言包 {{name}}？",
       "delete_message": "确定删除语言包 {{name}}（{{code}}）吗？此操作不可撤销。"
     },
     "toast": {
       "saved": "语言包已保存",
       "deleted": "语言包已删除",
       "reload_hint": "重新载入页面后即可在语言菜单中看到该语言。",
-      "invalid_json": "JSON 解析失败，请检查文件内容。",
-      "missing_fields": "语言包缺少必填字段（code / name / namespaces）。",
       "read_failed": "读取文件失败",
-      "too_large": "语言包过大，最大 {{max}} KB。"
-    }
+      "download_failed": "无法下载语言包。"
+    },
+    "summary_other": "可以上传：{{name}}（{{code}}），共 {{count}} 个命名空间。"
   },
   "alerts": {
     "bell_title": "通知",
@@ -722,21 +748,28 @@
         "switch_title": "切换语言？",
         "switch_message": "当前语言有未保存的修改，切换后会丢失。",
         "usage_missing_summary": "预览里没有按网站用量",
-        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。"
+        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。",
+        "unpublished": "此文本尚未发布",
+        "empty": "文本为空，无法发布"
       },
       "publish": {
         "title": "发布{{doc}}（{{locale}}）第 {{version}} 版？",
         "diff": "比上一版多 {{added}} 字、少 {{removed}} 字",
         "first": "这是该语言的第一个版本。",
         "bump": "重大变更：要求用户重新同意",
-        "bump_hint": "勾选后，约 {{users}} 名普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
-        "bump_hint_loading": "勾选后，普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
+        "bump_hint": "约 {{users}} 名普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
+        "bump_hint_loading": "普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
         "cancel": "取消",
         "confirm": "发布",
         "done": "已发布第 {{version}} 版",
         "conflict": "其他管理员刚发布了新版本，已重新载入",
         "too_large": "正文超过 {{max}} 字节，无法发布",
-        "failed": "发布失败，请重试"
+        "failed": "发布失败，请重试",
+        "kind_label": "变更类型",
+        "minor": "一般修改",
+        "minor_hint": "不会再次询问用户。适用于修正错别字和调整措辞。",
+        "bump_effect": "你将要求所有普通用户重新同意此文档。",
+        "confirm_bump": "发布并要求用户重新同意"
       },
       "history_sheet": {
         "title": "{{doc}}版本历史",
@@ -4282,7 +4315,6 @@
       "delete_text": "删除后，放在这个端口后面的监听器会回到自己的公网端口，它们的用户会重新连接一次；指向这个端口的中转线路不再下发，直到重新配置。",
       "deleted": "已删除共用端口",
       "saved": "已保存共用端口",
-      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
       "port": "共用的端口",
       "port_hint": "任意 TCP 端口，默认 443。",
       "listeners": "放在这个端口后面的监听器",
@@ -4311,7 +4343,8 @@
         "listener": "监听器 {{name}}",
         "forward": "中转线路 {{node}} / {{line}}",
         "link": "来自服务器 {{entry}} 的隧道 {{link}}（独立端口 {{port}}）",
-        "forward_short": "中转线路 {{node}} / {{line}}"
+        "forward_short": "中转线路 {{node}} / {{line}}",
+        "link_short": "隧道 {{link}}"
       },
       "refusal": {
         "no_sni": "没有可读的 SNI（如 Shadowsocks / SS-2022），保持自己的端口",
@@ -4454,7 +4487,36 @@
           "contract": "节点协议拒绝了它"
         }
       },
-      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效"
+      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效",
+      "back": "共用端口",
+      "discard_title": "放弃未保存的修改？",
+      "discard_message": "离开后，对这个共用端口所做的修改会丢失。",
+      "discard_confirm": "放弃",
+      "delete_confirm": "删除端口 {{port}}",
+      "plan": {
+        "listeners": "会回到各自公网端口的监听器：",
+        "lines": "会停止下发的中转线路：",
+        "tunnels": "受影响的隧道："
+      },
+      "graph": {
+        "title": "共用端口的分流",
+        "caption": "客户端连接共用端口，由 TLS 握手里的服务器名称（SNI）选择路由，再交给监听器、中转线路或伪装站点。选中一个方框可查看经过它的连接。",
+        "col_port": "客户端连接",
+        "col_sni": "握手里的 SNI",
+        "col_target": "交给",
+        "routes_other": "{{count}} 条路由",
+        "other": "其他或没有 SNI",
+        "loopback": "127.0.0.1:{{port}}",
+        "preview": "此共用端口的预览",
+        "no_default": "还没有伪装站点"
+      },
+      "more_routes_other": "另有 {{count}} 条路由",
+      "status": "状态",
+      "active": "生效中",
+      "actions": "操作",
+      "confirm_needed": "确认端点变更后才能保存",
+      "choose_target": "选择交给谁",
+      "empty_title": "还没有共用端口"
     },
     "delete": {
       "title": "删除服务器“{{name}}”？",
