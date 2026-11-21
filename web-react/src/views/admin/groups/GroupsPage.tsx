@@ -26,11 +26,9 @@ import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 import { RowActions } from '../subscription/RowActions'
 import { RowCard } from '../subscription/RowCard'
-import { GroupStatsContext, groupColumns, quotaSummary } from './columns'
+import { groupColumns, quotaSummary } from './columns'
 import { GroupSheet, type GroupTarget } from './GroupSheet'
 import { useGroupsT } from './useGroupsT'
-import { useMatchCounts } from './useMatchCounts'
-import { useOverrideCounts } from './useOverrideCounts'
 
 const NONE: Group[] = []
 
@@ -61,8 +59,6 @@ export default function GroupsPage() {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
-  const matches = useMatchCounts(qScope, items, canConfig)
-  const overrides = useOverrideCounts(qScope, items, canConfig)
 
   /** Patch the cached list after a write, so the table reflects it immediately instead of waiting for the next read. */
   function mutateItems(updater: (prev: Group[]) => Group[]) {
@@ -171,9 +167,7 @@ export default function GroupsPage() {
   }
 
   const loading = groupsQuery.isPending
-  const stats = { matches, overrides }
   return (
-    <GroupStatsContext.Provider value={stats}>
     <div className="p-4 sm:p-6">
       <PageHeader
         title={t('admin:groups.title')}
@@ -234,6 +228,5 @@ export default function GroupsPage() {
         }}
       />
     </div>
-    </GroupStatsContext.Provider>
   )
 }

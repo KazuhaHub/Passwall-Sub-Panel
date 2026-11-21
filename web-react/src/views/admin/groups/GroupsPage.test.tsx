@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useAuthStore } from '@/stores/auth'
-import { api, empty, installReads, mountPage, mountWithLinks, PATH, previewOf, reads, team } from './testHarness'
+import { api, empty, installReads, mountPage, mountWithLinks, PATH, previewOf, reads, scopeReply, team } from './testHarness'
 import GroupsPage from './GroupsPage'
 
 // The row is looked up again until it is in the table: the list redraws as the per-group answers arrive.
@@ -76,6 +76,28 @@ describe('the group list', () => {
     await openMenu('Team')
     expect(await menuItem('View members')).toBeTruthy()
     expect(await menuItem('Delete')).toBeTruthy()
+  })
+})
+
+describe('the per-group counts', () => {
+  it('never has more than 4 of the list\'s background reads in flight, however many groups there are', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...empty, id: 100 + i, slug: `g${i}`, name: `Group ${i}` }))
+    const extra: Record<string, unknown> = {}
+    for (const g of many) extra[`/admin/groups/${g.id}/scope-settings`] = scopeReply()
+    reads(many, extra)
+    let now = 0; let peak = 0
+    const slow = async <T,>(v: T) => { now++; peak = Math.max(peak, now); await new Promise(r => setTimeout(r, 5)); now--; return v }
+    const get = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, cfg?: unknown) => (String(url).endsWith('/scope-settings') ? slow(await get(url, cfg)) : get(url, cfg)))
+    api.post.mockImplementation(async () => slow(previewOf()))
+    mountPage(<GroupsPage />, PATH)
+    await rowOf('Group 0')
+    await waitFor(() => expect(api.post.mock.calls.length).toBeGreaterThanOrEqual(25), { timeout: 5000 })
+    await waitFor(() => expect(now).toBe(0))
+    expect(peak).toBeLessThanOrEqual(4)
+    expect(peak).toBeGreaterThan(1)
+    // Only the rows on the page are asked about, not all 30.
+    expect(api.post.mock.calls.length).toBe(25)
   })
 })
 

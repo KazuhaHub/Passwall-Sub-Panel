@@ -1,4 +1,3 @@
-import { createContext, useContext } from 'react'
 import type { TFunction } from 'i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 
@@ -8,14 +7,7 @@ import { StatusBadge } from '@/components/common/StatusBadge'
 import { StatusDot } from '@/components/common/StatusDot'
 import { Badge } from '@/components/ui/badge'
 import { RowActions } from '../subscription/RowActions'
-import type { MatchCounts } from './model'
-
-/**
- * The per-group answers that arrive after the list (matched nodes and lines, overridden settings). They reach the cells
- * through context, not through the columns: each answer would otherwise rebuild the column array and redraw every row.
- * A group missing from a map has no answer yet (a dash, never a zero).
- */
-export const GroupStatsContext = createContext<{ matches: ReadonlyMap<number, MatchCounts>; overrides: ReadonlyMap<number, number> }>({ matches: new Map(), overrides: new Map() })
+import { useMatchCount, useOverrideCount } from './useGroupStats'
 
 export interface GroupColumnCtx {
   t: TFunction
@@ -52,16 +44,17 @@ export function DestBadge({ state, t }: { state: Group['dest_state']; t: TFuncti
   return <StatusBadge tone="info" quiet={false} testId="allowlist-state" label={t(`admin:groups.destination.${state === 'report' ? 'badge_report' : 'badge_on'}`)} />
 }
 
-function MatchCell({ id, t }: { id: number; t: TFunction }) {
-  const m = useContext(GroupStatsContext).matches.get(id)
+/** Drawn only for rows on screen, which is what keeps the per-group reads few (see useGroupStats). */
+function MatchCell({ g, t }: { g: Group; t: TFunction }) {
+  const m = useMatchCount(g)
   if (!m) return DASH
   // Nothing matching is the one result worth words: those members get an empty subscription.
   if (m.nodes === 0) return <StatusBadge tone="warning" label={t('admin:groups.preview.none_short')} />
   return <span title={t('admin:groups.list.matches_title', { visible: m.visibleLines, total: m.totalLines })}>{t('admin:groups.list.matches', { nodes: m.nodes, lines: m.visibleLines })}</span>
 }
 
-function OverridesCell({ id }: { id: number }) {
-  const n = useContext(GroupStatsContext).overrides.get(id)
+function OverridesCell({ g }: { g: Group }) {
+  const n = useOverrideCount(g)
   return n === undefined || n === 0 ? DASH : <>{n}</>
 }
 
@@ -109,7 +102,7 @@ export function groupColumns(c: GroupColumnCtx): ColumnDef<Group, any>[] {
   // The preview behind this column is admin-only on the server: an operator reads the list without it.
   if (c.canConfig) {
     cols.push({ id: 'nodes', header: t('admin:groups.table.nodes'), enableSorting: false, meta: { label: t('admin:groups.table.nodes'), className: 'w-40 whitespace-nowrap' },
-      cell: ctx => <MatchCell id={ctx.row.original.id} t={t} /> })
+      cell: ctx => <MatchCell g={ctx.row.original} t={t} /> })
   }
   cols.push(
     { id: 'members', header: t('admin:groups.table.members'), accessorFn: r => r.members, meta: { label: t('admin:groups.table.members'), align: 'right', className: 'w-24 tabular-nums' } },
@@ -123,7 +116,7 @@ export function groupColumns(c: GroupColumnCtx): ColumnDef<Group, any>[] {
   )
   if (c.canConfig) {
     cols.push({ id: 'overrides', header: t('admin:groups.table.overrides'), enableSorting: false, meta: { label: t('admin:groups.table.overrides'), align: 'right', className: 'w-24 tabular-nums' },
-      cell: ctx => <OverridesCell id={ctx.row.original.id} /> })
+      cell: ctx => <OverridesCell g={ctx.row.original} /> })
     cols.push({ id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('admin:groups.table.actions'), className: 'w-20' },
       cell: ctx => {
         const g = ctx.row.original

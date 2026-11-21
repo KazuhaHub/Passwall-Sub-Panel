@@ -11,8 +11,8 @@ import { SaveBar } from '@/components/form/SaveBar'
 import { loadScopeState, saveScopeState, scopeChanged, scopeDiscarded, type ScopeState } from '@/components/scope/scopeOverrides'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
-import { groupKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
+import { matchKey, overridesKey } from './useGroupStats'
 import { useSheetGuard } from '../subscription/useSheetGuard'
 import GroupDestinationTab from './GroupDestinationTab'
 import { GeneralTab } from './GeneralTab'
@@ -112,6 +112,8 @@ function SheetBody({ target, canAccess, onClose, onSaved }: {
       if (group) {
         const res = await updateGroup(group.id, updateRequest(form))
         setSaved(form)
+        // The list's matched-nodes count for this group is read again.
+        void queryClient.invalidateQueries({ queryKey: matchKey(qScope, group.id) })
         // Overrides go after the group itself. A write that fails midway can leave them partly applied; the backend
         // writes are idempotent, so the sheet stays open on the state the server actually holds.
         let scopeFailed = false
@@ -120,7 +122,7 @@ function SheetBody({ target, canAccess, onClose, onSaved }: {
             scopeFailed = true
             pushToast({ message: t('admin:groups.scope.save_error'), severity: 'error' })
           }
-          void queryClient.invalidateQueries({ queryKey: [...groupKeys.all(qScope), 'overrides', group.id] })
+          void queryClient.invalidateQueries({ queryKey: overridesKey(qScope, group.id) })
         }
         if (scopeFailed) { loadScope(); onSaved(res.group, true, false); return }
         pushToast({ message: t('admin:groups.toast.updated'), severity: 'success' })
