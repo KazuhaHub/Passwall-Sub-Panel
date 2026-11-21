@@ -51,6 +51,7 @@ export default function LegalPublishDialog({ kind, locale, version, previous, co
   const affected = useAffectedUsers(scope, true)
   const [bump, setBump] = useState(false)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const doc = t(`auth:legal.kind.${kind}`)
   const size = previous === null ? null : changeSize(previous, content)
@@ -58,6 +59,7 @@ export default function LegalPublishDialog({ kind, locale, version, previous, co
 
   async function publish() {
     setError('')
+    setBusy(true)
     try {
       const res = await publishLegal(kind, { locale, content, consent_bump: bump })
       pushSnack(t('admin:settings.legal.publish.done', { version: res.document.version }), 'success')
@@ -75,12 +77,14 @@ export default function LegalPublishDialog({ kind, locale, version, previous, co
       } else {
         setError(t('admin:settings.legal.publish.failed'))
       }
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
-    <Dialog open onOpenChange={o => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open onOpenChange={o => { if (!o && !busy) onClose() }}>
+      <DialogContent className="sm:max-w-lg" showCloseButton={!busy}>
         <DialogHeader className="pr-8">
           <DialogTitle>{t('admin:settings.legal.publish.title', { doc, locale, version })}</DialogTitle>
           <DialogDescription>{size ? t('admin:settings.legal.publish.diff', size) : t('admin:settings.legal.publish.first')}</DialogDescription>
@@ -101,7 +105,7 @@ export default function LegalPublishDialog({ kind, locale, version, previous, co
         {bump && <Notice>{t('admin:settings.legal.publish.bump_effect')}</Notice>}
         {error && <Notice tone="danger" role="alert">{error}</Notice>}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>{t('admin:settings.legal.publish.cancel')}</Button>
+          <Button variant="outline" disabled={busy} onClick={onClose}>{t('admin:settings.legal.publish.cancel')}</Button>
           <AsyncButton variant={bump ? 'destructive' : 'default'} onClick={publish}>
             {bump ? t('admin:settings.legal.publish.confirm_bump') : t('admin:settings.legal.publish.confirm')}
           </AsyncButton>

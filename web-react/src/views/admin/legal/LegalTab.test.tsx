@@ -350,6 +350,18 @@ describe('publishing', () => {
     expect(vi.mocked(legalApi.getAdminLegal).mock.calls.length).toBeGreaterThan(2)
   })
 
+  it('cannot be closed with Escape while the request is running', async () => {
+    let release!: () => void
+    vi.mocked(legalApi.publishLegal).mockReturnValue(new Promise(res => { release = () => res({ document: ver(9, 'zh-CN', 4, '2026-10-01T08:00:00Z'), consent_version: 3, consent_bumped: false }) }))
+    const pub = await toPublish()
+    fireEvent.click(within(pub).getByRole('button', { name: 'Publish' }))
+    await waitFor(() => expect(legalApi.publishLegal).toHaveBeenCalled())
+    fireEvent.keyDown(pub, { key: 'Escape' })
+    expect(screen.getByRole('dialog', { name: /Publish Privacy/ })).toBeTruthy()
+    release()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Publish Privacy/ })).toBeNull())
+  })
+
   it('any other failure is said in the dialog, which stays', async () => {
     vi.mocked(legalApi.publishLegal).mockRejectedValue(new Error('boom'))
     const pub = await toPublish()

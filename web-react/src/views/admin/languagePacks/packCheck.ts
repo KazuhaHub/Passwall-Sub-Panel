@@ -60,6 +60,8 @@ export function checkPack(text: string): PackCheck {
     }
     for (const [ns, tree] of Object.entries(spaces)) {
       if (!(NAMESPACES as readonly string[]).includes(ns)) { problems.push({ key: 'unknown_namespace', values: { ns, known: NAMESPACES.join(', ') } }); continue }
+      // The server decodes into map[string]map[string]any, where null becomes an empty map and is accepted: never stricter than it.
+      if (tree === null) continue
       if (!isObject(tree)) { problems.push({ key: 'namespace_shape', values: { ns } }); continue }
       for (const [k, child] of Object.entries(tree)) walk(`${ns}:${k}`, child)
     }

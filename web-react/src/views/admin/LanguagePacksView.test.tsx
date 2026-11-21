@@ -112,6 +112,13 @@ describe('Language pack upload', () => {
     expect(api.put).not.toHaveBeenCalled()
   })
 
+  it('accepts a null namespace, as the server does', async () => {
+    const dialog = await openUpload()
+    fireEvent.change(within(dialog).getByLabelText('Language pack JSON'), { target: { value: JSON.stringify({ psp_language_pack: 1, code: 'de-DE', name: 'Deutsch', namespaces: { nav: null, common: { a: 'b' } } }) } })
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    expect(within(dialog).getByTestId('pack-summary')).toBeTruthy()
+  })
+
   it('says what is wrong with text that is not JSON', async () => {
     const dialog = await openUpload()
     fireEvent.change(within(dialog).getByLabelText('Language pack JSON'), { target: { value: '{nope' } })
