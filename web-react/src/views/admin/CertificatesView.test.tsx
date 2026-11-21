@@ -170,9 +170,24 @@ describe('deleting', () => {
     expect(api.delete).not.toHaveBeenCalled()
   })
 
+  it('offers no delete while it cannot tell which nodes use the certificate, only a retry', async () => {
+    reads({ '/admin/nodes': new Error('offline') })
+    mount()
+    openRowMenu(await rowOf('web'), /More actions for web/)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    const dialog = await confirmDialog()
+    expect(within(dialog).getByText(/Could not check which nodes use "web"/)).toBeTruthy()
+    expect(within(dialog).queryByRole('button', { name: 'Delete' })).toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeTruthy()
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+
   it('shows the server\'s own reason, with the way forward, when it refuses', async () => {
     reads()
     mount()
+    // Delete is only offered once the nodes have been read.
+    await waitFor(() => expect(api.get.mock.calls.some(([u]) => u === '/admin/nodes')).toBe(true))
+    await new Promise(r => setTimeout(r, 50))
     openRowMenu(await rowOf('web'), /More actions for web/)
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     const dialog = await confirmDialog()

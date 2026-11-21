@@ -177,6 +177,8 @@ export default function CertificatesView() {
             name={removal.item.name}
             uses={nodes.length > 0 ? <NodeLinks nodes={nodes} /> : null}
             blocked={nodes.length > 0}
+            unknown={!data.usageKnown}
+            onRetry={() => data.nodes.refetch()}
             resolve={t('certs.delete.cert_resolve')}
             onDelete={async () => {
               await deleteCert(removal.item.id)

@@ -3758,7 +3758,7 @@
     "renew": "Renew now",
     "renew_busy": "This certificate is already being issued",
     "renew_confirm_title": "Renew certificate",
-    "renew_confirm_message": "Request a new certificate for \"{{name}}\" from {{ca}} and deploy it to the nodes that use it. This counts toward the CA's rate limits. If the current certificate still has more than two thirds of its lifetime left, the CA is not contacted and the certificate is only deployed again.",
+    "renew_confirm_message": "Request a new certificate for \"{{name}}\" from {{ca}} and deploy it to the nodes that use it. This counts toward the CA's rate limits. If a valid certificate still has more than two thirds of its lifetime left, the CA is not contacted and it is only deployed again.",
     "renew_queued": "Renewal queued",
     "create_queued": "Issuance queued; processing in the background",
     "reissue_title": "Re-issue certificate",
@@ -3793,7 +3793,8 @@
       "cert_resolve": "Open each node above, change its certificate source, then delete this certificate.",
       "account_resolve": "Change the ACME account of those certificates first, then delete this account.",
       "cred_consequence": "Those certificates cannot be issued or renewed until they use another credential.",
-      "cred_resolve": "Change the DNS credential of those certificates first."
+      "cred_resolve": "Change the DNS credential of those certificates first.",
+      "usage_unknown": "Could not check which nodes use \"{{name}}\", so it cannot be deleted safely yet. Retry once the nodes have loaded."
     },
     "acct_title": "ACME accounts",
     "acct_subtitle": "Manage multiple CA accounts (different CAs / contact emails / EAB credentials); each certificate picks the one to issue under.",

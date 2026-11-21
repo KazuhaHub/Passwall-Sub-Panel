@@ -11,7 +11,7 @@ import { useCertsT, useCommonT } from './shared'
  * fresher than this list), its own reason is shown here with the same way forward, not as a bare toast.
  * Focus opens on Cancel.
  */
-export function DeleteDialog({ title, name, uses, blocked, consequence, resolve, onDelete, onClose }: {
+export function DeleteDialog({ title, name, uses, blocked, unknown, onRetry, consequence, resolve, onDelete, onClose }: {
   title: string
   /** The thing being deleted, named in the question. */
   name: string
@@ -19,6 +19,9 @@ export function DeleteDialog({ title, name, uses, blocked, consequence, resolve,
   uses: ReactNode | null
   /** Something uses it and the server refuses: no delete button. */
   blocked: boolean
+  /** What uses it could not be read (still loading, or failed): nothing is offered but a retry. */
+  unknown?: boolean
+  onRetry?: () => Promise<unknown>
   /** What happens to the users when it goes anyway (a credential has no server-side guard). */
   consequence?: string
   /** How to resolve a refusal. */
@@ -34,10 +37,12 @@ export function DeleteDialog({ title, name, uses, blocked, consequence, resolve,
     <ImpactDialogFrame
       title={title}
       cancelRef={cancel}
-      cancelLabel={blocked ? c('actions.close') : c('actions.cancel')}
+      cancelLabel={blocked || unknown ? c('actions.close') : c('actions.cancel')}
       onClose={onClose}
-      description={blocked ? t('certs.delete.blocked', { name }) : t('certs.delete.question', { name })}
-      actions={blocked ? undefined : (
+      description={unknown ? t('certs.delete.usage_unknown', { name }) : blocked ? t('certs.delete.blocked', { name }) : t('certs.delete.question', { name })}
+      actions={unknown ? (
+        <AsyncButton onClick={() => onRetry?.()}>{c('actions.retry')}</AsyncButton>
+      ) : blocked ? undefined : (
         <AsyncButton
           variant="destructive"
           onClick={async () => {

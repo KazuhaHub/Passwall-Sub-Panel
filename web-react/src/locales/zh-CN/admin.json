@@ -3733,7 +3733,7 @@
     "renew": "立即续期",
     "renew_busy": "此证书正在申请中",
     "renew_confirm_title": "续期证书",
-    "renew_confirm_message": "向 {{ca}} 为「{{name}}」申请新证书，并部署到使用它的节点。申请次数计入 CA 的频率限制。如果当前证书的有效期还剩三分之二以上，不会联系 CA，只重新部署。",
+    "renew_confirm_message": "向 {{ca}} 为「{{name}}」申请新证书，并部署到使用它的节点。申请次数计入 CA 的频率限制。如果证书仍有效且有效期还剩三分之二以上，不会联系 CA，只重新部署。",
     "renew_queued": "已提交续期",
     "create_queued": "已提交签发，后台处理中",
     "reissue_title": "重新签发证书",
@@ -3768,7 +3768,8 @@
       "cert_resolve": "请逐个打开上面的节点，修改其证书来源，然后再删除此证书。",
       "account_resolve": "请先修改这些证书使用的 ACME 账号，再删除此账号。",
       "cred_consequence": "这些证书在改用其他凭据之前无法签发或续期。",
-      "cred_resolve": "请先修改这些证书使用的 DNS 凭据。"
+      "cred_resolve": "请先修改这些证书使用的 DNS 凭据。",
+      "usage_unknown": "无法确认哪些节点在使用「{{name}}」，暂时不能安全删除。节点加载完成后请重试。"
     },
     "acct_title": "ACME 账号",
     "acct_subtitle": "管理多个 CA 账号（不同 CA / 联系邮箱 / EAB 凭据），证书签发时各自选用。",
