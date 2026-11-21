@@ -1016,34 +1016,21 @@
       "other": "尚不能识别此类上报；请检查服务器，并展开技术详情排查。"
     },
     "search": "搜索服务器、代码、对象或详情",
-    "search_action": "搜索",
     "refresh": "刷新",
     "empty": "没有匹配的节点问题。",
     "acknowledge": "确认已查看",
     "acknowledged": "已确认查看",
-    "view_details": "详情",
-    "open_details": "查看 {{server}} 的{{problem}}",
-    "clear_search": "清空搜索",
-    "loading": "正在加载节点问题",
     "load_failed": "无法加载记录，请刷新重试；当前显示的记录可能来自上一次查询。",
     "empty_review": "没有待查看的记录。",
-    "page_summary": "本页 {{records}}，归为 {{groups}}",
     "record_count_other": "{{count}} 条记录",
-    "group_count_other": "{{count}} 组问题摘要",
     "review_notice": "已查看不代表已恢复；这些上报记录不是实时健康检查。",
     "detail_scope": "本页共 {{records}}；原始日志在下方折叠保留。已查看不代表已恢复。",
-    "mobile_meta": "{{records}} · 最近出现 {{time}} {{timezone}}",
     "server_id": "服务器 #{{id}}",
     "record_id": "上报记录 #{{id}}",
     "unknown_server": "未关联的节点 Agent",
     "unknown_title": "其他节点问题",
     "reviewed_at": "查看时间",
     "bulk": {
-      "select_page": "全选本页待查看",
-      "select_group": "选择 {{server}} 的{{problem}}在本页的待查看记录",
-      "select_record": "选择上报记录 #{{id}}",
-      "selected": "已选 {{records}}",
-      "clear": "取消选择",
       "acknowledge": "批量确认已查看",
       "confirm_title": "批量确认查看",
       "confirm_message": "将所选的 {{records}} 标记为已查看？仅包含本页记录（含折叠记录），不会删除记录或修复节点。",
@@ -1129,9 +1116,10 @@
       "key": "对象",
       "detail": "详情",
       "first_seen": "首次出现",
-      "last_seen": "最近出现",
-      "actions": "操作"
-    }
+      "last_seen": "最近出现"
+    },
+    "load_failed_title": "暂时无法加载节点问题",
+    "acknowledge_all": "确认全部 {{count}} 条已查看"
   },
   "geo_anomalies": {
     "incomplete": "有面板读取失败，这个数字是下限而不是总数。",
