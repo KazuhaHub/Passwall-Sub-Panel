@@ -1,7 +1,7 @@
 // Shared per-group scope-override metadata + load/save logic (v3.8.0 §6.3).
 //
-// Extracted from GroupsView so the same editor can drive both the group detail
-// "Policies" tab and the Settings scope rail. The SCOPE_KEYS table is the
+// Extracted from the groups page so the same editor can drive both the group
+// sheet's Overrides and Layout tabs and the Settings scope rail. The SCOPE_KEYS table is the
 // frontend mirror of the backend allowlist (ports.OverridableScopeKeys /
 // admin_scope_settings.go) — a key the backend stops advertising is filtered
 // out at render time via scope.overridable, so a stale entry here degrades
@@ -198,4 +198,32 @@ export async function saveScopeState(groupId: number, scope: ScopeState): Promis
       await deleteGroupScopeOverride(groupId, k.type, k.name)
     }
   }
+}
+
+/**
+ * Whether saveScopeState would write anything: the same diff, so a sheet's
+ * "unsaved changes" and what a save actually sends cannot disagree.
+ */
+export function scopeChanged(scope: ScopeState): boolean {
+  return SCOPE_KEYS.some(k => {
+    if (!scope.overridable.includes(k.key)) return false
+    const st = scope.edit[k.key]
+    const was = scope.orig[k.key]
+    return st.on ? was === undefined || was !== st.value : was !== undefined
+  })
+}
+
+/** How many of the allowed keys the group overrides right now (as edited, not as saved). */
+export function overriddenCount(scope: ScopeState, keys: readonly ScopeKeyMeta[] = SCOPE_KEYS): number {
+  return keys.filter(k => scope.overridable.includes(k.key) && scope.edit[k.key]?.on).length
+}
+
+/** The editor state with every unsaved edit thrown away: each key back to what was loaded (the page's Discard). */
+export function scopeDiscarded(scope: ScopeState): ScopeState {
+  const edit: ScopeState['edit'] = {}
+  for (const k of SCOPE_KEYS) {
+    const was = scope.orig[k.key]
+    edit[k.key] = was !== undefined ? { on: true, value: was } : { on: false, value: scope.global[k.key] }
+  }
+  return { ...scope, edit }
 }

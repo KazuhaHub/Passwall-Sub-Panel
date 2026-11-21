@@ -13,8 +13,7 @@ vi.mock('@/api/accessControl', async importOriginal => {
   return { ...real, ...fns, destErrorOf: real.destErrorOf, isDestUnavailable: real.isDestUnavailable }
 })
 
-const onLeave = vi.fn(() => Promise.resolve(true))
-const ui = (id: number | null) => <GroupDestinationTab groupId={id} onLeave={onLeave} />
+const ui = (id: number | null) => <GroupDestinationTab groupId={id} />
 const route = '/admin/groups'
 const off = group({ group_id: 7, group_name: 'Staff', state: 'off', updated_at: null, list_ids: [], lists: [], base_list_id: 0, extra_list_id: 0, base_count: 0, ineligible: [], pending_nodes: [] })
 
@@ -23,14 +22,13 @@ beforeEach(() => {
   vi.mocked(api.getDestGroups).mockResolvedValue([group(), off])
 })
 
-describe('the group dialog destinations tab', () => {
+describe('the group sheet destinations tab', () => {
   it('a group with no allowlist is unrestricted, and offers to enable one on the access-control page', async () => {
     const { router } = renderAccess(ui(7), { route })
     expect(await screen.findByText('不限')).toBeTruthy()
     expect(screen.getByText('本组成员可以访问所有目的地，仍受全局访问策略约束。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '为本组启用白名单… ›' }))
     await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?tab=allowlist&al_enable=7'))
-    expect(onLeave).toHaveBeenCalled()
   })
 
   it('a report-only group shows its mode, its lists and its nodes as a summary, and the way to edit them', async () => {
@@ -42,15 +40,6 @@ describe('the group dialog destinations tab', () => {
     expect(screen.getByText('这里只显示摘要；名单和状态在访问控制页修改。')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '在访问控制中编辑 ›' }))
     await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control?tab=allowlist&al_group=1'))
-    expect(onLeave).toHaveBeenCalled()
-  })
-
-  it('does not leave when the dialog has unsaved changes the admin keeps', async () => {
-    onLeave.mockResolvedValueOnce(false)
-    const { router } = renderAccess(ui(1), { route })
-    fireEvent.click(await screen.findByRole('button', { name: '在访问控制中编辑 ›' }))
-    await waitFor(() => expect(onLeave).toHaveBeenCalled())
-    expect(whereIs(router)).toBe('/admin/groups')
   })
 
   it('lists the nodes that are not open to the group, with the reason, behind the count', async () => {
@@ -77,7 +66,7 @@ describe('the group dialog destinations tab', () => {
     expect(api.getDestGroups).not.toHaveBeenCalled()
   })
 
-  it('reads with skeletons, and a failed read is one line with a retry that leaves the dialog alone', async () => {
+  it('reads with skeletons, and a failed read is one line with a retry that leaves the sheet alone', async () => {
     vi.mocked(api.getDestGroups).mockRejectedValue(new Error('boom'))
     renderAccess(ui(1), { route })
     expect(await screen.findByText('读取白名单信息失败')).toBeTruthy()
