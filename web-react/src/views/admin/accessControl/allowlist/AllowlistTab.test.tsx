@@ -135,7 +135,7 @@ describe('the allowlist tab', () => {
     renderAccess(ui, { route })
     const card = (await screen.findByText('Guests')).closest('[data-testid="allowlist-card"]') as HTMLElement
     fireEvent.click(within(card).getByRole('button', { name: '开启…' }))
-    const dialog = await screen.findByRole('dialog', { name: '让「Guests」开启白名单？' })
+    const dialog = await screen.findByRole('alertdialog', { name: '让「Guests」开启白名单？' })
     expect(api.putDestGroup).not.toHaveBeenCalled()
     fireEvent.click(await within(dialog).findByRole('button', { name: '开启白名单' }))
     await waitFor(() => expect(api.putDestGroup).toHaveBeenCalledTimes(1))
