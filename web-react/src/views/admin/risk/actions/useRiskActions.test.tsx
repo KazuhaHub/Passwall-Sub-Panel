@@ -91,6 +91,26 @@ afterEach(() => {
   useAuthStore.setState({ role: '' })
 })
 
+describe('useRiskActions: the confirmation', () => {
+  // Every action changes how an account is judged or served: the dialog names the user, says whether it
+  // can be undone, and opens on Cancel so a stray Enter cannot confirm it.
+  it.each(KINDS)('%s names the user, says whether it can be undone, and opens on Cancel', async kind => {
+    mount(kind === 'resume' || kind === 'convert_manual' ? geoAutoHeld()
+      : subject({ review: { ...NO_REVIEW, dismissed: kind === 'undismiss' || kind === 'redismiss', trusted: kind === 'untrust' } }))
+    const dlg = await start(kind)
+    expect(within(dlg).getAllByText(/alice/).length).toBeGreaterThan(0)
+    expect(within(dlg).getByText(dict.current[`risk_center.actions.reversible_${kind === 'redismiss' ? 'dismiss' : kind}`])).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(within(dlg).getByRole('button', { name: '取消' })))
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('a pause says it holds the service, not the account', async () => {
+    mount(subject())
+    const dlg = await start('pause')
+    expect(within(dlg).getByText(/只暂停代理与订阅，不锁面板登录/)).toBeTruthy()
+  })
+})
+
 describe('useRiskActions: service actions', () => {
   it('pauses a geo account as an admin geo hold, the note as the detail', async () => {
     api.post.mockResolvedValue({ data: undefined })
