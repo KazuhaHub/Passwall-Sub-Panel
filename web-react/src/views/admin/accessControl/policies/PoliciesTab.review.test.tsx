@@ -60,9 +60,9 @@ describe('the row', () => {
     let release!: () => void
     vi.mocked(api.updateDestPolicy).mockReturnValue(new Promise(r => { release = () => r(pol({})) }))
     renderAccess(<PoliciesTab {...props} />)
-    const sw = (await screen.findByRole('switch', { name: /禁止发信/ })) as HTMLInputElement
+    const sw = await screen.findByRole('switch', { name: /禁止发信/ })
     fireEvent.click(sw)
-    await waitFor(() => expect((screen.getByRole('switch', { name: /禁止发信/ }) as HTMLInputElement).disabled).toBe(true))
+    await waitFor(() => expect(screen.getByRole('switch', { name: /禁止发信/ }).hasAttribute('data-disabled')).toBe(true))
     expect(screen.queryByRole('progressbar')).toBeNull()
     expect(screen.getByRole('switch', { name: /禁止发信/ })).toBe(sw)
     await act(async () => release())

@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
-import PolicyEditorDialog, { emptyForm } from './PolicyEditorDialog'
+import PolicyEditorSheet from './PolicyEditorSheet'
+import { emptyForm } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -33,14 +34,14 @@ beforeEach(() => {
 })
 
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorDialog open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
 
-describe('PolicyEditorDialog round 3', () => {
+describe('PolicyEditorSheet round 3', () => {
   it('shows a server error for description under the description field', async () => {
     vi.mocked(api.createDestPolicy).mockRejectedValue(bad('description'))
     mount(null, { ...emptyForm(), name: 'p', ports: '25' })
     fireEvent.click(await screen.findByRole('button', { name: '保存' }))
-    const field = (await screen.findByLabelText('说明')).closest('.MuiFormControl-root')!
+    const field = (await screen.findByLabelText('说明')).closest('[data-slot="field"]')!
     await waitFor(() => expect(field.textContent).toContain('策略的内容无效'))
   })
 
@@ -48,7 +49,7 @@ describe('PolicyEditorDialog round 3', () => {
     vi.mocked(api.createDestPolicy).mockRejectedValue(bad('group_ids'))
     mount(null, { ...emptyForm(), name: 'p', ports: '25', scope: 'groups', groupIds: [3] })
     fireEvent.click(await screen.findByRole('button', { name: '保存' }))
-    const picker = (await screen.findByLabelText('分组')).closest('.MuiFormControl-root')!
+    const picker = (await screen.findByLabelText('分组')).closest('[data-slot="field"]')!
     await waitFor(() => expect(picker.textContent).toContain('策略的内容无效'))
   })
 
@@ -69,8 +70,8 @@ describe('PolicyEditorDialog round 3', () => {
 
   it('disables the action toggle for a locked catalog policy', async () => {
     mount(pol({ template_key: 'bittorrent' }))
-    const allow = await screen.findByRole('button', { name: '放行' }) as HTMLButtonElement
-    expect(allow.disabled).toBe(true)
+    const allow = await screen.findByRole('radio', { name: '放行' })
+    expect(allow.getAttribute('aria-disabled')).toBe('true')
   })
 
   it('limits the name by UTF-8 bytes (128), not characters, and the maxLength attribute does not cut it first', async () => {

@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestList, DestPolicy } from '@/api/accessControl'
-import PolicyEditorDialog, { emptyForm } from './PolicyEditorDialog'
+import PolicyEditorSheet from './PolicyEditorSheet'
+import { emptyForm } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -32,10 +33,14 @@ beforeEach(() => {
   vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget })
 })
 
-const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorDialog open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+/** Base UI marks a disabled control by attribute, not by the `disabled` property. */
+const isOff = (el: HTMLElement) => el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('data-disabled')
+const checked = (el: HTMLElement) => el.getAttribute('aria-checked') === 'true'
 
-describe('PolicyEditorDialog review fixes', () => {
+const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
+  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+
+describe('PolicyEditorSheet review fixes', () => {
   it('a 400 naming a field with no input shows in the dialog top error', async () => {
     vi.mocked(api.createDestPolicy).mockRejectedValue(Object.assign(new Error('x'), {
       isAxiosError: true, response: { status: 400, data: { code: 'dest_policy_invalid', field: 'inline.network', error: 'bad' } },
@@ -48,19 +53,19 @@ describe('PolicyEditorDialog review fixes', () => {
 
   it('BitTorrent is disabled for allow and cleared when switching to allow', async () => {
     mount(null, { ...emptyForm(), name: 'p', bittorrent: true })
-    const bt = await screen.findByRole('checkbox', { name: /BT/ }) as HTMLInputElement
-    expect(bt.checked).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '放行' }))
-    await waitFor(() => expect((screen.getByRole('checkbox', { name: /BT/ }) as HTMLInputElement).disabled).toBe(true))
-    expect((screen.getByRole('checkbox', { name: /BT/ }) as HTMLInputElement).checked).toBe(false)
+    const bt = await screen.findByRole('checkbox', { name: /BT/ })
+    expect(checked(bt)).toBe(true)
+    fireEvent.click(screen.getByRole('radio', { name: '放行' }))
+    await waitFor(() => expect(isOff(screen.getByRole('checkbox', { name: /BT/ }))).toBe(true))
+    expect(checked(screen.getByRole('checkbox', { name: /BT/ }))).toBe(false)
   })
 
   it('locks the match fields of a catalog policy and says why', async () => {
     mount(pol({ template_key: 'bittorrent' }))
     expect(await screen.findByText('匹配内容由规则组目录决定')).toBeTruthy()
-    expect((screen.getByRole('checkbox', { name: /BT/ }) as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByRole('textbox', { name: /端口/ }) as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByRole('textbox', { name: /名称/ }) as HTMLInputElement).disabled).toBe(false)
+    expect(isOff(screen.getByRole('checkbox', { name: /BT/ }))).toBe(true)
+    expect(isOff(screen.getByRole('textbox', { name: /端口/ }))).toBe(true)
+    expect(isOff(screen.getByRole('textbox', { name: /名称/ }))).toBe(false)
   })
 
   it('requires a group when the scope is groups: error shown, save disabled', async () => {
@@ -70,7 +75,7 @@ describe('PolicyEditorDialog review fixes', () => {
 
   it('offers only destination lists', async () => {
     mount(null)
-    fireEvent.mouseDown(await screen.findByRole('combobox', { name: /列表/ }))
+    fireEvent.keyDown(await screen.findByRole('combobox', { name: /列表/ }), { key: 'ArrowDown' })
     expect(await screen.findByText(/目的地列表/)).toBeTruthy()
     expect(screen.queryByText(/来源列表/)).toBeNull()
   })

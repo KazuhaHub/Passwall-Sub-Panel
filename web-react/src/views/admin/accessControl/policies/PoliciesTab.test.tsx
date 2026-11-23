@@ -102,7 +102,22 @@ describe('writes', () => {
     const [id, body] = vi.mocked(api.updateDestPolicy).mock.calls[0]
     expect(id).toBe(2)
     expect(body).toMatchObject({ name: '禁止 BT', state: 'on', action: 'block', updated_at: 111, inline: { protocols: ['bittorrent'] } })
-    expect(confirmMock).not.toHaveBeenCalled()
+    // Not the first policy, so no first-publish question; the enabling question names the scope and starts on Cancel.
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    const opts = (confirmMock.mock.calls as unknown as unknown[][])[0][0] as { title: string; message: string; initialFocus: string }
+    expect(opts.title).toBe('启用策略「禁止 BT」？')
+    expect(opts.message).toContain('所有用户，共 1 个分组、0 人')
+    expect(opts.initialFocus).toBe('cancel')
+  })
+
+  it('declining the enabling question writes nothing', async () => {
+    confirmMock.mockImplementation(() => Promise.resolve(false))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalled())
+    expect(api.updateDestPolicy).not.toHaveBeenCalled()
   })
 
   it('the first policy to be enabled asks first, with the node count and minutes', async () => {
@@ -141,7 +156,7 @@ describe('the editor', () => {
     const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
     fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: '禁止发信 2' } })
-    expect(save.disabled).toBe(false)
+    await waitFor(() => expect((within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
     expect(within(dialog).getByText('只改名称或说明不会让节点重启')).toBeTruthy()
     vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget: { ...budget, regexps: { used: 300, limit: 256 } } })
     fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '26' } })
@@ -183,7 +198,8 @@ describe('templates', () => {
     const dialog = await screen.findByRole('dialog')
     const add = within(dialog).getByRole('button', { name: '添加' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
-    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('instantiates with the state the admin picked, in the UI language', async () => {
@@ -193,7 +209,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     await waitFor(() => expect(api.instantiateDestTemplate).toHaveBeenCalledWith('bittorrent', 'on', expect.any(String)))
   })
@@ -206,7 +222,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     expect(await within(dialog).findByText(/已有同名策略/)).toBeTruthy()
   })
