@@ -92,6 +92,13 @@ export const confirmMock = hoistedConfirm
 
 const hoistedSnack = vi.hoisted(() => vi.fn())
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: hoistedSnack, default: () => null }))
+// The rebuilt pages raise toasts through feedback/toasts (pushToast, or pushSnack by its new path); both
+// land on the same spy, so a test asserts `snack(message, severity)` whichever door the page used.
+vi.mock('@/components/feedback/toasts', async importOriginal => ({
+  ...await importOriginal<typeof import('@/components/feedback/toasts')>(),
+  pushSnack: hoistedSnack,
+  pushToast: (input: { message: string; severity?: string }) => hoistedSnack(input.message, input.severity),
+}))
 /** `pushSnack`. */
 export const snack = hoistedSnack
 
