@@ -78,7 +78,7 @@ describe('settings', () => {
   it('saves the update mode as dest_rules_update_mode', async () => {
     vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_rules_update_mode: 'auto' }))
     open()
-    fireEvent.click(await screen.findByRole('button', { name: '自动' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '自动' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_rules_update_mode: 'auto' }))
   })

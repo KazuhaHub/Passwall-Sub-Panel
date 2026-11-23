@@ -54,7 +54,7 @@ const SHARED = 'admin:risk_center.policy.'
  * A number is the shared NumberField, which keeps the text as typed ("0." is
  * not a number yet, so "0.5" can be typed) and tells the page the number the
  * text reads as. The stored 0 means UNSET, and the box shows that as an empty
- * field marked 默认, never as a 0 that would read as "zero tolerance": the
+ * field whose placeholder is the served default, never as a 0 that would read as "zero tolerance": the
  * served default is in the hint, and a set value carries a "follow again"
  * button that stores 0.
  */
@@ -131,7 +131,7 @@ export default function PolicyField<V extends FieldValue = FieldValue>({ spec, v
         onChange={n => onChange((n === null ? 0 : n) as V)}
         integer={spec.kind === 'number'}
         min={spec.min} max={spec.max}
-        allowEmpty emptyLabel={t(`${SHARED}default_adornment`)}
+        allowEmpty placeholder={fallback === undefined ? undefined : String(fallback)}
       />
     </Field>
   )

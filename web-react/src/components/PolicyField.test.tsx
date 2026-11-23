@@ -75,12 +75,12 @@ describe('PolicyField, numbers', () => {
     expect(input.value).toBe('0.5')
   })
 
-  // Unset is an empty field marked "default", never a 0 that reads as "zero tolerance"; the served
+  // Unset is an empty field showing the default, never a 0 that reads as "zero tolerance"; the served
   // default is in the hint under the box.
-  it('shows an unset value as empty, marked as the default, with the served default in the hint', () => {
+  it('shows an unset value as empty, with the served default as placeholder and in the hint', () => {
     const { input } = mount('geo_anomaly_max_cities', 0)
     expect(input.value).toBe('')
-    expect(screen.getByText('默认', { selector: '[data-slot=badge]' })).toBeTruthy()
+    expect(input.placeholder).toBe('2')
     expect(description(input)).toContain('默认 2')
     expect(screen.queryByRole('button', { name: '恢复跟随' })).toBeNull()
   })
@@ -88,7 +88,6 @@ describe('PolicyField, numbers', () => {
   it('shows a set value with a reset that stores 0', () => {
     const { input, stored } = mount('geo_anomaly_max_cities', 4)
     expect(input.value).toBe('4')
-    expect(screen.queryByText('默认', { selector: '[data-slot=badge]' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '恢复跟随' }))
     expect(stored).toEqual([0])
     expect(input.value).toBe('')

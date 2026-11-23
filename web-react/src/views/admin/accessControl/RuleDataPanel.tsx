@@ -1,19 +1,21 @@
 import { useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, Skeleton, ToggleButton,
-  ToggleButtonGroup, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import type { GeositeRejection, GeositeUpdateResult } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import FieldHint from '@/components/FieldHint'
-import { pushSnack } from '@/components/SnackbarHost'
-import ToneBadge from '@/components/ToneBadge'
+import { destErrorOf, type GeositeRejection, type GeositeUpdateResult } from '@/api/accessControl'
+import { AccessBadge } from '@/components/access/AccessBadge'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { FieldHint } from '@/components/common/HelpTip'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { IconError } from '@/lib/icons'
 import { useGeositeStatus, useRollbackGeosite, useUpdateGeosite } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { accessTone } from '@/utils/accessControl'
-import { destErrorOf } from '@/api/accessControl'
 import { destErrorText } from './destErrors'
 
 const R = 'admin:access_control.rule_data.'
@@ -32,7 +34,7 @@ function rejectionText(t: (k: string, o?: Record<string, unknown>) => string, r:
  * from, how old it is, what the upstream offers, and the update / roll back
  * pair. An update is always previewed first (a dry run downloads and verifies a
  * release and changes nothing) and applied by naming the tag that was reviewed.
- * The auto / manual mode is the dialog's own draft (it is saved with the other
+ * The auto / manual mode is the settings sheet's own draft (it is saved with the other
  * settings), so it comes in as props.
  */
 export default function RuleDataPanel({ mode, onModeChange, disabled }: {
@@ -41,9 +43,6 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
   disabled?: boolean
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
-  const md = theme.palette.md
   const scope = useQueryScope()
   const status = useGeositeStatus(scope)
   const update = useUpdateGeosite(scope)
@@ -53,14 +52,10 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
 
   const date = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(i18n.language) : '')
 
-  if (status.isPending) return <Skeleton variant="rounded" height={96} />
+  if (status.isPending) return <Skeleton className="h-24 w-full" />
   // A failed REFRESH keeps the data on screen (and the review dialog with its message); only a read that never succeeded replaces it.
   if (!status.data) {
-    return (
-      <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void status.refetch()}>{t('admin:access_control.retry')}</Button>}>
-        {t(`${R}read_failed`)}
-      </Alert>
-    )
+    return <ErrorState compact title={t(`${R}read_failed`)} retry={() => void status.refetch()} />
   }
   const s = status.data
   const busy = update.isPending || rollback.isPending
@@ -97,7 +92,7 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
         }
         await rollback.mutateAsync({})
       }
-      pushSnack(t(`${R}applied_snack`, { tag: review.result.to.tag }), 'success')
+      pushToast({ message: t(`${R}applied_snack`, { tag: review.result.to.tag }), severity: 'success' })
       setReview(null)
     } catch (err) {
       const e = destErrorOf(err)
@@ -112,104 +107,104 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
   const age = s.current_age_days
 
   return (
-    <Box data-testid="rule-data-panel">
+    <div data-testid="rule-data-panel" className="grid gap-1.5 text-sm">
       {!s.current ? (
-        <Typography sx={{ color: md.onSurfaceVariant }}>{t(`${R}none`)}</Typography>
+        <p className="text-muted-foreground">{t(`${R}none`)}</p>
       ) : (
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0.5 }}>
-          <Typography sx={{ fontSize: 14 }}>
-            {t(`${R}current`, { tag: s.current.tag })}
-            {s.current_released_at ? ` · ${t(`${R}released`, { date: date(s.current_released_at) })}` : ''}
-            {age !== undefined ? ` · ${t(`${R}age`, { count: age })}` : ''}
-          </Typography>
-        </Box>
+        <p>
+          {t(`${R}current`, { tag: s.current.tag })}
+          {s.current_released_at ? ` · ${t(`${R}released`, { date: date(s.current_released_at) })}` : ''}
+          {age !== undefined ? ` · ${t(`${R}age`, { count: age })}` : ''}
+        </p>
       )}
-      <Typography sx={{ fontSize: 14, mt: 0.5 }}>
+      <p>
         {s.latest.tag ? t(`${R}latest`, { tag: s.latest.tag }) : t(`${R}latest_unknown`)}
         {s.update_available && s.behind_days !== undefined ? ` · ${t(`${R}behind`, { count: s.behind_days })}` : ''}
-      </Typography>
-      {s.update_available && (
-        <Box sx={{ mt: 0.75 }}><ToneBadge tone={accessTone(theme, 'attention')} label={t(`${R}update_available`)} /></Box>
-      )}
-      {s.latest.error && (
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>{t(`${R}latest_error`)}</Typography>
-      )}
+      </p>
+      {s.update_available && <div><AccessBadge kind="attention" label={t(`${R}update_available`)} /></div>}
+      {s.latest.error && <p className="text-muted-foreground">{t(`${R}latest_error`)}</p>}
       {(s.last_update_error || s.data_error) && (
-        <Box sx={{ mt: 1 }}>
-          <FieldHint tone="amber" summary={s.data_error ? t(`${R}data_error.summary`) : t(`${R}last_update_error.summary`)}
+        <div>
+          <FieldHint summary={s.data_error ? t(`${R}data_error.summary`) : t(`${R}last_update_error.summary`)}
             detail={s.data_error ? t(`${R}data_error.detail`) : t(`${R}last_update_error.detail`)} />
-        </Box>
+        </div>
       )}
 
-      <Box sx={{ display: 'flex', gap: 1, mt: 1.5, flexWrap: 'wrap' }}>
-        <AsyncButton variant="outlined" size="small" disabled={disabled || busy} onClick={() => preview('update')}>{t(`${R}check_update`)}</AsyncButton>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        <AsyncButton variant="outline" size="sm" disabled={disabled || busy} onClick={() => preview('update')}>{t(`${R}check_update`)}</AsyncButton>
         {s.previous && (
-          <AsyncButton variant="text" size="small" disabled={disabled || busy} onClick={() => preview('rollback')}>{t(`${R}rollback`, { tag: s.previous.tag })}</AsyncButton>
+          <AsyncButton variant="ghost" size="sm" disabled={disabled || busy} onClick={() => preview('rollback')}>{t(`${R}rollback`, { tag: s.previous.tag })}</AsyncButton>
         )}
-      </Box>
-      {busy && <LinearProgress sx={{ mt: 1 }} aria-label={t(`${R}working`)} />}
-      {error && <Alert severity="error" sx={{ mt: 1 }} onClose={() => setError('')}>{error}</Alert>}
+      </div>
+      {error && (
+        <Alert variant="destructive" className="mt-1">
+          <IconError aria-hidden />
+          <AlertDescription className="flex items-start justify-between gap-2">
+            <span>{error}</span>
+            <Button variant="ghost" size="xs" onClick={() => setError('')}>{t('common:actions.close')}</Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
-      <Box sx={{ mt: 2 }}>
-        <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 0.5 }} id="rules-mode-label">{t(`${R}mode.title`)}</Typography>
-        <ToggleButtonGroup exclusive size="small" value={mode} disabled={disabled} aria-labelledby="rules-mode-label"
-          onChange={(_, v: 'manual' | 'auto' | null) => { if (v) onModeChange(v) }}>
-          <ToggleButton value="manual">{t(`${R}mode.manual`)}</ToggleButton>
-          <ToggleButton value="auto">{t(`${R}mode.auto`)}</ToggleButton>
-        </ToggleButtonGroup>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>{t(`${R}mode.${mode}_hint`)}</Typography>
-      </Box>
+      <div className="mt-3 grid gap-1.5">
+        <p id="rules-mode-label" className="font-semibold">{t(`${R}mode.title`)}</p>
+        <SegmentedControl<'manual' | 'auto'> aria-labelledby="rules-mode-label" value={mode} disabled={disabled}
+          onChange={onModeChange} className="w-fit"
+          options={[{ value: 'manual', label: t(`${R}mode.manual`) }, { value: 'auto', label: t(`${R}mode.auto`) }]} />
+        <p className="text-muted-foreground">{t(`${R}mode.${mode}_hint`)}</p>
+      </div>
 
-      <Dialog open={review !== null} onClose={() => !busy && setReview(null)} fullScreen={fullScreen} maxWidth="sm" fullWidth
-        slotProps={{ paper: { sx: { borderRadius: fullScreen ? 0 : 3, bgcolor: md.surfaceContainerHigh } } }}>
-        <DialogTitle>{review?.op === 'rollback' ? t(`${R}review.title_rollback`) : t(`${R}review.title_update`)}</DialogTitle>
-        <DialogContent>
+      <Dialog open={review !== null} onOpenChange={next => { if (!next && !busy) setReview(null) }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{review?.op === 'rollback' ? t(`${R}review.title_rollback`) : t(`${R}review.title_update`)}</DialogTitle>
+            <DialogDescription>
+              {diff && (diff.from ? t(`${R}review.from_to`, { from: diff.from.tag, to: diff.to.tag }) : t(`${R}review.to`, { to: diff.to.tag }))}
+            </DialogDescription>
+          </DialogHeader>
           {diff && (
-            <>
-              <Typography sx={{ fontSize: 14, mb: 1 }}>
-                {diff.from ? t(`${R}review.from_to`, { from: diff.from.tag, to: diff.to.tag }) : t(`${R}review.to`, { to: diff.to.tag })}
-              </Typography>
-              {rej && <Alert severity="error" sx={{ mb: 1 }}>{rejectionText(t, rej)}</Alert>}
+            <div className="grid gap-3">
+              {rej && <Alert variant="destructive"><IconError aria-hidden /><AlertDescription>{rejectionText(t, rej)}</AlertDescription></Alert>}
               {diff.unchanged ? (
-                <Typography sx={{ color: md.onSurfaceVariant }}>{t(`${R}review.unchanged`)}</Typography>
+                <p className="text-sm text-muted-foreground">{t(`${R}review.unchanged`)}</p>
               ) : (
-                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-                  <thead>
-                    <tr>
-                      <Box component="th" sx={{ textAlign: 'left', py: 0.5 }}>{t(`${R}review.category`)}</Box>
-                      <Box component="th" sx={{ textAlign: 'right' }}>{t(`${R}review.entries`)}</Box>
-                      <Box component="th" sx={{ textAlign: 'right' }}>{t(`${R}review.change`)}</Box>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="tabular-nums">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t(`${R}review.category`)}</TableHead>
+                      <TableHead className="text-right">{t(`${R}review.entries`)}</TableHead>
+                      <TableHead className="text-right">{t(`${R}review.change`)}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {diff.categories.map(c => (
-                      <tr key={c.name}>
-                        <Box component="td" sx={{ py: 0.5, overflowWrap: 'anywhere' }}>
+                      <TableRow key={c.name}>
+                        <TableCell className="break-words whitespace-normal">
                           {c.name}
-                          {c.in_use && <Box component="span" sx={{ ml: 1 }}><ToneBadge tone={accessTone(theme, 'measuring')} label={t(`${R}review.in_use`)} /></Box>}
-                        </Box>
-                        <Box component="td" sx={{ textAlign: 'right' }}>{c.old} → {c.new}</Box>
-                        <Box component="td" sx={{ textAlign: 'right' }}>{`+${c.added} −${c.removed}`}</Box>
-                      </tr>
+                          {c.in_use && <span className="ml-2"><AccessBadge kind="measuring" label={t(`${R}review.in_use`)} /></span>}
+                        </TableCell>
+                        <TableCell className="text-right">{c.old} → {c.new}</TableCell>
+                        <TableCell className="text-right">{`+${c.added} −${c.removed}`}</TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </Box>
+                  </TableBody>
+                </Table>
               )}
               {!diff.unchanged && !rej && (
-                <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 1.5 }}>
+                <p className="text-sm text-muted-foreground">
                   {diff.lists_changed > 0 ? t(`${R}review.restart`) : t(`${R}review.no_restart`)}
-                </Typography>
+                </p>
               )}
-            </>
+            </div>
           )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReview(null)} disabled={busy}>{t(`${R}review.cancel`)}</Button>
+            <AsyncButton disabled={!!rej || !!diff?.unchanged} onClick={apply}>
+              {review?.op === 'rollback' ? t(`${R}review.apply_rollback`) : t(`${R}review.apply_update`)}
+            </AsyncButton>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setReview(null)} disabled={busy}>{t(`${R}review.cancel`)}</Button>
-          <AsyncButton variant="contained" disabled={!!rej || !!diff?.unchanged} onClick={apply}>
-            {review?.op === 'rollback' ? t(`${R}review.apply_rollback`) : t(`${R}review.apply_update`)}
-          </AsyncButton>
-        </DialogActions>
       </Dialog>
-    </Box>
+    </div>
   )
 }
