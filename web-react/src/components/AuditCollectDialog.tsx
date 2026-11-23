@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { AuditCollect, DestNodeStatus } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import FieldHint from '@/components/FieldHint'
-import { pushSnack } from '@/components/SnackbarHost'
+import { ModeRadioGroup } from '@/components/access/ModeRadioGroup'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { FieldHint } from '@/components/common/HelpTip'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestSettings, useDestStatus, useSetAuditCollect } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -41,9 +42,6 @@ export default function AuditCollectDialog({ node, onClose }: {
   onClose: () => void
 }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const open = node !== null
   const status = useDestStatus(scope, { enabled: open })
@@ -81,47 +79,45 @@ export default function AuditCollectDialog({ node, onClose }: {
     }
   }
 
-  const option = (value: AuditCollect) => {
+  const options = MODES.map(value => {
     const disabled = execOnly || (tooOld && value !== 'off') || save.isPending || (value === 'hits_and_usage' && (tooOld || noUsage))
-    return (
-      <FormControlLabel key={value} value={value} disabled={disabled} sx={{ alignItems: 'flex-start', m: 0, p: 1, borderRadius: 2, border: `1px solid ${mode === value ? md.primary : md.outlineVariant}` }}
-        control={<Radio />}
-        label={(
-          <Box sx={{ pt: 0.75 }}>
-            <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{t(`${A}mode.${value}`)}</Typography>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}mode_help.${value}`, { days: days ?? '…', usageDays: usageDays ?? '…' })}</Typography>
-            {value === 'hits' && tooOld && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}too_old`)}</Typography>}
-            {value === 'hits_and_usage' && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}usage_cost`)}</Typography>}
-            {value === 'hits_and_usage' && (noUsage || tooOld) && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${A}usage_too_old`)}</Typography>}
-          </Box>
-        )} />
-    )
-  }
+    return {
+      value, disabled,
+      children: (
+        <>
+          <span className="block text-sm font-semibold">{t(`${A}mode.${value}`)}</span>
+          <span className="block text-muted-foreground">{t(`${A}mode_help.${value}`, { days: days ?? '…', usageDays: usageDays ?? '…' })}</span>
+          {value === 'hits' && tooOld && <span className="block text-foreground">{t(`${A}too_old`)}</span>}
+          {value === 'hits_and_usage' && <span className="block text-foreground">{t(`${A}usage_cost`)}</span>}
+          {value === 'hits_and_usage' && (noUsage || tooOld) && <span className="block text-foreground">{t(`${A}usage_too_old`)}</span>}
+        </>
+      ),
+    }
+  })
 
   return (
-    <Dialog open={open} onClose={() => guard(onClose)} fullWidth maxWidth="sm" fullScreen={fullScreen}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: fullScreen ? 0 : 3 } } }}>
-      <DialogTitle>{t(`${A}title`, { name: node?.panel_name ?? '' })}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        {execOnly && <Typography variant="body2">{t(`${A}exec_only`)}</Typography>}
-        {error && <Alert severity="error">{error}</Alert>}
-        <RadioGroup value={mode} onChange={(_, v) => setMode(v as AuditCollect)} aria-label={t(`${A}label`)} sx={{ gap: 1 }}>
-          {MODES.map(option)}
-        </RadioGroup>
-        {mode === 'hits_and_usage' && !legalOn && (
-          <FieldHint tone="amber" summary={t(`${A}usage_privacy_summary`)} detail={t(`${A}usage_privacy_detail`)} />
-        )}
-        {stored === 'hits_and_usage' && mode !== 'hits_and_usage' && (
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}usage_off_note`, { usageDays: usageDays ?? '…' })}</Typography>
-        )}
+    <Dialog open={open} onOpenChange={next => { if (!next) guard(onClose) }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t(`${A}title`, { name: node?.panel_name ?? '' })}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3">
+          {execOnly && <p className="text-sm">{t(`${A}exec_only`)}</p>}
+          {error && <Alert variant="destructive">{error}</Alert>}
+          <ModeRadioGroup<AuditCollect> value={mode} onChange={setMode} aria-label={t(`${A}label`)} options={options} />
+          {mode === 'hits_and_usage' && !legalOn && (
+            <FieldHint tone="warning" summary={t(`${A}usage_privacy_summary`)} detail={t(`${A}usage_privacy_detail`)} />
+          )}
+          {stored === 'hits_and_usage' && mode !== 'hits_and_usage' && (
+            <p className="text-sm text-muted-foreground">{t(`${A}usage_off_note`, { usageDays: usageDays ?? '…' })}</p>
+          )}
+        </div>
+        {!execOnly && <p className="text-xs text-muted-foreground">{mode === 'hits_and_usage' ? t(`${A}restart_usage`, { usageDays: usageDays ?? '…' }) : t(`${A}restart`)}</p>}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => guard(onClose)}>{t(`${A}cancel`)}</Button>
+          {!execOnly && <AsyncButton disabled={!dirty} onClick={submit}>{t(`${A}save`)}</AsyncButton>}
+        </DialogFooter>
       </DialogContent>
-      <DialogActions sx={{ flexDirection: 'column', alignItems: 'stretch', gap: 1, p: 2 }}>
-        {!execOnly && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{mode === 'hits_and_usage' ? t(`${A}restart_usage`, { usageDays: usageDays ?? '…' }) : t(`${A}restart`)}</Typography>}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-          <Button onClick={() => guard(onClose)}>{t(`${A}cancel`)}</Button>
-          {!execOnly && <AsyncButton variant="contained" disabled={!dirty} onClick={submit}>{t(`${A}save`)}</AsyncButton>}
-        </Box>
-      </DialogActions>
     </Dialog>
   )
 }
