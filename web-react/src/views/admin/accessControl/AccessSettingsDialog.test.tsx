@@ -42,7 +42,7 @@ describe('settings', () => {
     open()
     const refresh = await screen.findByLabelText('远程与分类列表刷新间隔（小时）')
     expect((refresh as HTMLInputElement).value).toBe('')
-    expect((refresh as HTMLInputElement).placeholder).toBe('24')
+    expect((refresh as HTMLInputElement).placeholder).toBe('默认 24')
     fireEvent.focus(refresh)
     fireEvent.change(refresh, { target: { value: '12' } })
     expect(await screen.findByText('已修改 1 项')).toBeTruthy()
@@ -95,7 +95,7 @@ describe('the hit-record retention (S18, the records tab\'s "change")', () => {
     open()
     const days = (await screen.findByLabelText('命中记录保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('30')
+    expect(days.placeholder).toBe('默认 30')
     expect(screen.getByText(/1–365/)).toBeTruthy()
   })
 
@@ -104,7 +104,7 @@ describe('the hit-record retention (S18, the records tab\'s "change")', () => {
     open()
     const days = (await screen.findByLabelText('仅报告数据保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('7')
+    expect(days.placeholder).toBe('默认 7')
     expect(screen.getAllByText(/1–30/).length).toBeGreaterThan(0)
     fireEvent.focus(days)
     fireEvent.change(days, { target: { value: '10' } })
@@ -261,7 +261,7 @@ describe('the per-site usage retention', () => {
     open()
     const days = (await screen.findByLabelText('按网站用量保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('7')
+    expect(days.placeholder).toBe('默认 7')
     expect(screen.getByText(/1–30/, { selector: '[data-focus="usage"] *' })).toBeTruthy()
   })
 

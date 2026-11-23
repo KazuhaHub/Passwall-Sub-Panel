@@ -23,8 +23,10 @@ function sources(dir: string): string[] {
 
 const files = [
   ...sources(here),
-  ...['ToneBadge', 'KpiTile', 'PolicyField', 'NodePolicyStatusRow'].map(n => join(srcRoot, 'components', `${n}.tsx`)),
-  join(srcRoot, 'views/admin/ServerAccessDialog.tsx'),
+  ...['PolicyField', 'NodePolicyStatusRow'].map(n => join(srcRoot, 'components', `${n}.tsx`)),
+  join(srcRoot, 'components/access/AccessBadge.tsx'),
+  join(srcRoot, 'components/access/accessStatus.ts'),
+  join(srcRoot, 'views/admin/servers/dialogs/ServerAccessDialog.tsx'),
   join(srcRoot, 'views/admin/risk/drawer/AccessTab.tsx'),
 ]
 
@@ -40,7 +42,7 @@ describe('accessControl style', () => {
     ['an rgb()/rgba() colour', /\brgba?\(/],
     ['a coloured Chip', /<Chip[^>]*\bcolor=/],
   ])('has %s nowhere', (_name, re) => {
-    // ToneBadge, StatusLine and the tone tables build colours with alpha() and
+    // The tone tables build colours from
     // theme tokens (no literal); this is what holds that.
     const offenders = files.filter(f => re.test(code(readFileSync(f, 'utf8'))))
     expect(offenders).toEqual([])

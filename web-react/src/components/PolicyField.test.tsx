@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/api/client', () => ({ client: {} }))
-// t over the REAL zh-CN admin bundle, so a key the field asks for but the
-// bundle lacks shows up as its raw key.
+// t over the REAL zh-CN admin and common bundles (the number box's own words are common's), so a key the
+// field asks for but the bundles lack shows up as its raw key.
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -56,12 +56,12 @@ function description(input: HTMLInputElement): string {
   return document.getElementById(id)?.textContent ?? ''
 }
 
-
 afterEach(cleanup)
 
 describe('PolicyField, numbers', () => {
-  // A number box that rewrites what is typed on every keystroke cannot take "0.5": "0." is not a
-  // number yet. The text stays as typed; the store gets the number it reads as.
+  // U2: a number box that rewrites what is typed on every keystroke cannot
+  // take "0.5" — "0." is not a number yet. The text stays as typed while the
+  // field has focus; the store gets the number it reads as.
   it('takes 0.5 typed one character at a time', () => {
     const { input, stored } = mount('geo_anomaly_min_placed_ratio', 0)
     fireEvent.focus(input)
@@ -75,45 +75,59 @@ describe('PolicyField, numbers', () => {
     expect(input.value).toBe('0.5')
   })
 
-  // Unset is an empty field showing the default, never a 0 that reads as "zero tolerance"; the served
-  // default is in the hint under the box.
-  it('shows an unset value as empty, with the served default as placeholder and in the hint', () => {
+  // Unset is an empty field that says "default" and the served default — never a 0 that reads as "zero
+  // tolerance".
+  it('shows an unset value as empty, with the default as placeholder and a default mark', () => {
     const { input } = mount('geo_anomaly_max_cities', 0)
     expect(input.value).toBe('')
-    expect(input.placeholder).toBe('2')
-    expect(description(input)).toContain('默认 2')
+    expect(input.placeholder).toBe('默认 2')
+    expect(screen.getByText('默认 2')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '恢复跟随' })).toBeNull()
   })
 
   it('shows a set value with a reset that stores 0', () => {
     const { input, stored } = mount('geo_anomaly_max_cities', 4)
     expect(input.value).toBe('4')
+    expect(screen.queryByText('默认')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '恢复跟随' }))
     expect(stored).toEqual([0])
     expect(input.value).toBe('')
+    expect(input.placeholder).toBe('默认 2')
   })
 
-  it('stores an emptied field as 0 once it is left', () => {
+  // Emptying the box and leaving it stores 0 (unset). A fraction in a whole-number box is refused out loud
+  // rather than truncated behind the admin's back: nothing is stored for it.
+  it('stores an emptied field as 0 and refuses a fraction for an integer key', () => {
     const { input, stored } = mount('geo_anomaly_max_cities', 4)
     fireEvent.focus(input)
     fireEvent.change(input, { target: { value: '' } })
     fireEvent.blur(input)
     expect(stored).toEqual([0])
-  })
-
-  // A whole-number key refuses a fraction with a message instead of silently cutting it.
-  it('does not take a fraction for an integer key', () => {
-    const { input, stored } = mount('geo_anomaly_max_cities', 4)
     fireEvent.focus(input)
     fireEvent.change(input, { target: { value: '3.7' } })
-    expect(stored).toEqual([])
+    expect(stored).toEqual([0])
     expect(input.getAttribute('aria-invalid')).toBe('true')
   })
 
-  // The server clamps a ratio under 1.5 up to it; the field says so before the admin saves.
+  // 0 has always meant "unset, use the default" and the server accepts it: it stays enterable where the
+  // field has a minimum, is stored as 0, and the box is drawn again as the default — never an unsaveable value.
+  it('takes 0 as "default" in a field with a minimum', () => {
+    const { input, stored } = mount('risk_usage_ratio', 2)
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '0' } })
+    fireEvent.blur(input)
+    expect(stored.at(-1)).toBe(0)
+    const again = screen.getByRole('textbox', { name: dict.current['settings.risk.usage_ratio'] }) as HTMLInputElement
+    expect(again.value).toBe('')
+    expect(again.getAttribute('aria-invalid')).toBeNull()
+  })
+
+  // The server clamps a ratio under 1.5 up to it; the page says so before
+  // the admin saves, and the toolbar refuses the save.
   it('marks a value outside the bounds', () => {
     const { input } = mount('risk_usage_ratio', 1.2)
     expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(description(input)).toContain('最小为1.5')
   })
 
   it('does not mark an unset value, whatever its bounds', () => {
@@ -121,7 +135,8 @@ describe('PolicyField, numbers', () => {
     expect(input.getAttribute('aria-invalid')).toBeNull()
   })
 
-  // The hint says what the knob means; the tail says its range and default, taken from the served defaults.
+  // U18: the hint says what the knob means; the tail says its range and
+  // default, taken from the served defaults.
   it('ends the hint with the range and the served default', () => {
     expect(description(mount('geo_anomaly_min_placed_ratio', 0).input)).toContain('范围 0–1，默认 0.5')
     cleanup()
@@ -132,12 +147,14 @@ describe('PolicyField, numbers', () => {
     expect(own).toContain('默认 3')
   })
 
-  // A runtime knob's hint states its own default and range; its caption is the number the server runs with.
+  // A runtime knob's hint states its own default and range; its caption
+  // is the number the server runs with.
   it('captions a runtime knob with its value in effect and no tail', () => {
     const { input } = mount('geo_anomaly_fresh_window_seconds', 0, 42)
     const text = description(input)
     expect(text).toContain('当前生效：42')
     expect(text).not.toContain('范围 20–900，默认 120')
+    expect(input.placeholder).toBe('默认 120')
   })
 })
 

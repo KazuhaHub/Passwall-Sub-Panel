@@ -1482,7 +1482,7 @@
     "help": {
       "label": "说明",
       "queue": "每个需要处理的账号一行，最紧急的在前：已标记且被自动暂停、已标记、异地自动暂停、疑似，再按最近变化。通知铃只数需立即处理的账号（已标记或异地自动暂停）。「忽略」让账号离开这里，直到出现新的或更严重的信号；「信任此账号」长期豁免地点类检测。只提示的信号不会改动任何账号；只有开启了自动临时暂停时，系统才会自行暂停账号。",
-      "live": "最近一次流量轮询（或手动刷新）时每块面板上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。",
+      "live": "最近一次流量轮询（或手动刷新）时每台服务器上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。",
       "records": "每次进入或离开「疑似」「已标记」、每次自动临时暂停的施加与解除，以及管理员的忽略与信任操作。每条都带当时的依据，不含 IP、人名或备注。",
       "policy": "每张卡片是一个检测项：开关、预设、关键阈值，其余在「高级」里。留空即出厂默认。分组例外在页面底部，单独保存。"
     },
@@ -1502,13 +1502,18 @@
       "filter_source": "来源",
       "filter_urgent": "仅需立即处理",
       "search": "搜索用户",
+      "title": "待处理账号",
+      "clear_filters": "清除筛选",
+      "filter_urgent_remove": "移除「仅需立即处理」筛选",
+      "reloading": "正在刷新列表",
+      "row_menu": "{{upn}} 的操作",
+      "col_actions": "操作",
       "col_user": "用户",
       "col_level": "级别",
       "col_sources": "信号",
       "col_reason": "原因",
       "col_changed": "最近变化",
       "col_review": "处理",
-      "row_open": "打开 {{upn}} 的风控详情",
       "places_more": "等 {{count}} 处",
       "headline_no_signal": "当前无信号",
       "empty": "没有需要处理的账号",
@@ -1538,20 +1543,20 @@
       "snapshot_none": "还没有快照：启动后第一次流量轮询完成时出现，也可以立即刷新。",
       "stale": "快照已超过 {{minutes}} 分钟，可能已经过时。",
       "refresh": "立即刷新",
-      "refresh_hint": "向每块面板各请求一次在线地址。不计入异地并发判定，也不写入连接历史或标记记录。",
-      "refreshed": "已刷新：{{panels}} 块面板，{{connections}} 个连接",
+      "refresh_hint": "向每台服务器各请求一次在线地址。不计入异地并发判定，也不写入连接历史或标记记录。",
+      "refreshed": "已刷新：{{panels}} 台服务器，{{connections}} 个连接",
       "just_polled": "刚完成一次轮询，已显示它的快照",
       "cooldown": "刷新过于频繁，请 {{seconds}} 秒后再试",
       "in_progress": "正在刷新，请稍候",
-      "unread": "{{count}} 块面板读取失败，其上的连接未列出：{{names}}",
-      "unsupported": "{{count}} 块面板不提供在线地址（如 S-UI），其上的连接无法列出：{{names}}",
+      "unread": "{{count}} 台服务器读取失败，其上的连接未列出：{{names}}",
+      "unsupported": "{{count}} 台服务器不提供在线地址（如 S-UI），其上的连接无法列出：{{names}}",
       "unreferenced": "有 {{count}} 个节点还没有上一次的参照时间（启动后第一次读取），无法确认它们是否仍在扫描，这次一律当作仍在扫描：已经停止扫描的节点，它最后一次扫描（最多 30 分钟前）看到的地址也会当作在连。",
       "truncated": "有 {{count}} 个连接超出单账号 {{max}} 个的上限，未列出",
       "empty": "此刻没有在连的账号",
       "empty_filtered": "没有符合条件的连接",
-      "empty_unread": "没有列出任何连接，但有 {{count}} 块面板读取失败，那里的连接无从得知",
+      "empty_unread": "没有列出任何连接，但有 {{count}} 台服务器读取失败，那里的连接无从得知",
       "filter_user": "用户",
-      "filter_panel": "面板",
+      "filter_panel": "服务器",
       "filter_sources": "来源",
       "opt_all": "全部",
       "opt_kept": "参与判定",
@@ -1559,7 +1564,7 @@
       "col_user": "用户",
       "col_connections": "连接数",
       "col_ip": "IP",
-      "col_panel": "面板 / 节点",
+      "col_panel": "服务器 / 节点",
       "col_region": "地区",
       "col_status": "判定",
       "col_seen": "仍有连接",
@@ -1573,7 +1578,7 @@
       },
       "source_key": "来源 {{key}}",
       "still_connected": "仍有连接（截至 {{time}}）",
-      "still_connected_hint": "3X-UI 只报告此刻仍有连接的地址；这里是面板扫描的时间，不是这个地址最后一次使用的时间。",
+      "still_connected_hint": "3X-UI 只报告此刻仍有连接的地址；这里是服务器扫描的时间，不是这个地址最后一次使用的时间。",
       "seen_none": "无时间戳",
       "node_hint": "3X-UI 的节点标识，原样显示",
       "device_inferred": "推断",
@@ -1583,7 +1588,7 @@
       "devices_unavailable": "订阅日志暂时读不到，本页没有推断设备",
       "device_fetches": "{{count}} 次拉取，最近 {{time}}",
       "stale_addresses": "上游窗口里另有 {{count}} 个已断开的地址",
-      "incomplete": "有面板读取失败，这个账号的连接可能不全",
+      "incomplete": "有服务器读取失败，这个账号的连接可能不全",
       "show_connections": "查看连接",
       "hide_connections": "收起连接"
     },
@@ -1624,6 +1629,7 @@
         "trusted": "信任",
         "untrusted": "取消信任"
       },
+      "col_actions": "操作",
       "col_at": "时间",
       "col_user": "用户",
       "col_source": "来源",
@@ -1679,6 +1685,8 @@
       "title": "风控详情",
       "close": "关闭",
       "not_found": "用户不存在或已删除",
+      "axis_account": "账号",
+      "axis_service": "代理服务",
       "tab_overview": "概览",
       "tab_connections": "连接",
       "tab_devices": "设备",
@@ -1718,6 +1726,15 @@
       "trust": "信任此账号",
       "untrust": "取消信任",
       "more": "更多操作",
+      "reversible_pause": "可随时在这里或用户管理中恢复。",
+      "reversible_convert_manual": "可随时恢复代理服务。",
+      "reversible_resume": "之后可再次暂停。",
+      "reversible_resume_trust": "将同时信任该账号，可随时再次暂停代理服务或取消信任。",
+      "reversible_dismiss": "不会改变该用户的代理服务，可随时取消忽略。",
+      "reversible_undismiss": "不会改变该用户的代理服务，可再次忽略。",
+      "reversible_trust": "不会改变该用户当前的代理服务，可随时取消信任。",
+      "reversible_trust_resume": "将同时恢复该用户的代理服务，可随时取消信任。",
+      "reversible_untrust": "不会立即改变该用户的代理服务；下一轮检测起地点类检测重新判定，满足条件时可能再次暂停，可再次信任。",
       "pause_title": "暂停 {{upn}} 的代理服务？",
       "pause_message": "只暂停代理与订阅，不锁面板登录。状态记为「{{state}}」，不会自动恢复。",
       "pause_note": "告知用户的说明（可选）",
@@ -1725,7 +1742,7 @@
       "convert_title": "改为人工暂停 {{upn}}？",
       "convert_message": "自动临时暂停到期后不再自动恢复；状态改记为「异地人工暂停」，直到管理员恢复。",
       "resume_title": "恢复 {{upn}} 的代理服务？",
-      "resume_message": "清除「{{reason}}」暂停并推送到各面板。",
+      "resume_message": "清除「{{reason}}」暂停并推送到各服务器。",
       "resume_geo_auto_warning": "如果仍在多地同时使用，满足暂停条件时会再次自动暂停。确认是误判的，可同时信任此账号。",
       "resume_also_trust": "同时信任此账号",
       "dismiss_title": "忽略 {{upn}} 当前的信号？",
@@ -1752,7 +1769,7 @@
       "reason_changed": "暂停原因已被更改，已刷新",
       "nothing_to_dismiss": "当前没有需要忽略的信号，已刷新",
       "resume_failed": "已信任，但恢复代理服务失败：{{error}}",
-      "resume_warning": "已信任并恢复代理服务，但推送到面板失败且未能排队重试：{{error}}",
+      "resume_warning": "已信任并恢复代理服务，但推送到服务器失败且未能排队重试：{{error}}",
       "note_too_long": "最多 200 字"
     },
     "review": {
@@ -1802,7 +1819,6 @@
       "min_default": "不小于 {{min}}，默认 {{d}}",
       "default_only": "默认 {{d}}",
       "out_of_range": "超出允许范围",
-      "invalid": "有 {{count}} 项超出范围，无法保存",
       "save": "保存策略",
       "discard": "放弃修改",
       "saved": "策略已保存",
@@ -1819,6 +1835,8 @@
       "pick_group": "选择分组",
       "group_save": "保存本组例外",
       "group_saved": "分组例外已保存",
+      "group_not_saved": "策略保存失败，分组「{{name}}」的例外尚未保存。",
+      "group_failed_after_policy": "策略已保存，但分组「{{name}}」的例外保存失败。",
       "group_dirty": "本组例外有未保存的修改",
       "no_groups": "还没有分组",
       "hwid_on_devices": "设备数依赖「数据与刷新」中的设备标识采集。",
@@ -4047,6 +4065,8 @@
   },
   "servers": {
     "retired_routes": {
+      "previewing": "正在读取路由模板…",
+      "cleaning": "正在从模板中移除规则…",
       "upgrade_notice": "如果升级前用过 3X-UI 的 VLESS 路由线路，可在对应服务器上打开清理入口，预览旧功能留下的规则。",
       "open": "清理旧 VLESS 路由",
       "title": "{{server}} 的旧 VLESS 路由",
@@ -4102,6 +4122,7 @@
       "command_next": "执行后刷新此原服务器，并核对 Agent、内核及实际客户端连接。仅生成命令不代表安装成功。",
       "node_command_hint": "请以 root 身份在这台节点机执行一键命令，不是在 PSP 主机上执行。私有脚本领取令牌仅可使用一次、15 分钟后过期。安装成功不等于代理服务已就绪：完成后仍须核对原服务器的 Agent、内核、受管节点及客户端实际连接。",
       "single_instance_confirmation": "我确认此部署仅有一个 PSP 进程使用该数据库；在线转换暂不支持多实例部署。",
+      "generate_summary": "生成命令不会更改 {{name}}。它会签发一条一次性命令，在节点主机上执行后，才会把该服务器转换为 Passwall Node {{version}}。",
       "generate_node_command": "生成节点端更换后端与安装命令",
       "command_failed": "未能生成有效节点端命令，请重新核对预检、核验版本及必要确认；没有完成后端转换。",
       "supported_deployment_hint": "自动节点接管仅支持标准 Linux/systemd 3X-UI（x-ui）部署，或已干净重装操作系统的节点机。旧标准安装会备份、禁用并保留，而非删除。转换前须确认没有面板／内核升级任务或外部自动化能够重启旧服务。自定义目录与第三方面板容器部署须手动处理，此包装器不支持这些形式，也不会恢复非受管配置。",
@@ -4177,6 +4198,7 @@
       "requirements": "需要已启用升级助手的 Linux/systemd，或生成 Docker 文件时已开启“高级”中的远程升级选项。旧版本需先手动维护一次。新进程重新同步并完成配置收敛后才算成功；Docker 失败时会自动恢复保留的旧容器。数据库格式改变时仍需手动迁移。",
       "current": "当前 Passwall Node 版本（最近上报）",
       "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签。比当前版本旧的发行版会被标注出来，但仍可选择——面板不阻止降级，安全性由发行物签名、校验和与节点侧的状态 schema 检查保证。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
+      "summary": "将把 {{name}} 从 {{from}} 升级到 {{to}}，其代理连接会短暂中断。",
       "confirm": "确认并下发升级",
       "retry": "重试同一个升级请求",
       "refresh": "重新查询原任务",
@@ -4206,14 +4228,13 @@
     "search_placeholder": "搜索名称 / URL",
     "no_match": "没有匹配的服务器",
     "edit_title": "编辑 {{name}}",
-    "selection_count": "已选 {{count}}",
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
       "region": "地区",
-      "tags": "标签（逗号分隔）",
+      "tags": "标签",
       "panel_type": "服务器类型",
       "update_channel": "Passwall Node 更新频道",
       "name": "服务器名称",
@@ -4253,8 +4274,6 @@
       "update_channel": "默认更新通道：stable 只接收正式版，rc 接收候选版与正式版，beta 接收所有阶段。Docker 跟随同名标签，latest 仅指向 stable；testing 兼容 beta。保存不会自动升级。",
       "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
-      "unconfigured": "未配置",
-      "change": "修改",
       "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "native": {
@@ -4272,7 +4291,6 @@
       },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",
-      "metadata_details": "可选备注与技术说明",
       "create_continue": "创建并继续安装",
       "method_label": "选择安装方式",
       "method": {
@@ -4461,8 +4479,10 @@
       "url": "URL",
       "status": "状态",
       "version": "版本",
-      "remark": "备注",
-      "actions": "操作"
+      "actions": "操作",
+      "type": "类型",
+      "counts": "节点 / 线路",
+      "remark": "备注"
     },
     "status": {
       "checking": "检测中",
@@ -4493,7 +4513,6 @@
     },
     "action": {
       "test": "测试连接",
-      "edit": "编辑",
       "delete": "删除",
       "more": "更多操作",
       "upgrade": "升级",
@@ -4503,7 +4522,10 @@
       "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据",
       "line_factors": "线路倍率",
-      "shared_ports": "共用端口（SNI）"
+      "shared_ports": "共用端口（SNI）",
+      "refresh": "刷新",
+      "more_for": "{{name}} 的更多操作",
+      "edit": "编辑"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -4865,7 +4887,30 @@
       "confirm": "删除服务器",
       "changed": "服务器上的依赖刚刚发生了变化，已重新读取",
       "blind_delete": "不核对，直接删除"
-    }
+    },
+    "count": "{{count}} 台服务器",
+    "counts": {
+      "title": "{{nodes}} 个节点，{{lines}} 条线路"
+    },
+    "menu": {
+      "unsupported": "{{action}}（{{reason}}）",
+      "not_ready": "节点尚未就绪",
+      "not_supported": "{{type}} 不支持"
+    },
+    "empty": {
+      "title": "还没有服务器",
+      "description": "添加 Passwall Node、3X-UI 或 S-UI 服务器后，即可接入节点。"
+    },
+    "clear_search": "清除搜索",
+    "form": {
+      "group_type": "服务器类型",
+      "group_basics": "基本信息",
+      "group_node": "Passwall Node",
+      "group_connection": "连接",
+      "group_test": "连接测试",
+      "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
+    },
+    "resource_state": "资源：{{state}}"
   },
   "diagnostics": {
     "title": "运行诊断",

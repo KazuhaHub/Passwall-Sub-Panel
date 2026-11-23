@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DestListsView, DestNodeStatus, DestPolicies, DestPolicy, DestStatus } from '@/api/accessControl'
-import { createAppTheme, DEFAULT_PRESET_HEX } from '@/theme'
 import {
-  ACCESS_TONE_KINDS, accessTone, enforcingNodeCount, limitKindKey, accessVerdict, applyMinutes, budgetLevel, clampDays, destStatusActive,
+  enforcingNodeCount, limitKindKey, accessVerdict, applyMinutes, budgetLevel, clampDays, destStatusActive,
   needsFirstPublishConfirm, nodeStateKey, NODE_STATE_FILTER, NODE_STATE_TONE, PENDING_STUCK_MS, pipelineSteps,
   visibleBudget, type NodeStateKey,
   collectingNodeCount, enabledPolicies, reportNotDeployedCount, nodeRecording, nodeResolve, policyHitsView, policyStateOptions, policyStateTone, reorderWithin,
@@ -149,29 +148,6 @@ describe('node states: one table', () => {
   })
 })
 
-describe('the closed colour table', () => {
-  for (const mode of ['light', 'dark'] as const) {
-    it(`${mode}: no two rows share a fill, words and icon`, () => {
-      const theme = createAppTheme({ mode, sourceColor: DEFAULT_PRESET_HEX, language: 'en-US' })
-      const seen = new Map<string, string>()
-      for (const kind of ACCESS_TONE_KINDS) {
-        const t = accessTone(theme, kind)
-        const sig = [t.bg, t.text ?? t.fg, t.fg, t.Icon.displayName ?? t.Icon.name ?? String(t.Icon)].join('|')
-        // Icons are distinct component objects; identify by reference through a per-run list.
-        const key = [t.bg, t.text ?? t.fg, t.fg].join('|') + '|' + iconId(t.Icon)
-        expect(seen.get(key), `${kind} repeats ${seen.get(key)} (${sig})`).toBeUndefined()
-        seen.set(key, kind)
-      }
-      expect(seen.size).toBe(ACCESS_TONE_KINDS.length)
-    })
-  }
-})
-
-const icons = new Map<unknown, number>()
-function iconId(icon: unknown): number {
-  if (!icons.has(icon)) icons.set(icon, icons.size)
-  return icons.get(icon)!
-}
 
 describe('shared node counts and limit kinds', () => {
   it('counts nodes an apply reaches, once', () => {

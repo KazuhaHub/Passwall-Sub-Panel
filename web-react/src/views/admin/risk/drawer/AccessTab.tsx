@@ -1,44 +1,50 @@
 import { useState, type ReactNode } from 'react'
-import { Alert, Box, Button, Skeleton, Tooltip, Typography, useTheme } from '@mui/material'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import { useNavigate } from 'react-router'
-import { useTranslation } from 'react-i18next'
 
-import type { DestExemption, DestUserHit } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
+import type { DestExemption, DestState, DestUserHit } from '@/api/accessControl'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { StatusBadge } from '@/components/common/StatusBadge'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import StateBadge from '@/views/admin/accessControl/allowlist/StateBadge'
-import { stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
-import ToneBadge from '@/components/ToneBadge'
+import { pushSnack } from '@/components/feedback/toasts'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { Button } from '@/components/ui/button'
+import { IconChevronRight, IconInfo } from '@/lib/icons'
 import { useDeleteDestExemption, useDestStatus, useDestUser } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
-import { accessTone, applyMinutes } from '@/utils/accessControl'
-import { recordsHref } from '../../accessControl/records/recordsParams'
+import { applyMinutes } from '@/utils/accessControl'
 import { formatMsDualTz } from '@/utils/datetime'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
-import { timeLeft } from '../../accessControl/timeLeft'
-import { removeExemptionConfirm } from '../../accessControl/confirmCopy'
-import UsageSection from './UsageSection'
-import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
+import { stateDay } from '@/views/admin/accessControl/allowlist/allowlistState'
 import { reportDestError } from '../../accessControl/destErrors'
+import { removeExemptionConfirm } from '../../accessControl/confirmCopy'
+import { recordsHref } from '../../accessControl/records/recordsParams'
+import AddExemptionDialog from '../../accessControl/sheets/AddExemptionDialog'
+import { timeLeft } from '../../accessControl/timeLeft'
+import { useRiskT } from '../useRiskT'
+import UsageSection from './UsageSection'
 
 const D = 'admin:access_control.drawer.'
 
 function Row({ label, children, action, tinted }: { label: string; children: ReactNode; action?: ReactNode; tinted?: boolean }) {
-  const md = useTheme().palette.md
   return (
-    <Box sx={{
-      display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', p: 1.5, borderRadius: 3,
-      bgcolor: tinted ? md.surfaceContainerHigh : md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`,
-    }}>
-      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, minWidth: 48 }}>{label}</Typography>
-      <Box sx={{ flex: 1, minWidth: 0, fontSize: 14, overflowWrap: 'anywhere' }}>{children}</Box>
+    <div className={`flex flex-wrap items-center gap-3 rounded-lg border p-3 ${tinted ? 'bg-muted/50' : ''}`}>
+      <span className="min-w-12 text-[13px] text-muted-foreground">{label}</span>
+      <div className="min-w-0 flex-1 text-sm [overflow-wrap:anywhere]">{children}</div>
       {action}
-    </Box>
+    </div>
   )
+}
+
+/** A group's allowlist state as a badge, in the groups page's words: report-only counts its days, on says
+ *  so. Drawn here with the new badge; the access-control page's own badge is still the old component set. */
+function GroupStateBadge({ state, day }: { state: DestState; day: number | null }) {
+  const { t } = useRiskT()
+  const label = state === 'report' && day !== null
+    ? t('admin:groups.destination.report', { days: day })
+    : t(`admin:groups.destination.${state === 'report' ? 'report_nodays' : 'on'}`)
+  return <span data-testid="allowlist-state" data-state={state}><StatusBadge tone={state === 'report' ? 'info' : 'neutral'} label={label} quiet={false} /></span>
 }
 
 /**
@@ -48,9 +54,7 @@ function Row({ label, children, action, tinted }: { label: string; children: Rea
  * added or lifted in place, through the same mutations the exemptions sheet uses.
  */
 export default function AccessTab({ userId }: { userId: number }) {
-  const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
+  const { t } = useRiskT()
   const scope = useQueryScope()
   const panelTz = useSiteStore(s => s.timezone)
   const q = useDestUser(scope, userId)
@@ -59,19 +63,9 @@ export default function AccessTab({ userId }: { userId: number }) {
   const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
 
-  if (q.isPending) {
-    return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }} data-testid="access-tab-loading">
-        <Skeleton variant="rounded" height={56} /><Skeleton variant="rounded" height={56} />
-      </Box>
-    )
-  }
+  if (q.isPending) return <div data-testid="access-tab-loading"><CardSkeleton lines={3} /></div>
   if (q.isError || !q.data) {
-    return (
-      <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void q.refetch()}>{t(`${D}retry`)}</Button>}>
-        {t(`${D}load_failed`)}
-      </Alert>
-    )
+    return <ErrorState compact title={t(`${D}load_failed`)} retry={() => q.refetch()} />
   }
 
   const { group, exemption } = q.data
@@ -81,7 +75,7 @@ export default function AccessTab({ userId }: { userId: number }) {
     : t(`${D}expires_in`, { left: timeLeft(t, Math.max(0, e.expires_at - now)) })
 
   const lift = async (e: DestExemption) => {
-    const ok = await confirm(removeExemptionConfirm({ t, minutes: applyMinutes(status.data) }, e.upn))
+    const ok = await confirm({ ...removeExemptionConfirm({ t, minutes: applyMinutes(status.data) }, e.upn), initialFocus: 'cancel' })
     if (!ok) return
     try {
       await remove.mutateAsync(e.user_id)
@@ -92,40 +86,39 @@ export default function AccessTab({ userId }: { userId: number }) {
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+    <div className="flex flex-col gap-3">
       <Row label={t(`${D}group`)}>
         {group
           ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <div className="flex flex-wrap items-center gap-2">
               <span>{group.name}</span>
-              {(group.state === 'report' || group.state === 'on') && <StateBadge scope="group" state={group.state} day={stateDay(group.state_changed_at ?? null, Date.now())} />}
-              {!(group.state === 'report' || group.state === 'on') && group.mode === 'open' && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${D}open`)} testId="group-mode" data="open" />}
-            </Box>
+              {(group.state === 'report' || group.state === 'on') && <GroupStateBadge state={group.state} day={stateDay(group.state_changed_at ?? null, Date.now())} />}
+              {!(group.state === 'report' || group.state === 'on') && group.mode === 'open' && (
+                <span data-testid="group-mode" data-state="open"><StatusBadge tone="neutral" label={t(`${D}open`)} quiet={false} /></span>
+              )}
+            </div>
           )
-          : <Typography component="span" sx={{ color: md.onSurfaceVariant, fontSize: 14 }}>{t(`${D}no_group`)}</Typography>}
+          : <span className="text-sm text-muted-foreground">{t(`${D}no_group`)}</span>}
       </Row>
       {exemption
         ? (
           <>
             <Row label={t(`${D}exemption`)} tinted
-              action={<AsyncButton size="small" onClick={() => lift(exemption)}>{t(`${D}remove_exemption`)}</AsyncButton>}>
-              <Tooltip title={exemption.expires_at === null ? '' : formatMsDualTz(exemption.expires_at, panelTz)}>
-                <Box component="span">
+              action={<AsyncButton variant="outline" size="sm" onClick={() => lift(exemption)}>{t(`${D}remove_exemption`)}</AsyncButton>}>
+              <span title={exemption.expires_at === null ? undefined : formatMsDualTz(exemption.expires_at, panelTz)}>
                 {t(`${D}exemption_line`, {
                   reason: exemption.reason, by: exemption.created_by_upn || '—',
                   ago: formatRelativeTimeShort(now - exemption.created_at, t), expiry: expiry(exemption),
                 })}
-                </Box>
-              </Tooltip>
+              </span>
             </Row>
-            <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', px: 1, color: md.onSurfaceVariant, borderRadius: 2, bgcolor: md.surfaceContainerHigh, py: 0.75 }}>
-              <InfoOutlinedIcon aria-hidden sx={{ fontSize: 16 }} />
-              <Typography sx={{ fontSize: 12.5 }}>{t(`${D}exempt_hint`)}</Typography>
-            </Box>
+            <p className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-[12.5px] text-muted-foreground">
+              <IconInfo aria-hidden className="size-4 shrink-0" />{t(`${D}exempt_hint`)}
+            </p>
           </>
         )
         : (
-          <Row label={t(`${D}exemption`)} action={<Button size="small" onClick={() => setAdding(true)}>{t(`${D}add_exemption`)}</Button>}>
+          <Row label={t(`${D}exemption`)} action={<Button variant="outline" size="sm" onClick={() => setAdding(true)}>{t(`${D}add_exemption`)}</Button>}>
             <span>{t(`${D}not_exempt`)}</span>
           </Row>
         )}
@@ -136,7 +129,7 @@ export default function AccessTab({ userId }: { userId: number }) {
       )}
       <UsageSection key={userId} userId={userId} available={q.data.usage_available} nodes={q.data.usage_nodes} />
       <AddExemptionDialog open={adding} onClose={() => setAdding(false)} lockedUserId={userId} />
-    </Box>
+    </div>
   )
 }
 
@@ -154,9 +147,7 @@ function HitsSection({ userId, days, items, available, onViewAll, onNodes }: {
   onViewAll: () => void
   onNodes: () => void
 }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const status = useDestStatus(scope)
   const num = new Intl.NumberFormat(i18n.language)
@@ -167,37 +158,39 @@ function HitsSection({ userId, days, items, available, onViewAll, onNodes }: {
     return h.source.startsWith('s') ? t('admin:access_control.drawer.hits_source_rule', { name: h.source_name }) : h.source_name
   }
   return (
-    <Box data-testid="access-hits" data-user={userId} sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
-        <Typography component="h3" sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:access_control.drawer.hits_title', { days })}</Typography>
+    <div data-testid="access-hits" data-user={userId} className="mt-2 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">{t('admin:access_control.drawer.hits_title', { days })}</h3>
         {available !== false && items.length > 0 && (
-          <Button size="small" endIcon={<ChevronRightIcon />} onClick={onViewAll}>{t('admin:access_control.drawer.hits_view_all')}</Button>
+          <Button variant="ghost" size="sm" onClick={onViewAll}>
+            {t('admin:access_control.drawer.hits_view_all')}<IconChevronRight />
+          </Button>
         )}
-      </Box>
+      </div>
       {available === false
         ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
-            <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{t('admin:access_control.drawer.hits_not_recorded')}</Typography>
-            <Button size="small" onClick={onNodes}>{t('admin:access_control.drawer.hits_nodes')}</Button>
-          </Box>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-3">
+            <p className="min-w-0 flex-1 text-sm">{t('admin:access_control.drawer.hits_not_recorded')}</p>
+            <Button variant="outline" size="sm" onClick={onNodes}>{t('admin:access_control.drawer.hits_nodes')}</Button>
+          </div>
         )
         : items.length === 0
-          ? <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t('admin:access_control.drawer.hits_none', { days })}</Typography>
+          ? <p className="text-sm text-muted-foreground">{t('admin:access_control.drawer.hits_none', { days })}</p>
           : items.map(h => {
             const where = [...(h.top_dests ?? []), (h.panels ?? []).map(id => nodeName.get(id)).filter((n): n is string => !!n).join(sep)].filter(Boolean).join(' · ')
             return (
-              <Box key={`${h.source}/${h.action}`} data-testid="access-hit" sx={{ p: 1.25, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+              <div key={`${h.source}/${h.action}`} data-testid="access-hit" className="min-w-0 rounded-lg border p-3">
+                <div className="flex min-w-0 items-center gap-2">
                   {h.action === 'observe'
-                    ? <ToneBadge tone={accessTone(theme, 'would_deny')} label={t('admin:access_control.records.rule.would_block')} data="observe" />
-                    : <ToneBadge tone={accessTone(theme, 'block')} label={t('admin:access_control.records.rule.blocked')} data="block" />}
-                  <Typography sx={{ flex: 1, minWidth: 0, fontSize: 14, overflowWrap: 'anywhere', fontStyle: h.source_name === null ? 'italic' : 'normal' }}>{name(h)}</Typography>
-                  <Typography sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{num.format(h.count)}</Typography>
-                </Box>
-                {where && <Typography variant="body2" sx={{ color: md.onSurfaceVariant, overflowWrap: 'anywhere' }}>{where}</Typography>}
-              </Box>
+                    ? <span data-testid="hit-action" data-state="observe"><StatusBadge tone="info" quiet={false} label={t('admin:access_control.records.rule.would_block')} /></span>
+                    : <span data-testid="hit-action" data-state="block"><StatusBadge tone="danger" label={t('admin:access_control.records.rule.blocked')} /></span>}
+                  <span className={`min-w-0 flex-1 text-sm [overflow-wrap:anywhere] ${h.source_name === null ? 'italic' : ''}`}>{name(h)}</span>
+                  <span className="font-semibold tabular-nums">{num.format(h.count)}</span>
+                </div>
+                {where && <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">{where}</p>}
+              </div>
             )
           })}
-    </Box>
+    </div>
   )
 }

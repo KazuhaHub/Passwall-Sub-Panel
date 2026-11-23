@@ -1,10 +1,8 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import type { QueryClient } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -12,6 +10,7 @@ import { formatMsDualTz } from '@/utils/datetime'
 import type { GeoWhy } from '@/api/geoAnomalies'
 import type { FlagRecord } from '@/api/riskCenter'
 import RecordsTab from './RecordsTab'
+import { pick as choose, shown } from './testSelect'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
@@ -29,10 +28,9 @@ vi.mock('react-i18next', async (importOriginal) => ({
 }))
 
 import zh from '@/locales/zh-CN/admin.json'
+import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
-dict.current = flatten(zh as Nested)
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
+dict.current = { ...flatten(zhCommon as Nested), ...flatten(zh as Nested) }
 
 const why = (over: Partial<GeoWhy>): GeoWhy => ({
   code: 'suspect', tier: 'region', scope: 'city', tol: { countries: 1, regions: 2, cities: 3 },
@@ -77,11 +75,9 @@ function mount(search = '?tab=records') {
   client = makeTestQueryClient()
   render(
     <MemoryRouter initialEntries={[`/admin/risk${search}`]}>
-      <ThemeProvider theme={theme}>
         <Routes>
           <Route path="/admin/risk" element={<><RecordsTab /><Where /></>} />
         </Routes>
-      </ThemeProvider>
     </MemoryRouter>,
     { wrapper: queryWrapper(client) },
   )
@@ -102,13 +98,14 @@ function flagParams(): Record<string, unknown>[] {
 }
 
 async function pick(combobox: string, option: string) {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: combobox }))
-  fireEvent.click(await screen.findByRole('option', { name: option }))
+  choose(await screen.findByRole('combobox', { name: combobox }), option)
 }
 
-/** The expanded detail rows, in order. */
-function details(): HTMLElement[] {
-  return screen.queryAllByTestId('record-detail')
+/** The row of a record, found by the account it names; clicking it opens the record in the sheet. */
+async function openRow(index = 0): Promise<HTMLElement> {
+  await waitFor(() => expect(document.querySelector('tr[data-row]')).not.toBeNull())
+  fireEvent.click(document.querySelectorAll('tr[data-row]')[index])
+  return await screen.findByTestId('record-detail')
 }
 
 /** Every text node under `el` outside the raw-data block, trimmed, non-empty. */
@@ -195,7 +192,10 @@ describe('RecordsTab', () => {
     const row = (await screen.findByText('alice')).closest('tr') as HTMLElement
     expect(within(row).getAllByText('自动临时暂停').length).toBe(3)
     expect(within(row).queryByText('region')).toBeNull()
-    expect(screen.queryByRole('button', { name: '查看证据' })).toBeNull()
+    // Opened, it has no raw data to offer.
+    fireEvent.click(row)
+    await screen.findByTestId('record-detail')
+    expect(screen.queryByRole('button', { name: '原始数据' })).toBeNull()
   })
 
   // The expanded row reads like the rest of the page: the sentence, then the
@@ -204,8 +204,7 @@ describe('RecordsTab', () => {
   it('expands a geo record to its sentence, places and named values; JSON only on demand', async () => {
     serve([rec({ params: geoParams })])
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: '查看证据' }))
-    const [detail] = details()
+    const detail = await openRow()
     const d = within(detail)
     expect(d.getByText('同时在 CN 的 3 个省 / 州（容错 2），连续 2 / 6 次')).toBeTruthy()
     expect(d.getByText(/CN 3: Guangdong 2 \(Shenzhen 2\) · Hunan 1/)).toBeTruthy()
@@ -228,8 +227,7 @@ describe('RecordsTab', () => {
         fetches_with_hwid: 9, fetches_without: 1, clients: [],
       } })])
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: '查看证据' }))
-    const d = within(details()[0])
+    const d = within(await openRow())
     expect(d.getByText('iPhone 15')).toBeTruthy()
     expect(d.getByText('#ab12')).toBeTruthy()
   })
@@ -250,15 +248,20 @@ describe('RecordsTab', () => {
       rec({ id: 6, source: 'review', event: 'trusted', level: '', state: '', code: 'trusted', params: { by: 3 } }),
     ])
     mount()
-    for (const b of await screen.findAllByRole('button', { name: '查看证据' })) fireEvent.click(b)
-    expect(details()).toHaveLength(6)
-    for (const detail of details()) {
-      fireEvent.click(within(detail).getByRole('button', { name: '原始数据' }))
-      expect(detail.querySelector('pre')).not.toBeNull()
-      const raw = textsOutsideRaw(detail).filter(s => /^[a-z_]+$/.test(s))
-      expect(raw).toEqual([])
+    const texts: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const detail = await openRow(i)
+      const raw = within(detail).queryByRole('button', { name: '原始数据' })
+      if (raw) {
+        fireEvent.click(raw)
+        expect(detail.querySelector('pre')).not.toBeNull()
+      }
+      expect(textsOutsideRaw(detail).filter(s => /^[a-z_]+$/.test(s))).toEqual([])
+      texts.push(detail.textContent ?? '')
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByTestId('record-detail')).toBeNull())
     }
-    const all = details().map(d => d.textContent ?? '').join('\n')
+    const all = texts.join('\n')
     expect(all).toContain('异地人工暂停')
     expect(all).toContain('由 #3 设为信任')
     // A time stored inside a record reads in panel time, like the row's own.
@@ -286,7 +289,7 @@ describe('RecordsTab', () => {
     expect(keys.some(k => k.includes('"flags"') && k.includes('"level":"cleared"') && k.includes('"event":"dismissed"')))
       .toBe(true)
     // The button says how many of its filters are set.
-    expect(within(more.closest('.MuiBadge-root') as HTMLElement).getByText('2')).toBeTruthy()
+    expect(within(more).getByText('2')).toBeTruthy()
     // A filter change starts again at the first page.
     expect(flagParams().at(-1)).toMatchObject({ page: 1 })
   })
@@ -340,7 +343,7 @@ describe('RecordsTab', () => {
     mount(search)
     await screen.findByText('alice')
     expect(flagParams().at(-1)).toEqual(want)
-    expect(screen.getByRole('combobox', { name: '来源' }).textContent).toBe('管理员处理')
+    expect(shown(screen.getByRole('combobox', { name: '来源' }))).toBe('管理员处理')
     expect((screen.getByLabelText('开始（浏览器时间）') as HTMLInputElement).value).toBe('2026-09-01T08:00')
   })
 

@@ -1,18 +1,21 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import {
-  Alert, Box, Button, ButtonBase, Chip, IconButton, LinearProgress, Menu, MenuItem, Skeleton, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
-  useMediaQuery, useTheme,
-} from '@mui/material'
-import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
-import { Link as RouterLink, useSearchParams } from 'react-router'
-import { useTranslation } from 'react-i18next'
+import { useMemo, useRef, type ReactNode, type RefObject } from 'react'
+import { Link, useSearchParams } from 'react-router'
 import { isAxiosError } from 'axios'
+import type { ColumnDef } from '@tanstack/react-table'
 
-import { PagedTableFooter } from '@/components/PagedTableFooter'
 import {
   QUEUE_SOURCE_FILTERS, type QueueParams, type QueueRow, type QueueStatus, type QueueView,
 } from '@/api/riskCenter'
+import { MoreMenu, type MoreMenuItem } from '@/components/common/MoreMenu'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { StatusDot } from '@/components/common/StatusDot'
+import type { Tone } from '@/components/common/tones'
+import { DataTable } from '@/components/data/DataTable'
+import { FilterBar } from '@/components/data/FilterBar'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { useRiskQueue } from '@/query/riskCenter'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -22,16 +25,15 @@ import { activeDbIsCountryOnly } from '@/utils/geoAnomaly'
 import { regionNamer } from '@/utils/regionName'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { listSeparator } from '@/utils/riskCenter'
-import { availableActions, subjectOfRow } from '../actions/riskSubject'
+import { FilterChip, plainColumns } from '../../logs/shared'
+import { availableActions, DESTRUCTIVE_ACTIONS, subjectOfRow, type RiskActionKind } from '../actions/riskSubject'
 import { useRiskActions } from '../actions/useRiskActions'
 import { ReviewBadges } from '../drawer/DrawerHeader'
 import { DetectorStateChip } from '../evidence/DetectorStateChip'
 import { parseQueueParams, QUEUE_PAGE_SIZES, queueSearch } from '../riskParams'
+import { useRiskT } from '../useRiskT'
 import QueueMetricCards, { type MetricCard } from './QueueMetricCards'
 import { headlineText, headlineTip, sourceChipLabel } from './queueText'
-
-/** How long the typing must pause before the search is written. */
-const SEARCH_DEBOUNCE_MS = 300
 
 /** What each metric card sets; every card first clears what the others set,
  *  so one card is in force at a time. */
@@ -58,16 +60,20 @@ function activeCard(p: QueueParams): MetricCard | null {
 
 const STATUSES: readonly QueueStatus[] = ['open', 'dismissed', 'trusted', 'all']
 
-/** A signal chip's colour by its level: the flag is the alarm, suspect the
- *  ramp. */
-function levelColor(level: string): 'error' | 'warning' | 'default' {
-  return level === 'flagged' ? 'error' : level === 'suspect' ? 'warning' : 'default'
+/** A signal's tone by its level: the flag is the alarm, suspect the ramp. */
+function levelTone(level: string): Tone {
+  return level === 'flagged' ? 'danger' : level === 'suspect' ? 'warning' : 'neutral'
 }
 
 /** What the failed read says: the server's words, else the transport's. */
 function errorText(err: unknown): string {
   if (isAxiosError(err)) return String((err.response?.data as { error?: string } | undefined)?.error ?? err.message)
   return String(err)
+}
+
+/** What a row's columns and its menu call, read through a ref so a re-render does not rebuild every row. */
+interface RowAct {
+  start: (kind: RiskActionKind, row: QueueRow) => void
 }
 
 /**
@@ -89,10 +95,7 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
   /** The policy tab, where the detectors' switches are. */
   onOpenPolicy: () => void
 }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const panelTz = useSiteStore(s => s.timezone)
   const [urlParams, setUrlParams] = useSearchParams()
@@ -102,81 +105,54 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
   // is not evidence of one.
   const { data: geoip } = useGeoIPStatus(scope)
   const actions = useRiskActions()
-  const [menu, setMenu] = useState<{ anchor: HTMLElement; row: QueueRow } | null>(null)
 
+  // The patch is applied to the URL as it is when the write happens (the functional form), so a card
+  // clicked while the search box waits out its pause is kept rather than undone by a stale copy.
   const update = (patch: Partial<QueueParams>) => setUrlParams(prev => queueSearch(prev, patch), { replace: true })
-
-  // The search box: the text is local, the URL is written once the typing
-  // pauses. The write reads the URL and the text as they are THEN (a ref kept
-  // current after every render), so a card clicked while the timer waits is
-  // kept rather than undone by a stale copy, and nothing is written when the
-  // text trims to the search already in force. No effect depends on the input.
-  //
-  // The URL also moves under the mounted tab — the bell's entry, Back and
-  // Forward — and the box follows it: when the URL's q changes to what the
-  // box does not say, the text becomes the URL's, and a write still waiting
-  // then reads that text and writes nothing. The tab's own write is not such
-  // a move: a navigation renders as a transition, after a key typed
-  // meanwhile, and taking its q for the URL's would undo that key. So the q
-  // it sent is remembered until the URL's q next changes.
-  const urlQ = params.q ?? ''
-  const [search, setSearch] = useState(urlQ)
-  const [seenQ, setSeenQ] = useState(urlQ)
-  const [sentQ, setSentQ] = useState<string | null>(null)
-  if (urlQ !== seenQ) {
-    setSeenQ(urlQ)
-    setSentQ(null)
-    if (urlQ !== sentQ && urlQ !== search.trim()) setSearch(urlQ)
-  }
-  const current = useRef({ urlParams, search })
-  useEffect(() => { current.current = { urlParams, search } })
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => {
-    const pending = timer
-    return () => clearTimeout(pending.current)
-  }, [])
-  const onSearch = (value: string) => {
-    setSearch(value)
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => {
-      const { urlParams: now, search: text } = current.current
-      const q = text.trim()
-      if ((now.get('q') ?? '') === q) return
-      setSentQ(q)
-      setUrlParams(queueSearch(now, { q }), { replace: true })
-    }, SEARCH_DEBOUNCE_MS)
-  }
 
   const card = activeCard(params)
   const toggleCard = (c: MetricCard) => update(card === c ? NO_CARD : { ...NO_CARD, ...CARD_FILTERS[c] })
 
   const data: QueueView | undefined = q.data
-  const ctx = { nameRegion: regionNamer(t, i18n.language), panelTz, sep: listSeparator(i18n.language) }
   const dbDown = geoip !== undefined && (!geoip.enabled || !geoip.active)
   const status503 = isAxiosError(q.error) && q.error.response?.status === 503
   const narrowed = !!(params.source || params.level || params.auto_suspended || params.urgent || params.q)
     || (params.page ?? 1) > 1
-  const cols = phone ? 4 : 7
+  const clearAll = () => update({ q: '', source: '', level: undefined, auto_suspended: false, urgent: false, status: 'open' })
 
-  const signalChips = (row: QueueRow) => row.sources
-    .filter(s => s.source !== 'geo_auto')
-    .map(s => (
-      <Chip key={s.source} size="small" variant="outlined" color={levelColor(s.level)}
-        label={sourceChipLabel(s.source, row, t)} />
-    ))
-
-  // Relative in the list (a dual-timezone string per row would double the
-  // column), exact in panel time in the tooltip. "—" when nothing changed on
-  // record, never "just now".
-  const changed = (row: QueueRow): ReactNode => (row.changed_at_ms > 0
-    ? (
-      <Tooltip title={formatMsDualTz(row.changed_at_ms, panelTz)}>
-        <Typography component="span" sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>
-          {formatRelativeTimeShort(Date.now() - row.changed_at_ms, t)}
-        </Typography>
-      </Tooltip>
-    )
-    : <Typography component="span" sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>)
+  // The columns are memoised on what words they read; the handlers they call come through a ref.
+  const act = useRef<RowAct>({ start: () => {} })
+  act.current = { start: (kind, row) => actions.start(kind, subjectOfRow(row)) }
+  const language = i18n.language
+  const columns = useMemo<ColumnDef<QueueRow, any>[]>(() => {
+    const ctx = { nameRegion: regionNamer(t, language), panelTz, sep: listSeparator(language) }
+    return plainColumns<QueueRow>([
+      { id: 'user', header: t('admin:risk_center.queue.col_user'),
+        meta: { label: t('admin:risk_center.queue.col_user'), hideable: false, className: 'w-[18%] max-w-0' },
+        cell: c => <UserCell row={c.row.original} /> },
+      { id: 'level', header: t('admin:risk_center.queue.col_level'),
+        meta: { label: t('admin:risk_center.queue.col_level'), className: 'w-36' },
+        cell: c => <LevelCell row={c.row.original} /> },
+      { id: 'sources', header: t('admin:risk_center.queue.col_sources'),
+        meta: { label: t('admin:risk_center.queue.col_sources'), className: 'w-[16%]' },
+        cell: c => <SignalChips row={c.row.original} /> },
+      { id: 'reason', header: t('admin:risk_center.queue.col_reason'),
+        meta: { label: t('admin:risk_center.queue.col_reason'), className: 'w-[28%] max-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground' },
+        cell: c => {
+          const row = c.row.original
+          const text = headlineText(row, t, ctx)
+          return <span title={headlineTip(row, t) || text}>{text}</span>
+        } },
+      { id: 'changed', header: t('admin:risk_center.queue.col_changed'),
+        meta: { label: t('admin:risk_center.queue.col_changed'), className: 'w-24 whitespace-nowrap' },
+        cell: c => <ChangedCell row={c.row.original} /> },
+      { id: 'review', header: t('admin:risk_center.queue.col_review'),
+        meta: { label: t('admin:risk_center.queue.col_review'), className: 'w-32' },
+        cell: c => <div className="flex flex-wrap gap-1"><ReviewBadges review={c.row.original.review} /></div> },
+      { id: 'actions', header: '', meta: { hideable: false, align: 'right', label: t('admin:risk_center.queue.col_actions'), className: 'w-12' },
+        cell: c => <RowMenu row={c.row.original} act={act} /> },
+    ])
+  }, [t, language, panelTz])
 
   const emptyText = narrowed
     ? t('admin:risk_center.queue.empty_filtered')
@@ -185,218 +161,177 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
       : params.status === 'trusted'
         ? t('admin:risk_center.queue.empty_trusted')
         : t('admin:risk_center.queue.empty')
+  // Empty because nothing is judged, not because nobody is sharing: say so, and offer the switches.
+  const nothingJudged = !narrowed && params.status === 'open' && data?.global_detectors_off === true
+  const empty = narrowed
+    ? <EmptyState compact title={emptyText} action={<Button variant="outline" size="sm" onClick={clearAll}>{t('admin:risk_center.queue.clear_filters')}</Button>} />
+    : <EmptyState compact title={emptyText} description={nothingJudged ? t('admin:risk_center.queue.global_off') : undefined}
+      action={nothingJudged ? <Button variant="outline" size="sm" onClick={onOpenPolicy}>{t('admin:risk_center.queue.open_policy')}</Button> : undefined} />
+
+  const sources = params.source ? params.source.split(',') : []
+  const toolbar = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <SegmentedControl<QueueStatus> value={params.status ?? 'open'} aria-label={t('admin:risk_center.queue.filter_status')}
+        options={STATUSES.map(s => ({ value: s, label: t(`admin:risk_center.queue.status_${s}`) }))}
+        onChange={v => update({ status: v, urgent: false })} />
+      <FilterBar aria-label={t('admin:risk_center.queue.title')}
+        search={{ value: params.q ?? '', onChange: v => update({ q: v }), placeholder: t('admin:risk_center.queue.search') }}
+        facets={[{
+          id: 'source', label: t('admin:risk_center.queue.filter_source'),
+          options: QUEUE_SOURCE_FILTERS.map(s => ({ value: s, label: t(`admin:risk_center.flags.source.${s}`) })),
+          selected: sources, onChange: next => update({ source: next.join(',') }),
+        }]}
+        onClearAll={narrowed ? clearAll : undefined}>
+        {params.urgent && (
+          <FilterChip label={t('admin:risk_center.queue.filter_urgent')} removeLabel={t('admin:risk_center.queue.filter_urgent_remove')}
+            onRemove={() => update({ urgent: false })} />
+        )}
+      </FilterBar>
+    </div>
+  )
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+    <div className="flex flex-col gap-3">
       <QueueMetricCards counts={data?.counts} active={card} onToggle={toggleCard} onOpenLive={onOpenLive} />
 
-      {/* Without a location database three detectors read "cannot tell",
-          and an empty queue would look like a clean fleet. */}
+      {/* Without a location database three detectors read "cannot tell", and an empty queue would look
+          like a clean fleet. */}
       {dbDown && (
-        <Alert severity="warning" sx={{ fontSize: 13 }}
-          action={(
-            <Button component={RouterLink} to="/admin/settings?tab=general" size="small" color="inherit">
+        <Alert>
+          <AlertDescription>{t('admin:risk_center.queue.geoip_unavailable')}</AlertDescription>
+          <AlertAction>
+            <Button variant="outline" size="sm" render={<Link to="/admin/settings?tab=general" />}>
               {t('admin:risk_center.queue.geoip_open')}
             </Button>
-          )}>
-          {t('admin:risk_center.queue.geoip_unavailable')}
+          </AlertAction>
         </Alert>
       )}
       {!dbDown && activeDbIsCountryOnly(geoip) && (
-        <Alert severity="info" sx={{ fontSize: 13 }}>{t('admin:geo_anomalies.coarse_db')}</Alert>
+        <Alert><AlertDescription>{t('admin:geo_anomalies.coarse_db')}</AlertDescription></Alert>
       )}
       {(data?.counts.geo_unknown ?? 0) > 0 && (
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+        <p className="text-xs text-muted-foreground">
           {t('admin:risk_center.queue.geo_unknown', { count: data?.counts.geo_unknown })}
-        </Typography>
+        </p>
       )}
 
-      <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-        <ToggleButtonGroup exclusive size="small" value={params.status}
-          aria-label={t('admin:risk_center.queue.filter_status')}
-          onChange={(_, v: QueueStatus | null) => { if (v) update({ status: v, urgent: false }) }}>
-          {STATUSES.map(s => (
-            <ToggleButton key={s} value={s} sx={{ px: 1.5 }}>
-              {t(`admin:risk_center.queue.status_${s}`)}
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
-        <TextField select size="small" label={t('admin:risk_center.queue.filter_source')} sx={{ minWidth: 200 }}
-          value={params.source ? params.source.split(',') : []}
-          onChange={e => {
-            const v = e.target.value as unknown as string[] | string
-            update({ source: (Array.isArray(v) ? v : v.split(',')).join(',') })
-          }}
-          slotProps={{
-            select: {
-              multiple: true,
-              renderValue: sel => (
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                  {(sel as string[]).map(s => (
-                    <Chip key={s} size="small" label={t(`admin:risk_center.flags.source.${s}`)} />
-                  ))}
-                </Box>
-              ),
-            },
-          }}>
-          {QUEUE_SOURCE_FILTERS.map(s => (
-            <MenuItem key={s} value={s}>{t(`admin:risk_center.flags.source.${s}`)}</MenuItem>
-          ))}
-        </TextField>
-        <TextField size="small" label={t('admin:risk_center.queue.search')} value={search}
-          onChange={e => onSearch(e.target.value)} sx={{ width: 220 }} />
-        {params.urgent && (
-          <Chip color="error" variant="outlined" label={t('admin:risk_center.queue.filter_urgent')}
-            onDelete={() => update({ urgent: false })} />
-        )}
-      </Box>
-
-      {q.error && (status503
-        ? <Alert severity="info" sx={{ fontSize: 13 }}>{t('admin:risk_center.unwired')}</Alert>
-        : (
-          <Alert severity="error" sx={{ fontSize: 13 }}
-            action={(
-              <Button size="small" color="inherit" onClick={() => void q.refetch()}>
-                {t('admin:risk_center.retry')}
-              </Button>
-            )}>
-            {t('admin:risk_center.load_failed', { error: errorText(q.error) })}
-          </Alert>
-        ))}
-
-      {/* A new filter keeps the previous page on screen while it loads; the
-          bar says the list is being read again. */}
-      <Box sx={{ height: 4 }}>{q.isFetching && data && <LinearProgress />}</Box>
-
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>{t('admin:risk_center.queue.col_user')}</TableCell>
-              <TableCell>{t('admin:risk_center.queue.col_level')}</TableCell>
-              {!phone && <TableCell>{t('admin:risk_center.queue.col_sources')}</TableCell>}
-              <TableCell>{t('admin:risk_center.queue.col_reason')}</TableCell>
-              {!phone && <TableCell>{t('admin:risk_center.queue.col_changed')}</TableCell>}
-              {!phone && <TableCell>{t('admin:risk_center.queue.col_review')}</TableCell>}
-              <TableCell />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {q.isPending && [0, 1, 2].map(i => (
-              <TableRow key={i}>
-                <TableCell colSpan={cols}><Skeleton variant="text" /></TableCell>
-              </TableRow>
-            ))}
-            {data && data.items.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={cols}>
-                  <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{emptyText}</Typography>
-                  {/* Empty because nothing is judged, not because nobody is
-                      sharing: say so, and offer the switches. */}
-                  {!narrowed && params.status === 'open' && data.global_detectors_off && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-                      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
-                        {t('admin:risk_center.queue.global_off')}
-                      </Typography>
-                      <Button size="small" onClick={onOpenPolicy}>{t('admin:risk_center.queue.open_policy')}</Button>
-                    </Box>
-                  )}
-                </TableCell>
-              </TableRow>
-            )}
-            {data?.items.map(row => {
-              const name = row.upn || row.display_name || `#${row.user_id}`
-              const tip = headlineTip(row, t)
-              const headline = (
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 420 }}>
-                  {headlineText(row, t, ctx)}
-                </Typography>
-              )
-              return (
-                <TableRow key={row.user_id} hover onClick={() => onOpenUser(row.user_id)} sx={{ cursor: 'pointer' }}>
-                  <TableCell>
-                    {/* The keyboard way in: focusable, Enter opens the
-                        drawer, and focus comes back here when it closes. */}
-                    <ButtonBase component="span" aria-label={t('admin:risk_center.queue.row_open', { upn: name })}
-                      onClick={e => { e.stopPropagation(); onOpenUser(row.user_id) }}
-                      sx={{ fontSize: 14, fontWeight: 600, borderRadius: 1, px: 0.25,
-                        '&.Mui-focusVisible': { outline: `2px solid ${md.primary}` } }}>
-                      {name}
-                    </ButtonBase>
-                    {(row.display_name || row.group_name) && (
-                      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                        {[row.display_name, row.group_name].filter(Boolean).join(' · ')}
-                      </Typography>
-                    )}
-                    {/* A phone folds the three narrow columns into one line
-                        under the account. */}
-                    {phone && (
-                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center', mt: 0.5 }}>
-                        {signalChips(row)}
-                        {changed(row)}
-                        <ReviewBadges review={row.review} />
-                      </Box>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                      {(row.level === 'flagged' || row.level === 'suspect') && <DetectorStateChip state={row.level} />}
-                      {/* The detector's own hold, by its one name (D17); the
-                          tooltip says since when. */}
-                      {row.auto_suspended && (
-                        <Tooltip title={t('admin:geo_anomalies.auto_suspended_since', {
-                          time: formatMsDualTz(row.service_disabled_at_ms, panelTz),
-                        })}>
-                          <Chip size="small" color="error" label={t('admin:users.status.geo_auto')} />
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </TableCell>
-                  {!phone && (
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>{signalChips(row)}</Box>
-                    </TableCell>
-                  )}
-                  <TableCell>{tip ? <Tooltip title={tip}>{headline}</Tooltip> : headline}</TableCell>
-                  {!phone && <TableCell>{changed(row)}</TableCell>}
-                  {!phone && (
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}><ReviewBadges review={row.review} /></Box>
-                    </TableCell>
-                  )}
-                  <TableCell align="right" padding="checkbox">
-                    <IconButton size="small" aria-label={t('admin:risk_center.actions.more')} aria-haspopup="menu"
-                      onClick={e => { e.stopPropagation(); setMenu({ anchor: e.currentTarget, row }) }}>
-                      <MoreHorizIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      {data && (
-        <PagedTableFooter total={data.total} page={params.page ?? 1} pageSize={params.page_size ?? 25}
-          rowsPerPageOptions={QUEUE_PAGE_SIZES}
-          onPageChange={p => update({ page: p })} onPageSizeChange={n => update({ page_size: n })} />
+      {status503 ? (
+        <EmptyState compact title={t('admin:risk_center.unwired')} />
+      ) : (
+        <>
+          {/* A new filter keeps the previous page on screen while it loads; the bar says the list is
+              being read again. */}
+          <div className="h-0.5 overflow-hidden rounded-full bg-muted" aria-hidden={!(q.isFetching && data)}>
+            {q.isFetching && data && <div role="progressbar" aria-label={t('admin:risk_center.queue.reloading')} className="h-full w-1/3 animate-pulse rounded-full bg-primary" />}
+          </div>
+          <DataTable<QueueRow>
+            aria-label={t('admin:risk_center.queue.title')}
+            mode="server"
+            data={data?.items ?? []}
+            total={data?.total}
+            columns={columns}
+            getRowId={r => String(r.user_id)}
+            loading={q.isPending}
+            error={q.error ? t('admin:risk_center.load_failed', { error: errorText(q.error) }) : null}
+            onRetry={() => void q.refetch()}
+            page={params.page ?? 1}
+            onPageChange={p => update({ page: p })}
+            pageSize={params.page_size ?? 25}
+            onPageSizeChange={n => update({ page_size: n })}
+            pageSizeOptions={QUEUE_PAGE_SIZES}
+            columnMenu={false}
+            maxHeight={null}
+            onRowOpen={r => onOpenUser(r.user_id)}
+            renderCard={r => <QueueCard row={r} act={act} />}
+            toolbar={toolbar}
+            empty={empty}
+          />
+        </>
       )}
-
-      {/* One menu for the table, outside every row: a click in it must not
-          reach the row's own click and open the drawer behind it. The
-          actions are the drawer's matrix, decided from the row — no read. */}
-      <Menu anchorEl={menu?.anchor} open={menu !== null} onClose={() => setMenu(null)}>
-        {menu && availableActions(subjectOfRow(menu.row), 'menu').map(k => (
-          <MenuItem key={k} onClick={() => {
-            const subject = subjectOfRow(menu.row)
-            setMenu(null)
-            actions.start(k, subject)
-          }}>
-            {t(`admin:risk_center.actions.${k}`)}
-          </MenuItem>
-        ))}
-      </Menu>
       {actions.dialogs}
-    </Box>
+    </div>
+  )
+}
+
+/** The account's name, and under it its display name and group. Rows open on click or Enter. */
+function UserCell({ row }: { row: QueueRow }) {
+  const name = row.upn || row.display_name || `#${row.user_id}`
+  const sub = [row.display_name, row.group_name].filter(Boolean).join(' · ')
+  return (
+    <div className="min-w-0">
+      <div className="truncate font-medium" title={name}>{name}</div>
+      {sub && <div className="truncate text-xs text-muted-foreground" title={sub}>{sub}</div>}
+    </div>
+  )
+}
+
+/** The level in words, and the detector's own hold by its one name, with since when in its title. */
+function LevelCell({ row }: { row: QueueRow }) {
+  const { t } = useRiskT()
+  const panelTz = useSiteStore(s => s.timezone)
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {(row.level === 'flagged' || row.level === 'suspect') && <DetectorStateChip state={row.level} />}
+      {row.auto_suspended && (
+        <span title={t('admin:geo_anomalies.auto_suspended_since', { time: formatMsDualTz(row.service_disabled_at_ms, panelTz) })}>
+          <StatusBadge tone="danger" label={t('admin:users.status.geo_auto')} />
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** One quiet marker per signal, its level in the shape as well as the words. */
+function SignalChips({ row }: { row: QueueRow }) {
+  const { t } = useRiskT()
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {row.sources.filter(s => s.source !== 'geo_auto').map(s => (
+        <StatusDot key={s.source} tone={levelTone(s.level)} label={sourceChipLabel(s.source, row, t)} className="text-xs" />
+      ))}
+    </div>
+  )
+}
+
+/** Relative in the list (a dual-timezone string per row would double the column), exact in panel time in
+ *  the title. "—" when nothing changed on record, never "just now". */
+function ChangedCell({ row }: { row: QueueRow }): ReactNode {
+  const { t } = useRiskT()
+  const panelTz = useSiteStore(s => s.timezone)
+  if (row.changed_at_ms <= 0) return <span className="text-muted-foreground">—</span>
+  return <span title={formatMsDualTz(row.changed_at_ms, panelTz)}>{formatRelativeTimeShort(Date.now() - row.changed_at_ms, t)}</span>
+}
+
+/**
+ * The row's one menu: the drawer's action matrix, decided from the row alone (no read). Rows open the
+ * drawer on click, so the menu is the only control in a row; the actions that take access away sit last,
+ * under a divider.
+ */
+function RowMenu({ row, act }: { row: QueueRow; act: RefObject<RowAct> }) {
+  const { t } = useRiskT()
+  const name = row.upn || row.display_name || `#${row.user_id}`
+  const items: MoreMenuItem[] = availableActions(subjectOfRow(row), 'menu').map(k => ({
+    id: k, label: t(`admin:risk_center.actions.${k}`), destructive: DESTRUCTIVE_ACTIONS.includes(k),
+    onSelect: () => act.current.start(k, row),
+  }))
+  if (items.length === 0) return null
+  return <MoreMenu size="icon-xs" label={t('admin:risk_center.queue.row_menu', { upn: name })} items={items} />
+}
+
+/** A row at phone width: the account and its level, the reason, and the time. The card opens the drawer. */
+function QueueCard({ row, act }: { row: QueueRow; act: RefObject<RowAct> }) {
+  const { t, i18n } = useRiskT()
+  const panelTz = useSiteStore(s => s.timezone)
+  const ctx = { nameRegion: regionNamer(t, i18n.language), panelTz, sep: listSeparator(i18n.language) }
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 items-start gap-2">
+        <div className="min-w-0 flex-1"><UserCell row={row} /></div>
+        <RowMenu row={row} act={act} />
+      </div>
+      <LevelCell row={row} />
+      <p className="text-xs text-muted-foreground">{headlineText(row, t, ctx)}</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs"><SignalChips row={row} /><ChangedCell row={row} /><ReviewBadges review={row.review} /></div>
+    </div>
   )
 }

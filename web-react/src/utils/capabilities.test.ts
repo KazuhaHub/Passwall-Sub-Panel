@@ -154,12 +154,12 @@ describe('the views that surface a dead IP cap consult the helpers', () => {
     expect(src).toContain('ip_limit_unenforced')
   })
 
-  it('ServersView badges the node itself', async () => {
+  it('the servers list badges the node itself', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
-    const src = fs.readFileSync(path.resolve(__dirname, '../views/admin/ServersView.tsx'), 'utf8')
+    const src = fs.readFileSync(path.resolve(__dirname, '../views/admin/servers/cells.tsx'), 'utf8')
     expect(src).toMatch(/import \{[^}]*ipCapBadgeTone[^}]*\} from '@\/utils\/capabilities'/)
-    expect(src).toContain('ipCapBadge(s)')
+    expect(src).toContain('ipCapBadgeTone(s.ip_limit_enforcement)')
   })
 })
 

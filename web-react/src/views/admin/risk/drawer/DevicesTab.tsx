@@ -1,14 +1,15 @@
-import { Box, Button, Chip, Tooltip, Typography, useTheme } from '@mui/material'
-import { Link as RouterLink } from 'react-router'
-import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import type { RiskUserSummary, UserDevice } from '@/api/riskCenter'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/feedback/EmptyState'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
+import { useRiskT } from '../useRiskT'
 
 function Entry({ d }: { d: UserDevice }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   // The declared device by its label, else its digest's 4-character prefix;
   // a client that declared nothing is named by what it sent.
@@ -17,55 +18,45 @@ function Entry({ d }: { d: UserDevice }) {
   const detail = [d.ua, `${formatMsDualTz(d.first_at_ms, panelTz)} – ${formatMsDualTz(d.last_at_ms, panelTz)}`]
     .filter(Boolean).join('\n')
   return (
-    <Box data-testid="device-entry" sx={{ py: 1, borderTop: `1px solid ${md.outlineVariant}`, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography sx={{ fontSize: 14, fontWeight: 600, wordBreak: 'break-all' }}>{name}</Typography>
-        {d.label && d.device_id4 && (
-          <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11, color: md.onSurfaceVariant }}>{`#${d.device_id4}`}</Box>
-        )}
-        {d.client_type && <Chip size="small" variant="outlined" label={d.client_type} />}
-        <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:risk_center.drawer.device_fetches', { count: d.fetches })}
-        </Typography>
-      </Box>
-      <Tooltip title={<Box sx={{ whiteSpace: 'pre-line', wordBreak: 'break-all' }}>{detail}</Box>}>
-        <Box sx={{ fontSize: 12, color: md.onSurfaceVariant, display: 'flex', flexWrap: 'wrap', columnGap: 0.75 }}>
-          <Box component="span" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-            {d.sources.join(', ') || '—'}
-            {d.sources_more > 0 ? ` ${t('admin:risk_center.drawer.sources_more', { count: d.sources_more })}` : ''}
-          </Box>
-          <span>·</span>
-          <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(d.last_at_ms, panelTz) })}</span>
-        </Box>
-      </Tooltip>
-    </Box>
+    <li data-testid="device-entry" className="flex flex-col gap-0.5 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium break-all">{name}</span>
+        {d.label && d.device_id4 && <span className="font-mono text-[11px] text-muted-foreground">{`#${d.device_id4}`}</span>}
+        {d.client_type && <Badge variant="outline">{d.client_type}</Badge>}
+        <span className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.device_fetches', { count: d.fetches })}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground" title={detail}>
+        <span className="font-mono break-all">
+          {d.sources.join(', ') || '—'}
+          {d.sources_more > 0 ? ` ${t('admin:risk_center.drawer.sources_more', { count: d.sources_more })}` : ''}
+        </span>
+        <span>·</span>
+        <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(d.last_at_ms, panelTz) })}</span>
+      </div>
+    </li>
   )
 }
 
 /**
- * 设备: the clients behind the account's subscription fetches in the device
- * window, one two-line entry each (what it is and how often it fetched;
- * from where and when last). An unreadable sub log says so rather than
- * passing for "no devices", and the full log is one exact link away.
+ * 设备: the clients behind the account's subscription fetches in the device window, one two-line entry
+ * each (what it is and how often it fetched; from where and when last). An unreadable sub log says so
+ * rather than passing for "no devices", and the full log is one exact link away.
  */
 export default function DevicesTab({ summary }: { summary: RiskUserSummary }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const u = summary.user
   const logs = `/admin/logs?tab=sub&user_id=${u.id}&upn=${encodeURIComponent(u.upn)}`
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-        {t('admin:risk_center.drawer.devices_intro', { hours: summary.device_window_hours })}
-      </Typography>
+    <div className="flex flex-col gap-2">
+      <p className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.devices_intro', { hours: summary.device_window_hours })}</p>
       {summary.devices_unavailable
-        ? <Typography sx={{ fontSize: 13, color: md.error }}>{t('admin:risk_center.drawer.devices_unavailable')}</Typography>
+        ? <p className="text-[13px] text-destructive">{t('admin:risk_center.drawer.devices_unavailable')}</p>
         : summary.devices.length === 0
-          ? <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:risk_center.drawer.devices_empty')}</Typography>
-          : <Box>{summary.devices.map((d, i) => <Entry key={`${d.device_id4}/${d.ua}/${i}`} d={d} />)}</Box>}
-      <Button size="small" component={RouterLink} to={logs} sx={{ alignSelf: 'flex-start', textTransform: 'none' }}>
+          ? <EmptyState compact title={t('admin:risk_center.drawer.devices_empty')} />
+          : <ul className="divide-y">{summary.devices.map((d, i) => <Entry key={`${d.device_id4}/${d.ua}/${i}`} d={d} />)}</ul>}
+      <Button variant="link" size="sm" className="self-start" render={<Link to={logs} />}>
         {t('admin:risk_center.drawer.open_sub_logs')}
       </Button>
-    </Box>
+    </div>
   )
 }
