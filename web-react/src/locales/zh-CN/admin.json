@@ -4989,7 +4989,6 @@
       "version": "版本",
       "build": "构建",
       "build_local": "本地构建",
-      "copy_build": "复制构建号",
       "uptime": "面板已运行",
       "since": "统计起点",
       "window": "统计时长",
@@ -5032,7 +5031,6 @@
       "peak_note": "峰值为本统计区间内的最高值。",
       "hist_value": "{{count}} 个样本 · 典型 {{p50}} · 95% 在 {{p95}} 以内",
       "server_help": "服务端说明",
-      "copy_name": "复制指标名",
       "stats": {
         "unit": "单位",
         "count": "样本数",
