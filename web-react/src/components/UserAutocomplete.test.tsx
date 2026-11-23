@@ -1,8 +1,6 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import UserAutocomplete from './UserAutocomplete'
@@ -15,8 +13,6 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'zh-CN' },
   }),
 }))
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 const alice = { id: 7, upn: 'alice', display_name: 'Alice', role: 'user', group_id: 1 }
 
@@ -44,7 +40,7 @@ describe('UserAutocomplete', () => {
   it('debounces the keyword', async () => {
     const onChange = vi.fn()
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={onChange} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={onChange} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     const input = screen.getByRole('combobox')
@@ -63,7 +59,7 @@ describe('UserAutocomplete', () => {
   it('picks a user by id', async () => {
     const onChange = vi.fn()
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={onChange} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={onChange} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     fireEvent.mouseDown(screen.getByRole('combobox'))
@@ -80,7 +76,7 @@ describe('UserAutocomplete', () => {
       throw new Error(`unexpected GET ${url}`)
     })
     render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={7} onChange={vi.fn()} label="user" /></ThemeProvider>,
+      <UserAutocomplete value={7} onChange={vi.fn()} label="user" />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
     await waitFor(() => expect((screen.getByRole('combobox') as HTMLInputElement).value).toBe('Alice (alice)'))
@@ -88,10 +84,11 @@ describe('UserAutocomplete', () => {
 
   it('fullWidth fills the parent and has no fixed pixel width (a 375px sheet must not overflow)', () => {
     const { container } = render(
-      <ThemeProvider theme={theme}><UserAutocomplete value={null} onChange={() => {}} label="user" fullWidth /></ThemeProvider>,
+      <UserAutocomplete value={null} onChange={() => {}} label="user" fullWidth />,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
-    const root = container.querySelector('.MuiAutocomplete-root') as HTMLElement
-    expect(getComputedStyle(root).width).toBe('100%')
+    const root = container.querySelector('[data-slot="input-group"]') as HTMLElement
+    expect(root.className).toContain('w-full')
+    expect(root.style.width).toBe('')
   })
 })

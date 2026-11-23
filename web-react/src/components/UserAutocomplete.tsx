@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Autocomplete, TextField } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { User } from '@/api/types'
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '@/components/ui/combobox'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useUserDetail, useUsersList } from '@/query/users'
+import { cn } from '@/lib/utils'
 
 /** How long the typing must pause before the keyword is searched. */
 const DEBOUNCE_MS = 250
@@ -64,22 +65,27 @@ export default function UserAutocomplete({ value, onChange, label, width = 280, 
   const all = selected && !options.some(o => o.id === selected.id) ? [selected, ...options] : options
 
   return (
-    <Autocomplete
-      size="small"
-      options={all}
+    <Combobox
+      items={all}
       value={selected}
-      loading={isFetching}
-      // The server already matched the keyword (UPN, display name, email);
-      // filtering again here by label would drop a match on the email.
-      filterOptions={x => x}
-      onChange={(_, v) => onChange(v?.id ?? null)}
-      onInputChange={(_, v, reason) => { if (reason === 'input' || reason === 'clear') setInput(v) }}
-      isOptionEqualToValue={(a, b) => a.id === b.id}
-      getOptionLabel={o => o.label}
-      sx={{ width: fullWidth ? '100%' : width, maxWidth: '100%' }}
-      renderInput={params => (
-        <TextField {...params} label={label ?? t('admin:risk_center.pick_user')} />
-      )}
-    />
+      // The server already matched the keyword (UPN, display name, email); filtering again here by label
+      // would drop a match on the email.
+      filter={null}
+      onValueChange={(v: Option | null) => onChange(v?.id ?? null)}
+      onInputValueChange={(v, details) => { if (details.reason === 'input-change' || details.reason === 'input-clear') setInput(v) }}
+      itemToStringLabel={(o: Option) => o.label}
+      isItemEqualToValue={(a: Option, b: Option) => a.id === b.id}
+    >
+      <ComboboxInput
+        aria-label={label ?? t('admin:risk_center.pick_user')} placeholder={label ?? t('admin:risk_center.pick_user')}
+        showClear={value !== null}
+        className={cn('max-w-full', fullWidth && 'w-full')} style={fullWidth ? undefined : { width }} />
+      <ComboboxContent>
+        <ComboboxEmpty>{isFetching ? '…' : t('admin:access_control.user_picker.no_match')}</ComboboxEmpty>
+        <ComboboxList>
+          {(o: Option) => <ComboboxItem key={o.id} value={o}>{o.label}</ComboboxItem>}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }
