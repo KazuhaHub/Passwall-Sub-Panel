@@ -183,6 +183,7 @@ function DiagnosticsPage() {
         message: t('admin:diagnostics.reset.message', { window: fmt.duration(m.window_ms) }),
         confirmText: t('admin:diagnostics.reset.confirm'),
         destructive: true,
+        initialFocus: 'cancel',
       })
       if (!ok) return
       setResetting(true)
