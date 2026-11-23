@@ -1,53 +1,48 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+// The harness first: it registers the request-client mock, which must precede anything that imports the client.
+import { api, mountAdmin } from './adminTestHarness'
 import { useSiteStore } from '@/stores/site'
+import { reads } from './settings/testSupport'
 import SettingsView from './SettingsView'
 
-const adminLegal = (kind: string) => ({ kind, enabled: false, consent_version: 0, documents: [], versions: [], data_collection: {} })
-
-async function openLegalTab(settings: Record<string, unknown> = {}, reads: Record<string, unknown> = {}) {
-  installReads({
-    ...reads,
-    '/admin/settings/ui': { sub_base_url: 'https://panel.example.test', timezone: 'UTC', node_poll_seconds: 30, full_report_seconds: 60, node_task_offline_reconcile_days: 30, node_task_backup_restore_days: 30, node_task_result_retention_days: 90, max_panel_concurrency: 8, audit_retention_days: 90, auth_event_retention_days: 90, sync_task_retention_days: 90, traffic_history_days: 730, expire_before_days: 7, traffic_remain_percent: 10, emergency_access_hours: 1, emergency_access_max_count: 1, sub_clients: [], quick_links: [], ...settings },
-    '/admin/groups': list([]),
-    '/admin/legal/terms': adminLegal('terms'),
-    '/admin/legal/privacy': adminLegal('privacy'),
-  })
-  mount(<SettingsView />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'admin:settings.tab_legal' }))
-  return screen.findByRole('switch', { name: 'admin:settings.legal.enabled' }) as Promise<HTMLInputElement>
+async function openLegalTab(settings: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
+  reads(extra, settings)
+  mountAdmin(<SettingsView />, '/admin/settings?tab=legal')
+  return screen.findByRole('switch', { name: 'Enable the privacy and terms page' })
 }
+const save = () => fireEvent.click(within(screen.getByRole('region', { name: 'You have unsaved changes' })).getByRole('button', { name: 'Save' }))
+const echo = () => api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
 
-describe('Settings > Privacy and terms tab', () => {
-  it('is a tab after SSO, and its switches ride the page\'s save bar', async () => {
-    const tabs = (await (async () => { await openLegalTab(); return screen.getAllByRole('tab').map(t => t.textContent) })())
-    expect(tabs.slice(-2)).toEqual(['admin:settings.tab_sso', 'admin:settings.tab_legal'])
+describe('Settings > Privacy and terms section', () => {
+  it('is the section after SSO, and its switches ride the section\'s save bar', async () => {
+    const enabled = await openLegalTab()
+    const names = within(screen.getByRole('navigation', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
+    expect(names.slice(-2)).toEqual(['SSO', 'Privacy and terms'])
 
-    const enabled = screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }) as HTMLInputElement
-    const usage = screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }) as HTMLInputElement
+    const usage = screen.getByRole('switch', { name: /Disclose per-site usage/ })
     expect(enabled.getAttribute('aria-checked')).toBe('false')
     expect(usage.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(enabled)
     fireEvent.click(usage)
-    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
-    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    echo()
+    save()
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', expect.objectContaining({ legal_enabled: true, legal_disclose_usage: true })))
   })
 
   it('shows the stored switches', async () => {
     const enabled = await openLegalTab({ legal_enabled: true, legal_disclose_usage: true })
     expect(enabled.getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByRole('switch', { name: 'admin:settings.legal.disclose_usage' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('switch', { name: /Disclose per-site usage/ }).getAttribute('aria-checked')).toBe('true')
   })
 
-  it('after a save the footer links and the consent dialog follow the server\'s own answer (/auth/methods), not the raw switch', async () => {
+  it("after a save the footer links and the consent dialog follow the server's own answer (/auth/methods), not the raw switch", async () => {
     useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
-    await openLegalTab({}, { '/auth/methods': { legal: { enabled: true, consent_version: 4 } } })
-    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
-    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
-    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    const enabled = await openLegalTab({}, { '/auth/methods': { legal: { enabled: true, consent_version: 4 } } })
+    fireEvent.click(enabled)
+    echo()
+    save()
     await waitFor(() => expect(useSiteStore.getState().legalEnabled).toBe(true))
     expect(useSiteStore.getState().legalConsentVersion).toBe(4)
     // A failing re-read is not worth a toast: the save already said what it did.
@@ -56,10 +51,9 @@ describe('Settings > Privacy and terms tab', () => {
 
   it('switched on with nothing published, the server says the page is not live, so no link to a 404 appears', async () => {
     useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
-    await openLegalTab({}, { '/auth/methods': { legal: { enabled: false, consent_version: 0 } } })
-    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
-    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
-    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    fireEvent.click(await openLegalTab({}, { '/auth/methods': { legal: { enabled: false, consent_version: 0 } } }))
+    echo()
+    save()
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods', expect.anything()))
     await new Promise(r => setTimeout(r, 20))
     expect(useSiteStore.getState().legalEnabled).toBe(false)
@@ -67,10 +61,9 @@ describe('Settings > Privacy and terms tab', () => {
 
   it('a failed re-read leaves what the site store had, rather than guessing from the switch', async () => {
     useSiteStore.setState({ legalEnabled: false, legalConsentVersion: 0 })
-    await openLegalTab()
-    fireEvent.click(screen.getByRole('switch', { name: 'admin:settings.legal.enabled' }))
-    api.put.mockImplementationOnce(async (_url: string, data: unknown) => ({ data }))
-    fireEvent.click(screen.getByRole('button', { name: 'admin:settings.save' }))
+    fireEvent.click(await openLegalTab())
+    echo()
+    save()
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/auth/methods', expect.anything()))
     await new Promise(r => setTimeout(r, 20))
     expect(useSiteStore.getState().legalEnabled).toBe(false)
