@@ -14,7 +14,7 @@ function deferred<T = unknown>() {
   return { promise, resolve, reject }
 }
 
-const rowOf = async (name = 'old-name') => (await screen.findByText(name)).closest('tr')!
+const rowOf = async (name = 'old-name') => (await screen.findByRole('row', { name: new RegExp(name) }))
 async function openMenu(name = 'old-name') {
   const trigger = within(await rowOf(name)).getByRole('button', { name: /^Actions for/ })
   fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })

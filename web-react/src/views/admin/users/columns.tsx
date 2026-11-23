@@ -1,18 +1,31 @@
 import type { TFunction } from 'i18next'
 import type { ColumnDef } from '@tanstack/react-table'
-import type { RiskLevels } from '@/api/riskCenter'
 import type { User } from '@/api/types'
 import { ExpiryCell, LastSeenCell, RiskCell, RoleBadge, StatusCell, TrafficCell, UserCell } from './cells'
+import { useUsers } from './context'
 import { RowActions } from './RowActions'
 
 export interface UserColumnCtx {
   t: TFunction
-  groupName: (id: number) => string
-  usedBytesOf: (id: number) => number | undefined
   /** The risk column is shown to admins only: an operator is shown neither it nor anything read from the risk center, whose every endpoint would answer 403. */
   canRisk: boolean
-  levels: RiskLevels | undefined
-  openRisk: (id: number) => void
+}
+
+// What the cells draw but the columns must not depend on comes from the page's context. TanStack renders a `cell`
+// function as a COMPONENT, so a new column array (because the groups, the usage or the risk levels arrived) would
+// remount every cell of every row: a flash, and a DOM node that was just found is gone. These read the context instead.
+function GroupCell({ user }: { user: User }) {
+  const { groups } = useUsers()
+  const n = groups.find(g => g.id === user.group_id)?.name ?? String(user.group_id)
+  return <span title={n}>{n}</span>
+}
+function TrafficColumnCell({ user }: { user: User }) {
+  const { usedBytesOf } = useUsers()
+  return <TrafficCell user={user} usedBytes={usedBytesOf(user.id)} />
+}
+function RiskColumnCell({ user }: { user: User }) {
+  const { levels, openRisk } = useUsers()
+  return <RiskCell userId={user.id} levels={levels} open={openRisk} />
 }
 
 // The default columns share the frame in percentages (max-w-0 lets a cell shrink below its content) and clip with
@@ -33,19 +46,19 @@ export function userColumns(c: UserColumnCtx): ColumnDef<User, any>[] {
     { id: 'display_name', accessorFn: (r: User) => r.display_name, header: t('users.table.display_name'), meta: { label: t('users.table.display_name'), defaultHidden: true, className: `${FIT} w-[14%]` },
       cell: x => <span title={x.row.original.display_name}>{x.row.original.display_name || '—'}</span> },
     { id: 'group_id', accessorFn: (r: User) => r.group_id, header: t('users.table.group'), meta: { label: t('users.table.group'), className: `${FIT} w-[9%]` },
-      cell: x => { const n = c.groupName(x.row.original.group_id); return <span title={n}>{n}</span> } },
+      cell: x => <GroupCell user={x.row.original} /> },
     { id: 'role', accessorFn: (r: User) => r.role, header: t('users.table.role'), meta: { label: t('users.table.role'), defaultHidden: true },
       cell: x => <RoleBadge role={x.row.original.role} /> },
     { id: 'enabled', accessorFn: (r: User) => r.enabled, header: t('users.table.status'), meta: { label: t('users.table.status'), className: `${FIT} w-[22%]` },
       cell: x => <StatusCell user={x.row.original} /> },
     { id: 'traffic', header: t('users.table.traffic'), enableSorting: false, meta: { label: t('users.table.traffic'), align: 'right', className: 'w-[14%] min-w-28' },
-      cell: x => <TrafficCell user={x.row.original} usedBytes={c.usedBytesOf(x.row.original.id)} /> },
+      cell: x => <TrafficColumnCell user={x.row.original} /> },
     { id: 'expire_at', accessorFn: (r: User) => r.expire_at, header: t('users.table.expire'), meta: { label: t('users.table.expire'), className: 'w-[11%] min-w-28' },
       cell: x => <ExpiryCell user={x.row.original} /> },
   ]
   if (c.canRisk) {
     cols.push({ id: 'risk', header: t('users.table.risk'), enableSorting: false, meta: { label: t('users.table.risk'), className: 'w-[8%] min-w-20' },
-      cell: x => <RiskCell userId={x.row.original.id} levels={c.levels} open={c.openRisk} /> })
+      cell: x => <RiskColumnCell user={x.row.original} /> })
   }
   cols.push(
     { id: 'last_online_at', accessorFn: (r: User) => r.last_online_at, header: t('users.table.last_online'), meta: { label: t('users.table.last_online'), className: 'w-[9%] min-w-24' },

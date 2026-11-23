@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { RiskLevels } from '@/api/riskCenter'
 import type { Group, Role, User } from '@/api/types'
 import type { DialogState } from './dialogs'
 import type { UserActions } from './useUserActions'
@@ -10,6 +11,8 @@ export interface UsersCtx {
   groups: readonly Group[]
   /** Period usage in bytes from the leaderboard; undefined for a user who is not in it (unknown, not zero). */
   usedBytesOf: (userId: number) => number | undefined
+  /** The risk center's verdicts by account id (admins only; undefined until read, or when the read failed). */
+  levels: RiskLevels | undefined
   /** This administrator's own account and role. */
   selfId: number | null
   role: Role | ''

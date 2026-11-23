@@ -9,7 +9,7 @@ import UsersPage from './UsersPage'
 vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: ({ userId }: { userId: number | null }) => (userId ? <div data-testid="risk-drawer">{userId}</div> : null) }))
 
 const GB = 1024 ** 3
-const rowOf = async (name: string) => (await screen.findByText(name)).closest('tr')!
+const rowOf = async (name: string) => (await screen.findByRole('row', { name: new RegExp(name) }))
 async function openRowMenu(name: string) {
   const trigger = within(await rowOf(name)).getByRole('button', { name: /^Actions for/ })
   fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })

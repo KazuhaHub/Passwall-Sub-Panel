@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, configure, render } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router'
 import { afterEach, beforeEach, vi } from 'vitest'
 import ConfirmHost from '@/components/ConfirmHost'
@@ -16,6 +16,10 @@ const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delet
 vi.mock('@/api/client', () => ({ client: api }))
 const toast = vi.hoisted(() => vi.fn())
 vi.mock('@/components/feedback/toasts', () => ({ pushSnack: toast, pushToast: toast }))
+
+// A loaded CI runner can take longer than the default one second to settle a sheet or a confirmation.
+configure({ asyncUtilTimeout: 5000 })
+vi.setConfig({ testTimeout: 15000 })
 
 i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 

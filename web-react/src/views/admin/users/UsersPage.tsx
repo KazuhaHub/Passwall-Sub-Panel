@@ -67,7 +67,6 @@ export default function UsersPage() {
   const rows = items ?? []
 
   const groups = useAllGroups(scope).data ?? NO_GROUPS
-  const groupName = useMemo(() => { const m = new Map(groups.map(g => [g.id, g.name])); return (id: number) => m.get(id) ?? String(id) }, [groups])
   // The risk column: ONE read for the whole list, keyed by account id. Decoration only: a failed read leaves it blank and the list works as before.
   const levels = useRiskLevels(scope, { enabled: canRisk }).data
   // Per-user period usage, from the Top-N leaderboard through the shared cache. It walks every user server-side, so it never rides the list refresh; `limit` tracks the page size.
@@ -120,14 +119,12 @@ export default function UsersPage() {
   }
 
   const ctx: UsersCtx = {
-    act, groups, usedBytesOf, selfId: auth.userId, role: auth.role, canElevate, canRisk, admin, reload, patchRow,
+    act, groups, usedBytesOf, levels, selfId: auth.userId, role: auth.role, canElevate, canRisk, admin, reload, patchRow,
     openRisk: id => riskDrawer.open(id), openUser: (id, tab) => sheet.open(id, tab), setDialog,
   }
 
-  // Columns are memoised on what they draw; the row actions read the page through the context, so they need no handlers here.
-  const columns = useMemo(() => userColumns({ t, groupName, usedBytesOf: id => usage.get(id), canRisk, levels, openRisk: id => riskDrawer.open(id) }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, groupName, usage, canRisk, levels])
+  // Columns depend on the language and the role only; what the cells draw arrives through the context (see columns.tsx).
+  const columns = useMemo(() => userColumns({ t, canRisk }), [t, canRisk])
 
   const group = singleFacet<string>(view.group > 0 ? String(view.group) : '', v => view.setGroup(v ? Number(v) : 0))
   const filtered = view.narrowed
