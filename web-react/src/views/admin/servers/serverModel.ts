@@ -4,7 +4,6 @@ import type { AccessToneKind } from '@/utils/accessControl'
 import type { NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
-import { ipCapBadgeTone } from '@/utils/capabilities'
 
 export function hasCapability(s: Server | null, capability: PanelCapability): boolean {
   return !!s?.capabilities?.includes(capability)
@@ -35,7 +34,6 @@ export function accessToneOf(kind: AccessToneKind): Tone {
 }
 
 export const ipCapTone: Record<'error' | 'info' | 'neutral', Tone> = { error: 'danger', info: 'info', neutral: 'neutral' }
-export { ipCapBadgeTone }
 
 /** The release a Passwall Node, an S-UI or a 3X-UI server could move to, or undefined when it is current or not yet known. */
 export function updateVersionOf(s: Server, nodeReleases: NodeRelease[] | null, suiReleaseVersion: string | null): string | undefined {

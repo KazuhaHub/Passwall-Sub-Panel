@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   getTransitProbeSettings, putTransitProbeSettings, transitProbeErrorOf,
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { UNSAFE_DataRouterContext } from 'react-router'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { discardChangesConfirm } from './accessControl/confirmCopy'
 
@@ -127,7 +128,8 @@ export default function LinkProbeSettings() {
   const dirty = dirtyKeys.length > 0
 
   // Probe settings are one section of the settings page: leaving to another route would lose the unsaved boxes.
-  useLeaveGuard(dirty, discardChangesConfirm(t), (next, current) => next.pathname !== current.pathname)
+  // The guard needs a data router (the app's); this section is also mounted by pages and tests under a plain one.
+  const dataRouter = useContext(UNSAFE_DataRouterContext) !== null
 
   if (loadError) {
     return (
@@ -234,6 +236,7 @@ export default function LinkProbeSettings() {
 
             <div className="grid gap-4 sm:grid-cols-2">{NUM_FIELDS.slice(2).map(numberField)}</div>
 
+            {dataRouter && <LeaveGuard dirty={dirty} />}
             <SaveBar dirty={dirty} pending={saving} saveLabel={t('settings.probe.save')}
               onSave={() => void save()} onDiscard={() => { setDraft(toDraft(view.settings)); fe.reset() }} />
           </form>
@@ -246,4 +249,11 @@ export default function LinkProbeSettings() {
 /** The Field wiring a text box takes. */
 function pick(p: FieldControlProps) {
   return { id: p.id, 'aria-describedby': p['aria-describedby'], 'aria-invalid': p['aria-invalid'], 'aria-required': p['aria-required'] }
+}
+
+/** Stands in front of leaving the route with unsaved values. A component of its own so it can be left out without a data router. */
+function LeaveGuard({ dirty }: { dirty: boolean }) {
+  const { t } = useTranslation('admin')
+  useLeaveGuard(dirty, discardChangesConfirm(t), (next, current) => next.pathname !== current.pathname)
+  return null
 }

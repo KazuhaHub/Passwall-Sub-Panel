@@ -8,7 +8,8 @@ import { StatusBadge } from '@/components/common/StatusBadge'
 import { StatusDot } from '@/components/common/StatusDot'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { ipCapBadgeTone, ipCapTone, resourceTone, splitVersionIdentity, typeLabel, updateVersionOf, accessToneOf } from './serverModel'
+import { ipCapBadgeTone } from '@/utils/capabilities'
+import { ipCapTone, resourceTone, splitVersionIdentity, typeLabel, updateVersionOf, accessToneOf } from './serverModel'
 import type { ProbeState } from './useServerProbes'
 
 /** Name first; the address under it, clipped with the whole text in the title; the identity warning, when there is one, in words. */
