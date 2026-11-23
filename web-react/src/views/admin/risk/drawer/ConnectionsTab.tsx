@@ -5,7 +5,6 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useConnectionHistory } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
@@ -49,21 +48,11 @@ function Entry({ c }: { c: MergedConnection }) {
         <span>{c.panel_name || `#${c.panel_id}`}</span>
         {/* The raw 3X-UI node id, explained as the Live tab's PanelCell explains it: PSP has no name for a node. */}
         {c.node && (
-          <Tooltip>
-            <TooltipTrigger render={<span className="font-mono break-all" />}>{c.node}</TooltipTrigger>
-            <TooltipContent>{t('admin:risk_center.live.node_hint')}</TooltipContent>
-          </Tooltip>
+          <span className="font-mono break-all" title={t('admin:risk_center.live.node_hint')}>{c.node}</span>
         )}
         <span>·</span>
         {/* The times behind "last seen" on the part of the line they are about. */}
-        {detail
-          ? (
-            <Tooltip>
-              <TooltipTrigger render={<span />}>{lastSeen}</TooltipTrigger>
-              <TooltipContent className="whitespace-pre-line">{detail}</TooltipContent>
-            </Tooltip>
-          )
-          : <span>{lastSeen}</span>}
+        <span title={detail || undefined}>{lastSeen}</span>
       </div>
     </li>
   )

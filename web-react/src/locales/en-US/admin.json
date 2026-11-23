@@ -1484,7 +1484,7 @@
       "just_polled": "A poll just finished; showing its snapshot",
       "cooldown": "Refreshing too often; try again in {{seconds}} s",
       "in_progress": "A refresh is already running",
-      "unread": "{{count}} panel(s) could not be read; their connections are not listed: {{names}}",
+      "unread": "{{count}} server(s) could not be read; their connections are not listed: {{names}}",
       "unsupported": "{{count}} server(s) do not report live addresses (such as S-UI); their connections cannot be listed: {{names}}",
       "unreferenced": "{{count}} node(s) have no previous reference yet (the first reading since start), so there is no telling whether they are still scanning, and each is treated as if it were: a node that has stopped may show the addresses of its last scan (up to 30 minutes old) as connected.",
       "truncated": "{{count}} connection(s) over the per-account cap of {{max}} are not listed",

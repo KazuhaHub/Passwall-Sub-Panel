@@ -9,7 +9,6 @@ import { pushSnack } from '@/components/feedback/toasts'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconChevronRight, IconInfo } from '@/lib/icons'
 import { useDeleteDestExemption, useDestStatus, useDestUser } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -106,15 +105,12 @@ export default function AccessTab({ userId }: { userId: number }) {
           <>
             <Row label={t(`${D}exemption`)} tinted
               action={<AsyncButton variant="outline" size="sm" onClick={() => lift(exemption)}>{t(`${D}remove_exemption`)}</AsyncButton>}>
-              <Tooltip>
-                <TooltipTrigger render={<span />}>
-                  {t(`${D}exemption_line`, {
-                    reason: exemption.reason, by: exemption.created_by_upn || '—',
-                    ago: formatRelativeTimeShort(now - exemption.created_at, t), expiry: expiry(exemption),
-                  })}
-                </TooltipTrigger>
-                {exemption.expires_at !== null && <TooltipContent>{formatMsDualTz(exemption.expires_at, panelTz)}</TooltipContent>}
-              </Tooltip>
+              <span title={exemption.expires_at === null ? undefined : formatMsDualTz(exemption.expires_at, panelTz)}>
+                {t(`${D}exemption_line`, {
+                  reason: exemption.reason, by: exemption.created_by_upn || '—',
+                  ago: formatRelativeTimeShort(now - exemption.created_at, t), expiry: expiry(exemption),
+                })}
+              </span>
             </Row>
             <p className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-[12.5px] text-muted-foreground">
               <IconInfo aria-hidden className="size-4 shrink-0" />{t(`${D}exempt_hint`)}

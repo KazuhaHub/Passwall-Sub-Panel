@@ -1,4 +1,3 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { GeoAnomaly, GeoEvidence } from '@/api/geoAnomalies'
 import { countryFlag } from '@/utils/geo'
 import { groupSpots, spreadKm, type SpotTree } from '@/utils/geoAnomaly'
@@ -63,13 +62,10 @@ export function GeoDistance({ evidence }: { evidence: GeoEvidence | undefined })
   const km = spreadKm(evidence)
   if (km <= 0) return null
   return (
-    <Tooltip>
-      <TooltipTrigger render={<div className="w-fit text-muted-foreground" />}>
-        {/* String(km), not a locale-grouped number: the server already
-            rounded it, and a separator would differ by browser locale. */}
-        {t('admin:geo_anomalies.max_km', { km: String(km) })}
-      </TooltipTrigger>
-      <TooltipContent>{t('admin:geo_anomalies.max_km_hint')}</TooltipContent>
-    </Tooltip>
+    <div className="w-fit text-muted-foreground" title={t('admin:geo_anomalies.max_km_hint')}>
+      {/* String(km), not a locale-grouped number: the server already rounded it, and a separator would
+          differ by browser locale. */}
+      {t('admin:geo_anomalies.max_km', { km: String(km) })}
+    </div>
   )
 }

@@ -3,7 +3,6 @@ import { IconButton } from '@/components/common/IconButton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/common/StatusBadge'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconChevronDown, IconChevronUp, IconWarning } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 
@@ -83,22 +82,16 @@ function GeoEvidencePanel({ geo }: { geo: GeoRow }) {
       <GeoDistance evidence={geo.evidence} />
       <div className="flex items-center gap-1.5 text-[13px]">
         <span className="text-xs text-muted-foreground">{t('admin:geo_anomalies.col_ips')}</span>
-        <Tooltip>
-          <TooltipTrigger render={<span className="tabular-nums" />}>{`${geo.concurrent_ips} / ${geo.live_ips}`}</TooltipTrigger>
-          <TooltipContent>{t('admin:geo_anomalies.ips_hint', {
-            concurrent: geo.concurrent_ips, window: geo.live_ips, excluded: geo.excluded_ips,
-            shared: ex.shared, listed: ex.listed, infra: ex.infra, internal: ex.internal,
-          })}</TooltipContent>
-        </Tooltip>
+        <span className="tabular-nums" title={t('admin:geo_anomalies.ips_hint', {
+          concurrent: geo.concurrent_ips, window: geo.live_ips, excluded: geo.excluded_ips,
+          shared: ex.shared, listed: ex.listed, infra: ex.infra, internal: ex.internal,
+        })}>{`${geo.concurrent_ips} / ${geo.live_ips}`}</span>
         {/* A count taken while a server was unreadable is a floor, and shown as a plain number it reads
             as the whole story. */}
         {!geo.complete && (
-          <Tooltip>
-            <TooltipTrigger render={<span role="img" aria-label={t('admin:geo_anomalies.incomplete')} className="text-warning-ink" />}>
-              <IconWarning className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t('admin:geo_anomalies.incomplete')}</TooltipContent>
-          </Tooltip>
+          <span role="img" aria-label={t('admin:geo_anomalies.incomplete')} title={t('admin:geo_anomalies.incomplete')} className="text-warning-ink">
+            <IconWarning className="size-3.5" />
+          </span>
         )}
       </div>
       {activeDbIsCountryOnly(geoip) && (

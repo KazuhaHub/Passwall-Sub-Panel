@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconChevronRight } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 
@@ -326,10 +325,7 @@ export function RiskKindChip({ sig }: { sig: RiskSignal | undefined }) {
   const panelTz = useSiteStore(s => s.timezone)
   if (!sig) {
     return (
-      <Tooltip>
-        <TooltipTrigger render={<Badge variant="outline" />}>—</TooltipTrigger>
-        <TooltipContent>{t('admin:risk_center.state.not_computed')}</TooltipContent>
-      </Tooltip>
+      <Badge variant="outline" title={t('admin:risk_center.state.not_computed')}>—</Badge>
     )
   }
   const updated = t('admin:risk_signals.col_updated')

@@ -5,7 +5,6 @@ import { IconButton } from '@/components/common/IconButton'
 import { InfoTip } from '@/components/common/HelpTip'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconChevronDown, IconChevronUp, IconSearch, IconWarning } from '@/lib/icons'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
@@ -109,12 +108,9 @@ function UserRow({ user, open, onToggle, onOpenUser, deviceWindowHours, devicesU
             {/* A list taken while a server holding this account was unread is a FLOOR; shown as a plain
                 count it would read as the whole. */}
             {user.unread_panels > 0 && (
-              <Tooltip>
-                <TooltipTrigger render={<span role="img" aria-label={t('admin:risk_center.live.incomplete')} className="text-warning-ink" />}>
-                  <IconWarning className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent>{t('admin:risk_center.live.incomplete')}</TooltipContent>
-              </Tooltip>
+              <span role="img" aria-label={t('admin:risk_center.live.incomplete')} title={t('admin:risk_center.live.incomplete')} className="text-warning-ink">
+                <IconWarning className="size-3.5" />
+              </span>
             )}
           </span>
         </TableCell>
@@ -211,10 +207,7 @@ export function PanelCell({ name, id, node }: { name: string; id: number; node: 
     <>
       <div className="text-[13px]">{name || `#${id}`}</div>
       {node && (
-        <Tooltip>
-          <TooltipTrigger render={<div className="font-mono text-[11px] break-all text-muted-foreground" />}>{node}</TooltipTrigger>
-          <TooltipContent>{t('admin:risk_center.live.node_hint')}</TooltipContent>
-        </Tooltip>
+        <div className="font-mono text-[11px] break-all text-muted-foreground" title={t('admin:risk_center.live.node_hint')}>{node}</div>
       )}
     </>
   )
@@ -259,10 +252,7 @@ function DeviceLine({ device, hours }: { device: ConnDevice; hours: number }) {
   ].filter(Boolean).join('\n')
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger render={<Badge variant="outline" />}>{name}</TooltipTrigger>
-        <TooltipContent className="whitespace-pre-line">{detail}</TooltipContent>
-      </Tooltip>
+      <Badge variant="outline" title={detail}>{name}</Badge>
       {device.label && device.device_id4 && <span className="font-mono text-[11px] text-muted-foreground">{`#${device.device_id4}`}</span>}
       <Badge variant="secondary">{t('admin:risk_center.live.device_inferred')}</Badge>
     </div>

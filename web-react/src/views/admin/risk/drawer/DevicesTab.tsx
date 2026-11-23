@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import type { RiskUserSummary, UserDevice } from '@/api/riskCenter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
@@ -26,17 +25,14 @@ function Entry({ d }: { d: UserDevice }) {
         {d.client_type && <Badge variant="outline">{d.client_type}</Badge>}
         <span className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.device_fetches', { count: d.fetches })}</span>
       </div>
-      <Tooltip>
-        <TooltipTrigger render={<div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground" />}>
-          <span className="font-mono break-all">
-            {d.sources.join(', ') || '—'}
-            {d.sources_more > 0 ? ` ${t('admin:risk_center.drawer.sources_more', { count: d.sources_more })}` : ''}
-          </span>
-          <span>·</span>
-          <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(d.last_at_ms, panelTz) })}</span>
-        </TooltipTrigger>
-        <TooltipContent className="break-all whitespace-pre-line">{detail}</TooltipContent>
-      </Tooltip>
+      <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground" title={detail}>
+        <span className="font-mono break-all">
+          {d.sources.join(', ') || '—'}
+          {d.sources_more > 0 ? ` ${t('admin:risk_center.drawer.sources_more', { count: d.sources_more })}` : ''}
+        </span>
+        <span>·</span>
+        <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(d.last_at_ms, panelTz) })}</span>
+      </div>
     </li>
   )
 }

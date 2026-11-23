@@ -1,9 +1,7 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { GeoAnomaly, GeoEvidence } from '@/api/geoAnomalies'
@@ -37,16 +35,14 @@ import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = flatten(zh as Nested)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 // A panel timezone no CI browser runs in, so a time rendered in the
 // browser's zone cannot pass for one rendered in the panel's.
 const PANEL_TZ = 'Pacific/Chatham'
 
 function mount(node: ReactNode) {
-  render(<ThemeProvider theme={theme}>{node}</ThemeProvider>)
+  render(<>{node}</>)
 }
 
-const chipOf = (label: string) => screen.getByText(label).closest('.MuiChip-root') as HTMLElement
 /** A detector's state badge (a ToneBadge, its state in data-state). */
 const badgeOf = (label: string) => screen.getByText(label).closest('[data-testid="detector-state"]') as HTMLElement
 
@@ -100,14 +96,13 @@ describe('DetectorStateChip', () => {
 
   it('carries its tooltip', () => {
     mount(<DetectorStateChip state="suspect" tooltip="why" />)
-    expect(badgeOf('疑似').closest('[aria-label]')?.getAttribute('aria-label')).toBe('why')
+    expect(badgeOf('疑似').getAttribute('title')).toBe('why')
   })
 })
 
-// The detector states are drawn by the one ToneBadge the access-control page
-// uses, from the closed colour table (plan S19): no <Chip color> says a state,
-// and the badges carry icon and words so no state is told by colour alone.
-describe('DetectorStateChip is a ToneBadge', () => {
+// The detector states are drawn by the one StatusBadge, from the closed tone table: the words are always
+// there, and a state that needs attention also carries an icon, so none is told by colour alone.
+describe('DetectorStateChip is a StatusBadge', () => {
   it('draws no MUI chip for a state', () => {
     mount(<>
       <DetectorStateChip state="flagged" /><DetectorStateChip state="suspect" /><DetectorStateChip state="clean" /><DetectorStateChip state="unknown" />
@@ -247,10 +242,10 @@ describe('RiskKindEvidence', () => {
     expect(screen.getByText('已知国家')).toBeTruthy()
     cleanup()
 
-    const { container } = render(<ThemeProvider theme={theme}>
+    const { container } = render(<>
       <RiskKindEvidence kind="travel" evidence={{ v: 1 }} />
       <RiskKindEvidence kind="devices" evidence={null} />
-    </ThemeProvider>)
+    </>)
     expect(container.textContent).toBe('')
   })
 })
@@ -263,12 +258,12 @@ describe('RiskKindChip', () => {
   // A kind with no row is "not computed", never blank and never clean.
   it('shows a kind with no row as not computed', () => {
     mount(<RiskKindChip sig={undefined} />)
-    expect(chipOf('—').closest('[aria-label]')?.getAttribute('aria-label')).toBe('尚未计算')
+    expect(screen.getByText('—').getAttribute('title')).toBe('尚未计算')
   })
 
   it('labels by the one vocabulary and explains itself with its code and panel time', () => {
     mount(<RiskKindChip sig={sig({ state: 'exempt', code: 'trusted' })} />)
-    const tip = badgeOf('已信任').closest('[aria-label]')?.getAttribute('aria-label') ?? ''
+    const tip = badgeOf('已信任').getAttribute('title') ?? ''
     expect(tip).toContain('管理员已信任此账号，不判断订阅地点')
     expect(tip).toContain(formatMsDualTz(1_790_000_000_000, PANEL_TZ))
   })
@@ -297,15 +292,14 @@ describe('GeoPlaces and GeoDistance', () => {
   // the row predates the field) nothing is drawn.
   it('shows the distance, marked as not judged, only where it was measured', () => {
     mount(<GeoDistance evidence={evidence()} />)
-    const hint = screen.getByText('相距约 1070 公里').closest('[aria-label]')
-    expect(hint?.getAttribute('aria-label') ?? '').toContain('不参与判定')
+    expect(screen.getByText('相距约 1070 公里').getAttribute('title') ?? '').toContain('不参与判定')
     cleanup()
 
     const base = evidence()
-    const { container } = render(<ThemeProvider theme={theme}>
+    const { container } = render(<>
       <GeoDistance evidence={evidence({ spread: { ...base.spread, max_km: undefined } })} />
       <GeoDistance evidence={evidence({ v: 2 })} />
-    </ThemeProvider>)
+    </>)
     expect(container.textContent).toBe('')
   })
 })

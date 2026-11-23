@@ -1,6 +1,5 @@
 import { StatusBadge } from '@/components/common/StatusBadge'
 import type { Tone } from '@/components/common/tones'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { AccessToneKind } from '@/utils/accessControl'
 import { useRiskT } from '../useRiskT'
 import { stateLabelKey, stateTone, type DetectorState } from './state'
@@ -33,16 +32,12 @@ const TONE: Partial<Record<AccessToneKind, Tone>> = {
 export function DetectorStateChip({ state, code, complete, tooltip }: DetectorStateChipProps) {
   const { t } = useRiskT()
   const partial = state === 'clean' && complete === false
+  // The reason is the badge's title: a plain hover text on a static label, never the only place a
+  // state is said.
   const badge = (
-    <span data-testid="detector-state" data-state={partial ? 'clean_partial' : state} className="inline-flex">
+    <span data-testid="detector-state" data-state={partial ? 'clean_partial' : state} title={tooltip} className="inline-flex">
       <StatusBadge tone={TONE[stateTone(state, complete)] ?? 'neutral'} label={t(`admin:${stateLabelKey(state, code)}`)} />
     </span>
   )
-  if (!tooltip) return badge
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex" />}>{badge}</TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
-    </Tooltip>
-  )
+  return badge
 }

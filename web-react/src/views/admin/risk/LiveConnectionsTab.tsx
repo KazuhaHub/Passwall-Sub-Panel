@@ -8,7 +8,6 @@ import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { DataTablePagination } from '@/components/data/DataTablePagination'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { NativeSelect } from '@/components/ui/native-select'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconRefresh } from '@/lib/icons'
 import { useSearchParams } from 'react-router'
 import {
@@ -129,14 +128,10 @@ export function LiveRefreshButton() {
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span />}>
-        <AsyncButton variant="outline" onClick={run} pending={refresh.isPending} icon={<IconRefresh />}>
-          {t('admin:risk_center.live.refresh')}
-        </AsyncButton>
-      </TooltipTrigger>
-      <TooltipContent>{t('admin:risk_center.live.refresh_hint')}</TooltipContent>
-    </Tooltip>
+    <AsyncButton variant="outline" onClick={run} pending={refresh.isPending} icon={<IconRefresh />}
+      title={t('admin:risk_center.live.refresh_hint')}>
+      {t('admin:risk_center.live.refresh')}
+    </AsyncButton>
   )
 }
 
