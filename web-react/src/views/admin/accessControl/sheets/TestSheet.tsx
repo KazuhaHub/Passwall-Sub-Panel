@@ -254,6 +254,8 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
           </Field>
           <Field label={t(`${T}exception.match`)}>
             {p => <SegmentedControl<'site' | 'host'> value={match} onChange={setMatch} aria-labelledby={p.labelId}
+              // Two long labels do not fit a phone side by side: they stack there, full width.
+              className="w-full flex-col items-stretch sm:w-fit sm:flex-row [&>button]:h-auto [&>button]:min-h-8 [&>button]:whitespace-normal [&>button]:py-1"
               options={[{ value: 'site', label: t(`${T}exception.site`) }, { value: 'host', label: t(`${T}exception.host`) }]} />}
           </Field>
         </div>

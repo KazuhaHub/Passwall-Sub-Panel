@@ -174,7 +174,7 @@ describe('the list sheet', () => {
     renderAccess(dialog({ editId: 4 }))
     expect(await screen.findByText('内容未变化，不会触发重启')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('code'), { target: { value: 'b.com' } })
-    expect(await screen.findByText('被 1 条启用的策略使用；内容变化会让 2 台节点各重启一次。')).toBeTruthy()
+    expect(await screen.findByText('被 1 条启用的策略使用；内容变化会让最多 2 台节点各重启一次。')).toBeTruthy()
   })
 
   it('does not call the empty name an error until it is blurred; typing elsewhere does not mark it', async () => {

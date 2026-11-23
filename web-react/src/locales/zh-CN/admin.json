@@ -6362,9 +6362,9 @@
         "attrs": "属性",
         "geosite_note": "数据来自 v2fly domain-list-community。",
         "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
-        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让 {{nodes}}各重启一次。",
-        "footer_nodes_other": "{{count}} 台节点",
-        "footer_nodes_unknown": "各节点",
+        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让{{nodes}}各重启一次。",
+        "footer_nodes_other": "最多 {{count}} 台节点",
+        "footer_nodes_unknown": "运行它的节点",
         "footer_unchanged": "内容未变化，不会触发重启",
         "footer_unused": "这个列表没有被使用，保存不会影响节点",
         "save": "保存",
@@ -6849,9 +6849,9 @@
         "footer": {
           "disabled": "已停用的策略不会下发",
           "rename_only": "只改名称或说明不会让节点重启",
-          "applies_unknown": "保存后几分钟内在各节点生效，节点会重启代理程序一次",
-          "applies_one": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次",
-          "applies_other": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次"
+          "applies_unknown": "保存后几分钟内在各节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_one": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_other": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次"
         },
         "template_locked": {
           "summary": "匹配内容由规则组目录决定",

@@ -121,7 +121,7 @@ export default function AddExemptionDialog({ open, onClose, lockedUserId, existi
             <Input value={reason} onChange={e => setReason(e.target.value.slice(0, MAX_REASON))} />
           </Field>
           <Field label={t(`${D}expiry`)} hint={expiry === 'h24' ? t(`${D}h24_note`) : undefined}>
-            {p => <SegmentedControl<Expiry> value={expiry} onChange={setExpiry} aria-labelledby={p.labelId} className="w-full"
+            {p => <SegmentedControl<Expiry> value={expiry} onChange={setExpiry} aria-labelledby={p.labelId} className="w-full [&>button]:min-w-0 [&>button]:flex-1 [&>button]:px-1.5"
               options={[
                 { value: 'forever', label: t(`${D}forever`) }, { value: 'h24', label: t(`${D}h24`) },
                 { value: 'd7', label: t(`${D}d7`) }, { value: 'custom', label: t(`${D}custom`) },
