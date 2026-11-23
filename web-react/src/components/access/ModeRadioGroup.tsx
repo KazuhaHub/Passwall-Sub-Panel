@@ -3,8 +3,7 @@ import { useId, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface ModeRadioOption<V extends string> {
-  /** null: nothing chosen yet. */
-  value: V | null
+  value: V
   /** The option's words, with whatever explains it under them. */
   children: ReactNode
   disabled?: boolean
