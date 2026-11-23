@@ -18,7 +18,6 @@ import type {
   DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState, ResolveUnavailable,
   DestStatus,
 } from '@/api/accessControl'
-import type { StatusLineTone } from '@/components/StatusLine'
 import { amber, type Tone } from '@/components/ToneBadge'
 
 // THE ACCESS-CONTROL PAGE'S PURE RULES: the closed colour table, the one
@@ -31,6 +30,9 @@ import { amber, type Tone } from '@/components/ToneBadge'
 // its row, and no two rows share a (fill, words, icon) triple — the test
 // asserts it. "Block" is a word, not an alarm: it is not drawn on red.
 // ---------------------------------------------------------------------------
+
+/** How bad the page verdict is, worst to quietest. The verdict line maps it onto a tone (VerdictBar). */
+export type StatusLineTone = 'failing' | 'attention' | 'measuring' | 'ok' | 'quiet'
 
 export const ACCESS_TONE_KINDS = [
   'block', 'allowlist_deny', 'observe', 'would_deny', 'allow', 'exempt', 'allowlist_enforced', 'ok', 'measuring',

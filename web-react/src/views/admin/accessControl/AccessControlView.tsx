@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Divider, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, Tab, Tabs, Button, useMediaQuery, useTheme } from '@mui/material'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
-import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlineOutlined'
-import SearchIcon from '@mui/icons-material/Search'
-import TuneIcon from '@mui/icons-material/Tune'
 import { Navigate, useLocation, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { isDestUnavailable } from '@/api/accessControl'
-import HelpTip from '@/components/HelpTip'
-import PageHeader from '@/components/PageHeader'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
 import UserAutocomplete from '@/components/UserAutocomplete'
+import { HelpTip } from '@/components/common/HelpTip'
+import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { PageHeader } from '@/components/common/PageHeader'
+import { pushToast } from '@/components/feedback/toasts'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDrawerParam, type DrawerState } from '@/hooks/useDrawerParam'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { IconInfo, IconPaused, IconSearch, IconTune } from '@/lib/icons'
 import { useDestLists, useDestPolicies, useDestSettings, useDestStatus, usePauseDest, usePublishDest } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
@@ -56,8 +57,8 @@ const HELP_KEY: Record<AccessTab, string> = {
  */
 export default function AccessControlView() {
   const { t } = useTranslation(['admin', 'common'])
-  const md = useTheme().palette.md
-  const phone = useMediaQuery(useTheme().breakpoints.down('sm'))
+  // The account picker takes a whole row of its own on a phone, where the header's actions wrap under the title.
+  const phone = useMediaQuery('(max-width: 639px)')
   const canView = useCan('access.view')
   const scope = useQueryScope()
   const location = useLocation()
@@ -71,7 +72,6 @@ export default function AccessControlView() {
   const pause = usePauseDest(scope)
   const publish = usePublishDest(scope)
   const pendingEdit = useRef<number | null>(null)
-  const [menu, setMenu] = useState<HTMLElement | null>(null)
   const [settings, setSettings] = useState<{ open: boolean; focus?: SettingsFocus }>({ open: false })
 
   // One drawer at a time. The page-level sheets are one string param; the
@@ -116,7 +116,7 @@ export default function AccessControlView() {
 
   const minutes = applyMinutes(status.data)
   const confirmArgs = { t, minutes }
-  const openSettings = (focus?: SettingsFocus) => { setMenu(null); setSettings({ open: true, focus }) }
+  const openSettings = (focus?: SettingsFocus) => setSettings({ open: true, focus })
   const nodeFilter = parseNodeFilter(params.get('node_state'))
   const setNodeFilter = (next: NodeFilter | null) => setParams(prev => {
     const out = new URLSearchParams(prev)
@@ -137,7 +137,7 @@ export default function AccessControlView() {
     if (!ok) return
     try {
       await pause.mutateAsync(paused)
-      pushSnack(t(paused ? 'admin:access_control.menu.paused_snack' : 'admin:access_control.menu.resumed_snack'), 'success')
+      pushToast({ message: t(paused ? 'admin:access_control.menu.paused_snack' : 'admin:access_control.menu.resumed_snack'), severity: 'success' })
     } catch (err) {
       reportDestError(t, err)
     }
@@ -155,76 +155,56 @@ export default function AccessControlView() {
 
   const unwired = status.isError && isDestUnavailable(status.error)
 
-  const headerActions = (
-    <Box data-header-actions sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
-      <Box sx={{ order: 1, ml: { xs: 'auto', sm: 0 } }}>
-        {phone
-          ? (
-            <IconButton aria-label={t('admin:access_control.header.test')} onClick={() => sheet.open('test')}>
-              <SearchIcon />
-            </IconButton>
-          )
-          : (
-            <Button variant="outlined" startIcon={<SearchIcon />} onClick={() => sheet.open('test')}>
-              {t('admin:access_control.header.test')}
-            </Button>
-          )}
-      </Box>
-      <Box sx={{ order: { xs: 3, sm: 2 }, flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: 0 }}>
-        <UserAutocomplete value={null} onChange={id => { if (id) account.open(id) }}
-          label={t('admin:access_control.header.pick_user')} width={280} fullWidth={phone} />
-      </Box>
-      <Box sx={{ order: { xs: 2, sm: 3 } }}>
-        <IconButton aria-label={t('admin:access_control.menu.label')} aria-haspopup="menu" onClick={e => setMenu(e.currentTarget)}>
-          <MoreVertIcon />
-        </IconButton>
-      </Box>
-      <Menu anchorEl={menu} open={menu !== null} onClose={() => setMenu(null)}>
-        <MenuItem onClick={() => openSettings()}>
-          <ListItemIcon><TuneIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:access_control.menu.settings')}</ListItemText>
-        </MenuItem>
-        <Divider />
-        <MenuItem disabled={status.data?.paused === true} onClick={() => { setMenu(null); void doPause(true) }}
-          sx={{ color: md.error }}>
-          <ListItemIcon><PauseCircleOutlineIcon fontSize="small" sx={{ color: md.error }} /></ListItemIcon>
-          <ListItemText>{t('admin:access_control.menu.pause')}</ListItemText>
-        </MenuItem>
-      </Menu>
-    </Box>
-  )
+  // The rest of the header sits in the More menu; pausing is the destructive item, last under its divider.
+  const more: MoreMenuItem[] = [
+    { id: 'settings', label: t('admin:access_control.menu.settings'), icon: IconTune, onSelect: () => openSettings() },
+    { id: 'pause', label: t('admin:access_control.menu.pause'), icon: IconPaused, destructive: true, disabled: status.data?.paused === true, onSelect: () => void doPause(true) },
+  ]
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, minWidth: 0 }}>
-      {/* PageHeader shrink-wraps its actions, which cannot give the phone's picker a full row: on a phone the
-          actions are their own full-width block under the heading instead. */}
-      <PageHeader title={t('admin:access_control.title')} subtitle={t('admin:access_control.subtitle')}
-        actions={phone ? undefined : headerActions} />
-      {phone && <Box sx={{ mb: 2 }}>{headerActions}</Box>}
+    <div className="p-4 sm:p-6">
+      <PageHeader
+        title={t('admin:access_control.title')}
+        description={t('admin:access_control.subtitle')}
+        secondary={(
+          <>
+            <UserAutocomplete value={null} onChange={id => { if (id) account.open(id) }}
+              label={t('admin:access_control.header.pick_user')} width={240} fullWidth={phone} />
+            <Button variant="outline" onClick={() => sheet.open('test')}>
+              <IconSearch />
+              {t('admin:access_control.header.test')}
+            </Button>
+          </>
+        )}
+        more={more}
+      />
 
       {unwired
-        ? <Alert severity="info">{t('admin:access_control.unwired')}</Alert>
+        ? <Alert><IconInfo aria-hidden /><AlertDescription>{t('admin:access_control.unwired')}</AlertDescription></Alert>
         : (
           <>
             <VerdictBar onOpenNodes={f => sheet.open('nodes', { extra: f ? { node_state: f } : undefined })}
               onOpenLists={() => setTab('lists')} onResume={() => doPause(false)} onPublish={doPublish} />
-            <Box sx={{ display: 'flex', alignItems: 'stretch', mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-              <Tabs value={tab} onChange={(_, v: AccessTab) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
-                sx={{ flex: 1, minWidth: 0 }}>
-                <Tab value="policies" label={t('admin:access_control.tab_policies')} />
-                <Tab value="lists" label={t('admin:access_control.tab_lists')} />
-                <Tab value="allowlist" label={t('admin:access_control.tab_allowlist')} />
-                <Tab value="records" label={t('admin:access_control.tab_records')} />
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <Tabs value={tab} onValueChange={v => setTab(v as AccessTab)} className="min-w-0">
+                <div className="max-w-full overflow-x-auto">
+                  <TabsList>
+                    <TabsTrigger value="policies">{t('admin:access_control.tab_policies')}</TabsTrigger>
+                    <TabsTrigger value="lists">{t('admin:access_control.tab_lists')}</TabsTrigger>
+                    <TabsTrigger value="allowlist">{t('admin:access_control.tab_allowlist')}</TabsTrigger>
+                    <TabsTrigger value="records">{t('admin:access_control.tab_records')}</TabsTrigger>
+                  </TabsList>
+                </div>
               </Tabs>
-              <HelpTip textKey={HELP_KEY[tab]} labelKey="admin:access_control.help.label" textValues={{
+              <HelpTip label={t('admin:access_control.help.label')} text={t(HELP_KEY[tab], {
                 max_regexps: policiesRead.data?.budget.regexps.limit ?? '…',
                 seconds: settingsRead.data?.effective.dest_policy_apply_min_seconds ?? '…',
                 hours: listsRead.data?.refresh_hours ?? '…',
                 days: tab === 'allowlist'
                   ? settingsRead.data?.effective.dest_trial_retention_days ?? '…'
                   : settingsRead.data?.effective.dest_hit_retention_days ?? '…',
-              }} />
-            </Box>
+              })} />
+            </div>
             {/* Only the open tab mounts, so only its reads are made. */}
             {tab === 'policies' && (
               <PoliciesTab onOpenExemptions={() => sheet.open('exemptions')} onOpenSettings={openSettings} onOpenAllowlist={openAllowlist}
@@ -264,6 +244,6 @@ export default function AccessControlView() {
         onTest={target => sheet.open('test', { replace: true, prefill: { target } })} />
       <AccessSettingsDialog open={settings.open} focus={settings.focus} onClose={() => setSettings({ open: false })} />
       <AccountDrawerHost userId={account.value} onClose={account.close} />
-    </Box>
+    </div>
   )
 }

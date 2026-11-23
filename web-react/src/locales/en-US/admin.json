@@ -6543,6 +6543,7 @@
         }
       },
       "countries": "Denied countries or regions",
+      "countries_empty": "No matching country or region",
       "cidrs": "Denied source IP ranges (optional, one per line)",
       "cidrs_hint": "For example 203.0.113.0/24 or 2001:db8::/32. Behind a relay or CDN the node sees its address.",
       "bad_lines": "Line {{lines}} is not a valid IP range",

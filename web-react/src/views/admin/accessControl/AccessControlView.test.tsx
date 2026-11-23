@@ -76,7 +76,7 @@ describe('the admin-only gates', () => {
 describe('the page', () => {
   it('shows the title and the verdict, and mounts only the open tab', async () => {
     renderAccess(<AccessControlView />)
-    expect(await screen.findByText('访问控制', { selector: 'h4' })).toBeTruthy()
+    expect(await screen.findByText('访问控制', { selector: 'h1' })).toBeTruthy()
     expect(await screen.findByText('策略在 1 台节点上生效')).toBeTruthy()
     expect(screen.getByTestId('policies-tab')).toBeTruthy()
     expect(screen.queryByTestId('lists-tab')).toBeNull()
@@ -181,10 +181,10 @@ describe('the page', () => {
     vi.mocked(api.pauseDest).mockResolvedValue()
     renderAccess(<AccessControlView />)
     await screen.findByTestId('policies-tab')
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多' }))
     fireEvent.click(await screen.findByText('数据与下发设置…'))
     expect(await screen.findByTestId('settings-dialog')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多' }))
     fireEvent.click(await screen.findByText('暂停全部执行…'))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '暂停全部访问控制？', destructive: true })))
     await waitFor(() => expect(api.pauseDest).toHaveBeenCalledWith(true))
@@ -286,31 +286,19 @@ describe('the header on a phone', () => {
     return () => { window.matchMedia = original }
   }
 
-  it('keeps the test button and the menu with the actions and gives the account picker the full width', async () => {
+  it('keeps the test button, the picker and the menu in the header and gives the account picker the full width', async () => {
     const restore = phone(true)
     try {
       renderAccess(<AccessControlView />)
       const pick = await screen.findByLabelText('pick')
       expect(pick.getAttribute('data-fullwidth')).toBe('true')
-      expect(screen.getByRole('button', { name: '测试目的地' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: '更多操作' })).toBeTruthy()
-      // All three sit in one actions container, so the menu never wraps away from the page's actions.
-      const row = pick.closest('[data-header-actions]')
-      expect(row?.contains(screen.getByRole('button', { name: '更多操作' }))).toBe(true)
-      expect(row?.contains(screen.getByRole('button', { name: '测试目的地' }))).toBe(true)
+      const actions = pick.closest('[data-slot="page-header-actions"]')
+      expect(actions?.contains(screen.getByRole('button', { name: '测试目的地' }))).toBe(true)
+      expect(actions?.contains(screen.getByRole('button', { name: '更多' }))).toBe(true)
     } finally { restore() }
   })
 
-  it('puts the test button and the menu together at the right of the first row, and the en-US picker label is short', async () => {
-    const restore = phone(true)
-    try {
-      renderAccess(<AccessControlView />)
-      const test = await screen.findByRole('button', { name: '测试目的地' })
-      const menu = screen.getByRole('button', { name: '更多操作' })
-      // Both live in the one actions row, the test button first (it carries the free space on xs).
-      expect(test.closest('[data-header-actions]')).toBe(menu.closest('[data-header-actions]'))
-      expect(test.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    } finally { restore() }
+  it('the picker label is short enough for a phone in both languages', () => {
     expect(translate('admin:access_control.header.pick_user').length).toBeLessThanOrEqual(8)
     setTestLang('en-US')
     expect(translate('admin:access_control.header.pick_user').length).toBeLessThanOrEqual(14)
