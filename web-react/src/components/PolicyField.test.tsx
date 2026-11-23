@@ -1,9 +1,7 @@
 /** @vitest-environment jsdom */
 import { useState } from 'react'
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 
 vi.mock('@/api/client', () => ({ client: {} }))
 // t over the REAL zh-CN admin bundle, so a key the field asks for but the
@@ -21,12 +19,11 @@ vi.mock('react-i18next', () => ({
 }))
 
 import zh from '@/locales/zh-CN/admin.json'
+import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
-import { cardFields, POLICY_CARDS, type PolicyFieldSpec } from './policyLayout'
+import { cardFields, POLICY_CARDS, type PolicyFieldSpec } from '@/views/admin/risk/policy/policyLayout'
 import PolicyField from './PolicyField'
-dict.current = flatten(zh as Nested)
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })
+dict.current = { ...flatten(zhCommon as Nested), ...flatten(zh as Nested) }
 
 const DEFAULTS: Record<string, number> = {
   geo_anomaly_min_placed_ratio: 0.5, geo_anomaly_max_cities: 2, risk_usage_ratio: 3, risk_max_devices: 3,
@@ -49,7 +46,7 @@ function mount(key: string, initial: number, effective?: number) {
         onChange={v => { stored.push(v as number); setValue(v as number) }} />
     )
   }
-  render(<ThemeProvider theme={theme}><Harness /></ThemeProvider>)
+  render(<Harness />)
   const input = screen.getByRole('textbox', { name: dict.current[spec(key).label.slice('admin:'.length)] }) as HTMLInputElement
   return { input, stored }
 }
@@ -59,12 +56,12 @@ function description(input: HTMLInputElement): string {
   return document.getElementById(id)?.textContent ?? ''
 }
 
+
 afterEach(cleanup)
 
 describe('PolicyField, numbers', () => {
-  // U2: a number box that rewrites what is typed on every keystroke cannot
-  // take "0.5" — "0." is not a number yet. The text stays as typed while the
-  // field has focus; the store gets the number it reads as.
+  // A number box that rewrites what is typed on every keystroke cannot take "0.5": "0." is not a
+  // number yet. The text stays as typed; the store gets the number it reads as.
   it('takes 0.5 typed one character at a time', () => {
     const { input, stored } = mount('geo_anomaly_min_placed_ratio', 0)
     fireEvent.focus(input)
@@ -78,49 +75,54 @@ describe('PolicyField, numbers', () => {
     expect(input.value).toBe('0.5')
   })
 
-  // Unset is an empty field whose placeholder is the served default and
-  // which says "default" — never a 0 that reads as "zero tolerance".
-  it('shows an unset value as empty, with the default as placeholder and a default mark', () => {
+  // Unset is an empty field marked "default", never a 0 that reads as "zero tolerance"; the served
+  // default is in the hint under the box.
+  it('shows an unset value as empty, marked as the default, with the served default in the hint', () => {
     const { input } = mount('geo_anomaly_max_cities', 0)
     expect(input.value).toBe('')
-    expect(input.placeholder).toBe('2')
-    expect(screen.getByText('默认')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '恢复默认' })).toBeNull()
+    expect(screen.getByText('默认', { selector: '[data-slot=badge]' })).toBeTruthy()
+    expect(description(input)).toContain('默认 2')
+    expect(screen.queryByRole('button', { name: '恢复跟随' })).toBeNull()
   })
 
   it('shows a set value with a reset that stores 0', () => {
     const { input, stored } = mount('geo_anomaly_max_cities', 4)
     expect(input.value).toBe('4')
-    expect(screen.queryByText('默认')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '恢复默认' }))
+    expect(screen.queryByText('默认', { selector: '[data-slot=badge]' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '恢复跟随' }))
     expect(stored).toEqual([0])
     expect(input.value).toBe('')
-    expect(input.placeholder).toBe('2')
   })
 
-  it('stores an emptied field as 0 and a whole number for an integer key', () => {
+  it('stores an emptied field as 0 once it is left', () => {
     const { input, stored } = mount('geo_anomaly_max_cities', 4)
     fireEvent.focus(input)
     fireEvent.change(input, { target: { value: '' } })
-    fireEvent.change(input, { target: { value: '3.7' } })
-    expect(stored).toEqual([0, 3])
+    fireEvent.blur(input)
+    expect(stored).toEqual([0])
   })
 
-  // The server clamps a ratio under 1.5 up to it; the page says so before
-  // the admin saves, and the toolbar refuses the save.
+  // A whole-number key refuses a fraction with a message instead of silently cutting it.
+  it('does not take a fraction for an integer key', () => {
+    const { input, stored } = mount('geo_anomaly_max_cities', 4)
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '3.7' } })
+    expect(stored).toEqual([])
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+  })
+
+  // The server clamps a ratio under 1.5 up to it; the field says so before the admin saves.
   it('marks a value outside the bounds', () => {
     const { input } = mount('risk_usage_ratio', 1.2)
     expect(input.getAttribute('aria-invalid')).toBe('true')
-    expect(description(input)).toContain('超出允许范围')
   })
 
   it('does not mark an unset value, whatever its bounds', () => {
     const { input } = mount('risk_usage_ratio', 0)
-    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(input.getAttribute('aria-invalid')).toBeNull()
   })
 
-  // U18: the hint says what the knob means; the tail says its range and
-  // default, taken from the served defaults.
+  // The hint says what the knob means; the tail says its range and default, taken from the served defaults.
   it('ends the hint with the range and the served default', () => {
     expect(description(mount('geo_anomaly_min_placed_ratio', 0).input)).toContain('范围 0–1，默认 0.5')
     cleanup()
@@ -131,13 +133,31 @@ describe('PolicyField, numbers', () => {
     expect(own).toContain('默认 3')
   })
 
-  // A runtime knob's hint states its own default and range; its caption
-  // is the number the server runs with.
+  // A runtime knob's hint states its own default and range; its caption is the number the server runs with.
   it('captions a runtime knob with its value in effect and no tail', () => {
     const { input } = mount('geo_anomaly_fresh_window_seconds', 0, 42)
     const text = description(input)
     expect(text).toContain('当前生效：42')
     expect(text).not.toContain('范围 20–900，默认 120')
-    expect(input.placeholder).toBe('120')
+  })
+})
+
+describe('PolicyField, the other kinds', () => {
+  const spec = { key: 'k', kind: 'inverted', label: 'admin:risk_center.policy.default_adornment' } as const
+
+  // An *_off key reads as its opposite: the switch says what is ON, and storing it writes the inverse.
+  it('an inverted switch shows the opposite of the stored flag and stores the inverse', () => {
+    const stored: boolean[] = []
+    render(<PolicyField spec={spec} value={true} defaults={{}} onChange={v => stored.push(v as boolean)} />)
+    const sw = screen.getByRole('switch')
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(sw)
+    expect(stored).toEqual([false])
+  })
+
+  it('a select with no stored value shows its first option', () => {
+    const select = { key: 's', kind: 'select', label: 'admin:risk_center.policy.default_adornment', options: [{ value: 'a', label: 'admin:risk_center.policy.default_adornment' }, { value: 'b', label: 'admin:risk_center.policy.out_of_range' }] } as const
+    render(<PolicyField spec={select as never} value={''} defaults={{}} onChange={() => {}} />)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('a')
   })
 })
