@@ -6130,7 +6130,7 @@
       "detail": {
         "countdown_one": "Goes out in {{count}} second",
         "countdown_other": "Goes out in {{count}} seconds",
-        "restart": "Each node restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
+        "restart": "Each node whose rules change restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
         "sniffing": "Inbound \"{{inbounds}}\" does not detect domains, so domain rules do not apply on it. Still running the previous version.",
         "sniffing_partial": "Sniffing is insufficient on {{n}} inbound(s): domain rules (and, with metadataOnly, protocol rules such as BitTorrent) do not apply on them",
         "over_limit": "{{what}} {{used}} / {{limit}}. Still running the previous version.",
@@ -6212,12 +6212,12 @@
       },
       "pause": {
         "title": "Pause all access control?",
-        "message": "Every node stops enforcing policies within {{minutes}} and restarts its proxy once; all definitions are kept and enforced again as before when you resume.",
+        "message": "The nodes that are running a policy stop enforcing within {{minutes}}, and each of them restarts its proxy once; all definitions are kept and enforced again as before when you resume.",
         "action": "Pause"
       },
       "resume": {
         "title": "Resume access control?",
-        "message": "Every node enforces policies again within {{minutes}} and restarts its proxy once.",
+        "message": "The nodes that have something to enforce start again within {{minutes}}, and each of them restarts its proxy once.",
         "action": "Resume"
       },
       "discard": {
@@ -6675,7 +6675,7 @@
         "manual": "Manual",
         "auto": "Automatic",
         "manual_hint": "A new version is only shown; you check for updates and confirm.",
-        "auto_hint": "A new version is downloaded, verified and applied; every change to a category in use restarts the proxy on each node once."
+        "auto_hint": "A new version is downloaded, verified and applied; every change to a category in use restarts the proxy once on each node whose policies use it."
       },
       "rejection": {
         "broad_entry": "List \"{{list}}\" would get an entry that is too broad ({{entry}}), so this update would be refused and the old data kept.",
@@ -6695,7 +6695,7 @@
         "entries": "Entries",
         "change": "Change",
         "in_use": "In use",
-        "restart": "A category in use changes, so each node restarts its proxy once after this is applied.",
+        "restart": "A category in use changes, so the nodes whose policies use it restart their proxy once after this is applied.",
         "no_restart": "No category in use changes, so no node restarts.",
         "cancel": "Cancel",
         "apply_update": "Apply update",
@@ -6730,9 +6730,9 @@
       "save": "Save source rule",
       "saved": "Source rule saved",
       "stale": "This source rule was just changed by someone else and has been reloaded; check it before saving.",
-      "restart_one": "Takes effect within about {{count}} minute of saving; the node restarts its proxy once.",
-      "restart_other": "Takes effect within about {{count}} minutes of saving; the node restarts its proxy once.",
-      "restart_unknown": "Takes effect within a few minutes of saving; the node restarts its proxy once.",
+      "restart_one": "Takes effect within about {{count}} minute of saving; the node restarts its proxy once if the rule changes what it enforces.",
+      "restart_other": "Takes effect within about {{count}} minutes of saving; the node restarts its proxy once if the rule changes what it enforces.",
+      "restart_unknown": "Takes effect within a few minutes of saving; the node restarts its proxy once if the rule changes what it enforces.",
       "unsaved": {
         "summary": "Source rules are not saved; use the button below",
         "detail": "The \"Deny source country or region\" changes of this inbound are unsaved. They are saved by their own button, not by OK above."
@@ -7252,18 +7252,18 @@
       },
       "too_old": "Node agent too old: upgrade needed",
       "exec_only": "A sing-box node only enforces and does not record",
-      "restart": "After saving, this node restarts its proxy once.",
+      "restart": "After saving, this node restarts its proxy once if the change alters what it is told to run.",
       "cancel": "Cancel",
       "save": "Save",
-      "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
-      "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
-      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
+      "saved_one": "Saved. {{node}} may restart its proxy once within about {{count}} minute",
+      "saved_other": "Saved. {{node}} may restart its proxy once within about {{count}} minutes",
+      "saved_unknown": "Saved. {{node}} may restart its proxy once within a few minutes",
       "usage_cost": "Cost: in the worst case measured, the Xray proxy process on a busy node uses 43% more CPU, and the node agent that receives the records uses some more on top. That is why it is an opt-in per node and off by default.",
       "usage_too_old": "The node agent needs an upgrade to record usage",
       "usage_privacy_summary": "The privacy page is not enabled",
       "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",
       "usage_off_note": "Turning it off stops new usage from being recorded; the usage already recorded is kept until its {{usageDays}} days are up, then deleted automatically.",
-      "restart_usage": "Saving restarts this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
+      "restart_usage": "Saving can restart this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
     },
     "node_recording": {
       "mode": {

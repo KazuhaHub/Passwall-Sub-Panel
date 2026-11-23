@@ -97,7 +97,7 @@ describe('SourceRulesSection', () => {
     vi.mocked(api.getDestSourceRule).mockResolvedValue({ rule: rule({ updated_at: 1234 }), native: true, geoip_available: true })
     vi.mocked(api.putDestSourceRule).mockResolvedValue({ rule: rule(), geoip_available: true })
     renderAccess(<SourceRulesSection nodeId={4} />)
-    expect(await screen.findByText('保存后约 2 分钟内生效，节点会重启代理程序一次。')).toBeTruthy()
+    expect(await screen.findByText('保存后约 2 分钟内生效；这条规则若改变节点要执行的内容，节点会重启代理程序一次。')).toBeTruthy()
     const input = screen.getByRole('combobox', { name: '拒绝的国家或地区' })
     fireEvent.keyDown(input, { key: 'ArrowDown' })
     fireEvent.change(input, { target: { value: 'CN' } })
