@@ -1,9 +1,7 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { createMemoryRouter, useLocation, useNavigationType } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import AppRouter from '@/router/AppRouter'
@@ -12,7 +10,7 @@ import RiskCenterView from './RiskCenterView'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: vi.fn() }))
 // t over the REAL zh-CN admin bundle, flattened as the SPA registers it, so a
 // key the page asks for but the bundle lacks shows up as its raw key instead
 // of passing on a defaultValue.
@@ -30,10 +28,9 @@ vi.mock('react-i18next', async (importOriginal) => ({
 }))
 
 import zh from '@/locales/zh-CN/admin.json'
+import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
-dict.current = flatten(zh as Nested)
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
+dict.current = { ...flatten(zhCommon as Nested), ...flatten(zh as Nested) }
 
 // Every location the page passed through and how it got there, so a test
 // can tell one replace from two updates in a row.
@@ -55,7 +52,7 @@ function mount(url: string) {
     { path: '/admin/dashboard', element: <><p>dashboard</p><Where /></> },
   ], { initialEntries: [url] })
   render(
-    <ThemeProvider theme={theme}><AppRouter router={router} /></ThemeProvider>,
+    <AppRouter router={router} />,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -209,7 +206,7 @@ describe('RiskCenterView', () => {
     serve()
     mount('/admin/risk')
     await screen.findByRole('heading', { name: '风控中心' })
-    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看说明' }))
     expect(await screen.findByText(/^每个需要处理的账号一行，最紧急的在前/)).toBeTruthy()
   })
 
@@ -218,7 +215,7 @@ describe('RiskCenterView', () => {
     serve()
     mount('/admin/risk?tab=records')
     await screen.findByRole('heading', { name: '风控中心' })
-    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看说明' }))
     expect(await screen.findByText(/^每次进入或离开「疑似」「已标记」/)).toBeTruthy()
   })
 
@@ -226,7 +223,7 @@ describe('RiskCenterView', () => {
     serve()
     mount('/admin/risk?tab=policy')
     await screen.findByRole('heading', { name: '风控中心' })
-    fireEvent.click(screen.getByRole('button', { name: '说明' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看说明' }))
     expect(await screen.findByText(/^每张卡片是一个检测项/)).toBeTruthy()
   })
 
@@ -277,7 +274,7 @@ describe('RiskCenterView', () => {
   it('a queue row opens the drawer over the queue', async () => {
     serve([aliceRow])
     mount('/admin/risk?tab=queue')
-    const upn = await screen.findByRole('button', { name: '打开 alice 的风控详情' })
+    const upn = await screen.findByText('alice')
     const before = seen.length
     fireEvent.click(upn)
 
