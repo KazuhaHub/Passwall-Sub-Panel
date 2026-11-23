@@ -215,7 +215,7 @@ describe.each([
   { file: '../components/AuditCollectDialog.tsx' },
   { file: '../components/DestResolveDialog.tsx' },
   { file: '../components/NodePolicyStatusRow.tsx' },
-  { file: '../views/admin/ServerAccessDialog.tsx' },
+  { file: '../views/admin/servers/dialogs/ServerAccessDialog.tsx' },
 ])('$file reads every word from the bundles', ({ file }) => {
   const source = readFileSync(viewDir(file), 'utf8')
 

@@ -4090,6 +4090,8 @@
   },
   "servers": {
     "retired_routes": {
+      "previewing": "Reading the routing template…",
+      "cleaning": "Removing the rules from the template…",
       "upgrade_notice": "Upgrading from a version with 3X-UI VLESS route lines? Use the cleanup action on the affected server to preview any rules left by the retired feature.",
       "open": "Clean retired VLESS routes",
       "title": "Retired VLESS routes on {{server}}",
@@ -4145,6 +4147,7 @@
       "command_next": "After running the command, refresh this original server and verify its agent, core and actual client connection. Generating a command does not confirm installation.",
       "node_command_hint": "Run the one-click command as root on THIS NODE HOST, not on the PSP host. Its private script-delivery token can be used once and expires after 15 minutes. Installation success is not proof that proxy service is ready: verify the original server's agent, core, managed nodes and client access afterwards.",
       "single_instance_confirmation": "I confirm exactly one PSP process uses this database in this deployment. Multi-instance deployments are not supported by this online conversion.",
+      "generate_summary": "Generating the command changes nothing on {{name}}. It issues a one-time command that converts the server to Passwall Node {{version}} when you run it on the node host.",
       "generate_node_command": "Generate node-host conversion and installation command",
       "command_failed": "Could not generate a valid node-host command. Recheck the preview, verified release and required confirmations; no backend conversion was completed.",
       "supported_deployment_hint": "The automatic node-host takeover is limited to the standard Linux/systemd 3X-UI (x-ui) deployment, or a cleanly reinstalled node OS. The old standard installation is backed up, disabled and retained rather than deleted. Before conversion, ensure no panel/core upgrade or external automation can restart the old service. Custom layouts and containerized third-party panels require manual handling; this wrapper does not support them or restore unmanaged configuration.",
@@ -4220,6 +4223,7 @@
       "requirements": "Requires an enabled upgrade helper: Linux/systemd, or Docker generated with the Advanced remote-upgrade option enabled. Older agents need one manual maintenance update. Success requires the new process to synchronize and converge configuration; Docker automatically restores the retained previous container on failure. State-schema changes require manual migration.",
       "current": "Current Passwall Node release (last reported)",
       "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags are refused. Releases older than the one this node runs are marked but remain selectable — the panel does not block a downgrade; the release signature, its checksum and the node’s own state-schema check are what guard it. Channel changes here are temporary; save the server’s update channel in Edit.",
+      "summary": "This upgrades {{name}} from {{from}} to {{to}} and briefly interrupts its proxy connections.",
       "confirm": "Confirm and request upgrade",
       "retry": "Retry the same upgrade request",
       "refresh": "Check the original task again",
@@ -4249,14 +4253,13 @@
     "search_placeholder": "Search name / URL",
     "no_match": "No servers match the search",
     "edit_title": "Edit {{name}}",
-    "selection_count": "{{count}} selected",
     "batch_test": "Test selected",
     "batch_delete": "Delete selected",
     "batch_upgrade_xray": "Upgrade Xray on selected",
     "batch_upgrade_panel": "Upgrade 3X-UI on selected",
     "field": {
       "region": "Region",
-      "tags": "Tags (comma-separated)",
+      "tags": "Tags",
       "panel_type": "Server type",
       "update_channel": "Passwall Node update channel",
       "name": "Server name",
@@ -4296,8 +4299,6 @@
       "update_channel": "Stable receives final releases; RC receives candidates and finals; Beta receives all stages. Docker follows the matching tag. latest always follows stable; testing remains a beta alias. Saving does not upgrade the node.",
       "update_channel_short": "Default release channel; Docker files follow its image tag, but saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
-      "unconfigured": "Not configured",
-      "change": "Change",
       "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
     },
     "native": {
@@ -4315,7 +4316,6 @@
       },
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
       "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
-      "metadata_details": "Optional remark and technical details",
       "create_continue": "Create and continue to installation",
       "method_label": "Choose installation method",
       "method": {
@@ -4504,8 +4504,10 @@
       "url": "URL",
       "status": "Status",
       "version": "Version",
-      "remark": "Remark",
-      "actions": "Actions"
+      "actions": "Actions",
+      "type": "Type",
+      "counts": "Nodes / lines",
+      "remark": "Remark"
     },
     "status": {
       "checking": "Checking",
@@ -4536,7 +4538,6 @@
     },
     "action": {
       "test": "Test",
-      "edit": "Edit",
       "delete": "Delete",
       "more": "More actions",
       "upgrade": "Upgrade",
@@ -4546,7 +4547,10 @@
       "select_core": "Select core and version",
       "rotate_node_credential": "Rotate node credential",
       "line_factors": "Line multipliers",
-      "shared_ports": "Shared ports (SNI)"
+      "shared_ports": "Shared ports (SNI)",
+      "refresh": "Refresh",
+      "more_for": "More actions for {{name}}",
+      "edit": "Edit"
     },
     "core_tier": {
       "recommended": "Recommended (broad compatibility)",
@@ -4914,7 +4918,30 @@
       "confirm": "Delete server",
       "changed": "What depends on the server just changed; it was read again",
       "blind_delete": "Delete without checking"
-    }
+    },
+    "count": "{{count}} servers",
+    "counts": {
+      "title": "{{nodes}} nodes, {{lines}} lines"
+    },
+    "menu": {
+      "unsupported": "{{action}} ({{reason}})",
+      "not_ready": "the node is not ready",
+      "not_supported": "{{type}} does not support this"
+    },
+    "empty": {
+      "title": "No servers yet",
+      "description": "Add a Passwall Node, 3X-UI or S-UI server to start attaching nodes."
+    },
+    "clear_search": "Clear search",
+    "form": {
+      "group_type": "Type",
+      "group_basics": "Basics",
+      "group_node": "Passwall Node",
+      "group_connection": "Connection",
+      "group_test": "Connection test",
+      "test_hint": "The test reaches the server with the saved settings and records its version. Save your changes first."
+    },
+    "resource_state": "Resources: {{state}}"
   },
   "diagnostics": {
     "title": "Diagnostics",

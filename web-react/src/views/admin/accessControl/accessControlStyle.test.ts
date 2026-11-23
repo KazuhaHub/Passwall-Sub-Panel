@@ -24,7 +24,7 @@ function sources(dir: string): string[] {
 const files = [
   ...sources(here),
   ...['ToneBadge', 'StatusLine', 'KpiTile', 'PolicyField', 'NodePolicyStatusRow'].map(n => join(srcRoot, 'components', `${n}.tsx`)),
-  join(srcRoot, 'views/admin/ServerAccessDialog.tsx'),
+  join(srcRoot, 'views/admin/servers/dialogs/ServerAccessDialog.tsx'),
   join(srcRoot, 'views/admin/risk/drawer/AccessTab.tsx'),
 ]
 
