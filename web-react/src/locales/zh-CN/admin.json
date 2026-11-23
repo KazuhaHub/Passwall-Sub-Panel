@@ -129,7 +129,6 @@
     "mail_load_failed": "暂时无法加载邮件设置",
     "saml_load_failed": "暂时无法加载 SAML 配置",
     "oidc_load_failed": "暂时无法加载 OIDC 配置",
-    "retry": "重试",
     "tab_general": "基本设置",
     "tab_security": "登录与安全",
     "tab_brand": "站点品牌",
@@ -139,20 +138,16 @@
     "tab_sso": "SSO 认证",
     "tab_legal": "隐私与协议",
     "save": "保存",
-    "cancel": "取消",
     "saved": "已保存",
     "panel_path_sso_notice": "面板路径已更新；如启用了 SSO，请同步更新身份提供商中登记的回调地址。",
     "scope": {
       "audience": "适用对象",
       "all_users": "所有用户（全局默认）",
-      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
-      "showing_for_label": "当前显示范围："
+      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。"
     },
     "feature_pending": "该 tab 正在迁移到 React + MUI（下个版本）。当前请使用 Vue 版本管理这些字段。",
     "general": {
       "section_login": "登录",
-      "section_login_security": "登录安全",
-      "section_security": "安全",
       "section_runtime": "运行时调度",
       "captcha_enabled": "启用登录验证码",
       "captcha_contexts": "验证码适用范围",
@@ -169,8 +164,8 @@
       "captcha_secret_key": "Secret Key（服务端校验）",
       "lockout_enabled": "启用失败锁定",
       "lockout_threshold": "锁定阈值（失败次数）",
-      "lockout_window_minutes": "统计窗口（分钟）",
-      "lockout_duration_minutes": "锁定时长（分钟）",
+      "lockout_window_minutes": "统计窗口",
+      "lockout_duration_minutes": "锁定时长",
       "lockout_scope": "锁定范围",
       "lockout_scope_ip_upn": "IP + 用户名（推荐）",
       "lockout_scope_ip": "仅 IP",
@@ -192,8 +187,8 @@
       "registration_default_group_missing": "已保存的分组不存在（ID：{{id}}），请选择一个有效分组",
       "registration_default_group_missing_option": "无效分组（ID：{{id}}）",
       "registration_default_group_current_option": "当前设置（ID：{{id}}）",
-      "registration_default_traffic_gb": "默认流量 GB（0=跟随分组）",
-      "registration_default_expire_days": "默认有效期（天，0=不过期）",
+      "registration_default_traffic_gb": "默认流量（0=跟随分组）",
+      "registration_default_expire_days": "默认有效期（0=不过期）",
       "registration_hint": "注册用户以邮箱作为登录名、角色为普通用户，加入默认组并继承上述配额/有效期。开启邮箱验证需先配置 SMTP；链接方式需先配置订阅基础 URL。",
       "twofa_section_title": "两步验证（2FA）",
       "twofa_section_hint": "为本地登录增加第二道验证。可启用下列任意方式（账号在「我的账号」里自助绑定）；登录时验证器代码、一次性备用码、以及账号已绑定的通行密钥都自动可用。",
@@ -201,9 +196,8 @@
       "totp_hint": "允许有本地密码的账号在「我的账号」里用身份验证器 App（TOTP）开启验证。关闭仅阻止新开启，不会移除已启用账号的验证器。SSO 账号不受影响。",
       "twofa_allow_email": "邮箱一次性验证码（较弱，需配置 SMTP）",
       "twofa_allow_email_hint": "与上面并列的一种登录验证方式，需账号已绑定其它因素（TOTP / 通行密钥）后方可启用。它较弱——掌握密码 + 邮箱即可通过，故默认关闭。",
-      "twofa_policy_subheading": "强制策略",
-      "twofa_email_cooldown": "验证码重发冷却（秒）",
-      "code_resend_cooldown": "验证码重发冷却（秒，注册验证 / 找回密码）",
+      "twofa_email_cooldown": "验证码重发冷却",
+      "code_resend_cooldown": "验证码重发冷却（注册验证 / 找回密码）",
       "code_resend_cooldown_hint": "同一账号两次重发验证码的最小间隔，防邮件轰炸（0=默认 60 秒）。与登录两步验证的邮件冷却相互独立。",
       "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
       "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组单独强制。仅本地账号生效。",
@@ -221,37 +215,36 @@
       "allow_user_personal_rules": "允许用户编辑个人规则",
       "allow_user_personal_rules_hint": "关闭后用户仍可在自助页查看个人规则，但无法保存修改。管理端不受影响，可继续手动为指定用户编辑。",
       "jwt_issuer": "JWT Issuer",
-      "jwt_access_ttl_minutes": "Access Token 有效期（分钟）",
-      "jwt_refresh_ttl_minutes": "Refresh Token 有效期（分钟）",
-      "sub_per_ip_per_min": "订阅请求限流（次/分钟/IP）",
-      "login_per_ip_per_min": "登录限流（次/分钟/IP）",
+      "jwt_access_ttl_minutes": "Access Token 有效期",
+      "jwt_refresh_ttl_minutes": "Refresh Token 有效期",
+      "sub_per_ip_per_min": "订阅请求限流（每 IP）",
+      "login_per_ip_per_min": "登录限流（每 IP）",
       "timezone": "面板时区",
       "timezone_placeholder": "例如 America/Los_Angeles（留空使用服务器时区）",
       "timezone_hint": "用于流量重置、用户到期日计算、图表默认时区。订阅页和用户自助页始终使用浏览器时区。",
-      "cron_traffic_pull_minutes": "流量采集间隔（分钟）",
-      "cron_reconcile_minutes": "Reconcile 间隔（分钟）",
-      "node_poll_seconds": "原生节点同步心跳（秒）",
+      "cron_traffic_pull_minutes": "流量采集间隔",
+      "cron_reconcile_minutes": "Reconcile 间隔",
+      "node_poll_seconds": "原生节点同步心跳",
       "node_poll_seconds_hint": "控制配置和任务送达原生节点的速度。0 = 使用默认 30 秒；有排队任务时 PSP 可临时要求更快重试。",
-      "full_report_seconds": "原生节点全量报告周期（秒）",
+      "full_report_seconds": "原生节点全量报告周期",
       "full_report_seconds_hint": "降低此值会增加节点上行带宽，但会缩短全车队流量分子陈旧时间，从而收紧配额可能超用的上界。0 = 每轮同步都发送全量报告。",
       "section_node_task_lifecycle": "原生任务生命周期策略",
       "node_task_lifecycle_hint": "全局策略配置，单位为天，不是任务执行 TTL。默认：离线对账 30 天、备份最大恢复年龄 30 天、完整结果保留 90 天。清理与恢复验收完成前不启用自动清理。",
-      "node_task_offline_reconcile_days": "离线自动对账窗口（天）",
+      "node_task_offline_reconcile_days": "离线自动对账窗口",
       "node_task_offline_reconcile_days_hint": "默认 30；整数 1–3650。超窗需人工核对，不自动重新执行任务。",
-      "node_task_backup_restore_days": "备份最大恢复年龄（天）",
+      "node_task_backup_restore_days": "备份最大恢复年龄",
       "node_task_backup_restore_days_hint": "默认 30；整数 1–3650。更早的备份恢复后需人工核对，不自动重新执行任务。",
-      "node_task_result_retention_days": "完整任务结果保留（天）",
+      "node_task_result_retention_days": "完整任务结果保留",
       "node_task_result_retention_days_hint": "默认 90；整数 1–3650，不能短于离线对账窗口或备份最大恢复年龄。",
-      "node_task_days_range": "必须为 1–3650 天的整数",
       "node_task_retention_minimum": "完整任务结果保留天数不能短于离线对账窗口或备份最大恢复年龄。",
       "node_task_policy_safety_hint": "调小窗口仅影响新任务的策略，不追溯缩短已有任务保护。任务身份记录（tombstone）不会自动删除。",
       "max_panel_concurrency": "面板并发上限（流量采集/Reconcile）",
       "max_panel_concurrency_hint": "并发拉取每个 3X-UI 面板入站数据的上限。0 = 使用默认值 8。单面板部署调高无意义；多面板（5+）且 3X-UI 服务器空闲时可调到 16-32。> 64 会被自动夹回 64。",
-      "audit_retention_days": "审计日志保留（天）",
-      "auth_event_retention_days": "认证日志保留（天）",
+      "audit_retention_days": "审计日志保留",
+      "auth_event_retention_days": "认证日志保留",
       "auth_event_retention_days_hint": "登录日志（含失败）的保留天数。0 = 永不清理。默认 90（合规友好）。",
-      "sync_task_retention_days": "同步任务保留（天）",
-      "traffic_history_days": "流量历史保留（天）",
+      "sync_task_retention_days": "同步任务保留",
+      "traffic_history_days": "流量历史保留",
       "traffic_history_days_hint": "图表能往回看多少天。超过自动清理。raw 5 分钟原始数据固定保留 7 天用于今天实时刷新；这个值控制 hourly 滚动表的保留长度。0 = 永不清理。默认 730（两年，给\"最近一年\"留一倍 buffer）。",
       "expire_before_days": "到期前 N 天发邮件提醒",
       "expire_before_days_hint": "账号到期前多少天向用户发送邮件提醒。",
@@ -262,10 +255,22 @@
       "cloudflare_auto_fetch": "自动拉取 Cloudflare 地址段",
       "cloudflare_auto_fetch_hint": "面板每天下载一次 Cloudflare 公布的地址段（www.cloudflare.com/ips-v4 与 ips-v6，匿名请求，不带任何与本面板有关的信息），用作 CDN 线路的来源。拉取失败时沿用上次的列表；关闭后使用面板内置的快照。",
       "emergency_access_enabled": "允许用户紧急访问",
-      "emergency_access_hours": "紧急访问时长（小时）",
+      "emergency_access_hours": "紧急访问时长",
       "emergency_access_max_count": "紧急访问最大次数",
-      "emergency_access_quota_gb": "紧急访问流量配额（GB）",
-      "emergency_access_quota_gb_hint": "0 表示不限制；超出后将提前结束本次紧急访问并重新自动停用"
+      "emergency_access_quota_gb": "紧急访问流量配额",
+      "emergency_access_quota_gb_hint": "0 表示不限制；超出后将提前结束本次紧急访问并重新自动停用",
+      "section_retention": "数据保留",
+      "section_notify": "提醒阈值",
+      "cron_effect_hint": "修改在当前周期结束后生效，无需重启。填 0 会被忽略，沿用当前周期。",
+      "login_mode_hint": "「强制 SSO」和「仅本地」可能让人无法登录，保存时会先确认。",
+      "section_captcha": "验证码",
+      "captcha_provider_keys_hint": "需要服务商提供的 Site Key 和 Secret Key。密钥错误可能导致用户无法通过验证码。",
+      "section_lockout": "失败锁定",
+      "section_recovery": "找回密码",
+      "section_registration": "自助注册",
+      "section_sessions": "会话与速率限制",
+      "jwt_issuer_hint": "修改后所有已登录的会话立即失效，包括你自己的。",
+      "jwt_ttl_hint": "新的有效期只对此后签发的令牌生效。"
     },
     "geo_anomaly": {
       "scope": "判定粒度",
@@ -381,7 +386,7 @@
       "no_db": "未发现 .mmdb 库——放一个进去，或配置自动更新后点「立即更新」。",
       "built": "构建",
       "auto_update": "自动更新数据库",
-      "update_interval_hours": "自动更新间隔（小时）",
+      "update_interval_hours": "自动更新间隔",
       "update_interval_hint": "最小 1 小时；修改后无需重启即生效。",
       "source": "更新来源",
       "source_maxmind": "MaxMind GeoLite2（城市级，推荐）",
@@ -394,9 +399,6 @@
       "token_maxmind": "MaxMind License Key",
       "token_ipinfo": "IPinfo Token",
       "token_custom": "Token / 凭据（可选）",
-      "token_set": "已设置（留空则保持不变）",
-      "token_kept": "已保存（保持不变）",
-      "token_change": "更改",
       "update_now": "立即更新",
       "update_hint": "「立即更新」会先自动保存设置再下载。MaxMind 库须 30 天内更新一次（EULA），建议开启自动更新。",
       "attribution": "数据来源需在使用处署名：MaxMind（GeoLite2）/ DB-IP / IPinfo —— 视所用库而定。",
@@ -419,11 +421,14 @@
       "email_domain": "默认邮箱域",
       "sub_base_url": "订阅 Base URL（必填）",
       "panel_path": "面板路径前缀",
-      "panel_path_hint": "留空部署在域名根路径；例如 /panel。订阅链接不受此项影响。",
+      "panel_path_hint": "留空部署在域名根路径；例如 /panel。以斜杠开头、不带结尾斜杠，且不能与订阅路径重叠。设置面板路径后，订阅基础 URL 不能再带路径。订阅链接不受其他影响。",
       "asset_hint": "Logo / Icon 留空时使用内置默认。",
       "theme_color": "系统默认主题色（HEX）",
       "theme_color_hint": "用作所有用户的默认主题色；用户仍可在顶栏调色板里覆盖。留空时回退到内置默认色。",
-      "theme_color_clear": "清空"
+      "theme_color_clear": "清空",
+      "section_addresses": "地址",
+      "sub_base_url_hint": "订阅链接、邮件和 SSO 回调地址以此地址生成，其主机名同时是通行密钥所用的域名。",
+      "theme_color_picker": "选择颜色"
     },
     "sso": {
       "tab_saml": "SAML 2.0",
@@ -442,9 +447,7 @@
       "role_rules_keep_hint": "打开后：本条规则没命中、且用户当前正是本规则赋予的角色时，保留该角色。关闭则按规则集结果撤销。",
       "role_rules_note": "备注",
       "role_rules_note_placeholder": "可选：标注此规则用途",
-      "role_rules_drag": "拖拽调整顺序（顺序决定优先级）",
       "role_rules_add": "添加规则",
-      "role_rules_remove": "删除",
       "group_rules_hint": "按 IdP 属性决定新用户进入哪个分组（OU），自上而下取第一条命中的规则。每次登录都会重新判定：被 IdP 移出某个组的人会相应离开对应 OU，而不是永久保留它的配额与节点。没有规则命中时落到下方的「默认分组」。",
       "group_rules_empty": "尚未配置分组规则 —— 所有 SSO 用户都会进入下方的默认分组，且已有用户的分组不会被 IdP 改动。",
       "group_rules_group": "分组（OU）",
@@ -461,11 +464,9 @@
         "sp_acs_url": "ACS URL（回调）",
         "sp_cert": "SP 证书（PEM）",
         "sp_key": "SP 私钥（PEM，留空保持不变）",
-        "sp_key_kept": "SP 私钥已配置（保持不变）",
-        "sp_key_change": "修改私钥",
         "idp_section": "身份提供方（IdP）",
         "idp_metadata_url": "IdP Metadata URL",
-        "idp_refresh_hours": "Metadata 刷新间隔（小时）",
+        "idp_refresh_hours": "Metadata 刷新间隔",
         "attr_section": "属性映射",
         "attr_upn": "UPN 属性名",
         "attr_upn_hint": "填 IdP 发送 UPN 的 attribute Name URN；或填 nameid 直接从 <Subject><NameID> 读（Okta / Google / Keycloak / ADFS 默认走这条）",
@@ -475,8 +476,8 @@
         "admin_groups": "管理员组 ID（逗号分隔）",
         "default_group": "默认分组 slug",
         "new_user_section": "新用户默认",
-        "expire_days": "默认有效期（天，0=永久）",
-        "traffic_limit_gb": "默认流量上限（GB，0=跟随分组）",
+        "expire_days": "默认有效期（0=永久）",
+        "traffic_limit_gb": "默认流量上限（0=跟随分组）",
         "traffic_reset_period": "默认流量重置周期",
         "group_section": "分组解析",
         "fetch_verify": "获取、校验并保存",
@@ -486,16 +487,13 @@
         "fetch_saved": "Metadata 已校验，SAML 设置已保存",
         "sp_auto_hint": "这些字段由面板根据「公网基地址」自动生成（首次保存时生成自签名证书）。请把它们粘贴到 IdP 侧的 Service Provider 配置。",
         "sp_save_first": "保存后将生成 SP 信息",
-        "copied": "已复制",
-        "copy_failed": "复制失败"
+        "fetch_expires": "，{{date}} 到期"
       },
       "oidc": {
         "enabled": "启用 OIDC / OAuth2",
         "issuer_url": "Issuer URL",
         "client_id": "Client ID",
         "client_secret": "Client Secret（留空保持不变）",
-        "client_secret_kept": "Client Secret 已配置（保持不变）",
-        "client_secret_change": "修改",
         "redirect_url": "Redirect URL",
         "scopes": "Scopes（逗号分隔）",
         "attr_section": "属性映射",
@@ -506,10 +504,15 @@
         "admin_groups": "管理员组 ID（逗号分隔）",
         "default_group": "默认分组 slug",
         "new_user_section": "新用户默认",
-        "expire_days": "默认有效期（天，0=永久）",
-        "traffic_limit_gb": "默认流量上限（GB，0=跟随分组）",
+        "expire_days": "默认有效期（0=永久）",
+        "traffic_limit_gb": "默认流量上限（0=跟随分组）",
         "traffic_reset_period": "默认流量重置周期"
-      }
+      },
+      "role_rule_name": "角色规则 {{n}}",
+      "group_rule_name": "分组规则 {{n}}",
+      "default_group_current": "已保存的值：{{slug}}",
+      "default_group_empty": "没有匹配的分组",
+      "default_group_none": "不设默认分组"
     },
     "mail": {
       "section_smtp": "SMTP 服务器",
@@ -531,8 +534,6 @@
       "test_send": "发送测试",
       "test_sent": "已发送",
       "saved": "已保存",
-      "password_kept": "密码已保存（保持不变）",
-      "password_change": "修改",
       "kind": {
         "expire_before": "到期前提醒",
         "expired": "已到期",
@@ -598,7 +599,11 @@
       "preview_title": "预览：{{kind}}",
       "preview_subject": "邮件主题",
       "preview_body": "邮件正文",
-      "preview_close": "关闭"
+      "preview_close": "关闭",
+      "template_kind": "模板",
+      "test_hint": "使用已保存的 SMTP 设置发送；改过设置请先保存。",
+      "test_sent_to": "测试邮件已发送至 {{to}}",
+      "test_failed": "发送失败：{{reason}}"
     },
     "portal": {
       "section_quick_links": "快捷链接",
@@ -629,7 +634,8 @@
         "level_danger": "紧急通知",
         "popup": "以弹窗形式展示（首次进入网站时弹窗）",
         "popup_hint": "用户可点击\"我知道了\"关闭，或勾选\"不再提醒\"。提示状态仅保存在用户浏览器本地；公告内容更新后会再次弹出。"
-      }
+      },
+      "link_name": "快捷链接 {{n}}"
     },
     "subscription": {
       "section_basic": "基本",
@@ -682,8 +688,8 @@
       },
       "sub_path": "订阅 URL 路径段（必填）",
       "sub_import_tutorial_url": "导入教程链接（用户门户「查看教程」按钮指向；留空时按钮隐藏）",
-      "sub_log_retention_days": "订阅日志保留（天）",
-      "sub_update_interval_hours": "订阅自动刷新提示间隔（小时）",
+      "sub_log_retention_days": "订阅日志保留",
+      "sub_update_interval_hours": "订阅自动刷新提示间隔",
       "sub_profile_name_template": "订阅名称模板",
       "sub_profile_name_template_hint": "服务端渲染后用于 Content-Disposition / Profile-Title 响应头，以及一键导入深链的 &name= 参数。可用占位符：{{ site_title }}、{{ app_title }}、{{ display_name }}、{{ upn }}、{{ user }}（display_name，无则回退 UPN）。留空时使用默认值 {{ site_title }} - {{ user }}。",
       "sub_region_flag_prefix": "节点名自动加地区国旗",
@@ -721,7 +727,8 @@
       "delete_family_title": "删除 {{name}}？",
       "delete_family_body": "{{name}} 及其导入 App 将从列表中移除，保存后生效。",
       "apps_count_other": "{{count}} 个 App",
-      "format_uri_list": "URI 列表（V2rayN / Passwall）"
+      "format_uri_list": "URI 列表（V2rayN / Passwall）",
+      "sub_path_hint": "订阅链接中地址之后、令牌之前的部分。修改后，已发出的订阅链接将失效。"
     },
     "legal": {
       "title": "隐私与协议页",
@@ -821,6 +828,72 @@
       "err_url": "请输入以 http:// 或 https:// 开头、端口有效（1 到 65535）的地址",
       "err_server": "{{message}}",
       "info": "说明"
+    },
+    "unit": {
+      "minutes": "分钟",
+      "hours": "小时",
+      "seconds": "秒",
+      "days": "天",
+      "per_minute": "次/分钟"
+    },
+    "unsaved_short": "未保存",
+    "nav_label": "设置分类",
+    "section_label": "设置分类",
+    "section_separator": "、",
+    "dirty_sections": "以下分类有未保存的修改：{{sections}}。仍要离开吗？",
+    "search": {
+      "placeholder": "搜索设置",
+      "label": "搜索设置",
+      "none": "没有与“{{query}}”匹配的设置",
+      "results": "匹配的设置"
+    },
+    "secret_hint": "已保存。留空则保持不变。",
+    "rows": {
+      "move_up": "上移{{name}}",
+      "move_down": "下移{{name}}",
+      "remove": "删除{{name}}"
+    },
+    "danger": {
+      "confirm": "仍要保存",
+      "login_mode_sso_redirect": {
+        "title": "将所有人直接跳转到 SSO？",
+        "message": "登录页会把所有人直接送到身份提供商，不再显示密码登录表单。如果 SSO 出故障，只有管理员还能通过本地登录的直接地址登录。",
+        "sso_off": "目前 SAML 和 OIDC 都未启用，在启用其中之一之前，面板仍只提供本地登录。",
+        "sso_unknown": "无法确认 SAML 或 OIDC 是否已启用。"
+      },
+      "login_mode_local_only": {
+        "title": "关闭 SSO 登录？",
+        "message": "登录页将不再提供 SSO 登录。没有本地密码的账号将无法登录。"
+      },
+      "disallow_user_local_login": {
+        "title": "禁止非管理员使用本地登录？",
+        "message": "除管理员外的所有账号将无法再用密码或通行密钥登录；没有 SSO 身份的账号将无法登录。管理员仍可本地登录。"
+      },
+      "require_2fa_for_staff": {
+        "title": "强制管理员和运营启用两步验证？",
+        "message": "未绑定验证器 App 或通行密钥的管理员和运营，登录时必须先完成绑定才能使用面板。仅在允许验证器 App 或通行密钥时生效。"
+      },
+      "jwt_issuer": {
+        "title": "修改 JWT 签发者？",
+        "message": "所有已登录的会话都会失效，包括你自己的，需要重新登录。"
+      },
+      "jwt_ttl": {
+        "title": "缩短会话有效期？",
+        "message": "此后访问令牌有效 {{access}} 分钟，刷新令牌有效 {{refresh}} 分钟，用户会更早需要重新登录。"
+      },
+      "lockout": {
+        "title": "保存这条锁定规则？",
+        "message": "{{window}} 分钟内失败 {{threshold}} 次将锁定 {{duration}} 分钟。阈值过低可能把管理员也锁在门外。"
+      },
+      "panel_path": {
+        "title": "将面板移到 {{to}}？",
+        "message": "保存后本页将在 {{url}} 重新加载，{{from}} 不再可用。如果启用了 SSO，请同步更新身份提供商中登记的回调地址。",
+        "lost": "保存后页面将跳转，以下分类未保存的修改会丢失：{{sections}}。请先保存它们。"
+      },
+      "sub_path": {
+        "title": "修改订阅路径？",
+        "message": "所有已发出的订阅链接都会失效，用户需要到订阅页面获取新链接。"
+      }
     }
   },
   "traffic": {
@@ -3157,7 +3230,6 @@
   "users": {
     "title": "用户管理",
     "create": "新增用户",
-    "edit_title": "编辑用户",
     "edit": {
       "row_changed": "该用户已被其他操作修改。当前编辑内容不会自动更新。",
       "reload_saved": "重新载入已保存值"
@@ -3199,7 +3271,6 @@
     },
     "result_title": "用户已创建",
     "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
-    "filter_group_all": "全部分组",
     "refresh": "刷新",
     "field": {
       "upn": "UPN",
@@ -3210,15 +3281,12 @@
       "group": "分组",
       "role": "角色",
       "expire_days": "有效期（天，0=永久）",
-      "expire_at": "到期时间",
-      "expire_mode_date": "到期时间",
+      "expire_mode_date": "指定日期",
       "expire_mode_permanent": "永久",
       "expire_tz_hint": "日期按面板时区 {{tz}} 计算",
-      "traffic_limit_gb": "流量上限 (GB，0=无限)",
       "period_used_gb": "本周期已用 (GB)",
       "account_enabled": "账户状态",
       "account_self_locked": "不能停用自己的账户",
-      "service_status": "代理服务状态",
       "block_violations": "违规次数：{{count}}",
       "emergency_used_count": "紧急访问已用 {{count}} 次",
       "emergency_window_until": "生效至 {{time}}（剩余 {{hours}} 小时）",
@@ -3228,7 +3296,6 @@
       "ip_limit": "并发 IP 上限",
       "device_limit": "设备数上限",
       "limit_zero_hint": "0 = 不限",
-      "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
       "ip_limit_unenforced": "以下面板会保存该上限但不执行（节点上没有可用的 fail2ban）：{{panels}}",
@@ -3243,7 +3310,11 @@
       "cap_no_clients_short": "暂无处执行",
       "device_limit_inert_short": "当前不生效",
       "limit_unsupported_short": "部分面板不支持",
-      "ip_limit_unenforced_short": "部分面板不执行"
+      "ip_limit_unenforced_short": "部分面板不执行",
+      "expire_mode": "到期",
+      "expire_date": "到期日期",
+      "level_user": "此用户",
+      "traffic_limit": "流量上限"
     },
     "role": {
       "admin": "管理员",
@@ -3269,10 +3340,16 @@
       "unlimited": "不限",
       "lifetime": "Lifetime 总量",
       "view_usage": "查看用量",
-      "created_at": "创建于"
+      "created_at": "创建于",
+      "status": "状态",
+      "validity": "有效期",
+      "subscription": "订阅",
+      "account": "账户信息",
+      "sub_hidden": "管理员和运营人员账户的订阅链接对运营人员隐藏。",
+      "not_found": "该用户已不存在",
+      "close": "关闭"
     },
     "table": {
-      "upn": "UPN",
       "display_name": "显示名",
       "group": "分组",
       "role": "角色",
@@ -3281,7 +3358,8 @@
       "status": "状态",
       "risk": "风控",
       "last_online": "最近活跃",
-      "actions": "操作"
+      "actions": "操作",
+      "user": "用户"
     },
     "relative_time": {
       "just_now": "刚刚",
@@ -3290,7 +3368,6 @@
       "days_ago": "{{count}} 天前"
     },
     "status": {
-      "enabled": "启用",
       "disabled": "禁用",
       "account_active": "账户正常",
       "service_active": "代理服务正常",
@@ -3318,19 +3395,25 @@
       "renew": "续期 30 天",
       "enable": "启用账户",
       "disable": "停用账户",
-      "delete": "删除"
+      "delete": "删除",
+      "row_menu": "{{upn}} 的操作"
     },
     "result": {
       "intro": "用户 {{upn}} 已创建。请记录初始密码 —— 这是唯一一次显示。",
       "password_label": "初始密码",
       "sub_url_label": "订阅 URL",
-      "copy": "复制"
+      "copy": "复制",
+      "reset_title": "密码已重置",
+      "reset_intro": "{{upn}} 的密码已重置。请立即记录，该密码只显示一次。"
     },
     "reason": {
       "enable_title": "启用账户",
       "disable_title": "停用账户",
       "enable_placeholder": "启用原因（可选）",
-      "disable_placeholder": "停用原因（可选）"
+      "disable_placeholder": "停用原因（可选）",
+      "label": "原因（可选）",
+      "disable_hint": "用户将无法登录，订阅也会停用。",
+      "enable_hint": "用户可再次登录，订阅是否可用取决于服务状态。"
     },
     "validate": {
       "upn_required": "请填写 UPN",
@@ -3344,14 +3427,13 @@
       "disabled": "已禁用",
       "renewed": "已续期 {{days}} 天",
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
-      "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
       "service_resumed": "代理服务已恢复",
       "service_suspended": "代理服务已暂停"
     },
     "confirm": {
       "delete_title": "删除用户",
-      "delete_message": "确定删除用户 {{upn}}？该操作将从所有 3X-UI inbound 清除其 client。",
+      "delete_message": "删除 {{upn}}？账户、订阅链接以及它在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "demote_title": "确认降级",
       "reset_credentials_title": "重置凭证",
       "reset_credentials_message": "重置 {{upn}} 的凭证会让旧订阅链接立即失效，现有连接被强制断开。继续？",
@@ -3360,7 +3442,7 @@
       "batch_unlink_sso_title": "批量解除 SSO 绑定",
       "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。",
+      "batch_delete_message": "删除 {{names}}{{suffix}}（共 {{count}} 个用户）？他们的账户、订阅链接以及在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "reset_2fa_title": "重置验证器 App（TOTP）",
       "reset_2fa_message": "将清除 {{upn}} 的验证器 App（TOTP）及其备用码；该用户的通行密钥（若有）不受影响。清除后该用户可仅凭密码登录（若无其它因素），并需要重新绑定。仅在用户丢失验证器且无备用码时使用。"
     },
@@ -3394,13 +3476,17 @@
       "regen_recovery_confirm": "重新生成",
       "regen_recovery_title": "重新生成备用码",
       "regen_recovery_message": "将作废 {{upn}} 现有的全部备用码并生成一组新的。请把新备用码通过安全渠道转交给用户——它只会显示这一次。",
-      "regen_recovery_done": "新备用码（只显示一次，请转交用户）："
+      "regen_recovery_done": "新备用码（只显示一次，请转交用户）：",
+      "passkey_count": "已注册 {{count}} 个"
     },
     "reset_password": {
       "title": "重置登录密码",
       "hint": "留空将生成随机密码；也可以点击右侧骰子按钮自动填充后再手动修改。",
       "field": "新密码（留空 = 随机）",
-      "gen": "随机生成"
+      "gen": "随机生成",
+      "confirm": "重置密码",
+      "hide": "隐藏密码",
+      "show": "显示密码"
     },
     "batch": {
       "selected": "已选 {{count}}",
@@ -3430,13 +3516,14 @@
       "placeholder": "每行一条规则，支持 mihomo / sing-box 格式",
       "saved": "个人规则已保存",
       "reset": "撤销修改",
-      "save": "保存"
+      "save": "保存",
+      "hint": "添加到该用户的订阅中，每行一条规则。"
     },
     "reconcile": {
       "trigger": "一键同步 Reconcile",
       "result_title": "巡检结果",
-      "summary_no_fix": "巡检完成！共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
-      "summary_fixed": "巡检完成！共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
+      "summary_no_fix": "巡检完成，共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
+      "summary_fixed": "巡检完成，共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
       "issues_title": "未修复问题",
       "show_details": "显示详情",
       "hide_details": "隐藏详情",
@@ -3444,7 +3531,7 @@
       "unfixed_section": "未能修复"
     },
     "credentials": {
-      "result": "已重置！新 UUID: {{uuid}}",
+      "result": "凭据已重置。新的 UUID：{{uuid}}",
       "emergency_reset": "已重置紧急使用次数",
       "twofa_reset": "已重置两步验证"
     },
@@ -3464,7 +3551,8 @@
       "revoke_all_message": "将吊销 {{upn}} 的全部 {{count}} 个通行密钥。仅在账号丢失全部设备或疑似被盗时使用。",
       "revoked_all": "已吊销 {{count}} 个通行密钥",
       "load_failed": "加载通行密钥失败",
-      "close": "关闭"
+      "close": "关闭",
+      "revoke_named": "吊销通行密钥 {{name}}"
     },
     "risk_lookup": "风控查询",
     "risk_chip_hint": "打开风控详情",
@@ -3472,6 +3560,51 @@
       "change": "改组后新增 {{added}} 个节点（{{added_names}}），移出 {{removed}} 个节点（{{removed_names}}）",
       "same": "改组后可用节点不变",
       "unknown": "改组影响暂时无法计算"
+    },
+    "empty": "还没有用户",
+    "empty_hint": "创建第一个用户后，对方即可获得订阅。",
+    "empty_filtered": "没有符合当前筛选条件的用户",
+    "load_failed": "无法加载用户列表",
+    "refresh_failed": "无法刷新列表，下面显示的是上次成功加载的内容。",
+    "readonly_operator": "运营人员不能修改管理员或运营人员的账户。",
+    "tabs": {
+      "overview": "概览",
+      "settings": "设置",
+      "usage": "用量",
+      "activity": "登录记录",
+      "security": "账户安全",
+      "unsaved": "有未保存的修改"
+    },
+    "axis": {
+      "intro": "账户决定用户能否登录面板，服务决定用户的订阅能否使用。两者相互独立，可以单独关闭。",
+      "account_title": "账户",
+      "account_caption": "登录面板",
+      "service_title": "代理服务",
+      "service_caption": "订阅",
+      "account_active": "用户可以登录面板。",
+      "account_disabled": "用户无法登录，订阅也已停用。",
+      "pending_approval": "等待管理员批准注册。",
+      "pending_email_verify": "等待用户验证邮箱地址。",
+      "pending_delete": "正在删除，其在服务器上的客户端正在清理。",
+      "service_active": "订阅可以正常使用。",
+      "emergency_active": "紧急访问已开启，订阅在限定时间内可用，不受到期或配额限制。",
+      "traffic_exceeded": "本周期的流量配额已用完，订阅已停用，直到下次重置或提高上限。用户仍可登录面板。",
+      "expired": "已过到期日，订阅已停用，续期后恢复。用户仍可登录面板。",
+      "blocked_client": "因使用不被允许的客户端而被暂停。",
+      "suspended_manual": "订阅已被主动暂停，在有人恢复之前保持停用。",
+      "suspended_geo_auto": "因出现异常地点的连接而被自动暂停。",
+      "suspended_geo_manual": "管理员因地点告警而暂停。",
+      "service_unavailable": "账户已停用，订阅随之停用。"
+    },
+    "filter_group_none": "没有匹配的分组",
+    "form": {
+      "identity": "身份",
+      "group": "分组",
+      "quota": "配额与重置",
+      "expiry": "到期",
+      "access": "访问权限",
+      "notes": "备注",
+      "create_limits_note": "保持为“跟随上级”的限额使用分组的值。创建时设定的值必须大于 0；若要让此用户不受分组限制，请在创建后编辑该用户。"
     }
   },
   "groups": {
@@ -5059,7 +5192,6 @@
       "version": "版本",
       "build": "构建",
       "build_local": "本地构建",
-      "copy_build": "复制构建号",
       "uptime": "面板已运行",
       "since": "统计起点",
       "window": "统计时长",
@@ -5102,7 +5234,6 @@
       "peak_note": "峰值为本统计区间内的最高值。",
       "hist_value": "{{count}} 个样本 · 典型 {{p50}} · 95% 在 {{p95}} 以内",
       "server_help": "服务端说明",
-      "copy_name": "复制指标名",
       "stats": {
         "unit": "单位",
         "count": "样本数",

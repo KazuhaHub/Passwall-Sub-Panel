@@ -1,17 +1,15 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { productionSnapshot, serverList, THREE_XUI } from '@/test/diagnosticsFixtures'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: vi.fn(), pushToast: vi.fn() }))
 // The reset is gated by ConfirmHost, which is not mounted here; resolve it
 // true so the request itself fires and its wait is observable.
 vi.mock('@/components/ConfirmHost', () => ({ confirm: vi.fn(async () => true) }))
@@ -36,7 +34,6 @@ function deferred<T = unknown>() {
   return { promise, resolve }
 }
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 const METRICS = '/admin/diagnostics/metrics'
 
 function reads(metrics: () => Promise<unknown> = async () => ({ data: productionSnapshot() })) {
@@ -52,11 +49,9 @@ const metricReads = () => api.get.mock.calls.filter(([url]) => url === METRICS).
 
 function mount() {
   render(
-    <ThemeProvider theme={theme}>
-      <QueryClientProvider client={makeTestQueryClient()}>
-        <MemoryRouter><DiagnosticsView /></MemoryRouter>
-      </QueryClientProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={makeTestQueryClient()}>
+      <MemoryRouter><DiagnosticsView /></MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
@@ -73,7 +68,7 @@ it('shows progress while the first reading is on its way', async () => {
   const gate = deferred<{ data: unknown }>()
   reads(() => gate.promise)
   mount()
-  expect(await screen.findByRole('progressbar')).toBeTruthy()
+  expect(await screen.findByRole('status')).toBeTruthy()
   expect(screen.queryByTestId('diag-status')).toBeNull()
   gate.resolve({ data: productionSnapshot() })
   expect(await screen.findByTestId('diag-status')).toBeTruthy()
@@ -93,7 +88,6 @@ it('shows Refresh as busy while a refetch is in flight, and does not fetch twice
 
   await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true))
   expect(button.getAttribute('aria-busy')).toBe('true')
-  expect(within(button).getByRole('progressbar')).toBeTruthy()
   expect(metricReads()).toBe(before + 1)
 
   gate.resolve({ data: productionSnapshot() })
