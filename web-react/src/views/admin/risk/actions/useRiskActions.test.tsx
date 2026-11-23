@@ -1,10 +1,8 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import type { QueryClient } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { alertKeys, riskCenterKeys, userKeys } from '@/query/keys'
@@ -16,7 +14,7 @@ import { useRiskActions } from './useRiskActions'
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const snack = vi.hoisted(() => vi.fn())
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack, default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: snack }))
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -37,7 +35,6 @@ dict.current = {
   ...Object.fromEntries(Object.entries(flatten(zhCommon as Nested)).map(([k, v]) => [`common:${k}`, v])),
 }
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 const SKIP = { _skipErrorToast: true }
 const NO_REVIEW: ReviewBadge = { dismissed: false, reopened: false, lapsed: false, trusted: false, escalated: [] }
 const GEO: AttentionEntry[] = [{ source: 'geo', level: 'flagged' }]
@@ -66,7 +63,7 @@ function Harness({ subject: s }: { subject: RiskSubject }) {
 }
 
 function mount(s: RiskSubject, client: QueryClient = makeTestQueryClient()) {
-  render(<ThemeProvider theme={theme}><Harness subject={s} /></ThemeProvider>, { wrapper: queryWrapper(client) })
+  render(<Harness subject={s} />, { wrapper: queryWrapper(client) })
   return client
 }
 
@@ -78,7 +75,7 @@ function httpError(status: number, data: unknown) {
 /** Starts an action and returns its dialog. */
 async function start(kind: RiskActionKind) {
   fireEvent.click(screen.getByText(`start-${kind}`))
-  return screen.findByRole('dialog')
+  return screen.findByRole('alertdialog')
 }
 
 function confirmIn(dialog: HTMLElement, name: string) {
@@ -167,8 +164,8 @@ describe('useRiskActions: service actions', () => {
     mount(geoAutoHeld())
     const dlg = await start('resume')
     expect(within(dlg).getByText(/满足暂停条件时会再次自动暂停/)).toBeTruthy()
-    const also = within(dlg).getByRole('checkbox', { name: '同时信任此账号' }) as HTMLInputElement
-    expect(also.checked).toBe(false)
+    const also = within(dlg).getByRole('checkbox', { name: '同时信任此账号' })
+    expect(also.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(also)
     confirmIn(dlg, '恢复代理服务')
 
@@ -237,8 +234,8 @@ describe('useRiskActions: review actions', () => {
     api.post.mockResolvedValue({ data: { review: REVIEW_DTO, resumed: true } })
     mount(geoAutoHeld())
     const dlg = await start('trust')
-    const resume = within(dlg).getByRole('checkbox', { name: '同时恢复代理服务（当前为异地自动暂停）' }) as HTMLInputElement
-    expect(resume.checked).toBe(true)
+    const resume = within(dlg).getByRole('checkbox', { name: '同时恢复代理服务（当前为异地自动暂停）' })
+    expect(resume.getAttribute('aria-checked')).toBe('true')
     confirmIn(dlg, '信任此账号')
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/risk-center/users/7/trust',
       { resume_service: true }, SKIP))
@@ -256,7 +253,7 @@ describe('useRiskActions: review actions', () => {
   })
 
   it.each([
-    [{ resumed: true, resume_warning: 'queue down' }, '已信任并恢复代理服务，但推送到面板失败且未能排队重试：queue down'],
+    [{ resumed: true, resume_warning: 'queue down' }, '已信任并恢复代理服务，但推送到服务器失败且未能排队重试：queue down'],
     [{ resumed: false, resume_error: 'panel down' }, '已信任，但恢复代理服务失败：panel down'],
   ])('a trust whose resume went wrong warns (%j)', async (res, text) => {
     api.post.mockResolvedValue({ data: { review: REVIEW_DTO, ...res } })
