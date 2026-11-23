@@ -80,7 +80,7 @@ describe('the views that collect a device cap consult the predicate', () => {
   // is the regression this exists to catch.
   it.each([
     ['UsersView', '../views/admin/users/capHints.tsx'],
-    ['GroupsView', '../views/admin/GroupsView.tsx'],
+    ['GroupsView (limits tab)', '../views/admin/groups/LimitsTab.tsx'],
   ])('%s imports and calls deviceCapIsInert', async (_name, rel) => {
     const fs = await import('node:fs')
     const path = await import('node:path')
