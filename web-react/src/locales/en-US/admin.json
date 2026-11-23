@@ -132,7 +132,6 @@
     "mail_load_failed": "Mail settings are temporarily unavailable",
     "saml_load_failed": "SAML configuration is temporarily unavailable",
     "oidc_load_failed": "OIDC configuration is temporarily unavailable",
-    "retry": "Retry",
     "tab_general": "General",
     "tab_security": "Login & Security",
     "tab_brand": "Brand",
@@ -142,20 +141,16 @@
     "tab_sso": "SSO",
     "tab_legal": "Privacy and terms",
     "save": "Save",
-    "cancel": "Cancel",
     "saved": "Saved",
     "panel_path_sso_notice": "The panel path was updated. If SSO is enabled, update the callback URLs registered with your identity provider.",
     "scope": {
       "audience": "Audience",
       "all_users": "All users (global default)",
-      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default.",
-      "showing_for_label": "Showing settings for users in"
+      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default."
     },
     "feature_pending": "This tab is being migrated to React + MUI (next iteration). Use the Vue version meanwhile.",
     "general": {
       "section_login": "Login",
-      "section_login_security": "Login security",
-      "section_security": "Security",
       "section_runtime": "Runtime tunables",
       "captcha_enabled": "Enable login captcha",
       "captcha_contexts": "Where captcha applies",
@@ -172,8 +167,8 @@
       "captcha_secret_key": "Secret key (server-side verify)",
       "lockout_enabled": "Enable failure lockout",
       "lockout_threshold": "Lockout threshold (failures)",
-      "lockout_window_minutes": "Counting window (minutes)",
-      "lockout_duration_minutes": "Lock duration (minutes)",
+      "lockout_window_minutes": "Counting window",
+      "lockout_duration_minutes": "Lock duration",
       "lockout_scope": "Lock scope",
       "lockout_scope_ip_upn": "IP + username (recommended)",
       "lockout_scope_ip": "IP only",
@@ -195,8 +190,8 @@
       "registration_default_group_missing": "The saved group no longer exists (ID: {{id}}). Select a valid group.",
       "registration_default_group_missing_option": "Invalid group (ID: {{id}})",
       "registration_default_group_current_option": "Current setting (ID: {{id}})",
-      "registration_default_traffic_gb": "Default traffic GB (0 = follow group)",
-      "registration_default_expire_days": "Default validity (days, 0 = no expiry)",
+      "registration_default_traffic_gb": "Default traffic (0 = follow group)",
+      "registration_default_expire_days": "Default validity (0 = no expiry)",
       "registration_hint": "Registrants sign in with their email as the username, get the user role, join the default group, and inherit the quota/expiry above. Email verification needs SMTP configured; link delivery needs the subscription base URL set.",
       "twofa_section_title": "Two-factor authentication (2FA)",
       "twofa_section_hint": "Add a second step to local sign-in. Enable any of the methods below (accounts enroll them from My Account); authenticator codes, one-time recovery codes, and an account's enrolled passkey are all available automatically at the login challenge.",
@@ -204,9 +199,8 @@
       "totp_hint": "Lets accounts with a local password set up an authenticator app (TOTP) from My Account. Turning this off only blocks new enrollment — it does not remove the authenticator from already-enrolled accounts. SSO accounts are unaffected.",
       "twofa_allow_email": "Email one-time code (weaker; requires SMTP)",
       "twofa_allow_email_hint": "A peer login-challenge method, available once the account has another factor (TOTP / passkey) enrolled. It's weaker — whoever has the password and inbox gets in — so it's off by default.",
-      "twofa_policy_subheading": "Enrollment policy",
-      "twofa_email_cooldown": "Code resend cooldown (sec)",
-      "code_resend_cooldown": "Code resend cooldown (sec — signup verify / password reset)",
+      "twofa_email_cooldown": "Code resend cooldown",
+      "code_resend_cooldown": "Code resend cooldown (sign-up verification and password reset)",
       "code_resend_cooldown_hint": "Minimum gap between two code resends to one account, anti mail-bombing (0 = default 60s). Independent of the login 2FA email cooldown.",
       "require_2fa_for_staff": "Require two-factor for all admins/operators",
       "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups). Local accounts only.",
@@ -224,37 +218,36 @@
       "allow_user_personal_rules": "Let users edit their personal rules",
       "allow_user_personal_rules_hint": "Once disabled, users can still see their personal rules on the self-service page but cannot save changes. Admins are unaffected and can still edit any user's rules manually.",
       "jwt_issuer": "JWT issuer",
-      "jwt_access_ttl_minutes": "Access token TTL (min)",
-      "jwt_refresh_ttl_minutes": "Refresh token TTL (min)",
-      "sub_per_ip_per_min": "Subscription rate limit (req/min/IP)",
-      "login_per_ip_per_min": "Login rate limit (req/min/IP)",
+      "jwt_access_ttl_minutes": "Access token TTL",
+      "jwt_refresh_ttl_minutes": "Refresh token TTL",
+      "sub_per_ip_per_min": "Subscription rate limit per IP",
+      "login_per_ip_per_min": "Login rate limit per IP",
       "timezone": "Panel timezone",
       "timezone_placeholder": "e.g. America/Los_Angeles (blank uses server local)",
       "timezone_hint": "Used for traffic resets, user expire_at math, and the default timezone of the admin traffic chart. Subscription and end-user views always follow the browser's timezone.",
-      "cron_traffic_pull_minutes": "Traffic poll interval (min)",
-      "cron_reconcile_minutes": "Reconcile interval (min)",
-      "node_poll_seconds": "Native-node sync heartbeat (seconds)",
+      "cron_traffic_pull_minutes": "Traffic poll interval",
+      "cron_reconcile_minutes": "Reconcile interval",
+      "node_poll_seconds": "Native-node sync heartbeat",
       "node_poll_seconds_hint": "How quickly configuration and tasks reach native agents. 0 uses the 30-second default; PSP may temporarily request a faster retry when work is queued.",
-      "full_report_seconds": "Native-node full report period (seconds)",
+      "full_report_seconds": "Native-node full report period",
       "full_report_seconds_hint": "Lower values use more agent uplink bandwidth but reduce fleet-counter staleness, tightening the quota-overburn bound. 0 = send a full report on every sync.",
       "section_node_task_lifecycle": "Native-task lifecycle policy",
       "node_task_lifecycle_hint": "Global policy configuration in days, not task execution TTL. Defaults: 30 days for offline reconciliation, 30 days for maximum backup age, and 90 days for full results. Automatic cleanup remains disabled until cleanup and restore acceptance checks are complete.",
-      "node_task_offline_reconcile_days": "Offline auto-reconciliation window (days)",
+      "node_task_offline_reconcile_days": "Offline auto-reconciliation window",
       "node_task_offline_reconcile_days_hint": "Default 30; whole days from 1 to 3650. Beyond this window, reconcile manually; do not automatically re-execute tasks.",
-      "node_task_backup_restore_days": "Maximum backup restore age (days)",
+      "node_task_backup_restore_days": "Maximum backup restore age",
       "node_task_backup_restore_days_hint": "Default 30; whole days from 1 to 3650. Older restores require manual reconciliation, not automatic task re-execution.",
-      "node_task_result_retention_days": "Full task-result retention (days)",
+      "node_task_result_retention_days": "Full task-result retention",
       "node_task_result_retention_days_hint": "Default 90; whole days from 1 to 3650, no shorter than either the offline window or maximum backup age.",
-      "node_task_days_range": "Must be a whole number of days from 1 to 3650",
       "node_task_retention_minimum": "Full task-result retention must cover both the offline reconciliation window and maximum backup restore age.",
       "node_task_policy_safety_hint": "Smaller windows affect new task policies only; existing task protection is never shortened retroactively. Task identity records (tombstones) are never automatically deleted.",
       "max_panel_concurrency": "Panel fan-out concurrency (traffic poll / reconcile)",
       "max_panel_concurrency_hint": "Maximum parallel ListInbounds fan-out across 3X-UI panels. 0 uses the built-in default of 8. Raising it does nothing for single-panel deployments; useful only with 5+ panels where 3X-UI has spare CPU. Values above 64 clamp down.",
-      "audit_retention_days": "Audit log retention (days)",
-      "auth_event_retention_days": "Auth log retention (days)",
+      "audit_retention_days": "Audit log retention",
+      "auth_event_retention_days": "Auth log retention",
       "auth_event_retention_days_hint": "How long login events (including failures) are kept. 0 = never prune. Default 90 (compliance-friendly).",
-      "sync_task_retention_days": "Sync task retention (days)",
-      "traffic_history_days": "Traffic history retention (days)",
+      "sync_task_retention_days": "Sync task retention",
+      "traffic_history_days": "Traffic history retention",
       "traffic_history_days_hint": "How far back the chart can render. Older data is auto-pruned. Raw 5-min snapshots are kept for a fixed 7-day window for \"today\" live refresh; this knob controls the hourly rollup table's retention. 0 = never prune. Default 730 (2y, gives \"last 1 year\" 1× buffer).",
       "expire_before_days": "Notify N days before account expires",
       "expire_before_days_hint": "Email the user this many days before their account's expire_at.",
@@ -265,10 +258,22 @@
       "cloudflare_auto_fetch": "Fetch Cloudflare address ranges automatically",
       "cloudflare_auto_fetch_hint": "Once a day the panel downloads Cloudflare's published ranges (www.cloudflare.com/ips-v4 and ips-v6; an anonymous request that carries nothing about this panel) and uses them as the source of CDN lines. A failed fetch keeps the previous list; with this off, the snapshot built into the panel is used.",
       "emergency_access_enabled": "Allow user emergency access",
-      "emergency_access_hours": "Duration (hours)",
+      "emergency_access_hours": "Duration",
       "emergency_access_max_count": "Max count",
-      "emergency_access_quota_gb": "Per-window traffic quota (GB)",
-      "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user"
+      "emergency_access_quota_gb": "Per-window traffic quota",
+      "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user",
+      "section_retention": "Data retention",
+      "section_notify": "Reminder thresholds",
+      "cron_effect_hint": "A change takes effect after the current interval ends; no restart needed. 0 is ignored and the current interval stays.",
+      "login_mode_hint": "Force SSO and Local only can lock people out; saving either asks you to confirm.",
+      "section_captcha": "Captcha",
+      "captcha_provider_keys_hint": "Needs the site key and secret key from the provider. Wrong keys can stop people from passing the captcha.",
+      "section_lockout": "Account lockout",
+      "section_recovery": "Password recovery",
+      "section_registration": "Self-service registration",
+      "section_sessions": "Sessions and rate limits",
+      "jwt_issuer_hint": "Changing it ends every signed-in session, including yours.",
+      "jwt_ttl_hint": "New lifetimes apply to tokens issued from now on."
     },
     "geo_anomaly": {
       "scope": "Granularity",
@@ -384,7 +389,7 @@
       "no_db": "No .mmdb database found — drop one in, or configure auto-update and click \"Update now\".",
       "built": "built",
       "auto_update": "Auto-update database",
-      "update_interval_hours": "Auto-update interval (hours)",
+      "update_interval_hours": "Auto-update interval",
       "update_interval_hint": "Minimum 1 hour; takes effect without a restart.",
       "source": "Update source",
       "source_maxmind": "MaxMind GeoLite2 (city-level, recommended)",
@@ -397,9 +402,6 @@
       "token_maxmind": "MaxMind License Key",
       "token_ipinfo": "IPinfo Token",
       "token_custom": "Token / credential (optional)",
-      "token_set": "Set (leave blank to keep unchanged)",
-      "token_kept": "Saved (kept unchanged)",
-      "token_change": "Change",
       "update_now": "Update now",
       "update_hint": "“Update now” saves your settings first, then downloads. MaxMind databases must be refreshed within 30 days (EULA) — enabling auto-update is recommended.",
       "attribution": "Attribution required where the data is used: MaxMind (GeoLite2) / DB-IP / IPinfo — depending on the database in use.",
@@ -422,11 +424,14 @@
       "email_domain": "Default email domain",
       "sub_base_url": "Subscription base URL (required)",
       "panel_path": "Panel path prefix",
-      "panel_path_hint": "Leave blank to mount at the domain root; for example, /panel. Subscription URLs are unchanged.",
+      "panel_path_hint": "Leave blank to mount at the domain root; for example, /panel. Start with a slash, no trailing slash, and not the subscription path. While a panel path is set, the subscription base URL cannot contain a path. Subscription links are otherwise unchanged.",
       "asset_hint": "Leave Logo / Icon blank to use built-in defaults.",
       "theme_color": "System default theme color (HEX)",
       "theme_color_hint": "Used as the default for every user. Users can still override via the palette in the top bar. Leave blank to fall back to the built-in default.",
-      "theme_color_clear": "Clear"
+      "theme_color_clear": "Clear",
+      "section_addresses": "Addresses",
+      "sub_base_url_hint": "Subscription links, emails and SSO URLs are built from this address, and its host is the passkey domain.",
+      "theme_color_picker": "Pick a color"
     },
     "sso": {
       "tab_saml": "SAML 2.0",
@@ -445,9 +450,7 @@
       "role_rules_keep_hint": "When on: if THIS rule doesn't match this login AND the user's current role equals this rule's role, leave the role alone. Off means the rule set as a whole decides (demote on miss).",
       "role_rules_note": "Note",
       "role_rules_note_placeholder": "Optional: describe what this rule represents",
-      "role_rules_drag": "Drag to reorder (order = priority)",
       "role_rules_add": "Add rule",
-      "role_rules_remove": "Remove",
       "group_rules_hint": "Decide which group (OU) a user lands in from their IdP attributes; the first matching rule wins. Re-evaluated on every login, so a principal the IdP removes from a group leaves the matching OU instead of keeping its quota and nodes indefinitely. No match falls back to the default group below.",
       "group_rules_empty": "No group rules — every SSO user lands in the default group below, and no existing user's group is changed by the IdP.",
       "group_rules_group": "Group (OU)",
@@ -464,11 +467,9 @@
         "sp_acs_url": "ACS URL (callback)",
         "sp_cert": "SP certificate (PEM)",
         "sp_key": "SP private key (PEM, leave blank to keep current)",
-        "sp_key_kept": "SP private key is configured (kept as-is)",
-        "sp_key_change": "Change private key",
         "idp_section": "Identity Provider (IdP)",
         "idp_metadata_url": "IdP metadata URL",
-        "idp_refresh_hours": "Metadata refresh interval (hours)",
+        "idp_refresh_hours": "Metadata refresh interval",
         "attr_section": "Attribute mapping",
         "attr_upn": "UPN attribute",
         "attr_upn_hint": "Attribute Name URN that carries the UPN, or \"nameid\" to read from <Subject><NameID> (default for Okta / Google / Keycloak / ADFS)",
@@ -478,8 +479,8 @@
         "admin_groups": "Admin group IDs (comma separated)",
         "default_group": "Default group slug",
         "new_user_section": "New user defaults",
-        "expire_days": "Default expiry (days, 0 = permanent)",
-        "traffic_limit_gb": "Default traffic cap (GB, 0 = follow group)",
+        "expire_days": "Default expiry (0 = permanent)",
+        "traffic_limit_gb": "Default traffic cap (0 = follow group)",
         "traffic_reset_period": "Default traffic reset period",
         "group_section": "Group resolution",
         "fetch_verify": "Fetch, verify & save",
@@ -489,16 +490,13 @@
         "fetch_saved": "Metadata verified and SAML settings saved",
         "sp_auto_hint": "These fields are auto-derived from your panel's public base URL (a self-signed cert is generated on first save). Paste them into your IdP's Service Provider configuration.",
         "sp_save_first": "Save once to materialise the SP details",
-        "copied": "Copied",
-        "copy_failed": "Copy failed"
+        "fetch_expires": ", expires {{date}}"
       },
       "oidc": {
         "enabled": "Enable OIDC / OAuth2",
         "issuer_url": "Issuer URL",
         "client_id": "Client ID",
         "client_secret": "Client secret (leave blank to keep current)",
-        "client_secret_kept": "Client secret is configured (kept as-is)",
-        "client_secret_change": "Change",
         "redirect_url": "Redirect URL",
         "scopes": "Scopes (comma separated)",
         "attr_section": "Attribute mapping",
@@ -509,10 +507,15 @@
         "admin_groups": "Admin group IDs (comma separated)",
         "default_group": "Default group slug",
         "new_user_section": "New user defaults",
-        "expire_days": "Default expiry (days, 0 = permanent)",
-        "traffic_limit_gb": "Default traffic cap (GB, 0 = follow group)",
+        "expire_days": "Default expiry (0 = permanent)",
+        "traffic_limit_gb": "Default traffic cap (0 = follow group)",
         "traffic_reset_period": "Default traffic reset period"
-      }
+      },
+      "role_rule_name": "Role rule {{n}}",
+      "group_rule_name": "Group rule {{n}}",
+      "default_group_current": "Saved value: {{slug}}",
+      "default_group_empty": "No matching group",
+      "default_group_none": "No default group"
     },
     "mail": {
       "section_smtp": "SMTP server",
@@ -534,8 +537,6 @@
       "test_send": "Send test",
       "test_sent": "Sent",
       "saved": "Saved",
-      "password_kept": "Password saved (kept unchanged)",
-      "password_change": "Change",
       "kind": {
         "expire_before": "Expiry reminder",
         "expired": "Expired",
@@ -601,7 +602,11 @@
       "preview_title": "Preview: {{kind}}",
       "preview_subject": "Subject",
       "preview_body": "Body",
-      "preview_close": "Close"
+      "preview_close": "Close",
+      "template_kind": "Template",
+      "test_hint": "Sends with the SMTP settings that are saved, so save first if you changed them.",
+      "test_sent_to": "Test email sent to {{to}}",
+      "test_failed": "Could not send: {{reason}}"
     },
     "portal": {
       "section_quick_links": "Quick links",
@@ -632,7 +637,8 @@
         "level_danger": "Urgent",
         "popup": "Show as a popup (on first site visit)",
         "popup_hint": "Users can dismiss with \"Got it\" or check \"Don't show again\". The dismissed state is stored only in the user's browser; updates to the announcement content trigger the popup again."
-      }
+      },
+      "link_name": "Quick link {{n}}"
     },
     "subscription": {
       "section_basic": "Basic",
@@ -685,8 +691,8 @@
       },
       "sub_path": "Subscription URL path segment (required)",
       "sub_import_tutorial_url": "Import tutorial URL (powers the 'View tutorial' button on the user portal; hidden when blank)",
-      "sub_log_retention_days": "Subscription log retention (days)",
-      "sub_update_interval_hours": "Subscription auto-refresh interval hint (hours)",
+      "sub_log_retention_days": "Subscription log retention",
+      "sub_update_interval_hours": "Subscription auto-refresh interval hint",
       "sub_profile_name_template": "Profile name template",
       "sub_profile_name_template_hint": "Server-rendered string used for the Content-Disposition / Profile-Title response headers and for the &name= deep-link param. Placeholders: {{ site_title }}, {{ app_title }}, {{ display_name }}, {{ upn }}, {{ user }} (display_name with UPN fallback). Empty falls back to {{ site_title }} - {{ user }}.",
       "sub_region_flag_prefix": "Prefix node names with the region's flag",
@@ -725,7 +731,8 @@
       "delete_family_body": "{{name}} and its import apps are removed from the list. The change takes effect when you save.",
       "apps_count_one": "{{count}} app",
       "apps_count_other": "{{count}} apps",
-      "format_uri_list": "URI list (V2rayN / Passwall)"
+      "format_uri_list": "URI list (V2rayN / Passwall)",
+      "sub_path_hint": "The part of each subscription link after the address and before the token. Changing it breaks the links already handed out."
     },
     "legal": {
       "title": "Privacy and terms page",
@@ -825,6 +832,72 @@
       "err_url": "Enter an http:// or https:// address with a valid port (1 to 65535)",
       "err_server": "{{message}}",
       "info": "Help"
+    },
+    "unit": {
+      "minutes": "min",
+      "hours": "h",
+      "seconds": "s",
+      "days": "days",
+      "per_minute": "req/min"
+    },
+    "unsaved_short": "unsaved",
+    "nav_label": "Settings sections",
+    "section_label": "Section",
+    "section_separator": ", ",
+    "dirty_sections": "These sections have unsaved changes: {{sections}}. Leave anyway?",
+    "search": {
+      "placeholder": "Search settings",
+      "label": "Search settings",
+      "none": "No setting matches \"{{query}}\"",
+      "results": "Matching settings"
+    },
+    "secret_hint": "A value is saved. Leave blank to keep it.",
+    "rows": {
+      "move_up": "Move {{name}} up",
+      "move_down": "Move {{name}} down",
+      "remove": "Remove {{name}}"
+    },
+    "danger": {
+      "confirm": "Save anyway",
+      "login_mode_sso_redirect": {
+        "title": "Send everyone straight to SSO?",
+        "message": "The sign-in page will send everyone to your identity provider and stop showing the password form. If SSO breaks, only admins can still sign in, at the direct local sign-in address.",
+        "sso_off": "SAML and OIDC are both off right now, so the panel keeps local sign-in only until one is enabled.",
+        "sso_unknown": "Could not check whether SAML or OIDC is on."
+      },
+      "login_mode_local_only": {
+        "title": "Turn off SSO sign-in?",
+        "message": "SSO sign-in will no longer be offered. Accounts without a local password cannot sign in."
+      },
+      "disallow_user_local_login": {
+        "title": "Block password sign-in for non-admins?",
+        "message": "Every account except admins can no longer sign in with a password or a passkey. Those without an SSO identity cannot sign in. Admins keep local sign-in."
+      },
+      "require_2fa_for_staff": {
+        "title": "Require two-step verification for staff?",
+        "message": "Admins and operators without an authenticator app or a passkey must set one up when they sign in, before they can use the panel. It applies only while an authenticator app or passkeys are allowed."
+      },
+      "jwt_issuer": {
+        "title": "Change the JWT issuer?",
+        "message": "Every signed-in session ends, including yours, and everyone has to sign in again."
+      },
+      "jwt_ttl": {
+        "title": "Shorten session lifetimes?",
+        "message": "From now on access tokens last {{access}} minutes and refresh tokens {{refresh}} minutes. People sign in again sooner."
+      },
+      "lockout": {
+        "title": "Save this lockout rule?",
+        "message": "{{threshold}} failures counted over {{window}} minutes lock sign-in for {{duration}} minutes. A low threshold can lock out admins as well."
+      },
+      "panel_path": {
+        "title": "Move the panel to {{to}}?",
+        "message": "After saving, this page reloads at {{url}} and {{from}} stops working. If SSO is on, update the callback URLs registered with your identity provider.",
+        "lost": "Saving reloads the page, so unsaved changes in these sections are lost: {{sections}}. Save them first."
+      },
+      "sub_path": {
+        "title": "Change the subscription path?",
+        "message": "Every subscription link already handed out stops working. Users need the new link from their subscription page."
+      }
     }
   },
   "traffic": {
