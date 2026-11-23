@@ -3,9 +3,10 @@ import type { ConfirmOpts } from '@/components/ConfirmHost'
 // THE CONFIRMATION CATALOGUE (plan §7.4 S20). Which actions ask, and what the
 // asking says, in one place as pure functions of `t` and the numbers, so a
 // test asserts every row. Anything not here does NOT ask: renaming, adding an
-// exemption, toggling an existing policy, editing a list, reordering and a
-// node's inbound rule are explained by the line beside the save button or by
-// the page verdict ("saved, goes out in N seconds"), not by a second click.
+// exemption, editing a list, reordering and a node's inbound rule are explained
+// by the line beside the save button or by the page verdict ("saved, goes out
+// in N seconds"), not by a second click. Switching a paused policy on does ask
+// (policies/enableConfirm.ts): it names the groups, users and nodes it reaches.
 // A title names its object as a question; the button is a verb, never "OK".
 
 type T = (key: string, opts?: Record<string, unknown>) => string

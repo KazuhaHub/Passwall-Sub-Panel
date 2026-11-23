@@ -14,6 +14,6 @@ describe('the shell bar height token', () => {
     expect(css).toMatch(/scroll-padding-top:\s*calc\(var\(--shell-bar-h\)/)
     expect(read('./AppShell.tsx')).toContain('h-(--shell-bar-h)')
     expect(read('./UserShell.tsx')).toContain('h-(--shell-bar-h)')
-    expect(read('../../views/admin/accessControl/records/RecordsTab.tsx')).toContain('var(--shell-bar-h')
+    expect(read('../../views/admin/accessControl/records/HitList.tsx')).toContain('var(--shell-bar-h')
   })
 })
