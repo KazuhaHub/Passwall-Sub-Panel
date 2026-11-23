@@ -1,17 +1,17 @@
-import { Box, Tab, Tabs, useTheme } from '@mui/material'
 import { Navigate, useLocation, useSearchParams } from 'react-router'
-import { useTranslation } from 'react-i18next'
-import PageHeader from '@/components/PageHeader'
-import UserAutocomplete from '@/components/UserAutocomplete'
+import { HelpTip } from '@/components/common/HelpTip'
+import { PageHeader } from '@/components/common/PageHeader'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCan } from '@/utils/permissions'
 import RiskUserDrawer from './drawer/RiskUserDrawer'
 import { useDrawerParam } from './drawerParam'
-import HelpTip from '@/components/HelpTip'
 import LiveConnectionsTab from './LiveConnectionsTab'
 import PolicyTab from './policy/PolicyTab'
 import QueueTab from './queue/QueueTab'
 import RecordsTab from './RecordsTab'
 import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
+import { UserPicker } from './UserPicker'
+import { useRiskT } from './useRiskT'
 
 const HELP_KEY: Record<RiskTab, string> = {
   queue: 'admin:risk_center.help.queue',
@@ -42,8 +42,7 @@ const HELP_KEY: Record<RiskTab, string> = {
  * mounts (legacyRedirect).
  */
 export default function RiskCenterView() {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const canView = useCan('risk.view')
   const location = useLocation()
   const [params, setParams] = useSearchParams()
@@ -75,38 +74,33 @@ export default function RiskCenterView() {
   if (redirect !== null) return <Navigate to={{ pathname: location.pathname, search: redirect }} replace />
 
   return (
-    <Box sx={{ p: 3 }}>
-      <PageHeader title={t('admin:risk_center.title')} subtitle={t('admin:risk_center.subtitle')}
-        actions={
-          // Any account, from any tab: the picker opens the drawer, whether or
-          // not the account is on the list in front of the admin.
-          <UserAutocomplete value={null} onChange={id => { if (id) drawer.open(id) }}
-            label={t('admin:risk_center.pick_user')} width={260} />
-        } />
-      <Box sx={{ display: 'flex', alignItems: 'stretch', mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-        <Tabs value={tab} onChange={(_, v: RiskTab) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
-          sx={{ flex: 1, minWidth: 0 }}>
-          <Tab value="queue" label={t('admin:risk_center.tab_queue')} />
-          <Tab value="live" label={t('admin:risk_center.tab_live')} />
-          <Tab value="records" label={t('admin:risk_center.tab_records')} />
-          <Tab value="policy" label={t('admin:risk_center.tab_policy')} />
-        </Tabs>
-        <HelpTip textKey={HELP_KEY[tab]} />
-      </Box>
-      {/* Only the open tab mounts, so only its lists are read. */}
-      {tab === 'queue' && (
-        <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
-      )}
-      {tab === 'live' && (
-        <LiveConnectionsTab onOpenUser={drawer.open} />
-      )}
-      {tab === 'records' && (
-        <RecordsTab onOpenUser={drawer.open} />
-      )}
-      {tab === 'policy' && (
-        <PolicyTab />
-      )}
+    <div className="p-4 sm:p-6">
+      <PageHeader title={t('admin:risk_center.title')} description={t('admin:risk_center.subtitle')}
+        // Any account, from any tab: the picker opens the drawer, whether or not the account is on the
+        // list in front of the admin.
+        secondary={<UserPicker value={null} onChange={id => { if (id) drawer.open(id) }}
+          aria-label={t('admin:risk_center.pick_user')} placeholder={t('admin:risk_center.pick_user')} />} />
+      <Tabs value={tab} onValueChange={v => setTab(v as RiskTab)} className="gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 overflow-x-auto">
+            <TabsList>
+              <TabsTrigger value="queue">{t('admin:risk_center.tab_queue')}</TabsTrigger>
+              <TabsTrigger value="live">{t('admin:risk_center.tab_live')}</TabsTrigger>
+              <TabsTrigger value="records">{t('admin:risk_center.tab_records')}</TabsTrigger>
+              <TabsTrigger value="policy">{t('admin:risk_center.tab_policy')}</TabsTrigger>
+            </TabsList>
+          </div>
+          <HelpTip text={t(HELP_KEY[tab])} />
+        </div>
+        {/* Only the open tab mounts, so only its lists are read. */}
+        <TabsContent value="queue">
+          <QueueTab onOpenUser={drawer.open} onOpenLive={() => setTab('live')} onOpenPolicy={() => setTab('policy')} />
+        </TabsContent>
+        <TabsContent value="live"><LiveConnectionsTab onOpenUser={drawer.open} /></TabsContent>
+        <TabsContent value="records"><RecordsTab onOpenUser={drawer.open} /></TabsContent>
+        <TabsContent value="policy"><PolicyTab /></TabsContent>
+      </Tabs>
       <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
-    </Box>
+    </div>
   )
 }

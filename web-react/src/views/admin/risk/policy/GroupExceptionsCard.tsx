@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Box, Button, CircularProgress, MenuItem, Paper, TextField, Typography, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
 import type { Group } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Field } from '@/components/form/Field'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { NativeSelect } from '@/components/ui/native-select'
+import { useRiskT } from '../useRiskT'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, SCOPE_KEYS, type ScopeState } from '@/components/scope/scopeOverrides'
 
@@ -38,7 +42,7 @@ function sameEdit(a: ScopeState['edit'][string] | undefined, b: ScopeState['edit
  * and its unsaved-parts line.
  */
 export function useGroupExceptions(groupId: number | null) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [failed, setFailed] = useState<{ groupId: number; error: unknown } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -123,12 +127,12 @@ export default function GroupExceptionsCard({ groups, groupId, onPickGroup, exce
   onPickGroup: (id: number) => void
   exceptions: GroupExceptions
 }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const titleId = useId()
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
-  // Arrived with a group in the link: that group is why the admin is here.
+  // Arrived with a group in the link: that group is why the admin is here. The shell sets
+  // scroll-padding-top, so the card is not scrolled under the top bar and needs no margin of its own.
   const arrivedWithGroup = useRef(groupId !== null)
   useEffect(() => {
     if (arrivedWithGroup.current) ref.current?.scrollIntoView?.({ block: 'start' })
@@ -139,7 +143,7 @@ export default function GroupExceptionsCard({ groups, groupId, onPickGroup, exce
     if (exceptions.dirty) {
       const ok = await confirm({
         title: t(`${P}switch_group_title`), message: t(`${P}leave_message`),
-        confirmText: t(`${P}leave_confirm`), destructive: true,
+        confirmText: t(`${P}leave_confirm`), destructive: true, initialFocus: 'cancel',
       })
       if (!ok) return
     }
@@ -147,46 +151,45 @@ export default function GroupExceptionsCard({ groups, groupId, onPickGroup, exce
   }
 
   return (
-    <Paper ref={ref} component="section" aria-labelledby={titleId} variant="outlined"
-      sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, bgcolor: md.surfaceContainerLow }}>
-      <Typography id={titleId} component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>
-        {t(`${P}card.groups`)}
-      </Typography>
-      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mt: 0.5 }}>{t(`${P}card.groups_desc`)}</Typography>
+    <Card ref={ref} role="region" aria-labelledby={titleId}>
+      <CardHeader>
+        <CardTitle id={titleId} role="heading" aria-level={2}>{t(`${P}card.groups`)}</CardTitle>
+        <CardDescription>{t(`${P}card.groups_desc`)}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {groups?.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">{t(`${P}no_groups`)}</p>
+        ) : (
+          // While the groups are read the picker waits, empty, rather than saying there are none.
+          <Field label={t(`${P}pick_group`)}>
+            <div className="w-full sm:w-64">
+              <NativeSelect disabled={!groups}
+                value={groupId !== null && groups?.some(g => g.id === groupId) ? String(groupId) : ''}
+                onChange={e => { if (e.target.value) void pick(Number(e.target.value)) }}>
+                <option value="" disabled />
+                {(groups ?? []).map(g => <option key={g.id} value={String(g.id)}>{g.name || g.slug}</option>)}
+              </NativeSelect>
+            </div>
+          </Field>
+        )}
 
-      {groups?.length === 0 ? (
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mt: 2 }}>{t(`${P}no_groups`)}</Typography>
-      ) : (
-        // While the groups are read the picker waits, empty, rather than
-        // saying there are none.
-        <TextField select size="small" label={t(`${P}pick_group`)} sx={{ mt: 2, minWidth: 240 }}
-          disabled={!groups}
-          value={groupId !== null && groups?.some(g => g.id === groupId) ? groupId : ''}
-          onChange={e => void pick(Number(e.target.value))}>
-          {(groups ?? []).map(g => <MenuItem key={g.id} value={g.id}>{g.name || g.slug}</MenuItem>)}
-        </TextField>
-      )}
-
-      {exceptions.loading && <Box sx={{ mt: 2 }}><CircularProgress size={20} /></Box>}
-      {exceptions.error !== null && (
-        <Typography sx={{ fontSize: 13, color: md.error, mt: 2 }}>
-          {t('admin:risk_center.load_failed', { error: errorText(exceptions.error) })}
-        </Typography>
-      )}
-      {exceptions.state && (
-        <>
-          <ScopeOverridesEditor scope={exceptions.state} onChange={exceptions.edit} categories={CATEGORIES} showHints />
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1.5, mt: 2, flexWrap: 'wrap' }}>
-            {exceptions.dirty && (
-              <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t(`${P}group_dirty`)}</Typography>
-            )}
-            <Button variant="outlined" disabled={!exceptions.dirty || exceptions.saving}
-              onClick={() => void exceptions.save()}>
-              {t(`${P}group_save`)}
-            </Button>
-          </Box>
-        </>
-      )}
-    </Paper>
+        {exceptions.loading && <CardSkeleton lines={3} />}
+        {exceptions.error !== null && (
+          <p className="text-[13px] text-destructive">{t('admin:risk_center.load_failed', { error: errorText(exceptions.error) })}</p>
+        )}
+        {exceptions.state && (
+          <>
+            <ScopeOverridesEditor scope={exceptions.state} onChange={exceptions.edit} categories={CATEGORIES} showHints />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {exceptions.dirty && <span className="text-[13px] text-muted-foreground">{t(`${P}group_dirty`)}</span>}
+              <AsyncButton variant="outline" disabled={!exceptions.dirty} pending={exceptions.saving}
+                onClick={() => exceptions.save()}>
+                {t(`${P}group_save`)}
+              </AsyncButton>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   )
 }

@@ -1,18 +1,24 @@
 import { useState } from 'react'
-import { Link as RouterLink, useSearchParams } from 'react-router'
-import { Alert, Box, Button, Paper, Skeleton, Typography, useTheme } from '@mui/material'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import { useTranslation } from 'react-i18next'
+import { Link, useSearchParams } from 'react-router'
 import { isAxiosError } from 'axios'
 
 import type { UISettings } from '@/api/settings'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { FormValidityProvider } from '@/components/form/FormValidity'
+import { SaveBar } from '@/components/form/SaveBar'
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { IconChevronRight } from '@/lib/icons'
 import { useAllGroups } from '@/query/groups'
 import { useRiskPolicy, useSaveRiskPolicy } from '@/query/riskCenter'
 import { useGeoIPStatus } from '@/query/settings'
 import { useQueryScope } from '@/query/useQueryScope'
 import { activeDbIsCountryOnly } from '@/utils/geoAnomaly'
 import { listSeparator } from '@/utils/riskCenter'
+import { useRiskT } from '../useRiskT'
 import { parsePolicyGroup, policyGroupSearch } from '../riskParams'
 import DetectorCard from './DetectorCard'
 import { effectiveGeo, effectiveRisk } from './effective'
@@ -20,7 +26,7 @@ import GroupExceptionsCard, { useGroupExceptions } from './GroupExceptionsCard'
 import {
   changedKeys, pick, POLICY_KEYS, type RiskPolicyKey, type RiskPolicySettings, type RiskPolicyView,
 } from './policyKeys'
-import { advancedConfigured, cardFields, outOfRange, POLICY_CARDS, type PolicyCardId } from './policyLayout'
+import { advancedConfigured, cardFields, POLICY_CARDS, type PolicyCardId } from './policyLayout'
 import { useLeaveGuard } from './useLeaveGuard'
 
 const P = 'admin:risk_center.policy.'
@@ -45,28 +51,17 @@ function scopeMemory(s: RiskPolicySettings): GeoScope {
  * default in every empty field and keeps no copy of any.
  */
 export default function PolicyTab() {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const scope = useQueryScope()
   const q = useRiskPolicy(scope)
 
-  if (q.data) return <PolicyBody loaded={q.data} />
+  if (q.data) return <FormValidityProvider><PolicyBody loaded={q.data} /></FormValidityProvider>
   if (q.error) {
     return isAxiosError(q.error) && q.error.response?.status === 503
-      ? <Alert severity="info" sx={{ fontSize: 13 }}>{t('admin:risk_center.unwired')}</Alert>
-      : (
-        <Alert severity="error" sx={{ fontSize: 13 }}
-          action={(
-            <Button size="small" color="inherit" onClick={() => void q.refetch()}>{t('admin:risk_center.retry')}</Button>
-          )}>
-          {t('admin:risk_center.load_failed', { error: errorText(q.error) })}
-        </Alert>
-      )
+      ? <EmptyState compact title={t('admin:risk_center.unwired')} />
+      : <ErrorState compact title={t('admin:risk_center.load_failed', { error: errorText(q.error) })} retry={() => q.refetch()} />
   }
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {[0, 1, 2].map(i => <Skeleton key={i} variant="rounded" height={160} />)}
-    </Box>
-  )
+  return <div className="flex flex-col gap-4">{[0, 1, 2].map(i => <CardSkeleton key={i} lines={4} />)}</div>
 }
 
 /**
@@ -82,8 +77,7 @@ export default function PolicyTab() {
  * and offers to rebase — the admin's edits on top of the newer policy.
  */
 function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const save = useSaveRiskPolicy(scope)
   const { data: geoip } = useGeoIPStatus(scope)
@@ -109,7 +103,6 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   const changed = changedKeys(draft, seed)
   const dirty = changed.length > 0
   const stale = POLICY_KEYS.some(k => !changed.includes(k) && loaded.settings[k] !== seed[k])
-  const invalid = POLICY_CARDS.flatMap(cardFields).filter(f => outOfRange(f, draft[f.key])).length
   const groups = groupsQ.data
   const groupName = groups?.find(g => g.id === groupId)?.name ?? `#${groupId}`
 
@@ -206,9 +199,7 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
     : !geoip.enabled || !geoip.active ? 'geoip_off'
       : activeDbIsCountryOnly(geoip) ? 'geoip_country' : 'geoip_city'
 
-  const caption = (text: string) => (
-    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{text}</Typography>
-  )
+  const caption = (text: string) => <p className="text-xs text-muted-foreground">{text}</p>
 
   const cardLines = (id: PolicyCardId) => {
     switch (id) {
@@ -221,14 +212,14 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
             {/* P11: without the database every verdict is "cannot tell", and
                 a quiet page would read as a clean fleet. */}
             {geoipState && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                <Typography sx={{ fontSize: 12, color: geoipState === 'geoip_off' ? md.error : md.onSurfaceVariant }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className={`text-xs ${geoipState === 'geoip_off' ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {t(`${P}geoip_status`, { state: t(`${P}${geoipState}`) })}
-                </Typography>
-                <Button component={RouterLink} to="/admin/settings?tab=general" size="small">
+                </p>
+                <Button variant="link" size="sm" render={<Link to="/admin/settings?tab=general" />}>
                   {t(`${P}geoip_open`)}
                 </Button>
-              </Box>
+              </div>
             )}
           </>
         )
@@ -239,11 +230,11 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
       case 'dest_block':
         // Which policies count is set on the access-control page, not here; this is the way there.
         return (
-          <Box>
-            <Button component={RouterLink} to="/admin/access-control?tab=policies" size="small" endIcon={<ChevronRightIcon />}>
-              {t(`${P}dest_block_open`)}
+          <div>
+            <Button variant="outline" size="sm" render={<Link to="/admin/access-control?tab=policies" />}>
+              {t(`${P}dest_block_open`)}<IconChevronRight />
             </Button>
-          </Box>
+          </div>
         )
       default:
         return null
@@ -266,11 +257,13 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
   ].filter((x): x is string => !!x)
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div className="flex flex-col gap-4">
       {stale && (
-        <Alert severity="info" sx={{ fontSize: 13 }}
-          action={<Button size="small" color="inherit" onClick={loadLatest}>{t(`${P}load_latest`)}</Button>}>
-          {t(`${P}stale`)}
+        <Alert>
+          <AlertDescription>{t(`${P}stale`)}</AlertDescription>
+          <AlertAction>
+            <Button variant="outline" size="sm" onClick={loadLatest}>{t(`${P}load_latest`)}</Button>
+          </AlertAction>
         </Alert>
       )}
 
@@ -291,26 +284,14 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
       <GroupExceptionsCard groups={groups} groupId={groupId} exceptions={exceptions}
         onPickGroup={id => setParams(prev => policyGroupSearch(prev, id), { replace: true })} />
 
-      {/* Sticky at the bottom, so what is unsaved and the save are in reach
-          from any card. The group card saves on its own (D7); its part is
-          named here so the page never looks clean while it is not. */}
-      <Paper elevation={3} sx={{
-        position: 'sticky', bottom: 0, zIndex: 2, px: 2, py: 1.25, borderRadius: 3,
-        display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', bgcolor: md.surfaceContainerHigh,
-      }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          {parts.length > 0 && (
-            <Typography sx={{ fontSize: 13 }}>{t(`${P}dirty_parts`, { parts: parts.join(listSeparator(i18n.language)) })}</Typography>
-          )}
-          {invalid > 0 && (
-            <Typography sx={{ fontSize: 13, color: md.error }}>{t(`${P}invalid`, { count: invalid })}</Typography>
-          )}
-        </Box>
-        <Button disabled={!dirty && !exceptions.dirty} onClick={discard}>{t(`${P}discard`)}</Button>
-        <Button variant="contained" disabled={!dirty || invalid > 0 || save.isPending} onClick={onSave}>
-          {t(`${P}save`)}
-        </Button>
-      </Paper>
-    </Box>
+      {/* Sticky at the bottom, so what is unsaved and the save are in reach from any card. The group card
+          saves on its own (D7); its part is named here so the page never looks clean while it is not,
+          and with only that part unsaved the bar saves it (the same request as the card's own button). */}
+      <SaveBar dirty={dirty || exceptions.dirty} pending={save.isPending || exceptions.saving}
+        saveLabel={t(`${P}save`)}
+        message={parts.length > 0 ? t(`${P}dirty_parts`, { parts: parts.join(listSeparator(i18n.language)) }) : undefined}
+        onSave={() => { if (dirty) onSave(); else void exceptions.save() }}
+        onDiscard={discard} />
+    </div>
   )
 }
