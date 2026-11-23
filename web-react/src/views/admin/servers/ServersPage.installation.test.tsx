@@ -87,6 +87,16 @@ describe('Passwall Node installation', () => {
     expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
   })
+  it('does not ask to discard a form whose type was re-selected but nothing else changed', async () => {
+    installReads({ '/admin/servers': list([]) })
+    mount(<ServersPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.create' }))
+    const type = await screen.findByRole('combobox', { name: 'admin:servers.field.panel_type' })
+    fireEvent.change(type, { target: { value: 'psp' } })
+    fireEvent.click(screen.getByRole('button', { name: 'common:actions.cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
   it('still rejects an invalid native name without creating a record or exposing installation materials', async () => {
     installReads({ '/admin/servers': list([]) })
     mount(<ServersPage />)

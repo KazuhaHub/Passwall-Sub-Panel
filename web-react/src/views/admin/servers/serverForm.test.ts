@@ -28,6 +28,9 @@ describe('the server form rules', () => {
     expect(sui.password).toBe('')
     expect(validateServerForm(sui, null).api_token).toBeTruthy()
   })
+  it('treats choosing the type already chosen as no change', () => {
+    expect(withPanelType(EMPTY_FORM, 'psp')).toBe(EMPTY_FORM)
+  })
   it('asks a Passwall Node only for a name', () => {
     expect(validateServerForm({ ...EMPTY_FORM, name: 'n' }, null)).toEqual({})
     expect(validateServerForm({ ...EMPTY_FORM, name: '' }, null).name).toBeTruthy()

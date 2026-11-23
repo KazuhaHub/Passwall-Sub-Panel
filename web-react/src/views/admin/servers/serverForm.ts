@@ -49,6 +49,9 @@ export function formOf(s: Server): ServerForm {
 
 /** What changing the type does to the rest of the form (only a new server can change type). */
 export function withPanelType(prev: ServerForm, panelType: PanelType): ServerForm {
+  // Choosing the type already chosen is not a change: it must not reset fields (a Passwall Node blanks auth_method)
+  // and so make an untouched form look edited, which would ask to discard it on Cancel.
+  if (panelType === prev.panel_type) return prev
   if (panelType === 'sui') return { ...prev, panel_type: panelType, auth_method: 'token', username: '', password: '' }
   if (panelType === 'psp') return { ...prev, panel_type: panelType, url: '', api_token: '', username: '', password: '', auth_method: '', insecure_https: false }
   return { ...prev, panel_type: panelType, auth_method: prev.auth_method || 'token' }
