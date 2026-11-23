@@ -50,8 +50,21 @@ export function loginHazards(saved: LoginDraft, next: LoginDraft, sso: SsoState,
   return out
 }
 
-/** The panel path moves this very page, and the subscription path changes every link already handed out. */
-export function addressHazard(kind: 'panel_path' | 'sub_path', from: string, to: string, t: T): ConfirmOpts {
-  // `url` is where this page is after a panel path change ("" is the domain root).
-  return ask(t, kind, { from: from || '/', to: to || '/', url: `${to === '/' ? '' : to}/admin/settings` })
+/**
+ * The panel path the way the server reads it (`panelpath.Normalize`): spaces trimmed, and "" or "/" is the domain root.
+ * A path it would refuse (a trailing slash, no leading slash) is left as typed so the server's answer is the one shown.
+ */
+export const normalizePanelPath = (p: string) => { const t = (p ?? '').trim(); return t === '/' ? '' : t }
+/** The subscription path as the server stores it: spaces trimmed (the leading slash is only shown, never stored). */
+export const normalizeSubPath = (p: string) => (p ?? '').trim().replace(/^\/+/, '')
+
+/**
+ * The panel path moves this very page, and the subscription path changes every link already handed out. Both are
+ * given NORMALISED, so `/panel/` or a stray space against the saved `/panel` does not ask. `lost` names the other
+ * sections with unsaved changes: a panel path change reloads the page, which drops their drafts.
+ */
+export function addressHazard(kind: 'panel_path' | 'sub_path', from: string, to: string, t: T, lost: string[] = []): ConfirmOpts {
+  const opts = ask(t, kind, { from: from || '/', to: to || '/', url: `${to}/admin/settings` })
+  if (kind === 'panel_path' && lost.length > 0) opts.message += ` ${t('settings.danger.panel_path.lost', { sections: lost.join(t('settings.section_separator')) })}`
+  return opts
 }

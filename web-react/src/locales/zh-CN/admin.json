@@ -261,7 +261,7 @@
       "emergency_access_quota_gb_hint": "0 表示不限制；超出后将提前结束本次紧急访问并重新自动停用",
       "section_retention": "数据保留",
       "section_notify": "提醒阈值",
-      "cron_effect_hint": "修改在当前周期结束后生效，无需重启。",
+      "cron_effect_hint": "修改在当前周期结束后生效，无需重启。填 0 会被忽略，沿用当前周期。",
       "login_mode_hint": "「强制 SSO」和「仅本地」可能让人无法登录，保存时会先确认。",
       "section_captcha": "验证码",
       "captcha_provider_keys_hint": "需要服务商提供的 Site Key 和 Secret Key。密钥错误可能导致用户无法通过验证码。",
@@ -421,13 +421,13 @@
       "email_domain": "默认邮箱域",
       "sub_base_url": "订阅 Base URL（必填）",
       "panel_path": "面板路径前缀",
-      "panel_path_hint": "留空部署在域名根路径；例如 /panel。订阅链接不受此项影响。",
+      "panel_path_hint": "留空部署在域名根路径；例如 /panel。以斜杠开头、不带结尾斜杠，且不能与订阅路径重叠。设置面板路径后，订阅基础 URL 不能再带路径。订阅链接不受其他影响。",
       "asset_hint": "Logo / Icon 留空时使用内置默认。",
       "theme_color": "系统默认主题色（HEX）",
       "theme_color_hint": "用作所有用户的默认主题色；用户仍可在顶栏调色板里覆盖。留空时回退到内置默认色。",
       "theme_color_clear": "清空",
       "section_addresses": "地址",
-      "sub_base_url_hint": "订阅链接和邮件中的链接以此地址生成，其主机名同时是通行密钥所用的域名。",
+      "sub_base_url_hint": "订阅链接、邮件和 SSO 回调地址以此地址生成，其主机名同时是通行密钥所用的域名。",
       "theme_color_picker": "选择颜色"
     },
     "sso": {
@@ -857,8 +857,8 @@
       "confirm": "仍要保存",
       "login_mode_sso_redirect": {
         "title": "将所有人直接跳转到 SSO？",
-        "message": "登录页会立即跳转到身份提供商。如果 SSO 无法使用，所有人（包括管理员）都无法登录。",
-        "sso_off": "目前 SAML 和 OIDC 都未启用。",
+        "message": "登录页会把所有人直接送到身份提供商，不再显示密码登录表单。如果 SSO 出故障，只有管理员还能通过本地登录的直接地址登录。",
+        "sso_off": "目前 SAML 和 OIDC 都未启用，在启用其中之一之前，面板仍只提供本地登录。",
         "sso_unknown": "无法确认 SAML 或 OIDC 是否已启用。"
       },
       "login_mode_local_only": {
@@ -866,12 +866,12 @@
         "message": "登录页将不再提供 SSO 登录。没有本地密码的账号将无法登录。"
       },
       "disallow_user_local_login": {
-        "title": "禁止用户使用本地密码登录？",
-        "message": "普通用户账号将无法再用本地密码登录；没有 SSO 身份的用户将无法登录。"
+        "title": "禁止非管理员使用本地登录？",
+        "message": "除管理员外的所有账号将无法再用密码或通行密钥登录；没有 SSO 身份的账号将无法登录。管理员仍可本地登录。"
       },
       "require_2fa_for_staff": {
         "title": "强制管理员和运营启用两步验证？",
-        "message": "未绑定验证器 App 或通行密钥的管理员和运营，下次登录后必须先完成绑定才能使用面板。"
+        "message": "未绑定验证器 App 或通行密钥的管理员和运营，登录时必须先完成绑定才能使用面板。仅在允许验证器 App 或通行密钥时生效。"
       },
       "jwt_issuer": {
         "title": "修改 JWT 签发者？",
@@ -887,7 +887,8 @@
       },
       "panel_path": {
         "title": "将面板移到 {{to}}？",
-        "message": "保存后本页将在 {{url}} 重新加载，{{from}} 不再可用。如果启用了 SSO，请同步更新身份提供商中登记的回调地址。"
+        "message": "保存后本页将在 {{url}} 重新加载，{{from}} 不再可用。如果启用了 SSO，请同步更新身份提供商中登记的回调地址。",
+        "lost": "保存后页面将跳转，以下分类未保存的修改会丢失：{{sections}}。请先保存它们。"
       },
       "sub_path": {
         "title": "修改订阅路径？",

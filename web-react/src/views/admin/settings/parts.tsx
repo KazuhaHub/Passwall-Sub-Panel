@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from 'react'
 import { Autocomplete, AutocompleteContent, AutocompleteInput, AutocompleteItem, AutocompleteList } from '@/components/ui/autocomplete'
 import { Field } from '@/components/form/Field'
-import { FormValidityProvider } from '@/components/form/FormValidity'
+import { FormValidityProvider, focusProblem, useFormValidity } from '@/components/form/FormValidity'
 import { NumberField } from '@/components/form/NumberField'
 import { SaveBar } from '@/components/form/SaveBar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,14 +28,35 @@ export function SectionForm({ dirty, pending, onSave, onDiscard, children, class
   children: ReactNode
   className?: string
 }) {
-  const body = <>{children}<SaveBar dirty={dirty} pending={pending} onSave={onSave} onDiscard={onDiscard} /></>
   return (
     <FormValidityProvider>
-      {plain
-        ? <div className={cn('flex flex-col gap-5', className)}>{body}</div>
-        : <form className={cn('flex flex-col gap-5', className)} noValidate onSubmit={e => { e.preventDefault(); onSave() }}>{body}</form>}
+      <Frame dirty={dirty} pending={pending} onSave={onSave} onDiscard={onDiscard} className={className} plain={plain}>{children}</Frame>
     </FormValidityProvider>
   )
+}
+
+/**
+ * What a save may be started from: a button, Enter in a field, or an action that saves first (the GeoIP update). Every
+ * one of them must stop where the SaveBar stops, at a field the form says cannot be saved yet, and take the person to it.
+ */
+export function useSaveGuard(): () => boolean {
+  const { issues } = useFormValidity()
+  return () => {
+    const bad = issues.filter(i => i.blocking !== false)
+    if (bad.length === 0) return false
+    for (const i of bad) if (i.el && focusProblem(i.el)) break
+    return true
+  }
+}
+
+function Frame({ dirty, pending, onSave, onDiscard, children, className, plain }: {
+  dirty: boolean; pending: boolean; onSave: () => void; onDiscard: () => void; children: ReactNode; className?: string; plain?: boolean
+}) {
+  const blocked = useSaveGuard()
+  const body = <>{children}<SaveBar dirty={dirty} pending={pending} onSave={onSave} onDiscard={onDiscard} /></>
+  return plain
+    ? <div className={cn('flex flex-col gap-5', className)}>{body}</div>
+    : <form className={cn('flex flex-col gap-5', className)} noValidate onSubmit={e => { e.preventDefault(); if (!blocked()) onSave() }}>{body}</form>
 }
 
 /** A titled group of settings, the unit a section is read in. */

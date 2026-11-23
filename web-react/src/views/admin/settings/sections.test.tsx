@@ -34,6 +34,17 @@ describe('General', () => {
     expect(sent()).toEqual({ ...uiSettings({ geo_ip_update_source: 'maxmind' }), cron_traffic_pull_minutes: 7, geo_ip_update_token: 'license-key' })
   })
 
+  it('stops every save path at a number the form refuses, the GeoIP update included', async () => {
+    reads({}, { geo_ip_update_source: 'maxmind' })
+    await open('general', 'Runtime tunables')
+    type('Native-node sync heartbeat', '4000')
+    fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+    expect(document.activeElement?.id).toBe('setting-node_poll_seconds')
+  })
+
   it('leaves a secret out of the request while nothing is typed in it', async () => {
     reads({}, { geo_ip_update_source: 'maxmind', has_geo_ip_update_token: true })
     await open('general', 'Runtime tunables')
@@ -63,7 +74,7 @@ describe('Login and security', () => {
     save()
     const dialog = await confirmDialog()
     expect(dialog.textContent).toContain('Send everyone straight to SSO?')
-    expect(dialog.textContent).toContain('SAML and OIDC are both off right now.')
+    expect(dialog.textContent).toContain('SAML and OIDC are both off right now')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(api.put).not.toHaveBeenCalled()
@@ -124,6 +135,25 @@ describe('Brand', () => {
     expect(dialog.textContent).toContain('/panel/admin/settings')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('names the other sections whose unsaved changes the reload would drop, and does not ask for a spelling of the same path', async () => {
+    reads({}, { panel_path: '/panel' })
+    await open('general', 'Runtime tunables')
+    type('Traffic poll interval', '7')
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: /^Brand/ }))
+    await screen.findByText('Site text')
+    echoPut()
+    type('Panel path prefix', ' /panel ')
+    save()
+    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    api.put.mockClear()
+    type('Panel path prefix', '/other')
+    save()
+    const dialog = await confirmDialog()
+    expect(dialog.textContent).toContain('unsaved changes in these sections are lost: General')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
   })
 })
 

@@ -5,8 +5,9 @@ import { Field } from '@/components/form/Field'
 import { confirm } from '@/components/ConfirmHost'
 import { validateUrl } from '@/utils/validators'
 import { useAdminT } from '../useAdminT'
-import { addressHazard } from './dangerConfirms'
-import { SECTION_KEYS, settingId, type KeysOf } from './model'
+import { addressHazard, normalizePanelPath } from './dangerConfirms'
+import { useOtherDirtySections } from './dirtyContext'
+import { SECTION_KEYS, SECTION_LABEL, settingId, type KeysOf } from './model'
 import { Group, Hint, SectionForm, TextRow } from './parts'
 import { useUiSection } from './useUiSection'
 
@@ -23,10 +24,12 @@ export const BrandSection = memo(function BrandSection({ onDirtyChange }: { onDi
   const t = useAdminT()
   const form = useUiSection<KeysOf<'brand'>>(keys, onDirtyChange, problemsOf)
   const { value: v, patch, saved, error, blur } = form
+  const lost = useOtherDirtySections('brand')
 
   async function save() {
     // The panel path moves this page itself, so say where it goes before it does.
-    if (v.panel_path !== saved.panel_path && !(await confirm(addressHazard('panel_path', saved.panel_path, v.panel_path, t)))) return
+    const from = normalizePanelPath(saved.panel_path); const to = normalizePanelPath(v.panel_path)
+    if (from !== to && !(await confirm(addressHazard('panel_path', from, to, t, lost.map(s => t(SECTION_LABEL[s])))))) return
     await form.save()
   }
 

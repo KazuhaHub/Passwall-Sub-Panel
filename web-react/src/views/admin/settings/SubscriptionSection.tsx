@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { confirm } from '@/components/ConfirmHost'
 import { useAdminT } from '../useAdminT'
-import { addressHazard } from './dangerConfirms'
+import { addressHazard, normalizeSubPath } from './dangerConfirms'
 import { SECTION_KEYS, settingId, type KeysOf } from './model'
 import { Group, Nested, NumField, Pair, SectionForm, SwitchField, TextRow } from './parts'
 import { ScopeShell, useScopedDirty } from './ScopeShell'
@@ -31,7 +31,7 @@ function SubscriptionForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) =
 
   async function save() {
     // Every subscription link already handed out carries the old path.
-    if (slash(v.sub_path) !== slash(saved.sub_path) && !(await confirm(addressHazard('sub_path', slash(saved.sub_path), slash(v.sub_path), t)))) return
+    if (normalizeSubPath(v.sub_path) !== normalizeSubPath(saved.sub_path) && !(await confirm(addressHazard('sub_path', slash(saved.sub_path), slash(v.sub_path), t)))) return
     await form.save()
   }
 

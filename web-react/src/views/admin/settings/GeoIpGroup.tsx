@@ -7,7 +7,7 @@ import { SecretField } from '@/components/form/SecretField'
 import { useAdminT } from '../useAdminT'
 import type { KeysOf } from './model'
 import { settingId } from './model'
-import { Group, Hint, NumField, Pair, SelectRow, SwitchField, TextRow } from './parts'
+import { Group, Hint, NumField, Pair, SelectRow, SwitchField, TextRow, useSaveGuard } from './parts'
 import type { UiSection } from './useUiSection'
 
 type Source = NonNullable<UISettings['geo_ip_update_source']>
@@ -22,6 +22,7 @@ export function GeoIpGroup({ form }: { form: UiSection<KeysOf<'general'>> }) {
   const { value: v, patch, saved } = form
   const [status, setStatus] = useState<GeoIPStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const blocked = useSaveGuard()
 
   useEffect(() => { void getGeoIPStatus().then(setStatus).catch(() => { /* not fatal: the section still renders */ }) }, [])
 
@@ -32,7 +33,8 @@ export function GeoIpGroup({ form }: { form: UiSection<KeysOf<'general'>> }) {
     try {
       // The server reads the STORED token and source, not this form: save what is typed first. A save that did not
       // happen (a rule broken, a request failed) says why itself, so the update does not start.
-      if (form.dirty && !(await form.save({ quiet: true }))) return
+      // Same stop as the SaveBar: a number out of range is not sent, here or anywhere.
+      if (form.dirty && (blocked() || !(await form.save({ quiet: true })))) return
       await updateGeoIPNow()
       const deadline = Date.now() + 5 * 60 * 1000
       while (Date.now() < deadline) {

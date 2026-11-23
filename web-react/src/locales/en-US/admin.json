@@ -264,7 +264,7 @@
       "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user",
       "section_retention": "Data retention",
       "section_notify": "Reminder thresholds",
-      "cron_effect_hint": "A change takes effect after the current interval ends; no restart needed.",
+      "cron_effect_hint": "A change takes effect after the current interval ends; no restart needed. 0 is ignored and the current interval stays.",
       "login_mode_hint": "Force SSO and Local only can lock people out; saving either asks you to confirm.",
       "section_captcha": "Captcha",
       "captcha_provider_keys_hint": "Needs the site key and secret key from the provider. Wrong keys can stop people from passing the captcha.",
@@ -424,13 +424,13 @@
       "email_domain": "Default email domain",
       "sub_base_url": "Subscription base URL (required)",
       "panel_path": "Panel path prefix",
-      "panel_path_hint": "Leave blank to mount at the domain root; for example, /panel. Subscription URLs are unchanged.",
+      "panel_path_hint": "Leave blank to mount at the domain root; for example, /panel. Start with a slash, no trailing slash, and not the subscription path. While a panel path is set, the subscription base URL cannot contain a path. Subscription links are otherwise unchanged.",
       "asset_hint": "Leave Logo / Icon blank to use built-in defaults.",
       "theme_color": "System default theme color (HEX)",
       "theme_color_hint": "Used as the default for every user. Users can still override via the palette in the top bar. Leave blank to fall back to the built-in default.",
       "theme_color_clear": "Clear",
       "section_addresses": "Addresses",
-      "sub_base_url_hint": "Subscription links and emails are built from this address, and its host is the passkey domain.",
+      "sub_base_url_hint": "Subscription links, emails and SSO URLs are built from this address, and its host is the passkey domain.",
       "theme_color_picker": "Pick a color"
     },
     "sso": {
@@ -861,8 +861,8 @@
       "confirm": "Save anyway",
       "login_mode_sso_redirect": {
         "title": "Send everyone straight to SSO?",
-        "message": "The sign-in page will redirect to your identity provider at once. If SSO is not working, nobody can sign in, including admins.",
-        "sso_off": "SAML and OIDC are both off right now.",
+        "message": "The sign-in page will send everyone to your identity provider and stop showing the password form. If SSO breaks, only admins can still sign in, at the direct local sign-in address.",
+        "sso_off": "SAML and OIDC are both off right now, so the panel keeps local sign-in only until one is enabled.",
         "sso_unknown": "Could not check whether SAML or OIDC is on."
       },
       "login_mode_local_only": {
@@ -870,12 +870,12 @@
         "message": "SSO sign-in will no longer be offered. Accounts without a local password cannot sign in."
       },
       "disallow_user_local_login": {
-        "title": "Block password sign-in for users?",
-        "message": "Accounts with the user role can no longer sign in with a local password. Those without an SSO identity cannot sign in."
+        "title": "Block password sign-in for non-admins?",
+        "message": "Every account except admins can no longer sign in with a password or a passkey. Those without an SSO identity cannot sign in. Admins keep local sign-in."
       },
       "require_2fa_for_staff": {
         "title": "Require two-step verification for staff?",
-        "message": "Admins and operators without an authenticator app or a passkey must set one up right after their next sign-in, before they can use the panel."
+        "message": "Admins and operators without an authenticator app or a passkey must set one up when they sign in, before they can use the panel. It applies only while an authenticator app or passkeys are allowed."
       },
       "jwt_issuer": {
         "title": "Change the JWT issuer?",
@@ -891,7 +891,8 @@
       },
       "panel_path": {
         "title": "Move the panel to {{to}}?",
-        "message": "After saving, this page reloads at {{url}} and {{from}} stops working. If SSO is on, update the callback URLs registered with your identity provider."
+        "message": "After saving, this page reloads at {{url}} and {{from}} stops working. If SSO is on, update the callback URLs registered with your identity provider.",
+        "lost": "Saving reloads the page, so unsaved changes in these sections are lost: {{sections}}. Save them first."
       },
       "sub_path": {
         "title": "Change the subscription path?",

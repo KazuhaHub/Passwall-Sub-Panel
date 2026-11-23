@@ -7,6 +7,7 @@ import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useDirtyTabs } from '../nodes/detail/useDirtyTabs'
 import { useAdminT } from '../useAdminT'
 import { BrandSection } from './BrandSection'
+import { DirtySectionsContext } from './dirtyContext'
 import { GeneralSection } from './GeneralSection'
 import { LegalSection } from './LegalSection'
 import { MailSection } from './MailSection'
@@ -98,12 +99,12 @@ export function SettingsPage() {
           <SettingsSearch onPick={pick} />
           <SettingsNav active={tab} onSelect={select} dirty={dirty} />
         </aside>
-        <div className="min-w-0 max-w-3xl">
+        <DirtySectionsContext.Provider value={dirty}><div className="min-w-0 max-w-3xl">
           {SECTIONS.map(s => {
             const Section = COMPONENTS[s]
             return shown.has(s) && <div key={s} id={sectionDomId(s)} hidden={tab !== s}><Section onDirtyChange={report[s]} /></div>
           })}
-        </div>
+        </div></DirtySectionsContext.Provider>
       </div>
     </div>
   )
