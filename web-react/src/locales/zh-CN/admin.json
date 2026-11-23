@@ -5842,6 +5842,9 @@
     }
   },
   "access_control": {
+    "user_picker": {
+      "no_match": "没有匹配的账户"
+    },
     "title": "访问控制",
     "subtitle": "决定用户能通过原生节点访问哪些目的地，并记录规则命中。",
     "retry": "重试",
@@ -5932,6 +5935,17 @@
         "message": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发；{{seconds}} 秒内的连续修改合并为一次。",
         "message_no_window": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发，连续修改合并为一次。",
         "action": "启用"
+      },
+      "enable_policy": {
+        "title": "启用策略「{{name}}」？",
+        "effect_block": "它会开始拦截匹配的连接",
+        "effect_allow": "它会开始放行匹配的连接，这些连接不再受后面的拦截规则限制",
+        "effect_report": "它会开始记录本应拦截的连接，不拦截任何连接",
+        "message_all": "{{effect}}。范围：所有用户，共 {{groups}} 个分组、{{users}} 人。{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "message_groups": "{{effect}}。范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "message_panels": "{{effect}}。范围：仅 {{panels}} 台服务器上的节点（{{names}}）。这些节点会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "action_on": "启用",
+        "action_report": "以仅报告启用"
       },
       "convert_policy": {
         "title": "把「{{name}}」改为拦截？",
@@ -6162,7 +6176,8 @@
         "edit": "编辑",
         "refresh": "立即刷新",
         "delete": "删除",
-        "delete_in_use": "被 {{count}} 条策略使用"
+        "delete_in_use": "被 {{count}} 条策略使用",
+        "delete_blocked": "删除（{{reason}}）"
       },
       "empty": "还没有列表。策略都从列表里取目的地。",
       "empty_filtered": "没有符合的列表",
@@ -6198,6 +6213,7 @@
       },
       "dialog": {
         "title_new": "新建列表",
+        "type": "列表类型",
         "title_edit": "编辑列表「{{name}}」",
         "close": "关闭",
         "name": "名称",
@@ -6660,6 +6676,7 @@
         "state": "状态",
         "match": "匹配什么",
         "lists": "列表",
+        "pick_none": "没有匹配的选项",
         "list_option": "{{name}} · {{kind}} · {{entries}} 条（正则 {{regexps}}）",
         "list_not_ready": "未就绪",
         "not_ready_hint": {

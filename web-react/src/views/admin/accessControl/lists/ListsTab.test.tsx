@@ -13,7 +13,8 @@ vi.mock('@/api/accessControl', async importOriginal => {
   return { ...real, ...fns, destErrorOf: real.destErrorOf, isDestUnavailable: real.isDestUnavailable }
 })
 const media = vi.hoisted(() => ({ folded: false }))
-vi.mock('@mui/material', async importOriginal => ({ ...await importOriginal<typeof import('@mui/material')>(), useMediaQuery: () => media.folded }))
+// DataTable folds its rows into cards below 768px through this hook.
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => media.folded }))
 
 const budget: DestBudget = {
   rules: { used: 1, limit: 256 }, domains: { used: 8420, limit: 50000 }, regexps: { used: 140, limit: 256 },
@@ -88,6 +89,16 @@ describe('the lists tab', () => {
     expect(screen.getByText('远程与分类列表每 24 小时刷新一次', { exact: false })).toBeTruthy()
   })
 
+  it('sorts by the column header, keeping the ranking the old tab had (entries high to low on a second press)', async () => {
+    renderAccess(ui, { route })
+    await screen.findByText('Internal')
+    const names = () => screen.getAllByTestId('list-state').map(e => e.closest('tr')?.querySelector('td')?.textContent ?? '')
+    fireEvent.click(screen.getByRole('button', { name: /^条目/ }))
+    await waitFor(() => expect(names()[0]).toContain('News'))
+    fireEvent.click(screen.getByRole('button', { name: /^条目/ }))
+    await waitFor(() => expect(names()[0]).toContain('Scam list'))
+  })
+
   it('the problems tile filters through lst_state (replace) and a second press clears it', async () => {
     const { router } = renderAccess(ui, { route })
     await screen.findByText('Internal')
@@ -122,12 +133,13 @@ describe('the lists tab', () => {
     renderAccess(ui, { route })
     await screen.findByText('News')
     fireEvent.click(screen.getByRole('button', { name: 'Internal 的操作' }))
-    expect(screen.getByRole('menuitem', { name: '删除' }).getAttribute('aria-disabled')).toBe('true')
+    // The disabled item says by whom the list is used, so the reason is on screen.
+    expect(screen.getByRole('menuitem', { name: '删除（被 1 条策略使用）' }).getAttribute('aria-disabled')).toBe('true')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     fireEvent.click(screen.getByRole('button', { name: 'News 的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '删除' }))
-    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '删除列表「News」？', destructive: true })))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '删除列表「News」？', destructive: true, initialFocus: 'cancel' })))
     await waitFor(() => expect(api.deleteDestList).toHaveBeenCalledWith(3))
     expect(snack).toHaveBeenCalledWith('已删除「News」', 'success')
   })

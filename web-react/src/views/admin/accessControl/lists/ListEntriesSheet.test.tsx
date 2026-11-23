@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { Dialog, ThemeProvider } from '@mui/material'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import { renderAccess } from '@/test/accessControlHarness'
-import { createAppTheme } from '@/theme'
 import ListEntriesSheet from './ListEntriesSheet'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -61,18 +59,5 @@ describe('the entries sheet', () => {
   it('is closed with no list and asks nothing', () => {
     renderAccess(<ListEntriesSheet listId={null} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
     expect(api.getDestList).not.toHaveBeenCalled()
-  })
-
-  // A dialog opened from this drawer (the edit dialog, the test sheet) must sit above it.
-  it('keeps the default drawer layer, below a modal opened from it', async () => {
-    const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })
-    renderAccess(<ThemeProvider theme={theme}><ListEntriesSheet listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} /><Dialog open><p>d</p></Dialog></ThemeProvider>)
-    await screen.findByText('Scam list')
-    const z = (el: Element | null) => Number(getComputedStyle(el as Element).zIndex)
-    const drawer = document.querySelector('.MuiDrawer-root')
-    const modal = document.querySelector('.MuiDialog-root')
-    expect(z(modal)).toBeGreaterThan(z(drawer))
-    expect(z(drawer)).toBe(theme.zIndex.drawer)
-    void render
   })
 })

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import { confirmMock, renderAccess, snack } from '@/test/accessControlHarness'
-import ListDialog from './ListDialog'
+import ListSheet from './ListSheet'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -21,7 +21,7 @@ const written = (id = 7): api.DestListWrite => ({ list: { id, name: 'Risky', kin
 
 const onClose = vi.fn()
 const onSaved = vi.fn()
-const dialog = (p: Partial<React.ComponentProps<typeof ListDialog>> = {}) => <ListDialog open editId={null} onClose={onClose} onSaved={onSaved} {...p} />
+const dialog = (p: Partial<React.ComponentProps<typeof ListSheet>> = {}) => <ListSheet open editId={null} onClose={onClose} onSaved={onSaved} {...p} />
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -33,7 +33,7 @@ beforeEach(() => {
 // A required field's label carries a star, so match the start of it.
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(new RegExp(`^${label}`)), { target: { value } })
 
-describe('the list dialog', () => {
+describe('the list sheet', () => {
   it('previews a custom list as typing pauses (not on every key) and shows what was understood', async () => {
     vi.mocked(api.previewDestList).mockResolvedValue({ report: report(), entries: [], entry_count: 1, regexp_count: 0 })
     renderAccess(dialog())
@@ -96,6 +96,30 @@ describe('the list dialog', () => {
     expect(vi.mocked(api.previewDestList).mock.calls[0][0]).toMatchObject({ kind: 'remote', source_url: 'https://example.org/list.txt' })
   })
 
+  it('saves a remote list with exactly the fields the old editor sent', async () => {
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0, http_status: 200, bytes: 10 })
+    vi.mocked(api.createDestList).mockResolvedValue(written(8))
+    renderAccess(dialog({ initialKind: 'remote' }))
+    type('名称', ' Feed ')
+    type('地址', ' https://example.org/list.txt ')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.createDestList).toHaveBeenCalledWith({ kind: 'remote', side: 'dest', name: 'Feed', source_url: 'https://example.org/list.txt' }))
+  })
+
+  it('saves a community category with its attributes and no name', async () => {
+    vi.mocked(api.getGeositeCategories).mockResolvedValue({ categories: [{ name: 'cn', entries: 5, attrs: [{ name: '!cn', entries: 1 }] }] } as never)
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 5, regexp_count: 0 })
+    vi.mocked(api.createDestList).mockResolvedValue(written(9))
+    renderAccess(dialog({ initialKind: 'geosite' }))
+    const input = await screen.findByLabelText('分类') as HTMLInputElement
+    await waitFor(() => expect(input.disabled).toBe(false))
+    fireEvent.mouseDown(input)
+    fireEvent.click(await screen.findByRole('option', { name: 'cn · 5 条' }))
+    await waitFor(() => expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.createDestList).toHaveBeenCalledWith({ kind: 'geosite', geosite_category: 'cn', geosite_attrs: [] }))
+  })
+
   it('an edit seeds from the pasted source, locks the type and sends updated_at; a 409 offers the latest', async () => {
     const list = written(4).list
     vi.mocked(api.getDestList).mockResolvedValue({ list, samples: [], source_text: '# note\na.com' })
@@ -103,7 +127,7 @@ describe('the list dialog', () => {
     vi.mocked(api.updateDestList).mockRejectedValue(axiosErr(409, { code: 'dest_list_stale' }))
     renderAccess(dialog({ editId: 4 }))
     await waitFor(() => expect((screen.getByLabelText('code') as HTMLTextAreaElement).value).toBe('# note\na.com'))
-    expect(screen.getByRole('button', { name: '自定义' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('radio', { name: '自定义' }).getAttribute('aria-disabled') === 'true').toBe(true)
     expect(api.getDestList).toHaveBeenCalledWith(4, true, expect.anything())
     fireEvent.change(screen.getByLabelText('code'), { target: { value: 'b.com' } })
     await screen.findByTestId('parse-report')
@@ -116,19 +140,19 @@ describe('the list dialog', () => {
   it('switching the type with input asks first and then clears it', async () => {
     renderAccess(dialog())
     fireEvent.change(await screen.findByLabelText('code'), { target: { value: 'a.com' } })
-    fireEvent.click(screen.getByRole('button', { name: '远程地址' }))
+    fireEvent.click(screen.getByRole('radio', { name: '远程地址' }))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '切换类型会清空已填内容？' })))
     expect(await screen.findByLabelText(/^地址/)).toBeTruthy()
   })
 
   it('closing with unsaved input asks first; closing a clean dialog does not', async () => {
     renderAccess(dialog())
-    fireEvent.click(await screen.findByRole('button', { name: '关闭' }))
+    fireEvent.click(await screen.findByTitle('Close details'))
     expect(confirmMock).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
     type('名称', 'x')
     confirmMock.mockResolvedValueOnce(false)
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByTitle('Close details'))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '放弃未保存的修改？' })))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
