@@ -1,9 +1,9 @@
-import { Box, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { DestTestResult, DestTestStep } from '@/api/accessControl'
-import ToneBadge from '@/components/ToneBadge'
-import { accessTone, type AccessToneKind } from '@/utils/accessControl'
+import { AccessBadge } from '@/components/access/AccessBadge'
+import { cn } from '@/lib/utils'
+import type { AccessToneKind } from '@/utils/accessControl'
 
 const T = 'admin:access_control.test.'
 
@@ -26,7 +26,6 @@ export type InboundName = (nodeId: number) => string | undefined
 /** The verdict's badge and the sentence beside it. */
 export function VerdictLine({ result }: { result: DestTestResult }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
   const kind = verdictTone(result)
   const hit = terminatingStep(result)
   const name = hit?.policy_id ? (hit.name || t(`${T}deleted_policy`)) : (hit?.name ?? '')
@@ -46,19 +45,21 @@ export function VerdictLine({ result }: { result: DestTestResult }) {
   else if (result.verdict === 'allow') sentence = t(`${T}verdict.allow`, { step: hit?.step ?? 0, name })
   else sentence = t(`${T}verdict.default`)
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-      <ToneBadge tone={accessTone(theme, kind)} label={t(`${T}badge.${result.verdict === 'observe' ? 'observe' : kind}`)} testId="test-verdict" data={kind} />
-      <Typography sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{sentence}</Typography>
-    </Box>
+    <div className="flex flex-wrap items-center gap-2">
+      {/* The wrapper carries the test hook and the kind: a quiet kind is a dot with no element of its own. */}
+      <span data-testid="test-verdict" data-state={kind} className="inline-flex max-w-full">
+        <AccessBadge kind={kind} label={t(`${T}badge.${result.verdict === 'observe' ? 'observe' : kind}`)} />
+      </span>
+      <p className="min-w-0 [overflow-wrap:anywhere]">{sentence}</p>
+    </div>
   )
 }
 
 /** The trace, step by step, on the same line-and-dot pattern as the policy rail. */
 export default function EvalTrace({ result, inboundName }: { result: DestTestResult; inboundName?: InboundName }) {
   const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   return (
-    <Box component="ol" data-testid="eval-trace" sx={{ listStyle: 'none', m: 0, p: 0, pl: 0.5, borderLeft: `2px solid ${md.outlineVariant}`, ml: 1.5 }}>
+    <ol data-testid="eval-trace" className="m-0 ml-3 list-none border-l-2 border-border p-0 pl-1">
       {result.steps.map(s => {
         const report = s.report_only === true
         const inbound = s.kind === 'source' && s.node_id ? inboundName?.(s.node_id) : undefined
@@ -70,22 +71,20 @@ export default function EvalTrace({ result, inboundName }: { result: DestTestRes
               : `${t(`${T}kind.${report ? 'report' : s.kind}`)}${s.policy_id ? ` · ${s.name || t(`${T}deleted_policy`)}` : ''}`
         const label = report && s.kind === 'source' ? `${named} · ${t(`${T}kind.report`)}` : named
         const hit = s.result === 'hit'
+        const shadowed = s.result === 'shadowed'
         return (
-          <Box component="li" key={s.step} data-result={s.result} sx={{ display: 'flex', gap: 1.5, py: 0.75, ml: -2.5, alignItems: 'flex-start' }}>
-            <Box aria-hidden sx={{
-              flex: '0 0 auto', width: 24, height: 24, borderRadius: '50%', display: 'grid', placeItems: 'center', fontWeight: 600, fontSize: 12,
-              bgcolor: md.surfaceContainerHighest, color: md.onSurface,
-            }}>{s.step}</Box>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 14, fontWeight: hit ? 600 : 400, overflowWrap: 'anywhere' }}>{label}</Typography>
-              <Typography variant="body2" sx={{ color: s.result === 'shadowed' ? md.onSurface : md.onSurfaceVariant, fontWeight: s.result === 'shadowed' ? 600 : 400 }}>
+          <li key={s.step} data-result={s.result} className="-ml-3.5 flex items-start gap-3 py-1.5">
+            <span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold">{s.step}</span>
+            <div className="min-w-0">
+              <p className={cn('text-sm [overflow-wrap:anywhere]', hit && 'font-semibold')}>{label}</p>
+              <p className={cn('text-sm', shadowed ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
                 {report && s.result === 'hit' ? t(`${T}result.hit_report`) : t(`${T}result.${s.result}`)}
-                {s.entry && <Box component="span" sx={{ fontFamily: 'ui-monospace, monospace', fontSize: 13, ml: 0.75 }}>{s.entry}</Box>}
-              </Typography>
-            </Box>
-          </Box>
+                {s.entry && <span className="ml-1.5 font-mono text-[13px]">{s.entry}</span>}
+              </p>
+            </div>
+          </li>
         )
       })}
-    </Box>
+    </ol>
   )
 }

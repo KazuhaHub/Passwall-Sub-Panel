@@ -3,7 +3,8 @@ import { useId, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface ModeRadioOption<V extends string> {
-  value: V
+  /** null: nothing chosen yet. */
+  value: V | null
   /** The option's words, with whatever explains it under them. */
   children: ReactNode
   disabled?: boolean
@@ -15,7 +16,8 @@ export interface ModeRadioOption<V extends string> {
  * accessible group come for free; the chosen row is outlined in the brand colour.
  */
 export function ModeRadioGroup<V extends string>({ value, onChange, options, 'aria-label': label, className }: {
-  value: V
+  /** null: nothing chosen yet. */
+  value: V | null
   onChange: (next: V) => void
   options: readonly ModeRadioOption<V>[]
   'aria-label': string
