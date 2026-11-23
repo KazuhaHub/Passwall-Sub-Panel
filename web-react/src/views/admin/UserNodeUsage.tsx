@@ -1,64 +1,45 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Box, CircularProgress, InputAdornment, Table, TableBody, TableCell,
-  TableContainer, TableFooter, TableHead, TablePagination, TableRow,
-  TableSortLabel, TextField, Typography, useTheme,
-} from '@mui/material'
-import SearchIcon from '@mui/icons-material/Search'
-import { useTranslation } from 'react-i18next'
 
 import type { UserNodeUsageRow } from '@/api/traffic'
-import { TrafficFactorBadge } from '@/components/TrafficFactorBadge'
-import { UsageBasisToggle, type UsageBasis } from './UsageBasisToggle'
+import { DataTablePagination } from '@/components/data/DataTablePagination'
+import { FilterBar } from '@/components/data/FilterBar'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { TableSkeleton } from '@/components/feedback/LoadingState'
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useUserNodeUsage } from '@/query/traffic'
 import { useQueryScope } from '@/query/useQueryScope'
+import { UsageBasisToggle, type UsageBasis } from './UsageBasisToggle'
+import { FactorBadge } from './users/FactorBadge'
+import { useAdminT } from './users/useAdminT'
+import { ChargedCell, RawCell, SortHead, sumUsage, usageMetric, type SortDir, type SortKey } from './users/usageShared'
 
-// fmt renders a byte count compactly (single-letter unit).
-function fmt(n: number): string {
-  if (!n) return '0'
-  const units = ['B', 'K', 'M', 'G', 'T']
-  let v = n
-  let u = 0
-  while (v >= 1024 && u < units.length - 1) { v /= 1024; u++ }
-  return `${v >= 100 || u === 0 ? Math.round(v) : v.toFixed(1)}${units[u]}`
-}
+const PAGE_SIZES = [10, 25, 50] as const
 
-type SortKey = 'lifetime' | 'period' | 'today'
-
-/** UserNodeUsage shows one user's usage broken down per node (lifetime /
- *  current-period / today, each split ↑up ↓down). Lives on the Traffic page's
- *  Trend tab (below the chart) when a single user is selected. All rows are
- *  fetched once and paginated / searched / sorted CLIENT-SIDE — a user's node
- *  count is bounded by their group coverage, and the backend already batches
- *  the per-node lookup, so this never hammers the DB. The "合计" total always
- *  reflects ALL nodes (not the filtered or current page). */
+/** UserNodeUsage shows one user's usage broken down per node (lifetime / current-period / today, each
+ *  split up and down). Lives on the Traffic page's Trend tab (below the chart) when a single user is
+ *  selected. All rows are fetched once and paginated / searched / sorted CLIENT-SIDE — a user's node
+ *  count is bounded by their group coverage, and the backend already batches the per-node lookup. The
+ *  total row always reflects ALL nodes (not the filtered or current page). */
 export function UserNodeUsage({ userId }: { userId: number }) {
-  const { t } = useTranslation('admin')
-  const md = useTheme().palette.md
+  const t = useAdminT()
   const scope = useQueryScope()
-  const { data, isPending, isError } = useUserNodeUsage(scope, userId)
-  const rows = data
+  const { data: rows, isPending, isError, error, refetch } = useUserNodeUsage(scope, userId)
   const [keyword, setKeyword] = useState('')
   const [orderBy, setOrderBy] = useState<SortKey>('period')
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
+  const [orderDir, setOrderDir] = useState<SortDir>('desc')
   const [basis, setBasis] = useState<UsageBasis>('charged')
   const charged = basis === 'charged'
-  const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(10)
 
-  // Switching user resets the client-side view state. The rows themselves come
-  // from the query, which is keyed by user id — so a new target starts pending
-  // rather than briefly showing the previous user's nodes.
-  useEffect(() => { setPage(0); setKeyword('') }, [userId])
+  // Switching user resets the client-side view state. The rows themselves come from the query, which is
+  // keyed by user id — so a new target starts pending rather than briefly showing the previous user's nodes.
+  useEffect(() => { setPage(1); setKeyword('') }, [userId])
 
-  // Grand total = EVERY node, always — independent of search / paging so it
-  // keeps matching the user-level period/lifetime figures shown elsewhere.
-  const grand = useMemo(() => (rows ?? []).reduce((a, r) => ({
-    lifetime: a.lifetime + r.lifetime_total_bytes, lifeUp: a.lifeUp + r.lifetime_up_bytes, lifeDown: a.lifeDown + r.lifetime_down_bytes,
-    period: a.period + r.period_total_bytes, periodUp: a.periodUp + r.period_up_bytes, periodDown: a.periodDown + r.period_down_bytes,
-    chargedLifetime: a.chargedLifetime + (r.charged_lifetime_bytes ?? 0), chargedPeriod: a.chargedPeriod + (r.charged_period_bytes ?? 0),
-    today: a.today + r.today_total_bytes, todayUp: a.todayUp + r.today_up_bytes, todayDown: a.todayDown + r.today_down_bytes,
-  }), { lifetime: 0, lifeUp: 0, lifeDown: 0, period: 0, periodUp: 0, periodDown: 0, chargedLifetime: 0, chargedPeriod: 0, today: 0, todayUp: 0, todayDown: 0 }), [rows])
+  // Grand total = EVERY node, always — independent of search / paging so it keeps matching the
+  // user-level period/lifetime figures shown elsewhere.
+  const grand = useMemo(() => sumUsage(rows ?? []), [rows])
 
   const filtered = useMemo(() => {
     const all = rows ?? []
@@ -69,156 +50,106 @@ export function UserNodeUsage({ userId }: { userId: number }) {
           (r.region || '').toLowerCase().includes(kw) ||
           (r.client_email || '').toLowerCase().includes(kw))
       : all
-    const metric = (r: UserNodeUsageRow) =>
-      orderBy === 'lifetime' ? (charged ? r.charged_lifetime_bytes : r.lifetime_total_bytes)
-        : orderBy === 'today' ? r.today_total_bytes
-          : (charged ? r.charged_period_bytes : r.period_total_bytes)
+    const metric = (r: UserNodeUsageRow) => usageMetric(r, orderBy, charged)
     return [...f].sort((a, b) => orderDir === 'desc' ? metric(b) - metric(a) : metric(a) - metric(b))
   }, [rows, keyword, orderBy, orderDir, charged])
 
-  const paged = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const setSort = (k: SortKey) => {
     if (orderBy === k) setOrderDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setOrderBy(k); setOrderDir('desc') }
-    setPage(0)
+    setPage(1)
   }
 
-  const title = (
-    <Typography sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, mb: 1 }}>
-      {t('users.nodeusage.title', { defaultValue: '按节点用量' })}
-    </Typography>
-  )
+  const title = <h3 className="text-sm font-medium">{t('users.nodeusage.title')}</h3>
 
-  if (isPending) {
-    return <Box>{title}<CircularProgress size={20} /></Box>
-  }
-  // A failed read is NOT "this user has no nodes" — that claim would send an
-  // admin hunting for a group-coverage problem that may not exist.
+  if (isPending) return <div className="space-y-2">{title}<TableSkeleton rows={3} cols={4} /></div>
+  // A failed read is NOT "this user has no nodes" — that claim would send an admin hunting for a
+  // group-coverage problem that may not exist.
   if (isError) {
     return (
-      <Box>
+      <div className="space-y-2">
         {title}
-        <Typography sx={{ fontSize: 12, color: md.error }}>
-          {t('users.nodeusage.unavailable', { defaultValue: '暂时无法获取节点用量' })}
-        </Typography>
-      </Box>
+        <ErrorState compact title={t('users.nodeusage.unavailable')} reason={error} retry={() => refetch()} />
+      </div>
     )
   }
   if (!rows || rows.length === 0) {
-    return (
-      <Box>
-        {title}
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('users.nodeusage.empty', { defaultValue: '该用户暂无节点' })}
-        </Typography>
-      </Box>
-    )
+    return <div className="space-y-2">{title}<EmptyState compact title={t('users.nodeusage.empty')} /></div>
   }
 
-  // One metric cell: prominent total over a small ↑up ↓down subline.
-  const cell = (total: number, up: number, down: number) => (
-    <Box sx={{ fontVariantNumeric: 'tabular-nums' }}>
-      <Box sx={{ fontSize: 13, fontWeight: 500 }}>{fmt(total)}</Box>
-      <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, whiteSpace: 'nowrap' }}>↑{fmt(up)} ↓{fmt(down)}</Box>
-    </Box>
-  )
-
-  // Charged mode: the charged total over the raw amount. The charged figure has
-  // no up/down split, so the subline says what the raw bytes were instead.
-  const chargedCell = (chargedTotal: number, rawTotal: number) => (
-    <Box sx={{ fontVariantNumeric: 'tabular-nums' }}>
-      <Box sx={{ fontSize: 13, fontWeight: 500 }}>{fmt(chargedTotal)}</Box>
-      <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, whiteSpace: 'nowrap' }}>
-        {t('users.nodeusage.raw_amount', { amount: fmt(rawTotal), defaultValue: '原始 {{amount}}' })}
-      </Box>
-    </Box>
-  )
-
-  const headCell = (k: SortKey, label: string) => (
-    <TableCell align="right" sortDirection={orderBy === k ? orderDir : false} sx={{ fontWeight: 600 }}>
-      <TableSortLabel active={orderBy === k} direction={orderBy === k ? orderDir : 'desc'} onClick={() => setSort(k)}>
-        {label}
-      </TableSortLabel>
-    </TableCell>
+  const metricCells = (c: { life: number; lifeRaw: number; lifeUp: number; lifeDown: number; per: number; perRaw: number; perUp: number; perDown: number; today: number; todayUp: number; todayDown: number }) => (
+    <>
+      <TableCell>{charged ? <ChargedCell charged={c.life} raw={c.lifeRaw} t={t} /> : <RawCell total={c.lifeRaw} up={c.lifeUp} down={c.lifeDown} />}</TableCell>
+      <TableCell>{charged ? <ChargedCell charged={c.per} raw={c.perRaw} t={t} /> : <RawCell total={c.perRaw} up={c.perUp} down={c.perDown} />}</TableCell>
+      <TableCell><RawCell total={c.today} up={c.todayUp} down={c.todayDown} /></TableCell>
+    </>
   )
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         {title}
-        <UsageBasisToggle value={basis} onChange={v => setBasis(v)} />
-        <TextField
-          size="small"
-          value={keyword}
-          onChange={e => { setKeyword(e.target.value); setPage(0) }}
-          placeholder={t('users.nodeusage.search', { defaultValue: '搜索节点 / 地区' })}
-          sx={{ width: 240 }}
-          slotProps={{
-            input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }
-          }}
-        />
-      </Box>
-      {charged && (
-        <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant, mb: 1 }}>
-          {t('users.nodeusage.charged_hint', { defaultValue: '计费合计已按各线路倍率换算；上行/下行拆分与今日为原始字节。' })}
-        </Typography>
-      )}
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell sx={{ fontWeight: 600 }}>{t('users.nodeusage.node', { defaultValue: '节点' })}</TableCell>
-              {headCell('lifetime', t('users.nodeusage.lifetime', { defaultValue: '累计' }))}
-              {headCell('period', t('users.nodeusage.period', { defaultValue: '本周期' }))}
-              {headCell('today', charged ? t('users.nodeusage.today_raw', { defaultValue: '今日（原始）' }) : t('users.nodeusage.today', { defaultValue: '今日' }))}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {paged.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} sx={{ color: md.onSurfaceVariant, fontSize: 12 }}>
-                  {t('users.nodeusage.no_match', { defaultValue: '无匹配节点' })}
-                </TableCell>
-              </TableRow>
-            )}
-            {paged.map((r, i) => (
-              <TableRow key={r.node_id || r.client_email || i}>
-                <TableCell>
-                  <Typography noWrap sx={{ fontSize: 13, fontWeight: 500 }}>
-                    {r.display_name || r.client_email || `#${r.node_id}`}
-                    <TrafficFactorBadge milli={r.traffic_factor_milli} sx={{ ml: 0.75 }} />
-                  </Typography>
-                  {r.region && <Typography noWrap sx={{ fontSize: 11, color: md.onSurfaceVariant }}>{r.region}</Typography>}
-                </TableCell>
-                <TableCell align="right">{charged ? chargedCell(r.charged_lifetime_bytes, r.lifetime_total_bytes) : cell(r.lifetime_total_bytes, r.lifetime_up_bytes, r.lifetime_down_bytes)}</TableCell>
-                <TableCell align="right">{charged ? chargedCell(r.charged_period_bytes, r.period_total_bytes) : cell(r.period_total_bytes, r.period_up_bytes, r.period_down_bytes)}</TableCell>
-                <TableCell align="right">{cell(r.today_total_bytes, r.today_up_bytes, r.today_down_bytes)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          <TableFooter>
-            {/* Always the grand total of EVERY node — not affected by search/page. */}
-            <TableRow>
-              <TableCell sx={{ fontWeight: 700, color: md.onSurface, borderTop: `2px solid ${md.outlineVariant}` }}>
-                {t('users.nodeusage.total', { defaultValue: '合计' })}
-              </TableCell>
-              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{charged ? chargedCell(grand.chargedLifetime, grand.lifetime) : cell(grand.lifetime, grand.lifeUp, grand.lifeDown)}</TableCell>
-              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{charged ? chargedCell(grand.chargedPeriod, grand.period) : cell(grand.period, grand.periodUp, grand.periodDown)}</TableCell>
-              <TableCell align="right" sx={{ borderTop: `2px solid ${md.outlineVariant}` }}>{cell(grand.today, grand.todayUp, grand.todayDown)}</TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        component="div"
-        count={filtered.length}
-        page={page}
-        onPageChange={(_, p) => setPage(p)}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={e => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0) }}
-        rowsPerPageOptions={[10, 25, 50]}
+        <UsageBasisToggle value={basis} onChange={setBasis} />
+      </div>
+      <FilterBar
+        aria-label={t('users.nodeusage.title')}
+        search={{ value: keyword, onChange: v => { setKeyword(v); setPage(1) }, placeholder: t('users.nodeusage.search') }}
       />
-    </Box>
-  );
+      {charged && <p className="text-xs text-muted-foreground">{t('users.nodeusage.charged_hint')}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t('users.nodeusage.node')}</TableHead>
+            <SortHead active={orderBy === 'lifetime'} dir={orderDir} onSort={() => setSort('lifetime')}>{t('users.nodeusage.lifetime')}</SortHead>
+            <SortHead active={orderBy === 'period'} dir={orderDir} onSort={() => setSort('period')}>{t('users.nodeusage.period')}</SortHead>
+            <SortHead active={orderBy === 'today'} dir={orderDir} onSort={() => setSort('today')}>{charged ? t('users.nodeusage.today_raw') : t('users.nodeusage.today')}</SortHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {paged.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4} className="text-muted-foreground">{t('users.nodeusage.no_match')}</TableCell>
+            </TableRow>
+          )}
+          {paged.map((r, i) => {
+            const name = r.display_name || r.client_email || `#${r.node_id}`
+            return (
+              <TableRow key={r.node_id || r.client_email || i}>
+                <TableCell className="max-w-56">
+                  <div className="flex items-center gap-1.5">
+                    <span className="min-w-0 truncate font-medium" title={name}>{name}</span>
+                    <FactorBadge milli={r.traffic_factor_milli} />
+                  </div>
+                  {r.region && <div className="truncate text-xs text-muted-foreground" title={r.region}>{r.region}</div>}
+                </TableCell>
+                {metricCells({
+                  life: r.charged_lifetime_bytes, lifeRaw: r.lifetime_total_bytes, lifeUp: r.lifetime_up_bytes, lifeDown: r.lifetime_down_bytes,
+                  per: r.charged_period_bytes, perRaw: r.period_total_bytes, perUp: r.period_up_bytes, perDown: r.period_down_bytes,
+                  today: r.today_total_bytes, todayUp: r.today_up_bytes, todayDown: r.today_down_bytes,
+                })}
+              </TableRow>
+            )
+          })}
+        </TableBody>
+        <TableFooter>
+          {/* Always the grand total of EVERY node — not affected by search or page. */}
+          <TableRow>
+            <TableCell className="font-semibold">{t('users.nodeusage.total')}</TableCell>
+            {metricCells({
+              life: grand.chargedLifetime, lifeRaw: grand.lifetime, lifeUp: grand.lifeUp, lifeDown: grand.lifeDown,
+              per: grand.chargedPeriod, perRaw: grand.period, perUp: grand.periodUp, perDown: grand.periodDown,
+              today: grand.today, todayUp: grand.todayUp, todayDown: grand.todayDown,
+            })}
+          </TableRow>
+        </TableFooter>
+      </Table>
+      <DataTablePagination
+        page={page} pageSize={pageSize} total={filtered.length} shown={paged.length}
+        pageSizeOptions={PAGE_SIZES}
+        onPageChange={setPage} onPageSizeChange={s => { setPageSize(s); setPage(1) }}
+      />
+    </div>
+  )
 }

@@ -1,28 +1,22 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
+import i18n from '@/test/initI18n'
+import { flatten, type Nested } from '@/i18n/options'
+import enAdmin from '@/locales/en-US/admin.json'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { UserActivity } from './UserActivity'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-    i18n: { language: 'en-US' },
-  }),
-}))
+// The real English strings, so an assertion reads what a person reads and a missing key shows as a raw key.
+i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 function mount(userId = 2) {
   render(
-    <ThemeProvider theme={theme}>
-      <UserActivity userId={userId} />
-    </ThemeProvider>,
+    <UserActivity userId={userId} />,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -38,16 +32,16 @@ describe('UserActivity', () => {
     api.get.mockRejectedValue(new Error('boom'))
     mount()
 
-    await waitFor(() => expect(screen.getByText('暂时无法获取登录记录')).toBeTruthy())
-    expect(screen.queryByText('暂无登录记录')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Sign-in records are temporarily unavailable')).toBeTruthy())
+    expect(screen.queryByText('No sign-in records')).toBeNull()
   })
 
   it('reports an empty history as empty when the request succeeds', async () => {
     api.get.mockResolvedValue({ data: { items: [], total: 0 } })
     mount()
 
-    await waitFor(() => expect(screen.getByText('暂无登录记录')).toBeTruthy())
-    expect(screen.queryByText('暂时无法获取登录记录')).toBeNull()
+    await waitFor(() => expect(screen.getByText('No sign-in records')).toBeTruthy())
+    expect(screen.queryByText('Sign-in records are temporarily unavailable')).toBeNull()
   })
 
   it('renders the sign-ins it receives', async () => {
@@ -59,7 +53,7 @@ describe('UserActivity', () => {
     })
     mount()
 
-    await waitFor(() => expect(screen.getByText('成功')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('OK')).toBeTruthy())
     expect(screen.getByText(/10\.0\.0\.1/)).toBeTruthy()
   })
 })
