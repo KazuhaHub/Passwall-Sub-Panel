@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { UISettings } from '@/api/settings'
-import { api, installReads, mountAdmin } from './adminTestHarness'
+import { api, mountAdmin } from './adminTestHarness'
 import { echoPut, group, reads, uiSettings } from './settings/testSupport'
 import SettingsView from './SettingsView'
 

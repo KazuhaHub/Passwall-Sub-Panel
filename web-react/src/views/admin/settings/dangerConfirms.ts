@@ -13,7 +13,7 @@ export type LoginDraft = Pick<UISettings,
 export type SsoState = 'on' | 'off' | 'unknown'
 
 const ask = (t: T, name: string, vars?: Record<string, unknown>, extra = ''): ConfirmOpts => ({
-  title: t(`settings.danger.${name}.title`),
+  title: t(`settings.danger.${name}.title`, vars),
   message: t(`settings.danger.${name}.message`, vars) + extra,
   confirmText: t('settings.danger.confirm'),
   initialFocus: 'cancel',

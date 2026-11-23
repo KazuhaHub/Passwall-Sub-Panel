@@ -48,8 +48,11 @@ function useJump(entry: SearchEntry | null, done: () => void) {
       const target = own ?? (tries >= 8 ? (entry.via && document.getElementById(entry.via)) || document.getElementById(sectionDomId(entry.section)) : null)
       if (!target && tries < 40) return
       clearInterval(timer)
-      target?.scrollIntoView({ block: 'center' })
-      if (target && /^(input|select|textarea|button)$/i.test(target.tagName) || target?.getAttribute('role') === 'switch') target?.focus()
+      target?.scrollIntoView?.({ block: 'center' })
+      // A switch keeps its id on a hidden input beside the control that takes focus: look for the control inside the field.
+      const scope = target?.closest('[data-slot="field"]') ?? target
+      const control = scope?.querySelector<HTMLElement>('[role="switch"], input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, button')
+      if (control) control.focus()
       done()
     }, 50)
     return () => clearInterval(timer)

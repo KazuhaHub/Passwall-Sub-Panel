@@ -107,7 +107,7 @@ function SecurityForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => vo
             {provider !== 'image' && (
               <>
                 <TextRow name="captcha_site_key" label={t('settings.general.captcha_site_key')} value={v.captcha_site_key} onChange={k => patch({ captcha_site_key: k })} />
-                <Field label={t('settings.general.captcha_secret_key')} hint={saved.has_captcha_secret_key ? t('settings.geo.token_set') : undefined}>
+                <Field label={t('settings.general.captcha_secret_key')} hint={saved.has_captcha_secret_key ? t('settings.secret_hint') : undefined}>
                   <SecretField id={settingId('captcha_secret_key')} value={v.captcha_secret_key ?? ''} isSet={saved.has_captcha_secret_key}
                     onChange={k => patch({ captcha_secret_key: k })} />
                 </Field>

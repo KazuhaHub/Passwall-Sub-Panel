@@ -107,7 +107,7 @@ export function GeoIpGroup({ form }: { form: UiSection<KeysOf<'general'>> }) {
       </Pair>
 
       {source !== 'dbip' && (
-        <Field label={tokenLabel} hint={saved.has_geo_ip_update_token ? t('settings.geo.token_set') : undefined}>
+        <Field label={tokenLabel} hint={saved.has_geo_ip_update_token ? t('settings.secret_hint') : undefined}>
           <SecretField id={settingId('geo_ip_update_token')} value={v.geo_ip_update_token ?? ''} isSet={saved.has_geo_ip_update_token}
             onChange={tok => patch({ geo_ip_update_token: tok })} />
         </Field>
