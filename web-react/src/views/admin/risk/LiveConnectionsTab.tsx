@@ -16,12 +16,12 @@ import {
 } from '@/api/riskCenter'
 import { useLiveConnections, useRefreshLiveConnections } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import { useSiteStore } from '@/stores/site'
 import { formatDualTz } from '@/utils/datetime'
 import { agoText } from '@/utils/riskCenter'
 import LiveConnectionList from './LiveConnectionList'
 import { liveSearch, parseLiveParams } from './riskParams'
-import { UserPicker } from './UserPicker'
 import { useRiskT } from './useRiskT'
 
 // A server deleted since the snapshot is named by its id.
@@ -172,8 +172,8 @@ export default function LiveConnectionsTab({ onOpenUser }: { onOpenUser?: (userI
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <UserPicker value={params.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
-          aria-label={t('admin:risk_center.live.filter_user')} placeholder={t('admin:risk_center.live.filter_user')} />
+        <UserAutocomplete value={params.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
+          label={t('admin:risk_center.live.filter_user')} />
         <div className="w-full sm:w-44">
           <NativeSelect aria-label={t('admin:risk_center.live.filter_panel')} value={params.panel_id ? String(params.panel_id) : ''}
             onChange={e => update({ panel_id: e.target.value === '' ? undefined : Number(e.target.value) })}>

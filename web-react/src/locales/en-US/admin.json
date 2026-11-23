@@ -1414,7 +1414,6 @@
     "tab_policy": "Policy",
     "open_user": "Open user",
     "pick_user": "Pick a user",
-    "picker_empty": "No matching users",
     "help": {
       "label": "About this tab",
       "queue": "One row per account that needs a look, most urgent first: flagged and auto-suspended, flagged, auto-suspended, suspect, then latest change. The bell counts only accounts that need action now (flagged or auto-suspended). Dismissing removes an account until a new or more severe signal appears; trusting exempts it from location checks for good. Observe-only signals never change an account; the panel only suspends on its own when automatic suspension is on.",

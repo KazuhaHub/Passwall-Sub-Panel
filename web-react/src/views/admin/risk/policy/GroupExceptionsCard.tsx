@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { NativeSelect } from '@/components/ui/native-select'
 import { useRiskT } from '../useRiskT'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
-import { loadScopeState, saveScopeState, SCOPE_KEYS, type ScopeState } from '@/components/scope/scopeOverrides'
+import { loadScopeState, saveScopeState, scopeChanged, SCOPE_KEYS, type ScopeState } from '@/components/scope/scopeOverrides'
 
 const P = 'admin:risk_center.policy.'
 /** The group editor's categories this page owns: the detectors'. */
@@ -61,7 +61,10 @@ export function useGroupExceptions(groupId: number | null) {
   // state until the new one arrives, and must not be shown or saved as it.
   const state = loaded && loaded.groupId === groupId ? loaded : null
   const error = failed && failed.groupId === groupId && !state ? failed.error : null
-  const dirty = !!state && SCOPE_KEYS.some(k => !sameEdit(state.current.edit[k.key], state.initial.edit[k.key]))
+  // The editor's own diff — the one saveScopeState writes from — so "unsaved" and what a save sends cannot
+  // disagree: a row switched to "set here" that has not been given a value yet (an unset enum) writes
+  // nothing and does not make the card dirty.
+  const dirty = !!state && scopeChanged(state.current)
 
   const edit = (next: ScopeState) => setLoaded(prev => (prev ? { ...prev, current: next } : prev))
 

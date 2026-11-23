@@ -20,6 +20,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { IconFilter, IconSearch } from '@/lib/icons'
 import { useFlagRecords } from '@/query/riskCenter'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
@@ -31,7 +32,6 @@ import { GeoDistance, GeoPlaces } from './evidence/GeoEvidence'
 import { RiskKindEvidence } from './evidence/RiskEvidence'
 import { paramRows } from './recordValues'
 import { parseRecordsParams, RECORDS_PAGE_SIZES, recordsSearch, type RecordsFilters } from './riskParams'
-import { UserPicker } from './UserPicker'
 import { useRiskT } from './useRiskT'
 
 /**
@@ -148,9 +148,8 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
 
   const toolbar = (
     <div className="flex flex-wrap items-end gap-2">
-      <Field label={t('admin:risk_center.flags.col_user')}>
-        <UserPicker value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })} />
-      </Field>
+      <UserAutocomplete value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
+        label={t('admin:risk_center.flags.col_user')} />
       <Field label={t('admin:risk_center.flags.filter_source')} className="w-44">
         <NativeSelect value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
           <option value="">{t('admin:risk_center.live.opt_all')}</option>

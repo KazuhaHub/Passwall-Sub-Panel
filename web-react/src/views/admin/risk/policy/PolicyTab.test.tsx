@@ -659,10 +659,25 @@ describe('PolicyTab, group exceptions', () => {
     mount('/admin/risk?tab=policy&group=2')
     await loaded()
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
-    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
     fireEvent.click(saveButton())
     await waitFor(() => expect(snack).toHaveBeenCalledWith(L('risk_center.policy.group_saved'), 'success'))
+    expect(api.put).toHaveBeenCalledWith('/admin/groups/2/scope-settings',
+      { type: 'geo_anomaly', name: 'max_cities', value: '4' })
     expect(policyPuts()).toEqual([])
+  })
+
+  // An unset enum switched to "set here" writes nothing until its value is edited: the card is not dirty,
+  // there is no save bar, and leaving the group asks nothing.
+  it('a "set here" that wrote nothing does not mark the group dirty', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('判定粒度')).toBeTruthy())
+    toggleOverride(groupRow('判定粒度'))
+    expect(barGone()).toBe(true)
+    expect(screen.queryByText(L('risk_center.policy.group_dirty'))).toBeNull()
   })
 
   it('names both parts while both are unsaved', async () => {

@@ -2,6 +2,7 @@ import { Navigate, useLocation, useSearchParams } from 'react-router'
 import { HelpTip } from '@/components/common/HelpTip'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import { useCan } from '@/utils/permissions'
 import RiskUserDrawer from './drawer/RiskUserDrawer'
 import { useDrawerParam } from './drawerParam'
@@ -10,7 +11,6 @@ import PolicyTab from './policy/PolicyTab'
 import QueueTab from './queue/QueueTab'
 import RecordsTab from './RecordsTab'
 import { legacyRedirect, parseRiskTab, type RiskTab } from './riskParams'
-import { UserPicker } from './UserPicker'
 import { useRiskT } from './useRiskT'
 
 const HELP_KEY: Record<RiskTab, string> = {
@@ -78,8 +78,8 @@ export default function RiskCenterView() {
       <PageHeader title={t('admin:risk_center.title')} description={t('admin:risk_center.subtitle')}
         // Any account, from any tab: the picker opens the drawer, whether or not the account is on the
         // list in front of the admin.
-        secondary={<UserPicker value={null} onChange={id => { if (id) drawer.open(id) }}
-          aria-label={t('admin:risk_center.pick_user')} placeholder={t('admin:risk_center.pick_user')} />} />
+        secondary={<UserAutocomplete value={null} onChange={id => { if (id) drawer.open(id) }}
+          label={t('admin:risk_center.pick_user')} />} />
       <Tabs value={tab} onValueChange={v => setTab(v as RiskTab)} className="gap-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 overflow-x-auto">
