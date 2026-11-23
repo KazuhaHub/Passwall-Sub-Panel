@@ -19,7 +19,7 @@ export interface DetectorStateChipProps {
  * only a suspect one a warning; a clean verdict is the quiet dot; every state that is not a verdict
  * (idle, unknown, not computed, switched off) is neutral, never green, and exempt is the notice tone.
  */
-const TONE: Record<AccessToneKind, Tone> = {
+const TONE: Partial<Record<AccessToneKind, Tone>> = {
   failing: 'danger', attention: 'warning', ok: 'success', exempt: 'info', paused: 'neutral', none: 'neutral', unknown: 'neutral',
 }
 
@@ -35,7 +35,7 @@ export function DetectorStateChip({ state, code, complete, tooltip }: DetectorSt
   const partial = state === 'clean' && complete === false
   const badge = (
     <span data-testid="detector-state" data-state={partial ? 'clean_partial' : state} className="inline-flex">
-      <StatusBadge tone={TONE[stateTone(state, complete)]} label={t(`admin:${stateLabelKey(state, code)}`)} />
+      <StatusBadge tone={TONE[stateTone(state, complete)] ?? 'neutral'} label={t(`admin:${stateLabelKey(state, code)}`)} />
     </span>
   )
   if (!tooltip) return badge

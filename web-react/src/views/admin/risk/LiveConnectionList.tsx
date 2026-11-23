@@ -1,19 +1,17 @@
 import { useState } from 'react'
-import {
-  Box, Chip, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography, useTheme,
-} from '@mui/material'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
-import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import { useTranslation } from 'react-i18next'
 
 import type { ConnDevice, ConnRegion, LiveConnection, LiveUser } from '@/api/riskCenter'
+import { IconButton } from '@/components/common/IconButton'
+import { InfoTip } from '@/components/common/HelpTip'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { IconChevronDown, IconChevronUp, IconSearch, IconWarning } from '@/lib/icons'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import { formatRegion } from '@/utils/geo'
-import { exclusionLabelKey, judgementColor, userLabel } from '@/utils/riskCenter'
+import { exclusionLabelKey, userLabel } from '@/utils/riskCenter'
+import { useRiskT } from './useRiskT'
 
 // Expand button, user, connections, notes.
 const COLS = 4
@@ -31,22 +29,20 @@ export interface LiveConnectionListProps {
 }
 
 /**
- * The live connections, one row per account, each expanding to a table of its
- * connections: address and source, panel and node, place, judgement, the
- * panel scan that still saw it connected, and the devices inferred behind
- * it.
+ * The live connections, one row per account, each expanding to a table of its connections: address and
+ * source, server and node, place, judgement, the scan that still saw it connected, and the devices
+ * inferred behind it. A table of its own rather than DataTable because every row carries a second,
+ * differently-shaped table under it.
  *
- * The Live tab's list. The drawer's 连接 tab draws the same connections with
- * the same pieces (AddressCell, JudgementChip, regionText), so the two cannot
- * describe one connection differently.
+ * The Live tab's list. The drawer's 连接 tab draws the same connections with the same pieces
+ * (AddressCell, JudgementChip, regionText), so the two cannot describe one connection differently.
  */
 export default function LiveConnectionList({
   users, deviceWindowHours, devicesUnavailable = false, onOpenUser, initiallyOpen = false,
 }: LiveConnectionListProps) {
-  const { t } = useTranslation(['admin'])
-  // Toggled ids: the ones that differ from the initial state. A new page of
-  // accounts then opens (or stays closed) as the list says, without an
-  // effect resetting anything.
+  const { t } = useRiskT()
+  // Toggled ids: the ones that differ from the initial state. A new page of accounts then opens (or
+  // stays closed) as the list says, without an effect resetting anything.
   const [toggled, setToggled] = useState<ReadonlySet<number>>(() => new Set())
   const isOpen = (id: number) => initiallyOpen !== toggled.has(id)
   const toggle = (id: number) => setToggled(prev => {
@@ -57,16 +53,16 @@ export default function LiveConnectionList({
   })
 
   return (
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
+    <div className="overflow-x-auto rounded-lg border">
+      <Table>
+        <TableHeader>
           <TableRow>
-            <TableCell sx={{ width: 48 }} />
-            <TableCell>{t('admin:risk_center.live.col_user')}</TableCell>
-            <TableCell align="right">{t('admin:risk_center.live.col_connections')}</TableCell>
-            <TableCell />
+            <TableHead className="w-10"><span className="sr-only">{t('admin:risk_center.live.show_connections')}</span></TableHead>
+            <TableHead>{t('admin:risk_center.live.col_user')}</TableHead>
+            <TableHead className="text-right">{t('admin:risk_center.live.col_connections')}</TableHead>
+            <TableHead />
           </TableRow>
-        </TableHead>
+        </TableHeader>
         <TableBody>
           {users.map(u => (
             <UserRow key={u.user_id} user={u} open={isOpen(u.user_id)} onToggle={() => toggle(u.user_id)}
@@ -74,7 +70,7 @@ export default function LiveConnectionList({
           ))}
         </TableBody>
       </Table>
-    </TableContainer>
+    </div>
   )
 }
 
@@ -86,53 +82,50 @@ function UserRow({ user, open, onToggle, onOpenUser, deviceWindowHours, devicesU
   deviceWindowHours: number
   devicesUnavailable: boolean
 }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   return (
     <>
-      <TableRow hover>
+      <TableRow>
         <TableCell>
-          <IconButton size="small" onClick={onToggle}
-            aria-label={open ? t('admin:risk_center.live.hide_connections') : t('admin:risk_center.live.show_connections')}>
-            {open ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+          <IconButton size="icon-xs" aria-expanded={open}
+            label={open ? t('admin:risk_center.live.hide_connections') : t('admin:risk_center.live.show_connections')} onClick={onToggle}>
+            {open ? <IconChevronUp /> : <IconChevronDown />}
           </IconButton>
         </TableCell>
         <TableCell>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <div className="flex items-center gap-1.5">
             <span>{userLabel(user)}</span>
-            {user.display_name && user.upn && (
-              <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{user.display_name}</Typography>
-            )}
+            {user.display_name && user.upn && <span className="text-xs text-muted-foreground">{user.display_name}</span>}
             {onOpenUser && (
-              <Tooltip title={t('admin:risk_center.open_user')}>
-                <IconButton size="small" onClick={() => onOpenUser(user.user_id)}>
-                  <PersonSearchOutlinedIcon fontSize="inherit" />
-                </IconButton>
-              </Tooltip>
+              <IconButton label={t('admin:risk_center.open_user')} size="icon-xs" onClick={() => onOpenUser(user.user_id)}>
+                <IconSearch />
+              </IconButton>
             )}
-          </Box>
+          </div>
         </TableCell>
-        <TableCell align="right">
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+        <TableCell className="text-right tabular-nums">
+          <span className="inline-flex items-center gap-1">
             <span>{user.connections.length}</span>
-            {/* A list taken while a panel holding this account was unread is
-                a FLOOR; shown as a plain count it would read as the whole. */}
+            {/* A list taken while a server holding this account was unread is a FLOOR; shown as a plain
+                count it would read as the whole. */}
             {user.unread_panels > 0 && (
-              <Tooltip title={t('admin:risk_center.live.incomplete')}>
-                <WarningAmberIcon fontSize="inherit" color="warning" />
+              <Tooltip>
+                <TooltipTrigger render={<span role="img" aria-label={t('admin:risk_center.live.incomplete')} className="text-warning-ink" />}>
+                  <IconWarning className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent>{t('admin:risk_center.live.incomplete')}</TooltipContent>
               </Tooltip>
             )}
-          </Box>
+          </span>
         </TableCell>
-        <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+        <TableCell className="text-xs text-muted-foreground">
           {user.stale_addresses > 0 && t('admin:risk_center.live.stale_addresses', { count: user.stale_addresses })}
         </TableCell>
       </TableRow>
       {open && (
-        <TableRow>
-          <TableCell colSpan={COLS} sx={{ bgcolor: md.surfaceContainerLow, py: 1 }}>
-            <ConnectionTable conns={user.connections} deviceWindowHours={deviceWindowHours}
-              devicesUnavailable={devicesUnavailable} />
+        <TableRow className="bg-muted/30 hover:bg-muted/30">
+          <TableCell colSpan={COLS}>
+            <ConnectionTable conns={user.connections} deviceWindowHours={deviceWindowHours} devicesUnavailable={devicesUnavailable} />
           </TableCell>
         </TableRow>
       )}
@@ -145,48 +138,42 @@ function ConnectionTable({ conns, deviceWindowHours, devicesUnavailable }: {
   deviceWindowHours: number
   devicesUnavailable: boolean
 }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   return (
-    <Table size="small">
-      <TableHead>
+    <Table>
+      <TableHeader>
         <TableRow>
-          <TableCell>{t('admin:risk_center.live.col_ip')}</TableCell>
-          <TableCell>{t('admin:risk_center.live.col_panel')}</TableCell>
-          <TableCell>{t('admin:risk_center.live.col_region')}</TableCell>
-          <TableCell>{t('admin:risk_center.live.col_status')}</TableCell>
-          <TableCell>
-            <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25, whiteSpace: 'nowrap' }}>
+          <TableHead>{t('admin:risk_center.live.col_ip')}</TableHead>
+          <TableHead>{t('admin:risk_center.live.col_panel')}</TableHead>
+          <TableHead>{t('admin:risk_center.live.col_region')}</TableHead>
+          <TableHead>{t('admin:risk_center.live.col_status')}</TableHead>
+          <TableHead>
+            <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
               {t('admin:risk_center.live.col_seen')}
-              <Tooltip title={t('admin:risk_center.live.still_connected_hint')}>
-                <IconButton size="small" sx={{ p: 0.25 }}><HelpOutlineIcon fontSize="inherit" /></IconButton>
-              </Tooltip>
-            </Box>
-          </TableCell>
-          <TableCell>{t('admin:risk_center.live.col_device')}</TableCell>
+              <InfoTip text={t('admin:risk_center.live.still_connected_hint')} />
+            </span>
+          </TableHead>
+          <TableHead>{t('admin:risk_center.live.col_device')}</TableHead>
         </TableRow>
-      </TableHead>
+      </TableHeader>
       <TableBody>
         {conns.map(c => (
           <TableRow key={`${c.panel_id}/${c.node}/${c.source_key}`}>
             <TableCell><AddressCell ip={c.ip} sourceKey={c.source_key} /></TableCell>
             <TableCell><PanelCell name={c.panel_name} id={c.panel_id} node={c.node} /></TableCell>
-            <TableCell sx={{ fontSize: 12 }}>{regionText(c.region)}</TableCell>
+            <TableCell className="text-xs">{regionText(c.region)}</TableCell>
             <TableCell><JudgementChip exclusion={c.exclusion} /></TableCell>
-            <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-              {/* Not when this address was last used. Xray keeps an address
-                  while any connection from it is open, and 3X-UI's scan
-                  stamps each one it still lists with the scan's own time,
-                  on the panel's clock — one time for all of an account's
-                  addresses. Printed in the panel's timezone like every
-                  other time. */}
+            <TableCell className="text-xs whitespace-nowrap">
+              {/* Not when this address was last used. Xray keeps an address while any connection from it
+                  is open, and 3X-UI's scan stamps each one it still lists with the scan's own time, on
+                  the server's clock — one time for all of an account's addresses. Printed in the panel's
+                  timezone like every other time. */}
               {c.seen_at > 0
                 ? t('admin:risk_center.live.still_connected', { time: formatMsDualTz(c.seen_at * 1000, panelTz) })
                 : t('admin:risk_center.live.seen_none')}
             </TableCell>
-            <TableCell>
-              <DeviceCell conn={c} hours={deviceWindowHours} unavailable={devicesUnavailable} />
-            </TableCell>
+            <TableCell><DeviceCell conn={c} hours={deviceWindowHours} unavailable={devicesUnavailable} /></TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -205,71 +192,62 @@ export function regionText(r: ConnRegion | null): string {
  * what was judged.
  */
 export function AddressCell({ ip, sourceKey }: { ip: string; sourceKey: string }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   return (
     <>
-      <Box sx={{ fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>{ip || sourceKey}</Box>
+      <div className="font-mono text-[13px] break-all">{ip || sourceKey}</div>
       {ip && sourceKey && sourceKey !== ip && (
-        <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, wordBreak: 'break-all' }}>
-          {t('admin:risk_center.live.source_key', { key: sourceKey })}
-        </Box>
+        <div className="text-[11px] break-all text-muted-foreground">{t('admin:risk_center.live.source_key', { key: sourceKey })}</div>
       )}
     </>
   )
 }
 
-/** The panel by name (by id once deleted), and the raw 3X-UI node id under
- *  it: PSP has no name for a node, and a guessed one would mislead. */
+/** The server by name (by id once deleted), and the raw 3X-UI node id under it: PSP has no name for a
+ *  node, and a guessed one would mislead. */
 export function PanelCell({ name, id, node }: { name: string; id: number; node: string }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   return (
     <>
-      <Box sx={{ fontSize: 13 }}>{name || `#${id}`}</Box>
+      <div className="text-[13px]">{name || `#${id}`}</div>
       {node && (
-        <Tooltip title={t('admin:risk_center.live.node_hint')}>
-          <Box sx={{ fontFamily: 'monospace', fontSize: 11, color: md.onSurfaceVariant, wordBreak: 'break-all' }}>{node}</Box>
+        <Tooltip>
+          <TooltipTrigger render={<div className="font-mono text-[11px] break-all text-muted-foreground" />}>{node}</TooltipTrigger>
+          <TooltipContent>{t('admin:risk_center.live.node_hint')}</TooltipContent>
         </Tooltip>
       )}
     </>
   )
 }
 
-/** Judged, or the reason it was set aside. Never in the success colour
- *  (judgementColor); a reason this build does not know prints raw. */
+/** Judged, or the reason it was set aside. Never drawn as a good state: an excluded source was not judged
+ *  at all, and a judged one is only counted, not cleared; a reason this build does not know prints raw. */
 export function JudgementChip({ exclusion }: { exclusion: string }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const key = exclusionLabelKey(exclusion)
   const label = exclusion === '' ? t('admin:risk_center.live.kept') : key ? t(key) : exclusion
-  return (
-    <Chip size="small" color={judgementColor(exclusion)} variant={exclusion === '' ? 'filled' : 'outlined'}
-      label={label} />
-  )
+  return <Badge variant={exclusion === '' ? 'secondary' : 'outline'}>{label}</Badge>
 }
 
 function DeviceCell({ conn, hours, unavailable }: { conn: LiveConnection; hours: number; unavailable: boolean }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
-  const none = (text: string) => <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{text}</Typography>
-  // Through PSP's own relay every account's fetches share one address:
-  // nothing about the device behind it can be told, and "not inferable"
-  // alone would hide why.
+  const { t } = useRiskT()
+  const none = (text: string) => <span className="text-xs text-muted-foreground">{text}</span>
+  // Through PSP's own relay every account's fetches share one address: nothing about the device behind
+  // it can be told, and "not inferable" alone would hide why.
   if (conn.exclusion === 'infra') return none(t('admin:risk_center.live.device_via_relay'))
   if (unavailable) return none('—')
   if (conn.devices.length === 0) return none(t('admin:risk_center.live.device_none'))
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+    <div className="flex flex-col gap-1">
       {conn.devices.map((d, i) => <DeviceLine key={`${d.device_id4}/${d.ua}/${i}`} device={d} hours={hours} />)}
-    </Box>
+    </div>
   )
 }
 
-/** One inferred device, labelled "inferred" every time: the connection
- *  carried no device, and a device shown bare would read as a fact. */
+/** One inferred device, labelled "inferred" every time: the connection carried no device, and a device
+ *  shown bare would read as a fact. */
 function DeviceLine({ device, hours }: { device: ConnDevice; hours: number }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const name = device.label || (device.device_id4 ? `#${device.device_id4}` : device.client_type || device.ua || '—')
   const detail = [
@@ -280,14 +258,13 @@ function DeviceLine({ device, hours }: { device: ConnDevice; hours: number }) {
     device.ua,
   ].filter(Boolean).join('\n')
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-      <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{detail}</Box>}>
-        <Chip size="small" variant="outlined" label={name} />
+    <div className="flex flex-wrap items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger render={<Badge variant="outline" />}>{name}</TooltipTrigger>
+        <TooltipContent className="whitespace-pre-line">{detail}</TooltipContent>
       </Tooltip>
-      {device.label && device.device_id4 && (
-        <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11, color: md.onSurfaceVariant }}>{`#${device.device_id4}`}</Box>
-      )}
-      <Chip size="small" variant="outlined" color="info" label={t('admin:risk_center.live.device_inferred')} />
-    </Box>
+      {device.label && device.device_id4 && <span className="font-mono text-[11px] text-muted-foreground">{`#${device.device_id4}`}</span>}
+      <Badge variant="secondary">{t('admin:risk_center.live.device_inferred')}</Badge>
+    </div>
   )
 }

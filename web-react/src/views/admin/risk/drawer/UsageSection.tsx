@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { Alert, Box, Button, MenuItem, TextField, ToggleButton, ToggleButtonGroup, Typography, useTheme } from '@mui/material'
 import { useNavigate } from 'react-router'
-import { useTranslation } from 'react-i18next'
 
 import type { DestUsage, DestUsageNode } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import HelpTip from '@/components/HelpTip'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { HelpTip } from '@/components/common/HelpTip'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import { useDestSettings, useDestUserUsage } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
+import { useRiskT } from '../useRiskT'
 
 const D = 'admin:access_control.drawer.'
 
@@ -30,8 +33,7 @@ export default function UsageSection({ userId, available, nodes }: {
   available: boolean | null
   nodes: DestUsageNode[] | null
 }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const navigate = useNavigate()
   const settings = useDestSettings(scope)
@@ -56,86 +58,82 @@ export default function UsageSection({ userId, available, nodes }: {
   const answer: DestUsage | undefined = read.data
 
   const head = (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography component="h3" sx={{ fontSize: 14, fontWeight: 600 }}>{t(`${D}usage_title`)}</Typography>
-        <HelpTip textKey={`admin:access_control.drawer.usage_help`} labelKey="admin:access_control.drawer.usage_help_label" />
-      </Box>
-    </Box>
+    <div className="flex items-center gap-1">
+      <h3 className="text-sm font-medium">{t(`${D}usage_title`)}</h3>
+      <HelpTip text={t(`${D}usage_help`)} label={t(`${D}usage_help_label`)} />
+    </div>
   )
 
   if (available === false) {
     return (
-      <Box data-testid="access-usage" sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <div data-testid="access-usage" className="mt-2 flex flex-col gap-2">
         {head}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
-          <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{t(`${D}usage_not_recorded`)}</Typography>
-          <Button size="small" onClick={() => void navigate('/admin/access-control?sheet=nodes')}>{t(`${D}usage_nodes`)}</Button>
-        </Box>
-      </Box>
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-3">
+          <p className="min-w-0 flex-1 text-sm">{t(`${D}usage_not_recorded`)}</p>
+          <Button variant="outline" size="sm" onClick={() => void navigate('/admin/access-control?sheet=nodes')}>{t(`${D}usage_nodes`)}</Button>
+        </div>
+      </div>
     )
   }
 
   return (
-    <Box data-testid="access-usage" data-user={userId} sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <div data-testid="access-usage" data-user={userId} className="mt-2 flex flex-col gap-2">
       {head}
-      <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}usage_audit`)}</Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <ToggleButtonGroup exclusive size="small" value={range} aria-label={t(`${D}usage_range_label`)}
-          onChange={(_, v: string | null) => { if (v) { setRange(v); if (asked) void run(v, panelId) } }}>
-          {ranges.map(r => (
-            <ToggleButton key={r} value={r} disabled={read.isPending}>{r === '24h' ? t(`${D}usage_range_24h`) : t(`${D}usage_range_days`, { count: parseInt(r, 10) })}</ToggleButton>
-          ))}
-        </ToggleButtonGroup>
+      <p className="text-sm text-muted-foreground">{t(`${D}usage_audit`)}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl value={range} aria-label={t(`${D}usage_range_label`)} disabled={read.isPending}
+          options={ranges.map(r => ({ value: r, label: r === '24h' ? t(`${D}usage_range_24h`) : t(`${D}usage_range_days`, { count: parseInt(r, 10) }) }))}
+          onChange={v => { setRange(v); if (asked) void run(v, panelId) }} />
         {(nodes?.length ?? 0) > 1 && (
-          <TextField select size="small" label={t(`${D}usage_node_label`)} value={panelId} sx={{ minWidth: 160 }} disabled={read.isPending}
-            onChange={e => { const p = Number(e.target.value); setPanelId(p); if (asked) void run(range, p) }}>
-            <MenuItem value={0}>{t(`${D}usage_node_all`)}</MenuItem>
-            {nodes!.map(n => <MenuItem key={n.panel_id} value={n.panel_id}>{n.name}</MenuItem>)}
-          </TextField>
+          <div className="w-44">
+            <NativeSelect aria-label={t(`${D}usage_node_label`)} value={panelId} disabled={read.isPending}
+              onChange={e => { const p = Number(e.target.value); setPanelId(p); if (asked) void run(range, p) }}>
+              <option value={0}>{t(`${D}usage_node_all`)}</option>
+              {nodes!.map(n => <option key={n.panel_id} value={n.panel_id}>{n.name}</option>)}
+            </NativeSelect>
+          </div>
         )}
-        <AsyncButton size="small" variant={asked ? 'text' : 'outlined'} onClick={() => run(range, panelId)}>{t(`${D}usage_view`)}</AsyncButton>
-      </Box>
+        <AsyncButton size="sm" variant={asked ? 'ghost' : 'outline'} onClick={() => run(range, panelId)}>{t(`${D}usage_view`)}</AsyncButton>
+      </div>
       {read.isError && (
-        <Alert severity="error" action={<Button color="inherit" size="small" disabled={read.isPending} onClick={() => void run(range, panelId)}>{t(`${D}retry`)}</Button>}>
-          {t(`${D}usage_load_failed`)}
+        <Alert variant="destructive">
+          <AlertDescription>{t(`${D}usage_load_failed`)}</AlertDescription>
+          <AlertAction><Button variant="outline" size="sm" disabled={read.isPending} onClick={() => void run(range, panelId)}>{t(`${D}retry`)}</Button></AlertAction>
         </Alert>
       )}
       {answer && !read.isError && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        <div className="flex flex-col gap-1.5">
           {answer.effective_days < requestedDays && (
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}usage_window`, { days: answer.effective_days })}</Typography>
+            <p className="text-sm text-muted-foreground">{t(`${D}usage_window`, { days: answer.effective_days })}</p>
           )}
           {answer.total === 0
-            ? <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${D}usage_none`)}</Typography>
+            ? <p className="text-sm text-muted-foreground">{t(`${D}usage_none`)}</p>
             : (
               <>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', px: 1.25, fontSize: 12, color: md.onSurfaceVariant }}>
+                <div className="flex justify-between px-3 text-xs text-muted-foreground">
                   <span>{t(`${D}usage_col_site`)}</span><span>{t(`${D}usage_col_count`)}</span>
-                </Box>
+                </div>
                 {answer.items.map(it => (
-                  <Box key={it.site} data-testid="usage-site" sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, p: 1.25, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-                    <Box component="span" sx={{ minWidth: 0, overflowWrap: 'anywhere', fontSize: 14 }}>{it.site}</Box>
-                    <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{num.format(it.count)}</Box>
-                  </Box>
+                  <div key={it.site} data-testid="usage-site" className="flex justify-between gap-2 rounded-lg border p-3">
+                    <span className="min-w-0 text-sm [overflow-wrap:anywhere]">{it.site}</span>
+                    <span className="font-semibold tabular-nums">{num.format(it.count)}</span>
+                  </div>
                 ))}
                 {answer.others.sites > 0 && (
-                  <Box data-testid="usage-others" sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, px: 1.25, color: md.onSurfaceVariant, fontSize: 14 }}>
+                  <div data-testid="usage-others" className="flex justify-between gap-2 px-3 text-sm text-muted-foreground">
                     <span>{t(`${D}usage_others`, { sites: num.format(answer.others.sites) })}</span>
-                    <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>{num.format(answer.others.count)}</Box>
-                  </Box>
+                    <span className="tabular-nums">{num.format(answer.others.count)}</span>
+                  </div>
                 )}
-                <Typography variant="body2" sx={{ px: 1.25 }}>{t(`${D}usage_total`, { n: num.format(answer.total) })}</Typography>
+                <p className="px-3 text-sm">{t(`${D}usage_total`, { n: num.format(answer.total) })}</p>
               </>
             )}
           {answer.nodes.length > 0 && (
-            <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t(`${D}usage_from`, { nodes: answer.nodes.map(n => n.name).join(t(`${D}hits_list_separator`)) })}</Typography>
+            <p className="text-xs text-muted-foreground">{t(`${D}usage_from`, { nodes: answer.nodes.map(n => n.name).join(t(`${D}hits_list_separator`)) })}</p>
           )}
-          {answer.dropped_in_range > 0 && (
-            <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${D}usage_dropped`, { n: num.format(answer.dropped_in_range) })}</Typography>
-          )}
-        </Box>
+          {answer.dropped_in_range > 0 && <p className="text-sm">{t(`${D}usage_dropped`, { n: num.format(answer.dropped_in_range) })}</p>}
+        </div>
       )}
-    </Box>
+    </div>
   )
 }

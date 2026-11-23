@@ -1,9 +1,11 @@
 import { useState, type ReactNode } from 'react'
-import { Alert, Box, Chip, IconButton, Tooltip, Typography, useTheme } from '@mui/material'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import { useTranslation } from 'react-i18next'
+import { IconButton } from '@/components/common/IconButton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { IconChevronDown, IconChevronUp, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 
 import type { RiskReview, RiskUserSummary } from '@/api/riskCenter'
 import { RISK_KINDS, type RiskKind, type RiskSignal } from '@/api/riskSignals'
@@ -14,6 +16,7 @@ import { formatMsDualTz } from '@/utils/datetime'
 import { activeDbIsCountryOnly, reasonText, tierLabelKey } from '@/utils/geoAnomaly'
 import { riskCodeText } from '@/utils/riskSignals'
 import { flagSourceKey, listSeparator } from '@/utils/riskCenter'
+import { useRiskT } from '../useRiskT'
 import { DetectorStateChip } from '../evidence/DetectorStateChip'
 import { GeoDistance, GeoPlaces } from '../evidence/GeoEvidence'
 import { RiskKindEvidence } from '../evidence/RiskEvidence'
@@ -34,92 +37,79 @@ function DetectorRow({ title, chip, badges, reason, judgedAt, stale, evidence }:
   stale?: boolean
   evidence?: ReactNode
 }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const [open, setOpen] = useState(false)
+  const label = t(open ? 'admin:risk_signals.collapse' : 'admin:risk_signals.expand')
   return (
-    <Box data-testid="detector-row" component="section"
-      sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 3, p: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography data-testid="detector-title" component="h3" sx={{ fontSize: 14, fontWeight: 600, color: md.onSurface }}>
-          {title}
-        </Typography>
+    <section data-testid="detector-row" className="flex flex-col gap-1 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 data-testid="detector-title" className="text-sm font-medium">{title}</h3>
         {chip}
         {badges}
-        <Box sx={{ flex: 1 }} />
+        <span className="flex-1" />
         {evidence && (
-          <Tooltip title={t(open ? 'admin:risk_signals.collapse' : 'admin:risk_signals.expand')}>
-            <IconButton size="small" aria-expanded={open} onClick={() => setOpen(o => !o)}
-              aria-label={t(open ? 'admin:risk_signals.collapse' : 'admin:risk_signals.expand')}>
-              {open ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
+          <IconButton label={label} size="icon-sm" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+            {open ? <IconChevronUp /> : <IconChevronDown />}
+          </IconButton>
         )}
-      </Box>
-      {reason && <Typography sx={{ fontSize: 13, color: md.onSurface }}>{reason}</Typography>}
+      </div>
+      {reason && <p className="text-[13px]">{reason}</p>}
       {judgedAt ? (
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:risk_center.drawer.last_judged', { time: formatMsDualTz(judgedAt, panelTz) })}
-        </Typography>
+        <p className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.last_judged', { time: formatMsDualTz(judgedAt, panelTz) })}</p>
       ) : null}
-      {/* A verdict nobody re-judged within the freshness window is history:
-          shown, but counted neither on the queue nor by the bell. */}
-      {stale && (
-        <Typography sx={{ fontSize: 12, color: md.tertiary }}>{t('admin:risk_center.drawer.stale_verdict')}</Typography>
-      )}
-      {open && evidence && (
-        <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.75, fontSize: 13 }}>{evidence}</Box>
-      )}
-    </Box>
+      {/* A verdict nobody re-judged within the freshness window is history: shown, but counted neither on
+          the queue nor by the bell. */}
+      {stale && <StatusBadge tone="warning" label={t('admin:risk_center.drawer.stale_verdict')} className="mt-0.5" />}
+      {open && evidence && <div className="mt-1 flex flex-col gap-1.5 text-[13px]">{evidence}</div>}
+    </section>
   )
 }
 
 /** The geo verdict's evidence: where, how far apart, and how many sources
  *  it stood on — a floor when a panel could not be read. */
 function GeoEvidencePanel({ geo }: { geo: GeoRow }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const scope = useQueryScope()
   // Read only once the evidence is opened: it qualifies the places above.
   const { data: geoip } = useGeoIPStatus(scope)
   const ex = geo.evidence?.excluded ?? { shared: 0, listed: 0, infra: 0, internal: 0 }
   return (
     <>
-      <Box>
-        <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:geo_anomalies.col_places')}
-        </Typography>
-        <Box sx={{ fontSize: 13 }}><GeoPlaces row={geo} /></Box>
-      </Box>
+      <div>
+        <span className="text-xs text-muted-foreground">{t('admin:geo_anomalies.col_places')}</span>
+        <div className="text-[13px]"><GeoPlaces row={geo} /></div>
+      </div>
       <GeoDistance evidence={geo.evidence} />
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontSize: 13 }}>
-        <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:geo_anomalies.col_ips')}
-        </Typography>
-        <Tooltip title={t('admin:geo_anomalies.ips_hint', {
-          concurrent: geo.concurrent_ips, window: geo.live_ips, excluded: geo.excluded_ips,
-          shared: ex.shared, listed: ex.listed, infra: ex.infra, internal: ex.internal,
-        })}>
-          <span>{`${geo.concurrent_ips} / ${geo.live_ips}`}</span>
+      <div className="flex items-center gap-1.5 text-[13px]">
+        <span className="text-xs text-muted-foreground">{t('admin:geo_anomalies.col_ips')}</span>
+        <Tooltip>
+          <TooltipTrigger render={<span className="tabular-nums" />}>{`${geo.concurrent_ips} / ${geo.live_ips}`}</TooltipTrigger>
+          <TooltipContent>{t('admin:geo_anomalies.ips_hint', {
+            concurrent: geo.concurrent_ips, window: geo.live_ips, excluded: geo.excluded_ips,
+            shared: ex.shared, listed: ex.listed, infra: ex.infra, internal: ex.internal,
+          })}</TooltipContent>
         </Tooltip>
-        {/* A count taken while a panel was unreadable is a floor, and shown
-            as a plain number it reads as the whole story. */}
+        {/* A count taken while a server was unreadable is a floor, and shown as a plain number it reads
+            as the whole story. */}
         {!geo.complete && (
-          <Tooltip title={t('admin:geo_anomalies.incomplete')}>
-            <WarningAmberIcon fontSize="inherit" color="warning" />
+          <Tooltip>
+            <TooltipTrigger render={<span role="img" aria-label={t('admin:geo_anomalies.incomplete')} className="text-warning-ink" />}>
+              <IconWarning className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent>{t('admin:geo_anomalies.incomplete')}</TooltipContent>
           </Tooltip>
         )}
-      </Box>
+      </div>
       {activeDbIsCountryOnly(geoip) && (
-        <Alert severity="info" sx={{ fontSize: 13 }}>{t('admin:geo_anomalies.coarse_db')}</Alert>
+        <Alert><AlertDescription>{t('admin:geo_anomalies.coarse_db')}</AlertDescription></Alert>
       )}
     </>
   )
 }
 
 function GeoDetector({ geo }: { geo: RiskUserSummary['geo'] }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const title = t('admin:risk_center.drawer.detector_geo')
   if (!geo) {
     return <DetectorRow title={title} chip={<DetectorStateChip state="not_computed" />}
@@ -132,14 +122,11 @@ function GeoDetector({ geo }: { geo: RiskUserSummary['geo'] }) {
       // reads as trust (the why's code).
       chip={<DetectorStateChip state={geo.state} code={geo.evidence?.why?.code} complete={geo.complete} />}
       badges={<>
-        {tierKey && (
-          <Chip size="small" variant="outlined" color={geo.flagged ? 'error' : geo.state === 'suspect' ? 'warning' : 'default'}
-            label={t(tierKey)} />
-        )}
+        {tierKey && <Badge variant={geo.flagged ? 'destructive' : 'outline'}>{t(tierKey)}</Badge>}
         {/* The latch outlives the state: an idle or unreadable sample freezes
             the streak, so a flagged account that went quiet is still flagged. */}
         {geo.flagged && geo.state !== 'flagged' && (
-          <Chip size="small" variant="outlined" color="error" label={t('admin:geo_anomalies.latched')} />
+          <Badge variant="destructive">{t('admin:geo_anomalies.latched')}</Badge>
         )}
       </>}
       // ALWAYS the reason: "no data" next to "no connections right now" says
@@ -152,7 +139,7 @@ function GeoDetector({ geo }: { geo: RiskUserSummary['geo'] }) {
 }
 
 function KindDetector({ kind, sig, userId }: { kind: RiskKind; sig: (RiskSignal & { stale: boolean }) | undefined; userId: number }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const title = t(`admin:risk_signals.kind.${kind}`)
   if (!sig) return <DetectorRow title={title} chip={<DetectorStateChip state="not_computed" />} />
   return (
@@ -166,12 +153,11 @@ function KindDetector({ kind, sig, userId }: { kind: RiskKind; sig: (RiskSignal 
  *  reopen rule makes of the dismissal now. An admin since deleted is named
  *  by id. */
 function ReviewLines({ review }: { review: RiskReview }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t, i18n } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const R = 'admin:risk_center.review.'
-  const line = (text: string, color = md.onSurfaceVariant) => (
-    <Typography key={text} sx={{ fontSize: 13, color }}>{text}</Typography>
+  const line = (text: string, danger = false) => (
+    <p key={text} className={cn('text-[13px]', danger ? 'text-destructive' : 'text-muted-foreground')}>{text}</p>
   )
   const lines: ReactNode[] = []
   if (review.dismissed) {
@@ -181,9 +167,9 @@ function ReviewLines({ review }: { review: RiskReview }) {
     if (review.note) lines.push(line(t(`${R}note`, { note: review.note })))
     if (review.reopened) {
       const sources = review.escalated.map(s => t(flagSourceKey(s))).join(listSeparator(i18n.language))
-      lines.push(line(t(`${R}reopened`, { sources }), md.error))
+      lines.push(line(t(`${R}reopened`, { sources }), true))
     }
-    if (review.lapsed) lines.push(line(t(`${R}lapsed`), md.error))
+    if (review.lapsed) lines.push(line(t(`${R}lapsed`), true))
   }
   if (review.trusted) {
     lines.push(line(t(`${R}trusted_by`, {
@@ -192,7 +178,7 @@ function ReviewLines({ review }: { review: RiskReview }) {
     lines.push(line(t('admin:risk_center.drawer.trust_scope')))
   }
   if (lines.length === 0) return null
-  return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, px: 0.5 }}>{lines}</Box>
+  return <div className="flex flex-col gap-1 px-1">{lines}</div>
 }
 
 /**
@@ -202,12 +188,12 @@ function ReviewLines({ review }: { review: RiskReview }) {
  */
 export default function OverviewTab({ summary }: { summary: RiskUserSummary }) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+    <div className="flex flex-col gap-3">
       <GeoDetector geo={summary.geo} />
       {RISK_KINDS.map(k => (
         <KindDetector key={k} kind={k} sig={summary.signals.find(s => s.kind === k)} userId={summary.user.id} />
       ))}
       <ReviewLines review={summary.review} />
-    </Box>
+    </div>
   )
 }

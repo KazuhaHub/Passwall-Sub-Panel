@@ -1,21 +1,24 @@
-import { Fragment, useState } from 'react'
-import {
-  Badge, Box, Button, Chip, CircularProgress, IconButton, MenuItem, Popover, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, TextField, Tooltip, Typography, useTheme,
-} from '@mui/material'
-import FilterListIcon from '@mui/icons-material/FilterList'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
-import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp'
-import PersonSearchOutlinedIcon from '@mui/icons-material/PersonSearchOutlined'
+import { Fragment, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
+import type { ColumnDef } from '@tanstack/react-table'
 
-import { PagedTableFooter } from '@/components/PagedTableFooter'
-import UserAutocomplete from '@/components/UserAutocomplete'
 import type { GeoEvidence } from '@/api/geoAnomalies'
 import { FLAG_EVENTS, FLAG_LEVELS, type FlagRecord, type FlagRecordParams } from '@/api/riskCenter'
 import { RISK_KINDS } from '@/api/riskSignals'
+import { IconButton } from '@/components/common/IconButton'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import type { Tone } from '@/components/common/tones'
+import { DataTable } from '@/components/data/DataTable'
+import { DetailSheet } from '@/components/data/DetailSheet'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { Field } from '@/components/form/Field'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { IconFilter, IconSearch } from '@/lib/icons'
 import { useFlagRecords } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
@@ -23,27 +26,29 @@ import { formatMsDualTz } from '@/utils/datetime'
 import {
   FLAG_SOURCES, flagEventKey, flagLevelKey, flagSourceKey, flagText, userLabel, withNote,
 } from '@/utils/riskCenter'
+import { plainColumns } from '../logs/shared'
 import { GeoDistance, GeoPlaces } from './evidence/GeoEvidence'
 import { RiskKindEvidence } from './evidence/RiskEvidence'
 import { paramRows } from './recordValues'
 import { parseRecordsParams, RECORDS_PAGE_SIZES, recordsSearch, type RecordsFilters } from './riskParams'
+import { UserPicker } from './UserPicker'
+import { useRiskT } from './useRiskT'
 
 /**
- * The event chip's colour, by the level the record moved TO: into a flag or
- * a suspension is the alarm, into suspect the ramp, and every leave or lift
- * (level none) is neutral — a cleared flag is news, not good news. A review
- * record has no level and is neutral too. The drawer's 时间线 colours its
- * chips the same way.
+ * The event badge's tone, by the level the record moved TO: into a flag or a suspension is the alarm,
+ * into suspect the ramp, and every leave or lift (level none) is neutral — a cleared flag is news, not
+ * good news. A review record has no level and is neutral too. The drawer's 时间线 tones its badges the
+ * same way.
  */
-export function levelColor(level: string): 'error' | 'warning' | 'default' {
+export function levelTone(level: string): Tone {
   switch (level) {
     case 'flagged':
     case 'suspended':
-      return 'error'
+      return 'danger'
     case 'suspect':
       return 'warning'
     default:
-      return 'default'
+      return 'neutral'
   }
 }
 
@@ -81,18 +86,18 @@ export interface RecordsTabProps {
  * that account's records itself in a form made for a side panel.
  */
 export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const [urlParams, setUrlParams] = useSearchParams()
   const filters = parseRecordsParams(urlParams)
-  // recordsSearch starts any filter change again at the first page: page 3
-  // of one filter is not a page of another.
+  // recordsSearch starts any filter change again at the first page: page 3 of one filter is not a page of
+  // another.
   const update = (patch: Partial<RecordsFilters>) => {
     setUrlParams(prev => recordsSearch(prev, patch), { replace: true })
   }
-  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
-  const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set())
+  // The record open in the sheet is the page's own, not the URL's: nothing about a record goes in the
+  // address beyond the filters it already holds.
+  const [openId, setOpenId] = useState<number | null>(null)
 
   const who = filters.user_id
   const sinceAt = toInstant(filters.since)
@@ -106,159 +111,143 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
     ...(sinceAt ? { since: sinceAt } : {}),
     ...(untilAt ? { until: untilAt } : {}),
   }
-  const { data, isPending, error } = useFlagRecords(scope, params)
-  const rows = data?.items ?? []
+  const { data, isPending, error, refetch } = useFlagRecords(scope, params)
+  const rows = data?.items
   const hidden = (filters.level ? 1 : 0) + (filters.event ? 1 : 0)
-
-  const toggle = (id: number) => setOpen(prev => {
-    const next = new Set(prev)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-
-  const cols = 6
+  const narrowed = !!(who || filters.source || filters.level || filters.event || filters.since || filters.until)
+  const record = openId === null ? undefined : rows?.find(r => r.id === openId)
   const err = error
     ? (isAxiosError(error) ? String(error.response?.data?.error ?? error.message) : String(error))
     : ''
-  // datetime-local reads and writes the BROWSER's time, while every time the
-  // page prints is the panel's: the bounds say which one they are.
+  // datetime-local reads and writes the BROWSER's time, while every time the page prints is the
+  // panel's: the bounds say which one they are.
   const browserTime = t('admin:risk_center.flags.browser_time')
+  const language = i18n.language
+  const panelTz = useSiteStore(s => s.timezone)
+
+  const columns = useMemo<ColumnDef<FlagRecord, any>[]>(() => plainColumns<FlagRecord>([
+    { id: 'at', header: t('admin:risk_center.flags.col_at'), meta: { label: t('admin:risk_center.flags.col_at'), hideable: false, className: 'w-44 text-xs whitespace-nowrap' },
+      cell: c => <AtCell ms={c.row.original.at_ms} /> },
+    { id: 'user', header: t('admin:risk_center.flags.col_user'), meta: { label: t('admin:risk_center.flags.col_user'), className: 'w-[16%] max-w-0 overflow-hidden text-ellipsis whitespace-nowrap' },
+      cell: c => <span title={userLabel(c.row.original)}>{userLabel(c.row.original)}</span> },
+    { id: 'source', header: t('admin:risk_center.flags.col_source'), meta: { label: t('admin:risk_center.flags.col_source'), className: 'w-32' },
+      cell: c => <Badge variant="outline">{t(flagSourceKey(c.row.original.source), { defaultValue: c.row.original.source })}</Badge> },
+    { id: 'event', header: t('admin:risk_center.flags.col_event'), meta: { label: t('admin:risk_center.flags.col_event'), className: 'w-40' },
+      cell: c => <StatusBadge tone={levelTone(c.row.original.level)} label={t(flagEventKey(c.row.original.event), { defaultValue: c.row.original.event })} /> },
+    // The reason AT THE TIME, from the numbers stored with the record — not the account's current verdict,
+    // which may have moved since.
+    { id: 'detail', header: t('admin:risk_center.flags.col_detail'), meta: { label: t('admin:risk_center.flags.col_detail'), className: 'max-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground' },
+      cell: c => { const text = flagText(c.row.original, t, language); return <span title={text}>{text}</span> } },
+    { id: 'actions', header: '', meta: { hideable: false, align: 'right', label: t('admin:risk_center.flags.col_actions'), className: 'w-12' },
+      cell: c => onOpenUser ? (
+        <IconButton label={t('admin:risk_center.open_user')} size="icon-xs" onClick={() => onOpenUser(c.row.original.user_id)}><IconSearch /></IconButton>
+      ) : null },
+  ]), [t, language, onOpenUser])
+
+  const clearAll = () => update({ user_id: undefined, source: undefined, since: undefined, until: undefined, level: undefined, event: undefined })
+
+  const toolbar = (
+    <div className="flex flex-wrap items-end gap-2">
+      <Field label={t('admin:risk_center.flags.col_user')}>
+        <UserPicker value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })} />
+      </Field>
+      <Field label={t('admin:risk_center.flags.filter_source')}>
+        <div className="w-44">
+          <NativeSelect value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
+            <option value="">{t('admin:risk_center.live.opt_all')}</option>
+            {FLAG_SOURCES.map(s => <option key={s} value={s}>{t(flagSourceKey(s))}</option>)}
+          </NativeSelect>
+        </div>
+      </Field>
+      <Field label={withNote(t('admin:risk_center.flags.filter_since'), browserTime, i18n.language)}>
+        <Input type="datetime-local" className="w-56" value={filters.since ?? ''} onChange={e => update({ since: e.target.value || undefined })} />
+      </Field>
+      <Field label={withNote(t('admin:risk_center.flags.filter_until'), browserTime, i18n.language)}>
+        <Input type="datetime-local" className="w-56" value={filters.until ?? ''} onChange={e => update({ until: e.target.value || undefined })} />
+      </Field>
+      <Popover>
+        <PopoverTrigger render={<Button variant="outline" />}>
+          <IconFilter />
+          {t('admin:risk_center.flags.more_filters')}
+          {hidden > 0 && <Badge variant="secondary" className="tabular-nums">{hidden}</Badge>}
+        </PopoverTrigger>
+        <PopoverContent align="start" className="flex w-64 flex-col gap-3">
+          <Field label={t('admin:risk_center.flags.filter_level')}>
+            <NativeSelect value={filters.level ?? ''} onChange={e => update({ level: e.target.value || undefined })}>
+              <option value="">{t('admin:risk_center.live.opt_all')}</option>
+              {FLAG_LEVELS.map(l => <option key={l} value={l}>{t(flagLevelKey(l === 'cleared' ? '' : l))}</option>)}
+            </NativeSelect>
+          </Field>
+          <Field label={t('admin:risk_center.flags.filter_event')}>
+            <NativeSelect value={filters.event ?? ''} onChange={e => update({ event: e.target.value || undefined })}>
+              <option value="">{t('admin:risk_center.live.opt_all')}</option>
+              {FLAG_EVENTS.map(ev => <option key={ev} value={ev}>{t(flagEventKey(ev))}</option>)}
+            </NativeSelect>
+          </Field>
+        </PopoverContent>
+      </Popover>
+      {narrowed && <Button variant="ghost" onClick={clearAll}>{t('admin:risk_center.queue.clear_filters')}</Button>}
+    </div>
+  )
+
+  const empty = narrowed
+    ? <EmptyState compact title={t('admin:risk_center.flags.empty')} action={<Button variant="outline" size="sm" onClick={clearAll}>{t('admin:risk_center.queue.clear_filters')}</Button>} />
+    : <EmptyState compact title={t('admin:risk_center.flags.empty')} />
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-        <UserAutocomplete value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })}
-          label={t('admin:risk_center.flags.col_user')} width={220} />
-        <TextField select size="small" label={t('admin:risk_center.flags.filter_source')} sx={{ width: 170 }}
-          value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
-          <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
-          {FLAG_SOURCES.map(s => <MenuItem key={s} value={s}>{t(flagSourceKey(s))}</MenuItem>)}
-        </TextField>
-        <TextField type="datetime-local" size="small"
-          label={withNote(t('admin:risk_center.flags.filter_since'), browserTime, i18n.language)}
-          value={filters.since ?? ''} onChange={e => update({ since: e.target.value || undefined })}
-          sx={{ width: 230 }} slotProps={{ inputLabel: { shrink: true } }} />
-        <TextField type="datetime-local" size="small"
-          label={withNote(t('admin:risk_center.flags.filter_until'), browserTime, i18n.language)}
-          value={filters.until ?? ''} onChange={e => update({ until: e.target.value || undefined })}
-          sx={{ width: 230 }} slotProps={{ inputLabel: { shrink: true } }} />
-        <Badge badgeContent={hidden} color="primary">
-          <Button size="small" variant="outlined" startIcon={<FilterListIcon fontSize="small" />}
-            aria-haspopup="dialog" onClick={e => setMoreAnchor(e.currentTarget)}>
-            {t('admin:risk_center.flags.more_filters')}
-          </Button>
-        </Badge>
-        <Popover open={moreAnchor !== null} anchorEl={moreAnchor} onClose={() => setMoreAnchor(null)}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-          slotProps={{ paper: { sx: { p: 2, display: 'flex', flexDirection: 'column', gap: 1.5, width: 240 } } }}>
-          <TextField select size="small" label={t('admin:risk_center.flags.filter_level')}
-            value={filters.level ?? ''} onChange={e => update({ level: e.target.value || undefined })}>
-            <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
-            {FLAG_LEVELS.map(l => <MenuItem key={l} value={l}>{t(flagLevelKey(l === 'cleared' ? '' : l))}</MenuItem>)}
-          </TextField>
-          <TextField select size="small" label={t('admin:risk_center.flags.filter_event')}
-            value={filters.event ?? ''} onChange={e => update({ event: e.target.value || undefined })}>
-            <MenuItem value="">{t('admin:risk_center.live.opt_all')}</MenuItem>
-            {FLAG_EVENTS.map(ev => <MenuItem key={ev} value={ev}>{t(flagEventKey(ev))}</MenuItem>)}
-          </TextField>
-        </Popover>
-      </Box>
-      {err && <Typography color="error" sx={{ fontSize: 13 }}>{err}</Typography>}
-
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>{t('admin:risk_center.flags.col_at')}</TableCell>
-              <TableCell>{t('admin:risk_center.flags.col_user')}</TableCell>
-              <TableCell>{t('admin:risk_center.flags.col_source')}</TableCell>
-              <TableCell>{t('admin:risk_center.flags.col_event')}</TableCell>
-              <TableCell>{t('admin:risk_center.flags.col_detail')}</TableCell>
-              <TableCell />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {isPending && (
-              <TableRow><TableCell colSpan={cols}><CircularProgress size={20} /></TableCell></TableRow>
-            )}
-            {!isPending && !err && rows.length === 0 && (
-              <TableRow><TableCell colSpan={cols}>
-                <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:risk_center.flags.empty')}</Typography>
-              </TableCell></TableRow>
-            )}
-            {rows.map(r => (
-              <FlagRow key={r.id} rec={r} cols={cols} open={open.has(r.id)}
-                onToggle={() => toggle(r.id)} onOpenUser={onOpenUser} />
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      {data && (
-        <PagedTableFooter total={data.total} page={filters.page} pageSize={filters.page_size}
-          rowsPerPageOptions={RECORDS_PAGE_SIZES}
-          onPageChange={p => update({ page: p })} onPageSizeChange={n => update({ page_size: n })} />
-      )}
-    </Box>
+    <div className="flex flex-col gap-3">
+      <DataTable<FlagRecord>
+        aria-label={t('admin:risk_center.tab_records')}
+        mode="server"
+        data={rows ?? []}
+        total={data?.total}
+        columns={columns}
+        getRowId={r => String(r.id)}
+        loading={isPending}
+        error={err ? t('admin:risk_center.load_failed', { error: err }) : null}
+        onRetry={() => void refetch()}
+        page={filters.page}
+        onPageChange={p => update({ page: p })}
+        pageSize={filters.page_size}
+        onPageSizeChange={n => update({ page_size: n })}
+        pageSizeOptions={RECORDS_PAGE_SIZES}
+        columnMenu={false}
+        maxHeight={null}
+        onRowOpen={r => setOpenId(r.id)}
+        activeRowId={openId === null ? null : String(openId)}
+        renderCard={r => (
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{userLabel(r)}</span>
+              <StatusBadge tone={levelTone(r.level)} label={t(flagEventKey(r.event), { defaultValue: r.event })} />
+            </div>
+            <div className="text-xs text-muted-foreground"><AtCell ms={r.at_ms} /></div>
+            <div className="text-xs text-muted-foreground">{flagText(r, t, language)}</div>
+          </div>
+        )}
+        toolbar={toolbar}
+        empty={empty}
+      />
+      <DetailSheet
+        open={record !== undefined}
+        onClose={() => setOpenId(null)}
+        title={record ? userLabel(record) : ''}
+        status={record && <StatusBadge tone={levelTone(record.level)} label={t(flagEventKey(record.event), { defaultValue: record.event })} />}
+        description={record && `${t(flagSourceKey(record.source), { defaultValue: record.source })} · ${formatMsDualTz(record.at_ms, panelTz)}`}
+        actions={record && onOpenUser && (
+          <Button variant="outline" size="sm" onClick={() => onOpenUser(record.user_id)}>{t('admin:risk_center.open_user')}</Button>
+        )}
+      >
+        {record && <RecordDetail rec={record} />}
+      </DetailSheet>
+    </div>
   )
 }
 
-function FlagRow({ rec, cols, open, onToggle, onOpenUser }: {
-  rec: FlagRecord
-  cols: number
-  open: boolean
-  onToggle: () => void
-  onOpenUser?: (userId: number) => void
-}) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+/** The record's time in panel time, exact (the sheet and the title carry the zone). */
+function AtCell({ ms }: { ms: number }) {
   const panelTz = useSiteStore(s => s.timezone)
-  const hasParams = rec.params !== null && rec.params !== undefined
-  return (
-    <>
-      <TableRow hover>
-        <TableCell sx={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatMsDualTz(rec.at_ms, panelTz)}</TableCell>
-        <TableCell>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <span>{userLabel(rec)}</span>
-            {onOpenUser && (
-              <Tooltip title={t('admin:risk_center.open_user')}>
-                <IconButton size="small" onClick={() => onOpenUser(rec.user_id)}>
-                  <PersonSearchOutlinedIcon fontSize="inherit" />
-                </IconButton>
-              </Tooltip>
-            )}
-          </Box>
-        </TableCell>
-        <TableCell>
-          <Chip size="small" variant="outlined" label={t(flagSourceKey(rec.source), { defaultValue: rec.source })} />
-        </TableCell>
-        <TableCell>
-          <Chip size="small" color={levelColor(rec.level)} label={t(flagEventKey(rec.event), { defaultValue: rec.event })} />
-        </TableCell>
-        {/* The reason AT THE TIME, from the numbers stored with the record —
-            not the account's current verdict, which may have moved since. */}
-        <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 460 }}>
-          {flagText(rec, t, i18n.language)}
-        </TableCell>
-        <TableCell align="right">
-          {hasParams && (
-            <IconButton size="small" onClick={onToggle} aria-expanded={open}
-              aria-label={open ? t('admin:risk_center.flags.evidence_hide') : t('admin:risk_center.flags.evidence_show')}>
-              {open ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
-            </IconButton>
-          )}
-        </TableCell>
-      </TableRow>
-      {open && hasParams && (
-        <TableRow data-testid="record-detail">
-          <TableCell colSpan={cols} sx={{ bgcolor: md.surfaceContainerLow }}>
-            <RecordDetail rec={rec} />
-          </TableCell>
-        </TableRow>
-      )}
-    </>
-  )
+  return <span>{formatMsDualTz(ms, panelTz)}</span>
 }
 
 /**
@@ -273,57 +262,52 @@ function FlagRow({ rec, cols, open, onToggle, onOpenUser }: {
  * entry already reads the sentence on the line above.
  */
 export function RecordDetail({ rec, sentence = true }: { rec: FlagRecord; sentence?: boolean }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t, i18n } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const [raw, setRaw] = useState(false)
   const params = rec.params && typeof rec.params === 'object' ? rec.params as Record<string, unknown> : {}
   const geoEvidence = rec.source === 'geo' && params.evidence && typeof params.evidence === 'object'
     ? params.evidence as GeoEvidence
     : undefined
-  // A risk record's params ARE its verdict's evidence, drawn by its kind's
-  // panel; laid out as rows as well, they would say the same thing twice.
+  // A risk record's params ARE its verdict's evidence, drawn by its kind's panel; laid out as rows as
+  // well, they would say the same thing twice.
   const risk = isRiskKind(rec.source)
   const rows = risk ? [] : paramRows(rec, t, panelTz, i18n.language)
+  const hasParams = rec.params !== null && rec.params !== undefined
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, fontSize: 13, py: 0.5 }}>
-      {sentence && <Typography sx={{ fontSize: 13, color: md.onSurface }}>{flagText(rec, t, i18n.language)}</Typography>}
+    <div className="flex flex-col gap-3 py-1 text-[13px]">
+      {sentence && <p>{flagText(rec, t, i18n.language)}</p>}
       {geoEvidence && (
-        <Box sx={{ fontSize: 13 }}>
+        <div>
           <GeoPlaces row={{ places: [], evidence: geoEvidence }} />
           <GeoDistance evidence={geoEvidence} />
-        </Box>
+        </div>
       )}
       {risk && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, fontSize: 13 }}>
+        <div className="flex flex-col gap-1.5">
           <RiskKindEvidence kind={rec.source} evidence={rec.params} userId={rec.user_id} />
-        </Box>
+        </div>
       )}
       {rows.length > 0 && (
-        <Box component="dl" sx={{
-          m: 0, display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 2, rowGap: 0.5, fontSize: 13,
-        }}>
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
           {rows.map(r => (
             <Fragment key={r.key}>
-              <Box component="dt" sx={{ color: md.onSurfaceVariant }}>{r.label}</Box>
-              <Box component="dd" sx={{ m: 0, color: md.onSurface }}>{r.value}</Box>
+              <dt className="text-muted-foreground">{r.label}</dt>
+              <dd>{r.value}</dd>
             </Fragment>
           ))}
-        </Box>
+        </dl>
       )}
-      <Box>
-        <Button size="small" onClick={() => setRaw(v => !v)} aria-expanded={raw} sx={{ textTransform: 'none' }}>
-          {raw ? t('admin:risk_center.flags.raw_hide') : t('admin:risk_center.flags.raw_show')}
-        </Button>
-      </Box>
-      {/* Address-free: no producer writes an address into params (pinned
-          server-side by JSON-walk tests), and a review record carries the
-          admin's id and levels only — never a name, never the note. */}
-      {raw && (
-        <Box component="pre" sx={{ m: 0, fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {JSON.stringify(rec.params, null, 2)}
-        </Box>
+      {hasParams && (
+        <div>
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setRaw(v => !v)} aria-expanded={raw}>
+            {raw ? t('admin:risk_center.flags.raw_hide') : t('admin:risk_center.flags.raw_show')}
+          </Button>
+        </div>
       )}
-    </Box>
+      {/* Address-free: no producer writes an address into params (pinned server-side by JSON-walk tests),
+          and a review record carries the admin's id and levels only — never a name, never the note. */}
+      {raw && <pre className="font-mono text-xs break-all whitespace-pre-wrap">{JSON.stringify(rec.params, null, 2)}</pre>}
+    </div>
   )
 }
