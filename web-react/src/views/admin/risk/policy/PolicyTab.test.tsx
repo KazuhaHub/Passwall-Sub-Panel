@@ -554,11 +554,17 @@ describe('PolicyTab, group exceptions', () => {
 
   function groupRow(label: string): HTMLElement {
     const groups = card('risk_center.policy.card.groups')
-    // The row is the line holding the label, its switch and its value.
-    let el: HTMLElement | null = within(groups).getByText(label)
-    while (el && !within(el).queryByRole('switch')) el = el.parentElement
+    // The row is the inheritance field holding the label, where the value comes from and the value's editor.
+    const el = within(groups).getByText(label).closest<HTMLElement>('[data-slot="inheritance-field"]')
     if (!el) throw new Error(`no row ${label}`)
     return el
+  }
+
+  // The row's override on/off: whichever of "follow the level above" / "set here" is not the chosen one.
+  function toggleOverride(row: HTMLElement) {
+    const other = within(row).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')
+    if (!other) throw new Error('no other mode')
+    fireEvent.click(other)
   }
 
   it('opens the group named in the URL, with each row explained', async () => {
@@ -590,7 +596,7 @@ describe('PolicyTab, group exceptions', () => {
       .findByRole('combobox', { name: L('risk_center.policy.pick_group') })
     await waitFor(() => expect(picker.textContent).toBe('Group 202'))
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
-    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    toggleOverride(groupRow('城市容错'))
     expect(screen.getByText('未保存：分组「Group 202」的例外')).toBeTruthy()
   })
 
@@ -623,9 +629,9 @@ describe('PolicyTab, group exceptions', () => {
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
 
     // Override the cities; drop the stored regions override.
-    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    toggleOverride(groupRow('城市容错'))
     fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
-    fireEvent.click(within(groupRow('省级容错')).getByRole('switch'))
+    toggleOverride(groupRow('省级容错'))
     expect(screen.getByText(L('risk_center.policy.group_dirty'))).toBeTruthy()
     expect(screen.getByText('未保存：分组「Team A」的例外')).toBeTruthy()
     // The page's own save is for the policy; the group has its own.
@@ -644,7 +650,7 @@ describe('PolicyTab, group exceptions', () => {
     await loaded()
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
     type(field('settings.risk.max_devices'), '5')
-    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    toggleOverride(groupRow('城市容错'))
     expect(screen.getByText('未保存：策略、分组「Team A」的例外')).toBeTruthy()
   })
 
@@ -653,7 +659,7 @@ describe('PolicyTab, group exceptions', () => {
     mount('/admin/risk?tab=policy&group=2')
     await loaded()
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
-    fireEvent.click(within(groupRow('城市容错')).getByRole('switch'))
+    toggleOverride(groupRow('城市容错'))
 
     confirmMock.mockResolvedValueOnce(false)
     await pickGroup('Team B')
@@ -673,10 +679,10 @@ describe('PolicyTab, group exceptions', () => {
     serve()
     mount('/admin/risk?tab=policy&group=2')
     await loaded()
-    await waitFor(() => expect(within(groupRow('城市容错')).getByText('全局: 2（默认）')).toBeTruthy())
+    await waitFor(() => expect(groupRow('城市容错').textContent).toContain('全局2（默认）'))
     type(field('settings.geo_anomaly.max_cities'), '5')
     fireEvent.click(saveButton())
-    await waitFor(() => expect(within(groupRow('城市容错')).getByText('全局: 5')).toBeTruthy())
+    await waitFor(() => expect(groupRow('城市容错').textContent).toContain('全局5'))
   })
 })
 
