@@ -6197,7 +6197,6 @@
         "usage": "使用情况"
       },
       "sheet": {
-        "close": "关闭",
         "source": "远程地址：{{url}}",
         "category": "社区分类：{{name}}",
         "custom": "自定义列表",
@@ -6215,7 +6214,6 @@
         "title_new": "新建列表",
         "type": "列表类型",
         "title_edit": "编辑列表「{{name}}」",
-        "close": "关闭",
         "name": "名称",
         "name_required": "名称必填",
         "text": "列表内容",

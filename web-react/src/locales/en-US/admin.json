@@ -6247,7 +6247,6 @@
         "usage": "Used by"
       },
       "sheet": {
-        "close": "Close",
         "source": "Remote address: {{url}}",
         "category": "Community category: {{name}}",
         "custom": "Custom list",
@@ -6265,7 +6264,6 @@
         "title_new": "New list",
         "type": "List type",
         "title_edit": "Edit list \"{{name}}\"",
-        "close": "Close",
         "name": "Name",
         "name_required": "A name is required",
         "text": "List content",
