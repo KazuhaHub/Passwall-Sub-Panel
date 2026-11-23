@@ -1,15 +1,18 @@
-import { Box, Button, Chip, IconButton, Typography, useTheme } from '@mui/material'
-import CloseIcon from '@mui/icons-material/Close'
-import { Link as RouterLink } from 'react-router'
-import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import type { ReviewBadge, RiskUserBasics, RiskUserSummary } from '@/api/riskCenter'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import type { Tone } from '@/components/common/tones'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { useUserUsage } from '@/query/traffic'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import { formatGB } from '@/utils/riskSignals'
 import { accountStateOf, serviceStateOf } from '@/utils/userAccess'
+import { useRiskT } from '../useRiskT'
 
 const U = 'admin:users.status.'
 
@@ -26,54 +29,50 @@ export function accountLabelKey(u: RiskUserBasics): string {
 }
 
 /**
- * The service chip: the location holds by their own names (the detector's
- * and an admin's), every other state in the Users page's words. Keyed by the
- * stored reason, not the state, because both holds are one state
- * (manual_suspended) there.
+ * The service state: the location holds by their own names (the detector's and an admin's), every other
+ * state in the Users page's words. Keyed by the stored reason, not the state, because both holds are one
+ * state (manual_suspended) there. The tone says how loud it is: a location hold is the alarm, any other
+ * way the service is not running a notice, and a running service is the quiet dot.
  */
-export function serviceChip(u: RiskUserBasics): { key: string; color: 'error' | 'warning' | 'default' } {
-  if (u.service_disabled_reason === 'geo_auto') return { key: `${U}geo_auto`, color: 'error' }
-  if (u.service_disabled_reason === 'geo_anomaly') return { key: `${U}geo_manual`, color: 'error' }
+export function serviceChip(u: RiskUserBasics): { key: string; tone: Tone } {
+  if (u.service_disabled_reason === 'geo_auto') return { key: `${U}geo_auto`, tone: 'danger' }
+  if (u.service_disabled_reason === 'geo_anomaly') return { key: `${U}geo_manual`, tone: 'danger' }
   switch (serviceStateOf(u)) {
-    case 'active': return { key: `${U}service_active`, color: 'default' }
-    case 'emergency_active': return { key: `${U}emergency_active`, color: 'warning' }
-    case 'traffic_exceeded': return { key: `${U}traffic_exhausted`, color: 'warning' }
-    case 'expired': return { key: `${U}expired`, color: 'warning' }
-    case 'blocked_client': return { key: `${U}blocked`, color: 'warning' }
-    case 'manual_suspended': return { key: `${U}service_suspended`, color: 'warning' }
-    default: return { key: `${U}service_unavailable`, color: 'warning' }
+    case 'active': return { key: `${U}service_active`, tone: 'success' }
+    case 'emergency_active': return { key: `${U}emergency_active`, tone: 'warning' }
+    case 'traffic_exceeded': return { key: `${U}traffic_exhausted`, tone: 'warning' }
+    case 'expired': return { key: `${U}expired`, tone: 'warning' }
+    case 'blocked_client': return { key: `${U}blocked`, tone: 'warning' }
+    case 'manual_suspended': return { key: `${U}service_suspended`, tone: 'warning' }
+    default: return { key: `${U}service_unavailable`, tone: 'warning' }
   }
 }
 
 /** The review badges, most telling first: a dismissal that no longer holds
  *  outranks one that does, and trust stands beside either. */
 export function ReviewBadges({ review }: { review: ReviewBadge }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const R = 'admin:risk_center.review.'
   return (
     <>
       {review.dismissed && (review.reopened
-        ? <Chip size="small" color="warning" label={t(`${R}badge_reopened`)} />
+        ? <StatusBadge tone="warning" label={t(`${R}badge_reopened`)} />
         : review.lapsed
-          ? <Chip size="small" color="warning" label={t(`${R}badge_lapsed`)} />
-          : <Chip size="small" variant="outlined" label={t(`${R}badge_dismissed`)} />)}
-      {review.trusted && <Chip size="small" variant="outlined" color="primary" label={t(`${R}badge_trusted`)} />}
+          ? <StatusBadge tone="warning" label={t(`${R}badge_lapsed`)} />
+          : <Badge variant="outline">{t(`${R}badge_dismissed`)}</Badge>)}
+      {review.trusted && <Badge variant="secondary">{t(`${R}badge_trusted`)}</Badge>}
     </>
   )
 }
 
 /**
- * Who the account is and where its service stands: names, group, the two
- * access axes, the review badges, the hold's time and the message the user
- * was given, and the period's usage with the way to its trend.
+ * Who the account is and where its service stands: names, group, the two access axes (said apart, so a
+ * service hold never reads as the account being disabled), the review badges, the hold's time and the
+ * message the user was given, and the period's usage with the way to its trend. The title and the
+ * description are the sheet's own, so the dialog is named by the account.
  */
-export default function DrawerHeader({ summary, headingId, onClose }: {
-  summary: RiskUserSummary
-  headingId: string
-  onClose: () => void
-}) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+export default function DrawerHeader({ summary }: { summary: RiskUserSummary }) {
+  const { t } = useRiskT()
   const scope = useQueryScope()
   const panelTz = useSiteStore(s => s.timezone)
   const u = summary.user
@@ -83,45 +82,44 @@ export default function DrawerHeader({ summary, headingId, onClose }: {
   const limit = u.traffic_limit_bytes > 0 ? formatGB(u.traffic_limit_bytes) : t('admin:users.detail.unlimited')
   const svc = serviceChip(u)
   const r = summary.review
+  const account = accountStateOf(u)
   return (
-    <Box data-testid="risk-drawer-header" sx={{ p: 2.5, pb: 1.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:risk_center.drawer.title')}</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-            <Typography id={headingId} variant="h6" component="h2" sx={{ fontWeight: 700, wordBreak: 'break-all' }}>
-              {u.upn}
-            </Typography>
-            {u.display_name && <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{u.display_name}</Typography>}
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{`#${u.id}`}</Typography>
-            {u.group_name && <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{u.group_name}</Typography>}
-          </Box>
-        </Box>
-        <IconButton onClick={onClose} aria-label={t('admin:risk_center.drawer.close')}><CloseIcon /></IconButton>
-      </Box>
-      <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Chip size="small" variant="outlined" label={t(accountLabelKey(u))} />
-        <Chip size="small" color={svc.color} variant={svc.color === 'default' ? 'outlined' : 'filled'} label={t(svc.key)} />
+    <div data-testid="risk-drawer-header" className="flex flex-col gap-2">
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.title')}</p>
+        <SheetTitle className="text-base break-all">{u.upn}</SheetTitle>
+        <SheetDescription className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
+          {u.display_name && <span>{u.display_name}</span>}
+          <span>{`#${u.id}`}</span>
+          {u.group_name && <span>{u.group_name}</span>}
+        </SheetDescription>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span className="inline-flex items-center gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.axis_account')}</span>
+          <StatusBadge tone={account === 'active' ? 'neutral' : 'warning'} label={t(accountLabelKey(u))} />
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.axis_service')}</span>
+          <StatusBadge tone={svc.tone} label={t(svc.key)} />
+        </span>
         <ReviewBadges review={{ dismissed: r.dismissed, reopened: r.reopened, lapsed: r.lapsed, trusted: r.trusted,
           escalated: r.escalated }} />
-      </Box>
+      </div>
       {u.service_disabled_reason && (
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+        <p className="text-[13px] text-muted-foreground">
           {t('admin:risk_center.drawer.suspended_since', { time: formatMsDualTz(u.service_disabled_at_ms, panelTz) })}
           {/* The message the user was shown, as they saw it. */}
           {u.service_disable_detail ? ` · ${u.service_disable_detail}` : ''}
-        </Typography>
+        </p>
       )}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', fontSize: 13 }}>
-        <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:users.detail.period_used')}
-        </Typography>
-        <span>{`${usage ? formatGB(usage.period_used_bytes) : '—'} / ${limit}`}</span>
-        <Button size="small" component={RouterLink} to={`/admin/traffic?tab=trend&scope=user&user=${u.id}`}
-          sx={{ textTransform: 'none' }}>
+      <div className="flex flex-wrap items-center gap-x-2 text-[13px]">
+        <span className="text-xs text-muted-foreground">{t('admin:users.detail.period_used')}</span>
+        <span className="tabular-nums">{`${usage ? formatGB(usage.period_used_bytes) : '—'} / ${limit}`}</span>
+        <Button variant="link" size="sm" render={<Link to={`/admin/traffic?tab=trend&scope=user&user=${u.id}`} />}>
           {t('admin:risk_center.drawer.open_traffic')}
         </Button>
-      </Box>
-    </Box>
+      </div>
+    </div>
   )
 }
