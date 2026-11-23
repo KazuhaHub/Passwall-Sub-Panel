@@ -79,7 +79,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const [busyId, setBusyId] = useState<number | null>(null)
   const [highlight, setHighlight] = useState<number | null>(null)
   const [converting, setConverting] = useState<DestPolicy | null>(null)
-  const chooseRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const [chooser, setChooser] = useState<DestTemplate | null>(null)
   const [chooserError, setChooserError] = useState<{ text: string; needsData: boolean } | null>(null)
   const [unavailableOpen, setUnavailableOpen] = useState(false)
@@ -351,17 +351,17 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       {editing && (
         <PolicyEditorSheet open policy={editing.policy} initial={editing.initial} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
       )}
-      {/* Which state a policy comes back in, when the page cannot know. Dismissing writes nothing, and focus starts on the safe answer. */}
+      {/* Which state a policy comes back in, when the page cannot know. Dismissing writes nothing, and focus starts on Cancel: neither option is what a stray Enter picks. */}
       <Dialog open={choosing !== null} onOpenChange={next => { if (!next) setChoosing(null) }}>
-        <DialogContent showCloseButton={false} className="sm:max-w-md" initialFocus={chooseRef}>
+        <DialogContent showCloseButton={false} className="sm:max-w-md" initialFocus={cancelRef}>
           <DialogHeader>
             <DialogTitle>{t(`${P}turn_on.title`, { name: choosing?.name ?? '' })}</DialogTitle>
             <DialogDescription>{t(`${P}turn_on.body`)} {choosing ? enableScopeOf(subjectOf(choosing, 'on')) : ''}</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setChoosing(null)}>{t(`${P}turn_on.cancel`)}</Button>
+            <Button ref={cancelRef} variant="outline" onClick={() => setChoosing(null)}>{t(`${P}turn_on.cancel`)}</Button>
             <Button variant="outline" onClick={() => choose('on')}>{t(`${P}turn_on.block`)}</Button>
-            <Button ref={chooseRef} onClick={() => choose('report')}>{t(`${P}turn_on.report`)}</Button>
+            <Button variant="outline" onClick={() => choose('report')}>{t(`${P}turn_on.report`)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -10,13 +10,14 @@ const CJK = /[\u3000-\u9fff\uff00-\uffef]$/
 /** Who a policy reaches, as the confirmation names it. `users` is null when it cannot be counted (a policy scoped to servers). */
 export interface EnableScope {
   scope: 'all' | 'groups' | 'panels'
-  groups: number
+  /** null: the groups have not been read (loading or failed), so no number is stated. */
+  groups: number | null
   users: number | null
   panels: number
   /** The groups' or servers' names, for a scoped policy (shortened by the caller). */
   names: string
-  /** Exempt accounts, which the block and report-only rules skip. */
-  exempt: number
+  /** Exempt accounts, which the block and report-only rules skip; null when the count could not be read. */
+  exempt: number | null
 }
 
 /** The words naming who a policy reaches and what the nodes do about it: the tail of the enabling question. */
@@ -28,13 +29,18 @@ export function enableScopeText(
   const when = minutesWords(t, minutes)
   const nodeWords = nodes === null ? t(`${P}nodes_unknown`) : t(`${P}nodes_up_to`, { count: nodes })
   // Exempt accounts skip the block and report-only rules (the exempt list sits between the allows and the blocks).
-  const exempt = action === 'block' && s.exempt > 0 ? t(`${P}exempt`, { count: s.exempt }) : ''
+  // The count is of ALL exempt accounts, so for a policy that reaches only some of them it is said as a total.
+  const exempt = action !== 'block' ? ''
+    : s.exempt === null ? t(`${P}exempt_unknown`)
+    : s.exempt === 0 ? ''
+    : t(`${P}exempt_${s.scope}`, { count: s.exempt })
   // A space between sentences in a spaced script, none between Chinese ones.
   const gap = (text: string) => (CJK.test(text) ? '' : ' ')
+  const known = s.groups !== null && s.users !== null
   const scope = s.scope === 'all'
-    ? t(`${P}scope_all`, { groups: s.groups, users: s.users ?? 0 })
+    ? known ? t(`${P}scope_all`, { groups: s.groups, users: s.users }) : t(`${P}scope_all_unknown`)
     : s.scope === 'groups'
-      ? t(`${P}scope_groups`, { groups: s.groups, users: s.users ?? 0, names: s.names })
+      ? known ? t(`${P}scope_groups`, { groups: s.groups, users: s.users, names: s.names }) : t(`${P}scope_groups_unknown`, { groups: s.groups ?? 0, names: s.names })
       : t(`${P}scope_panels`, { panels: s.panels, names: s.names })
   const head = exempt ? `${scope}${gap(scope)}${exempt}` : scope
   return `${head}${gap(head)}${t(`${P}restart`, { nodes: nodeWords, minutes: when })}`

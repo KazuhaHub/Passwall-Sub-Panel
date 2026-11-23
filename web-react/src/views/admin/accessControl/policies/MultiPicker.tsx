@@ -15,8 +15,8 @@ export interface PickOption {
 
 /**
  * Pick several of many by typing: the editor's lists, groups and servers. Chips show what is chosen and
- * each has its own remove button. `value` is the chosen ids; ids the options do not contain are not shown
- * and not touched (the editor prunes deleted groups itself and says so).
+ * each has its own remove button. `value` is the chosen ids; ids the options do not contain are not shown,
+ * and an edit keeps them: only what the person added or removed changes (the editor prunes deleted groups itself and says so).
  */
 export function MultiPicker({ options, value, onChange, emptyText, id, disabled, ...aria }: {
   options: readonly PickOption[]
@@ -32,7 +32,7 @@ export function MultiPicker({ options, value, onChange, emptyText, id, disabled,
   const chosen = options.filter(o => value.includes(o.id))
   return (
     <Combobox multiple items={options as PickOption[]} value={chosen} disabled={disabled}
-      onValueChange={v => onChange((v as PickOption[]).map(o => o.id))}
+      onValueChange={v => onChange([...value.filter(id => !options.some(o => o.id === id)), ...(v as PickOption[]).map(o => o.id)])}
       itemToStringLabel={(o: PickOption) => o.name} isItemEqualToValue={(a: PickOption, b: PickOption) => a.id === b.id}>
       <ComboboxChips ref={anchor}>
         <ComboboxValue>

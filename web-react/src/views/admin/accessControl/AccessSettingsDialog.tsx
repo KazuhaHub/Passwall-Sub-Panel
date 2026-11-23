@@ -6,6 +6,7 @@ import PolicyField, { outOfRange, type FieldSpec } from '@/components/PolicyFiel
 import { confirm } from '@/components/ConfirmHost'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { DetailSheet } from '@/components/data/DetailSheet'
+import { FormValidityProvider, useFormValidity } from '@/components/form/FormValidity'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushToast } from '@/components/feedback/toasts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -48,7 +49,14 @@ export interface AccessSettingsDialogProps {
  * block). Only keys that changed are sent. A blank number is the default and is
  * never shown as 0.
  */
-export default function AccessSettingsDialog({ open, focus, onClose }: AccessSettingsDialogProps) {
+export default function AccessSettingsDialog(props: AccessSettingsDialogProps) {
+  // The number boxes report an unusable draft ("1.5" in a whole-number box, a value outside its range) to
+  // the provider, which keeps Save off while one is open: the sheet would otherwise store the cut value.
+  return <FormValidityProvider><AccessSettings {...props} /></FormValidityProvider>
+}
+
+function AccessSettings({ open, focus, onClose }: AccessSettingsDialogProps) {
+  const { blocked } = useFormValidity()
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const read = useDestSettings(scope, { enabled: open })
@@ -139,7 +147,7 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
         <>
           <span className="mr-auto self-center text-sm text-muted-foreground">{count > 0 ? t(`${S}changed`, { count }) : ''}</span>
           <Button variant="outline" disabled={count === 0 || save.isPending} onClick={() => stored && setDraft({ ...stored, dest_rules_update_mode: storedMode })}>{t(`${S}discard`)}</Button>
-          <AsyncButton disabled={count === 0 || invalid} onClick={submit}>{t(`${S}save`)}</AsyncButton>
+          <AsyncButton disabled={count === 0 || invalid || blocked} onClick={submit}>{t(`${S}save`)}</AsyncButton>
         </>
       )}
     >

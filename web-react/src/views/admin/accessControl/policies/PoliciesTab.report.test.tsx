@@ -152,11 +152,16 @@ describe('turning on a policy whose earlier state is not known (after a reload)'
     return screen.findByRole('dialog')
   }
 
-  it('asks which: Report only is the default, and nothing is written until it is answered', async () => {
+  // Neither answer may be what a stray Enter picks: this dialog is also the enabling question, which a
+  // person must confirm on purpose. Focus starts on Cancel and Enter there closes the dialog.
+  it('asks which, starts on Cancel, and Enter writes nothing', async () => {
     const dialog = await open()
     expect(within(dialog).getByText('开启「禁止 BT」？')).toBeTruthy()
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '仅报告' }))
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    expect(document.activeElement).toBe(cancel)
+    fireEvent.click(cancel) // what Enter does on a focused button
     expect(api.updateDestPolicy).not.toHaveBeenCalled()
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 
   it('Report only writes report, Turn on blocking writes on', async () => {

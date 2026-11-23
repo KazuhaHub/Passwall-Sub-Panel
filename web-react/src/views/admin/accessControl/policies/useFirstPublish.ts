@@ -33,20 +33,23 @@ function useEnableReads() {
   const nodes = enforcingNodeCount(status.data)
   const minutes = applyMinutes(status.data)
   const scopeOf = (subject: EnableSubject): EnableScope => {
-    const all = groups.data ?? []
+    // A read that has not answered (or failed) leaves the counts unknown, never zero.
+    const read = groups.isSuccess ? groups.data : null
+    const all = read ?? []
     const byId = new Map(all.map(g => [g.id, g]))
     const pickedGroups = subject.scope === 'groups' ? subject.groupIds : all.map(g => g.id)
     const panelNames = new Map((servers.data?.items ?? []).map(s => [s.id, s.name]))
     const shown = (names: string[]) => names.slice(0, NAMES_SHOWN).join(t('admin:access_control.policies.separator')) + (names.length > NAMES_SHOWN ? ` +${names.length - NAMES_SHOWN}` : '')
     return {
       scope: subject.scope,
-      groups: pickedGroups.length,
-      users: pickedGroups.reduce((n, id) => n + (byId.get(id)?.members ?? 0), 0),
+      // A scoped policy names its own groups, so their number is known; the people in them are not without the read.
+      groups: subject.scope === 'groups' ? subject.groupIds.length : read ? pickedGroups.length : null,
+      users: read ? pickedGroups.reduce((n, id) => n + (byId.get(id)?.members ?? 0), 0) : null,
       panels: subject.panelIds.length,
       names: subject.scope === 'groups'
         ? shown(subject.groupIds.map(id => byId.get(id)?.name ?? `#${id}`))
         : shown(subject.panelIds.map(id => panelNames.get(id) ?? `#${id}`)),
-      exempt: policies.data?.exemptions.count ?? 0,
+      exempt: policies.data ? policies.data.exemptions.count : null,
     }
   }
   return { t, scope, policies, status, nodes, minutes, scopeOf }

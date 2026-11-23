@@ -90,6 +90,19 @@ describe('settings', () => {
   })
 })
 
+describe('an unusable draft', () => {
+  // A whole-number box refuses "1.5"; Save must not store the cut value behind it.
+  it('keeps Save off while a number box holds a fraction', async () => {
+    open()
+    const refresh = await screen.findByLabelText('远程与分类列表刷新间隔（小时）')
+    fireEvent.focus(refresh)
+    fireEvent.change(refresh, { target: { value: '1.5' } })
+    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(refresh, { target: { value: '12' } })
+    await waitFor(() => expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+})
+
 describe('the hit-record retention (S18, the records tab\'s "change")', () => {
   it('is a field with the served default, never a 0, and says its range', async () => {
     open()

@@ -50,3 +50,31 @@ describe('enablePolicyConfirm', () => {
     expect(enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, base, { scope: 'all', groups: 1, users: 1, panels: 0, names: '', exempt: 0 }).initialFocus).toBe('cancel')
   })
 })
+
+describe('what the confirmation cannot know', () => {
+  const none = { scope: 'all' as const, groups: null, users: null, panels: 0, names: '', exempt: null }
+
+  // A read that has not answered must not read as "0 groups and 0 people".
+  it('says the groups and people could not be counted instead of stating zero', () => {
+    const c = enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, base, none)
+    expect(c.message).toContain('分组数和人数暂时无法确认')
+    expect(c.message).not.toContain('0 个分组')
+    expect(c.message).not.toContain('0 人')
+  })
+
+  it('a group-scoped policy still knows its own groups, but not their people', () => {
+    const c = enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, base, { ...none, scope: 'groups', groups: 2, names: '学生、员工' })
+    expect(c.message).toContain('2 个分组（学生、员工），人数暂时无法确认')
+  })
+
+  it('says the exempt count could not be read for a block policy, and nothing of it for an allow policy', () => {
+    expect(enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, base, none).message).toContain('豁免账号数暂时无法确认')
+    expect(enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, { ...base, action: 'allow' }, none).message).not.toContain('豁免')
+  })
+
+  // The exempt count is of every exempt account, so a policy that reaches some groups says it as a total.
+  it('words the exempt count as a total when the policy reaches only some groups', () => {
+    const c = enablePolicyConfirm({ t, minutes: 2, nodes: 1 }, base, { scope: 'groups', groups: 1, users: 5, panels: 0, names: '学生', exempt: 3 })
+    expect(c.message).toContain('这些分组里的豁免账号不受影响（豁免账号共 3 个）')
+  })
+})

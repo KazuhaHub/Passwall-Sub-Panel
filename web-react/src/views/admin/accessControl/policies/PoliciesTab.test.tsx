@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { confirmMock, renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
+import * as groupsApi from '@/api/groups'
 import type { DestCatalog, DestPolicies, DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
 
@@ -106,6 +107,17 @@ describe('writes', () => {
     expect(body).toMatchObject({ name: '禁止 BT', state: 'on', action: 'block', updated_at: 111, inline: { protocols: ['bittorrent'] } })
     // Not the first policy, so no first-publish question, and the choice dialog already was the enabling question.
     expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  // A groups read that failed must not turn into "0 groups and 0 people" in the question.
+  it('says the groups and people could not be counted when the groups read failed', async () => {
+    vi.mocked(groupsApi.listAllGroups).mockRejectedValueOnce(new Error('down'))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    const body = await screen.findByText(/范围：/)
+    expect(body.textContent).toContain('分组数和人数暂时无法确认')
+    expect(body.textContent).not.toMatch(/0 个分组|0 人/)
   })
 
   it('declining the choice dialog writes nothing and asks nothing more', async () => {
