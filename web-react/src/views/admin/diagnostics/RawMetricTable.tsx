@@ -1,11 +1,9 @@
 import { Fragment, useState, type ReactNode } from 'react'
-import {
-  Box, ButtonBase, IconButton, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography, useTheme,
-} from '@mui/material'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import type { HistogramSnapshot } from '@/api/diagnostics'
-import { copyToClipboard } from '@/utils/clipboard'
+import { CopyButton } from '@/components/common/CopyButton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { IconChevronDown } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { bucketRows, quantileUsable, ratePerHour, type RawFamily, type RawSeries } from '@/utils/diagnostics'
 import { FAMILY_LABEL_GROUP } from '@/utils/diagnosticsCatalog'
 import type { DiagFormat } from './useDiagFormat'
@@ -16,7 +14,9 @@ import type { DiagFormat } from './useDiagFormat'
 // never a fallback for missing copy. The table is shared by the raw area and
 // each card's "detailed data", so the two can never show one series two ways.
 
-const COLUMNS = { xs: 'minmax(0, 1fr)', md: 'minmax(0, 2.2fr) 88px minmax(0, 1.7fr) minmax(0, 2.3fr)' }
+// One column on a phone, four from the md breakpoint. Written out in full so Tailwind can see the class.
+const COLS = 'md:grid-cols-[minmax(0,2.2fr)_88px_minmax(0,1.7fr)_minmax(0,2.3fr)]'
+const GRID = `grid gap-x-4 gap-y-1 ${COLS}`
 
 /** The translated name of a family, when the bundles have one. */
 export function familyLabel(fmt: DiagFormat, family: string): string | undefined {
@@ -36,21 +36,12 @@ export function childLabel(fmt: DiagFormat, f: RawFamily, s: RawSeries): string 
   return `${s.label}=${s.value}`
 }
 
-function CopyName({ name, fmt }: { name: string; fmt: DiagFormat }) {
-  return (
-    <IconButton size="small" aria-label={fmt.t('admin:diagnostics.raw.copy_name')} onClick={() => void copyToClipboard(name)}
-      sx={{ p: 0.25 }}>
-      <ContentCopyIcon sx={{ fontSize: 14 }} />
-    </IconButton>
-  )
+function CopyName({ name }: { name: string }) {
+  return <CopyButton value={name} name={name} size="icon-xs" />
 }
 
 function Mono({ children }: { children: ReactNode }) {
-  return (
-    <Typography component="code" sx={{ fontFamily: 'monospace', fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
-      {children}
-    </Typography>
-  )
+  return <code className="font-mono text-[11.5px] break-all text-muted-foreground">{children}</code>
 }
 
 function histValue(h: HistogramSnapshot, fmt: DiagFormat): string {
@@ -65,7 +56,6 @@ function histValue(h: HistogramSnapshot, fmt: DiagFormat): string {
 
 /** Every field of a histogram as the API sent it, then its buckets. */
 function HistogramDetails({ h, fmt }: { h: HistogramSnapshot; fmt: DiagFormat }) {
-  const md = useTheme().palette.md
   const { t } = fmt
   const stats: Array<[string, string]> = [
     ['unit', h.unit],
@@ -79,45 +69,41 @@ function HistogramDetails({ h, fmt }: { h: HistogramSnapshot; fmt: DiagFormat })
     ['p99', fmt.exact(h.p99)],
   ]
   return (
-    <Box data-testid={`hist-${h.name}`} sx={{ gridColumn: '1 / -1', p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainer, minWidth: 0 }}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 1 }}>
+    <div data-testid={`hist-${h.name}`} className="col-span-full min-w-0 rounded-lg bg-muted/50 p-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2">
         {stats.map(([k, v]) => (
-          <Box key={k} sx={{ minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant }}>{t(`admin:diagnostics.raw.stats.${k}`)}</Typography>
-            <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>{v}</Typography>
-          </Box>
+          <div key={k} className="min-w-0">
+            <div className="text-xs text-muted-foreground">{t(`admin:diagnostics.raw.stats.${k}`)}</div>
+            <div className="text-sm tabular-nums [overflow-wrap:anywhere]">{v}</div>
+          </div>
         ))}
-      </Box>
-      <Typography variant="caption" sx={{ display: 'block', mt: 1, color: md.onSurfaceVariant }}>
-        {t('admin:diagnostics.raw.quantile_note')}
-      </Typography>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">{t('admin:diagnostics.raw.quantile_note')}</p>
       {h.buckets.length > 0 && (
         <>
-          <Typography variant="caption" sx={{ display: 'block', mt: 1, fontWeight: 600 }}>{t('admin:diagnostics.raw.buckets')}</Typography>
-          {/* The bucket table scrolls inside its own box; the page never does. */}
-          <Box sx={{ overflowX: 'auto', maxWidth: '100%' }}>
-            <Table size="small" sx={{ '& td, & th': { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', px: 1 } }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>{t('admin:diagnostics.raw.bucket.le')}</TableCell>
-                  <TableCell align="right">{t('admin:diagnostics.raw.bucket.cumulative')}</TableCell>
-                  <TableCell align="right">{t('admin:diagnostics.raw.bucket.count')}</TableCell>
+          <p className="mt-2 text-xs font-semibold">{t('admin:diagnostics.raw.buckets')}</p>
+          {/* The bucket table scrolls inside its own box (the shared Table's container); the page never does. */}
+          <Table className="tabular-nums [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('admin:diagnostics.raw.bucket.le')}</TableHead>
+                <TableHead className="text-right">{t('admin:diagnostics.raw.bucket.cumulative')}</TableHead>
+                <TableHead className="text-right">{t('admin:diagnostics.raw.bucket.count')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {bucketRows(h).map((b, i) => (
+                <TableRow key={i}>
+                  <TableCell>{b.inf ? t('admin:diagnostics.raw.bucket.inf') : fmt.bound(b.le, h.unit)}</TableCell>
+                  <TableCell className="text-right">{fmt.exact(b.cumulative)}</TableCell>
+                  <TableCell className="text-right">{fmt.exact(b.count)}</TableCell>
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {bucketRows(h).map((b, i) => (
-                  <TableRow key={i}>
-                    <TableCell>{b.inf ? t('admin:diagnostics.raw.bucket.inf') : fmt.bound(b.le, h.unit)}</TableCell>
-                    <TableCell align="right">{fmt.exact(b.cumulative)}</TableCell>
-                    <TableCell align="right">{fmt.exact(b.count)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Box>
+              ))}
+            </TableBody>
+          </Table>
         </>
       )}
-    </Box>
+    </div>
   )
 }
 
@@ -130,68 +116,53 @@ function SeriesValue({ s, fmt, windowMs, open, onToggle }: {
     // only events, so the rate carries no unit of its own.
     const perHour = s.counter.value > 0 ? ratePerHour(s.counter.value, windowMs) : null
     return (
-      <Box>
-        <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>{fmt.exact(s.counter.value)}</Typography>
+      <div>
+        <div className="text-sm tabular-nums">{fmt.exact(s.counter.value)}</div>
         {perHour !== null && (
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>{t('admin:diagnostics.fmt.per_hour', { rate: fmt.rate(perHour) })}</Typography>
+          <span className="text-xs text-muted-foreground">{t('admin:diagnostics.fmt.per_hour', { rate: fmt.rate(perHour) })}</span>
         )}
-      </Box>
+      </div>
     )
   }
   if (s.gauge) {
     return (
-      <Tooltip title={t('admin:diagnostics.raw.peak_note')}>
-        <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-          {t('admin:diagnostics.raw.gauge_value', { value: fmt.exact(s.gauge.value), peak: fmt.exact(s.gauge.peak) })}
-        </Typography>
-      </Tooltip>
+      <span className="text-sm tabular-nums" title={t('admin:diagnostics.raw.peak_note')}>
+        {t('admin:diagnostics.raw.gauge_value', { value: fmt.exact(s.gauge.value), peak: fmt.exact(s.gauge.peak) })}
+      </span>
     )
   }
   if (s.histogram) {
     return (
-      <ButtonBase onClick={onToggle} aria-expanded={open}
-        sx={{ justifyContent: 'flex-start', textAlign: 'left', gap: 0.5, borderRadius: 1, px: 0.5, mx: -0.5 }}>
-        <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>{histValue(s.histogram, fmt)}</Typography>
-        <ExpandMoreIcon aria-hidden sx={{ fontSize: 18, transform: open ? 'rotate(180deg)' : 'none' }} />
-      </ButtonBase>
+      <button type="button" onClick={onToggle} aria-expanded={open}
+        className="-mx-1 flex items-center gap-1 rounded px-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 pointer-coarse:min-h-[2rem]">
+        <span className="text-sm tabular-nums">{histValue(s.histogram, fmt)}</span>
+        <IconChevronDown aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </button>
     )
   }
   return null
 }
 
-function Row({ children, indent = false, divider = true }: { children: ReactNode; indent?: boolean; divider?: boolean }) {
-  const md = useTheme().palette.md
-  return (
-    <Box sx={{
-      display: 'grid', gridTemplateColumns: COLUMNS, columnGap: 2, rowGap: 0.5, py: 1,
-      pl: indent ? { xs: 1.5, md: 3 } : 0, minWidth: 0,
-      borderTop: divider ? `1px solid ${md.outlineVariant}` : 'none',
-    }}>
-      {children}
-    </Box>
-  )
+function Row({ children, indent = false }: { children: ReactNode; indent?: boolean }) {
+  return <div className={cn(GRID, 'min-w-0 border-t py-2', indent && 'pl-3 md:pl-6')}>{children}</div>
 }
 
 function TypeCell({ f, fmt }: { f: RawFamily; fmt: DiagFormat }) {
-  return <Typography variant="caption" sx={{ color: 'text.secondary' }}>{fmt.t(`admin:diagnostics.raw.type.${f.type}`)}</Typography>
+  return <span className="text-xs text-muted-foreground">{fmt.t(`admin:diagnostics.raw.type.${f.type}`)}</span>
 }
 
 function Desc({ f, fmt }: { f: RawFamily; fmt: DiagFormat }) {
   const desc = familyDesc(fmt, f.family)
   return (
-    <Box sx={{ minWidth: 0 }}>
-      {desc && <Typography variant="caption" sx={{ display: 'block' }}>{desc}</Typography>}
+    <div className="min-w-0 text-xs">
+      {desc && <p>{desc}</p>}
       {f.help && (
-        <Box sx={{ mt: desc ? 0.5 : 0 }}>
-          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontWeight: 600 }}>
-            {fmt.t('admin:diagnostics.raw.server_help')}
-          </Typography>
-          <Typography variant="caption" component="span" sx={{ display: 'block', color: 'text.secondary', overflowWrap: 'anywhere' }}>
-            {f.help}
-          </Typography>
-        </Box>
+        <div className={cn('text-muted-foreground', desc && 'mt-1')}>
+          <p className="font-semibold">{fmt.t('admin:diagnostics.raw.server_help')}</p>
+          <p className="[overflow-wrap:anywhere]">{f.help}</p>
+        </div>
       )}
-    </Box>
+    </div>
   )
 }
 
@@ -213,7 +184,6 @@ export default function RawMetricTable({ families, fmt, windowMs }: {
   fmt: DiagFormat
   windowMs: number
 }) {
-  const md = useTheme().palette.md
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const toggle = (name: string) => setOpen(prev => {
     const next = new Set(prev)
@@ -224,39 +194,30 @@ export default function RawMetricTable({ families, fmt, windowMs }: {
   const { t } = fmt
 
   const nameCell = (title: string, series: string, mono = false) => (
-    <Box sx={{ minWidth: 0 }}>
-      {mono
-        ? <Mono>{title}</Mono>
-        : <Typography variant="body2" sx={{ fontWeight: 500 }}>{title}</Typography>}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, minWidth: 0 }}>
+    <div className="min-w-0">
+      {mono ? <Mono>{title}</Mono> : <div className="text-sm font-medium">{title}</div>}
+      <div className="flex min-w-0 items-center gap-0.5">
         <Mono>{series}</Mono>
-        <CopyName name={series} fmt={fmt} />
-      </Box>
-    </Box>
+        <CopyName name={series} />
+      </div>
+    </div>
   )
 
   const seriesRow = (f: RawFamily, s: RawSeries, child: boolean) => (
-    <Fragment key={s.name}>
-      <Row indent={child}>
-        {nameCell(child ? childLabel(fmt, f, s) : (familyLabel(fmt, f.family) ?? f.family), s.name)}
-        {child ? <Box sx={{ display: { xs: 'none', md: 'block' } }} /> : <TypeCell f={f} fmt={fmt} />}
-        <SeriesValue s={s} fmt={fmt} windowMs={windowMs} open={open.has(s.name)} onToggle={() => toggle(s.name)} />
-        {child ? <Box sx={{ display: { xs: 'none', md: 'block' } }} /> : <Desc f={f} fmt={fmt} />}
-        {s.histogram && open.has(s.name) && <HistogramDetails h={s.histogram} fmt={fmt} />}
-      </Row>
-    </Fragment>
+    <Row key={s.name} indent={child}>
+      {nameCell(child ? childLabel(fmt, f, s) : (familyLabel(fmt, f.family) ?? f.family), s.name)}
+      {child ? <div className="hidden md:block" /> : <TypeCell f={f} fmt={fmt} />}
+      <SeriesValue s={s} fmt={fmt} windowMs={windowMs} open={open.has(s.name)} onToggle={() => toggle(s.name)} />
+      {child ? <div className="hidden md:block" /> : <Desc f={f} fmt={fmt} />}
+      {s.histogram && open.has(s.name) && <HistogramDetails h={s.histogram} fmt={fmt} />}
+    </Row>
   )
 
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Box sx={{
-        display: { xs: 'none', md: 'grid' }, gridTemplateColumns: COLUMNS.md, columnGap: 2, pb: 0.5,
-        color: md.onSurfaceVariant,
-      }}>
-        {(['name', 'type', 'value', 'desc'] as const).map(k => (
-          <Typography key={k} variant="caption" sx={{ fontWeight: 600 }}>{t(`admin:diagnostics.raw.col.${k}`)}</Typography>
-        ))}
-      </Box>
+    <div className="min-w-0">
+      <div className={cn('hidden gap-x-4 pb-1 text-xs font-semibold text-muted-foreground md:grid', COLS)}>
+        {(['name', 'type', 'value', 'desc'] as const).map(k => <span key={k}>{t(`admin:diagnostics.raw.col.${k}`)}</span>)}
+      </div>
       {families.map(f => {
         const title = familyLabel(fmt, f.family) ?? f.family
         if (f.absent) {
@@ -264,9 +225,9 @@ export default function RawMetricTable({ families, fmt, windowMs }: {
             <Row key={f.family}>
               {nameCell(title, f.family)}
               <TypeCell f={f} fmt={fmt} />
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              <span className="text-sm text-muted-foreground">
                 {t(f.labelled ? 'admin:diagnostics.raw.no_children' : 'admin:diagnostics.raw.absent')}
-              </Typography>
+              </span>
               <Desc f={f} fmt={fmt} />
             </Row>
           )
@@ -277,15 +238,13 @@ export default function RawMetricTable({ families, fmt, windowMs }: {
             <Row>
               {nameCell(title, f.family)}
               <TypeCell f={f} fmt={fmt} />
-              <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                {familyTotal(f, fmt)}
-              </Typography>
+              <span className="text-sm tabular-nums">{familyTotal(f, fmt)}</span>
               <Desc f={f} fmt={fmt} />
             </Row>
             {f.series.map(s => seriesRow(f, s, true))}
           </Fragment>
         )
       })}
-    </Box>
+    </div>
   )
 }

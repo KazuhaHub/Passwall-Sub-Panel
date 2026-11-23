@@ -1,29 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+// The request client is not under test; importing the real one would drag in the i18n bootstrap.
+vi.mock('@/api/client', () => ({ client: {} }))
+import i18n from '@/test/initI18n'
+import { flatten, type Nested } from '@/i18n/options'
+import enAdmin from '@/locales/en-US/admin.json'
 import ScopeOverridesEditor from './ScopeOverridesEditor'
 import type { ScopeState } from './scopeOverrides'
 
-// A real dictionary for the keys under test, so an assertion on "Region /
-// state" proves the option went through its translation key rather than
-// printing the raw stored code. Everything else falls back to its default.
-const dict: Record<string, string> = {
-  'admin:groups.scope.geo_scope_city': 'City, tiered',
-  'admin:groups.scope.geo_scope_region': 'Region / state',
-  'admin:groups.scope.geo_scope_country': 'Country only',
-  'admin:groups.scope.geo_scope_off': 'Off',
-  'admin:groups.scope.default_suffix': ' (default)',
-  'admin:groups.scope.global_prefix': 'Global',
-}
-// The editor is pure; its module's load/save helpers are not under test, and
-// importing the real API client would drag in the i18n bootstrap.
-vi.mock('@/api/client', () => ({ client: {} }))
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (k: string, o?: { defaultValue?: string }) => dict[k] ?? o?.defaultValue ?? k,
-    i18n: { language: 'en-US' },
-  }),
-}))
+// The REAL English strings, so an assertion on "Region / state" proves the option went through its translation key
+// rather than printing the raw stored code, and a missing key shows up as itself.
+i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 
 afterEach(cleanup)
 
@@ -36,24 +24,80 @@ function state(key: string, global: string, edit: { on: boolean; value: string }
   }
 }
 
-function mount(scope: ScopeState) {
+function mount(scope: ScopeState, props: Partial<Parameters<typeof ScopeOverridesEditor>[0]> = {}) {
   const onChange = vi.fn()
-  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban', 'risk']} />)
+  render(<ScopeOverridesEditor scope={scope} onChange={onChange} categories={['geo', 'geo_ban', 'risk']} {...props} />)
   return onChange
 }
+
+/** The one row of an inheritance field, by what its trail shows. */
+const trail = () => screen.getByRole('list', { name: 'Where the value comes from' })
+
+describe('ScopeOverridesEditor, inheritance', () => {
+  it('shows the global value, that the group follows it, and the switch to set its own', () => {
+    mount(state('notify.expire_before_days', '3', { on: false, value: '3' }), { categories: ['notify'] })
+    expect(trail().textContent).toContain('Global3')
+    expect(trail().textContent).toContain('This groupFollows above')
+    expect(screen.getByText('Following the level above, currently 3')).toBeTruthy()
+    expect(screen.queryByRole('spinbutton')).toBeNull()
+  })
+
+  it('shows an override, the value in effect, and goes back to following global with nothing stored', () => {
+    const onChange = mount(state('notify.expire_before_days', '3', { on: true, value: '7' }), { categories: ['notify'] })
+    expect(trail().textContent).toContain('Global3')
+    expect(trail().textContent).toContain('This group7')
+    expect(within(trail()).getByText('In effect').closest('li')!.textContent).toContain('This group')
+    fireEvent.click(screen.getByRole('radio', { name: 'Follow the level above' }))
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      edit: { 'notify.expire_before_days': { on: false, value: '3' } },
+    }))
+  })
+
+  it('starts an override from the value that was in effect, and writes what is typed', () => {
+    const onChange = mount(state('notify.expire_before_days', '3', { on: false, value: '3' }), { categories: ['notify'] })
+    fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      edit: { 'notify.expire_before_days': { on: true, value: '3' } },
+    }))
+  })
+
+  it('renders a switch for a bool, as On or Off in the trail', () => {
+    const onChange = mount(state('security.totp_enabled', '1', { on: true, value: '0' }), { categories: ['2fa'] })
+    expect(trail().textContent).toContain('GlobalOn')
+    expect(trail().textContent).toContain('This groupOff')
+    fireEvent.click(screen.getByRole('switch'))
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ edit: { 'security.totp_enabled': { on: true, value: '1' } } }))
+  })
+
+  it('offers only the keys asked for, and never one the backend does not list', () => {
+    const scope: ScopeState = {
+      overridable: ['notify.expire_before_days'],
+      global: { 'notify.expire_before_days': '3', 'notify.traffic_remain_percent': '10' },
+      orig: {},
+      edit: { 'notify.expire_before_days': { on: false, value: '3' }, 'notify.traffic_remain_percent': { on: false, value: '10' } },
+    }
+    mount(scope, { categories: ['notify'] })
+    expect(screen.queryByText('Expiry reminder (days)')).not.toBeNull()
+    expect(screen.queryByText('Traffic-low reminder (%)')).toBeNull()
+    cleanup()
+    mount({ ...scope, overridable: [...scope.overridable, 'notify.traffic_remain_percent'] }, { categories: ['notify'], omitKeys: ['notify.expire_before_days'] })
+    expect(screen.queryByText('Expiry reminder (days)')).toBeNull()
+    expect(screen.queryByText('Traffic-low reminder (%)')).not.toBeNull()
+    cleanup()
+    mount({ ...scope, overridable: [...scope.overridable, 'notify.traffic_remain_percent'] }, { categories: ['notify'], keys: ['notify.traffic_remain_percent'] })
+    expect(screen.queryByText('Expiry reminder (days)')).toBeNull()
+  })
+})
 
 describe('ScopeOverridesEditor, enum rows', () => {
   it('renders an overridden enum as a select with translated options', () => {
     const onChange = mount(state('geo_anomaly.scope', '', { on: true, value: 'region' }))
 
-    const select = screen.queryByRole('combobox')
-    expect(select?.textContent).toBe('Region / state')
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('region')
+    expect(Array.from(select.options).map(o => o.textContent)).toEqual(['City, tiered', 'Region / state', 'Country only', 'Off'])
 
-    fireEvent.mouseDown(select!)
-    const options = within(screen.getByRole('listbox')).getAllByRole('option')
-    expect(options.map(o => o.textContent)).toEqual(['City, tiered', 'Region / state', 'Country only', 'Off'])
-
-    fireEvent.click(options[2])
+    fireEvent.change(select, { target: { value: 'country' } })
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
       edit: { 'geo_anomaly.scope': { on: true, value: 'country' } },
     }))
@@ -61,24 +105,28 @@ describe('ScopeOverridesEditor, enum rows', () => {
 
   it('shows an inherited empty scope as the default label', () => {
     // '' is what the server stores when nobody chose a scope, and it judges
-    // that as city. "Global: " followed by nothing would read as "off".
+    // that as city. A global shown as nothing would read as "off".
     mount(state('geo_anomaly.scope', '', { on: false, value: '' }))
-    expect(screen.queryByText('Global: City, tiered (default)')).not.toBeNull()
+    expect(trail().textContent).toContain('GlobalCity, tiered (default)')
   })
 
   it('shows an inherited chosen scope by its label, without the default suffix', () => {
     mount(state('geo_anomaly.scope', 'country', { on: false, value: 'country' }))
-    expect(screen.queryByText('Global: Country only')).not.toBeNull()
+    expect(trail().textContent).toContain('GlobalCountry only')
+    expect(trail().textContent).not.toContain('(default)')
   })
 
-  it('seeds the default when an override is switched on from an unset scope', () => {
-    // Switching on copies the inherited value. An inherited '' is not one of
-    // the options, so the select would open blank and save '' — the default
-    // it stands for is what the admin is looking at, so that is what is seeded.
+  it('starts from the default when an override is switched on from an unset scope, and writes nothing until it is edited', () => {
+    // An inherited '' is not one of the options, so a select opened on it would
+    // show blank and save ''. The select starts on the default it stands for, a
+    // note says so, and only an edit stores it.
     const onChange = mount(state('geo_anomaly.scope', '', { on: false, value: '' }))
-    fireEvent.click(screen.getAllByRole('switch')[0])
+    fireEvent.click(screen.getByRole('radio', { name: 'Set here' }))
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('city')
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'off' } })
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      edit: { 'geo_anomaly.scope': { on: true, value: 'city' } },
+      edit: { 'geo_anomaly.scope': { on: true, value: 'off' } },
     }))
   })
 })
@@ -88,12 +136,12 @@ describe('ScopeOverridesEditor, unset numeric rows', () => {
     // The geo tolerances read 0 as "never configured". "Global: 0" would tell
     // a group admin the fleet tolerates no second city at all.
     mount(state('geo_anomaly.max_cities', '0', { on: false, value: '0' }))
-    expect(screen.queryByText('Global: 2 (default)')).not.toBeNull()
+    expect(trail().textContent).toContain('Global2 (default)')
   })
 
   it('shows a configured int as itself', () => {
     mount(state('geo_anomaly.max_cities', '4', { on: false, value: '4' }))
-    expect(screen.queryByText('Global: 4')).not.toBeNull()
+    expect(trail().textContent).toContain('Global4')
   })
 })
 
@@ -119,7 +167,7 @@ describe('ScopeOverridesEditor, overridden unset numeric rows', () => {
     for (const v of ['', '1.5']) {
       mount(state('geo_anomaly.max_cities', '4', { on: true, value: v }))
       expect(screen.queryByText('= Global: 4'), `override ${JSON.stringify(v)}`).not.toBeNull()
-      expect(screen.queryByText(/\(default\)/), `override ${JSON.stringify(v)}`).toBeNull()
+      expect(screen.queryByText(/^= .*\(default\)/), `override ${JSON.stringify(v)}`).toBeNull()
       cleanup()
     }
     // ...and the global value is itself read the usual way.
@@ -135,8 +183,7 @@ describe('ScopeOverridesEditor, overridden unset numeric rows', () => {
   it('adds no hint to an int whose 0 is a real value', () => {
     // Only keys with an unsetValue read 0 as unset. Elsewhere 0 means 0, and
     // a hint would invent a default the server never applies.
-    render(<ScopeOverridesEditor onChange={vi.fn()} categories={['notify']}
-      scope={state('notify.expire_before_days', '3', { on: true, value: '0' })} />)
+    mount(state('notify.expire_before_days', '3', { on: true, value: '0' }), { categories: ['notify'] })
     expect(screen.queryByRole('spinbutton')).not.toBeNull()
     expect(screen.queryByText(/^=/)).toBeNull()
   })
@@ -171,7 +218,7 @@ describe('ScopeOverridesEditor, overridden unset float rows', () => {
     // the global 4 that "= Global" promised.
     for (const v of ['NaN', 'nan', '-Inf', '-infinity']) {
       mount(state('risk.usage_ratio', '4', { on: true, value: v }))
-      expect(screen.queryByRole('spinbutton', { description: '= 3 (default)' }), `override ${v}`).not.toBeNull()
+      expect(screen.queryByText('= 3 (default)'), `override ${v}`).not.toBeNull()
       cleanup()
     }
   })
@@ -182,7 +229,6 @@ describe('ScopeOverridesEditor, overridden unset float rows', () => {
     // Go float syntax. Each one applies, so no hint.
     for (const v of ['Inf', '+infinity', '1_5', '0x1.8p1']) {
       mount(state('risk.usage_ratio', '4', { on: true, value: v }))
-      expect(screen.queryByRole('spinbutton'), `override ${v}`).not.toBeNull()
       expect(screen.queryByText(/^=/), `override ${v}`).toBeNull()
       cleanup()
     }
@@ -213,46 +259,15 @@ describe('ScopeOverridesEditor, multi-line strings', () => {
 })
 
 describe('ScopeOverridesEditor, hints', () => {
-  afterEach(() => vi.unstubAllGlobals())
-
-  function mountWithHints(scope: ScopeState) {
-    render(<ScopeOverridesEditor scope={scope} onChange={vi.fn()} categories={['geo', 'geo_ban', 'risk']} showHints />)
-  }
-
   // The risk center's group card explains each row where the global field
   // is explained; the other hosts keep their compact rows.
-  it('shows the hint under the label only when asked', () => {
-    mountWithHints(state('geo_anomaly.max_cities', '0', { on: false, value: '0' }))
-    expect(screen.getByText('admin:settings.geo_anomaly.max_cities_hint')).toBeTruthy()
+  it('shows the hint under the row only when asked', () => {
+    const scope = state('geo_anomaly.max_cities', '0', { on: false, value: '0' })
+    const hint = i18n.t('admin:settings.geo_anomaly.max_cities_hint')
+    mount(scope, { showHints: true })
+    expect(screen.getByText(hint)).toBeTruthy()
     cleanup()
-    mount(state('geo_anomaly.max_cities', '0', { on: false, value: '0' }))
-    expect(screen.queryByText('admin:settings.geo_anomaly.max_cities_hint')).toBeNull()
-  })
-
-  // U11: three fixed columns beside a hint leave the label a sliver on a
-  // phone. There the label and its hint take a line of their own, and the
-  // switch and the value share the line under it.
-  it('gives the label and hint their own line on a phone', () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: true, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
-      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
-    }))
-    mountWithHints(state('geo_anomaly.max_cities', '4', { on: false, value: '4' }))
-    const hint = screen.getByText('admin:settings.geo_anomaly.max_cities_hint')
-    const labelLine = hint.parentElement as HTMLElement
-    expect(within(labelLine).getByText('城市容错')).toBeTruthy()
-    expect(within(labelLine).queryByRole('switch')).toBeNull()
-    const row = labelLine.parentElement as HTMLElement
-    expect(row.children).toHaveLength(2)
-    const controls = row.children[1] as HTMLElement
-    expect(within(controls).getByRole('switch')).toBeTruthy()
-    expect(within(controls).getByText('Global: 4')).toBeTruthy()
-  })
-
-  it('keeps label, switch and value on one line on a wide screen', () => {
-    mountWithHints(state('geo_anomaly.max_cities', '4', { on: false, value: '4' }))
-    const hint = screen.getByText('admin:settings.geo_anomaly.max_cities_hint')
-    const row = (hint.parentElement as HTMLElement).parentElement as HTMLElement
-    expect(row.children).toHaveLength(3)
+    mount(scope)
+    expect(screen.queryByText(hint)).toBeNull()
   })
 })

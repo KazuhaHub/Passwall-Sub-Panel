@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import type { DiagnosticsSnapshot, MetricsSnapshot } from '@/api/diagnostics'
@@ -15,7 +13,7 @@ import {
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const snack = vi.hoisted(() => vi.fn())
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack, default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: snack, pushToast: vi.fn() }))
 const confirmMock = vi.hoisted(() => vi.fn(async (_opts: unknown) => true))
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock }))
 const copy = vi.hoisted(() => vi.fn(async (_text: string) => true))
@@ -28,7 +26,8 @@ const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (k: string, o?: Record<string, unknown>) => {
-      const key = k.includes(':') ? k : `admin:${k}`
+      // A bare key is the shared components' (common); a prefixed one is this page's.
+      const key = k.includes(':') ? k : `common:${k}`
       const raw = dict.current[key] ?? k
       return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
     },
@@ -38,16 +37,16 @@ vi.mock('react-i18next', () => ({
 
 import zh from '@/locales/zh-CN/admin.json'
 import zhNav from '@/locales/zh-CN/nav.json'
+import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = {
   ...Object.fromEntries(Object.entries(flatten(zh as Nested)).map(([k, v]) => [`admin:${k}`, v])),
   ...Object.fromEntries(Object.entries(flatten(zhNav as Nested)).map(([k, v]) => [`nav:${k}`, v])),
+  ...Object.fromEntries(Object.entries(flatten(zhCommon as Nested)).map(([k, v]) => [`common:${k}`, v])),
 }
 
 import DiagnosticsView from './DiagnosticsView'
-import { stageGroupColors } from './StageBar'
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })
+import { STAGE_GROUP_FILL } from './StageBar'
 
 const served = vi.hoisted(() => ({
   snap: undefined as unknown,
@@ -67,20 +66,24 @@ function serve(snap: DiagnosticsSnapshot, servers: ServerRow[] = [THREE_XUI, NAT
 
 function mount() {
   render(
-    <ThemeProvider theme={theme}>
-      <QueryClientProvider client={makeTestQueryClient()}>
-        <MemoryRouter initialEntries={['/admin/diagnostics']}>
-          <Routes>
-            <Route path="/admin/diagnostics" element={<DiagnosticsView />} />
-            <Route path="/admin/dashboard" element={<p>dashboard</p>} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={makeTestQueryClient()}>
+      <MemoryRouter initialEntries={['/admin/diagnostics']}>
+        <Routes>
+          <Route path="/admin/diagnostics" element={<DiagnosticsView />} />
+          <Route path="/admin/dashboard" element={<p>dashboard</p>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 
 const card = (id: string) => document.getElementById(`diag-card-${id}`) as HTMLElement
+/** A subsystem that needs no attention is one folded line; opening it shows its figures. */
+const openCard = (id: string) => {
+  const toggle = card(id).querySelector('h3 button') as HTMLElement
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle)
+  return card(id)
+}
 const statusLine = () => screen.getByTestId('diag-status')
 
 async function loaded() {
@@ -133,6 +136,30 @@ describe('the status line', () => {
   })
 })
 
+describe('which subsystems are open', () => {
+  // A healthy subsystem costs one line; the one that needs attention starts open.
+  it('folds a healthy subsystem and opens one that needs attention', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    expect(card('lifecycle').querySelector('h3 button')?.getAttribute('aria-expanded')).toBe('true')
+    expect(card('poll').querySelector('h3 button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(within(card('poll')).queryByText('1,774 轮')).toBeNull()
+  })
+
+  // The page re-reads every minute; a refresh must not fold what someone opened.
+  it('keeps a subsystem open across a refresh', async () => {
+    serve(productionSnapshot())
+    mount()
+    await loaded()
+    openCard('poll')
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await waitFor(() => expect(api.get.mock.calls.filter(([u]) => u === '/admin/diagnostics/metrics').length).toBeGreaterThan(1))
+    expect(card('poll').querySelector('h3 button')?.getAttribute('aria-expanded')).toBe('true')
+    expect(within(card('poll')).getByText('1,774 轮')).toBeTruthy()
+  })
+})
+
 describe('the production reading', () => {
   it('lists the status sync failures with their share, origin and where to go', async () => {
     serve(productionSnapshot())
@@ -167,7 +194,7 @@ describe('the production reading', () => {
     serve(productionSnapshot())
     mount()
     await loaded()
-    const poll = card('poll')
+    const poll = openCard('poll')
     expect(within(poll).getByText('运行中')).toBeTruthy()
     expect(within(poll).getByText('按间隔至少应有 1,773 轮')).toBeTruthy()
     expect(within(poll).getByText('1,774 轮')).toBeTruthy()
@@ -188,7 +215,7 @@ describe('the production reading', () => {
     mount()
     await loaded()
     for (const id of ['lifecycle', 'floor']) {
-      const text = card(id).textContent ?? ''
+      const text = openCard(id).textContent ?? ''
       expect(text).not.toMatch(/占(核对的)?\s*没有尝试/)
       expect(within(card(id)).getAllByText('没有尝试，因此没有比例').length).toBeGreaterThan(0)
     }
@@ -223,15 +250,12 @@ describe('the production reading', () => {
 // time on a poll that may be perfectly healthy, so none of its segments may
 // borrow a state colour, and each must be told apart from the others.
 describe('the poll stage bar', () => {
-  for (const mode of ['light', 'dark'] as const) {
-    it(`uses no state colour and five distinct colours in ${mode} mode`, () => {
-      const md = createAppTheme({ mode, sourceColor: '#6750a4', language: 'zh-CN' }).palette.md
-      const colors = Object.values(stageGroupColors(md))
-      expect(colors).not.toContain(md.error)
-      expect(colors).not.toContain(md.errorContainer)
-      expect(new Set(colors).size).toBe(colors.length)
-    })
-  }
+  it('uses no state colour and five distinct fills', () => {
+    const fills = Object.values(STAGE_GROUP_FILL)
+    expect(fills).toHaveLength(5)
+    expect(new Set(fills).size).toBe(fills.length)
+    for (const fill of fills) expect(fill).not.toMatch(/destructive|success|warning|info/)
+  })
 })
 
 describe('the native node card', () => {
@@ -248,7 +272,7 @@ describe('the native node card', () => {
     serve({ ...productionSnapshot(), metrics: m })
     mount()
     await loaded()
-    const tile = within(card('node')).getByText('保存失败').parentElement as HTMLElement
+    const tile = within(openCard('node')).getByText('保存失败').parentElement as HTMLElement
     expect(within(tile).getByText('1 次')).toBeTruthy()
     expect(within(tile).getByText('其中 1 次含历史样本')).toBeTruthy()
   })
@@ -334,7 +358,7 @@ describe('the raw metrics', () => {
     serve(productionSnapshot())
     mount()
     await loaded()
-    expect(within(card('lifecycle')).getByText('约每小时 15 次')).toBeTruthy()
+    expect(within(openCard('lifecycle')).getByText('约每小时 15 次')).toBeTruthy()
     const raw = openRaw()
     search(raw, 'psp_poll_total')
     expect(within(raw).getByText('约每小时 30')).toBeTruthy()
@@ -393,7 +417,7 @@ describe('clearing the statistics', () => {
     expect(within(kept).getByRole('button', { name: '下载清零前的数据' })).toBeTruthy()
 
     const raw = openRaw()
-    fireEvent.click(within(raw).getByRole('button', { name: /^清零前/ }))
+    fireEvent.click(within(raw).getByRole('radio', { name: /^清零前/ }))
     expect(within(raw).getByText(/正在查看清零前的数据/)).toBeTruthy()
     // The checks and the summary describe the window shown, not the current one.
     expect(within(raw).getByTestId('self-check-poll_ms').textContent).toContain('与已开始的 1,774 轮一致')
@@ -441,7 +465,7 @@ describe('the blackout', () => {
     }), uptime_ms: 30_000 })
     mount()
     await loaded()
-    const sso = card('sso')
+    const sso = openCard('sso')
     expect(within(sso).getByText('本区间有 2 次 SAML 登录被拒，原因见下方。')).toBeTruthy()
     expect(within(sso).getByText('目标地址不符 2')).toBeTruthy()
     expect(within(card('poll')).queryByText('已运行')).toBeNull()
