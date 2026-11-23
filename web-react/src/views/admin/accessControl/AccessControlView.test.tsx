@@ -286,14 +286,15 @@ describe('the header on a phone', () => {
     return () => { window.matchMedia = original }
   }
 
-  it('keeps the test button, the picker and the menu in the header and gives the account picker the full width', async () => {
+  it('keeps the test button and the menu with the header actions and gives the account picker a full-width row', async () => {
     const restore = phone(true)
     try {
       renderAccess(<AccessControlView />)
       const pick = await screen.findByLabelText('pick')
       expect(pick.getAttribute('data-fullwidth')).toBe('true')
-      const actions = pick.closest('[data-slot="page-header-actions"]')
-      expect(actions?.contains(screen.getByRole('button', { name: '测试目的地' }))).toBe(true)
+      // The picker has a row of its own under the title; the test button and the menu stay with the header's actions.
+      const actions = screen.getByRole('button', { name: '测试目的地' }).closest('[data-slot="page-header-actions"]')
+      expect(actions?.contains(pick)).toBe(false)
       expect(actions?.contains(screen.getByRole('button', { name: '更多' }))).toBe(true)
     } finally { restore() }
   })

@@ -222,9 +222,10 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
         deletedRule={deletedRule} panels={panels} showExit={showExit} exitOptions={exitOptions} exitName={exitName} filterCount={filterCount} phone={phone} />
 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">{t(`${R}view.label`)}</span>
-          <SegmentedControl<RecGroupBy> aria-label={t(`${R}view.label`)} value={filter.group_by} onChange={v => patch({ group_by: v })}
+          {/* Five views do not fit a phone's width: the control scrolls inside itself instead of widening the page. */}
+          <SegmentedControl<RecGroupBy> className="overflow-x-auto" aria-label={t(`${R}view.label`)} value={filter.group_by} onChange={v => patch({ group_by: v })}
             options={views.map(v => ({ value: v, label: t(`${R}view.${v}`) }))} />
         </div>
         {data && data.items.length > 0 && (

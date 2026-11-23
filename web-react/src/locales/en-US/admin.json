@@ -5894,7 +5894,6 @@
       "pick_user": "Find account…"
     },
     "menu": {
-      "label": "More actions",
       "settings": "Data and apply settings…",
       "pause": "Pause all enforcement…",
       "paused_snack": "Access control is paused",

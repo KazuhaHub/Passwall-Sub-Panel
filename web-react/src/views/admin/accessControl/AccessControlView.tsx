@@ -57,7 +57,7 @@ const HELP_KEY: Record<AccessTab, string> = {
  */
 export default function AccessControlView() {
   const { t } = useTranslation(['admin', 'common'])
-  // The account picker takes a whole row of its own on a phone, where the header's actions wrap under the title.
+  // The account picker takes a whole row of its own on a phone, where the header actions wrap under the title.
   const phone = useMediaQuery('(max-width: 639px)')
   const canView = useCan('access.view')
   const scope = useQueryScope()
@@ -161,6 +161,13 @@ export default function AccessControlView() {
     { id: 'pause', label: t('admin:access_control.menu.pause'), icon: IconPaused, destructive: true, disabled: status.data?.paused === true, onSelect: () => void doPause(true) },
   ]
 
+  // The picker sits among the header actions on a desktop. That action row is only as wide as its content, so
+  // a phone's full-width picker has nothing to fill there: it gets a row of its own under the title instead.
+  const picker = (
+    <UserAutocomplete value={null} onChange={id => { if (id) account.open(id) }}
+      label={t('admin:access_control.header.pick_user')} width={240} fullWidth={phone} />
+  )
+
   return (
     <div className="p-4 sm:p-6">
       <PageHeader
@@ -168,8 +175,7 @@ export default function AccessControlView() {
         description={t('admin:access_control.subtitle')}
         secondary={(
           <>
-            <UserAutocomplete value={null} onChange={id => { if (id) account.open(id) }}
-              label={t('admin:access_control.header.pick_user')} width={240} fullWidth={phone} />
+            {!phone && picker}
             <Button variant="outline" onClick={() => sheet.open('test')}>
               <IconSearch />
               {t('admin:access_control.header.test')}
@@ -178,6 +184,7 @@ export default function AccessControlView() {
         )}
         more={more}
       />
+      {phone && <div className="-mt-1 mb-4">{picker}</div>}
 
       {unwired
         ? <Alert><IconInfo aria-hidden /><AlertDescription>{t('admin:access_control.unwired')}</AlertDescription></Alert>

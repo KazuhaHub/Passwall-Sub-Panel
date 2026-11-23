@@ -5863,7 +5863,6 @@
       "pick_user": "查看账号…"
     },
     "menu": {
-      "label": "更多操作",
       "settings": "数据与下发设置…",
       "pause": "暂停全部执行…",
       "paused_snack": "访问控制已暂停",
