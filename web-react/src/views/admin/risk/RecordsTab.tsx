@@ -151,13 +151,11 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
       <Field label={t('admin:risk_center.flags.col_user')}>
         <UserPicker value={filters.user_id ?? null} onChange={id => update({ user_id: id ?? undefined })} />
       </Field>
-      <Field label={t('admin:risk_center.flags.filter_source')}>
-        <div className="w-44">
-          <NativeSelect value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
-            <option value="">{t('admin:risk_center.live.opt_all')}</option>
-            {FLAG_SOURCES.map(s => <option key={s} value={s}>{t(flagSourceKey(s))}</option>)}
-          </NativeSelect>
-        </div>
+      <Field label={t('admin:risk_center.flags.filter_source')} className="w-44">
+        <NativeSelect value={filters.source ?? ''} onChange={e => update({ source: e.target.value || undefined })}>
+          <option value="">{t('admin:risk_center.live.opt_all')}</option>
+          {FLAG_SOURCES.map(s => <option key={s} value={s}>{t(flagSourceKey(s))}</option>)}
+        </NativeSelect>
       </Field>
       <Field label={withNote(t('admin:risk_center.flags.filter_since'), browserTime, i18n.language)}>
         <Input type="datetime-local" className="w-56" value={filters.since ?? ''} onChange={e => update({ since: e.target.value || undefined })} />
@@ -275,7 +273,7 @@ export function RecordDetail({ rec, sentence = true }: { rec: FlagRecord; senten
   const rows = risk ? [] : paramRows(rec, t, panelTz, i18n.language)
   const hasParams = rec.params !== null && rec.params !== undefined
   return (
-    <div className="flex flex-col gap-3 py-1 text-[13px]">
+    <div data-testid="record-detail" className="flex flex-col gap-3 py-1 text-[13px]">
       {sentence && <p>{flagText(rec, t, i18n.language)}</p>}
       {geoEvidence && (
         <div>

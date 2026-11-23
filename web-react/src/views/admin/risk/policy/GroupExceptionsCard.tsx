@@ -161,15 +161,13 @@ export default function GroupExceptionsCard({ groups, groupId, onPickGroup, exce
           <p className="text-[13px] text-muted-foreground">{t(`${P}no_groups`)}</p>
         ) : (
           // While the groups are read the picker waits, empty, rather than saying there are none.
-          <Field label={t(`${P}pick_group`)}>
-            <div className="w-full sm:w-64">
-              <NativeSelect disabled={!groups}
-                value={groupId !== null && groups?.some(g => g.id === groupId) ? String(groupId) : ''}
-                onChange={e => { if (e.target.value) void pick(Number(e.target.value)) }}>
-                <option value="" disabled />
-                {(groups ?? []).map(g => <option key={g.id} value={String(g.id)}>{g.name || g.slug}</option>)}
-              </NativeSelect>
-            </div>
+          <Field label={t(`${P}pick_group`)} className="w-full sm:w-64">
+            <NativeSelect disabled={!groups}
+              value={groupId !== null && groups?.some(g => g.id === groupId) ? String(groupId) : ''}
+              onChange={e => { if (e.target.value) void pick(Number(e.target.value)) }}>
+              <option value="" disabled />
+              {(groups ?? []).map(g => <option key={g.id} value={String(g.id)}>{g.name || g.slug}</option>)}
+            </NativeSelect>
           </Field>
         )}
 
