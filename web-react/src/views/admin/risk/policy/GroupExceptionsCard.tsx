@@ -68,16 +68,19 @@ export function useGroupExceptions(groupId: number | null) {
 
   const edit = (next: ScopeState) => setLoaded(prev => (prev ? { ...prev, current: next } : prev))
 
-  const save = async () => {
-    if (!state) return
+  /** Resolves true when the group's changes were written; a failure is toasted here. */
+  const save = async (): Promise<boolean> => {
+    if (!state) return false
     setSaving(true)
     try {
       await saveScopeState(state.groupId, state.current)
       const fresh = await loadScopeState(state.groupId)
       setLoaded({ groupId: state.groupId, initial: fresh, current: fresh })
       pushSnack(t(`${P}group_saved`), 'success')
+      return true
     } catch {
       pushSnack(t('admin:groups.scope.save_error'), 'error')
+      return false
     } finally {
       setSaving(false)
     }

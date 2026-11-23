@@ -680,6 +680,38 @@ describe('PolicyTab, group exceptions', () => {
     expect(screen.queryByText(L('risk_center.policy.group_dirty'))).toBeNull()
   })
 
+  // Both parts unsaved: the page's Save writes both, the policy first, then the group's own requests.
+  it('the save bar saves the policy and then the group when both are unsaved', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    type(field('settings.risk.max_devices'), '5')
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(snack).toHaveBeenCalledWith(L('risk_center.policy.group_saved'), 'success'))
+    expect(policyPuts()).toEqual([{ risk_max_devices: 5 }])
+    const order = api.put.mock.calls.map(([u]) => u)
+    expect(order.indexOf('/admin/risk-center/policy')).toBeLessThan(order.indexOf('/admin/groups/2/scope-settings'))
+    await waitFor(() => expect(barGone()).toBe(true))
+  })
+
+  it('a refused policy leaves the group unsaved and says so', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    server.putError = Object.assign(new Error('500'), { isAxiosError: true, response: { status: 500, data: { error: 'down' } } })
+    type(field('settings.risk.max_devices'), '5')
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(snack).toHaveBeenCalledWith(expect.stringContaining('尚未保存'), 'warning'))
+    expect(api.put.mock.calls.some(([u]) => String(u).includes('/scope-settings'))).toBe(false)
+    expect(screen.getByText(/^未保存：策略、分组/)).toBeTruthy()
+  })
+
   it('names both parts while both are unsaved', async () => {
     serve()
     mount('/admin/risk?tab=policy&group=2')

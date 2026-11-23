@@ -1,5 +1,6 @@
 import type { AuthEvent } from '@/api/authEvents'
 import { StatusDot } from '@/components/common/StatusDot'
+import { Button } from '@/components/ui/button'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { useUserActivity } from '@/query/authEvents'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -20,10 +21,17 @@ export default function RecentLogins({ userId }: { userId: number }) {
   const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const scope = useQueryScope()
-  const { data, isPending, isError } = useUserActivity(scope, userId)
+  const { data, isPending, isError, refetch } = useUserActivity(scope, userId)
   const items: AuthEvent[] | undefined = data?.items
   if (isPending) return <CardSkeleton lines={2} />
-  if (isError) return <p className="text-xs text-destructive">{t('admin:users.activity.unavailable')}</p>
+  if (isError) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-destructive">{t('admin:users.activity.unavailable')}</p>
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>{t('admin:risk_center.retry')}</Button>
+      </div>
+    )
+  }
   if (!items || items.length === 0) return <p className="text-xs text-muted-foreground">{t('admin:users.activity.empty')}</p>
   return (
     <ul className="flex flex-col divide-y text-xs">

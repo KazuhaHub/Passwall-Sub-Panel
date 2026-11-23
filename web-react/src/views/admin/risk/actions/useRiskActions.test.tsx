@@ -104,6 +104,30 @@ describe('useRiskActions: the confirmation', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
+  // The trust dialog on a detector-held account offers to resume it, ticked: the closing line follows the
+  // box, so it never says the service is untouched when confirming lifts the hold.
+  it('the trust line follows the resume box', async () => {
+    api.post.mockResolvedValue({ data: { review: REVIEW_DTO, resumed: true } })
+    mount(geoAutoHeld())
+    const dlg = await start('trust')
+    const resumes = dict.current['risk_center.actions.reversible_trust_resume']
+    const untouched = dict.current['risk_center.actions.reversible_trust']
+    expect(within(dlg).getByText(resumes)).toBeTruthy()
+    expect(within(dlg).queryByText(untouched)).toBeNull()
+    fireEvent.click(within(dlg).getByRole('checkbox'))
+    expect(within(dlg).getByText(untouched)).toBeTruthy()
+    expect(within(dlg).queryByText(resumes)).toBeNull()
+  })
+
+  it('the resume line says the account is trusted too when that box is ticked', async () => {
+    mount(geoAutoHeld())
+    const dlg = await start('resume')
+    const both = dict.current['risk_center.actions.reversible_resume_trust']
+    expect(within(dlg).queryByText(both)).toBeNull()
+    fireEvent.click(within(dlg).getByRole('checkbox'))
+    expect(within(dlg).getByText(both)).toBeTruthy()
+  })
+
   it('a pause says it holds the service, not the account', async () => {
     mount(subject())
     const dlg = await start('pause')

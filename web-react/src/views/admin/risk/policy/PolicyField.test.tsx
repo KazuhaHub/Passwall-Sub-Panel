@@ -109,6 +109,19 @@ describe('PolicyField, numbers', () => {
     expect(input.getAttribute('aria-invalid')).toBe('true')
   })
 
+  // 0 has always meant "unset, use the default" and the server accepts it: it stays enterable where the
+  // field has a minimum, is stored as 0, and the box is drawn again as the default — never an unsaveable value.
+  it('takes 0 as "default" in a field with a minimum', () => {
+    const { input, stored } = mount('risk_usage_ratio', 2)
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: '0' } })
+    fireEvent.blur(input)
+    expect(stored.at(-1)).toBe(0)
+    const again = screen.getByRole('textbox', { name: dict.current['settings.risk.usage_ratio'] }) as HTMLInputElement
+    expect(again.value).toBe('')
+    expect(again.getAttribute('aria-invalid')).toBeNull()
+  })
+
   // The server clamps a ratio under 1.5 up to it; the page says so before
   // the admin saves, and the toolbar refuses the save.
   it('marks a value outside the bounds', () => {

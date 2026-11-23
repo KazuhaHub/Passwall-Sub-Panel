@@ -44,6 +44,9 @@ interface DialogCopy {
   destructive: boolean
   note?: { label: string; hint?: string }
   check?: { label: string; initial: boolean }
+  /** The closing line on what the action does to access and whether it can be undone; with a checkbox, the
+   *  line for the box ticked as well, because the box changes what the action does. */
+  reversible: { unticked: string; ticked?: string }
 }
 
 /**
@@ -52,10 +55,16 @@ interface DialogCopy {
  */
 function dialogCopy(kind: RiskActionKind, s: RiskSubject, t: Translate): DialogCopy {
   const copy = baseCopy(kind, s, t)
-  return { ...copy, paragraphs: [...copy.paragraphs, t(`${A}reversible_${kind === 'redismiss' ? 'dismiss' : kind}`)] }
+  const key = `${A}reversible_${kind === 'redismiss' ? 'dismiss' : kind}`
+  // Trusting a held account offers to resume it, and resuming an untrusted held one offers to trust it:
+  // the line follows the box, so it never says the service is untouched when confirming resumes it.
+  const reversible = copy.check && (kind === 'trust' || kind === 'resume')
+    ? { unticked: t(key), ticked: t(`${key}_${kind === 'trust' ? 'resume' : 'trust'}`) }
+    : { unticked: t(key) }
+  return { ...copy, reversible }
 }
 
-function baseCopy(kind: RiskActionKind, s: RiskSubject, t: Translate): DialogCopy {
+function baseCopy(kind: RiskActionKind, s: RiskSubject, t: Translate): Omit<DialogCopy, 'reversible'> {
   const upn = { upn: s.upn }
   switch (kind) {
     case 'pause': {
@@ -301,7 +310,8 @@ function ActionDialog({ open, busy, copy, cancelText, onCancel, onConfirm }: {
           <AlertDialogTitle>{copy.title}</AlertDialogTitle>
           <AlertDialogDescription render={<div />}>
             <div className="flex flex-col gap-2">
-              {copy.paragraphs.map((text, i) => <p key={i}>{text}</p>)}
+              {[...copy.paragraphs, also && copy.reversible.ticked ? copy.reversible.ticked : copy.reversible.unticked]
+                .map((text, i) => <p key={i}>{text}</p>)}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

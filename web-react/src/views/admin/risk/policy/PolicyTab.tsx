@@ -138,32 +138,49 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
     if (!changed.includes('geo_anomaly_scope')) setLastScope(scopeMemory(loaded.settings))
   }
 
-  const onSave = () => {
+  /** Writes the policy; resolves false when the server refused it (the refusal is already shown). */
+  const savePolicy = async (): Promise<boolean> => {
     setErrors({})
-    save.mutate(pick(draft, changed), {
-      onSuccess: view => {
-        reseed(view.settings)
-        pushSnack(t(`${P}saved`), 'success')
-        // The group rows show the global value they inherit.
-        void exceptions.reloadBaseline()
-      },
-      onError: err => {
-        const body = isAxiosError(err) ? err.response?.data as { error?: string; field?: string; bad?: string[] } : undefined
-        const key = body?.field as RiskPolicyKey | undefined
-        const card = key ? POLICY_CARDS.find(c => cardFields(c).some(f => f.key === key)) : undefined
-        if (!key || !card) {
-          pushSnack(t(`${P}save_failed`, { error: errorText(err) }), 'error')
-          return
-        }
-        // The field the server named: marked with what it named, its panel
-        // opened, and scrolled to once the panel has rendered it.
-        setErrors({ [key]: body?.bad?.length ? body.bad.join(', ') : (body?.error ?? '') })
-        if (card.advanced?.some(f => f.key === key)) setOpen(o => ({ ...o, [card.id]: true }))
-        setTimeout(() => {
-          document.querySelector(`[data-policy-key="${key}"]`)?.scrollIntoView?.({ block: 'center' })
-        }, 0)
-      },
-    })
+    try {
+      const view = await save.mutateAsync(pick(draft, changed))
+      reseed(view.settings)
+      pushSnack(t(`${P}saved`), 'success')
+      // The group rows show the global value they inherit.
+      void exceptions.reloadBaseline()
+      return true
+    } catch (err) {
+      const body = isAxiosError(err) ? err.response?.data as { error?: string; field?: string; bad?: string[] } : undefined
+      const key = body?.field as RiskPolicyKey | undefined
+      const card = key ? POLICY_CARDS.find(c => cardFields(c).some(f => f.key === key)) : undefined
+      if (!key || !card) {
+        pushSnack(t(`${P}save_failed`, { error: errorText(err) }), 'error')
+        return false
+      }
+      // The field the server named: marked with what it named, its panel
+      // opened, and scrolled to once the panel has rendered it.
+      setErrors({ [key]: body?.bad?.length ? body.bad.join(', ') : (body?.error ?? '') })
+      if (card.advanced?.some(f => f.key === key)) setOpen(o => ({ ...o, [card.id]: true }))
+      setTimeout(() => {
+        document.querySelector(`[data-policy-key="${key}"]`)?.scrollIntoView?.({ block: 'center' })
+      }, 0)
+      return false
+    }
+  }
+
+  /**
+   * The page's Save writes everything that is unsaved: the policy first, then the group's exceptions
+   * (their own requests, another resource). If the policy is refused the group is not attempted and the
+   * admin is told it is still unsaved; if the group then fails, the policy is already saved and the
+   * message says so.
+   */
+  const onSave = async () => {
+    if (dirty && !(await savePolicy())) {
+      if (exceptions.dirty) pushSnack(t(`${P}group_not_saved`, { name: groupName }), 'warning')
+      return
+    }
+    if (exceptions.dirty && !(await exceptions.save()) && dirty) {
+      pushSnack(t(`${P}group_failed_after_policy`, { name: groupName }), 'warning')
+    }
   }
 
   // The geo card while switched off shows the granularity it will come back
@@ -285,12 +302,12 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
         onPickGroup={id => setParams(prev => policyGroupSearch(prev, id), { replace: true })} />
 
       {/* Sticky at the bottom, so what is unsaved and the save are in reach from any card. The group card
-          saves on its own (D7); its part is named here so the page never looks clean while it is not,
-          and with only that part unsaved the bar saves it (the same request as the card's own button). */}
+          saves on its own button too (D7); its part is named here so the page never looks clean while it is
+          not, and the bar's Save writes every part that is unsaved (the same requests as the card's own). */}
       <SaveBar dirty={dirty || exceptions.dirty} pending={save.isPending || exceptions.saving}
         saveLabel={t(`${P}save`)}
         message={parts.length > 0 ? t(`${P}dirty_parts`, { parts: parts.join(listSeparator(i18n.language)) }) : undefined}
-        onSave={() => { if (dirty) onSave(); else void exceptions.save() }}
+        onSave={() => void onSave()}
         onDiscard={discard} />
     </div>
   )

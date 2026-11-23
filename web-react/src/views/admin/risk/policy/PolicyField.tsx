@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { Field } from '@/components/form/Field'
 import { NumberField } from '@/components/form/NumberField'
@@ -94,11 +94,38 @@ export default function PolicyField({ spec, value, onChange, defaults, effective
   ].filter(Boolean)
   const emptyLabel = fallback === undefined ? t(`${SHARED}default_adornment`) : `${t(`${SHARED}default_adornment`)} ${fallback}`
   return (
-    <Field label={label}
-      hint={lines.length > 0 ? <>{lines.map((line, i) => <span key={i} className="block">{line}</span>)}</> : undefined}>
-      <NumberField value={stored > 0 ? stored : null} integer={spec.kind === 'number'} min={spec.min} max={spec.max}
+    <NumberBox spec={spec} stored={stored} emptyLabel={emptyLabel} onChange={onChange}
+      label={label} hint={lines.length > 0 ? <>{lines.map((line, i) => <span key={i} className="block">{line}</span>)}</> : undefined} />
+  )
+}
+
+/**
+ * The number box. 0 has always meant "unset, use the default" and the server accepts it, so it must stay
+ * enterable even where the field has a minimum: the box enforces the minimum on every other value, and a
+ * 0 left in it is taken as "back to the default" when the box is left — it stores 0 and the box is drawn
+ * again empty, as the default.
+ */
+function NumberBox({ spec, stored, emptyLabel, onChange, label, hint }: {
+  spec: PolicyFieldSpec
+  stored: number
+  emptyLabel: string
+  onChange: (v: FieldValue) => void
+  label: string
+  hint: ReactNode
+}) {
+  const [resets, setResets] = useState(0)
+  return (
+    <Field label={label} hint={hint}>
+      <NumberField key={resets} value={stored > 0 ? stored : null} integer={spec.kind === 'number'} min={spec.min} max={spec.max}
         allowEmpty emptyLabel={emptyLabel}
-        onChange={n => onChange(n === null ? 0 : n)} />
+        onChange={n => onChange(n === null ? 0 : n)}
+        onBlur={e => {
+          const text = e.currentTarget.value.trim()
+          if (spec.min !== undefined && spec.min > 0 && text !== '' && Number.parseFloat(text) === 0) {
+            onChange(0)
+            setResets(k => k + 1)
+          }
+        }} />
     </Field>
   )
 }
