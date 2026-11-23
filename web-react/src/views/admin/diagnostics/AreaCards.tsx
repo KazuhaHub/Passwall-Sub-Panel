@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Box, Stack, Tooltip, Typography, useTheme } from '@mui/material'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import type { DiagnosticsSnapshot, MetricsSnapshot } from '@/api/diagnostics'
 import {
   cardSentenceKey,
@@ -23,10 +23,9 @@ import {
   type WindowMode,
 } from '@/utils/diagnostics'
 import type { CardId } from '@/utils/diagnosticsCatalog'
-import KpiTile, { KpiGrid } from './KpiTile'
 import PanelOpTable from './PanelOpTable'
 import StageBar from './StageBar'
-import SubsystemCard from './SubsystemCard'
+import SubsystemCard, { needsAttention } from './SubsystemCard'
 import SystemInfo from './SystemInfo'
 import type { DiagFormat } from './useDiagFormat'
 
@@ -36,8 +35,6 @@ import type { DiagFormat } from './useDiagFormat'
 // grey), except on the single sign-on card, which no window gates, and on a
 // card proven not in use; an inhibited card keeps its figures, uncoloured,
 // because they are still what was recorded.
-
-const WIDE: ReadonlySet<CardId> = new Set(['poll', 'lifecycle'])
 
 interface Ctx {
   m: MetricsSnapshot
@@ -51,8 +48,7 @@ interface Ctx {
 const val = (m: MetricsSnapshot, name: string) => counter(m, name)?.value ?? 0
 
 function Line({ children }: { children: ReactNode }) {
-  const md = useTheme().palette.md
-  return <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>{children}</Typography>
+  return <p className="mt-1 text-sm text-muted-foreground">{children}</p>
 }
 
 /** The values each card's sentence interpolates. */
@@ -131,8 +127,6 @@ function PollBody({ c }: { c: Ctx }) {
 }
 
 function LifecycleBody({ c }: { c: Ctx }) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { m, fmt } = c
   const { t } = fmt
   const total = val(m, 'psp_lifecycle_sync_total')
@@ -155,39 +149,37 @@ function LifecycleBody({ c }: { c: Ctx }) {
           caption={t('admin:diagnostics.cards.lifecycle.kpi.writes_caption')} />
         <KpiTile label={t('admin:diagnostics.cards.lifecycle.kpi.errors')}
           value={t('admin:diagnostics.fmt.times', { count: fmt.count(errors) })}
-          color={errors > 0 ? md.error : undefined}
+          danger={errors > 0}
           caption={total > 0 ? t('admin:diagnostics.cards.lifecycle.kpi.errors_caption', { pct: fmt.pct(errors, total) }) : t('admin:diagnostics.fmt.no_denominator')} />
       </KpiGrid>
       {notProvisioned > 0 && <Line>{t('admin:diagnostics.cards.lifecycle.not_provisioned', { count: fmt.count(notProvisioned) })}</Line>}
       {lifecycleCardBreakdown(m).map(line => (
         <Line key={line.key}>{t(`admin:diagnostics.${line.key}`, { list: formatBreakdownList(line.items, line.group, fmt.label, fmt.count) })}</Line>
       ))}
-      <Box sx={{ mt: 1.5 }}>
-        <Typography variant="caption" sx={{ display: 'block', fontWeight: 600 }}>{t('admin:diagnostics.cards.lifecycle.reasons_title')}</Typography>
-        <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0, display: 'flex', flexWrap: 'wrap', columnGap: 2, rowGap: 0.25 }}>
+      <div className="mt-3">
+        <p className="text-xs font-semibold">{t('admin:diagnostics.cards.lifecycle.reasons_title')}</p>
+        <ul className="flex flex-wrap gap-x-4 gap-y-0.5">
           {writeReasonGroups(m).map(g => (
-            <Tooltip key={g.group}
+            <li key={g.group} className="text-sm tabular-nums"
               title={g.reasons.map(r => `${fmt.label('write_reason', r.value)} (${r.value}) ${fmt.count(r.count)}`).join(' · ')}>
-              <Typography component="li" variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                {`${t(`admin:diagnostics.labels.write_reason_group.${g.group}`)} ${fmt.count(g.count)}`}
-              </Typography>
-            </Tooltip>
+              {`${t(`admin:diagnostics.labels.write_reason_group.${g.group}`)} ${fmt.count(g.count)}`}
+            </li>
           ))}
-        </Box>
-      </Box>
-      <Box sx={{ mt: 1.5 }}>
-        <Typography variant="caption" sx={{ display: 'block', fontWeight: 600 }}>{t('admin:diagnostics.cards.lifecycle.limits.title')}</Typography>
-        <Typography variant="body2">
+        </ul>
+      </div>
+      <div className="mt-3">
+        <p className="text-xs font-semibold">{t('admin:diagnostics.cards.lifecycle.limits.title')}</p>
+        <p className="text-sm">
           {ip > 0
             ? t('admin:diagnostics.cards.lifecycle.limits.ip_gaps', { count: fmt.count(ip) })
             : t('admin:diagnostics.cards.lifecycle.limits.ip_none')}
-        </Typography>
-        <Typography variant="body2">
+        </p>
+        <p className="text-sm">
           {t('admin:diagnostics.cards.lifecycle.limits.device')}
           {device > 0 ? ` ${t('admin:diagnostics.cards.lifecycle.limits.device_gaps', { count: fmt.count(device) })}` : ''}
-        </Typography>
-        <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t('admin:diagnostics.cards.lifecycle.limits.servers_note')}</Typography>
-      </Box>
+        </p>
+        <p className="text-xs text-muted-foreground">{t('admin:diagnostics.cards.lifecycle.limits.servers_note')}</p>
+      </div>
     </>
   )
 }
@@ -226,7 +218,6 @@ function FloorBody({ c }: { c: Ctx }) {
 }
 
 function LiveIPBody({ c }: { c: Ctx }) {
-  const md = useTheme().palette.md
   const { m, fmt } = c
   const { t } = fmt
   const judged = ratePerPoll(histogram(m, 'psp_user_live_ips')?.count ?? 0, val(m, 'psp_poll_total'))
@@ -257,7 +248,7 @@ function LiveIPBody({ c }: { c: Ctx }) {
           })} />
       </KpiGrid>
       {c.facts.complete && c.facts.types.has('sui') && (
-        <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant }}>{t('admin:diagnostics.cards.liveip.sui_note')}</Typography>
+        <p className="text-xs text-muted-foreground">{t('admin:diagnostics.cards.liveip.sui_note')}</p>
       )}
     </>
   )
@@ -303,9 +294,9 @@ function SsoBody({ c }: { c: Ctx }) {
       <KpiTile label={t('admin:diagnostics.cards.sso.kpi.saml')}
         value={t('admin:diagnostics.fmt.times', { count: fmt.count(saml.reduce((n, r) => n + r.count, 0)) })}
         caption={saml.length > 0 ? (
-          <Stack component="span" sx={{ display: 'flex' }}>
+          <span className="flex flex-col">
             {saml.map(r => <span key={r.value}>{`${fmt.label('saml', r.value)} ${fmt.count(r.count)}`}</span>)}
-          </Stack>
+          </span>
         ) : undefined} />
       <KpiTile label={t('admin:diagnostics.cards.sso.kpi.claims')}
         value={t('admin:diagnostics.cards.sso.kpi.claims_value', {
@@ -339,8 +330,13 @@ function showsFigures(card: CardSummary, mode: WindowMode): boolean {
   return card.state !== 'not_applicable' && card.state !== 'none'
 }
 
+/** Needs-attention subsystems first, then the rest in their fixed order. */
+function byUrgency(cards: CardSummary[]): CardSummary[] {
+  return [...cards].sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)))
+}
+
 export default function AreaCards({
-  snap, cards, mode, intervalMs, settingsIntervalMs, expected, facts, families, fmt, panelTz, expanded, onToggle,
+  snap, cards, mode, intervalMs, settingsIntervalMs, expected, facts, families, fmt, panelTz, open, onToggle, rawOpen, onToggleRaw,
 }: {
   snap: DiagnosticsSnapshot
   cards: CardSummary[]
@@ -352,8 +348,11 @@ export default function AreaCards({
   families: RawFamily[]
   fmt: DiagFormat
   panelTz: string
-  expanded: ReadonlySet<CardId>
-  onToggle: (id: CardId) => void
+  /** What the person opened or folded by hand; a card not in it follows its state. */
+  open: ReadonlyMap<CardId, boolean>
+  onToggle: (id: CardId, nowOpen: boolean) => void
+  rawOpen: ReadonlySet<CardId>
+  onToggleRaw: (id: CardId) => void
 }) {
   const { t } = fmt
   const byId = Object.fromEntries(cards.map(card => [card.id, card])) as Record<CardId, CardSummary>
@@ -361,24 +360,26 @@ export default function AreaCards({
   const pollState = t(`admin:diagnostics.state.${byId.poll.state}`)
 
   return (
-    <Box component="section" sx={{ mt: 1 }}>
-      <Typography variant="h6" component="h2" sx={{ mb: 1 }}>{t('admin:diagnostics.cards.section_title')}</Typography>
-      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))' } }}>
-        {cards.map(card => {
+    <section>
+      <h2 className="mb-2 text-sm font-medium text-muted-foreground">{t('admin:diagnostics.cards.section_title')}</h2>
+      <div className="space-y-2">
+        {byUrgency(cards).map(card => {
           const key = cardSentenceKey(card, mode, intervalMs > 0)
           const depends = card.id === 'floor' || card.id === 'liveip'
+          const isOpen = open.get(card.id) ?? needsAttention(card)
           return (
-            <SubsystemCard key={card.id} card={card} wide={WIDE.has(card.id)}
+            <SubsystemCard key={card.id} card={card}
               sentence={t(`admin:diagnostics.${key}`, sentenceValues(card.id, c))}
               extra={depends ? <Line>{t('admin:diagnostics.cards.common.depends', { state: pollState })}</Line> : undefined}
               families={families.filter(f => f.card === card.id)} windowMs={snap.metrics.window_ms}
-              fmt={fmt} expanded={expanded.has(card.id)} onToggle={() => onToggle(card.id)}>
+              fmt={fmt} open={isOpen} onToggle={() => onToggle(card.id, !isOpen)}
+              rawOpen={rawOpen.has(card.id)} onToggleRaw={() => onToggleRaw(card.id)}>
               {showsFigures(card, mode) ? body(card.id, c) : null}
             </SubsystemCard>
           )
         })}
-        <SystemInfo snap={snap} settingsIntervalMs={settingsIntervalMs} panelTz={panelTz} fmt={fmt} />
-      </Box>
-    </Box>
+      </div>
+      <SystemInfo snap={snap} settingsIntervalMs={settingsIntervalMs} panelTz={panelTz} fmt={fmt} />
+    </section>
   )
 }

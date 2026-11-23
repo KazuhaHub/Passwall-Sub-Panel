@@ -1,28 +1,22 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
+import i18n from '@/test/initI18n'
+import { flatten, type Nested } from '@/i18n/options'
+import enAdmin from '@/locales/en-US/admin.json'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { UserServerUsage } from './UserServerUsage'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-    i18n: { language: 'en-US' },
-  }),
-}))
+// The real English strings, so an assertion reads what a person reads and a missing key shows as a raw key.
+i18n.addResourceBundle('en-US', 'admin', flatten(enAdmin as Nested), true, true)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 function mount(userId = 2) {
   render(
-    <ThemeProvider theme={theme}>
-      <UserServerUsage userId={userId} />
-    </ThemeProvider>,
+    <UserServerUsage userId={userId} />,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
 }
@@ -35,16 +29,16 @@ describe('UserServerUsage', () => {
     api.get.mockRejectedValue(new Error('boom'))
     mount()
 
-    await waitFor(() => expect(screen.getByText('暂时无法获取服务器用量')).toBeTruthy())
-    expect(screen.queryByText('该用户暂无服务器')).toBeNull()
+    await waitFor(() => expect(screen.getByText('Server usage is temporarily unavailable')).toBeTruthy())
+    expect(screen.queryByText('No servers for this user')).toBeNull()
   })
 
   it('reports an empty breakdown as empty when the request succeeds', async () => {
     api.get.mockResolvedValue({ data: { items: [] } })
     mount()
 
-    await waitFor(() => expect(screen.getByText('该用户暂无服务器')).toBeTruthy())
-    expect(screen.queryByText('暂时无法获取服务器用量')).toBeNull()
+    await waitFor(() => expect(screen.getByText('No servers for this user')).toBeTruthy())
+    expect(screen.queryByText('Server usage is temporarily unavailable')).toBeNull()
   })
 
   const row = { panel_id: 1, server_name: 'srv-a', node_count: 2, lifetime_up_bytes: 1024, lifetime_down_bytes: 1024, lifetime_total_bytes: 2048, period_up_bytes: 512, period_down_bytes: 512, period_total_bytes: 1024, today_up_bytes: 0, today_down_bytes: 0, today_total_bytes: 0, traffic_factor_milli: 1500, charged_lifetime_bytes: 3072, charged_period_bytes: 1536 }
@@ -69,7 +63,7 @@ describe('UserServerUsage', () => {
     expect(screen.getByText('5.0K')).toBeTruthy()
     expect(screen.queryByText('↑1.0K ↓1.0K')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '原始' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Raw' }))
     // Raw mode: unchanged behaviour, up/down splits are back and the charged figure is gone.
     expect(screen.getAllByText('↑1.0K ↓1.0K').length).toBeGreaterThan(0)
     expect(screen.queryByText('3.0K')).toBeNull()
