@@ -32,7 +32,7 @@ import { RailStep } from './PolicyRail'
 import QuotaMeters from './QuotaMeters'
 import TemplateGrid, { TemplateChooser, UnavailableDialog } from './TemplateGrid'
 import TemplateMenu from './TemplateMenu'
-import { useFirstPublishGate } from './useFirstPublish'
+import { useEnableScopeText, useFirstPublishGate, type EnableSubject } from './useFirstPublish'
 
 export interface PoliciesTabProps {
   /** Opens the exemptions sheet (`sheet=exemptions`). */
@@ -73,6 +73,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const reorder = useReorderDestPolicies(scope)
   const instantiate = useInstantiateDestTemplate(scope)
   const gate = useFirstPublishGate()
+  const enableScopeOf = useEnableScopeText()
 
   const [editing, setEditing] = useState<{ policy: DestPolicy | null; initial?: PolicyForm } | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -141,11 +142,13 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const hasNoExecutor = status.data ? !status.data.nodes.some(n => n.kind === 'psp' && n.supports.policy && n.state !== 'offline' && n.state !== 'unsupported_version') : false
   const nothingYet = data.allow.length === 0 && data.block.length === 0
 
+  const subjectOf = (p: DestPolicy, state: DestState): EnableSubject => ({ name: p.name, action: p.action, state, scope: p.scope, groupIds: p.group_ids, panelIds: p.panel_ids })
+
   /** The one place a policy's state is written: the whole policy, with the updated_at it was read at (R18). */
-  const setState = async (p: DestPolicy, state: DestState): Promise<boolean> => {
+  const setState = async (p: DestPolicy, state: DestState, asked = false): Promise<boolean> => {
     // A paused policy switched on says who it reaches (the gate asks, once, unless this is the very first policy).
     const enabling = p.state === 'off' && state !== 'off'
-    if (!(await gate(enabling, enabling ? { name: p.name, action: p.action, state, scope: p.scope, groupIds: p.group_ids, panelIds: p.panel_ids } : undefined))) return false
+    if (!(await gate(enabling, enabling ? subjectOf(p, state) : undefined, { asked }))) return false
     setBusyId(p.id)
     try {
       await update.mutateAsync({ id: p.id, input: { ...inputOf(formOf(p), { id: p.id, updatedAt: p.updated_at }), state } })
@@ -160,8 +163,8 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
 
   // The switch is "deployed or not". A policy switched off here comes back as it was. When the page does not know what
   // it was (a reload since), a block policy asks rather than guess: guessing "on" would silently enforce a report-only one.
-  const turnOn = async (p: DestPolicy, state: DestState) => {
-    if (await setState(p, state)) stateBeforeOff.current.delete(p.id)
+  const turnOn = async (p: DestPolicy, state: DestState, asked = false) => {
+    if (await setState(p, state, asked)) stateBeforeOff.current.delete(p.id)
   }
   const toggle = async (p: DestPolicy) => {
     if (p.state === 'off') {
@@ -178,7 +181,8 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const choose = (state: DestState) => {
     const p = choosing
     setChoosing(null)
-    if (p) void turnOn(p, state)
+    // The choice dialog named the scope, so the enabling question is not asked again.
+    if (p) void turnOn(p, state, true)
   }
 
   const toReport = async (p: DestPolicy) => {
@@ -352,7 +356,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
         <DialogContent showCloseButton={false} className="sm:max-w-md" initialFocus={chooseRef}>
           <DialogHeader>
             <DialogTitle>{t(`${P}turn_on.title`, { name: choosing?.name ?? '' })}</DialogTitle>
-            <DialogDescription>{t(`${P}turn_on.body`)}</DialogDescription>
+            <DialogDescription>{t(`${P}turn_on.body`)} {choosing ? enableScopeOf(subjectOf(choosing, 'on')) : ''}</DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-wrap gap-2">
             <Button variant="outline" onClick={() => setChoosing(null)}>{t(`${P}turn_on.cancel`)}</Button>

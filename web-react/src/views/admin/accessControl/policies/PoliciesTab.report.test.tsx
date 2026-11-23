@@ -336,8 +336,7 @@ describe('changing state from the row', () => {
     fireEvent.click(within(rowOf('禁止 BT')).getByRole('switch'))
     fireEvent.click(await screen.findByRole('button', { name: '仅报告' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
-    // Not "the first policy": the only question is the one naming who the policy reaches.
-    expect(confirmMock).toHaveBeenCalledTimes(1)
+    // Not "the first policy", and the choice dialog already named who the policy reaches: no confirm at all.
     expect(confirmMock).not.toHaveBeenCalledWith(expect.objectContaining({ title: '启用第一条访问策略？' }))
   })
 

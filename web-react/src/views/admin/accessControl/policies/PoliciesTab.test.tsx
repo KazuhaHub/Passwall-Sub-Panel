@@ -96,28 +96,25 @@ describe('writes', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('禁止 BT')
     fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
-    // Its earlier state is not known here, so the admin says which it is turned on as.
+    // Its earlier state is not known here, so the admin says which it is turned on as. That one dialog names the
+    // scope and the nodes too, so it is the only question: no second confirm follows.
+    expect(await screen.findByText(/范围：所有用户，共 1 个分组、0 人/)).toBeTruthy()
     fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
     const [id, body] = vi.mocked(api.updateDestPolicy).mock.calls[0]
     expect(id).toBe(2)
     expect(body).toMatchObject({ name: '禁止 BT', state: 'on', action: 'block', updated_at: 111, inline: { protocols: ['bittorrent'] } })
-    // Not the first policy, so no first-publish question; the enabling question names the scope and starts on Cancel.
-    expect(confirmMock).toHaveBeenCalledTimes(1)
-    const opts = (confirmMock.mock.calls as unknown as unknown[][])[0][0] as { title: string; message: string; initialFocus: string }
-    expect(opts.title).toBe('启用策略「禁止 BT」？')
-    expect(opts.message).toContain('所有用户，共 1 个分组、0 人')
-    expect(opts.initialFocus).toBe('cancel')
+    // Not the first policy, so no first-publish question, and the choice dialog already was the enabling question.
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 
-  it('declining the enabling question writes nothing', async () => {
-    confirmMock.mockImplementation(() => Promise.resolve(false))
+  it('declining the choice dialog writes nothing and asks nothing more', async () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('禁止 BT')
     fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
-    fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
-    await waitFor(() => expect(confirmMock).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
     expect(api.updateDestPolicy).not.toHaveBeenCalled()
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 
   it('the first policy to be enabled asks first, with the node count and minutes', async () => {

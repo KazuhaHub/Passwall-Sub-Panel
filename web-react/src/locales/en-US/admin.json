@@ -6116,11 +6116,17 @@
       "enable_policy": {
         "title": "Enable policy \"{{name}}\"?",
         "effect_block": "It will start blocking the connections it matches",
-        "effect_allow": "It will start letting the connections it matches through, and the block rules after it no longer apply to them",
-        "effect_report": "It will start recording the connections it would have blocked, and block none",
-        "message_all": "{{effect}}. Scope: all users, {{groups}} groups and {{users}} people. {{nodes}} will restart the proxy once within {{minutes}}, which drops connections in use once; clients reconnect on their own.",
-        "message_groups": "{{effect}}. Scope: {{groups}} groups ({{names}}), {{users}} people. {{nodes}} will restart the proxy once within {{minutes}}, which drops connections in use once; clients reconnect on their own.",
-        "message_panels": "{{effect}}. Scope: only the nodes on {{panels}} servers ({{names}}). They will restart the proxy once within {{minutes}}, which drops connections in use once; clients reconnect on their own.",
+        "effect_allow": "It will start letting the connections it matches through; the block rules and allowlist refusals after it no longer apply to them, while a node's source-country rules still do",
+        "effect_report": "It will mark the connections it would have blocked in the records (on nodes that record hits) and block none",
+        "scope_all": "Scope: all users, {{groups}} groups and {{users}} people.",
+        "scope_groups": "Scope: {{groups}} groups ({{names}}), {{users}} people.",
+        "scope_panels": "Scope: connections that leave through the {{panels}} selected servers ({{names}}).",
+        "exempt_one": "The {{count}} exempt account is not affected.",
+        "exempt_other": "The {{count}} exempt accounts are not affected.",
+        "nodes_up_to_one": "Up to {{count}} node",
+        "nodes_up_to_other": "Up to {{count}} nodes",
+        "nodes_unknown": "The nodes it applies to",
+        "restart": "{{nodes}} will restart the proxy once within {{minutes}}, which drops connections in use once; clients reconnect on their own.",
         "action_on": "Enable",
         "action_report": "Enable as report only"
       },
@@ -6356,8 +6362,7 @@
         "edit": "Edit",
         "refresh": "Refresh now",
         "delete": "Delete",
-        "delete_in_use": "Used by {{count}} policies",
-        "delete_blocked": "Delete ({{reason}})"
+        "delete_blocked": "Delete (in use)"
       },
       "empty": "No lists yet. Policies take their destinations from lists.",
       "empty_filtered": "No matching lists",
@@ -6927,7 +6932,7 @@
       "template_name_taken": "A policy with this name already exists. Rename or delete it first, then add this group.",
       "turn_on": {
         "title": "Turn on \"{{name}}\"?",
-        "body": "The page no longer knows whether this policy was report-only or on before it was switched off. Report only records and blocks nothing; Turn on blocking cuts the connections it matches.",
+        "body": "The page no longer knows whether this policy was report-only or on before it was switched off. Report only marks what it would block in the records and blocks nothing; Turn on blocking cuts the connections it matches.",
         "report": "Report only",
         "block": "Turn on blocking",
         "cancel": "Cancel"

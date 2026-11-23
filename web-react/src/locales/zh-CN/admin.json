@@ -6069,11 +6069,15 @@
       "enable_policy": {
         "title": "启用策略「{{name}}」？",
         "effect_block": "它会开始拦截匹配的连接",
-        "effect_allow": "它会开始放行匹配的连接，这些连接不再受后面的拦截规则限制",
-        "effect_report": "它会开始记录本应拦截的连接，不拦截任何连接",
-        "message_all": "{{effect}}。范围：所有用户，共 {{groups}} 个分组、{{users}} 人。{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
-        "message_groups": "{{effect}}。范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
-        "message_panels": "{{effect}}。范围：仅 {{panels}} 台服务器上的节点（{{names}}）。这些节点会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "effect_allow": "它会开始放行匹配的连接，排在它后面的拦截规则和白名单拒绝不再对这些连接生效（节点的来源国家规则仍然生效）",
+        "effect_report": "它会在记录里标出本应拦截的连接（仅限记录命中的节点），不拦截任何连接",
+        "scope_all": "范围：所有用户，共 {{groups}} 个分组、{{users}} 人。",
+        "scope_groups": "范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。",
+        "scope_panels": "范围：经由所选 {{panels}} 台服务器（{{names}}）出口的连接。",
+        "exempt_other": "其中 {{count}} 个豁免账号不受影响。",
+        "nodes_up_to_other": "最多 {{count}} 台节点",
+        "nodes_unknown": "它所作用的节点",
+        "restart": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
         "action_on": "启用",
         "action_report": "以仅报告启用"
       },
@@ -6306,8 +6310,7 @@
         "edit": "编辑",
         "refresh": "立即刷新",
         "delete": "删除",
-        "delete_in_use": "被 {{count}} 条策略使用",
-        "delete_blocked": "删除（{{reason}}）"
+        "delete_blocked": "删除（使用中）"
       },
       "empty": "还没有列表。策略都从列表里取目的地。",
       "empty_filtered": "没有符合的列表",
@@ -6863,7 +6866,7 @@
       "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。",
       "turn_on": {
         "title": "开启「{{name}}」？",
-        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只记录、不拦截；选「开启拦截」会断开它命中的连接。",
+        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只在记录里标出本应拦截的连接、不拦截；选「开启拦截」会断开它命中的连接。",
         "report": "仅报告",
         "block": "开启拦截",
         "cancel": "取消"
