@@ -54,7 +54,7 @@ function Entry({ rec }: { rec: FlagRecord }) {
       {/* The reason AT THE TIME, from the numbers stored with the record. */}
       <p className="text-[13px] text-muted-foreground">{flagText(rec, t, i18n.language)}</p>
       {open && hasParams && (
-        <div data-testid="record-detail" className="rounded-md bg-muted/50 px-3 py-1">
+        <div className="rounded-md bg-muted/50 px-3 py-1">
           <RecordDetail rec={rec} sentence={false} />
         </div>
       )}

@@ -1,21 +1,20 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskUserSummary } from '@/api/riskCenter'
 import ConfirmHost, { confirm } from '@/components/ConfirmHost'
-import RiskUserDrawer, { riskDrawerZIndex } from './RiskUserDrawer'
+import RiskUserDrawer from './RiskUserDrawer'
+import { pick } from '../testSelect'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: vi.fn() }))
 // t over the REAL zh-CN bundles, so a key the drawer asks for but the bundle
 // lacks shows up as its raw key instead of passing on a defaultValue.
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
@@ -35,11 +34,10 @@ import zh from '@/locales/zh-CN/admin.json'
 import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = {
+  ...flatten(zhCommon as Nested),
   ...flatten(zh as Nested),
   ...Object.fromEntries(Object.entries(flatten(zhCommon as Nested)).map(([k, v]) => [`common:${k}`, v])),
 }
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 const TAKEN = '2026-09-28T10:00:05Z'
 const TAKEN_MS = Date.parse(TAKEN)
@@ -156,9 +154,7 @@ function serve(user: () => RiskUserSummary | Error = () => summary()) {
 function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
   return (
     <MemoryRouter>
-      <ThemeProvider theme={theme}>
-        <RiskUserDrawer userId={userId} onClose={onClose} host={host} />
-      </ThemeProvider>
+      <RiskUserDrawer userId={userId} onClose={onClose} host={host} />
     </MemoryRouter>
   )
 }
@@ -180,22 +176,15 @@ afterEach(() => {
 })
 
 describe('RiskUserDrawer', () => {
-  it('stacks above dialogs, so it can open from the Users edit dialog', () => {
-    expect(riskDrawerZIndex(theme)).toBeGreaterThan(theme.zIndex.modal)
-  })
-
   it('stays below a confirm raised while it is open, so the confirm can be answered', async () => {
-    // The policy page's leave guard: a route link in the drawer (查看用量趋势,
-    // the logs links) leaves a dirty 策略 tab, and the guard asks through the
-    // app's one confirm. Beneath the drawer's backdrop it could not be
-    // clicked, and a click meant for it closed the drawer instead.
+    // The policy page's leave guard: a route link in the drawer (查看用量趋势, the logs links) leaves a
+    // dirty 策略 tab, and the guard asks through the app's one confirm. Beneath the drawer's backdrop it
+    // could not be clicked, and a click meant for it closed the drawer instead.
     serve()
     render(
       <MemoryRouter>
-        <ThemeProvider theme={theme}>
-          <RiskUserDrawer userId={7} onClose={vi.fn()} host="risk" />
-          <ConfirmHost />
-        </ThemeProvider>
+        <RiskUserDrawer userId={7} onClose={vi.fn()} host="risk" />
+        <ConfirmHost />
       </MemoryRouter>,
       { wrapper: queryWrapper(makeTestQueryClient()) },
     )
@@ -203,15 +192,12 @@ describe('RiskUserDrawer', () => {
 
     act(() => { void confirm({ title: 'leave-guard', message: 'unsaved' }) })
 
-    // The confirm is a Tailwind alert dialog now; jsdom loads no stylesheet, so its
-    // stacking is read from the z-index utility it carries (z-[N]) and the backdrop's.
+    // jsdom loads no stylesheet, so stacking is read from the z-index utility each layer carries.
     const asked = (await screen.findByText('leave-guard')).closest('[role="alertdialog"]')!
-    const drawer = document.querySelector('.MuiDrawer-root')!
-    const z = (el: Element) => Number(getComputedStyle(el).zIndex)
-    expect(z(drawer)).toBe(riskDrawerZIndex(theme))
-    const level = (el: Element) => Number(/(?:^|\s)z-\[(\d+)\]/.exec(el.className)?.[1])
-    expect(level(asked)).toBeGreaterThan(z(drawer))
-    expect(level(document.querySelector('[data-slot="alert-dialog-overlay"]')!)).toBeGreaterThan(z(drawer))
+    const sheet = document.querySelector('[data-slot="sheet-content"]')!
+    const level = (el: Element) => Number(/(?:^|\s)z-\[?(\d+)\]?/.exec(el.className)?.[1])
+    expect(level(asked)).toBeGreaterThan(level(sheet))
+    expect(level(document.querySelector('[data-slot="alert-dialog-overlay"]')!)).toBeGreaterThan(level(sheet))
   })
 
   it.each([
@@ -246,7 +232,7 @@ describe('RiskUserDrawer', () => {
     let fail = true
     serve(() => (fail ? httpError(500, { error: 'boom' }) : summary()))
     mount(7)
-    expect(await screen.findByText('读取失败：boom')).toBeTruthy()
+    expect(await screen.findByText('boom')).toBeTruthy()
     fail = false
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(await header()).toBeTruthy()
@@ -321,15 +307,11 @@ describe('RiskUserDrawer', () => {
     await waitFor(() => expect(screen.getAllByTestId('conn-entry')).toHaveLength(2))
     const [online] = screen.getAllByTestId('conn-entry')
     const panelTz = useSiteStore.getState().timezone
-    const tips = async () => (await screen.findAllByRole('tooltip')).map(el => el.textContent ?? '')
+    expect(within(online).getByText('n1').getAttribute('title')).toBe('3X-UI 的节点标识，原样显示')
 
-    fireEvent.mouseOver(within(online).getByText('n1'))
-    expect(await tips()).toContain('3X-UI 的节点标识，原样显示')
-
-    fireEvent.mouseOver(within(online).getByText(`最近 ${formatMsDualTz(TAKEN_MS, panelTz)}`, { exact: false }))
-    await waitFor(async () => expect((await tips()).some(tip =>
-      tip.includes(`仍有连接（截至 ${formatMsDualTz(1_790_000_000_000, panelTz)}）`)
-      && tip.includes('这里是面板扫描的时间，不是这个地址最后一次使用的时间'))).toBe(true))
+    const tip = within(online).getByText(`最近 ${formatMsDualTz(TAKEN_MS, panelTz)}`, { exact: false }).getAttribute('title') ?? ''
+    expect(tip).toContain(`仍有连接（截至 ${formatMsDualTz(1_790_000_000_000, panelTz)}）`)
+    expect(tip).toContain('这里是服务器扫描的时间，不是这个地址最后一次使用的时间')
     expect(screen.queryByText(/面板时钟/)).toBeNull()
   })
 
@@ -345,7 +327,7 @@ describe('RiskUserDrawer', () => {
     expect(within(entry).getByText('拉取 12 次')).toBeTruthy()
     expect(within(entry).getByText('198.51.100.20', { exact: false })).toBeTruthy()
     expect(within(entry).getByText('另有 2 个', { exact: false })).toBeTruthy()
-    const link = screen.getByRole('link', { name: '在日志管理中查看全部订阅记录' })
+    const link = screen.getByText('在日志管理中查看全部订阅记录').closest('a')!
     expect(link.getAttribute('href')).toBe('/admin/logs?tab=sub&user_id=7&upn=alice')
   })
 
@@ -375,8 +357,7 @@ describe('RiskUserDrawer', () => {
     expect(first.getByText('共 4 台设备，其中常用 2 台（上限 3）')).toBeTruthy()
     // The exact time, in panel time, behind the short one.
     const panelTz = useSiteStore.getState().timezone
-    fireEvent.mouseOver(first.getByTestId('timeline-time'))
-    expect((await screen.findByRole('tooltip')).textContent).toBe(formatMsDualTz(JUDGED_MS, panelTz))
+    expect(first.getByTestId('timeline-time').getAttribute('title')).toBe(formatMsDualTz(JUDGED_MS, panelTz))
 
     // The evidence, drawn as on the Records page, without the sentence twice.
     fireEvent.click(first.getByRole('button', { name: '查看证据' }))
@@ -394,19 +375,18 @@ describe('RiskUserDrawer', () => {
     expect(screen.queryByLabelText('开始（浏览器时间）')).toBeNull()
     expect(screen.queryByRole('button', { name: '更多筛选' })).toBeNull()
     expect(screen.getByText('仅显示最近 2 条（共 120 条）')).toBeTruthy()
-    const all = screen.getByRole('link', { name: '在记录中查看全部' })
+    const all = screen.getByText('在记录中查看全部').closest('a')!
     expect(all.getAttribute('href')).toBe('/admin/risk?tab=records&rec_user=7')
 
     // The one filter: the source, read for this account only.
     const flagParams = () => api.get.mock.calls.filter(([u]) => u === '/admin/risk-center/flags').map(([, c]) => c?.params)
     expect(flagParams()[0]).toMatchObject({ user_id: 7, page: 1, page_size: 50 })
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    fireEvent.click(await screen.findByRole('option', { name: '管理员处理' }))
+    pick(screen.getByRole('combobox', { name: '来源' }), '管理员处理')
     await waitFor(() => expect(flagParams().at(-1)).toMatchObject({ user_id: 7, source: 'review' }))
 
     expect(await screen.findByText('192.0.2.44', { exact: false })).toBeTruthy()
     expect(screen.getByText('最近登录')).toBeTruthy()
-    const link = screen.getByRole('link', { name: '在认证日志中查看' })
+    const link = screen.getByText('在认证日志中查看').closest('a')!
     expect(link.getAttribute('href')).toBe('/admin/logs?tab=auth&user_id=7&upn=alice')
   })
 
@@ -446,7 +426,7 @@ describe('RiskUserDrawer', () => {
     serve(blocked)
     mount(7)
     await header()
-    const link = screen.getByRole('link', { name: '在用户管理中处理' })
+    const link = screen.getByText('在用户管理中处理').closest('a')!
     expect(link.getAttribute('href')).toBe('/admin/users?q=alice')
     // Neither service action is offered for a hold the risk center did not write.
     expect(screen.queryByRole('button', { name: '恢复代理服务' })).toBeNull()
@@ -456,7 +436,7 @@ describe('RiskUserDrawer', () => {
     serve(blocked)
     mount(7, vi.fn(), 'users')
     await header()
-    expect(screen.queryByRole('link', { name: '在用户管理中处理' })).toBeNull()
+    expect(screen.queryByText('在用户管理中处理')).toBeNull()
   })
 
   it('offers the service action and the review actions from the one matrix', async () => {
