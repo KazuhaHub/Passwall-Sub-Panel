@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import {
-  Box, Button, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
+import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { quantileReading, type PanelOpRow } from '@/utils/diagnostics'
 import type { DiagFormat } from './useDiagFormat'
 
@@ -30,14 +30,10 @@ function errorsCell(row: PanelOpRow, fmt: DiagFormat): string {
 function OpName({ op, fmt }: { op: string; fmt: DiagFormat }) {
   const label = fmt.label('op', op)
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Typography variant="body2">{label}</Typography>
-      {label !== op && (
-        <Typography component="code" sx={{ display: 'block', fontFamily: 'monospace', fontSize: 11, color: 'text.secondary', wordBreak: 'break-all' }}>
-          {op}
-        </Typography>
-      )}
-    </Box>
+    <div className="min-w-0">
+      <div className="text-sm">{label}</div>
+      {label !== op && <code className="block font-mono text-[11px] break-all text-muted-foreground">{op}</code>}
+    </div>
   )
 }
 
@@ -46,24 +42,22 @@ function OpName({ op, fmt }: { op: string; fmt: DiagFormat }) {
  * on a phone each operation is a block, so the page never scrolls sideways.
  */
 export default function PanelOpTable({ rows, fmt }: { rows: PanelOpRow[]; fmt: DiagFormat }) {
-  const theme = useTheme()
-  const md = theme.palette.md
-  const narrow = useMediaQuery(theme.breakpoints.down('sm'))
+  const narrow = useMediaQuery('(max-width: 639px)')
   const [all, setAll] = useState(false)
   const { t } = fmt
   const shown = all ? rows : rows.slice(0, FIRST_ROWS)
   const head = (k: string) => t(`admin:diagnostics.cards.panel_api.table.${k}`)
 
   return (
-    <Box sx={{ mt: 1.5 }}>
+    <div className="mt-3">
       {rows.length > 0 && (narrow ? (
-        <Stack spacing={1} data-testid="panel-op-blocks">
+        <ul className="space-y-2" data-testid="panel-op-blocks">
           {shown.map(row => {
             const l = latencies(row, fmt)
             return (
-              <Box key={row.op} sx={{ p: 1.25, borderRadius: 2, bgcolor: md.surfaceContainer }}>
+              <li key={row.op} className="rounded-lg bg-muted/50 p-2.5">
                 <OpName op={row.op} fmt={fmt} />
-                <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontVariantNumeric: 'tabular-nums', color: md.onSurfaceVariant }}>
+                <p className="mt-1 text-xs tabular-nums text-muted-foreground">
                   {[
                     `${head('requests')} ${fmt.count(row.requests)}`,
                     `${head('errors')} ${errorsCell(row, fmt)}`,
@@ -71,56 +65,52 @@ export default function PanelOpTable({ rows, fmt }: { rows: PanelOpRow[]; fmt: D
                     `${head('p95')} ${l.p95}`,
                     `${head('max')} ${l.max}`,
                   ].join(' · ')}
-                </Typography>
-              </Box>
+                </p>
+              </li>
             )
           })}
-        </Stack>
+        </ul>
       ) : (
-        <Box sx={{ overflowX: 'auto' }}>
-          <Table size="small" sx={{ '& td, & th': { fontVariantNumeric: 'tabular-nums', px: 1 } }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>{head('op')}</TableCell>
-                <TableCell align="right">{head('requests')}</TableCell>
-                <TableCell align="right">{head('errors')}</TableCell>
-                <TableCell align="right">{head('p50')}</TableCell>
-                <TableCell align="right">{head('p95')}</TableCell>
-                <TableCell align="right">{head('max')}</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {shown.map(row => {
-                const l = latencies(row, fmt)
-                return (
-                  <TableRow key={row.op}>
-                    <TableCell><OpName op={row.op} fmt={fmt} /></TableCell>
-                    <TableCell align="right">{fmt.count(row.requests)}</TableCell>
-                    <TableCell align="right">{errorsCell(row, fmt)}</TableCell>
-                    <TableCell align="right">{l.p50}</TableCell>
-                    <TableCell align="right">{l.p95}</TableCell>
-                    <TableCell align="right">{l.max}</TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </Box>
+        <Table className="tabular-nums">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{head('op')}</TableHead>
+              <TableHead className="text-right">{head('requests')}</TableHead>
+              <TableHead className="text-right">{head('errors')}</TableHead>
+              <TableHead className="text-right">{head('p50')}</TableHead>
+              <TableHead className="text-right">{head('p95')}</TableHead>
+              <TableHead className="text-right">{head('max')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {shown.map(row => {
+              const l = latencies(row, fmt)
+              return (
+                <TableRow key={row.op}>
+                  <TableCell><OpName op={row.op} fmt={fmt} /></TableCell>
+                  <TableCell className="text-right">{fmt.count(row.requests)}</TableCell>
+                  <TableCell className="text-right">{errorsCell(row, fmt)}</TableCell>
+                  <TableCell className="text-right">{l.p50}</TableCell>
+                  <TableCell className="text-right">{l.p95}</TableCell>
+                  <TableCell className="text-right">{l.max}</TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
       ))}
       {rows.length > FIRST_ROWS && (
-        <Button size="small" sx={{ mt: 0.5 }} onClick={() => setAll(a => !a)}>
+        <Button variant="ghost" size="sm" className="mt-1" onClick={() => setAll(a => !a)}>
           {all
             ? t('admin:diagnostics.cards.panel_api.show_less')
             : t('admin:diagnostics.cards.panel_api.show_all', { count: fmt.count(rows.length) })}
         </Button>
       )}
-      <Stack spacing={0.25} sx={{ mt: 1 }}>
+      <div className="mt-2 space-y-0.5">
         {(['note_scope', 'note_get_client', 'note_timeout'] as const).map(k => (
-          <Typography key={k} variant="caption" sx={{ color: md.onSurfaceVariant }}>
-            {t(`admin:diagnostics.cards.panel_api.${k}`)}
-          </Typography>
+          <p key={k} className="text-xs text-muted-foreground">{t(`admin:diagnostics.cards.panel_api.${k}`)}</p>
         ))}
-      </Stack>
-    </Box>
+      </div>
+    </div>
   )
 }

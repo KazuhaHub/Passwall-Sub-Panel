@@ -5090,7 +5090,6 @@
       "version": "Version",
       "build": "Build",
       "build_local": "Local build",
-      "copy_build": "Copy build",
       "uptime": "Panel up for",
       "since": "Statistics since",
       "window": "Statistics window",
@@ -5133,7 +5132,6 @@
       "peak_note": "The peak is the highest value in this statistics window.",
       "hist_value": "{{count}} samples · typical {{p50}} · 95% within {{p95}}",
       "server_help": "Server description",
-      "copy_name": "Copy metric name",
       "stats": {
         "unit": "Unit",
         "count": "Samples",

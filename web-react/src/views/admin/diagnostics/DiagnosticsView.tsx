@@ -1,17 +1,17 @@
 import { useMemo, useRef, useState } from 'react'
-import { Box, Button, CircularProgress, Typography, useTheme } from '@mui/material'
-import DownloadIcon from '@mui/icons-material/Download'
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import RefreshIcon from '@mui/icons-material/Refresh'
 import { useQueryClient } from '@tanstack/react-query'
 import { Navigate } from 'react-router'
 import { resetDiagnostics } from '@/api/diagnostics'
 import type { ServerListParams } from '@/api/servers'
-import { AsyncButton } from '@/components/AsyncButton'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { HelpTip } from '@/components/common/HelpTip'
+import { PageHeader } from '@/components/common/PageHeader'
 import { confirm } from '@/components/ConfirmHost'
-import HelpTip from '@/components/HelpTip'
-import PageHeader from '@/components/PageHeader'
-import { pushSnack } from '@/components/SnackbarHost'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { LoadingState } from '@/components/feedback/LoadingState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { IconDownload, IconInfo, IconRefresh } from '@/lib/icons'
 import { useDiagnostics } from '@/query/diagnostics'
 import { diagnosticsKeys } from '@/query/keys'
 import { useServersList } from '@/query/servers'
@@ -39,14 +39,16 @@ import AreaCards from './AreaCards'
 import ExportMenu from './ExportMenu'
 import { buildExport, buildPreviousExport, downloadJson, exportFileName, type PageReading } from './exportData'
 import FindingList from './FindingList'
+import { panelTime } from './panelTime'
 import RawMetrics, { type ClosedWindow } from './RawMetrics'
-import StatusLine, { panelTime } from './StatusLine'
+import VerdictBanner from './VerdictBanner'
 import { useDiagFormat } from './useDiagFormat'
 
-// THE DIAGNOSTICS PAGE, IN FOUR LAYERS: one status line coloured by the worst
+// THE DIAGNOSTICS PAGE, IN FOUR LAYERS: a verdict in words, set by the worst
 // finding; the problems, each with its denominator, its impact, what to do
-// and where; seven area cards in a fixed order; and every raw series the
-// registry returned, one click away and exportable. The rules that decide
+// and where; the seven subsystems, those that need attention first and a
+// healthy one as a single line; and every raw series the registry returned,
+// one click away and exportable. The rules that decide
 // what an operator is told live in utils/diagnostics.ts, pure and tested;
 // this file only reads, derives once per reading, and lays the result out.
 
@@ -69,7 +71,6 @@ export default function DiagnosticsView() {
 function DiagnosticsPage() {
   const fmt = useDiagFormat()
   const { t } = fmt
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   const qc = useQueryClient()
   const panelTz = useSiteStore(s => s.timezone)
@@ -88,7 +89,12 @@ function DiagnosticsPage() {
   const [previous, setPrevious] = useState<ClosedWindow | null>(null)
   const [resetting, setResetting] = useState(false)
   const resettingRef = useRef(false)
-  const [expanded, setExpanded] = useState<ReadonlySet<CardId>>(new Set())
+  // What a person opened or folded by hand, kept here and not in the cards so
+  // the minute refresh (which re-derives everything below) never closes it:
+  // a subsystem not in the map follows its state (open when it needs attention).
+  const [cardOpen, setCardOpen] = useState<ReadonlyMap<CardId, boolean>>(new Map())
+  const [rawCardOpen, setRawCardOpen] = useState<ReadonlySet<CardId>>(new Set())
+  const [rawOpen, setRawOpen] = useState(false)
 
   const snap = diag.data
 
@@ -127,16 +133,14 @@ function DiagnosticsPage() {
   }
 
   if (diag.isPending) {
-    return <Box sx={{ p: 3, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box>
+    return <div className="p-4 sm:p-6"><LoadingState /></div>
   }
   if (!snap || !derived) {
     return (
-      <Box sx={{ p: { xs: 2, sm: 3 } }}>
+      <div className="p-4 sm:p-6">
         <PageHeader title={t('admin:diagnostics.title')} />
-        <Box role="alert" sx={{ p: 2, borderRadius: 3, bgcolor: md.errorContainer, color: md.onErrorContainer }}>
-          {t('admin:diagnostics.load_failed')}
-        </Box>
-      </Box>
+        <ErrorState title={t('admin:diagnostics.load_failed')} reason={diag.error} retry={() => diag.refetch()} />
+      </div>
     )
   }
 
@@ -179,6 +183,7 @@ function DiagnosticsPage() {
         message: t('admin:diagnostics.reset.message', { window: fmt.duration(m.window_ms) }),
         confirmText: t('admin:diagnostics.reset.confirm'),
         destructive: true,
+        initialFocus: 'cancel',
       })
       if (!ok) return
       setResetting(true)
@@ -205,58 +210,59 @@ function DiagnosticsPage() {
     ? t('admin:diagnostics.actions.reset_disabled_empty')
     : mode === 'blackout' ? t('admin:diagnostics.actions.reset_disabled_blackout') : undefined
 
-  const toggleCard = (id: CardId) => setExpanded(prev => {
+  const toggleCard = (id: CardId, nowOpen: boolean) => setCardOpen(prev => new Map(prev).set(id, nowOpen))
+  const toggleRawCard = (id: CardId) => setRawCardOpen(prev => {
     const next = new Set(prev)
     if (next.has(id)) next.delete(id)
     else next.add(id)
     return next
   })
   const showData = (id: CardId) => {
-    setExpanded(prev => new Set(prev).add(id))
+    setCardOpen(prev => new Map(prev).set(id, true))
+    setRawCardOpen(prev => new Set(prev).add(id))
+    // No scroll margin here: the shell sets scroll-padding-top globally.
     document.getElementById(`diag-card-${id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
   }
 
   return (
-    <Box sx={{ p: { xs: 2, sm: 3 }, minWidth: 0 }}>
+    <div className="min-w-0 p-4 sm:p-6">
       <PageHeader
         title={t('admin:diagnostics.title')}
-        subtitle={t('admin:diagnostics.subtitle')}
-        actions={
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <HelpTip textKey="admin:diagnostics.help" labelKey="admin:diagnostics.help_label" />
-            <AsyncButton startIcon={<RefreshIcon />} onClick={() => diag.refetch()}>
+        description={t('admin:diagnostics.subtitle')}
+        secondary={
+          <>
+            <HelpTip text={t('admin:diagnostics.help')} label={t('admin:diagnostics.help_label')} />
+            <AsyncButton variant="outline" icon={<IconRefresh />} onClick={() => diag.refetch()}>
               {t('admin:diagnostics.actions.refresh')}
             </AsyncButton>
             <ExportMenu fmt={fmt} onCopy={onCopy} onDownload={onDownload} onReset={() => void onReset()}
               resetting={resetting} resetDisabledReason={resetDisabledReason} />
-          </Box>
+          </>
         }
       />
 
-      <StatusLine verdict={verdict} snap={snap} intervalMs={interval} readAt={diag.dataUpdatedAt} panelTz={panelTz} fmt={fmt} />
+      <VerdictBanner verdict={verdict} snap={snap} intervalMs={interval} readAt={diag.dataUpdatedAt} panelTz={panelTz} fmt={fmt} />
 
       {previous && (
-        <Box data-testid="reset-kept" sx={{
-          display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', p: 1.5, mb: 2, borderRadius: 3,
-          bgcolor: md.surfaceContainerHigh,
-        }}>
-          <InfoOutlinedIcon aria-hidden sx={{ color: md.onSurfaceVariant }} />
-          <Typography variant="body2" sx={{ flex: '1 1 260px', minWidth: 0 }}>
+        <div data-testid="reset-kept" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-muted/50 p-3">
+          <IconInfo aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 flex-1 basis-64 text-sm">
             {t('admin:diagnostics.reset.kept', { window: fmt.duration(previous.metrics.window_ms) })}
-          </Typography>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={onDownloadPrevious}>
-            {t('admin:diagnostics.reset.download_previous')}
+          </p>
+          <Button variant="outline" size="sm" onClick={onDownloadPrevious}>
+            <IconDownload />{t('admin:diagnostics.reset.download_previous')}
           </Button>
-        </Box>
+        </div>
       )}
 
       <FindingList findings={findings} fmt={fmt} base={base} cur={m} onShowData={showData} />
 
       <AreaCards snap={snap} cards={cards} mode={mode} intervalMs={interval} settingsIntervalMs={settingsIntervalMs}
         expected={expected} facts={facts} families={families} fmt={fmt} panelTz={panelTz}
-        expanded={expanded} onToggle={toggleCard} />
+        open={cardOpen} onToggle={toggleCard} rawOpen={rawCardOpen} onToggleRaw={toggleRawCard} />
 
-      <RawMetrics current={m} previous={previous} mode={mode} panelTz={panelTz} fmt={fmt} />
-    </Box>
+      <RawMetrics current={m} previous={previous} mode={mode} panelTz={panelTz} fmt={fmt}
+        open={rawOpen} onToggle={() => setRawOpen(o => !o)} />
+    </div>
   )
 }
