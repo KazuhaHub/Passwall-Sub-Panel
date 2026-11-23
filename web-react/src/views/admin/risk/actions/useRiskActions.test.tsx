@@ -1,10 +1,8 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import type { QueryClient } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { alertKeys, riskCenterKeys, userKeys } from '@/query/keys'
@@ -16,7 +14,7 @@ import { useRiskActions } from './useRiskActions'
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const snack = vi.hoisted(() => vi.fn())
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack, default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: snack }))
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -37,7 +35,6 @@ dict.current = {
   ...Object.fromEntries(Object.entries(flatten(zhCommon as Nested)).map(([k, v]) => [`common:${k}`, v])),
 }
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 const SKIP = { _skipErrorToast: true }
 const NO_REVIEW: ReviewBadge = { dismissed: false, reopened: false, lapsed: false, trusted: false, escalated: [] }
 const GEO: AttentionEntry[] = [{ source: 'geo', level: 'flagged' }]
@@ -66,7 +63,7 @@ function Harness({ subject: s }: { subject: RiskSubject }) {
 }
 
 function mount(s: RiskSubject, client: QueryClient = makeTestQueryClient()) {
-  render(<ThemeProvider theme={theme}><Harness subject={s} /></ThemeProvider>, { wrapper: queryWrapper(client) })
+  render(<Harness subject={s} />, { wrapper: queryWrapper(client) })
   return client
 }
 
@@ -78,7 +75,7 @@ function httpError(status: number, data: unknown) {
 /** Starts an action and returns its dialog. */
 async function start(kind: RiskActionKind) {
   fireEvent.click(screen.getByText(`start-${kind}`))
-  return screen.findByRole('dialog')
+  return screen.findByRole('alertdialog')
 }
 
 function confirmIn(dialog: HTMLElement, name: string) {
@@ -92,6 +89,50 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   useAuthStore.setState({ role: '' })
+})
+
+describe('useRiskActions: the confirmation', () => {
+  // Every action changes how an account is judged or served: the dialog names the user, says whether it
+  // can be undone, and opens on Cancel so a stray Enter cannot confirm it.
+  it.each(KINDS)('%s names the user, says whether it can be undone, and opens on Cancel', async kind => {
+    mount(kind === 'resume' || kind === 'convert_manual' ? geoAutoHeld()
+      : subject({ review: { ...NO_REVIEW, dismissed: kind === 'undismiss' || kind === 'redismiss', trusted: kind === 'untrust' } }))
+    const dlg = await start(kind)
+    expect(within(dlg).getAllByText(/alice/).length).toBeGreaterThan(0)
+    expect(within(dlg).getByText(dict.current[`risk_center.actions.reversible_${kind === 'redismiss' ? 'dismiss' : kind}`])).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(within(dlg).getByRole('button', { name: '取消' })))
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  // The trust dialog on a detector-held account offers to resume it, ticked: the closing line follows the
+  // box, so it never says the service is untouched when confirming lifts the hold.
+  it('the trust line follows the resume box', async () => {
+    api.post.mockResolvedValue({ data: { review: REVIEW_DTO, resumed: true } })
+    mount(geoAutoHeld())
+    const dlg = await start('trust')
+    const resumes = dict.current['risk_center.actions.reversible_trust_resume']
+    const untouched = dict.current['risk_center.actions.reversible_trust']
+    expect(within(dlg).getByText(resumes)).toBeTruthy()
+    expect(within(dlg).queryByText(untouched)).toBeNull()
+    fireEvent.click(within(dlg).getByRole('checkbox'))
+    expect(within(dlg).getByText(untouched)).toBeTruthy()
+    expect(within(dlg).queryByText(resumes)).toBeNull()
+  })
+
+  it('the resume line says the account is trusted too when that box is ticked', async () => {
+    mount(geoAutoHeld())
+    const dlg = await start('resume')
+    const both = dict.current['risk_center.actions.reversible_resume_trust']
+    expect(within(dlg).queryByText(both)).toBeNull()
+    fireEvent.click(within(dlg).getByRole('checkbox'))
+    expect(within(dlg).getByText(both)).toBeTruthy()
+  })
+
+  it('a pause says it holds the service, not the account', async () => {
+    mount(subject())
+    const dlg = await start('pause')
+    expect(within(dlg).getByText(/只暂停代理与订阅，不锁面板登录/)).toBeTruthy()
+  })
 })
 
 describe('useRiskActions: service actions', () => {
@@ -167,8 +208,8 @@ describe('useRiskActions: service actions', () => {
     mount(geoAutoHeld())
     const dlg = await start('resume')
     expect(within(dlg).getByText(/满足暂停条件时会再次自动暂停/)).toBeTruthy()
-    const also = within(dlg).getByRole('checkbox', { name: '同时信任此账号' }) as HTMLInputElement
-    expect(also.checked).toBe(false)
+    const also = within(dlg).getByRole('checkbox', { name: '同时信任此账号' })
+    expect(also.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(also)
     confirmIn(dlg, '恢复代理服务')
 
@@ -237,8 +278,8 @@ describe('useRiskActions: review actions', () => {
     api.post.mockResolvedValue({ data: { review: REVIEW_DTO, resumed: true } })
     mount(geoAutoHeld())
     const dlg = await start('trust')
-    const resume = within(dlg).getByRole('checkbox', { name: '同时恢复代理服务（当前为异地自动暂停）' }) as HTMLInputElement
-    expect(resume.checked).toBe(true)
+    const resume = within(dlg).getByRole('checkbox', { name: '同时恢复代理服务（当前为异地自动暂停）' })
+    expect(resume.getAttribute('aria-checked')).toBe('true')
     confirmIn(dlg, '信任此账号')
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/risk-center/users/7/trust',
       { resume_service: true }, SKIP))
@@ -256,7 +297,7 @@ describe('useRiskActions: review actions', () => {
   })
 
   it.each([
-    [{ resumed: true, resume_warning: 'queue down' }, '已信任并恢复代理服务，但推送到面板失败且未能排队重试：queue down'],
+    [{ resumed: true, resume_warning: 'queue down' }, '已信任并恢复代理服务，但推送到服务器失败且未能排队重试：queue down'],
     [{ resumed: false, resume_error: 'panel down' }, '已信任，但恢复代理服务失败：panel down'],
   ])('a trust whose resume went wrong warns (%j)', async (res, text) => {
     api.post.mockResolvedValue({ data: { review: REVIEW_DTO, ...res } })

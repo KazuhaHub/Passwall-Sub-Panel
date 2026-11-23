@@ -1,10 +1,8 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { createMemoryRouter, useLocation, useSearchParams } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import AppRouter from '@/router/AppRouter'
@@ -18,7 +16,7 @@ vi.setConfig({ testTimeout: 30_000 })
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 const snack = vi.hoisted(() => vi.fn())
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack, default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: snack }))
 const confirmMock = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock, default: () => null }))
 // t over the REAL zh-CN admin bundle, so a key the page asks for but the
@@ -36,13 +34,15 @@ vi.mock('react-i18next', () => ({
 }))
 
 import zh from '@/locales/zh-CN/admin.json'
+import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
 import { allGroupsQuery } from '@/query/groups'
 import { settingsKeys } from '@/query/keys'
 import { sessionScope } from '@/query/session'
+import { pick, shown } from '../testSelect'
 import { POLICY_KEYS } from './policyKeys'
 import PolicyTab from './PolicyTab'
-dict.current = flatten(zh as Nested)
+dict.current = { ...flatten(zhCommon as Nested), ...flatten(zh as Nested) }
 
 /** The zh-CN text of an admin key. */
 const L = (key: string) => {
@@ -50,8 +50,6 @@ const L = (key: string) => {
   if (v === undefined) throw new Error(`no zh-CN text for ${key}`)
   return v
 }
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'zh-CN' })
 
 // The 23 runtime knobs, each with the settings key its label lives under.
 const KNOBS: [string, string][] = [
@@ -198,9 +196,7 @@ function mount(url = '/admin/risk?tab=policy', client: QueryClient = makeTestQue
     { path: '/admin/risk', element: <><PolicyTab /><TabSwitch /><Where /></> },
   ], { initialEntries: [url] })
   render(
-    <ThemeProvider theme={theme}>
-      <QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={client}><AppRouter router={router} /></QueryClientProvider>,
   )
   return { client }
 }
@@ -239,6 +235,15 @@ function saveButton(): HTMLButtonElement {
   return screen.getByRole('button', { name: L('risk_center.policy.save') }) as HTMLButtonElement
 }
 
+/** The save bar is only there while something is unsaved; its button is off (aria-disabled) while a field is invalid. */
+const savable = () => saveButton().getAttribute('aria-disabled') !== 'true'
+const barGone = () => screen.queryByRole('button', { name: L('risk_center.policy.save') }) === null
+
+/** A card's own switch: named by the card's title. */
+function toggleOf(cardKey: string, root: HTMLElement = document.body): HTMLElement {
+  return within(root).getByRole('switch', { name: L(`risk_center.policy.card.${cardKey}`) })
+}
+
 function policyPuts(): Record<string, unknown>[] {
   return api.put.mock.calls
     .filter(([u]) => u === '/admin/risk-center/policy')
@@ -263,8 +268,8 @@ describe('PolicyTab, the page', () => {
     for (const k of ['geo', 'sub_spread', 'devices', 'usage_shift', 'login_country', 'dest_block', 'data', 'groups']) {
       expect(card(`risk_center.policy.card.${k}`), k).toBeTruthy()
     }
-    // Nothing is unsaved on arrival.
-    expect(saveButton().disabled).toBe(true)
+    // Nothing is unsaved on arrival: the save bar is not there.
+    expect(screen.queryByRole('button', { name: L('risk_center.policy.save') })).toBeNull()
   })
 
   it('says the location database is at city level', async () => {
@@ -312,7 +317,7 @@ describe('PolicyTab, the access-block card (S19)', () => {
     serve()
     mount()
     await loaded()
-    const link = within(card('risk_center.policy.card.dest_block')).getByRole('link', { name: L('risk_center.policy.dest_block_open') })
+    const link = within(card('risk_center.policy.card.dest_block')).getByText(L('risk_center.policy.dest_block_open')).closest('a')!
     expect(link.getAttribute('href')).toBe('/admin/access-control?tab=policies')
     type(field('settings.risk.max_devices'), '5')
     confirmMock.mockResolvedValueOnce(false)
@@ -334,7 +339,7 @@ describe('PolicyTab, fields', () => {
     for (const [knob, labelKey] of KNOBS) {
       const input = field(labelKey)
       expect(input.value, knob).toBe('')
-      expect(input.placeholder, knob).toBe(String(DEFAULTS[knob]))
+      expect(input.placeholder, knob).toBe(`默认 ${DEFAULTS[knob]}`)
       expect(description(input), knob).toContain(`当前生效：${EFFECTIVE[knob]}`)
     }
   })
@@ -362,7 +367,7 @@ describe('PolicyTab, fields', () => {
     mount()
     await loaded()
     const input = field('settings.risk_center.connection_retention_days')
-    expect(input.placeholder).toBe('')
+    expect(input.placeholder).toBe('默认')
     expect(description(input)).not.toContain('当前生效')
   })
 
@@ -382,10 +387,12 @@ describe('PolicyTab, fields', () => {
     mount()
     await loaded()
     type(field('settings.risk.usage_ratio'), '1.2')
-    expect(screen.getByText('有 1 项超出范围，无法保存')).toBeTruthy()
-    expect(saveButton().disabled).toBe(true)
+    // The box says what is wrong where it is, and the save bar names it and is off.
+    expect(field('settings.risk.usage_ratio').getAttribute('aria-invalid')).toBe('true')
+    expect(description(field('settings.risk.usage_ratio'))).toContain('最小为1.5')
+    expect(savable()).toBe(false)
     type(field('settings.risk.usage_ratio'), '2')
-    expect(saveButton().disabled).toBe(false)
+    expect(savable()).toBe(true)
   })
 })
 
@@ -396,8 +403,10 @@ describe('PolicyTab, switches and presets', () => {
     serve({ geo_anomaly_scope: 'region' })
     mount()
     await loaded()
-    const toggle = within(card('risk_center.policy.card.geo')).getByRole('switch', { name: L('risk_center.policy.enabled') })
+    const toggle = toggleOf('geo')
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText(`未保存：${L('risk_center.policy.part_policy')}`)).toBeTruthy()
     fireEvent.click(toggle)
     expect(screen.queryByText(`未保存：${L('risk_center.policy.part_policy')}`)).toBeNull()
@@ -410,9 +419,10 @@ describe('PolicyTab, switches and presets', () => {
     serve()
     mount()
     await loaded()
-    const devices = within(card('risk_center.policy.card.devices'))
-    fireEvent.click(devices.getByRole('switch', { name: L('risk_center.policy.enabled') }))
-    expect(devices.getByRole('switch', { name: L('risk_center.policy.disabled') })).toBeTruthy()
+    const devices = toggleOf('devices')
+    fireEvent.click(devices)
+    expect(devices.getAttribute('aria-checked')).toBe('false')
+    expect(within(card('risk_center.policy.card.devices')).getByText(L('risk_center.policy.disabled'))).toBeTruthy()
     fireEvent.click(saveButton())
     await waitFor(() => expect(policyPuts()).toEqual([{ risk_devices_off: true }]))
   })
@@ -422,17 +432,17 @@ describe('PolicyTab, switches and presets', () => {
     mount()
     await loaded()
     const geo = card('risk_center.policy.card.geo')
-    const presetButton = (key: string) => within(geo).getByRole('button', { name: L(`risk_center.policy.preset_${key}`) })
-    expect(presetButton('standard').getAttribute('aria-pressed')).toBe('true')
+    const presetButton = (key: string) => within(geo).getByRole('radio', { name: L(`risk_center.policy.preset_${key}`) })
+    expect(presetButton('standard').getAttribute('aria-checked')).toBe('true')
     fireEvent.click(presetButton('strict'))
-    expect(presetButton('strict').getAttribute('aria-pressed')).toBe('true')
+    expect(presetButton('strict').getAttribute('aria-checked')).toBe('true')
     expect(field('settings.geo_anomaly.max_cities', geo).value).toBe('1')
     expect(field('settings.geo_anomaly.flag_after', geo).value).toBe('2')
     expect(field('settings.geo_anomaly.clear_after', geo).value).toBe('8')
     // A strict value that IS the default is stored unset.
     expect(field('settings.geo_anomaly.max_places', geo).value).toBe('')
     type(field('settings.geo_anomaly.max_cities', geo), '5')
-    expect(presetButton('custom').getAttribute('aria-pressed')).toBe('true')
+    expect(presetButton('custom').getAttribute('aria-checked')).toBe('true')
   })
 })
 
@@ -453,7 +463,7 @@ describe('PolicyTab, saving', () => {
     const scope = sessionScope({ userId: 1, role: 'admin', authEpoch: useAuthStore.getState().authEpoch })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: settingsKeys.ui(scope) })
     // Reseeded from the answer: nothing is unsaved any more.
-    await waitFor(() => expect(saveButton().disabled).toBe(true))
+    await waitFor(() => expect(barGone()).toBe(true))
     expect(field('settings.risk.max_devices').value).toBe('5')
   })
 
@@ -497,7 +507,7 @@ describe('PolicyTab, saving', () => {
     server.policy = { ...server.policy, risk_min_days: 2 }
     await act(async () => { await client.refetchQueries() })
     expect(await screen.findByText(L('risk_center.policy.stale'))).toBeTruthy()
-    expect(saveButton().disabled).toBe(true)
+    expect(barGone()).toBe(true)
     expect(screen.queryByText(/^未保存：/)).toBeNull()
   })
 
@@ -540,16 +550,15 @@ describe('PolicyTab, saving', () => {
     type(field('settings.risk.max_devices'), '5')
     fireEvent.click(screen.getByRole('button', { name: L('risk_center.policy.discard') }))
     expect(field('settings.risk.max_devices').value).toBe('')
-    expect(saveButton().disabled).toBe(true)
+    expect(barGone()).toBe(true)
   })
 })
 
 describe('PolicyTab, group exceptions', () => {
   async function pickGroup(name: string) {
     const picker = await within(card('risk_center.policy.card.groups')).findByRole('combobox', { name: L('risk_center.policy.pick_group') })
-    await waitFor(() => expect(picker.getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.mouseDown(picker)
-    fireEvent.click(await screen.findByRole('option', { name }))
+    await waitFor(() => expect((picker as HTMLSelectElement).disabled).toBe(false))
+    pick(picker, name)
   }
 
   function groupRow(label: string): HTMLElement {
@@ -594,7 +603,7 @@ describe('PolicyTab, group exceptions', () => {
     await loaded()
     const picker = await within(card('risk_center.policy.card.groups'))
       .findByRole('combobox', { name: L('risk_center.policy.pick_group') })
-    await waitFor(() => expect(picker.textContent).toBe('Group 202'))
+    await waitFor(() => expect(shown(picker)).toBe('Group 202'))
     await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
     toggleOverride(groupRow('城市容错'))
     expect(screen.getByText('未保存：分组「Group 202」的例外')).toBeTruthy()
@@ -611,7 +620,7 @@ describe('PolicyTab, group exceptions', () => {
     await loaded()
     const picker = await within(card('risk_center.policy.card.groups'))
       .findByRole('combobox', { name: L('risk_center.policy.pick_group') })
-    await waitFor(() => expect(picker.textContent).toBe('Team B'))
+    await waitFor(() => expect(shown(picker)).toBe('Team B'))
   })
 
   it('writes the picked group to the URL', async () => {
@@ -634,14 +643,73 @@ describe('PolicyTab, group exceptions', () => {
     toggleOverride(groupRow('省级容错'))
     expect(screen.getByText(L('risk_center.policy.group_dirty'))).toBeTruthy()
     expect(screen.getByText('未保存：分组「Team A」的例外')).toBeTruthy()
-    // The page's own save is for the policy; the group has its own.
-    expect(saveButton().disabled).toBe(true)
+    // The group has its own save button; the bar's Save saves it too when it is all that is unsaved.
 
     fireEvent.click(screen.getByRole('button', { name: L('risk_center.policy.group_save') }))
     await waitFor(() => expect(snack).toHaveBeenCalledWith(L('risk_center.policy.group_saved'), 'success'))
     expect(api.put).toHaveBeenCalledWith('/admin/groups/2/scope-settings',
       { type: 'geo_anomaly', name: 'max_cities', value: '4' })
     expect(api.delete).toHaveBeenCalledWith('/admin/groups/2/scope-settings/geo_anomaly/max_regions')
+  })
+
+  // The bar's Save is for what is unsaved: with only the group's exceptions changed it sends the group's
+  // own requests, not an empty policy PUT.
+  it('the save bar saves the group when it is all that is unsaved', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(snack).toHaveBeenCalledWith(L('risk_center.policy.group_saved'), 'success'))
+    expect(api.put).toHaveBeenCalledWith('/admin/groups/2/scope-settings',
+      { type: 'geo_anomaly', name: 'max_cities', value: '4' })
+    expect(policyPuts()).toEqual([])
+  })
+
+  // An unset enum switched to "set here" writes nothing until its value is edited: the card is not dirty,
+  // there is no save bar, and leaving the group asks nothing.
+  it('a "set here" that wrote nothing does not mark the group dirty', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('判定粒度')).toBeTruthy())
+    toggleOverride(groupRow('判定粒度'))
+    expect(barGone()).toBe(true)
+    expect(screen.queryByText(L('risk_center.policy.group_dirty'))).toBeNull()
+  })
+
+  // Both parts unsaved: the page's Save writes both, the policy first, then the group's own requests.
+  it('the save bar saves the policy and then the group when both are unsaved', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    type(field('settings.risk.max_devices'), '5')
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(snack).toHaveBeenCalledWith(L('risk_center.policy.group_saved'), 'success'))
+    expect(policyPuts()).toEqual([{ risk_max_devices: 5 }])
+    const order = api.put.mock.calls.map(([u]) => u)
+    expect(order.indexOf('/admin/risk-center/policy')).toBeLessThan(order.indexOf('/admin/groups/2/scope-settings'))
+    await waitFor(() => expect(barGone()).toBe(true))
+  })
+
+  it('a refused policy leaves the group unsaved and says so', async () => {
+    serve()
+    mount('/admin/risk?tab=policy&group=2')
+    await loaded()
+    await waitFor(() => expect(within(card('risk_center.policy.card.groups')).getByText('城市容错')).toBeTruthy())
+    server.putError = Object.assign(new Error('500'), { isAxiosError: true, response: { status: 500, data: { error: 'down' } } })
+    type(field('settings.risk.max_devices'), '5')
+    fireEvent.click(within(groupRow('城市容错')).getAllByRole('radio').find(r => r.getAttribute('aria-checked') !== 'true')!)
+    fireEvent.change(within(groupRow('城市容错')).getByRole('spinbutton'), { target: { value: '4' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(snack).toHaveBeenCalledWith(expect.stringContaining('尚未保存'), 'warning'))
+    expect(api.put.mock.calls.some(([u]) => String(u).includes('/scope-settings'))).toBe(false)
+    expect(screen.getByText(/^未保存：策略、分组/)).toBeTruthy()
   })
 
   it('names both parts while both are unsaved', async () => {

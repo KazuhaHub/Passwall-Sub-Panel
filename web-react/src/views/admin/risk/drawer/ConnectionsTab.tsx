@@ -1,14 +1,17 @@
-import { Box, Button, Chip, CircularProgress, Tooltip, Typography, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
 import { isAxiosError } from 'axios'
 
 import type { RiskUserSummary } from '@/api/riskCenter'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { StatusBadge } from '@/components/common/StatusBadge'
+import { Button } from '@/components/ui/button'
 import { useConnectionHistory } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import { AddressCell, JudgementChip, regionText } from '../LiveConnectionList'
 import { LiveSnapshotHeader } from '../LiveConnectionsTab'
+import { useRiskT } from '../useRiskT'
 import { mergeConnections, type MergedConnection } from './mergeConnections'
 
 /** One page of history is plenty for one account in a drawer; beyond it the
@@ -20,44 +23,38 @@ function errorText(error: unknown): string {
 }
 
 function Entry({ c }: { c: MergedConnection }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const scanned = c.online && c.seen_at > 0
   const detail = [
     c.count > 0 ? t('admin:risk_center.drawer.seen_detail', { first: formatMsDualTz(c.first_seen_ms, panelTz), count: c.count }) : '',
-    // The upstream's own time for a live source, in the Live tab's words:
-    // the panel's scan that still saw it connected, on the panel's clock,
-    // the same for every address still connected — not when this one was
-    // last used.
+    // The upstream's own time for a live source, in the Live tab's words: the scan that still saw it
+    // connected, on the server's clock, the same for every address still connected — not when this one
+    // was last used.
     scanned ? t('admin:risk_center.live.still_connected', { time: formatMsDualTz(c.seen_at * 1000, panelTz) }) : '',
     scanned ? t('admin:risk_center.live.still_connected_hint') : '',
   ].filter(Boolean).join('\n')
-  const lastSeen = <span>{t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(c.last_seen_ms, panelTz) })}</span>
+  const lastSeen = t('admin:risk_center.drawer.last_seen', { time: formatMsDualTz(c.last_seen_ms, panelTz) })
   return (
-    <Box data-testid="conn-entry" sx={{ py: 1, borderTop: `1px solid ${md.outlineVariant}`, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Box sx={{ minWidth: 0 }}><AddressCell ip={c.ip} sourceKey={c.source_key} /></Box>
-        {c.online && <Chip size="small" color="success" label={t('admin:risk_center.drawer.online')} />}
+    <li data-testid="conn-entry" className="flex flex-col gap-0.5 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0"><AddressCell ip={c.ip} sourceKey={c.source_key} /></div>
+        {c.online && <StatusBadge tone="success" label={t('admin:risk_center.drawer.online')} />}
         <JudgementChip exclusion={c.exclusion} />
-      </Box>
-      <Box sx={{ fontSize: 12, color: md.onSurfaceVariant, display: 'flex', flexWrap: 'wrap', columnGap: 0.75 }}>
+      </div>
+      <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
         <span>{regionText(c.region)}</span>
         <span>·</span>
         <span>{c.panel_name || `#${c.panel_id}`}</span>
-        {/* The raw 3X-UI node id, explained as the Live tab's PanelCell
-            explains it: PSP has no name for a node. */}
+        {/* The raw 3X-UI node id, explained as the Live tab's PanelCell explains it: PSP has no name for a node. */}
         {c.node && (
-          <Tooltip title={t('admin:risk_center.live.node_hint')}>
-            <Box component="span" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{c.node}</Box>
-          </Tooltip>
+          <span className="font-mono break-all" title={t('admin:risk_center.live.node_hint')}>{c.node}</span>
         )}
         <span>·</span>
-        {/* The times behind "last seen" on the part of the line they are
-            about, so the node's own tooltip never opens inside this one. */}
-        {detail ? <Tooltip title={<Box sx={{ whiteSpace: 'pre-line' }}>{detail}</Box>}>{lastSeen}</Tooltip> : lastSeen}
-      </Box>
-    </Box>
+        {/* The times behind "last seen" on the part of the line they are about. */}
+        <span title={detail || undefined}>{lastSeen}</span>
+      </div>
+    </li>
   )
 }
 
@@ -68,8 +65,7 @@ function Entry({ c }: { c: MergedConnection }) {
  * refresh, and the snapshot's own line says how old it is.
  */
 export default function ConnectionsTab({ summary }: { summary: RiskUserSummary }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const scope = useQueryScope()
   const history = useConnectionHistory(scope, {
     user_id: summary.user.id, page: 1, page_size: HISTORY_CAP, sort_by: 'last_seen', sort_dir: 'desc',
@@ -78,26 +74,22 @@ export default function ConnectionsTab({ summary }: { summary: RiskUserSummary }
   const merged = mergeConnections(live, history.data?.items ?? [], summary.live.snapshot.taken_at)
   const total = history.data?.total ?? 0
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <div className="flex flex-col gap-2">
       <LiveSnapshotHeader view={summary.live} />
-      {history.isPending && <CircularProgress size={18} />}
+      {history.isPending && <CardSkeleton lines={3} />}
       {history.isError && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography sx={{ fontSize: 13, color: md.error }}>
-            {t('admin:risk_center.load_failed', { error: errorText(history.error) })}
-          </Typography>
-          <Button size="small" onClick={() => void history.refetch()}>{t('admin:risk_center.retry')}</Button>
-        </Box>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[13px] text-destructive">{t('admin:risk_center.load_failed', { error: errorText(history.error) })}</p>
+          <Button variant="outline" size="sm" onClick={() => void history.refetch()}>{t('admin:risk_center.retry')}</Button>
+        </div>
       )}
-      {merged.length > 0 && <Box>{merged.map(c => <Entry key={c.key} c={c} />)}</Box>}
+      {merged.length > 0 && <ul className="divide-y">{merged.map(c => <Entry key={c.key} c={c} />)}</ul>}
       {!history.isPending && !history.isError && merged.length === 0 && (
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:risk_center.drawer.connections_empty')}</Typography>
+        <EmptyState compact title={t('admin:risk_center.drawer.connections_empty')} />
       )}
       {total > HISTORY_CAP && (
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-          {t('admin:risk_center.drawer.history_capped', { shown: HISTORY_CAP, total })}
-        </Typography>
+        <p className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.history_capped', { shown: HISTORY_CAP, total })}</p>
       )}
-    </Box>
+    </div>
   )
 }

@@ -42,6 +42,12 @@ export function subjectOfRow(r: QueueRow): RiskSubject {
 export type RiskActionKind = 'pause' | 'convert_manual' | 'resume' | 'dismiss' | 'redismiss' | 'undismiss'
   | 'trust' | 'untrust'
 
+/**
+ * The actions that take access away or take protection off an account: drawn in the danger colour and
+ * set apart at the end of a menu, and confirmed in the danger style (useRiskActions agrees).
+ */
+export const DESTRUCTIVE_ACTIONS: readonly RiskActionKind[] = ['pause', 'convert_manual', 'untrust']
+
 /** The service states a pause applies to: the account is being served. */
 const SERVING: readonly string[] = ['active', 'emergency_active']
 

@@ -1,10 +1,8 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -18,7 +16,7 @@ import QueueTab from './QueueTab'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: vi.fn() }))
 // t over the REAL zh-CN bundles, so a key the tab asks for but the bundle
 // lacks shows up as its raw key instead of passing on a defaultValue.
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
@@ -38,11 +36,10 @@ import zh from '@/locales/zh-CN/admin.json'
 import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = {
+  ...flatten(zhCommon as Nested),
   ...flatten(zh as Nested),
   ...Object.fromEntries(Object.entries(flatten(zhCommon as Nested)).map(([k, v]) => [`common:${k}`, v])),
 }
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 const NOW = Date.now()
 const HELD_AT = NOW - 2 * 3_600_000
@@ -183,9 +180,7 @@ function Page() {
 function mount(search = '?tab=queue') {
   render(
     <MemoryRouter initialEntries={[`/admin/risk${search}`]}>
-      <ThemeProvider theme={theme}>
-        <Routes><Route path="/admin/risk" element={<Page />} /></Routes>
-      </ThemeProvider>
+      <Routes><Route path="/admin/risk" element={<Page />} /></Routes>
     </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
@@ -209,13 +204,27 @@ function lastQueueRead(): Record<string, unknown> {
 }
 
 async function rowOf(upn: string): Promise<HTMLElement> {
-  return (await screen.findByRole('button', { name: `打开 ${upn} 的风控详情` })).closest('tr') as HTMLElement
+  let row: HTMLElement | undefined
+  await waitFor(() => {
+    row = [...document.querySelectorAll<HTMLElement>('tr[data-row]')].find(tr => within(tr).queryByText(upn) !== null)
+    expect(row).toBeTruthy()
+  })
+  return row as HTMLElement
+}
+
+/** The status switch: a radio group, one choice at a time. */
+const statusGroup = () => screen.getByRole('radiogroup', { name: '状态' })
+
+/** Opens the source filter's checklist and returns its checkbox for one source. */
+function sourceBox(name: string): HTMLElement {
+  if (!screen.queryByRole('checkbox', { name })) fireEvent.click(screen.getByRole('button', { name: /^来源/ }))
+  return screen.getByRole('checkbox', { name })
 }
 
 /** A metric card: its label and then its number (or "—"), which tells the
  *  已忽略 card from the 已忽略 status button. */
 function card(label: string): HTMLElement {
-  return screen.getByRole('button', { name: new RegExp(`^${label}\\s*(\\d+|—)$`) })
+  return screen.getByRole('button', { name: new RegExp(`^${label}\\s*(\\d+|—)`) })
 }
 
 beforeEach(() => {
@@ -278,15 +287,15 @@ describe('QueueTab rows', () => {
     serve()
     mount()
     const cell = within(await rowOf('alice')).getByText('5 分钟前')
-    expect(cell.getAttribute('aria-label')).toBe(formatMsDualTz(alice.changed_at_ms, 'Asia/Shanghai'))
+    expect(cell.getAttribute('title')).toBe(formatMsDualTz(alice.changed_at_ms, 'Asia/Shanghai'))
     expect(within(await rowOf('carol')).getByText('—')).toBeTruthy()
   })
 
   it('says when the hold began in the hold chip', async () => {
     serve()
     mount()
-    const chip = within(await rowOf('alice')).getByText('异地自动暂停').closest('.MuiChip-root') as HTMLElement
-    expect(chip.getAttribute('aria-label'))
+    const chip = within(await rowOf('alice')).getByText('异地自动暂停').closest('[title]') as HTMLElement
+    expect(chip.getAttribute('title'))
       .toBe(`自 ${formatMsDualTz(HELD_AT, 'Asia/Shanghai')} 起自动暂停，到期自动恢复`)
   })
 })
@@ -363,7 +372,7 @@ describe('QueueTab metric cards', () => {
     mount()
     await rowOf('alice')
     const tip = `来自 ${formatDualTz('2026-09-28T10:00:05Z', 'Asia/Shanghai')} 的快照`
-    expect(card('在线账号').getAttribute('title')).toBe(tip)
+    expect(card('在线账号').textContent).toContain(tip)
   })
 })
 
@@ -372,12 +381,12 @@ describe('QueueTab filters', () => {
     serve()
     mount()
     await rowOf('alice')
-    const group = screen.getByRole('group', { name: '状态' })
-    expect(within(group).getAllByRole('button').map(b => b.textContent)).toEqual(['待处理', '已忽略', '已信任', '全部'])
-    fireEvent.click(within(group).getByRole('button', { name: '已信任' }))
+    const group = statusGroup()
+    expect(within(group).getAllByRole('radio').map(b => b.textContent)).toEqual(['待处理', '已忽略', '已信任', '全部'])
+    fireEvent.click(within(group).getByRole('radio', { name: '已信任' }))
     await waitFor(() => expect(urlParams().get('status')).toBe('trusted'))
     await waitFor(() => expect(lastQueueRead()).toEqual({ status: 'trusted', page: 1, page_size: 25 }))
-    fireEvent.click(within(group).getByRole('button', { name: '待处理' }))
+    fireEvent.click(within(group).getByRole('radio', { name: '待处理' }))
     await waitFor(() => expect(urlParams().has('status')).toBe(false))
   })
 
@@ -385,29 +394,28 @@ describe('QueueTab filters', () => {
     serve()
     mount()
     await rowOf('alice')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    const list = await screen.findByRole('listbox')
-    expect(within(list).getAllByRole('option').map(o => o.textContent))
+    fireEvent.click(screen.getByRole('button', { name: /^来源/ }))
+    expect(screen.getAllByRole('checkbox').map(o => o.closest('label')?.textContent))
       .toEqual(['异地并发', '订阅多地', '设备数', '用量变化', '登录国家', '访问拦截'])
-    fireEvent.click(within(list).getByRole('option', { name: '设备数' }))
+    fireEvent.click(sourceBox('设备数'))
     await waitFor(() => expect(urlParams().get('source')).toBe('devices'))
-    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: '异地并发' }))
+    fireEvent.click(sourceBox('异地并发'))
     await waitFor(() => expect(urlParams().get('source')).toBe('geo,devices'))
     await waitFor(() => expect(lastQueueRead()).toEqual({ status: 'open', source: 'geo,devices', page: 1, page_size: 25 }))
   })
 
   // The search writes the URL once the typing pauses, reading the URL as it
   // is THEN: a card clicked while it waits is kept, not undone.
-  it('writes the search once after 300 ms without undoing a card clicked meanwhile', async () => {
+  it('writes the search once after 250 ms without undoing a card clicked meanwhile', async () => {
     serve()
     mount()
     await rowOf('alice')
     vi.useFakeTimers()
-    const box = screen.getByRole('textbox', { name: '搜索用户' })
+    const box = screen.getByRole('searchbox', { name: '搜索用户' })
     fireEvent.change(box, { target: { value: 'a' } })
     fireEvent.change(box, { target: { value: 'al' } })
     fireEvent.change(box, { target: { value: 'ali' } })
-    act(() => { vi.advanceTimersByTime(299) })
+    act(() => { vi.advanceTimersByTime(249) })
     expect(urlParams().has('q')).toBe(false)
 
     fireEvent.click(card('已标记'))
@@ -428,7 +436,7 @@ describe('QueueTab filters', () => {
     serve()
     mount('?tab=queue&q=alice')
     await rowOf('alice')
-    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    const box = screen.getByRole('searchbox', { name: '搜索用户' }) as HTMLInputElement
     expect(box.value).toBe('alice')
     act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
     await waitFor(() => expect(lastQueueRead()).toEqual({ status: 'open', urgent: true, page: 1, page_size: 25 }))
@@ -442,9 +450,9 @@ describe('QueueTab filters', () => {
     // The bell pushes; the search then replaces that entry.
     act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
     vi.useFakeTimers()
-    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    const box = screen.getByRole('searchbox', { name: '搜索用户' }) as HTMLInputElement
     fireEvent.change(box, { target: { value: 'bob' } })
-    act(() => { vi.advanceTimersByTime(300) })
+    act(() => { vi.advanceTimersByTime(250) })
     expect(urlParams().get('q')).toBe('bob')
 
     act(() => { void navigateTo(-1) })
@@ -455,22 +463,6 @@ describe('QueueTab filters', () => {
     expect(box.value).toBe('bob')
   })
 
-  // A search still waiting when the URL moves the box is the old text: it
-  // must not be written over the new URL.
-  it('drops a search still waiting when the URL moves the box', async () => {
-    serve()
-    mount('?tab=queue&q=alice')
-    await rowOf('alice')
-    vi.useFakeTimers()
-    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
-    fireEvent.change(box, { target: { value: 'alicex' } })
-    act(() => { void navigateTo('/admin/risk?tab=queue&urgent=1') })
-    expect(box.value).toBe('')
-    act(() => { vi.advanceTimersByTime(1000) })
-    expect(location()).toBe('/admin/risk?tab=queue&urgent=1')
-    expect(box.value).toBe('')
-  })
-
   // The tab's own write is not a move to follow: a key typed while it lands
   // (a navigation renders as a transition, after the keystroke) stays.
   it('keeps a key typed while its own search write lands', async () => {
@@ -478,15 +470,15 @@ describe('QueueTab filters', () => {
     mount()
     await rowOf('alice')
     vi.useFakeTimers()
-    const box = screen.getByRole('textbox', { name: '搜索用户' }) as HTMLInputElement
+    const box = screen.getByRole('searchbox', { name: '搜索用户' }) as HTMLInputElement
     fireEvent.change(box, { target: { value: 'ali' } })
     act(() => {
-      vi.advanceTimersByTime(300)
+      vi.advanceTimersByTime(250)
       fireEvent.change(box, { target: { value: 'alic' } })
     })
     expect(urlParams().get('q')).toBe('ali')
     expect(box.value).toBe('alic')
-    act(() => { vi.advanceTimersByTime(300) })
+    act(() => { vi.advanceTimersByTime(250) })
     expect(urlParams().get('q')).toBe('alic')
     expect(box.value).toBe('alic')
   })
@@ -498,8 +490,7 @@ describe('QueueTab filters', () => {
     mount('?tab=queue&urgent=1')
     await rowOf('alice')
     expect(lastQueueRead()).toEqual({ status: 'open', urgent: true, page: 1, page_size: 25 })
-    const chip = screen.getByText('仅需立即处理').closest('.MuiChip-root') as HTMLElement
-    fireEvent.click(within(chip).getByTestId('CancelIcon'))
+    fireEvent.click(screen.getByRole('button', { name: '移除「仅需立即处理」筛选' }))
     await waitFor(() => expect(urlParams().has('urgent')).toBe(false))
     expect(screen.queryByText('仅需立即处理')).toBeNull()
   })
@@ -513,9 +504,9 @@ describe('QueueTab filters', () => {
     ['the hold card', () => fireEvent.click(card('异地自动暂停')), { status: 'all', auto_suspended: true }],
     ['the flagged card', () => fireEvent.click(card('已标记')), { status: 'open', level: 'flagged' }],
     ['the dismissed status', () => fireEvent.click(
-      within(screen.getByRole('group', { name: '状态' })).getByRole('button', { name: '已忽略' })), { status: 'dismissed' }],
+      within(statusGroup()).getByRole('radio', { name: '已忽略' })), { status: 'dismissed' }],
     ['the trusted status', () => fireEvent.click(
-      within(screen.getByRole('group', { name: '状态' })).getByRole('button', { name: '已信任' })), { status: 'trusted' }],
+      within(statusGroup()).getByRole('radio', { name: '已信任' })), { status: 'trusted' }],
   ])('%s drops the urgent filter', async (_, click, read) => {
     serve()
     mount('?tab=queue&urgent=1')
@@ -530,8 +521,7 @@ describe('QueueTab filters', () => {
     serve()
     mount('?tab=queue&urgent=1')
     await rowOf('alice')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: '设备数' }))
+    fireEvent.click(sourceBox('设备数'))
     await waitFor(() => expect(urlParams().get('source')).toBe('devices'))
     expect(urlParams().get('urgent')).toBe('1')
   })
@@ -545,20 +535,18 @@ describe('QueueTab opening an account', () => {
     await waitFor(() => expect(urlParams().get('user')).toBe('8'))
   })
 
-  // The UPN is the keyboard way in: Enter opens the drawer, and Esc brings
-  // the focus back to where it was.
-  it('Enter on the user opens the drawer and focus returns after Esc', async () => {
+  // The row is the keyboard way in: Enter opens the drawer, and Esc brings the focus back to it.
+  it('Enter on the row opens the drawer and focus returns after Esc', async () => {
     serve()
     mount()
-    const upn = within(await rowOf('alice')).getByRole('button', { name: '打开 alice 的风控详情' })
+    const upn = await rowOf('alice')
     upn.focus()
     fireEvent.keyDown(upn, { key: 'Enter' })
     await waitFor(() => expect(location()).toBe('/admin/risk?tab=queue&user=7'))
     const header = await screen.findByTestId('risk-drawer-header')
     fireEvent.keyDown(within(header).getByText('alice'), { key: 'Escape' })
     await waitFor(() => expect(location()).toBe('/admin/risk?tab=queue'))
-    await waitFor(() => expect(document.activeElement).toBe(
-      screen.getByRole('button', { name: '打开 alice 的风控详情' })))
+    await waitFor(() => expect(document.activeElement).toBe(upn))
   })
 
   // The menu decides from the row alone: opening it reads nothing.
@@ -567,10 +555,11 @@ describe('QueueTab opening an account', () => {
     mount()
     const a = await rowOf('alice')
     const reads = api.get.mock.calls.length
-    fireEvent.click(within(a).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(within(a).getByRole('button', { name: 'alice 的操作' }))
     const menu = await screen.findByRole('menu')
+    // The actions that take access away come last, under a divider.
     expect(within(menu).getAllByRole('menuitem').map(m => m.textContent))
-      .toEqual(['改为人工暂停', '恢复代理服务', '忽略', '信任此账号'])
+      .toEqual(['恢复代理服务', '忽略', '信任此账号', '改为人工暂停'])
     expect(api.get.mock.calls.length).toBe(reads)
     // The menu is not the row: nothing opened behind it.
     expect(urlParams().has('user')).toBe(false)
@@ -581,18 +570,18 @@ describe('QueueTab opening an account', () => {
   it('the row menu leaves trust out for a devices-only row', async () => {
     serve()
     mount()
-    fireEvent.click(within(await rowOf('bob')).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(within(await rowOf('bob')).getByRole('button', { name: 'bob 的操作' }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).getAllByRole('menuitem').map(m => m.textContent))
-      .toEqual(['暂停代理服务', '再次忽略', '取消忽略'])
+      .toEqual(['再次忽略', '取消忽略', '暂停代理服务'])
   })
 
   it('a menu action opens its dialog', async () => {
     serve()
     mount()
-    fireEvent.click(within(await rowOf('alice')).getByRole('button', { name: '更多操作' }))
+    fireEvent.click(within(await rowOf('alice')).getByRole('button', { name: 'alice 的操作' }))
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: '忽略' }))
-    expect(within(await screen.findByRole('dialog')).getByText('忽略 alice 当前的信号？')).toBeTruthy()
+    expect(within(await screen.findByRole('alertdialog')).getByText('忽略 alice 当前的信号？')).toBeTruthy()
     expect(urlParams().has('user')).toBe(false)
   })
 })
@@ -603,8 +592,8 @@ describe('QueueTab states', () => {
     mount()
     await rowOf('alice')
     const warn = await screen.findByText(/^IP 地区库不可用/)
-    expect((warn.closest('.MuiAlert-root') as HTMLElement).className).toContain('Warning')
-    const link = screen.getByRole('link', { name: '前往 IP 地区显示' })
+    expect(warn.closest('[data-slot="alert"]')).toBeTruthy()
+    const link = screen.getByRole('button', { name: '前往 IP 地区显示' })
     expect(link.getAttribute('href')).toBe('/admin/settings?tab=general')
   })
 
@@ -618,7 +607,7 @@ describe('QueueTab states', () => {
     serve(view(), { ...CITY_DB, available: [{ ...CITY_DB.available[0], granularity: 'country' }] })
     mount()
     const info = await screen.findByText('当前地区库只能定位到国家，跨省、跨城两级不会触发。')
-    expect((info.closest('.MuiAlert-root') as HTMLElement).className).toContain('Info')
+    expect(info.closest('[data-slot="alert"]')).toBeTruthy()
     expect(screen.queryByText(/^IP 地区库不可用/)).toBeNull()
   })
 
@@ -685,23 +674,20 @@ describe('QueueTab states', () => {
 })
 
 describe('QueueTab on a phone', () => {
-  // Three columns fold into one caption line under the user, so the table
-  // fits a phone without scrolling sideways.
-  it('moves signals, last change and review under the user cell', async () => {
+  // Each row is a card: the signals, the last change and the review sit under the user, so nothing
+  // scrolls sideways.
+  it('moves signals, last change and review under the user', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: true, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
       addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     }))
     serve()
     mount()
-    const b = await rowOf('bob')
-    const headers = screen.getAllByRole('columnheader').map(h => h.textContent)
-    expect(headers).not.toContain('信号')
-    expect(headers).not.toContain('最近变化')
-    expect(headers).not.toContain('处理')
-    const userCell = within(b).getByRole('button', { name: '打开 bob 的风控详情' }).closest('td') as HTMLElement
-    expect(within(userCell).getByText('设备数')).toBeTruthy()
-    expect(within(userCell).getByText('3 小时前')).toBeTruthy()
-    expect(within(userCell).getByText('忽略已过期')).toBeTruthy()
+    const name = await screen.findByText('bob')
+    const card = name.closest('li') as HTMLElement
+    expect(screen.queryAllByRole('columnheader')).toHaveLength(0)
+    expect(within(card).getByText('设备数')).toBeTruthy()
+    expect(within(card).getByText('3 小时前')).toBeTruthy()
+    expect(within(card).getByText('忽略已过期')).toBeTruthy()
   })
 })

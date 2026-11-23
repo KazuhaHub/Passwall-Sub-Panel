@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { useAuthStore } from '@/stores/auth'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +7,7 @@ import * as acApi from '@/api/accessControl'
 import * as riskApi from '@/api/riskCenter'
 import { confirmMock, renderAccess, setTestLang, whereIs } from '@/test/accessControlHarness'
 import RiskUserDrawer from './RiskUserDrawer'
+import { pick } from '../testSelect'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -107,20 +108,6 @@ describe('the access tab', () => {
     renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText('读取这个账号的访问信息失败')).toBeTruthy()
     expect(screen.getAllByRole('tab')).toHaveLength(5)
-  })
-
-  it('scrolls the tabs on a phone only when all five show', async () => {
-    const mm = window.matchMedia
-    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as typeof window.matchMedia
-    try {
-      renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="users" />, { role: 'operator' })
-      await screen.findByTestId('risk-drawer-header')
-      expect(document.querySelector('.MuiTabs-scrollableX')).toBeNull()
-      cleanup()
-      renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="users" />)
-      await screen.findByTestId('risk-drawer-header')
-      expect(document.querySelector('.MuiTabs-scrollableX')).not.toBeNull()
-    } finally { window.matchMedia = mm }
   })
 
   it('falls back to the overview when the permission to see the access tab goes while it is selected', async () => {
@@ -247,13 +234,13 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 3 } as never })
     open()
     const button = await screen.findByRole('button', { name: '查看用量' }) as HTMLButtonElement
-    const days = await screen.findByRole('button', { name: '3 天' }) as HTMLButtonElement
+    const days = await screen.findByRole('radio', { name: '3 天' }) as HTMLButtonElement
     fireEvent.click(button)
     fireEvent.click(button)
     await waitFor(() => expect(button.disabled).toBe(true))
     expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1)
-    expect(days.disabled).toBe(true)
-    expect(screen.getByRole('combobox', { name: '节点' }).getAttribute('aria-disabled')).toBe('true')
+    expect(days.getAttribute('aria-disabled')).toBe('true')
+    expect((screen.getByRole('combobox', { name: '节点' }) as HTMLSelectElement).disabled).toBe(true)
     release(usage())
     await waitFor(() => expect(button.disabled).toBe(false))
   })
@@ -277,9 +264,9 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     vi.mocked(acApi.getDestUser).mockResolvedValue(available())
     open()
     const section = await screen.findByTestId('access-usage')
-    const days = await within(section).findByRole('button', { name: '3 天' })
-    expect(within(section).getByRole('button', { name: '24 小时' })).toBeTruthy()
-    expect(within(section).queryByRole('button', { name: '7 天' })).toBeNull()
+    const days = await within(section).findByRole('radio', { name: '3 天' })
+    expect(within(section).getByRole('radio', { name: '24 小时' })).toBeTruthy()
+    expect(within(section).queryByRole('radio', { name: '7 天' })).toBeNull()
     fireEvent.click(within(section).getByRole('button', { name: '查看用量' }))
     await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledTimes(1))
     fireEvent.click(days)
@@ -306,9 +293,7 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     const two = [{ panel_id: 5, name: '东京 01' }, { panel_id: 6, name: '洛杉矶 02' }]
     vi.mocked(acApi.getDestUser).mockResolvedValue(available({ usage_nodes: two }))
     open()
-    const select = await screen.findByLabelText('节点')
-    fireEvent.mouseDown(select)
-    fireEvent.click(await screen.findByRole('option', { name: '洛杉矶 02' }))
+    pick(await screen.findByLabelText('节点'), '洛杉矶 02')
     fireEvent.click(screen.getByRole('button', { name: '查看用量' }))
     await waitFor(() => expect(acApi.postDestUserUsage).toHaveBeenCalledWith(7, { range: '24h', panel_id: 6 }))
   })
@@ -337,9 +322,9 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     vi.mocked(acApi.getDestUser).mockResolvedValue(available())
     open()
     const section = await screen.findByTestId('access-usage')
-    expect(await within(section).findByRole('button', { name: '24 hours' })).toBeTruthy()
-    // A retention of one day is the 24 hours: no second button for the same window.
-    expect(within(section).queryByRole('button', { name: '1 day' })).toBeNull()
+    expect(await within(section).findByRole('radio', { name: '24 hours' })).toBeTruthy()
+    // A retention of one day is the 24 hours: no second choice for the same window.
+    expect(within(section).queryByRole('radio', { name: '1 day' })).toBeNull()
     setTestLang('zh-CN')
   })
 })

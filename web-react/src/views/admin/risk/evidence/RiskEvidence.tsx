@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
-import { Box, Button, Chip, Tooltip, Typography, useTheme } from '@mui/material'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import { useTranslation } from 'react-i18next'
-
 import { useNavigate } from 'react-router'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { IconChevronRight } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 
 import type {
   DestBlockEvidence, DevicesEvidence, LoginCountryEvidence, RiskSignal, SubSpreadEvidence, UsageShiftEvidence,
@@ -17,6 +18,7 @@ import { formatMsDualTz } from '@/utils/datetime'
 import { countryFlag } from '@/utils/geo'
 import { regionNamer } from '@/utils/regionName'
 import { dayBits, dayLabels, formatGB, placeLabel, riskCodeText } from '@/utils/riskSignals'
+import { useRiskT } from '../useRiskT'
 import { DetectorStateChip } from './DetectorStateChip'
 
 // The renderers of the four risk kinds' evidence, shared by every surface that
@@ -29,31 +31,26 @@ import { DetectorStateChip } from './DetectorStateChip'
 /** One cell per window day, oldest first, each titled with its panel-local
  *  date. A filled cell is a day the place, client or device was seen on. */
 export function DayStrip({ mask, labels }: { mask: number; labels: string[] }) {
-  const md = useTheme().palette.md
   return (
-    <Box data-testid="day-strip" sx={{ display: 'inline-flex', gap: '2px', flexShrink: 0 }}>
+    <span data-testid="day-strip" className="inline-flex shrink-0 gap-0.5">
       {dayBits(mask, labels.length).map((on, i) => (
-        <Box key={i} data-on={on ? 'true' : 'false'} title={labels[i]} sx={{
-          width: 10, height: 10, borderRadius: '2px',
-          bgcolor: on ? md.primary : md.surfaceContainerHighest, border: `1px solid ${md.outlineVariant}`,
-        }} />
+        <span key={i} data-on={on ? 'true' : 'false'} title={labels[i]}
+          className={cn('size-2.5 rounded-xs border', on ? 'border-primary bg-primary' : 'border-border bg-muted')} />
       ))}
-    </Box>
+    </span>
   )
 }
 
 function Caption({ children }: { children: ReactNode }) {
-  const md = useTheme().palette.md
-  return <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{children}</Typography>
+  return <p className="text-xs text-muted-foreground">{children}</p>
 }
 
 function Subtitle({ children }: { children: ReactNode }) {
-  const md = useTheme().palette.md
-  return <Typography sx={{ fontSize: 12, fontWeight: 600, color: md.onSurface, mt: 0.5 }}>{children}</Typography>
+  return <h4 className="mt-1 text-xs font-medium text-foreground">{children}</h4>
 }
 
 function Line({ children }: { children: ReactNode }) {
-  return <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', fontSize: 13 }}>{children}</Box>
+  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">{children}</div>
 }
 
 /** A place: the flag, then the name in its own element so the name reads (and
@@ -61,15 +58,20 @@ function Line({ children }: { children: ReactNode }) {
 function Place({ cc, name }: { cc: string; name: string }) {
   const flag = countryFlag(cc)
   return (
-    <Box component="span" sx={{ minWidth: 140, display: 'inline-flex', gap: 0.5 }}>
+    <span className="inline-flex min-w-32 gap-1">
       {flag && <span>{flag}</span>}
       <span>{name}</span>
-    </Box>
+    </span>
   )
 }
 
+/** The fixed-width name column the day strips line up against. */
+function Name({ children }: { children: ReactNode }) {
+  return <span className="min-w-32">{children}</span>
+}
+
 export function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
-  const { t, i18n } = useTranslation(['admin'])
+  const { t, i18n } = useRiskT()
   // Provinces only: a Chinese UI names a CN province by its ISO code, as the
   // location evidence does. The foreign lines below stay country codes.
   const name = regionNamer(t, i18n.language)
@@ -86,10 +88,8 @@ export function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
         <Line key={`${p.cc}/${p.region}/${i}`}>
           <Place cc={p.cc} name={placeLabel(p, name)} />
           <DayStrip mask={p.days} labels={labels} />
-          {p.established && (
-            <Chip size="small" variant="outlined" color="primary" label={t('admin:risk_signals.province_recurring')} />
-          )}
-          <Chip size="small" variant="outlined" label={t('admin:risk_signals.province_group', { n: p.group })} />
+          {p.established && <Badge variant="secondary">{t('admin:risk_signals.province_recurring')}</Badge>}
+          <Badge variant="outline">{t('admin:risk_signals.province_group', { n: p.group })}</Badge>
         </Line>
       ))}
       {identities.length > 0 && <Subtitle>{t('admin:risk_signals.identities_title')}</Subtitle>}
@@ -97,10 +97,10 @@ export function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
         const places = (id.provinces ?? []).map(j => provinces[j]).filter(Boolean).map(p => placeLabel(p, name)).join(' · ')
         return (
           <Line key={`${id.kind}/${id.label}/${i}`}>
-            <Chip size="small" variant="outlined" label={id.kind === 'hwid'
+            <Badge variant="outline">{id.kind === 'hwid'
               ? t('admin:risk_signals.identity_hwid')
-              : t('admin:risk_signals.identity_ua')} />
-            <Box component="span" sx={{ minWidth: 140 }}>{id.label || (id.hwid4 ? `#${id.hwid4}` : '—')}</Box>
+              : t('admin:risk_signals.identity_ua')}</Badge>
+            <Name>{id.label || (id.hwid4 ? `#${id.hwid4}` : '—')}</Name>
             <DayStrip mask={id.days} labels={labels} />
             {places && <Caption>{t('admin:risk_signals.identity_seen_at', { places })}</Caption>}
           </Line>
@@ -124,7 +124,7 @@ export function SubSpreadPanel({ ev }: { ev: SubSpreadEvidence }) {
 }
 
 export function DevicesPanel({ ev }: { ev: DevicesEvidence }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const labels = dayLabels(ev.window_start, ev.window_days)
   const devices = ev.devices ?? []
@@ -136,12 +136,10 @@ export function DevicesPanel({ ev }: { ev: DevicesEvidence }) {
           enough to tell this account's devices apart, nothing more. */}
       {devices.map((d, i) => (
         <Line key={`${d.hwid4}/${i}`}>
-          <Box component="span" sx={{ minWidth: 140 }}>{d.label || '—'}</Box>
-          <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 12 }}>{`#${d.hwid4}`}</Box>
+          <Name>{d.label || '—'}</Name>
+          <span className="font-mono text-xs">{`#${d.hwid4}`}</span>
           <DayStrip mask={d.days} labels={labels} />
-          {d.recurrent && (
-            <Chip size="small" variant="outlined" color="primary" label={t('admin:risk_signals.device_recurring')} />
-          )}
+          {d.recurrent && <Badge variant="secondary">{t('admin:risk_signals.device_recurring')}</Badge>}
           <Caption>{t('admin:risk_signals.device_last_seen', { time: formatMsDualTz(d.last_ms, panelTz) })}</Caption>
           {d.client && <Caption>{d.client}</Caption>}
         </Line>
@@ -150,7 +148,7 @@ export function DevicesPanel({ ev }: { ev: DevicesEvidence }) {
       {clients.length > 0 && <Subtitle>{t('admin:risk_signals.clients_title')}</Subtitle>}
       {clients.map((c, i) => (
         <Line key={`${c.label}/${i}`}>
-          <Box component="span" sx={{ minWidth: 140 }}>{c.label || '—'}</Box>
+          <Name>{c.label || '—'}</Name>
           <DayStrip mask={c.days} labels={labels} />
         </Line>
       ))}
@@ -159,7 +157,7 @@ export function DevicesPanel({ ev }: { ev: DevicesEvidence }) {
 }
 
 export function UsagePanel({ ev }: { ev: UsageShiftEvidence }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   // The numbers exist only once the judged days were judged; a warm-up or a
   // short history carries the series alone, and a caption of zeros would
   // read as a judgement.
@@ -190,7 +188,6 @@ export function UsagePanel({ ev }: { ev: UsageShiftEvidence }) {
  * actually crossed.
  */
 export function UsageBars({ ev }: { ev: UsageShiftEvidence }) {
-  const md = useTheme().palette.md
   const series = ev.series ?? []
   const thresholds = ev.thresholds ?? []
   const over = ev.over ?? []
@@ -204,27 +201,26 @@ export function UsageBars({ ev }: { ev: UsageShiftEvidence }) {
   const labels = dayLabels(start, n)
   const y = (b: number) => H - (b / top) * H
   return (
-    <Box component="svg" viewBox={`0 0 ${Math.max(n * step, 1)} ${H}`} role="img"
-      sx={{ width: '100%', maxWidth: 420, height: H, display: 'block' }}>
+    <svg viewBox={`0 0 ${Math.max(n * step, 1)} ${H}`} role="img" className="block h-15 w-full max-w-105">
       {series.map((b, i) => {
         const j = i - firstJudged
         return (
           <rect key={i} x={i * step} y={y(b)} width={step - 2} height={H - y(b)}
-            fill={j >= 0 && over[j] ? md.error : md.primary} opacity={j >= 0 ? 1 : 0.55}>
+            className={j >= 0 && over[j] ? 'fill-destructive' : 'fill-primary'} opacity={j >= 0 ? 1 : 0.55}>
             <title>{`${labels[i] ? `${labels[i]}: ` : ''}${formatGB(b)}`}</title>
           </rect>
         )
       })}
       {thresholds.map((th, j) => {
         const x = (firstJudged + j) * step
-        return <line key={j} x1={x - 1} x2={x + step - 1} y1={y(th)} y2={y(th)} stroke={md.onSurface} strokeWidth={1.5} />
+        return <line key={j} x1={x - 1} x2={x + step - 1} y1={y(th)} y2={y(th)} className="stroke-foreground" strokeWidth={1.5} />
       })}
-    </Box>
+    </svg>
   )
 }
 
 export function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   const known = ev.known ?? []
   const events = ev.events ?? []
@@ -237,7 +233,7 @@ export function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
       <Line>
         <Caption>{t('admin:risk_signals.login_known')}</Caption>
         {known.length
-          ? known.map(cc => <Chip key={cc} size="small" variant="outlined" label={[countryFlag(cc), cc].filter(Boolean).join(' ')} />)
+          ? known.map(cc => <Badge key={cc} variant="outline">{[countryFlag(cc), cc].filter(Boolean).join(' ')}</Badge>)
           : '—'}
       </Line>
       {events.length > 0 && <Subtitle>{t('admin:risk_signals.login_events')}</Subtitle>}
@@ -266,7 +262,7 @@ export function LoginPanel({ ev }: { ev: LoginCountryEvidence }) {
  * hits is only for who may open that page.
  */
 export function DestBlockPanel({ ev, userId }: { ev: DestBlockEvidence; userId?: number }) {
-  const { t, i18n } = useTranslation(['admin'])
+  const { t, i18n } = useRiskT()
   const scope = useQueryScope()
   const navigate = useNavigate()
   const canView = useCan('access.view')
@@ -282,23 +278,24 @@ export function DestBlockPanel({ ev, userId }: { ev: DestBlockEvidence; userId?:
   const hours = ev.window_hours
   const since = hours <= 1 ? '1h' : hours <= 24 ? '24h' : `${Math.ceil(hours / 24)}d`
   return (
-    <Box data-testid="dest-block-evidence" sx={{ display: 'contents' }}>
+    <div data-testid="dest-block-evidence" className="contents">
       {(ev.by_source ?? []).map(b => (
         <Line key={b.source}>
-          <Box component="span" sx={{ minWidth: 140 }}>{label(b.source)}</Box>
-          <Typography component="span" sx={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{num.format(b.count)}</Typography>
+          <Name>{label(b.source)}</Name>
+          <span className="font-semibold tabular-nums">{num.format(b.count)}</span>
         </Line>
       ))}
       <Caption>{t('admin:risk_signals.dest_block_nodes', { count: ev.nodes })}</Caption>
       {canView && userId !== undefined && (
-        <Box>
-          <Button size="small" endIcon={<ChevronRightIcon />}
+        <div>
+          <Button variant="ghost" size="sm" className="-ml-2"
             onClick={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since, action: 'block' })}`)}>
             {t('admin:risk_signals.dest_block_view_hits')}
+            <IconChevronRight />
           </Button>
-        </Box>
+        </div>
       )}
-    </Box>
+    </div>
   )
 }
 
@@ -324,13 +321,11 @@ export function RiskKindEvidence({ kind, evidence, userId }: { kind: string; evi
  *  with no row is "not computed", never blank and never clean; in a table
  *  cell it is a dash with the words in its tooltip. */
 export function RiskKindChip({ sig }: { sig: RiskSignal | undefined }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useRiskT()
   const panelTz = useSiteStore(s => s.timezone)
   if (!sig) {
     return (
-      <Tooltip title={t('admin:risk_center.state.not_computed')}>
-        <Chip size="small" variant="outlined" label="—" />
-      </Tooltip>
+      <Badge variant="outline" title={t('admin:risk_center.state.not_computed')}>—</Badge>
     )
   }
   const updated = t('admin:risk_signals.col_updated')

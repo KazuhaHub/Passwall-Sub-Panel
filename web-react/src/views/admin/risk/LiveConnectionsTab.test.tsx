@@ -1,20 +1,19 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { formatDualTz } from '@/utils/datetime'
 import { LIVE_REFRESH_TIMEOUT_MS, type LiveSnapshotInfo, type LiveUser, type LiveView } from '@/api/riskCenter'
 import LiveConnectionsTab from './LiveConnectionsTab'
+import { pick, shown } from './testSelect'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 const snack = vi.hoisted(() => vi.fn())
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack, default: () => null }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: snack }))
 // t over the REAL zh-CN admin bundle, so a key the tab asks for but the
 // bundle lacks shows up as its raw key.
 const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
@@ -32,8 +31,6 @@ vi.mock('react-i18next', () => ({
 import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = flatten(zh as Nested)
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 
 const alice: LiveUser = {
   user_id: 7, upn: 'alice', display_name: 'Alice', stale_addresses: 0, unread_panels: 0,
@@ -90,11 +87,9 @@ function Where() {
 function mount(search = '?tab=live') {
   render(
     <MemoryRouter initialEntries={[`/admin/risk${search}`]}>
-      <ThemeProvider theme={theme}>
-        <Routes>
+      <Routes>
           <Route path="/admin/risk" element={<><LiveConnectionsTab /><Where /></>} />
         </Routes>
-      </ThemeProvider>
     </MemoryRouter>,
     { wrapper: queryWrapper(makeTestQueryClient()) },
   )
@@ -161,7 +156,7 @@ describe('LiveConnectionsTab', () => {
   it('lists unread panels by name', async () => {
     serve(view({ panels_unread: [{ id: 2, name: 'hk-1' }] }))
     mount()
-    expect(await screen.findByText('1 块面板读取失败，其上的连接未列出：hk-1')).toBeTruthy()
+    expect(await screen.findByText('1 台服务器读取失败，其上的连接未列出：hk-1')).toBeTruthy()
   })
 
   // S-UI has no live read at all. Drawn as a failure it would sit there
@@ -169,10 +164,10 @@ describe('LiveConnectionsTab', () => {
   it('shows unsupported panels as info, not failure', async () => {
     serve(view({ panels_unsupported: [{ id: 4, name: 'sui-1' }] }))
     mount()
-    const text = await screen.findByText('1 块面板不提供在线地址（如 S-UI），其上的连接无法列出：sui-1')
-    const alert = text.closest('.MuiAlert-root') as HTMLElement
-    expect(alert.className).toContain('Info')
-    expect(alert.className).not.toMatch(/Error|Warning/)
+    const text = await screen.findByText('1 台服务器不提供在线地址（如 S-UI），其上的连接无法列出：sui-1')
+    // A notice, not the failure alert (destructive variant): it says a fact about the server.
+    const alert = text.closest('[data-slot="alert"]') as HTMLElement
+    expect(alert.className).not.toContain('text-destructive')
     expect(screen.queryByText(/读取失败/)).toBeNull()
   })
 
@@ -263,7 +258,7 @@ describe('LiveConnectionsTab', () => {
     } })
     mount()
     fireEvent.click(await screen.findByRole('button', { name: '立即刷新' }))
-    await waitFor(() => expect(snack).toHaveBeenCalledWith('已刷新：3 块面板，9 个连接', 'success'))
+    await waitFor(() => expect(snack).toHaveBeenCalledWith('已刷新：3 台服务器，9 个连接', 'success'))
     await waitFor(() => expect(liveReads()).toBe(2))
   })
 
@@ -280,8 +275,7 @@ describe('LiveConnectionsTab', () => {
     serve(params => (params.exclusion === 'shared' ? view({}, { items: [], total: 0 }) : view()))
     mount()
     await screen.findByText('alice')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    fireEvent.click(await screen.findByRole('option', { name: '共享出口' }))
+    pick(screen.getByRole('combobox', { name: '来源' }), '共享出口')
 
     expect(await screen.findByText('没有符合条件的连接')).toBeTruthy()
     expect(screen.queryByText('此刻没有在连的账号')).toBeNull()
@@ -290,7 +284,7 @@ describe('LiveConnectionsTab', () => {
   it('an empty snapshot with a panel unread says the rest is unknown', async () => {
     serve(view({ users: 0, connections: 0, panels_unread: [{ id: 2, name: 'hk-1' }] }, { items: [], total: 0 }))
     mount()
-    expect(await screen.findByText('没有列出任何连接，但有 1 块面板读取失败，那里的连接无从得知')).toBeTruthy()
+    expect(await screen.findByText('没有列出任何连接，但有 1 台服务器读取失败，那里的连接无从得知')).toBeTruthy()
     expect(screen.queryByText('此刻没有在连的账号')).toBeNull()
   })
 
@@ -300,8 +294,7 @@ describe('LiveConnectionsTab', () => {
     serve(view())
     mount('?tab=live&user=9&live_page=2')
     await screen.findByText('alice')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    fireEvent.click(await screen.findByRole('option', { name: '共享出口' }))
+    pick(screen.getByRole('combobox', { name: '来源' }), '共享出口')
     await waitFor(() => expect(urlParams().get('live_excl')).toBe('shared'))
     // A new filter starts at the first page; the page's other params stay.
     expect(urlParams().has('live_page')).toBe(false)
@@ -316,7 +309,7 @@ describe('LiveConnectionsTab', () => {
     mount(search)
     await screen.findByText('alice')
     expect(lastLiveRead()).toEqual({ page: 1, page_size: 25, exclusion: 'shared' })
-    expect(screen.getByRole('combobox', { name: '来源' }).textContent).toBe('共享出口')
+    expect(shown(screen.getByRole('combobox', { name: '来源' }))).toBe('共享出口')
   })
 
   it('reads every filter and the page from the URL', async () => {
@@ -324,15 +317,14 @@ describe('LiveConnectionsTab', () => {
     mount('?tab=live&live_user=7&live_panel=2&live_excl=kept&live_page=3&live_size=50')
     await screen.findByText('alice')
     expect(lastLiveRead()).toEqual({ page: 3, page_size: 50, user_id: 7, panel_id: 2, exclusion: 'kept' })
-    expect(screen.getByRole('combobox', { name: '面板' }).textContent).toBe('hk-1')
+    expect(shown(screen.getByRole('combobox', { name: '服务器' }))).toBe('hk-1')
   })
 
   it('filters by source', async () => {
     serve(view())
     mount()
     await screen.findByText('alice')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '来源' }))
-    fireEvent.click(await screen.findByRole('option', { name: '已排除' }))
+    pick(screen.getByRole('combobox', { name: '来源' }), '已排除')
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/risk-center/live',
       expect.objectContaining({ params: expect.objectContaining({ exclusion: 'excluded', page: 1 }) })))
   })
