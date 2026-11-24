@@ -194,7 +194,7 @@ describe('RiskUserDrawer', () => {
 
     // jsdom loads no stylesheet, so stacking is read from the z-index utility each layer carries.
     const asked = (await screen.findByText('leave-guard')).closest('[role="alertdialog"]')!
-    const sheet = document.querySelector('[data-slot="sheet-content"]')!
+    const sheet = document.querySelector('[data-slot="detail-dialog"]')!
     const level = (el: Element) => Number(/(?:^|\s)z-\[?(\d+)\]?/.exec(el.className)?.[1])
     expect(level(asked)).toBeGreaterThan(level(sheet))
     expect(level(document.querySelector('[data-slot="alert-dialog-overlay"]')!)).toBeGreaterThan(level(sheet))
@@ -404,7 +404,7 @@ describe('RiskUserDrawer', () => {
     const onClose = vi.fn()
     mount(7, onClose)
     await header()
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
     expect(onClose).toHaveBeenCalled()
   })
 

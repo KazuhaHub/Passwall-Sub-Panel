@@ -1666,7 +1666,6 @@
     "retry": "Retry",
     "drawer": {
       "title": "Risk details",
-      "close": "Close",
       "not_found": "User not found or deleted",
       "axis_account": "Account",
       "axis_service": "Proxy service",

@@ -1,16 +1,14 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { isAxiosError } from 'axios'
-import { XIcon } from 'lucide-react'
 
 import { MoreMenu } from '@/components/common/MoreMenu'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { TOUCH_TARGET } from '@/components/common/touchTarget'
 import { useRiskUser } from '@/query/riskCenter'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useCan } from '@/utils/permissions'
@@ -71,19 +69,6 @@ function ActionBar({ subject, host, onStart }: {
   )
 }
 
-/** The close button, in the corner of the header like every detail sheet's. */
-function CloseButton() {
-  const { t } = useRiskT()
-  return (
-    <SheetClose
-      render={<Button variant="ghost" size="icon-sm" className={`${TOUCH_TARGET} absolute top-3 right-3`}
-        aria-label={t('admin:risk_center.drawer.close')} title={t('admin:risk_center.drawer.close')} />}
-    >
-      <XIcon />
-    </SheetClose>
-  )
-}
-
 /**
  * ONE ACCOUNT'S RISK DETAIL, over whichever page opened it: who it is and where its two access axes
  * stand, what can be done about it (the one action matrix the queue's row menu also uses), and tabs —
@@ -92,7 +77,7 @@ function CloseButton() {
  *
  * Permanently mounted, like AccountSecurityDrawer: `shown` keeps the last account so the close
  * transition has content, and each open — or a switch to another account — starts again on the
- * overview with no dialog left open. A refresh of the summary replaces its data in place: the sheet and
+ * overview with no dialog left open. A refresh of the summary replaces its data in place: the dialog and
  * the tab the admin is on stay. It reads nothing while closed.
  */
 export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
@@ -108,7 +93,6 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
 }) {
   const { t } = useRiskT()
   const scope = useQueryScope()
-  const headingId = useId()
   const actions = useRiskActions()
   const open = userId !== null
 
@@ -138,20 +122,16 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   let body
   if (data) {
     body = (
-      <Tabs value={tab} onValueChange={v => setTab(v as DrawerTab)} className="min-h-0 flex-1 gap-0">
-        <SheetHeader className="gap-3 border-b p-4 pr-14">
-          <DrawerHeader summary={data} />
-          <ActionBar subject={subjectOfSummary(data)} host={host} onStart={actions.start} />
-          <CloseButton />
-        </SheetHeader>
-        {/* The tab strip stays put while a long tab scrolls under it. */}
-        <div className="overflow-x-auto border-b px-4 py-2">
+      <Tabs value={tab} onValueChange={v => setTab(v as DrawerTab)} className="gap-0">
+        <DrawerHeader summary={data} />
+        {/* The tab strip stays put at the top of the scrolling body while a long tab scrolls under it. */}
+        <div className="sticky top-0 z-10 -mx-4 mt-3 overflow-x-auto border-b bg-popover px-4 py-2">
           <TabsList aria-label={t('admin:risk_center.drawer.title')}>
             {tabs.map(k => <TabsTrigger key={k} value={k}>{t(`admin:risk_center.drawer.tab_${k}`)}</TabsTrigger>)}
           </TabsList>
         </div>
         {/* Only the open tab is mounted, so only its lists are read. */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="pt-4">
           <TabsContent value="overview"><OverviewTab summary={data} /></TabsContent>
           <TabsContent value="connections"><ConnectionsTab summary={data} /></TabsContent>
           <TabsContent value="devices"><DevicesTab summary={data} /></TabsContent>
@@ -160,32 +140,25 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
         </div>
       </Tabs>
     )
+  } else if (q.isError) {
+    // When the summary cannot arrive: the dialog still has a name and a way out.
+    body = status === 404 ? <EmptyState compact title={t('admin:risk_center.drawer.not_found')} />
+      : status === 503 ? <EmptyState compact title={t('admin:risk_center.unwired')} />
+        : <ErrorState compact reason={q.error} retry={() => q.refetch()} />
   } else {
-    // Before the summary arrives, or when it cannot: the sheet still has a name and a way out.
-    body = (
-      <>
-        <SheetHeader className="border-b p-4 pr-14">
-          <SheetTitle id={headingId} className="text-base">{t('admin:risk_center.drawer.title')}</SheetTitle>
-          <CloseButton />
-        </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {q.isError
-            ? status === 404 ? <EmptyState compact title={t('admin:risk_center.drawer.not_found')} />
-              : status === 503 ? <EmptyState compact title={t('admin:risk_center.unwired')} />
-                : <ErrorState compact reason={q.error} retry={() => q.refetch()} />
-            : <CardSkeleton lines={6} />}
-        </div>
-      </>
-    )
+    body = <CardSkeleton lines={6} />
   }
 
   return (
-    <Sheet open={open} onOpenChange={next => { if (!next) onClose() }}>
-      <SheetContent side="right" showCloseButton={false}
-        className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:w-[46rem] data-[side=right]:sm:max-w-[46rem]">
-        {shown !== null && body}
-        {actions.dialogs}
-      </SheetContent>
-    </Sheet>
+    <DetailDialog
+      open={open}
+      onClose={onClose}
+      size="lg"
+      title={t('admin:risk_center.drawer.title')}
+      actions={data ? <ActionBar subject={subjectOfSummary(data)} host={host} onStart={actions.start} /> : undefined}
+    >
+      {shown !== null && body}
+      {actions.dialogs}
+    </DetailDialog>
   )
 }
