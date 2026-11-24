@@ -35,7 +35,7 @@ beforeEach(() => {
 describe('the turn-on dialog', () => {
   it('says what turning on does, in the owner words, and confirms with one plain-looking destructive button', async () => {
     renderAccess(dialog())
-    const d = await screen.findByRole('dialog', { name: '让「Guests」开启白名单？' })
+    const d = await screen.findByRole('alertdialog', { name: '让「Guests」开启白名单？' })
     expect(await within(d).findByText('开启后，本组 51 人访问名单外的目的地会被拒绝，约 2 分钟内生效。可以随时改回仅报告。')).toBeTruthy()
     expect(await within(d).findByText('所有名单都已就绪')).toBeTruthy()
     expect(within(d).getByText('基础放行不为空')).toBeTruthy()
@@ -46,13 +46,20 @@ describe('the turn-on dialog', () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1))
   })
 
+  it('opens with focus on Cancel, so a stray Enter cannot turn the allowlist on', async () => {
+    renderAccess(dialog())
+    const d = await screen.findByRole('alertdialog')
+    await waitFor(() => expect(document.activeElement).toBe(within(d).getByRole('button', { name: '取消' })))
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
   it('only a list that is not ready stops it; everything else is a note', async () => {
     vi.mocked(api.getDestGroup).mockResolvedValue(detail({ readiness: {
       lists_ready: false, not_ready_lists: [{ id: 3, name: 'Remote feed' }], unapplied_nodes: 2, base_nonempty: false, remaining_sites_24h: 41,
       top_sites: [{ site: 'gstatic.com', count: 5, added: false }, { site: 'figma.com', count: 4, added: false }, { site: 'ok.com', count: 3, added: true }],
     } }))
     renderAccess(dialog())
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     expect(await within(d).findByText('名单「Remote feed」还没下载成功，不能开启')).toBeTruthy()
     expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true)
     expect(within(d).getByTestId('check-lists').getAttribute('data-tone')).toBe('failing')
@@ -69,7 +76,7 @@ describe('the turn-on dialog', () => {
   it('a list chosen in the dialog that the preview says is not ready stops it too', async () => {
     vi.mocked(api.previewDestGroup).mockResolvedValue(preview({ not_ready_lists: [{ id: 3, name: 'Remote feed' }] }))
     renderAccess(dialog())
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     expect(await within(d).findByText('名单「Remote feed」还没下载成功，不能开启')).toBeTruthy()
     expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true)
   })
@@ -82,7 +89,7 @@ describe('the turn-on dialog', () => {
   it('a failed read has a retry and does not let it through', async () => {
     vi.mocked(api.getDestGroup).mockRejectedValue(new Error('boom'))
     renderAccess(dialog())
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     expect(await within(d).findByRole('button', { name: '重试' })).toBeTruthy()
     expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true)
   })
@@ -90,7 +97,7 @@ describe('the turn-on dialog', () => {
   it('a refused turn-on for a list that is not ready is said inside, and the dialog stays', async () => {
     onConfirm.mockRejectedValue(notReady)
     renderAccess(dialog())
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     const go = await within(d).findByRole('button', { name: '开启白名单' })
     await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(go)
@@ -112,7 +119,7 @@ describe('the turn-on dialog', () => {
     vi.mocked(api.getDestGroup).mockResolvedValue(detail({ readiness: { lists_ready: false, not_ready_lists: [{ id: 3, name: 'Remote feed' }], unapplied_nodes: 0, base_nonempty: true, remaining_sites_24h: 0, top_sites: [] } }))
     vi.mocked(api.previewDestGroup).mockResolvedValue(preview({ not_ready_lists: [] }))
     renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     expect(await within(d).findByText('所有名单都已就绪')).toBeTruthy()
     await waitFor(() => expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(false))
   })
@@ -132,13 +139,13 @@ describe('the turn-on dialog', () => {
   it('with lists edited, it cannot be confirmed while the preview is pending or refused', async () => {
     vi.mocked(api.previewDestGroup).mockReturnValue(new Promise(() => {}))
     const first = renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
-    const d = await screen.findByRole('dialog')
+    const d = await screen.findByRole('alertdialog')
     await within(d).findByText('所有名单都已就绪')
     expect((within(d).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true)
     first.unmount()
     vi.mocked(api.previewDestGroup).mockRejectedValue(new Error('boom'))
     renderAccess(dialog({ listIds: [10], savedListIds: [10, 3] }))
-    const d2 = await screen.findByRole('dialog')
+    const d2 = await screen.findByRole('alertdialog')
     await within(d2).findByText('所有名单都已就绪')
     await waitFor(() => expect((within(d2).getByRole('button', { name: '开启白名单' }) as HTMLButtonElement).disabled).toBe(true))
   })

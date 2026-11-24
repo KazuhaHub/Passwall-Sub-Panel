@@ -1,9 +1,8 @@
-import { useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { DestState } from '@/api/accessControl'
-import ToneBadge from '@/components/ToneBadge'
-import { accessTone, type AccessToneKind } from '@/utils/accessControl'
+import { AccessBadge } from '@/components/access/AccessBadge'
+import type { AccessToneKind } from '@/utils/accessControl'
 
 const TONE: Record<DestState, AccessToneKind> = { report: 'would_deny', on: 'allowlist_enforced', off: 'none' }
 
@@ -19,7 +18,6 @@ export default function StateBadge({ state, day, scope = 'allowlist' }: {
   scope?: 'allowlist' | 'group' | 'group-badge'
 }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
   const group = scope === 'group' && state !== 'off'
   const label = scope === 'group-badge'
     ? t(`admin:groups.destination.${state === 'report' ? 'badge_report' : 'badge_on'}`)
@@ -30,5 +28,6 @@ export default function StateBadge({ state, day, scope = 'allowlist' }: {
     : state === 'report' && day !== null
       ? t('admin:access_control.allowlist.state.report_day', { days: day })
       : t(`admin:access_control.allowlist.state.${state}`)
-  return <ToneBadge tone={accessTone(theme, TONE[state])} label={label} testId="allowlist-state" data={state} />
+  // data-state is what tests and styles key off; AccessBadge carries data-kind, so the wrapper adds it.
+  return <span data-testid="allowlist-state" data-state={state} className="inline-flex max-w-full"><AccessBadge kind={TONE[state]} label={label} /></span>
 }

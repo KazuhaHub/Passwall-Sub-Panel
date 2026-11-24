@@ -1,16 +1,18 @@
-import { useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, ToggleButton, ToggleButtonGroup, Typography, useTheme,
-} from '@mui/material'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DestCatalog, DestState, DestTemplate, DestUnavailableTemplate } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import ToneBadge from '@/components/ToneBadge'
-import { accessTone } from '@/utils/accessControl'
+import { AccessBadge } from '@/components/access/AccessBadge'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { pickLocalized } from './templates'
 
 const T = 'admin:access_control.templates.'
+
+const CARD = 'flex min-w-0 flex-col gap-1.5 rounded-xl border bg-card p-3'
 
 /**
  * The catalog as cards (S4): what a rule group blocks, in the server's own
@@ -25,35 +27,31 @@ export default function TemplateGrid({ catalog, onUse, onGoToLists }: {
   onGoToLists: () => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const card = { p: 1.5, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, display: 'flex', flexDirection: 'column', gap: 0.75, minWidth: 0 } as const
   return (
-    <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(2, minmax(0, 1fr))', md: 'repeat(3, minmax(0, 1fr))' } }}>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {catalog.templates.map(tpl => (
-        <Box key={tpl.key} sx={card} data-testid="template-card">
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{pickLocalized(tpl.name, i18n.language)}</Typography>
-            {tpl.added && <ToneBadge tone={accessTone(theme, 'none')} label={t(`${T}added`)} />}
-          </Box>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant, flex: 1 }}>{pickLocalized(tpl.description, i18n.language)}</Typography>
-          <Box><Button size="small" variant="outlined" onClick={() => onUse(tpl)}>{t(tpl.added ? `${T}add_another` : `${T}use`)}</Button></Box>
-        </Box>
+        <div key={tpl.key} className={CARD} data-testid="template-card">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">{pickLocalized(tpl.name, i18n.language)}</span>
+            {tpl.added && <AccessBadge kind="none" label={t(`${T}added`)} />}
+          </div>
+          <p className="flex-1 text-sm text-muted-foreground">{pickLocalized(tpl.description, i18n.language)}</p>
+          <div><Button size="sm" variant="outline" onClick={() => onUse(tpl)}>{t(tpl.added ? `${T}add_another` : `${T}use`)}</Button></div>
+        </div>
       ))}
-      {catalog.unavailable.map(u => <UnavailableCard key={u.key} item={u} onGoToLists={onGoToLists} card={card} />)}
-    </Box>
+      {catalog.unavailable.map(u => <UnavailableCard key={u.key} item={u} onGoToLists={onGoToLists} />)}
+    </div>
   )
 }
 
-function UnavailableCard({ item, onGoToLists, card }: { item: DestUnavailableTemplate; onGoToLists: () => void; card: object }) {
+function UnavailableCard({ item, onGoToLists, className }: { item: DestUnavailableTemplate; onGoToLists: () => void; className?: string }) {
   const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   return (
-    <Box sx={{ ...card, borderStyle: 'dashed' }} data-testid="template-unavailable">
-      <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{pickLocalized(item.name, i18n.language)}</Typography>
-      <Typography variant="body2" sx={{ color: md.onSurfaceVariant, flex: 1 }}>{pickLocalized(item.reason, i18n.language)}</Typography>
-      <Box><Button size="small" variant="outlined" onClick={onGoToLists}>{t(`${T}new_list`)}</Button></Box>
-    </Box>
+    <div className={cn(CARD, 'border-dashed', className)} data-testid="template-unavailable">
+      <span className="text-sm font-semibold">{pickLocalized(item.name, i18n.language)}</span>
+      <p className="flex-1 text-sm text-muted-foreground">{pickLocalized(item.reason, i18n.language)}</p>
+      <div><Button size="sm" variant="outline" onClick={onGoToLists}>{t(`${T}new_list`)}</Button></div>
+    </div>
   )
 }
 
@@ -66,19 +64,21 @@ export function UnavailableDialog({ open, catalog, onClose, onGoToLists }: {
 }) {
   const { t } = useTranslation(['admin'])
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{t(`${T}unavailable_title`)}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        {(catalog?.unavailable ?? []).map(u => <UnavailableCard key={u.key} item={u} card={{ display: 'grid', gap: 0.75, p: 1.5 }} onGoToLists={() => { onClose(); onGoToLists() }} />)}
+    <Dialog open={open} onOpenChange={next => { if (!next) onClose() }}>
+      <DialogContent showCloseButton={false} className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>{t(`${T}unavailable_title`)}</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
+          {(catalog?.unavailable ?? []).map(u => <UnavailableCard key={u.key} item={u} onGoToLists={() => { onClose(); onGoToLists() }} />)}
+        </div>
+        <DialogFooter><Button variant="outline" onClick={onClose}>{t(`${T}close`)}</Button></DialogFooter>
       </DialogContent>
-      <DialogActions><Button onClick={onClose}>{t(`${T}close`)}</Button></DialogActions>
     </Dialog>
   )
 }
 
 /**
  * Adding a rule group asks for its state: nothing is enabled by default, so
- * the admin says Off or On here (and nothing is chosen until they do).
+ * the admin says Off, Report only or On here (and nothing is chosen until they do).
  */
 export function TemplateChooser({ template, onClose, onConfirm, error, onOpenSettings }: {
   template: DestTemplate | null
@@ -89,35 +89,39 @@ export function TemplateChooser({ template, onClose, onConfirm, error, onOpenSet
   onOpenSettings: () => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const [state, setState] = useState<DestState | null>(null)
+  // A fresh choice every time it opens: nothing is chosen until the admin says.
+  useEffect(() => { if (template === null) setState(null) }, [template])
   return (
-    <Dialog open={template !== null} onClose={onClose} fullWidth maxWidth="sm" slotProps={{ transition: { onExited: () => setState(null) } }}>
-      <DialogTitle>{t(`${T}chooser_title`, { name: template ? pickLocalized(template.name, i18n.language) : '' })}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        <Typography variant="body2">{template ? pickLocalized(template.description, i18n.language) : ''}</Typography>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${T}chooser_state`)}</Typography>
-        <ToggleButtonGroup exclusive fullWidth value={state} onChange={(_, v: DestState | null) => setState(v)} aria-label={t(`${T}chooser_state`)}>
-          <ToggleButton value="off">{t('admin:access_control.policies.state.off')}</ToggleButton>
+    <Dialog open={template !== null} onOpenChange={next => { if (!next) onClose() }}>
+      <DialogContent showCloseButton={false} className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t(`${T}chooser_title`, { name: template ? pickLocalized(template.name, i18n.language) : '' })}</DialogTitle>
+          <DialogDescription>{template ? pickLocalized(template.description, i18n.language) : ''}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2">
+          <span id="template-state-label" className="text-sm font-semibold">{t(`${T}chooser_state`)}</span>
           {/* The templates are block policies: Report only is offered and recommended, never preselected. */}
-          <ToggleButton value="report" sx={{ gap: 0.75 }}>
-            {t('admin:access_control.policies.state.report')}
-            <Typography component="span" sx={{ fontSize: 11, fontWeight: 600, color: md.primary }}>{t(`${T}recommend`)}</Typography>
-          </ToggleButton>
-          <ToggleButton value="on">{t('admin:access_control.policies.state.on')}</ToggleButton>
-        </ToggleButtonGroup>
-        <Typography variant="caption">{t(`${T}chooser_help`)}</Typography>
-        {template?.counts_as_risk && <Typography variant="caption" sx={{ display: 'block' }}>{t(`${T}chooser_risk`)}</Typography>}
-        {error && (
-          <Alert severity="error" action={error.needsData ? <Button color="inherit" size="small" onClick={onOpenSettings}>{t(`${T}update_data`)}</Button> : undefined}>
-            {error.text}
-          </Alert>
-        )}
+          <SegmentedControl aria-labelledby="template-state-label" value={state ?? ('' as DestState)} onChange={setState}
+            options={[
+              { value: 'off', label: t('admin:access_control.policies.state.off') },
+              { value: 'report', label: <>{t('admin:access_control.policies.state.report')}<span className="text-[11px] font-semibold text-primary">{t(`${T}recommend`)}</span></> },
+              { value: 'on', label: t('admin:access_control.policies.state.on') },
+            ]} />
+          <p className="text-xs text-muted-foreground">{t(`${T}chooser_help`)}</p>
+          {template?.counts_as_risk && <p className="text-xs text-muted-foreground">{t(`${T}chooser_risk`)}</p>}
+          {error && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-sm">
+              <span className="min-w-0 flex-1">{error.text}</span>
+              {error.needsData && <Button size="sm" variant="outline" onClick={onOpenSettings}>{t(`${T}update_data`)}</Button>}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t(`${T}cancel`)}</Button>
+          <AsyncButton disabled={state === null} onClick={async () => { if (state) await onConfirm(state) }}>{t(`${T}add`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>{t(`${T}cancel`)}</Button>
-        <AsyncButton variant="contained" disabled={state === null} onClick={async () => { if (state) await onConfirm(state) }}>{t(`${T}add`)}</AsyncButton>
-      </DialogActions>
     </Dialog>
   )
 }

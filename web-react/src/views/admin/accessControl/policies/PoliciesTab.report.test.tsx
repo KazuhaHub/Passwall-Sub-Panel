@@ -103,8 +103,8 @@ describe('report-only in the rail', () => {
   it('the switch is lit for report-only and turns it off', async () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('加密货币交易所')
-    const sw = within(rowOf('加密货币交易所')).getByRole('switch') as HTMLInputElement
-    expect(sw.checked).toBe(true)
+    const sw = within(rowOf('加密货币交易所')).getByRole('switch')
+    expect(sw.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(sw)
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledWith(3, expect.objectContaining({ state: 'off' })))
   })
@@ -122,7 +122,7 @@ describe('the switch keeps the report state', () => {
     await screen.findByText('加密货币交易所')
     fireEvent.click(within(rowOf('加密货币交易所')).getByRole('switch'))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenLastCalledWith(3, expect.objectContaining({ state: 'off' })))
-    await waitFor(() => expect((within(rowOf('加密货币交易所')).getByRole('switch') as HTMLInputElement).checked).toBe(false))
+    await waitFor(() => expect(within(rowOf('加密货币交易所')).getByRole('switch').getAttribute('aria-checked')).toBe('false'))
     fireEvent.click(within(rowOf('加密货币交易所')).getByRole('switch'))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenLastCalledWith(3, expect.objectContaining({ state: 'report' })))
   })
@@ -138,7 +138,7 @@ describe('the switch keeps the report state', () => {
     await screen.findByText('禁止发信')
     fireEvent.click(within(rowOf('禁止发信')).getByRole('switch'))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenLastCalledWith(1, expect.objectContaining({ state: 'off' })))
-    await waitFor(() => expect((within(rowOf('禁止发信')).getByRole('switch') as HTMLInputElement).checked).toBe(false))
+    await waitFor(() => expect(within(rowOf('禁止发信')).getByRole('switch').getAttribute('aria-checked')).toBe('false'))
     fireEvent.click(within(rowOf('禁止发信')).getByRole('switch'))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenLastCalledWith(1, expect.objectContaining({ state: 'on' })))
   })
@@ -152,11 +152,17 @@ describe('turning on a policy whose earlier state is not known (after a reload)'
     return screen.findByRole('dialog')
   }
 
-  it('asks which: Report only is the default, and nothing is written until it is answered', async () => {
+  // Neither answer may be what a stray Enter picks: this dialog is also the enabling question, which a
+  // person must confirm on purpose. Focus starts on Cancel and Enter there closes the dialog.
+  it('asks which, starts on Cancel, and Enter writes nothing', async () => {
     const dialog = await open()
     expect(within(dialog).getByText('开启「禁止 BT」？')).toBeTruthy()
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '仅报告' }))
+    const cancel = within(dialog).getByRole('button', { name: '取消' })
+    // The dialog moves focus after it opens, so wait for it rather than read it on the same tick.
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
+    fireEvent.click(cancel) // what Enter does on a focused button
     expect(api.updateDestPolicy).not.toHaveBeenCalled()
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 
   it('Report only writes report, Turn on blocking writes on', async () => {
@@ -336,7 +342,8 @@ describe('changing state from the row', () => {
     fireEvent.click(within(rowOf('禁止 BT')).getByRole('switch'))
     fireEvent.click(await screen.findByRole('button', { name: '仅报告' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
-    expect(confirmMock).not.toHaveBeenCalled()
+    // Not "the first policy", and the choice dialog already named who the policy reaches: no confirm at all.
+    expect(confirmMock).not.toHaveBeenCalledWith(expect.objectContaining({ title: '启用第一条访问策略？' }))
   })
 
   it('moving inside the report step sends ALL block ids, the other step keeping its slots', async () => {
@@ -417,12 +424,12 @@ describe('the editor: three states for a block policy, two for an allow policy',
     await screen.findByText('禁止发信')
     fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
     const dialog = await screen.findByRole('dialog')
-    const group = within(dialog).getByRole('group', { name: '状态' })
-    expect(within(group).getAllByRole('button').map(b => b.textContent?.replace('推荐', '').trim())).toEqual(['关闭', '仅报告', '开启'])
-    expect(within(group).getByRole('button', { name: /仅报告/ }).getAttribute('aria-pressed')).toBe('true')
+    const group = within(dialog).getByRole('radiogroup', { name: '状态' })
+    expect(within(group).getAllByRole('radio').map(b => b.textContent?.replace('推荐', '').trim())).toEqual(['关闭', '仅报告', '开启'])
+    expect(within(group).getByRole('radio', { name: /仅报告/ }).getAttribute('aria-checked')).toBe('true')
     expect(within(dialog).getByText(/推荐/)).toBeTruthy()
     expect(within(dialog).getByText('不拦截任何连接，只记录它本应拦截的连接。它排在所有生效的规则之后判断，所以不会改变任何连接的结果。')).toBeTruthy()
-    fireEvent.click(within(group).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(group).getByRole('radio', { name: '开启' }))
     expect(within(dialog).getByText('断开命中的连接，并记录命中。')).toBeTruthy()
     fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: '新策略' } })
     fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '25' } })
@@ -450,11 +457,11 @@ describe('the editor: three states for a block policy, two for an allow policy',
     await screen.findByText('禁止发信')
     fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('group', { name: '状态' }).textContent).toContain('仅报告')
-    fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
-    const group = within(dialog).getByRole('group', { name: '状态' })
-    expect(within(group).getAllByRole('button').map(b => b.textContent)).toEqual(['关闭', '开启'])
-    expect(within(group).getByRole('button', { name: '关闭' }).getAttribute('aria-pressed')).toBe('true')
+    expect(within(dialog).getByRole('radiogroup', { name: '状态' }).textContent).toContain('仅报告')
+    fireEvent.click(within(dialog).getByRole('radio', { name: '放行' }))
+    const group = within(dialog).getByRole('radiogroup', { name: '状态' })
+    expect(within(group).getAllByRole('radio').map(b => b.textContent)).toEqual(['关闭', '开启'])
+    expect(within(group).getByRole('radio', { name: '关闭' }).getAttribute('aria-checked')).toBe('true')
     expect(within(dialog).getByText('放行策略没有「仅报告」：放行要改变判定结果才有意义，而仅报告不改变任何结果。')).toBeTruthy()
   })
 
@@ -462,8 +469,8 @@ describe('the editor: three states for a block policy, two for an allow policy',
     renderAccess(<PoliciesTab {...props} />)
     fireEvent.click(await screen.findByText('加密货币交易所'))
     const dialog = await screen.findByRole('dialog')
-    const group = within(dialog).getByRole('group', { name: '状态' })
-    expect(within(group).getByRole('button', { name: '仅报告' }).getAttribute('aria-pressed')).toBe('true')
+    const group = within(dialog).getByRole('radiogroup', { name: '状态' })
+    expect(within(group).getByRole('radio', { name: '仅报告' }).getAttribute('aria-checked')).toBe('true')
     expect(within(dialog).queryByText(/新建的拦截策略建议/)).toBeNull()
     expect(within(dialog).getByTestId('editor-summary').textContent).toContain('仅报告')
   })
@@ -476,9 +483,9 @@ describe('templates ask for one of the three states', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getAllByRole('button').map(b => b.textContent?.replace('推荐', '').trim()).filter(Boolean)).toEqual(expect.arrayContaining(['关闭', '仅报告', '开启']))
-    expect(within(dialog).getByRole('button', { name: /仅报告/ }).textContent).toContain('推荐')
-    fireEvent.click(within(dialog).getByRole('button', { name: /仅报告/ }))
+    expect(within(dialog).getAllByRole('radio').map(b => b.textContent?.replace('推荐', '').trim())).toEqual(['关闭', '仅报告', '开启'])
+    expect(within(dialog).getByRole('radio', { name: /仅报告/ }).textContent).toContain('推荐')
+    fireEvent.click(within(dialog).getByRole('radio', { name: /仅报告/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     await waitFor(() => expect(api.instantiateDestTemplate).toHaveBeenCalledWith('bittorrent', 'report', expect.any(String)))
   })

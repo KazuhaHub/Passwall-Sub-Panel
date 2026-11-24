@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react'
-import { Alert, Box, Button, IconButton, Menu, MenuItem, Skeleton, Tooltip, Typography, useTheme } from '@mui/material'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { useTranslation } from 'react-i18next'
 
 import { type DestExemption } from '@/api/accessControl'
-import ToneBadge from '@/components/ToneBadge'
+import { AccessBadge } from '@/components/access/AccessBadge'
+import { MoreMenu } from '@/components/common/MoreMenu'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { DetailSheet } from '@/components/data/DetailSheet'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { IconDelete, IconEdit, IconUser } from '@/lib/icons'
 import { useDeleteDestExemption, useDestExemptions, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { accessTone, applyMinutes, type AccessToneKind } from '@/utils/accessControl'
+import { applyMinutes, type AccessToneKind } from '@/utils/accessControl'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { timeLeft } from '../timeLeft'
 import { removeExemptionConfirm } from '../confirmCopy'
 import { reportDestError } from '../destErrors'
 import AddExemptionDialog from './AddExemptionDialog'
-import SheetDrawer from './SheetDrawer'
 
 export interface ExemptionsSheetProps {
   open: boolean
@@ -30,13 +34,10 @@ const HOUR = 3_600_000
 /** S5: every exemption in one place, each with who added it, why and when it ends. */
 export default function ExemptionsSheet({ open, onClose, onOpenUser }: ExemptionsSheetProps) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
   const scope = useQueryScope()
   const q = useDestExemptions(scope, { enabled: open })
   const status = useDestStatus(scope, { enabled: open })
   const remove = useDeleteDestExemption(scope)
-  const [menu, setMenu] = useState<{ el: HTMLElement; row: DestExemption } | null>(null)
   const [dialog, setDialog] = useState<{ open: boolean; existing?: DestExemption }>({ open: false })
   const now = Date.now()
 
@@ -51,7 +52,8 @@ export default function ExemptionsSheet({ open, onClose, onOpenUser }: Exemption
   }
 
   const doRemove = async (row: DestExemption) => {
-    const ok = await confirm(removeExemptionConfirm({ t, minutes: applyMinutes(status.data) }, row.upn))
+    // Taking an exemption away puts that account back under every rule: focus starts on Cancel.
+    const ok = await confirm({ ...removeExemptionConfirm({ t, minutes: applyMinutes(status.data) }, row.upn), destructive: true, initialFocus: 'cancel' })
     if (!ok) return
     try {
       await remove.mutateAsync(row.user_id)
@@ -63,53 +65,35 @@ export default function ExemptionsSheet({ open, onClose, onOpenUser }: Exemption
 
   return (
     <>
-      <SheetDrawer open={open} onClose={onClose} title={t(`${X}title`)} headingId="exemptions-heading">
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1.5 }}>{t(`${X}lead`)}</Typography>
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1.5 }}>
-          <Button variant="contained" size="small" onClick={() => setDialog({ open: true })}>{t(`${X}add`)}</Button>
-        </Box>
-        {q.isPending && [0, 1, 2].map(i => <Skeleton key={i} variant="rounded" height={64} sx={{ mb: 1 }} />)}
-        {q.isError && (
-          <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void q.refetch()}>{t('admin:access_control.retry')}</Button>}>
-            {t(`${X}load_failed`)}
-          </Alert>
-        )}
-        {q.isSuccess && rows.length === 0 && (
-          <Box sx={{ p: 2, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
-            <Typography variant="body2">{t(`${X}empty`)}</Typography>
-          </Box>
-        )}
+      <DetailSheet open={open} onClose={onClose} title={t(`${X}title`)} description={t(`${X}lead`)}
+        actions={<Button size="sm" onClick={() => setDialog({ open: true })}>{t(`${X}add`)}</Button>}>
+        {q.isPending && <div className="grid gap-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>}
+        {q.isError && <ErrorState compact title={t(`${X}load_failed`)} reason={q.error} retry={() => q.refetch()} />}
+        {q.isSuccess && rows.length === 0 && <EmptyState compact title={t(`${X}empty`)} />}
         {rows.length > 0 && (
-          <Box sx={{ borderRadius: 3, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surfaceContainerLow, overflow: 'hidden' }}>
-            {rows.map((r, i) => {
+          <ul className="divide-y rounded-lg border">
+            {rows.map(r => {
               const tn = tone(r)
               return (
-                <Box key={r.user_id} data-testid="exemption-row"
-                  sx={{ p: 1.5, display: 'flex', gap: 1, alignItems: 'flex-start', borderTop: i ? `1px solid ${md.outlineVariant}` : 'none' }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{r.upn || `#${r.user_id}`}</Typography>
-                    <Typography variant="body2" sx={{ color: md.onSurfaceVariant, overflowWrap: 'anywhere' }}>
+                <li key={r.user_id} data-testid="exemption-row" className="flex items-start gap-2 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold [overflow-wrap:anywhere]" title={r.upn}>{r.upn || `#${r.user_id}`}</p>
+                    <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
                       {t(`${X}reason_line`, { reason: r.reason, by: r.created_by_upn || '—', ago: formatRelativeTimeShort(now - r.created_at, t) })}
-                    </Typography>
-                  </Box>
-                  <Tooltip title={t(`${X}expiry_tip`)}>
-                    <Box><ToneBadge tone={accessTone(theme, tn.kind)} label={tn.label} data={tn.kind} /></Box>
-                  </Tooltip>
-                  <IconButton size="small" aria-label={t(`${X}row_menu`)} onClick={e => setMenu({ el: e.currentTarget, row: r })}
-                    sx={{ minWidth: 44, minHeight: 44 }}>
-                    <MoreVertIcon />
-                  </IconButton>
-                </Box>
+                    </p>
+                  </div>
+                  <span title={t(`${X}expiry_tip`)} className="shrink-0"><AccessBadge kind={tn.kind} label={tn.label} /></span>
+                  <MoreMenu label={t(`${X}row_menu`)} items={[
+                    { id: 'open', label: t(`${X}open_user`), icon: IconUser, onSelect: () => onOpenUser(r.user_id) },
+                    { id: 'edit', label: t(`${X}edit`), icon: IconEdit, onSelect: () => setDialog({ open: true, existing: r }) },
+                    { id: 'cancel', label: t(`${X}cancel`), icon: IconDelete, destructive: true, onSelect: () => void doRemove(r) },
+                  ]} />
+                </li>
               )
             })}
-          </Box>
+          </ul>
         )}
-        <Menu anchorEl={menu?.el} open={menu !== null} onClose={() => setMenu(null)}>
-          <MenuItem onClick={() => { const r = menu!.row; setMenu(null); onOpenUser(r.user_id) }}>{t(`${X}open_user`)}</MenuItem>
-          <MenuItem onClick={() => { const r = menu!.row; setMenu(null); setDialog({ open: true, existing: r }) }}>{t(`${X}edit`)}</MenuItem>
-          <MenuItem sx={{ color: md.error }} onClick={() => { const r = menu!.row; setMenu(null); void doRemove(r) }}>{t(`${X}cancel`)}</MenuItem>
-        </Menu>
-      </SheetDrawer>
+      </DetailSheet>
       <AddExemptionDialog open={dialog.open} existing={dialog.existing} onClose={() => setDialog({ open: false })} />
     </>
   )

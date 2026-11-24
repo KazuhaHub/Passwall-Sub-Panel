@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Alert, Box, Button, Link, Skeleton } from '@mui/material'
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { useTranslation } from 'react-i18next'
 
-import { AsyncButton } from '@/components/AsyncButton'
-import StatusLine from '@/components/StatusLine'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { TONE_STYLE, type Tone } from '@/components/common/tones'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { IconChevronRight, IconError, IconPending, IconSuccess, IconWarning, IconCircle, type IconType } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { useDestLists, useDestPolicies, useDestSourceRules, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
-import { accessVerdict, applyMinutes, collectingNodeCount, enabledPolicies, limitKindKey, type AccessVerdict } from '@/utils/accessControl'
+import { accessVerdict, applyMinutes, collectingNodeCount, enabledPolicies, limitKindKey, type AccessVerdict, type StatusLineTone } from '@/utils/accessControl'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import type { NodeFilter } from './accessParams'
 
@@ -27,10 +30,48 @@ function useNow(active: boolean): number {
 function Skip({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
   if (!onClick) return <>{children}</>
   return (
-    <Link component="button" type="button" underline="always" onClick={onClick}
-      sx={{ color: 'inherit', font: 'inherit', verticalAlign: 'baseline' }}>
+    <button type="button" onClick={onClick}
+      className="inline cursor-pointer rounded-sm align-baseline underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
       {children}
-    </Link>
+    </button>
+  )
+}
+
+// The verdict's five levels on the shared tone set. The icon and the words carry the level as well as
+// the colour, and only the left edge and the icon take the hue; the sentence stays in the foreground.
+const LEVEL: Record<StatusLineTone, { tone: Tone; Icon: IconType }> = {
+  failing: { tone: 'danger', Icon: IconError },
+  attention: { tone: 'warning', Icon: IconWarning },
+  measuring: { tone: 'info', Icon: IconPending },
+  ok: { tone: 'success', Icon: IconSuccess },
+  quiet: { tone: 'neutral', Icon: IconCircle },
+}
+
+/** The one summary on the page: a level, a sentence, what it is made of, when it was read, and the action it offers. */
+function VerdictLine({ level, dataTone, title, detail, meta, actions }: {
+  level: StatusLineTone
+  dataTone: string
+  title: ReactNode
+  detail?: ReactNode
+  meta?: ReactNode
+  actions?: ReactNode
+}) {
+  const { tone, Icon } = LEVEL[level]
+  const style = TONE_STYLE[tone]
+  return (
+    <div data-testid="access-verdict" data-tone={dataTone}
+      className={cn('mb-4 flex flex-col gap-3 rounded-lg border border-l-4 bg-card p-3 sm:flex-row sm:items-start', style.line)}>
+      <div className="flex min-w-0 flex-1 items-start gap-2.5">
+        <Icon aria-hidden className={cn('mt-0.5 size-4.5 shrink-0', style.ink)} />
+        <div className="min-w-0">
+          {/* Only the sentence is the live region: the countdown and the read-at time are aria-hidden, so a poll or a ticking second is never read out. */}
+          <p role="status" className="font-semibold">{title}</p>
+          {detail ? <div className="mt-1 text-sm text-muted-foreground">{detail}</div> : null}
+          {meta ? <div aria-hidden="true" className="mt-0.5 text-xs text-muted-foreground">{meta}</div> : null}
+        </div>
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+    </div>
   )
 }
 
@@ -69,13 +110,9 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
     return accessVerdict(data, { policies: policies.data, lists: lists.data, hasDefinitions: policiesOn + sourceOn > 0, now })
   }, [data, policies.data, lists.data, sourceRules.data, now])
 
-  if (status.isPending) return <Skeleton variant="rounded" height={72} sx={{ mb: 2 }} />
+  if (status.isPending) return <Skeleton className="mb-4 h-[4.5rem] w-full" />
   if (status.isError || !data || !verdict) {
-    return (
-      <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" size="small" onClick={() => void status.refetch()}>{t('admin:access_control.retry')}</Button>}>
-        {t(`${V}read_failed`)}
-      </Alert>
-    )
+    return <ErrorState compact className="mb-4" title={t(`${V}read_failed`)} retry={() => void status.refetch()} />
   }
 
   const num = new Intl.NumberFormat(i18n.language)
@@ -124,8 +161,8 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
       const eta = verdict.nextPublishAt ? Math.max(0, Math.round((verdict.nextPublishAt - now) / 1000)) : 0
       detail = (
         <>
-          <Box component="span" aria-hidden sx={{ display: 'block' }}>{t(`${V}detail.countdown`, { count: eta })}</Box>
-          <Box component="span" sx={{ display: 'block' }}>{t(`${V}detail.restart`)}</Box>
+          <span aria-hidden className="block">{t(`${V}detail.countdown`, { count: eta })}</span>
+          <span className="block">{t(`${V}detail.restart`)}</span>
         </>
       )
       break
@@ -166,16 +203,16 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
   let action: ReactNode = null
   switch (verdict.action) {
     case 'nodes':
-      action = <Button size="small" color="inherit" endIcon={<ChevronRightIcon />} onClick={() => onOpenNodes()}>{t(`${V}action.nodes`)}</Button>
+      action = <Button size="sm" variant="outline" onClick={() => onOpenNodes()}>{t(`${V}action.nodes`)}<IconChevronRight /></Button>
       break
     case 'lists':
-      action = <Button size="small" color="inherit" endIcon={<ChevronRightIcon />} onClick={onOpenLists}>{t(`${V}action.lists`)}</Button>
+      action = <Button size="sm" variant="outline" onClick={onOpenLists}>{t(`${V}action.lists`)}<IconChevronRight /></Button>
       break
     case 'resume':
-      action = <AsyncButton size="small" variant="contained" onClick={onResume}>{t(`${V}action.resume`)}</AsyncButton>
+      action = <AsyncButton size="sm" onClick={onResume}>{t(`${V}action.resume`)}</AsyncButton>
       break
     case 'publish':
-      action = <AsyncButton size="small" variant="contained" onClick={onPublish}>{t(`${V}action.publish`)}</AsyncButton>
+      action = <AsyncButton size="sm" onClick={onPublish}>{t(`${V}action.publish`)}</AsyncButton>
       break
   }
 
@@ -184,8 +221,7 @@ export default function VerdictBar({ onOpenNodes, onOpenLists, onResume, onPubli
   const metaText = stale ? `${t(`${V}read_at`, { time: readAt })} · ${t(`${V}stale`)}` : t(`${V}read_at`, { time: readAt })
 
   return (
-    <StatusLine testId="access-verdict" dataTone={`${verdict.tone}:${verdict.kind}`} tone={verdict.tone}
-      title={title[verdict.kind]} detail={detail} meta={metaText} actions={action}
-      liveRegion="title" metaHidden />
+    <VerdictLine dataTone={`${verdict.tone}:${verdict.kind}`} level={verdict.tone}
+      title={title[verdict.kind]} detail={detail} meta={metaText} actions={action} />
   )
 }

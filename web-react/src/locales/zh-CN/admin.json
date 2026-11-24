@@ -6018,6 +6018,9 @@
     }
   },
   "access_control": {
+    "user_picker": {
+      "no_match": "没有匹配的账户"
+    },
     "title": "访问控制",
     "subtitle": "决定用户能通过原生节点访问哪些目的地，并记录规则命中。",
     "retry": "重试",
@@ -6036,7 +6039,6 @@
       "pick_user": "查看账号…"
     },
     "menu": {
-      "label": "更多操作",
       "settings": "数据与下发设置…",
       "pause": "暂停全部执行…",
       "paused_snack": "访问控制已暂停",
@@ -6083,7 +6085,7 @@
       },
       "detail": {
         "countdown_other": "{{count}} 秒后下发",
-        "restart": "每台节点会重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
+        "restart": "规则有变化的节点会各重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
         "sniffing": "入站「{{inbounds}}」没有识别域名，域名规则在它上面不生效。仍在执行上一版。",
         "sniffing_partial": "{{n}} 个入站的嗅探不足：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效",
         "over_limit": "{{what}} {{used}} / {{limit}}。仍在执行上一版。",
@@ -6108,6 +6110,26 @@
         "message": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发；{{seconds}} 秒内的连续修改合并为一次。",
         "message_no_window": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发，连续修改合并为一次。",
         "action": "启用"
+      },
+      "enable_policy": {
+        "title": "启用策略「{{name}}」？",
+        "effect_block": "它会开始拦截匹配的连接",
+        "effect_allow": "它会开始放行匹配的连接，排在它后面的拦截规则和白名单拒绝不再对这些连接生效（节点的来源国家规则仍然生效）",
+        "effect_report": "它会在记录里标出本应拦截的连接（仅限记录命中的节点），不拦截任何连接",
+        "scope_all": "范围：所有用户，共 {{groups}} 个分组、{{users}} 人。",
+        "scope_groups": "范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。",
+        "scope_panels": "范围：经由所选 {{panels}} 台服务器（{{names}}）出口的连接。",
+                "scope_all_unknown": "范围：所有用户（分组数和人数暂时无法确认）。",
+        "scope_groups_unknown": "范围：{{groups}} 个分组（{{names}}），人数暂时无法确认。",
+        "exempt_all_other": "其中 {{count}} 个豁免账号不受影响。",
+        "exempt_groups_other": "这些分组里的豁免账号不受影响（豁免账号共 {{count}} 个）。",
+        "exempt_panels_other": "豁免账号不受影响（共 {{count}} 个）。",
+        "exempt_unknown": "豁免账号数暂时无法确认；豁免账号不受影响。",
+"nodes_up_to_other": "最多 {{count}} 台节点",
+        "nodes_unknown": "它所作用的节点",
+        "restart": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "action_on": "启用",
+        "action_report": "以仅报告启用"
       },
       "convert_policy": {
         "title": "把「{{name}}」改为拦截？",
@@ -6146,12 +6168,12 @@
       },
       "pause": {
         "title": "暂停全部访问控制？",
-        "message": "所有节点会在{{minutes}}内停止执行策略，并各重启代理程序一次；定义全部保留，恢复后照原样执行。",
+        "message": "正在执行策略的节点会在{{minutes}}内停止执行，并各重启代理程序一次；定义全部保留，恢复后照原样执行。",
         "action": "暂停"
       },
       "resume": {
         "title": "恢复访问控制？",
-        "message": "所有节点会在{{minutes}}内重新执行策略，并各重启代理程序一次。",
+        "message": "有策略可执行的节点会在{{minutes}}内重新执行，并各重启代理程序一次。",
         "action": "恢复"
       },
       "discard": {
@@ -6338,7 +6360,7 @@
         "edit": "编辑",
         "refresh": "立即刷新",
         "delete": "删除",
-        "delete_in_use": "被 {{count}} 条策略使用"
+        "delete_blocked": "删除（使用中）"
       },
       "empty": "还没有列表。策略都从列表里取目的地。",
       "empty_filtered": "没有符合的列表",
@@ -6358,7 +6380,6 @@
         "usage": "使用情况"
       },
       "sheet": {
-        "close": "关闭",
         "source": "远程地址：{{url}}",
         "category": "社区分类：{{name}}",
         "custom": "自定义列表",
@@ -6374,8 +6395,8 @@
       },
       "dialog": {
         "title_new": "新建列表",
+        "type": "列表类型",
         "title_edit": "编辑列表「{{name}}」",
-        "close": "关闭",
         "name": "名称",
         "name_required": "名称必填",
         "text": "列表内容",
@@ -6391,9 +6412,9 @@
         "attrs": "属性",
         "geosite_note": "数据来自 v2fly domain-list-community。",
         "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
-        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让 {{nodes}}各重启一次。",
-        "footer_nodes_other": "{{count}} 台节点",
-        "footer_nodes_unknown": "各节点",
+        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让{{nodes}}各重启一次。",
+        "footer_nodes_other": "最多 {{count}} 台节点",
+        "footer_nodes_unknown": "运行它的节点",
         "footer_unchanged": "内容未变化，不会触发重启",
         "footer_unused": "这个列表没有被使用，保存不会影响节点",
         "save": "保存",
@@ -6600,7 +6621,7 @@
         "manual": "手动",
         "auto": "自动",
         "manual_hint": "发现新版本时只提示，由你检查更新并确认。",
-        "auto_hint": "发现新版本就下载、校验并应用；每次让正在使用的分类变化，节点会各重启代理程序一次。"
+        "auto_hint": "发现新版本就下载、校验并应用；每次让正在使用的分类变化，使用它的策略所在的节点会各重启代理程序一次。"
       },
       "rejection": {
         "broad_entry": "列表「{{list}}」里会出现过宽的条目 {{entry}}，这次更新会被拒绝，继续使用旧数据。",
@@ -6620,7 +6641,7 @@
         "entries": "条目",
         "change": "变化",
         "in_use": "正在使用",
-        "restart": "正在使用的分类有变化，应用后各节点会重启代理程序一次。",
+        "restart": "正在使用的分类有变化，使用它的策略所在的节点应用后会重启代理程序一次。",
         "no_restart": "正在使用的分类没有变化，不会触发节点重启。",
         "cancel": "取消",
         "apply_update": "应用更新",
@@ -6648,14 +6669,15 @@
         }
       },
       "countries": "拒绝的国家或地区",
+      "countries_empty": "没有匹配的国家或地区",
       "cidrs": "拒绝的来源 IP 段（可选，每行一个）",
       "cidrs_hint": "例如 203.0.113.0/24 或 2001:db8::/32。节点前面有中转或 CDN 时，看到的是它们的地址。",
       "bad_lines": "第 {{lines}} 行不是有效的 IP 段",
       "save": "保存来源规则",
       "saved": "已保存来源规则",
       "stale": "这条来源规则刚被其他人修改过，已重新载入，请确认后再保存。",
-      "restart_other": "保存后约 {{count}} 分钟内生效，节点会重启代理程序一次。",
-      "restart_unknown": "保存后几分钟内生效，节点会重启代理程序一次。",
+      "restart_other": "保存后约 {{count}} 分钟内生效；这条规则若改变节点要执行的内容，节点会重启代理程序一次。",
+      "restart_unknown": "保存后几分钟内生效；这条规则若改变节点要执行的内容，节点会重启代理程序一次。",
       "unsaved": {
         "summary": "来源规则未保存，用下方按钮保存",
         "detail": "这个入站的「拒绝来源国家或地区」有未保存的修改。它由自己的保存按钮保存，不会随上面的确定一起保存。"
@@ -6836,6 +6858,7 @@
         "state": "状态",
         "match": "匹配什么",
         "lists": "列表",
+        "pick_none": "没有匹配的选项",
         "list_option": "{{name}} · {{kind}} · {{entries}} 条（正则 {{regexps}}）",
         "list_not_ready": "未就绪",
         "not_ready_hint": {
@@ -6876,9 +6899,9 @@
         "footer": {
           "disabled": "已停用的策略不会下发",
           "rename_only": "只改名称或说明不会让节点重启",
-          "applies_unknown": "保存后几分钟内在各节点生效，节点会重启代理程序一次",
-          "applies_one": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次",
-          "applies_other": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次"
+          "applies_unknown": "保存后几分钟内在各节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_one": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_other": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次"
         },
         "template_locked": {
           "summary": "匹配内容由规则组目录决定",
@@ -6893,7 +6916,7 @@
       "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。",
       "turn_on": {
         "title": "开启「{{name}}」？",
-        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只记录、不拦截；选「开启拦截」会断开它命中的连接。",
+        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只在记录里标出本应拦截的连接、不拦截；选「开启拦截」会断开它命中的连接。",
         "report": "仅报告",
         "block": "开启拦截",
         "cancel": "取消"
@@ -7167,17 +7190,17 @@
       },
       "too_old": "节点版本过旧，需升级",
       "exec_only": "sing-box 节点只执行，不记录",
-      "restart": "保存后这台节点会重启代理程序一次。",
+      "restart": "保存后，如果改动让这台节点要执行的内容变了，它会重启代理程序一次。",
       "cancel": "取消",
       "save": "保存",
-      "saved_other": "已保存，{{node}} 会在约 {{count}} 分钟内重启代理程序一次",
-      "saved_unknown": "已保存，{{node}} 会在几分钟内重启代理程序一次",
+      "saved_other": "已保存，{{node}} 可能会在约 {{count}} 分钟内重启代理程序一次",
+      "saved_unknown": "已保存，{{node}} 可能会在几分钟内重启代理程序一次",
       "usage_cost": "代价：最坏情况实测，繁忙节点上 Xray 代理进程的 CPU 多 +43%，节点的 agent 接收记录还要另外占用 CPU。所以每台节点自行选择，默认不开启。",
       "usage_too_old": "节点版本需升级才能记录用量",
       "usage_privacy_summary": "隐私政策还没有启用",
       "usage_privacy_detail": "按网站用量是要告知用户的记录。建议先在系统设置的「隐私与协议」里启用并发布隐私政策，发布时勾选「重大变更」让用户重新同意。这只是提醒，不影响保存。",
       "usage_off_note": "关闭后不再记录新的用量；已有的用量会保留到 {{usageDays}} 天期满后自动删除。",
-      "restart_usage": "保存后这台节点会重启代理程序一次；按网站用量保留 {{usageDays}} 天，到期自动删除。"
+      "restart_usage": "保存后这台节点可能会重启代理程序一次；按网站用量保留 {{usageDays}} 天，到期自动删除。"
     },
     "node_recording": {
       "mode": {

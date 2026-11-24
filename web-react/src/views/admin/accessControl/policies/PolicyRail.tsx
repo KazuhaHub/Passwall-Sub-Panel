@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { Box, Typography, useMediaQuery, useTheme } from '@mui/material'
+
+import { cn } from '@/lib/utils'
 
 /**
  * The match-order rail (S2): a 2px vertical line down the left, a numbered dot
@@ -15,25 +16,18 @@ export function RailStep({ n, title, caption, actions, children, last = false }:
   children?: ReactNode
   last?: boolean
 }) {
-  const theme = useTheme()
-  const md = theme.palette.md
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
-  const dot = phone ? 20 : 24
   return (
-    <Box sx={{ position: 'relative', pl: phone ? '28px' : '40px', pb: last ? 0 : 2 }}>
-      {!last && <Box aria-hidden sx={{ position: 'absolute', left: phone ? 8 : 11, top: dot, bottom: 0, width: '2px', bgcolor: md.outlineVariant }} />}
-      <Box aria-hidden sx={{
-        position: 'absolute', left: 0, top: 0, width: dot, height: dot, borderRadius: '50%', bgcolor: md.surfaceContainerHighest,
-        color: md.onSurface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600,
-      }}>{n}</Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', minHeight: dot, mb: children ? 1 : 0 }}>
-        <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, minWidth: 0 }}>
+    <div className={cn('relative pl-7 sm:pl-10', !last && 'pb-4')}>
+      {!last && <span aria-hidden className="absolute top-5 bottom-0 left-2 w-0.5 bg-border sm:top-6 sm:left-[11px]" />}
+      <span aria-hidden className="absolute top-0 left-0 flex size-5 items-center justify-center rounded-full bg-muted text-xs font-semibold sm:size-6">{n}</span>
+      <div className={cn('flex min-h-5 flex-wrap items-center justify-between gap-2 sm:min-h-6', children && 'mb-2')}>
+        <h2 className="min-w-0 text-base font-semibold">
           {title}
-          {caption ? <Box component="span" sx={{ fontSize: 13, fontWeight: 400, color: md.onSurfaceVariant }}>{' · '}{caption}</Box> : null}
-        </Typography>
-        {actions && <Box sx={{ flex: '0 0 auto', whiteSpace: 'nowrap', ml: 'auto' }}>{actions}</Box>}
-      </Box>
+          {caption ? <span className="text-[13px] font-normal text-muted-foreground">{' · '}{caption}</span> : null}
+        </h2>
+        {actions && <div className="ml-auto shrink-0 whitespace-nowrap">{actions}</div>}
+      </div>
       {children}
-    </Box>
+    </div>
   )
 }

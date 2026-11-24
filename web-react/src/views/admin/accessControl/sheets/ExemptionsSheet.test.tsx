@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { useTheme } from '@mui/material'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { confirmMock, renderAccess, snack } from '@/test/accessControlHarness'
@@ -66,15 +65,19 @@ describe('ExemptionsSheet', () => {
     expect(onOpenUser).toHaveBeenCalledWith(1)
   })
 
-  it('the dialog it opens stacks above the drawer', async () => {
+  it('adds an exemption from the dialog it opens, over the sheet', async () => {
     vi.mocked(api.getDestExemptions).mockResolvedValue([])
-    let z = { drawer: 0, modal: 0 }
-    function Probe() { const t = useTheme(); z = { drawer: t.zIndex.drawer, modal: t.zIndex.modal }; return null }
-    renderAccess(<><Probe /><ExemptionsSheet open onClose={() => {}} onOpenUser={() => {}} /></>)
+    renderAccess(<ExemptionsSheet open onClose={() => {}} onOpenUser={() => {}} />)
     fireEvent.click(await screen.findByRole('button', { name: '添加豁免' }))
-    const dialogRoot = (await screen.findByRole('dialog', { name: '添加豁免' })).closest('.MuiDialog-root') as HTMLElement
-    const drawerRoot = document.querySelector('.MuiDrawer-root') as HTMLElement
-    expect(Number(getComputedStyle(dialogRoot).zIndex)).toBeGreaterThan(Number(getComputedStyle(drawerRoot).zIndex))
-    expect(z.modal).toBeGreaterThan(z.drawer)
+    expect(await screen.findByRole('dialog', { name: '添加豁免' })).toBeTruthy()
+  })
+
+  it('the confirmation to cancel an exemption starts on Cancel', async () => {
+    vi.mocked(api.getDestExemptions).mockResolvedValue([ex({})])
+    vi.mocked(api.deleteDestExemption).mockResolvedValue()
+    renderAccess(<ExemptionsSheet open onClose={() => {}} onOpenUser={() => {}} />)
+    fireEvent.click(await screen.findByRole('button', { name: '更多操作' }))
+    fireEvent.click(await screen.findByText('取消豁免'))
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ destructive: true, initialFocus: 'cancel' })))
   })
 })

@@ -38,7 +38,7 @@ describe('AddExemptionDialog', () => {
     vi.mocked(api.createDestExemption).mockResolvedValue({} as api.DestExemption)
     renderAccess(<AddExemptionDialog open onClose={() => {}} lockedUserId={7} />)
     fireEvent.change(screen.getByRole('textbox', { name: /原因/ }), { target: { value: 'x' } })
-    fireEvent.click(screen.getByRole('button', { name: '24 小时' }))
+    fireEvent.click(screen.getByRole('radio', { name: '24 小时' }))
     expect(screen.getByText('到期后最迟约 1 小时加一个下发窗口才真正失效')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(api.createDestExemption).toHaveBeenCalled())

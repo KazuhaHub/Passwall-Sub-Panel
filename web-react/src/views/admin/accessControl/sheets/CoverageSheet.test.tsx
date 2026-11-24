@@ -183,14 +183,12 @@ describe('recording (2c)', () => {
     expect(screen.getByText('入站 routeOnly 开启，按原样执行')).toBeTruthy()
   })
 
-  it('the dialog opens above the drawer: it is a modal, the drawer is not raised', async () => {
+  it('the dialog opens over the sheet, which stays mounted under it', async () => {
     vi.mocked(api.getDestStatus).mockResolvedValue(status([rec()]))
     sheet()
     fireEvent.click(await screen.findByRole('button', { name: 'Tokyo 01 的更多操作' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: '设置记录方式…' }))
-    const dialog = (await screen.findAllByRole('dialog')).find(d => d.textContent?.includes('记录什么'))!
-    const z = (el: Element | null) => { while (el) { const v = Number(getComputedStyle(el).zIndex); if (v) return v; el = el.parentElement } return 0 }
-    const drawer = document.querySelector('.MuiDrawer-root')
-    expect(z(dialog.closest('.MuiDialog-root'))).toBeGreaterThan(z(drawer))
+    expect((await screen.findAllByRole('dialog')).some(d => d.textContent?.includes('记录什么'))).toBe(true)
+    expect(screen.getByText('节点覆盖 · 1 台')).toBeTruthy()
   })
 })

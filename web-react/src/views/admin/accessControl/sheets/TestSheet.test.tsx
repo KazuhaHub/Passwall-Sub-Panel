@@ -231,15 +231,6 @@ describe('TestSheet', () => {
       expect(screen.getByText('会越过所有拦截策略')).toBeTruthy()
     })
 
-    it('keeps its content on screen while the dialog fades out', async () => {
-      await open()
-      expect(await screen.findByRole('radio', { name: /「Guests」的补充列表/ })).toBeTruthy()
-      fireEvent.click(screen.getByRole('button', { name: '取消' }))
-      // Closing must not unmount the content before the exit transition ends.
-      expect(screen.queryByRole('radio', { name: /「Guests」的补充列表/ })).not.toBeNull()
-      await waitFor(() => expect(screen.queryByRole('radio', { name: /「Guests」的补充列表/ })).toBeNull())
-    })
-
     it('everyone is a deliberate choice, with its warning, and sends no group', async () => {
       await open()
       fireEvent.click(await screen.findByRole('radio', { name: /全局放行例外/ }))

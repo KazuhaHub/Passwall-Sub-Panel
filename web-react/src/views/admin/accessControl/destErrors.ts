@@ -1,5 +1,5 @@
 import { destErrorOf, isDestUnavailable } from '@/api/accessControl'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
 import { limitKindKey } from '@/utils/accessControl'
 import { isRouteImpactCancelled } from '@/utils/destRouteImpact'
 

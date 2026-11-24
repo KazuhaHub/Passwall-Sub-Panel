@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { confirmMock, renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
-import PolicyEditorDialog, { emptyForm, formOf, inputOf } from './PolicyEditorDialog'
+import PolicyEditorSheet from './PolicyEditorSheet'
+import { emptyForm, formOf, inputOf } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -34,8 +35,10 @@ beforeEach(() => {
   vi.mocked(api.createDestPolicy).mockResolvedValue(pol())
 })
 
+const checked = (el: HTMLElement) => el.getAttribute('aria-checked') === 'true'
+
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorDialog open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
 
 describe('counts_as_risk', () => {
   it('round-trips through the form: a block policy keeps it, an allow policy never sends it', () => {
@@ -47,8 +50,8 @@ describe('counts_as_risk', () => {
 
   it('a block policy shows the toggle as stored and saves the changed value', async () => {
     mount(pol())
-    const box = await screen.findByRole('checkbox', { name: /计入风险/ }) as HTMLInputElement
-    expect(box.checked).toBe(true)
+    const box = await screen.findByRole('checkbox', { name: /计入风险/ })
+    expect(checked(box)).toBe(true)
     fireEvent.click(box)
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledWith(1, expect.objectContaining({ counts_as_risk: false })))
@@ -57,7 +60,7 @@ describe('counts_as_risk', () => {
   it('an allow policy has no toggle, and switching a block policy to allow hides it and sends no value', async () => {
     mount(pol())
     await screen.findByRole('checkbox', { name: /计入风险/ })
-    fireEvent.click(screen.getByRole('button', { name: '放行' }))
+    fireEvent.click(screen.getByRole('radio', { name: '放行' }))
     await waitFor(() => expect(screen.queryByRole('checkbox', { name: /计入风险/ })).toBeNull())
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
@@ -69,7 +72,7 @@ describe('saving a report-only policy as On', () => {
   it('asks first, naming the policy, and does not write when declined', async () => {
     confirmMock.mockImplementation(() => Promise.resolve(false))
     mount(pol({ state: 'report', counts_as_risk: false }))
-    fireEvent.click(await screen.findByRole('button', { name: '开启' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '开启' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '把「禁止发信」改为拦截？', confirmText: '改为拦截' })))
     expect(api.updateDestPolicy).not.toHaveBeenCalled()
@@ -77,7 +80,7 @@ describe('saving a report-only policy as On', () => {
 
   it('writes once it is confirmed', async () => {
     mount(pol({ state: 'report' }))
-    fireEvent.click(await screen.findByRole('button', { name: '开启' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '开启' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledWith(1, expect.objectContaining({ state: 'on' })))
     expect(confirmMock).toHaveBeenCalled()

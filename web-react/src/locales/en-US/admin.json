@@ -6049,6 +6049,9 @@
     }
   },
   "access_control": {
+    "user_picker": {
+      "no_match": "No matching accounts"
+    },
     "title": "Access control",
     "subtitle": "Decides which destinations users can reach through native nodes, and records rule matches.",
     "retry": "Retry",
@@ -6067,7 +6070,6 @@
       "pick_user": "Find account…"
     },
     "menu": {
-      "label": "More actions",
       "settings": "Data and apply settings…",
       "pause": "Pause all enforcement…",
       "paused_snack": "Access control is paused",
@@ -6128,7 +6130,7 @@
       "detail": {
         "countdown_one": "Goes out in {{count}} second",
         "countdown_other": "Goes out in {{count}} seconds",
-        "restart": "Each node restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
+        "restart": "Each node whose rules change restarts its proxy once and drops the connections in use once; a run of changes is merged into one apply.",
         "sniffing": "Inbound \"{{inbounds}}\" does not detect domains, so domain rules do not apply on it. Still running the previous version.",
         "sniffing_partial": "Sniffing is insufficient on {{n}} inbound(s): domain rules (and, with metadataOnly, protocol rules such as BitTorrent) do not apply on them",
         "over_limit": "{{what}} {{used}} / {{limit}}. Still running the previous version.",
@@ -6155,6 +6157,30 @@
         "message": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way; changes within {{seconds}} seconds of each other are merged into one.",
         "message_no_window": "{{nodes}} will each restart the proxy once within {{minutes}} and drop the connections in use once; clients reconnect on their own. Later changes go out the same way, and a run of changes is merged into one.",
         "action": "Enable"
+      },
+      "enable_policy": {
+        "title": "Enable policy \"{{name}}\"?",
+        "effect_block": "It will start blocking the connections it matches",
+        "effect_allow": "It will start letting the connections it matches through; the block rules and allowlist refusals after it no longer apply to them, while a node's source-country rules still do",
+        "effect_report": "It will mark the connections it would have blocked in the records (on nodes that record hits) and block none",
+        "scope_all": "Scope: all users, {{groups}} groups and {{users}} people.",
+        "scope_groups": "Scope: {{groups}} groups ({{names}}), {{users}} people.",
+        "scope_panels": "Scope: connections that leave through the {{panels}} selected servers ({{names}}).",
+        "scope_all_unknown": "Scope: all users (the number of groups and people could not be counted yet).",
+        "scope_groups_unknown": "Scope: {{groups}} groups ({{names}}); the number of people could not be counted yet.",
+        "exempt_all_one": "The {{count}} exempt account is not affected.",
+        "exempt_all_other": "The {{count}} exempt accounts are not affected.",
+        "exempt_groups_one": "Exempt accounts in these groups are not affected ({{count}} exempt account in total).",
+        "exempt_groups_other": "Exempt accounts in these groups are not affected ({{count}} exempt accounts in total).",
+        "exempt_panels_one": "Exempt accounts are not affected ({{count}} in total).",
+        "exempt_panels_other": "Exempt accounts are not affected ({{count}} in total).",
+        "exempt_unknown": "How many accounts are exempt could not be counted yet; exempt accounts are not affected.",
+        "nodes_up_to_one": "Up to {{count}} node",
+        "nodes_up_to_other": "Up to {{count}} nodes",
+        "nodes_unknown": "The nodes it applies to",
+        "restart": "{{nodes}} will restart the proxy once within {{minutes}}, which drops connections in use once; clients reconnect on their own.",
+        "action_on": "Enable",
+        "action_report": "Enable as report only"
       },
       "convert_policy": {
         "title": "Turn \"{{name}}\" into a block?",
@@ -6193,12 +6219,12 @@
       },
       "pause": {
         "title": "Pause all access control?",
-        "message": "Every node stops enforcing policies within {{minutes}} and restarts its proxy once; all definitions are kept and enforced again as before when you resume.",
+        "message": "The nodes that are running a policy stop enforcing within {{minutes}}, and each of them restarts its proxy once; all definitions are kept and enforced again as before when you resume.",
         "action": "Pause"
       },
       "resume": {
         "title": "Resume access control?",
-        "message": "Every node enforces policies again within {{minutes}} and restarts its proxy once.",
+        "message": "The nodes that have something to enforce start again within {{minutes}}, and each of them restarts its proxy once.",
         "action": "Resume"
       },
       "discard": {
@@ -6388,7 +6414,7 @@
         "edit": "Edit",
         "refresh": "Refresh now",
         "delete": "Delete",
-        "delete_in_use": "Used by {{count}} policies"
+        "delete_blocked": "Delete (in use)"
       },
       "empty": "No lists yet. Policies take their destinations from lists.",
       "empty_filtered": "No matching lists",
@@ -6408,7 +6434,6 @@
         "usage": "Used by"
       },
       "sheet": {
-        "close": "Close",
         "source": "Remote address: {{url}}",
         "category": "Community category: {{name}}",
         "custom": "Custom list",
@@ -6424,8 +6449,8 @@
       },
       "dialog": {
         "title_new": "New list",
+        "type": "List type",
         "title_edit": "Edit list \"{{name}}\"",
-        "close": "Close",
         "name": "Name",
         "name_required": "A name is required",
         "text": "List content",
@@ -6443,9 +6468,9 @@
         "geosite_counts": "This category has {{entries}} entries, {{regexps}} of them regular expressions",
         "footer_used_one": "Used by {{count}} enabled policy; a change in content makes {{nodes}} restart once.",
         "footer_used_other": "Used by {{count}} enabled policies; a change in content makes {{nodes}} restart once.",
-        "footer_nodes_one": "{{count}} node",
-        "footer_nodes_other": "{{count}} nodes",
-        "footer_nodes_unknown": "each node",
+        "footer_nodes_one": "up to {{count}} node",
+        "footer_nodes_other": "up to {{count}} nodes",
+        "footer_nodes_unknown": "the nodes that run it",
         "footer_unchanged": "The content is unchanged, so nothing restarts",
         "footer_unused": "This list is not used, so saving does not affect the nodes",
         "save": "Save",
@@ -6657,7 +6682,7 @@
         "manual": "Manual",
         "auto": "Automatic",
         "manual_hint": "A new version is only shown; you check for updates and confirm.",
-        "auto_hint": "A new version is downloaded, verified and applied; every change to a category in use restarts the proxy on each node once."
+        "auto_hint": "A new version is downloaded, verified and applied; every change to a category in use restarts the proxy once on each node whose policies use it."
       },
       "rejection": {
         "broad_entry": "List \"{{list}}\" would get an entry that is too broad ({{entry}}), so this update would be refused and the old data kept.",
@@ -6677,7 +6702,7 @@
         "entries": "Entries",
         "change": "Change",
         "in_use": "In use",
-        "restart": "A category in use changes, so each node restarts its proxy once after this is applied.",
+        "restart": "A category in use changes, so the nodes whose policies use it restart their proxy once after this is applied.",
         "no_restart": "No category in use changes, so no node restarts.",
         "cancel": "Cancel",
         "apply_update": "Apply update",
@@ -6705,15 +6730,16 @@
         }
       },
       "countries": "Denied countries or regions",
+      "countries_empty": "No matching country or region",
       "cidrs": "Denied source IP ranges (optional, one per line)",
       "cidrs_hint": "For example 203.0.113.0/24 or 2001:db8::/32. Behind a relay or CDN the node sees its address.",
       "bad_lines": "Line {{lines}} is not a valid IP range",
       "save": "Save source rule",
       "saved": "Source rule saved",
       "stale": "This source rule was just changed by someone else and has been reloaded; check it before saving.",
-      "restart_one": "Takes effect within about {{count}} minute of saving; the node restarts its proxy once.",
-      "restart_other": "Takes effect within about {{count}} minutes of saving; the node restarts its proxy once.",
-      "restart_unknown": "Takes effect within a few minutes of saving; the node restarts its proxy once.",
+      "restart_one": "Takes effect within about {{count}} minute of saving; the node restarts its proxy once if the rule changes what it enforces.",
+      "restart_other": "Takes effect within about {{count}} minutes of saving; the node restarts its proxy once if the rule changes what it enforces.",
+      "restart_unknown": "Takes effect within a few minutes of saving; the node restarts its proxy once if the rule changes what it enforces.",
       "unsaved": {
         "summary": "Source rules are not saved; use the button below",
         "detail": "The \"Deny source country or region\" changes of this inbound are unsaved. They are saved by their own button, not by OK above."
@@ -6900,6 +6926,7 @@
         "state": "State",
         "match": "What it matches",
         "lists": "Lists",
+        "pick_none": "No matching options",
         "list_option": "{{name}} · {{kind}} · {{entries}} entries (regexps {{regexps}})",
         "list_not_ready": "Not ready",
         "not_ready_hint": {
@@ -6940,9 +6967,9 @@
         "footer": {
           "disabled": "A policy that is off is not applied",
           "rename_only": "Changing only the name or description does not restart nodes",
-          "applies_unknown": "Takes effect on the nodes within a few minutes; each node restarts its proxy once",
-          "applies_one": "Takes effect on {{count}} node within about {{minutes}} min; the node restarts its proxy once",
-          "applies_other": "Takes effect on {{count}} nodes within about {{minutes}} min; each node restarts its proxy once"
+          "applies_unknown": "Takes effect on the nodes within a few minutes; a node whose rules change restarts its proxy once",
+          "applies_one": "Takes effect on up to {{count}} node within about {{minutes}} min; a node whose rules change restarts its proxy once",
+          "applies_other": "Takes effect on up to {{count}} nodes within about {{minutes}} min; a node whose rules change restarts its proxy once"
         },
         "template_locked": {
           "summary": "Matching is set by the rule-group catalog",
@@ -6957,7 +6984,7 @@
       "template_name_taken": "A policy with this name already exists. Rename or delete it first, then add this group.",
       "turn_on": {
         "title": "Turn on \"{{name}}\"?",
-        "body": "The page no longer knows whether this policy was report-only or on before it was switched off. Report only records and blocks nothing; Turn on blocking cuts the connections it matches.",
+        "body": "The page no longer knows whether this policy was report-only or on before it was switched off. Report only marks what it would block in the records and blocks nothing; Turn on blocking cuts the connections it matches.",
         "report": "Report only",
         "block": "Turn on blocking",
         "cancel": "Cancel"
@@ -7232,18 +7259,18 @@
       },
       "too_old": "Node agent too old: upgrade needed",
       "exec_only": "A sing-box node only enforces and does not record",
-      "restart": "After saving, this node restarts its proxy once.",
+      "restart": "After saving, this node restarts its proxy once if the change alters what it is told to run.",
       "cancel": "Cancel",
       "save": "Save",
-      "saved_one": "Saved. {{node}} restarts its proxy once within about {{count}} minute",
-      "saved_other": "Saved. {{node}} restarts its proxy once within about {{count}} minutes",
-      "saved_unknown": "Saved. {{node}} restarts its proxy once within a few minutes",
+      "saved_one": "Saved. {{node}} may restart its proxy once within about {{count}} minute",
+      "saved_other": "Saved. {{node}} may restart its proxy once within about {{count}} minutes",
+      "saved_unknown": "Saved. {{node}} may restart its proxy once within a few minutes",
       "usage_cost": "Cost: in the worst case measured, the Xray proxy process on a busy node uses 43% more CPU, and the node agent that receives the records uses some more on top. That is why it is an opt-in per node and off by default.",
       "usage_too_old": "The node agent needs an upgrade to record usage",
       "usage_privacy_summary": "The privacy page is not enabled",
       "usage_privacy_detail": "Per-site usage is a record users should be told about. Enable and publish the privacy policy first (Settings, Privacy and terms), and tick \"Material change\" when publishing so users agree again. This is only a reminder and does not block saving.",
       "usage_off_note": "Turning it off stops new usage from being recorded; the usage already recorded is kept until its {{usageDays}} days are up, then deleted automatically.",
-      "restart_usage": "Saving restarts this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
+      "restart_usage": "Saving can restart this node's proxy once; per-site usage is kept {{usageDays}} days, then deleted automatically."
     },
     "node_recording": {
       "mode": {

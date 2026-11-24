@@ -38,9 +38,7 @@ const dlg = (over: Partial<Parameters<typeof EnableAllowlistDialog>[0]> = {}) =>
 )
 
 async function pickList(name: string) {
-  const box = await screen.findByRole('combobox', { name: /选择列表/ })
-  fireEvent.mouseDown(box)
-  fireEvent.click(await screen.findByRole('option', { name }))
+  fireEvent.click(await screen.findByRole('checkbox', { name }))
 }
 
 beforeEach(() => {
@@ -99,14 +97,12 @@ describe('step 2: the lists', () => {
     renderAccess(dlg({ initialGroupId: 2 }))
     const next = await screen.findByRole('button', { name: '下一步' }) as HTMLButtonElement
     expect(next.disabled).toBe(true)
-    const box = await screen.findByRole('combobox', { name: /选择列表/ })
-    fireEvent.mouseDown(box)
-    expect(await screen.findByRole('option', { name: 'Guest list' })).toBeTruthy()
-    expect(screen.queryByRole('option', { name: 'Mine' })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'Source side' })).toBeNull()
+    expect(await screen.findByRole('checkbox', { name: 'Guest list' })).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: 'Mine' })).toBeNull()
+    expect(screen.queryByRole('checkbox', { name: 'Source side' })).toBeNull()
     // The server refuses an empty custom list, so it is not offered.
-    expect(screen.queryByRole('option', { name: 'Empty custom' })).toBeNull()
-    fireEvent.click(screen.getByRole('option', { name: 'Remote feed' }))
+    expect(screen.queryByRole('checkbox', { name: 'Empty custom' })).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Remote feed' }))
     expect(await screen.findByText('仅报告时跳过，开启前必须就绪')).toBeTruthy()
     expect(next.disabled).toBe(false)
   })
@@ -164,7 +160,7 @@ describe('step 3: the effect, and one write', () => {
     const turnOnButton = screen.getByRole('button', { name: '开启白名单' })
     await waitFor(() => expect((turnOnButton as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(turnOnButton)
-    const turnOn = await screen.findByRole('dialog', { name: '让「Guests」开启白名单？' })
+    const turnOn = await screen.findByRole('alertdialog', { name: '让「Guests」开启白名单？' })
     expect(api.putDestGroup).not.toHaveBeenCalled()
     const go = await within(turnOn).findByRole('button', { name: '开启白名单' })
     await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false))
@@ -240,7 +236,7 @@ describe('editing a group that is on', () => {
     const live = group({ group_id: 4, group_name: 'Ops', state: 'on', updated_at: 5, list_ids: [10, 11], lists: [{ id: 10, name: 'Guest list', entry_count: 40, state: 'ready' }, { id: 11, name: 'Remote feed', entry_count: 3, state: 'ready' }], ineligible: [], pending_nodes: [] })
     confirmMock.mockResolvedValueOnce(false)
     renderAccess(dlg({ groups: [live], initialGroupId: 4 }))
-    fireEvent.click((await screen.findAllByTestId('CancelIcon'))[1])
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Remote feed' }))
     fireEvent.click(await screen.findByRole('button', { name: '下一步' }))
     fireEvent.click(await screen.findByRole('button', { name: '保存' }))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '从「Ops」的名单里去掉 Remote feed？' })))

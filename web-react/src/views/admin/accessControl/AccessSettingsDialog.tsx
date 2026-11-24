@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestSettings } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
 import PolicyField, { outOfRange, type FieldSpec } from '@/components/PolicyField'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { DetailSheet } from '@/components/data/DetailSheet'
+import { FormValidityProvider, useFormValidity } from '@/components/form/FormValidity'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { IconError, IconInfo } from '@/lib/icons'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestSettings, useSaveDestSettings } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -45,11 +49,15 @@ export interface AccessSettingsDialogProps {
  * block). Only keys that changed are sent. A blank number is the default and is
  * never shown as 0.
  */
-export default function AccessSettingsDialog({ open, focus, onClose }: AccessSettingsDialogProps) {
+export default function AccessSettingsDialog(props: AccessSettingsDialogProps) {
+  // The number boxes report an unusable draft ("1.5" in a whole-number box, a value outside its range) to
+  // the provider, which keeps Save off while one is open: the sheet would otherwise store the cut value.
+  return <FormValidityProvider><AccessSettings {...props} /></FormValidityProvider>
+}
+
+function AccessSettings({ open, focus, onClose }: AccessSettingsDialogProps) {
+  const { blocked } = useFormValidity()
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const read = useDestSettings(scope, { enabled: open })
   const save = useSaveDestSettings(scope)
@@ -110,7 +118,7 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
     }
     try {
       await save.mutateAsync(changed)
-      pushSnack(t(`${S}saved`), 'success')
+      pushToast({ message: t(`${S}saved`), severity: 'success' })
       onClose()
     } catch (err) {
       const e = destErrorOf(err)
@@ -119,74 +127,85 @@ export default function AccessSettingsDialog({ open, focus, onClose }: AccessSet
     }
   }
 
+  const err = (key: string) => errors[key]
+    ? <p role="alert" className="mt-1 text-xs text-destructive">{errors[key]}</p>
+    : null
+  const group = (title: string, children: ReactNode) => (
+    <section className="grid gap-3">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {children}
+    </section>
+  )
+
   return (
-    <Dialog open={open} onClose={close} fullScreen={fullScreen} maxWidth="sm" fullWidth
-      slotProps={{ paper: { sx: { borderRadius: fullScreen ? 0 : 3, bgcolor: md.surfaceContainerHigh } } }}>
-      <DialogTitle>{t(`${S}title`)}</DialogTitle>
-      <DialogContent ref={body}>
-        {read.isPending && open && <Skeleton variant="rounded" height={160} />}
+    <DetailSheet
+      open={open}
+      onClose={close}
+      title={t(`${S}title`)}
+      className="data-[side=right]:sm:w-[34rem] data-[side=right]:sm:max-w-[34rem]"
+      footer={(
+        <>
+          <span className="mr-auto self-center text-sm text-muted-foreground">{count > 0 ? t(`${S}changed`, { count }) : ''}</span>
+          <Button variant="outline" disabled={count === 0 || save.isPending} onClick={() => stored && setDraft({ ...stored, dest_rules_update_mode: storedMode })}>{t(`${S}discard`)}</Button>
+          <AsyncButton disabled={count === 0 || invalid || blocked} onClick={submit}>{t(`${S}save`)}</AsyncButton>
+        </>
+      )}
+    >
+      <div ref={body} className="grid gap-6">
+        {read.isPending && open && <Skeleton className="h-40 w-full" />}
         {read.isError && (isDestUnavailable(read.error)
-          ? <Alert severity="info">{t(`${S}unwired`)}</Alert>
-          : <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void read.refetch()}>{t('admin:access_control.retry')}</Button>}>{t(`${S}read_failed`)}</Alert>)}
+          ? <Alert><IconInfo aria-hidden /><AlertDescription>{t(`${S}unwired`)}</AlertDescription></Alert>
+          : <ErrorState compact title={t(`${S}read_failed`)} retry={() => void read.refetch()} />)}
         {draft && read.data && (
-          <Box sx={{ display: 'grid', gap: 2.5, pt: 1 }}>
-            {errors._ && <Alert severity="error">{errors._}</Alert>}
-            <Box>
-              <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_retention`)}</Typography>
-              <Box data-focus="retention">
-                <PolicyField spec={FIELDS[2]} value={draft.dest_hit_retention_days} defaults={read.data.defaults}
-                  effective={read.data.effective.dest_hit_retention_days} error={errors.dest_hit_retention_days}
-                  onChange={v => setDraft({ ...draft, dest_hit_retention_days: v as number })} />
-                {errors.dest_hit_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_hit_retention_days}</Typography>}
-              </Box>
-              <Box data-focus="usage" sx={{ mt: 2 }}>
-                <PolicyField spec={FIELDS[4]} value={draft.dest_usage_retention_days ?? 0} defaults={read.data.defaults}
-                  effective={read.data.effective.dest_usage_retention_days ?? read.data.defaults.dest_usage_retention_days} error={errors.dest_usage_retention_days}
-                  onChange={v => setDraft({ ...draft, dest_usage_retention_days: v as number })} />
-                {errors.dest_usage_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_usage_retention_days}</Typography>}
-              </Box>
-              <Box data-focus="trial" sx={{ mt: 2 }}>
-                <PolicyField spec={FIELDS[3]} value={draft.dest_trial_retention_days} defaults={read.data.defaults}
-                  effective={read.data.effective.dest_trial_retention_days} error={errors.dest_trial_retention_days}
-                  onChange={v => setDraft({ ...draft, dest_trial_retention_days: v as number })} />
-                {errors.dest_trial_retention_days && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_trial_retention_days}</Typography>}
-              </Box>
-            </Box>
-            <Box>
-              <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_refresh`)}</Typography>
-              <Box data-focus="refresh">
+          <>
+            {errors._ && <Alert variant="destructive"><IconError aria-hidden /><AlertDescription>{errors._}</AlertDescription></Alert>}
+            {group(t(`${S}group_retention`), (
+              <>
+                <div data-focus="retention">
+                  <PolicyField spec={FIELDS[2]} value={draft.dest_hit_retention_days} defaults={read.data.defaults}
+                    effective={read.data.effective.dest_hit_retention_days}
+                    onChange={v => setDraft({ ...draft, dest_hit_retention_days: v as number })} />
+                  {err('dest_hit_retention_days')}
+                </div>
+                <div data-focus="usage">
+                  <PolicyField spec={FIELDS[4]} value={draft.dest_usage_retention_days ?? 0} defaults={read.data.defaults}
+                    effective={read.data.effective.dest_usage_retention_days ?? read.data.defaults.dest_usage_retention_days}
+                    onChange={v => setDraft({ ...draft, dest_usage_retention_days: v as number })} />
+                  {err('dest_usage_retention_days')}
+                </div>
+                <div data-focus="trial">
+                  <PolicyField spec={FIELDS[3]} value={draft.dest_trial_retention_days} defaults={read.data.defaults}
+                    effective={read.data.effective.dest_trial_retention_days}
+                    onChange={v => setDraft({ ...draft, dest_trial_retention_days: v as number })} />
+                  {err('dest_trial_retention_days')}
+                </div>
+              </>
+            ))}
+            {group(t(`${S}group_refresh`), (
+              <div data-focus="refresh">
                 <PolicyField spec={FIELDS[1]} value={draft.dest_list_refresh_hours} defaults={read.data.defaults}
-                  effective={read.data.effective.dest_list_refresh_hours} error={errors.dest_list_refresh_hours}
+                  effective={read.data.effective.dest_list_refresh_hours}
                   onChange={v => setDraft({ ...draft, dest_list_refresh_hours: v as number })} />
-                {errors.dest_list_refresh_hours && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_list_refresh_hours}</Typography>}
-              </Box>
-            </Box>
-            <Box>
-              <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_apply`)}</Typography>
-              <Box data-focus="apply">
+                {err('dest_list_refresh_hours')}
+              </div>
+            ))}
+            {group(t(`${S}group_apply`), (
+              <div data-focus="apply">
                 <PolicyField spec={FIELDS[0]} value={draft.dest_policy_apply_min_seconds} defaults={read.data.defaults}
-                  effective={read.data.effective.dest_policy_apply_min_seconds} error={errors.dest_policy_apply_min_seconds}
+                  effective={read.data.effective.dest_policy_apply_min_seconds}
                   onChange={v => setDraft({ ...draft, dest_policy_apply_min_seconds: v as number })} />
-                {errors.dest_policy_apply_min_seconds && <Typography variant="caption" role="alert" sx={{ color: md.error }}>{errors.dest_policy_apply_min_seconds}</Typography>}
-              </Box>
-            </Box>
-            <Box data-focus="rules">
-              <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, mb: 1.5 }}>{t(`${S}group_rules`)}</Typography>
-              <RuleDataPanel mode={draft.dest_rules_update_mode === 'auto' ? 'auto' : 'manual'}
-                onModeChange={m => setDraft({ ...draft, dest_rules_update_mode: m })} disabled={save.isPending} />
-            </Box>
-          </Box>
+                {err('dest_policy_apply_min_seconds')}
+              </div>
+            ))}
+            <div data-focus="rules">
+              {group(t(`${S}group_rules`), (
+                <RuleDataPanel mode={draft.dest_rules_update_mode === 'auto' ? 'auto' : 'manual'}
+                  onModeChange={m => setDraft({ ...draft, dest_rules_update_mode: m })} disabled={save.isPending} />
+              ))}
+            </div>
+          </>
         )}
-      </DialogContent>
-      <DialogActions sx={{ position: 'sticky', bottom: 0, bgcolor: md.surfaceContainerHigh, justifyContent: 'space-between', px: 3 }}>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
-          {count > 0 ? t(`${S}changed`, { count }) : ''}
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button disabled={count === 0 || save.isPending} onClick={() => stored && setDraft({ ...stored, dest_rules_update_mode: storedMode })}>{t(`${S}discard`)}</Button>
-          <AsyncButton variant="contained" disabled={count === 0 || invalid} onClick={submit}>{t(`${S}save`)}</AsyncButton>
-        </Box>
-      </DialogActions>
-    </Dialog>
+      </div>
+    </DetailSheet>
   )
 }

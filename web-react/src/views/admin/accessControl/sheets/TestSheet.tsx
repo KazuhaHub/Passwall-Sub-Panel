@@ -1,24 +1,29 @@
 import { useState, type FormEvent } from 'react'
-import {
-  Alert, Autocomplete, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Skeleton, TextField, ToggleButton,
-  ToggleButtonGroup, Typography, useTheme,
-} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import FieldHint from '@/components/FieldHint'
-
 import { destErrorOf, type DestTestResult } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import { pushSnack } from '@/components/SnackbarHost'
-import UserAutocomplete from '@/components/UserAutocomplete'
+import { ModeRadioGroup } from '@/components/access/ModeRadioGroup'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { FieldHint } from '@/components/common/HelpTip'
 import { nodeStateText } from '@/components/NodePolicyStatusRow'
+import { OptionCombobox } from '@/components/OptionCombobox'
+import { DetailSheet } from '@/components/data/DetailSheet'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Alert, AlertAction } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import type { DrawerPrefill } from '@/hooks/useDrawerParam'
 import { useAddDestException, useDestStatus, usePublishDest, useTestDestination } from '@/query/accessControl'
 import { useNodesList } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import { reportDestError } from '../destErrors'
 import EvalTrace, { terminatingStep, VerdictLine } from './EvalTrace'
-import SheetDrawer from './SheetDrawer'
 import { normalizeTarget, parseResolvedIps, resolvedIpsPayload, validIp, validPort } from './testInput'
 
 export interface TestSheetProps {
@@ -36,16 +41,14 @@ const T = 'admin:access_control.test.'
 export default function TestSheet({ open, onClose, prefill, onOpenPolicy }: TestSheetProps) {
   const { t } = useTranslation(['admin'])
   return (
-    <SheetDrawer open={open} onClose={onClose} title={t(`${T}title`)} headingId="test-heading">
+    <DetailSheet open={open} onClose={onClose} title={t(`${T}title`)}>
       <TestBody prefill={prefill} onOpenPolicy={onOpenPolicy} />
-    </SheetDrawer>
+    </DetailSheet>
   )
 }
 
 function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPolicy: (id: number) => void }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
   const scope = useQueryScope()
   const test = useTestDestination(scope)
   const publish = usePublishDest(scope)
@@ -101,87 +104,96 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
     try { await publish.mutateAsync() } catch (err) { reportDestError(t, err) }
   }
 
-  const options = nodes.data?.items ?? []
+  const options = (nodes.data?.items ?? []).map(n => ({ value: n.id, label: n.display_name || n.panel_name }))
   const hit = result ? terminatingStep(result.r) : undefined
   const isIp = result ? /^[0-9.]+$/.test(result.host) || result.host.includes(':') : false
+  const mono = 'font-mono text-[13px] md:text-[13px]'
 
   return (
-    <Box component="form" onSubmit={run} noValidate>
-      <Box sx={{ display: 'grid', gap: 1.5 }}>
-        <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'minmax(0, 1fr) 110px' } }}>
-          <TextField label={t(`${T}target`)} value={target} onChange={e => setTarget(e.target.value)} required size="small"
-            error={targetBad || fieldError === 'target'}
-            helperText={targetBad ? t(`${T}target_required`) : norm.stripped ? t(`${T}host_only`) : undefined}
-            slotProps={{ htmlInput: { style: { fontFamily: 'ui-monospace, monospace', fontSize: 13 } } }} />
-          <TextField label={t(`${T}port`)} value={port} onChange={e => setPort(e.target.value)} size="small" error={portBad || fieldError === 'port'}
-            helperText={portBad ? t(`${T}port_bad`) : undefined} slotProps={{ htmlInput: { inputMode: 'numeric' } }} />
-        </Box>
-        <ToggleButtonGroup exclusive size="small" value={network} onChange={(_, v: 'tcp' | 'udp' | null) => { if (v) setNetwork(v) }} aria-label={t(`${T}network`)}>
-          <ToggleButton value="tcp">TCP</ToggleButton>
-          <ToggleButton value="udp">UDP</ToggleButton>
-        </ToggleButtonGroup>
-        <UserAutocomplete value={userId} onChange={setUserId} label={t(`${T}account`)} fullWidth />
-        <Autocomplete size="small" options={options} loading={nodes.isFetching}
-          value={options.find(n => n.id === inbound) ?? null} onChange={(_, v) => setInbound(v?.id ?? null)}
-          getOptionLabel={n => n.display_name || n.panel_name} isOptionEqualToValue={(a, b) => a.id === b.id}
-          renderInput={p => <TextField {...p} label={t(`${T}inbound`)} />} />
-        <TextField label={t(`${T}source_ip`)} value={sourceIp} onChange={e => setSourceIp(e.target.value)} size="small"
-          error={ipBad || fieldError === 'source_ip'} helperText={ipBad ? t(`${T}source_ip_bad`) : t(`${T}source_ip_hint`)} />
-        <TextField label={t(`${T}resolved_ips`)} value={resolvedIps} onChange={e => setResolvedIps(e.target.value)} size="small" disabled={lookupFailed}
-          error={resolved.bad || fieldError === 'resolved_ips'} helperText={resolved.bad ? t(`${T}resolved_ips_bad`) : t(`${T}resolved_ips_hint`)}
-          slotProps={{ htmlInput: { style: { fontFamily: 'ui-monospace, monospace', fontSize: 13 } } }} />
-        <FormControlLabel label={t(`${T}resolved_failed`)} sx={{ m: 0 }}
-          control={<Checkbox size="small" checked={lookupFailed} onChange={e => { setLookupFailed(e.target.checked); if (e.target.checked) setResolvedIps('') }} />} />
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <AsyncButton type="submit" variant="contained" onClick={run}>{t(`${T}run`)}</AsyncButton>
-        </Box>
-      </Box>
+    <form onSubmit={run} noValidate className="grid gap-4">
+      <div className="grid gap-3">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
+          <Field label={t(`${T}target`)} required
+            error={targetBad ? t(`${T}target_required`) : fieldError === 'target' ? t(`${T}target_required`) : undefined}
+            hint={norm.stripped ? t(`${T}host_only`) : undefined}>
+            <Input value={target} onChange={e => setTarget(e.target.value)} className={mono} />
+          </Field>
+          <Field label={t(`${T}port`)} error={portBad ? t(`${T}port_bad`) : fieldError === 'port' ? t(`${T}port_bad`) : undefined}>
+            <Input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric" />
+          </Field>
+        </div>
+        <Field label={t(`${T}network`)}>
+          {p => <SegmentedControl<'tcp' | 'udp'> value={network} onChange={setNetwork} aria-labelledby={p.labelId}
+            options={[{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }]} />}
+        </Field>
+        <Field label={t(`${T}account`)}>
+          {() => <UserAutocomplete value={userId} onChange={setUserId} label={t(`${T}account`)} fullWidth />}
+        </Field>
+        <Field label={t(`${T}inbound`)}>
+          <OptionCombobox options={options} value={inbound} onChange={setInbound} emptyText={t('admin:access_control.user_picker.no_match')} />
+        </Field>
+        <Field label={t(`${T}source_ip`)} error={ipBad ? t(`${T}source_ip_bad`) : fieldError === 'source_ip' ? t(`${T}source_ip_bad`) : undefined}
+          hint={t(`${T}source_ip_hint`)}>
+          <Input value={sourceIp} onChange={e => setSourceIp(e.target.value)} />
+        </Field>
+        <Field label={t(`${T}resolved_ips`)} error={resolved.bad ? t(`${T}resolved_ips_bad`) : fieldError === 'resolved_ips' ? t(`${T}resolved_ips_bad`) : undefined}
+          hint={t(`${T}resolved_ips_hint`)}>
+          <Input value={resolvedIps} onChange={e => setResolvedIps(e.target.value)} disabled={lookupFailed} className={mono} />
+        </Field>
+        <Field label={t(`${T}resolved_failed`)} orientation="horizontal">
+          <Checkbox checked={lookupFailed} onCheckedChange={c => { setLookupFailed(c); if (c) setResolvedIps('') }} />
+        </Field>
+        <div className="flex justify-end">
+          <AsyncButton type="submit" pending={test.isPending}>{t(`${T}run`)}</AsyncButton>
+        </div>
+      </div>
 
-      <Box sx={{ mt: 2, pt: 2, borderTop: `1px solid ${md.outlineVariant}` }} aria-live="polite">
-        {test.isPending && <Skeleton variant="rounded" height={120} />}
+      <div className="border-t pt-4" aria-live="polite">
+        {test.isPending && <Skeleton className="h-28 w-full" />}
         {failed && !test.isPending && (
-          <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void run()}>{t('admin:access_control.retry')}</Button>}>
+          <Alert variant="destructive">
             {t(`${T}failed`)}
+            <AlertAction><Button size="xs" variant="outline" onClick={() => void run()}>{t('admin:access_control.retry')}</Button></AlertAction>
           </Alert>
         )}
-        {!result && !failed && !test.isPending && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}initial`)}</Typography>}
+        {!result && !failed && !test.isPending && <p className="text-sm text-muted-foreground">{t(`${T}initial`)}</p>}
         {result && !test.isPending && (
-          <Box sx={{ display: 'grid', gap: 1.5 }}>
+          <div className="grid gap-3">
             {result.r.unpublished && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', p: 1, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}>
-                <Typography variant="body2" sx={{ flex: 1, color: md.onSurface }}>{t(`${T}unpublished`)}</Typography>
-                <AsyncButton size="small" onClick={doPublish}>{t('admin:access_control.verdict.action.publish')}</AsyncButton>
-              </Box>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-2">
+                <p className="flex-1 text-sm">{t(`${T}unpublished`)}</p>
+                <AsyncButton size="sm" variant="outline" onClick={doPublish}>{t('admin:access_control.verdict.action.publish')}</AsyncButton>
+              </div>
             )}
             <VerdictLine result={result.r} />
             <EvalTrace result={result.r} inboundName={inboundName} />
-            <Box sx={{ display: 'grid', gap: 0.5 }}>
+            <div className="grid gap-1 text-sm">
               {result.r.nodes.map(n => {
                 const st = status.data?.nodes.find(x => x.panel_id === n.panel_id)
                 const text = st ? nodeStateText(t, st, Date.now()) : null
                 return text && text.key !== 'applied' && text.key !== 'applied_exec_only'
-                  ? <Typography key={n.panel_id} variant="body2">{t(`${T}node_hint`, { node: n.name, note: text.note })}</Typography>
-                  : <Typography key={n.panel_id} variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}node_applied`, { node: n.name })}</Typography>
+                  ? <p key={n.panel_id}>{t(`${T}node_hint`, { node: n.name, note: text.note })}</p>
+                  : <p key={n.panel_id} className="text-muted-foreground">{t(`${T}node_applied`, { node: n.name })}</p>
               })}
-              <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}note_published`)}</Typography>
-              <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}note_no_dns`)}</Typography>
-              {isIp && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${T}note_ip`)}</Typography>}
-              {result.r.notes.includes('hostname_skips_ip_rules') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_hostname_skips_ip`)}</Typography>}
-              {result.r.notes.includes('hostname_needs_resolution') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_hostname_needs_resolution`)}</Typography>}
-              {result.r.notes.includes('resolution_failed_engine_dependent') && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_resolution_failed`)}</Typography>}
-              {result.r.conditional && <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${T}note_conditional`)}</Typography>}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'space-between' }}>
-              {result.r.verdict === 'block' && <Button size="small" onClick={() => setException(true)}>{t(`${T}add_exception`)}</Button>}
+              <p className="text-muted-foreground">{t(`${T}note_published`)}</p>
+              <p className="text-muted-foreground">{t(`${T}note_no_dns`)}</p>
+              {isIp && <p className="text-muted-foreground">{t(`${T}note_ip`)}</p>}
+              {result.r.notes.includes('hostname_skips_ip_rules') && <p>{t(`${T}note_hostname_skips_ip`)}</p>}
+              {result.r.notes.includes('hostname_needs_resolution') && <p>{t(`${T}note_hostname_needs_resolution`)}</p>}
+              {result.r.notes.includes('resolution_failed_engine_dependent') && <p>{t(`${T}note_resolution_failed`)}</p>}
+              {result.r.conditional && <p>{t(`${T}note_conditional`)}</p>}
+            </div>
+            <div className="flex flex-wrap justify-between gap-2">
+              {result.r.verdict === 'block' && <Button size="sm" variant="outline" type="button" onClick={() => setException(true)}>{t(`${T}add_exception`)}</Button>}
               {hit?.policy_id ? (
-                <Button size="small" onClick={() => onOpenPolicy(hit.policy_id!)}>{t(`${T}open_policy`, { name: hit.name || t(`${T}deleted_policy`) })}</Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => onOpenPolicy(hit.policy_id!)}>{t(`${T}open_policy`, { name: hit.name || t(`${T}deleted_policy`) })}</Button>
               ) : null}
-            </Box>
-          </Box>
+            </div>
+          </div>
         )}
-      </Box>
+      </div>
       <ExceptionDialog key={`${hit?.group_id ?? 0}:${result?.host ?? ''}`} open={exception} host={result?.host ?? ''} group={hit?.kind === 'group' && hit.group_id ? { id: hit.group_id, name: hit.name ?? '' } : null} onClose={() => setException(false)} />
-    </Box>
+    </form>
   )
 }
 
@@ -192,7 +204,6 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
  */
 function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: string; group: { id: number; name: string } | null; onClose: () => void }) {
   const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   const add = useAddDestException(scope)
   const [entry, setEntry] = useState(host)
@@ -221,33 +232,38 @@ function ExceptionDialog({ open, host, group, onClose }: { open: boolean; host: 
     }
   }
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" slotProps={{ transition: { onExited: reset } }}>
-      <DialogTitle>{t(`${T}exception.title`)}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
-        {!none && <Typography variant="body2">{toGroup && group ? t(`${T}exception.lead_group`, { group: group.name }) : t(`${T}exception.lead`)}</Typography>}
-        {none && <Typography variant="body2" sx={{ color: md.error }}>{t('admin:access_control.records.exception.group_gone')}</Typography>}
-        {group && (
-          <RadioGroup value={none ? '' : toGroup ? 'group' : 'global'} onChange={(_, v) => setEveryone(v === 'global')} aria-label={t('admin:access_control.records.exception.where')}>
-            {!gone && <FormControlLabel value="group" control={<Radio />} label={t('admin:access_control.records.exception.group', { group: group.name })} />}
-            <FormControlLabel value="global" control={<Radio />} label={t('admin:access_control.records.exception.global')} />
-            {everyone && (
-              <Box sx={{ pl: 4 }}>
-                <FieldHint tone="amber" summary={t('admin:access_control.records.exception.global_hint.summary')} detail={t('admin:access_control.records.exception.global_hint.detail')} />
-              </Box>
-            )}
-          </RadioGroup>
-        )}
-        <TextField label={t(`${T}target`)} value={entry} onChange={e => setEntry(e.target.value)} size="small" error={error}
-          helperText={error ? t(`${T}exception.invalid`) : undefined} />
-        <ToggleButtonGroup exclusive size="small" value={match} onChange={(_, v: 'site' | 'host' | null) => { if (v) setMatch(v) }} aria-label={t(`${T}exception.match`)}>
-          <ToggleButton value="site">{t(`${T}exception.site`)}</ToggleButton>
-          <ToggleButton value="host">{t(`${T}exception.host`)}</ToggleButton>
-        </ToggleButtonGroup>
+    <Dialog open={open} onOpenChange={next => { if (!next) onClose() }} onOpenChangeComplete={o => { if (!o) reset() }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader><DialogTitle>{t(`${T}exception.title`)}</DialogTitle></DialogHeader>
+        <div className="grid gap-4">
+          {!none && <p className="text-sm">{toGroup && group ? t(`${T}exception.lead_group`, { group: group.name }) : t(`${T}exception.lead`)}</p>}
+          {none && <p className="text-sm text-destructive">{t('admin:access_control.records.exception.group_gone')}</p>}
+          {group && (
+            <div className="grid gap-2">
+              <ModeRadioGroup<'group' | 'global'> value={none ? null : toGroup ? 'group' : 'global'} aria-label={t('admin:access_control.records.exception.where')}
+                onChange={v => setEveryone(v === 'global')}
+                options={[
+                  ...(!gone ? [{ value: 'group' as const, children: t('admin:access_control.records.exception.group', { group: group.name }) }] : []),
+                  { value: 'global' as const, children: t('admin:access_control.records.exception.global') },
+                ]} />
+              {everyone && <FieldHint tone="warning" summary={t('admin:access_control.records.exception.global_hint.summary')} detail={t('admin:access_control.records.exception.global_hint.detail')} />}
+            </div>
+          )}
+          <Field label={t(`${T}target`)} error={error ? t(`${T}exception.invalid`) : undefined}>
+            <Input value={entry} onChange={e => setEntry(e.target.value)} />
+          </Field>
+          <Field label={t(`${T}exception.match`)}>
+            {p => <SegmentedControl<'site' | 'host'> value={match} onChange={setMatch} aria-labelledby={p.labelId}
+              // Two long labels do not fit a phone side by side: they stack there, full width.
+              className="w-full flex-col items-stretch sm:w-fit sm:flex-row [&>button]:h-auto [&>button]:min-h-8 [&>button]:whitespace-normal [&>button]:py-1"
+              options={[{ value: 'site', label: t(`${T}exception.site`) }, { value: 'host', label: t(`${T}exception.host`) }]} />}
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t(`${T}exception.cancel`)}</Button>
+          <AsyncButton disabled={none} onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>{t(`${T}exception.cancel`)}</Button>
-        <AsyncButton variant="contained" disabled={none} onClick={save}>{t(`${T}exception.save`)}</AsyncButton>
-      </DialogActions>
     </Dialog>
   )
 }

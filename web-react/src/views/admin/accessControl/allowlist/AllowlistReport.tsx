@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react'
-import {
-  Alert, Box, Breadcrumbs, Button, Checkbox, Link, MenuItem, Skeleton, TextField, ToggleButton, ToggleButtonGroup, Typography, useTheme,
-} from '@mui/material'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import type { ColumnDef, SortingState } from '@tanstack/react-table'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import type { DestGroupReportItem } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import BarCount from '@/components/BarCount'
-import BulkBar from '@/components/BulkBar'
-import HelpTip from '@/components/HelpTip'
-import KpiTile, { KpiGrid } from '@/components/KpiTile'
-import { amber } from '@/components/ToneBadge'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { HelpTip } from '@/components/common/HelpTip'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
+import { DataTable } from '@/components/data/DataTable'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
+import { IconWarning } from '@/lib/icons'
 import { useDestGroupReport, useDestGroups, useDestLists, useDestSettings, useDestStatus, useEditDestListEntries } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
@@ -27,8 +27,6 @@ const R = 'admin:access_control.allowlist.report.'
 const IP = '(ip)'
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
-
-type SortKey = 'count' | 'last'
 
 export interface AllowlistReportProps {
   groupId: number
@@ -51,8 +49,6 @@ export interface AllowlistReportProps {
  */
 export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTestDestination, onOpenSettings, onTurnOn, onViewDenied }: AllowlistReportProps) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
   const scope = useQueryScope()
   const [params, setParams] = useSearchParams()
   const groups = useDestGroups(scope)
@@ -60,7 +56,7 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   const status = useDestStatus(scope)
   const lists = useDestLists(scope)
   const edit = useEditDestListEntries(scope)
-  const num = new Intl.NumberFormat(i18n.language)
+  const num = useMemo(() => new Intl.NumberFormat(i18n.language), [i18n.language])
 
   const group = groups.data?.find(g => g.group_id === groupId)
   const retention = settings.data?.effective.dest_trial_retention_days
@@ -70,8 +66,8 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   const read = useDestGroupReport(scope, groupId, days)
   const data = read.data
 
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'count', dir: 'desc' })
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'count', desc: true }])
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [added, setAdded] = useState<Set<string>>(new Set())
   const [target, setTarget] = useState<number | null>(null)
 
@@ -83,30 +79,22 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   const targets = [extraId, ...(group?.lists ?? []).map(l => l.id).filter(id => lists.data?.items.find(l => l.id === id)?.kind === 'custom')].filter(id => id > 0)
 
   const isAdded = (i: DestGroupReportItem) => i.added || added.has(i.site)
-  const rows = useMemo(() => {
-    const sign = sort.dir === 'asc' ? 1 : -1
-    return [...(data?.items ?? [])].sort((a, b) => sign * (sort.key === 'count' ? a.count - b.count : a.last_at - b.last_at))
-  }, [data, sort])
+  const rows = useMemo(() => data?.items ?? [], [data])
   const max = rows.reduce((m, r) => Math.max(m, r.count), 0)
   const total = rows.reduce((n, r) => n + r.count, 0)
   const unhandled = rows.filter(r => r.site !== IP && !isAdded(r)).length
   const addable = (i: DestGroupReportItem) => i.site !== IP && !isAdded(i)
 
   const setDays = (d: number) => setParams(allowlistSearch(params, { days: d }), { replace: true })
-  const onSort = (key: SortKey) => setSort(s => ({ key, dir: s.key === key && s.dir === 'desc' ? 'asc' : 'desc' }))
-  const toggle = (site: string, on: boolean) => setSelected(prev => {
-    const out = new Set(prev)
-    if (on) out.add(site); else out.delete(site)
-    return out
-  })
 
+  /** One entries request per call, never a rewrite of the list: the sites go in as `domain:<site>` additions. */
   const add = async (sites: string[]) => {
     if (sites.length === 0 || targetId <= 0) return
     try {
       await edit.mutateAsync({ id: targetId, add: sites.map(s => `domain:${s}`) })
       // "Added" means in the group's own lists, which is what the server marks; another list the admin picked is not.
       if (targetId === extraId) setAdded(prev => new Set([...prev, ...sites]))
-      setSelected(new Set())
+      setSelected({})
       pushSnack(t(`${R}snack_added`, { count: sites.length, list: listName(targetId), minutes: minutesWords(t, applyMinutes(status.data)) }), 'success')
     } catch (err) {
       reportDestError(t, err)
@@ -120,133 +108,159 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
   const age = since === null || sinceMs === null ? null : sinceMs < DAY ? { young: true, n: Math.max(1, Math.floor(sinceMs / HOUR)) } : { young: false, n: stateDay(since, Date.now()) ?? 1 }
   const noneEver = data !== undefined && since === null && data.items.length === 0
 
-  const sortButton = (key: SortKey, label: string) => (
-    <Link component="button" type="button" underline="hover" aria-label={label} onClick={() => onSort(key)}
-      sx={{ font: 'inherit', color: md.onSurfaceVariant, fontWeight: sort.key === key ? 600 : 400 }}>
-      {label}{sort.key === key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}
-    </Link>
-  )
+  const columns = useMemo<ColumnDef<DestGroupReportItem, any>[]>(() => [
+    {
+      id: 'site', header: t(`${R}col_site`), enableSorting: false,
+      meta: { hideable: false, label: t(`${R}col_site`), className: 'min-w-0 [overflow-wrap:anywhere]' },
+      cell: ctx => {
+        const r = ctx.row.original
+        const done = r.added || added.has(r.site)
+        return (
+          <div className="min-w-0">
+            {r.site === IP
+              ? <span className="font-mono">{IP}</span>
+              : (
+                <button type="button" onClick={() => onTestDestination(r.site)}
+                  className="rounded-sm text-left font-mono underline-offset-2 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">{r.site}</button>
+              )}
+            {done && <p className="text-sm text-muted-foreground">{t(`${R}added`)}</p>}
+            {r.site === IP && <p className="text-sm whitespace-normal text-muted-foreground">{t(`${R}ip_note`)}</p>}
+          </div>
+        )
+      },
+    },
+    {
+      id: 'count', header: t(`${R}col_count`), accessorFn: r => r.count,
+      meta: { label: t(`${R}col_count`), className: 'w-44' },
+      cell: ctx => <CountBar value={ctx.row.original.count} max={max} formatter={num} />,
+    },
+    {
+      id: 'last', header: t(`${R}col_last`), accessorFn: r => r.last_at,
+      meta: { label: t(`${R}col_last`), className: 'w-28 text-muted-foreground' },
+      cell: ctx => formatRelativeTimeShort(Date.now() - ctx.row.original.last_at, t),
+    },
+    {
+      id: 'actions', header: '', enableSorting: false,
+      meta: { hideable: false, align: 'right', label: t(`${R}add`), className: 'w-36' },
+      cell: ctx => {
+        const r = ctx.row.original
+        if (r.site === IP) return <Button size="sm" variant="outline" onClick={() => onOpenEntries(extraId)} disabled={extraId <= 0}>{t(`${R}edit_extra`)}</Button>
+        if (r.added || added.has(r.site)) return null
+        return <AsyncButton size="sm" variant="outline" onClick={() => add([r.site])}>{t(`${R}add`)}</AsyncButton>
+      },
+    },
+    // The row handlers close over this render's list and target; the columns are rebuilt when those change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, max, num, added, extraId, targetId, onTestDestination, onOpenEntries])
+
+  const selectedSites = Object.keys(selected).filter(k => selected[k])
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1.5 }}>
-        <Breadcrumbs aria-label={t(`${R}crumb_label`)} sx={{ flex: 1, minWidth: 0 }}>
-          <Link component="button" type="button" underline="hover" onClick={onBack} sx={{ font: 'inherit' }}>{t(`${R}crumb_root`)}</Link>
-          <Typography component="span" sx={{ overflowWrap: 'anywhere' }}>{group?.group_name ?? '…'}</Typography>
-          <Typography component="h2" sx={{ fontSize: 'inherit', fontWeight: 600 }}>{on ? t(`${R}title_on`, { group: group?.group_name ?? '' }) : t(`${R}crumb_report`)}</Typography>
-        </Breadcrumbs>
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <nav aria-label={t(`${R}crumb_label`)} className="min-w-0 flex-1">
+          <ol className="flex flex-wrap items-center gap-1.5 text-sm">
+            <li><button type="button" onClick={onBack} className="rounded-sm underline-offset-2 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">{t(`${R}crumb_root`)}</button></li>
+            <li aria-hidden className="text-muted-foreground">/</li>
+            <li className="[overflow-wrap:anywhere]">{group?.group_name ?? '…'}</li>
+            <li aria-hidden className="text-muted-foreground">/</li>
+            <li><h2 className="text-sm font-semibold">{on ? t(`${R}title_on`, { group: group?.group_name ?? '' }) : t(`${R}crumb_report`)}</h2></li>
+          </ol>
+        </nav>
         {on
-          ? <Button size="small" onClick={onViewDenied}>{t(`${R}view_denied`)}</Button>
-          : group?.state === 'report' && (noneEver || rows.length > 0) && <Button size="small" variant="contained" onClick={onTurnOn}>{t(`${R}turn_on`)}</Button>}
-      </Box>
-      {on && <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1 }}>{t(`${R}on_note`)}</Typography>}
+          ? <Button size="sm" variant="outline" onClick={onViewDenied}>{t(`${R}view_denied`)}</Button>
+          : group?.state === 'report' && (noneEver || rows.length > 0) && <Button size="sm" onClick={onTurnOn}>{t(`${R}turn_on`)}</Button>}
+      </div>
+      {on && <p className="mb-2 text-sm text-muted-foreground">{t(`${R}on_note`)}</p>}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${R}range`)}</Typography>
-        <ToggleButtonGroup exclusive size="small" value={days} aria-label={t(`${R}range`)} onChange={(_, v: number | null) => { if (v) setDays(v) }}>
-          {options.map(d => <ToggleButton key={d} value={d} sx={{ minHeight: 36 }}>{t(`${R}day`, { n: d })}</ToggleButton>)}
-        </ToggleButtonGroup>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-sm text-muted-foreground">{t(`${R}range`)}</span>
+        <SegmentedControl size="sm" value={String(days)} aria-label={t(`${R}range`)} onChange={v => setDays(Number(v))}
+          options={options.map(d => ({ value: String(d), label: t(`${R}day`, { n: d }) }))} />
+        <span className="text-sm text-muted-foreground">
           {t(`${R}range_note`, { days: options[options.length - 1] })}{' '}
-          <Link component="button" type="button" underline="always" onClick={() => onOpenSettings('trial')} sx={{ font: 'inherit', verticalAlign: 'baseline' }}>{t(`${R}edit_retention`)}</Link>
-        </Typography>
-      </Box>
-      {data && data.effective_days < days && <Typography variant="body2" sx={{ mt: 0.5, color: md.onSurfaceVariant }}>{t(`${R}clamped`, { days: data.effective_days })}</Typography>}
+          <button type="button" onClick={() => onOpenSettings('trial')} className="rounded-sm underline underline-offset-2 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">{t(`${R}edit_retention`)}</button>
+        </span>
+      </div>
+      {data && data.effective_days < days && <p className="mt-1 text-sm text-muted-foreground">{t(`${R}clamped`, { days: data.effective_days })}</p>}
 
-      {read.isPending && (
-        <Box sx={{ mt: 1.5 }}>
-          <Skeleton variant="rounded" height={72} sx={{ mb: 1.5 }} />
-          {[0, 1, 2, 3, 4, 5, 6, 7].map(i => <Skeleton key={i} variant="rounded" height={40} sx={{ mb: 0.75 }} />)}
-        </Box>
-      )}
-      {read.isError && (
-        <Alert severity="error" sx={{ mt: 1.5 }} action={<Button color="inherit" size="small" onClick={() => void read.refetch()}>{t('admin:access_control.retry')}</Button>}>
-          {t(`${R}read_failed`)}
-        </Alert>
-      )}
+      {read.isError && <ErrorState className="mt-3" title={t(`${R}read_failed`)} reason={read.error} retry={() => read.refetch()} />}
 
-      {data && (
+      {(read.isPending || data) && (
         <>
-          <KpiGrid>
-            <KpiTile label={t(`${R}kpi_sites`)} value={num.format(rows.length)} />
-            <KpiTile label={t(`${R}kpi_count`)} value={num.format(total)} />
-            <KpiTile label={t(`${R}kpi_open`)} value={num.format(unhandled)} />
-            <KpiTile label={t(`${R}kpi_lost`)} value={num.format(data.dropped_in_range)} />
-          </KpiGrid>
-          {data.dropped_in_range > 0 && (
-            <Typography variant="body2" sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5, mb: 1 }}>
-              <WarningAmberIcon aria-hidden sx={{ fontSize: 16, mt: '2px', color: amber(theme).fg }} />
+          {data && (
+            <KpiGrid>
+              <KpiTile label={t(`${R}kpi_sites`)} value={num.format(rows.length)} />
+              <KpiTile label={t(`${R}kpi_count`)} value={num.format(total)} />
+              <KpiTile label={t(`${R}kpi_open`)} value={num.format(unhandled)} />
+              <KpiTile label={t(`${R}kpi_lost`)} value={num.format(data.dropped_in_range)} />
+            </KpiGrid>
+          )}
+          {data && data.dropped_in_range > 0 && (
+            <p className="mb-2 flex items-start gap-1.5 text-sm">
+              <IconWarning aria-hidden className="mt-0.5 size-4 shrink-0 text-warning-ink" />
               {t(`${R}lost_note`)}
-            </Typography>
+            </p>
           )}
-          {age && <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1 }}>{age.young ? t(`${R}age_young`, { hours: age.n }) : t(`${R}age`, { days: age.n })}</Typography>}
+          {age && <p className="mb-2 text-sm text-muted-foreground">{age.young ? t(`${R}age_young`, { hours: age.n }) : t(`${R}age`, { days: age.n })}</p>}
 
-          {noneEver && (
-            <Box sx={{ p: 2, borderRadius: 2, bgcolor: md.surfaceContainerHigh }}><Typography variant="body2">{t(`${R}never`)}</Typography></Box>
+          {noneEver && <div className="rounded-lg bg-muted p-4 text-sm">{t(`${R}never`)}</div>}
+          {data && !noneEver && rows.length === 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-4 text-sm">
+              <p className="flex-1">{t(`${R}empty`, { days: data.effective_days })}</p>
+              {group?.state === 'report' && <Button size="sm" variant="outline" onClick={onTurnOn}>{t(`${R}turn_on`)}</Button>}
+            </div>
           )}
-          {!noneEver && rows.length === 0 && (
-            <Box sx={{ p: 2, borderRadius: 2, bgcolor: md.surfaceContainerHigh, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <Typography variant="body2" sx={{ flex: 1 }}>{t(`${R}empty`, { days: data.effective_days })}</Typography>
-              {group?.state === 'report' && <Button size="small" onClick={onTurnOn}>{t(`${R}turn_on`)}</Button>}
-            </Box>
+          {(read.isPending || rows.length > 0) && (
+            <>
+              <p className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                {t(`${R}col_site`)}
+                <HelpTip text={t(`${R}site_help`)} label={t(`${R}site_help_label`)} />
+              </p>
+              <DataTable<DestGroupReportItem>
+                aria-label={t(`${R}crumb_report`)}
+                data={rows}
+                columns={columns}
+                getRowId={r => r.site}
+                loading={read.isPending}
+                pagination={false}
+                sorting={sorting}
+                onSortingChange={setSorting}
+                selectable
+                selection={selected}
+                onSelectionChange={setSelected}
+                rowLabel={r => r.site}
+                // The (ip) row and a site already in the list cannot be added by name, so they are not ticked.
+                rowOptions={r => ({ selectable: addable(r), state: isAdded(r) ? 'dimmed' : undefined })}
+                columnMenu={false}
+                bulkActions={() => (
+                  <>
+                    {targets.length > 1 && (
+                      <NativeSelect aria-label={t(`${R}add_to`)} value={targetId} onChange={e => setTarget(Number(e.target.value))} className="w-44">
+                        {targets.map(id => <option key={id} value={id}>{listName(id)}</option>)}
+                      </NativeSelect>
+                    )}
+                    <AsyncButton onClick={() => add(selectedSites)}>{t(`${R}add_n`, { n: selectedSites.length })}</AsyncButton>
+                  </>
+                )}
+              />
+            </>
           )}
-
-          {rows.length > 0 && (
-            <Box sx={{ borderRadius: 3, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surfaceContainerLow, px: { xs: 1.5, sm: 2 } }}>
-              <Box sx={{ display: { xs: 'none', sm: 'grid' }, gridTemplateColumns: ROW_COLUMNS, gap: 1.5, alignItems: 'center', py: 1, fontSize: 12 }}>
-                <span />
-                <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant, display: 'inline-flex', alignItems: 'center' }}>
-                  {t(`${R}col_site`)}
-                  <HelpTip textKey="admin:access_control.allowlist.report.site_help" labelKey="admin:access_control.allowlist.report.site_help_label" />
-                </Typography>
-                {sortButton('count', t(`${R}col_count`))}
-                {sortButton('last', t(`${R}col_last`))}
-                <span />
-              </Box>
-              {rows.map((r, i) => {
-                const done = isAdded(r)
-                const ip = r.site === IP
-                return (
-                  <Box key={r.site} data-testid="report-row" data-site={r.site} sx={{
-                    display: 'grid', gridTemplateColumns: { xs: '36px minmax(0, 1fr)', sm: ROW_COLUMNS }, gap: { xs: 0.5, sm: 1.5 }, alignItems: 'center',
-                    py: 1, borderTop: `1px solid ${md.outlineVariant}`, opacity: done ? 0.6 : 1, ...(i === 0 ? { borderTopColor: 'transparent' } : {}),
-                  }}>
-                    <Box sx={{ width: 36 }}>
-                      {addable(r) && <Checkbox size="small" checked={selected.has(r.site)} onChange={(_, c) => toggle(r.site, c)} slotProps={{ input: { 'aria-label': t(`${R}select`, { site: r.site }) } }} />}
-                    </Box>
-                    <Box sx={{ minWidth: 0 }}>
-                      {ip
-                        ? <Typography sx={{ fontFamily: 'ui-monospace, monospace' }}>{IP}</Typography>
-                        : (
-                          <Link component="button" type="button" underline="hover" onClick={() => onTestDestination(r.site)}
-                            sx={{ font: 'inherit', fontFamily: 'ui-monospace, monospace', textAlign: 'left', overflowWrap: 'anywhere' }}>{r.site}</Link>
-                        )}
-                      {done && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${R}added`)}</Typography>}
-                    </Box>
-                    <Box sx={{ gridColumn: { xs: '2', sm: 'auto' } }}><BarCount value={r.count} max={max} formatter={num} /></Box>
-                    <Typography variant="body2" sx={{ gridColumn: { xs: '2', sm: 'auto' }, color: md.onSurfaceVariant }}>{formatRelativeTimeShort(Date.now() - r.last_at, t)}</Typography>
-                    <Box sx={{ gridColumn: { xs: '2', sm: 'auto' }, justifySelf: { sm: 'end' } }}>
-                      {addable(r) && <AsyncButton size="small" onClick={() => add([r.site])}>{t(`${R}add`)}</AsyncButton>}
-                      {ip && <Button size="small" onClick={() => onOpenEntries(extraId)} disabled={extraId <= 0}>{t(`${R}edit_extra`)}</Button>}
-                    </Box>
-                    {ip && <Typography variant="body2" sx={{ gridColumn: { xs: '1 / -1', sm: '2 / -1' }, color: md.onSurfaceVariant }}>{t(`${R}ip_note`)}</Typography>}
-                  </Box>
-                )
-              })}
-            </Box>
-          )}
-          <BulkBar count={selected.size} label={t(`${R}selected`, { n: selected.size })}>
-            {targets.length > 1 && (
-              <TextField select size="small" label={t(`${R}add_to`)} value={targetId} onChange={e => setTarget(Number(e.target.value))} sx={{ minWidth: 160 }}>
-                {targets.map(id => <MenuItem key={id} value={id}>{listName(id)}</MenuItem>)}
-              </TextField>
-            )}
-            <AsyncButton variant="contained" onClick={() => add([...selected])}>{t(`${R}add_n`, { n: selected.size })}</AsyncButton>
-          </BulkBar>
         </>
       )}
-    </Box>
+    </div>
   )
 }
 
-const ROW_COLUMNS = '36px minmax(0, 1.4fr) minmax(160px, 1fr) 96px 132px'
+/** A count with a bar behind it, relative to the largest count on the page: a hint, the number is always written. */
+function CountBar({ value, max, formatter }: { value: number; max: number; formatter: Intl.NumberFormat }) {
+  const pct = !(max > 0) || !(value > 0) ? 0 : Math.min(100, Math.max(2, Math.round((value / max) * 100)))
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <div aria-hidden className="h-2 min-w-10 flex-1 overflow-hidden rounded bg-primary/10">
+        <div data-testid="bar-fill" className="h-full bg-primary/60" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="min-w-14 text-right tabular-nums">{formatter.format(value)}</span>
+    </div>
+  )
+}

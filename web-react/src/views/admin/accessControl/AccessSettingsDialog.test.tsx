@@ -42,7 +42,7 @@ describe('settings', () => {
     open()
     const refresh = await screen.findByLabelText('远程与分类列表刷新间隔（小时）')
     expect((refresh as HTMLInputElement).value).toBe('')
-    expect((refresh as HTMLInputElement).placeholder).toBe('24')
+    expect((refresh as HTMLInputElement).placeholder).toBe('默认 24')
     fireEvent.focus(refresh)
     fireEvent.change(refresh, { target: { value: '12' } })
     expect(await screen.findByText('已修改 1 项')).toBeTruthy()
@@ -78,7 +78,7 @@ describe('settings', () => {
   it('saves the update mode as dest_rules_update_mode', async () => {
     vi.mocked(api.putDestSettings).mockResolvedValue(view({ dest_rules_update_mode: 'auto' }))
     open()
-    fireEvent.click(await screen.findByRole('button', { name: '自动' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '自动' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.putDestSettings).toHaveBeenCalledWith({ dest_rules_update_mode: 'auto' }))
   })
@@ -90,12 +90,25 @@ describe('settings', () => {
   })
 })
 
+describe('an unusable draft', () => {
+  // A whole-number box refuses "1.5"; Save must not store the cut value behind it.
+  it('keeps Save off while a number box holds a fraction', async () => {
+    open()
+    const refresh = await screen.findByLabelText('远程与分类列表刷新间隔（小时）')
+    fireEvent.focus(refresh)
+    fireEvent.change(refresh, { target: { value: '1.5' } })
+    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(refresh, { target: { value: '12' } })
+    await waitFor(() => expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+})
+
 describe('the hit-record retention (S18, the records tab\'s "change")', () => {
   it('is a field with the served default, never a 0, and says its range', async () => {
     open()
     const days = (await screen.findByLabelText('命中记录保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('30')
+    expect(days.placeholder).toBe('默认 30')
     expect(screen.getByText(/1–365/)).toBeTruthy()
   })
 
@@ -104,7 +117,7 @@ describe('the hit-record retention (S18, the records tab\'s "change")', () => {
     open()
     const days = (await screen.findByLabelText('仅报告数据保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('7')
+    expect(days.placeholder).toBe('默认 7')
     expect(screen.getAllByText(/1–30/).length).toBeGreaterThan(0)
     fireEvent.focus(days)
     fireEvent.change(days, { target: { value: '10' } })
@@ -261,7 +274,7 @@ describe('the per-site usage retention', () => {
     open()
     const days = (await screen.findByLabelText('按网站用量保留（天）')) as HTMLInputElement
     expect(days.value).toBe('')
-    expect(days.placeholder).toBe('7')
+    expect(days.placeholder).toBe('默认 7')
     expect(screen.getByText(/1–30/, { selector: '[data-focus="usage"] *' })).toBeTruthy()
   })
 

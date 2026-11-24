@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { confirmMock, renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
+import * as groupsApi from '@/api/groups'
 import type { DestCatalog, DestPolicies, DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
 
@@ -96,12 +97,35 @@ describe('writes', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('禁止 BT')
     fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
-    // Its earlier state is not known here, so the admin says which it is turned on as.
+    // Its earlier state is not known here, so the admin says which it is turned on as. That one dialog names the
+    // scope and the nodes too, so it is the only question: no second confirm follows.
+    expect(await screen.findByText(/范围：所有用户，共 1 个分组、0 人/)).toBeTruthy()
     fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
     const [id, body] = vi.mocked(api.updateDestPolicy).mock.calls[0]
     expect(id).toBe(2)
     expect(body).toMatchObject({ name: '禁止 BT', state: 'on', action: 'block', updated_at: 111, inline: { protocols: ['bittorrent'] } })
+    // Not the first policy, so no first-publish question, and the choice dialog already was the enabling question.
+    expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  // A groups read that failed must not turn into "0 groups and 0 people" in the question.
+  it('says the groups and people could not be counted when the groups read failed', async () => {
+    vi.mocked(groupsApi.listAllGroups).mockRejectedValueOnce(new Error('down'))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    const body = await screen.findByText(/范围：/)
+    expect(body.textContent).toContain('分组数和人数暂时无法确认')
+    expect(body.textContent).not.toMatch(/0 个分组|0 人/)
+  })
+
+  it('declining the choice dialog writes nothing and asks nothing more', async () => {
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+    expect(api.updateDestPolicy).not.toHaveBeenCalled()
     expect(confirmMock).not.toHaveBeenCalled()
   })
 
@@ -141,7 +165,7 @@ describe('the editor', () => {
     const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
     fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: '禁止发信 2' } })
-    expect(save.disabled).toBe(false)
+    await waitFor(() => expect((within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
     expect(within(dialog).getByText('只改名称或说明不会让节点重启')).toBeTruthy()
     vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget: { ...budget, regexps: { used: 300, limit: 256 } } })
     fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '26' } })
@@ -183,7 +207,8 @@ describe('templates', () => {
     const dialog = await screen.findByRole('dialog')
     const add = within(dialog).getByRole('button', { name: '添加' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
-    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('instantiates with the state the admin picked, in the UI language', async () => {
@@ -193,7 +218,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     await waitFor(() => expect(api.instantiateDestTemplate).toHaveBeenCalledWith('bittorrent', 'on', expect.any(String)))
   })
@@ -206,7 +231,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     expect(await within(dialog).findByText(/已有同名策略/)).toBeTruthy()
   })

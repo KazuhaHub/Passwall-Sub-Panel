@@ -1,47 +1,36 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
-import {
-  Alert, Badge, Box, Button, ButtonBase, Divider, IconButton, LinearProgress, Link, ListItemText, ListSubheader, Menu, MenuItem,
-  Popover, Skeleton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup,
-  Tooltip, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
-import FilterListIcon from '@mui/icons-material/FilterList'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestHitItem, type DestHits } from '@/api/accessControl'
-import KpiTile, { KpiGrid } from '@/components/KpiTile'
-import { PagedTableFooter } from '@/components/PagedTableFooter'
-import ToneBadge from '@/components/ToneBadge'
-import UserAutocomplete from '@/components/UserAutocomplete'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
+import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { DataTablePagination } from '@/components/data/DataTablePagination'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { LoadingState } from '@/components/feedback/LoadingState'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { IconWarning } from '@/lib/icons'
 import { useAllNodes, useAllServers } from '@/query/nodes'
 import { useDestHits, useDestPolicies, useDestSettings, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
-import { accessTone, collectingNodeCount, enabledPolicies, isNativeKind } from '@/utils/accessControl'
+import { collectingNodeCount, enabledPolicies, isNativeKind } from '@/utils/accessControl'
 import AddExemptionDialog from '../sheets/AddExemptionDialog'
 import type { SettingsFocus } from '../accessParams'
 import { destErrorText } from '../destErrors'
 import AddExceptionDialog, { type ExceptionTarget } from './AddExceptionDialog'
-import { dayKey, dayRelation, formatClock, formatHourRange } from './hitTime'
+import { R } from './cells'
+import { GroupList } from './GroupList'
+import { HitList } from './HitList'
+import { RecordsFilters } from './RecordsFilters'
 import {
-  parseRecordsParams, recordsApiParams, recordsFilterCount, recordsSearch, REC_DEFAULT_SIZE, REC_DEFAULT_SINCE, REC_MAX_RANGE_DAYS,
-  REC_PAGE_SIZES, relativeSince, type RecGroupBy, type RecordsFilter,
+  parseRecordsParams, recordsApiParams, recordsFilterCount, recordsSearch, REC_PAGE_SIZES, type RecGroupBy, type RecordsFilter,
 } from './recordsParams'
 
-// The shell's top bar is sticky over the page, which scrolls as a whole, so the LIST view's day
-// headings (the page is their scroller) stick just below it. The table view's cell sits in a
-// TableContainer, its own scroll container, where top: 0 is correct and unchanged.
-const STICKY_TOP = 'var(--shell-bar-h, 3.5rem)'
-const R = 'admin:access_control.records.'
-
-// Widths of the details table's fixed columns; the destination takes the rest.
-const COLUMN_WIDTH: Partial<Record<'hour' | 'user' | 'rule' | 'dest' | 'panel' | 'exit', number>> = { hour: 120, user: 170, rule: 230, panel: 110, exit: 120 }
-const COUNT_WIDTH = 80
-const MENU_WIDTH = 52
-const DEST_MIN_WIDTH = 200
-const HOUR = 3_600_000
 const SEARCH_DEBOUNCE_MS = 400
 
 export interface RecordsTabProps {
@@ -54,23 +43,22 @@ export interface RecordsTabProps {
   onGoToPolicies: () => void
 }
 
-/** The destination as a hit names it: host and port. */
-const destOf = (h: Pick<DestHitItem, 'dest' | 'port'>) => (h.port > 0 ? `${h.dest}:${h.port}` : h.dest)
-
 /**
  * THE RECORDS TAB (S12): the hits, one row per account, destination and hour,
  * answering who, on which node, because of which rule, to what, and how many.
- * Filters, the four views and the page are in the URL (`rec_*`, recordsParams);
+ * Filters, the views and the page are in the URL (`rec_*`, recordsParams);
  * the search term is not: it is component state and a request parameter only
  * (R12). The tiles count the whole time/account/node selection whatever the
  * action filter says, so pressing one never zeroes the other.
+ *
+ * Records name accounts and the destinations they reached; the tab is read-only except for the row
+ * menu's exception, whose dialogs carry their own role checks on the server.
  */
 export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettings, onOpenNodes, onGoToPolicies }: RecordsTabProps) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const folded = useMediaQuery(theme.breakpoints.down('md'))
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
+  // The details table folds into cards below 900px, as before; the filter row folds below 600px.
+  const folded = useMediaQuery('(max-width: 899.95px)')
+  const phone = useMediaQuery('(max-width: 599.95px)')
   const scope = useQueryScope()
   const tz = useSiteStore(s => s.timezone)
   const [params, setParams] = useSearchParams()
@@ -98,22 +86,26 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   const { filter, request } = useMemo(() => {
     const f = parseRecordsParams(new URLSearchParams(recKey))
     return { filter: f, request: recordsApiParams(f, { now: Date.now(), retentionDays: retention, q }) }
+    // hourTick moves the request's "now" forward; it is not read inside.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recKey, retention, q, hourTick])
   const hits = useDestHits(scope, request)
 
   const patch = (next: Partial<RecordsFilter>) => setParams(prev => recordsSearch(prev, next), { replace: true })
-  const clear = () => { setTyped(''); setQ(''); setParams(prev => recordsSearch(prev, { user_id: undefined, panel_id: undefined, exit_panel_id: undefined, source: undefined, action: undefined }), { replace: true }) }
+  const clear = () => {
+    setTyped(''); setQ('')
+    setParams(prev => recordsSearch(prev, { user_id: undefined, panel_id: undefined, exit_panel_id: undefined, source: undefined, action: undefined }), { replace: true })
+  }
 
-  const [menu, setMenu] = useState<{ el: HTMLElement; hit: DestHitItem } | null>(null)
   const [exception, setException] = useState<ExceptionTarget | null>(null)
   const [exempting, setExempting] = useState<number | null>(null)
-  const [more, setMore] = useState<HTMLElement | null>(null)
 
   const num = new Intl.NumberFormat(i18n.language)
   const data: DestHits | undefined = hits.data
   // One instant per read: the day headings and "today" are measured from it, not from each render.
   const readAt = hits.dataUpdatedAt
-  const now = useMemo(() => Date.now(), [readAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => Date.now(), [readAt])
   const filterCount = recordsFilterCount(filter) + (q ? 1 : 0)
 
   // ---- labels ----
@@ -127,7 +119,6 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   /** Where a hit left from: the exit server's name, or "this server" when it went out directly. */
   const exitLabel = (h: Pick<DestHitItem, 'exit_panel_id' | 'exit_panel_name'>) =>
     h.exit_panel_id === undefined ? '—' : h.exit_panel_id === 0 ? t(`${R}exit.direct`) : h.exit_panel_name ?? `#${h.exit_panel_id}`
-  const days7 = relativeSince(7, retention)
 
   // ---- the rule filter's options: policies, source rules and the deleted, from what is there and what the range saw ----
   const ruleOptions = useMemo(() => {
@@ -146,7 +137,6 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
     }
     return { policies: [...byId].map(([source, label]) => ({ source, label })), rules, allowlists, deleted }
   }, [policies.data, data?.sources, t])
-  const known = new Set([...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.allowlists, ...ruleOptions.deleted].map(o => o.source))
   // Exit servers exist only where a tunnel does: a node that leaves through another server. Without one, nothing of this shows.
   const nodeList = useAllNodes(scope)
   const exitIds = useMemo(() => [...new Set((nodeList.data ?? []).map(n => n.egress_panel_id ?? 0).filter(id => id > 0))].sort((a, b) => a - b), [nodeList.data])
@@ -158,6 +148,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   // The exit servers the tunnels name, whether or not they record hits; a linked exit that no tunnel names any more stays while it is the filter.
   const exitOptions = filter.exit_panel_id && !exitIds.includes(filter.exit_panel_id) ? [...exitIds, filter.exit_panel_id] : exitIds
   const panels = (status.data?.nodes ?? []).filter(n => isNativeKind(n.kind) && n.state !== 'unsupported_kind')
+  const exitName = (id: number) => serverNames.get(id) ?? panels.find(n => n.panel_id === id)?.panel_name ?? `#${id}`
 
   // ---- state of the page ----
   const deployed = enabledPolicies(policies.data).length
@@ -165,425 +156,105 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
   const rangeDays = /^(\d+)d$/.exec(filter.since)?.[1]
   const olderThanRetention = !!retention && !!rangeDays && Number(rangeDays) > retention
 
-  const tiles = data && (
-    <Box data-testid="hits-tiles">
-      <KpiGrid>
-        {(['block', 'observe'] as const).map(a => (
-          <KpiTile key={a} label={t(`${R}tiles.${a}`)} value={num.format(a === 'block' ? data.summary.block : data.summary.observe)}
-            pressed={filter.action === a} onToggle={() => patch({ action: filter.action === a ? undefined : a })} />
-        ))}
-        <KpiTile label={t(`${R}tiles.users`)} value={num.format(data.summary.users)} />
-      </KpiGrid>
-    </Box>
-  )
-
-  // ---- the controls ----
-  const rangeOptions: { value: string; label: string }[] = [
-    { value: '1h', label: t(`${R}range.h1`) },
-    { value: '24h', label: t(`${R}range.h24`) },
-    ...(!retention || retention > 1 ? [{ value: days7, label: t(`${R}range.days`, { days: days7.replace('d', '') }) }] : []),
-  ]
-  const custom = /^\d{4}-/.test(filter.since)
-  // A link may carry another window ("14d"): it is an option for as long as it is the current one.
-  if (!custom && !rangeOptions.some(o => o.value === filter.since)) {
-    rangeOptions.push({ value: filter.since, label: t(`${R}range.days`, { days: String(rangeDays ?? '') }) })
-  }
-  const rangeValue = custom ? 'custom' : filter.since
-  const setRange = (v: string) => {
-    if (v === 'custom') {
-      // Start from the span of the current range, in browser time, as datetime-local text.
-      const end = Date.now(); const start = end - 24 * HOUR
-      const local = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-      patch({ since: local(start), until: local(end) })
-    } else patch({ since: v, until: undefined })
-  }
-
-  const accountField = <UserAutocomplete value={filter.user_id ?? null} onChange={id => patch({ user_id: id ?? undefined })}
-    label={t(`${R}filters.user`)} width={240} fullWidth={phone} />
-  const ruleField = (
-    <TextField select size="small" label={t(`${R}filters.source`)} value={filter.source && known.has(filter.source) ? filter.source : filter.source ? filter.source : ''}
-      onChange={e => patch({ source: e.target.value || undefined })} sx={{ minWidth: 200 }} fullWidth={phone}
-      slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: (v: unknown) => {
-        if (!v) return t(`${R}filters.source_all`)
-        const all = [...ruleOptions.policies, ...ruleOptions.rules, ...ruleOptions.allowlists]
-        return all.find(o => o.source === v)?.label ?? deletedRule(String(v))
-      } } }}>
-      <MenuItem value="">{t(`${R}filters.source_all`)}</MenuItem>
-      {ruleOptions.policies.length > 0 && <ListSubheader>{t(`${R}filters.group_policies`)}</ListSubheader>}
-      {ruleOptions.policies.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
-      {ruleOptions.rules.length > 0 && <ListSubheader>{t(`${R}filters.group_rules`)}</ListSubheader>}
-      {ruleOptions.rules.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
-      {ruleOptions.allowlists.length > 0 && <ListSubheader>{t(`${R}filters.group_allowlists`)}</ListSubheader>}
-      {ruleOptions.allowlists.map(o => <MenuItem key={o.source} value={o.source}>{o.label}</MenuItem>)}
-      {ruleOptions.deleted.length > 0 && <ListSubheader>{t(`${R}filters.group_deleted`)}</ListSubheader>}
-      {ruleOptions.deleted.map(o => <MenuItem key={o.source} value={o.source}>{deletedRule(o.source)}</MenuItem>)}
-    </TextField>
-  )
-  const panelField = (
-    <TextField select size="small" label={t(`${R}filters.panel`)} value={filter.panel_id ?? ''} onChange={e => patch({ panel_id: Number(e.target.value) || undefined })}
-      sx={{ minWidth: 160 }} fullWidth={phone} slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: (v: unknown) => (!v ? t(`${R}filters.panel_all`) : panels.find(n => n.panel_id === v)?.panel_name ?? `#${String(v)}`) } }}>
-      <MenuItem value="">{t(`${R}filters.panel_all`)}</MenuItem>
-      {panels.map(n => <MenuItem key={n.panel_id} value={n.panel_id}>{n.panel_name}</MenuItem>)}
-    </TextField>
-  )
-  const exitName = (id: number) => serverNames.get(id) ?? panels.find(n => n.panel_id === id)?.panel_name ?? `#${id}`
-  const exitField = (
-    <TextField select size="small" label={t(`${R}filters.exit`)} value={filter.exit_panel_id === undefined ? '' : filter.exit_panel_id}
-      onChange={e => patch({ exit_panel_id: e.target.value === '' ? undefined : Number(e.target.value) })}
-      sx={{ minWidth: 160 }} fullWidth={phone} slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: (v: unknown) => (
-        v === '' ? t(`${R}filters.exit_all`) : v === 0 ? t(`${R}filters.exit_direct`) : exitName(Number(v))
-      ) } }}>
-      <MenuItem value="">{t(`${R}filters.exit_all`)}</MenuItem>
-      <MenuItem value={0}>{t(`${R}filters.exit_direct`)}</MenuItem>
-      {exitOptions.map(id => <MenuItem key={id} value={id}>{exitName(id)}</MenuItem>)}
-    </TextField>
-  )
-  const rangeField = (
-    <TextField select size="small" label={t(`${R}filters.range`)} value={rangeValue} onChange={e => setRange(e.target.value)}
-      sx={{ minWidth: 160 }} fullWidth={phone}>
-      {rangeOptions.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
-      <MenuItem value="custom">{t(`${R}range.custom`)}</MenuItem>
-    </TextField>
-  )
-  const searchField = (
-    <TextField size="small" type="search" label={t(`${R}filters.search`)} value={typed} onChange={e => setTyped(e.target.value)}
-      sx={{ minWidth: 220 }} fullWidth={phone} slotProps={{ htmlInput: { autoComplete: 'off', spellCheck: false } }} />
-  )
-
   const views: RecGroupBy[] = showExit ? ['none', 'site', 'user', 'policy', 'exit'] : ['none', 'site', 'user', 'policy']
+
+  /** The row menu: test the destination, add an exception for it, open the account. */
+  const menuOf = (h: DestHitItem): MoreMenuItem[] => [
+    { id: 'test', label: t(`${R}menu.test`), onSelect: () => onTestDestination(h.dest) },
+    {
+      id: 'exception', label: t(`${R}menu.exception`),
+      // A hit refused by an allowlist group defaults to that group's supplement list; a group that is gone defaults to nothing.
+      onSelect: () => setException({
+        host: h.dest,
+        user: h.upn ? { id: h.user_id, upn: h.upn } : null,
+        group: h.source_kind === 'group' && h.source_name ? { id: Number(h.source.slice(1)), name: h.source_name } : null,
+        groupGone: h.source_kind === 'group' && !h.source_name,
+      }),
+    },
+    { id: 'open_user', label: t(`${R}menu.open_user`), disabled: !h.upn, onSelect: () => onOpenUser(h.user_id) },
+  ]
 
   // ---- the list ----
   const grouped = filter.group_by !== 'none'
   const refusalCode = hits.isError ? destErrorOf(hits.error)?.code : undefined
   const refusal = refusalCode === 'dest_hits_range' || refusalCode === 'dest_hits_invalid'
-  let body: React.ReactNode
+  let body: ReactNode
   if (hits.isPending) {
-    body = <Box sx={{ display: 'grid', gap: 1 }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} variant="rounded" height={48} />)}</Box>
+    body = <LoadingState />
   } else if (hits.isError && (!data || refusal)) {
     // A refused range or filter is the admin's to fix, and the page kept from the last read would hide it: say it either way.
     body = isDestUnavailable(hits.error)
-      ? <Alert severity="info">{t('admin:access_control.unwired')}</Alert>
+      ? <Alert>{t('admin:access_control.unwired')}</Alert>
       : refusal
-        ? <Alert severity="error">{destErrorText(t, hits.error)}</Alert>
-        : <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void hits.refetch()}>{t('admin:access_control.retry')}</Button>}>{t(`${R}read_failed`)}</Alert>
+        ? <Alert variant="destructive">{destErrorText(t, hits.error)}</Alert>
+        : <ErrorState compact title={t(`${R}read_failed`)} reason={hits.error} retry={() => hits.refetch()} />
   } else if (data && data.items.length === 0) {
-    const empty = (text: string, action?: React.ReactNode) => (
-      <Box sx={{ p: 2, borderRadius: 2, bgcolor: md.surfaceContainerHigh, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{text}</Typography>
-        {action}
-      </Box>
-    )
-    if (deployed === 0 && filterCount === 0) body = empty(t(`${R}empty.no_policies`), <Button size="small" onClick={onGoToPolicies}>{t(`${R}empty.to_policies`)}</Button>)
-    else if (recording === 0 && status.data) body = empty(t(`${R}empty.no_collect`), <Button size="small" onClick={onOpenNodes}>{t(`${R}empty.nodes`)}</Button>)
-    else if (filterCount > 0) body = empty(t(`${R}empty.filtered`), <Button size="small" onClick={clear}>{t(`${R}empty.clear`)}</Button>)
+    const empty = (title: string, action?: ReactNode) => <EmptyState compact title={title} action={action} />
+    if (deployed === 0 && filterCount === 0) body = empty(t(`${R}empty.no_policies`), <Button size="sm" variant="outline" onClick={onGoToPolicies}>{t(`${R}empty.to_policies`)}</Button>)
+    else if (recording === 0 && status.data) body = empty(t(`${R}empty.no_collect`), <Button size="sm" variant="outline" onClick={onOpenNodes}>{t(`${R}empty.nodes`)}</Button>)
+    else if (filterCount > 0) body = empty(t(`${R}empty.filtered`), <Button size="sm" variant="outline" onClick={clear}>{t(`${R}empty.clear`)}</Button>)
     else if (olderThanRetention) body = empty(t(`${R}empty.older`, { days: retention }))
     else body = empty(t(`${R}empty.none`))
   } else if (data) {
     body = grouped
-      ? <GroupList data={data} view={filter.group_by} folded={folded} num={num} userName={userName} ruleName={ruleName} exitLabel={exitLabel} onOpenUser={onOpenUser}
-        onPickSource={s => patch({ source: s })} />
+      ? <GroupList data={data} view={filter.group_by} folded={folded} num={num} userName={userName} ruleName={ruleName} exitLabel={exitLabel}
+        onOpenUser={onOpenUser} onPickSource={s => patch({ source: s })} />
       : <HitList data={data} folded={folded} tz={tz} now={now} num={num} userName={userName} ruleName={ruleName} exitLabel={exitLabel} showExit={showExit}
-        onOpenUser={onOpenUser} onPickSource={s => patch({ source: s })} onMenu={(el, hit) => setMenu({ el, hit })} />
+        onOpenUser={onOpenUser} onPickSource={s => patch({ source: s })} menuOf={menuOf} />
   }
 
   const hideTiles = !data || (data.items.length === 0 && (deployed === 0 || (recording === 0 && !!status.data)))
   return (
-    <Box>
-      {hits.isPending ? <Skeleton variant="rounded" height={72} sx={{ mb: 1.5 }} /> : !hideTiles && tiles}
-
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 1 }}>
-        <Box sx={{ flex: phone ? '1 1 100%' : '0 0 auto' }}>{accountField}</Box>
-        <Box sx={{ flex: phone ? '1 1 100%' : '0 0 auto' }}>{rangeField}</Box>
-        {phone
-          ? (
-            <>
-              <Badge color="primary" badgeContent={filterCount} invisible={filterCount === 0}>
-                <Button size="small" variant="outlined" startIcon={<FilterListIcon />} onClick={e => setMore(e.currentTarget)}>{t(`${R}filters.more`)}</Button>
-              </Badge>
-              <Popover open={more !== null} anchorEl={more} onClose={() => setMore(null)} slotProps={{ paper: { sx: { p: 2, display: 'grid', gap: 1.5, width: 300, maxWidth: '90vw' } } }}>
-                {ruleField}{panelField}{showExit && exitField}{searchField}
-              </Popover>
-            </>
-          )
-          : <>{ruleField}{panelField}{showExit && exitField}{searchField}</>}
-      </Box>
-      {custom && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1, alignItems: 'center' }}>
-          <TextField size="small" type="datetime-local" label={t(`${R}range.since`)} value={filter.since.slice(0, 16)}
-            onChange={e => patch({ since: e.target.value || REC_DEFAULT_SINCE, until: filter.until })} slotProps={{ inputLabel: { shrink: true } }} />
-          <TextField size="small" type="datetime-local" label={t(`${R}range.until`)} value={(filter.until ?? '').slice(0, 16)}
-            onChange={e => patch({ since: filter.since, until: e.target.value || undefined })} slotProps={{ inputLabel: { shrink: true } }} />
-          <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t(`${R}range.custom_note`, { days: REC_MAX_RANGE_DAYS })}</Typography>
-        </Box>
+    <div>
+      {!hits.isPending && data && !hideTiles && (
+        <div data-testid="hits-tiles">
+          <KpiGrid className="mt-0">
+            {(['block', 'observe'] as const).map(a => (
+              <KpiTile key={a} label={t(`${R}tiles.${a}`)} value={num.format(a === 'block' ? data.summary.block : data.summary.observe)}
+                pressed={filter.action === a} onToggle={() => patch({ action: filter.action === a ? undefined : a })} />
+            ))}
+            <KpiTile label={t(`${R}tiles.users`)} value={num.format(data.summary.users)} />
+          </KpiGrid>
+        </div>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${R}view.label`)}</Typography>
-          <ToggleButtonGroup exclusive size="small" value={filter.group_by} aria-label={t(`${R}view.label`)} onChange={(_, v: RecGroupBy | null) => { if (v) patch({ group_by: v }) }}>
-            {views.map(v => <ToggleButton key={v} value={v}>{t(`${R}view.${v}`)}</ToggleButton>)}
-          </ToggleButtonGroup>
-        </Box>
+      <RecordsFilters filter={filter} patch={patch} typed={typed} onTyped={setTyped} retention={retention} ruleOptions={ruleOptions}
+        deletedRule={deletedRule} panels={panels} showExit={showExit} exitOptions={exitOptions} exitName={exitName} filterCount={filterCount} phone={phone} />
+
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">{t(`${R}view.label`)}</span>
+          {/* Five views do not fit a phone's width: the control scrolls inside itself instead of widening the page. */}
+          <SegmentedControl<RecGroupBy> className="overflow-x-auto" aria-label={t(`${R}view.label`)} value={filter.group_by} onChange={v => patch({ group_by: v })}
+            options={views.map(v => ({ value: v, label: t(`${R}view.${v}`) }))} />
+        </div>
         {data && data.items.length > 0 && (
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
+          <span className="text-sm text-muted-foreground">
             {grouped ? t(`${R}count.grouped`, { n: num.format(data.total) }) : t(`${R}count.detail`, { n: num.format(data.total) })}
-          </Typography>
+          </span>
         )}
-      </Box>
+      </div>
       {data && data.dropped_in_range > 0 && (
-        <Box data-testid="hits-dropped" sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1 }}>
-          <WarningAmberIcon aria-hidden sx={{ fontSize: 16, color: theme.palette.mode === 'dark' ? theme.palette.warning.light : theme.palette.warning.dark }} />
-          <Typography variant="body2" sx={{ color: md.onSurface }}>{t(`${R}dropped`, { n: num.format(data.dropped_in_range) })}</Typography>
-        </Box>
+        <p data-testid="hits-dropped" className="mb-2 flex items-center gap-1.5 text-sm">
+          <IconWarning aria-hidden className="size-4 text-warning-ink" />{t(`${R}dropped`, { n: num.format(data.dropped_in_range) })}
+        </p>
       )}
 
       {/* A fixed slot, so a re-read does not move the table. */}
-      <Box sx={{ height: 4, mb: 0.5 }}>{hits.isFetching && !hits.isPending && <LinearProgress />}</Box>
+      <div aria-hidden className="mb-1 h-1 overflow-hidden rounded-full">{hits.isFetching && !hits.isPending && <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />}</div>
       {body}
 
       {data && data.items.length > 0 && (
-        <PagedTableFooter total={data.total} page={filter.page} pageSize={filter.page_size} rowsPerPageOptions={[...REC_PAGE_SIZES]}
-          onPageChange={n => patch({ page: n })} onPageSizeChange={n => patch({ page_size: n === REC_DEFAULT_SIZE ? REC_DEFAULT_SIZE : n })} />
+        <DataTablePagination total={data.total} page={filter.page} pageSize={filter.page_size} shown={data.items.length} pageSizeOptions={REC_PAGE_SIZES}
+          onPageChange={n => patch({ page: n })} onPageSizeChange={n => patch({ page_size: n })} />
       )}
-      <Typography variant="body2" sx={{ mt: 1, color: md.onSurfaceVariant }}>
+      <p className="mt-2 text-sm text-muted-foreground">
         {retention ? t(`${R}retention`, { days: retention }) : ''}{' '}
-        <Link component="button" type="button" underline="always" onClick={() => onOpenSettings('retention')} sx={{ font: 'inherit', verticalAlign: 'baseline' }}>
-          {t(`${R}change`)}
-        </Link>
-      </Typography>
+        <Button type="button" variant="link" className="h-auto p-0 align-baseline" onClick={() => onOpenSettings('retention')}>{t(`${R}change`)}</Button>
+      </p>
 
-      <Menu anchorEl={menu?.el} open={menu !== null} onClose={() => setMenu(null)}>
-        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); onTestDestination(h.dest) }}><ListItemText>{t(`${R}menu.test`)}</ListItemText></MenuItem>
-        <MenuItem onClick={() => { const h = menu!.hit; setMenu(null); setException({ host: h.dest, user: h.upn ? { id: h.user_id, upn: h.upn } : null, group: h.source_kind === 'group' && h.source_name ? { id: Number(h.source.slice(1)), name: h.source_name } : null, groupGone: h.source_kind === 'group' && !h.source_name }) }}>
-          <ListItemText>{t(`${R}menu.exception`)}</ListItemText>
-        </MenuItem>
-        <Divider />
-        <MenuItem disabled={!menu?.hit.upn} onClick={() => { const h = menu!.hit; setMenu(null); onOpenUser(h.user_id) }}><ListItemText>{t(`${R}menu.open_user`)}</ListItemText></MenuItem>
-      </Menu>
       <AddExceptionDialog target={exception} onClose={() => setException(null)} onExempt={id => setExempting(id)} />
       <AddExemptionDialog open={exempting !== null} onClose={() => setExempting(null)} lockedUserId={exempting ?? undefined} />
-    </Box>
-  )
-}
-
-type Namers = {
-  num: Intl.NumberFormat
-  userName: (h: Pick<DestHitItem, 'user_id' | 'upn'>) => string
-  ruleName: (h: Pick<DestHitItem, 'source' | 'source_name' | 'source_kind'>) => string | null
-  exitLabel: (h: Pick<DestHitItem, 'exit_panel_id' | 'exit_panel_name'>) => string
-  onOpenUser: (id: number) => void
-  onPickSource: (source: string) => void
-}
-
-/** The action a hit records, in the closed table's words: a block, or what a report-only rule would have blocked. */
-function ActionBadge({ action }: { action: DestHitItem['action'] }) {
-  const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  return action === 'observe'
-    ? <ToneBadge tone={accessTone(theme, 'would_deny')} label={t(`${R}rule.would_block`)} testId="hit-action" data="observe" />
-    : <ToneBadge tone={accessTone(theme, 'block')} label={t(`${R}rule.blocked`)} testId="hit-action" data="block" />
-}
-
-function RuleLink({ hit, ruleName, onPickSource }: { hit: DestHitItem } & Pick<Namers, 'ruleName' | 'onPickSource'>) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
-  const name = ruleName(hit)
-  if (name === null) return <Typography component="span" sx={{ fontSize: 13, fontStyle: 'italic', color: md.onSurfaceVariant }}>{t(`${R}rule.${hit.source.startsWith('s') ? 'deleted_source_rule' : 'deleted_policy'}`)}</Typography>
-  return (
-    <ButtonBase onClick={() => onPickSource(hit.source)} aria-label={t(`${R}rule.filter_by`, { name })}
-      sx={{ fontSize: 13, textAlign: 'start', borderRadius: 1, overflowWrap: 'anywhere', '&:hover': { textDecoration: 'underline' }, '&:focus-visible': { outline: `2px solid ${md.primary}`, outlineOffset: 2 } }}>
-      <span>{name}</span>
-    </ButtonBase>
-  )
-}
-
-function UserCell({ hit, userName, onOpenUser }: { hit: Pick<DestHitItem, 'user_id' | 'upn'> } & Pick<Namers, 'userName' | 'onOpenUser'>) {
-  const md = useTheme().palette.md
-  if (!hit.upn) return <Typography component="span" sx={{ fontSize: 13, fontStyle: 'italic', color: md.onSurfaceVariant }}>{userName(hit)}</Typography>
-  return (
-    <ButtonBase onClick={() => onOpenUser(hit.user_id)} aria-label={hit.upn}
-      sx={{ fontSize: 13, textAlign: 'start', borderRadius: 1, overflowWrap: 'anywhere', '&:hover': { textDecoration: 'underline' }, '&:focus-visible': { outline: `2px solid ${md.primary}`, outlineOffset: 2 } }}>
-      <span>{hit.upn}</span>
-    </ButtonBase>
-  )
-}
-
-function Dest({ hit }: { hit: DestHitItem }) {
-  const md = useTheme().palette.md
-  const text = destOf(hit)
-  return (
-    <Tooltip title={text}>
-      <Typography data-testid="hit-dest" component="span" noWrap sx={{ display: 'block', fontFamily: 'ui-monospace, monospace', fontSize: 13, color: md.onSurface, minWidth: 0 }}>{text}</Typography>
-    </Tooltip>
-  )
-}
-
-function HitList({ data, folded, tz, now, num, userName, ruleName, exitLabel, showExit, onOpenUser, onPickSource, onMenu }: Namers & {
-  data: DestHits
-  showExit: boolean
-  folded: boolean
-  tz: string
-  now: number
-  onMenu: (el: HTMLElement, hit: DestHitItem) => void
-}) {
-  const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  // Consecutive rows of one panel-zone day sit under one heading.
-  const groups = useMemo(() => {
-    const out: { day: string; ms: number; rows: DestHitItem[] }[] = []
-    for (const h of data.items) {
-      const day = dayKey(h.hour_ms, tz)
-      const last = out.at(-1)
-      if (last && last.day === day) last.rows.push(h)
-      else out.push({ day, ms: h.hour_ms, rows: [h] })
-    }
-    return out
-  }, [data.items, tz])
-  const dayLabel = (ms: number) => {
-    const rel = dayRelation(ms, now, tz)
-    if (rel !== 'date') return t(`${R}day.${rel}`)
-    try {
-      return new Intl.DateTimeFormat(i18n.language, { timeZone: tz || undefined, year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(ms))
-    } catch {
-      return dayKey(ms, tz)
-    }
-  }
-  const hover = (h: DestHitItem) => t(`${R}hover.first_last`, { first: formatClock(h.first_ms, tz), last: formatClock(h.last_ms, tz) })
-  const menuButton = (h: DestHitItem) => (
-    <IconButton size="small" aria-label={t(`${R}menu.label`)} aria-haspopup="menu" onClick={e => onMenu(e.currentTarget, h)} sx={{ width: 44, height: 44 }}>
-      <MoreVertIcon />
-    </IconButton>
-  )
-  const hidden = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as const
-
-  if (folded) {
-    return (
-      <Box sx={{ display: 'grid', gap: 1 }}>
-        {groups.map(g => (
-          <Fragment key={g.day + g.ms}>
-            <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, position: 'sticky', top: STICKY_TOP, bgcolor: md.surface, py: 0.5 }}>{dayLabel(g.ms)}</Typography>
-            {g.rows.map((h, i) => (
-              <Box key={i} data-testid="hit-row" sx={{ p: 1.5, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, minWidth: 0 }}>
-                <Box data-line sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}><Box component="span" sx={hidden}>{t(`${R}cols.user`)}</Box><UserCell hit={h} userName={userName} onOpenUser={onOpenUser} /></Box>
-                  <Typography component="span" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}><Box component="span" sx={hidden}>{t(`${R}cols.count`)}</Box>{num.format(h.count)}</Typography>
-                  {menuButton(h)}
-                </Box>
-                <Box data-line sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexWrap: 'wrap' }}>
-                  <ActionBadge action={h.action} />
-                  <RuleLink hit={h} ruleName={ruleName} onPickSource={onPickSource} />
-                  <Box sx={{ flex: '1 1 160px', minWidth: 0 }}><Dest hit={h} /></Box>
-                </Box>
-                <Typography data-line variant="body2" data-testid="hit-time" title={hover(h)} sx={{ color: md.onSurfaceVariant }}>
-                  {formatHourRange(h.hour_ms, tz)} · {h.panel_name ?? '—'}{showExit && <span data-testid="hit-exit"> → {exitLabel(h)}</span>}
-                </Typography>
-              </Box>
-            ))}
-          </Fragment>
-        ))}
-      </Box>
-    )
-  }
-
-  const columns = showExit ? ['hour', 'user', 'rule', 'dest', 'panel', 'exit'] as const : ['hour', 'user', 'rule', 'dest', 'panel'] as const
-  // A fixed layout gives the auto destination column only what the fixed
-  // columns leave over, so the table is never narrower than all of them plus
-  // room for a destination; a narrower container scrolls instead.
-  const fixedWidth = columns.reduce((sum, c) => sum + (COLUMN_WIDTH[c] ?? 0), 0) + COUNT_WIDTH + MENU_WIDTH
-  return (
-    <TableContainer>
-      <Table size="small" aria-label={t(`${R}title`)} sx={{ tableLayout: 'fixed', minWidth: fixedWidth + DEST_MIN_WIDTH }}>
-        <TableHead>
-          <TableRow>
-            {columns.map(c => (
-              <TableCell key={c} sx={{ width: COLUMN_WIDTH[c] ?? 'auto' }}>{t(`${R}cols.${c}`)}</TableCell>
-            ))}
-            <TableCell align="right" sx={{ width: COUNT_WIDTH }}>{t(`${R}cols.count`)}</TableCell>
-            <TableCell sx={{ width: MENU_WIDTH }}><Box component="span" sx={hidden}>{t(`${R}menu.label`)}</Box></TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {groups.map(g => (
-            <Fragment key={g.day + g.ms}>
-              <TableRow>
-                <TableCell colSpan={showExit ? 8 : 7} sx={{ position: 'sticky', top: 0, bgcolor: md.surface, py: 0.5 }}>
-                  <Typography component="h3" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant }}>{dayLabel(g.ms)}</Typography>
-                </TableCell>
-              </TableRow>
-              {g.rows.map((h, i) => (
-                <TableRow key={i} data-testid="hit-row" hover>
-                  <TableCell sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    <span data-testid="hit-time" title={hover(h)}>{formatHourRange(h.hour_ms, tz)}</span>
-                  </TableCell>
-                  <TableCell sx={{ overflowWrap: 'anywhere' }}><UserCell hit={h} userName={userName} onOpenUser={onOpenUser} /></TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-                      <ActionBadge action={h.action} />
-                      <RuleLink hit={h} ruleName={ruleName} onPickSource={onPickSource} />
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ minWidth: 0 }}><Dest hit={h} /></TableCell>
-                  <TableCell sx={{ overflowWrap: 'anywhere' }}>{h.panel_name ?? '—'}</TableCell>
-                  {showExit && <TableCell data-testid="hit-exit" sx={{ overflowWrap: 'anywhere' }}>{exitLabel(h)}</TableCell>}
-                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{num.format(h.count)}</TableCell>
-                  <TableCell padding="none">{menuButton(h)}</TableCell>
-                </TableRow>
-              ))}
-            </Fragment>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  )
-}
-
-/**
- * The folded views: one row per destination, account or policy with its count
- * as a bar (the longest is the whole width), and its last hit. The API gives
- * the sum and the span of the fold, not how many accounts or policies are
- * behind it, so there is no such column.
- */
-function GroupList({ data, view, folded, num, userName, ruleName, exitLabel, onOpenUser, onPickSource }: Namers & { data: DestHits; view: RecGroupBy; folded: boolean }) {
-  const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const tz = useSiteStore(s => s.timezone)
-  const max = Math.max(1, ...data.items.map(i => i.count))
-  const last = (ms: number) => {
-    try {
-      return new Intl.DateTimeFormat(i18n.language, { timeZone: tz || undefined, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))
-    } catch { return '' }
-  }
-  const objectCell = (h: DestHitItem) => {
-    if (view === 'site') return <Typography component="span" noWrap sx={{ fontFamily: 'ui-monospace, monospace', fontSize: 13 }}>{h.dest}</Typography>
-    if (view === 'user') return <UserCell hit={h} userName={userName} onOpenUser={onOpenUser} />
-    if (view === 'exit') return <Typography component="span" data-testid="hit-exit" noWrap sx={{ fontSize: 13 }}>{exitLabel(h)}</Typography>
-    return <RuleLink hit={h} ruleName={ruleName} onPickSource={onPickSource} />
-  }
-  return (
-    <Box role="table" aria-label={t(`${R}title`)} sx={{ display: 'grid' }}>
-      {!folded && (
-        <Box role="row" sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 2fr) 120px', gap: 1.5, px: 1.5, py: 1, borderBottom: `1px solid ${md.outlineVariant}`, color: md.onSurfaceVariant, fontSize: 13 }}>
-          <span role="columnheader">{t(`${R}cols.object`)}</span><span role="columnheader">{t(`${R}cols.count`)}</span><span role="columnheader">{t(`${R}cols.last`)}</span>
-        </Box>
-      )}
-      {data.items.map((h, i) => (
-        <Box key={i} role="row" data-testid="hit-group-row" sx={{
-          display: 'grid', gridTemplateColumns: folded ? 'minmax(0, 1fr)' : 'minmax(0, 1.4fr) minmax(0, 2fr) 120px', gap: folded ? 0.5 : 1.5, alignItems: 'center',
-          px: 1.5, py: 1, borderBottom: `1px solid ${md.outlineVariant}`, minWidth: 0,
-        }}>
-          <Box role="cell" sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
-            {objectCell(h)}
-            <ActionBadge action={h.action} />
-          </Box>
-          <Box role="cell" sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-            <Box data-testid="hit-bar" aria-hidden sx={{ height: 8, borderRadius: 4, bgcolor: md.primary, width: `${Math.max(2, (h.count / max) * 60)}%`, flex: '0 0 auto' }} />
-            <Typography component="span" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, fontWeight: 600 }}>{num.format(h.count)}</Typography>
-          </Box>
-          <Typography role="cell" variant="body2" sx={{ color: md.onSurfaceVariant }}>{last(h.last_ms)}</Typography>
-        </Box>
-      ))}
-    </Box>
+    </div>
   )
 }

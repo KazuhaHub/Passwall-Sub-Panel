@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormHelperText, TextField, ToggleButton, ToggleButtonGroup,
-  Typography, useMediaQuery, useTheme,
-} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, type DestExemption } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import UserAutocomplete from '@/components/UserAutocomplete'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestStatus, useSaveDestExemption } from '@/query/accessControl'
@@ -41,8 +42,6 @@ export default function AddExemptionDialog({ open, onClose, lockedUserId, existi
   existing?: DestExemption
 }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const full = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const save = useSaveDestExemption(scope)
   const status = useDestStatus(scope, { enabled: open })
@@ -102,46 +101,44 @@ export default function AddExemptionDialog({ open, onClose, lockedUserId, existi
   const minutes = applyMinutes(status.data)
   const minutesText = minutes === null ? t('admin:access_control.confirm.minutes_unknown') : t('admin:access_control.confirm.minutes', { count: minutes })
 
+  const lockedName = existing?.upn ?? picked.data?.upn ?? `#${lockedUserId}`
   return (
-    <Dialog open={open} onClose={close} fullWidth maxWidth="sm" fullScreen={full}
-      slotProps={{ paper: { sx: { bgcolor: theme.palette.md.surfaceContainerHigh, borderRadius: full ? 0 : 3 } } }}>
-      <DialogTitle>{t(existing ? `${D}title_edit` : `${D}title_add`)}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 2, pt: '8px !important' }}>
-        <Box>
+    <Dialog open={open} onOpenChange={next => { if (!next) close() }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader><DialogTitle>{t(existing ? `${D}title_edit` : `${D}title_add`)}</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
           {existing || lockedUserId !== undefined
-            ? <Typography sx={{ fontWeight: 600 }}>{existing?.upn ?? picked.data?.upn ?? `#${lockedUserId}`}</Typography>
+            ? <p className="font-semibold">{lockedName}</p>
             : (
-              <UserAutocomplete value={userId} onChange={id => { setUserId(id); setExists(false) }} label={t(`${D}user`)} width={400} />
+              <Field label={t(`${D}user`)} required error={exists ? t(`${D}exists`) : touched && userBad ? t(`${D}user_required`) : undefined}>
+                {() => <UserAutocomplete value={userId} onChange={id => { setUserId(id); setExists(false) }} label={t(`${D}user`)} fullWidth />}
+              </Field>
             )}
-          {(exists || (touched && userBad)) && (
-            <FormHelperText error>{exists ? t(`${D}exists`) : t(`${D}user_required`)}</FormHelperText>
-          )}
-        </Box>
-        <TextField label={t(`${D}reason`)} value={reason} required fullWidth
-          onChange={e => setReason(e.target.value.slice(0, MAX_REASON))}
-          error={touched && reasonBad} helperText={touched && reasonBad ? t(`${D}reason_required`) : `${reason.length} / ${MAX_REASON}`} />
-        <Box>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>{t(`${D}expiry`)}</Typography>
-          <ToggleButtonGroup exclusive size="small" value={expiry} fullWidth={full} aria-label={t(`${D}expiry`)}
-            onChange={(_, v: Expiry | null) => { if (v) setExpiry(v) }}>
-            <ToggleButton value="forever">{t(`${D}forever`)}</ToggleButton>
-            <ToggleButton value="h24">{t(`${D}h24`)}</ToggleButton>
-            <ToggleButton value="d7">{t(`${D}d7`)}</ToggleButton>
-            <ToggleButton value="custom">{t(`${D}custom`)}</ToggleButton>
-          </ToggleButtonGroup>
-          {expiry === 'h24' && <FormHelperText>{t(`${D}h24_note`)}</FormHelperText>}
+          {/* An account that is already exempt is also told on the pinned form, which has no picker to hang it on. */}
+          {(existing || lockedUserId !== undefined) && exists && <p role="alert" className="text-xs text-destructive">{t(`${D}exists`)}</p>}
+          <Field label={t(`${D}reason`)} required hint={`${reason.length} / ${MAX_REASON}`}
+            error={touched && reasonBad ? t(`${D}reason_required`) : undefined}>
+            <Input value={reason} onChange={e => setReason(e.target.value.slice(0, MAX_REASON))} />
+          </Field>
+          <Field label={t(`${D}expiry`)} hint={expiry === 'h24' ? t(`${D}h24_note`) : undefined}>
+            {p => <SegmentedControl<Expiry> value={expiry} onChange={setExpiry} aria-labelledby={p.labelId} className="w-full [&>button]:min-w-0 [&>button]:flex-1 [&>button]:px-1.5"
+              options={[
+                { value: 'forever', label: t(`${D}forever`) }, { value: 'h24', label: t(`${D}h24`) },
+                { value: 'd7', label: t(`${D}d7`) }, { value: 'custom', label: t(`${D}custom`) },
+              ]} />}
+          </Field>
           {expiry === 'custom' && (
-            <TextField type="datetime-local" sx={{ mt: 1 }} fullWidth label={t(`${D}custom_label`)} value={custom}
-              onChange={e => setCustom(e.target.value)} slotProps={{ inputLabel: { shrink: true } }}
-              error={customBad && (touched || custom !== '')} helperText={customBad && custom !== '' ? t(`${D}custom_past`) : undefined} />
+            <Field label={t(`${D}custom_label`)} error={customBad && custom !== '' ? t(`${D}custom_past`) : undefined}>
+              <Input type="datetime-local" value={custom} onChange={e => setCustom(e.target.value)} />
+            </Field>
           )}
-        </Box>
-        <Typography variant="body2" sx={{ color: theme.palette.md.onSurfaceVariant }}>{t(`${D}apply_note`, { minutes: minutesText })}</Typography>
+          <p className="text-sm text-muted-foreground">{t(`${D}apply_note`, { minutes: minutesText })}</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={close}>{t(`${D}cancel`)}</Button>
+          <AsyncButton onClick={submit}>{t(existing ? `${D}save_edit` : `${D}save`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={close}>{t(`${D}cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={submit}>{t(existing ? `${D}save_edit` : `${D}save`)}</AsyncButton>
-      </DialogActions>
     </Dialog>
   )
 }

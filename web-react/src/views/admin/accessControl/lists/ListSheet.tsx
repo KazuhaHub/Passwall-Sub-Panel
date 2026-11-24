@@ -1,19 +1,22 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Link,
-  Skeleton, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
-import CloseIcon from '@mui/icons-material/Close'
 import { useTranslation } from 'react-i18next'
 
 import {
   destErrorOf, previewDestList, type DestListInput, type DestListKind, type DestListPreview, type DestParseReport,
 } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
+import { AsyncButton } from '@/components/common/AsyncButton'
 import type { CodeEditorHandle } from '@/components/CodeEditor'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { DetailSheet } from '@/components/data/DetailSheet'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { LevelAlert } from '@/components/LevelAlert'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
+import { IconSpinner } from '@/lib/icons'
 import { isRouteImpactCancelled } from '@/utils/destRouteImpact'
 import { useCreateDestList, useDestList, useDestLists, useDestPolicies, useDestStatus, useSaveDestList } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -24,11 +27,12 @@ import GeositeCategoryPicker from './GeositeCategoryPicker'
 import { reasonText } from './listStatus'
 import ParseReport from './ParseReport'
 
-// Lazy: the editor pulls CodeMirror in, and only an open dialog needs it.
+// Lazy: the editor pulls CodeMirror in, and only an open sheet needs it.
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const L = 'admin:access_control.lists.'
 const PREVIEW_DEBOUNCE_MS = 500
+const MONO = 'font-mono text-[13px]'
 
 interface Draft { kind: DestListKind; name: string; text: string; url: string; category: string; attrs: string[] }
 const BLANK: Draft = { kind: 'custom', name: '', text: '', url: '', category: '', attrs: [] }
@@ -36,13 +40,14 @@ const BLANK: Draft = { kind: 'custom', name: '', text: '', url: '', category: ''
 interface ParseLine { line: number; text: string; code: string; detail?: string }
 
 /**
- * NEW AND EDIT LIST (S7). Before saving it shows how the list will be read:
- * what is kept, rewritten and left out, and why. A custom list is previewed
- * as the text pauses (the preview writes nothing); a remote one only on [Test
- * fetch], because that really fetches; a community category by its picker.
- * The type is locked when editing. Closing with unsaved input asks first.
+ * NEW AND EDIT LIST (S7). A list is a long document with a live preview, so it is edited in a wide sheet rather
+ * than a dialog. Before saving it shows how the list will be read: what is kept, rewritten and left out, and why.
+ * A custom list is previewed as the text pauses (the preview writes nothing); a remote one only on [Test fetch],
+ * because that really fetches; a community category by its picker. The footer says what saving does to the nodes
+ * (nothing, or a restart of N nodes) beside the Save button. The type is locked when editing. Closing with unsaved
+ * input asks first, with focus on Cancel.
  */
-export default function ListDialog({ open, onClose, editId, initialKind = 'custom', onSaved }: {
+export default function ListSheet({ open, onClose, editId, initialKind = 'custom', onSaved }: {
   open: boolean
   onClose: () => void
   editId: number | null
@@ -51,9 +56,6 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
   onSaved: (id: number) => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const editing = editId !== null
   const detail = useDestList(scope, editId, { text: true, enabled: open && editing })
@@ -82,7 +84,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
   // Only the field the user has left (or a save attempt) is judged: typing in the editor must not mark the name.
   const [nameTouched, setNameTouched] = useState(false)
 
-  // A new dialog starts blank, in the kind it was opened for.
+  // A new sheet starts blank, in the kind it was opened for.
   useEffect(() => {
     if (!open || editing) return
     const blank = { ...BLANK, kind: initialKind }
@@ -106,7 +108,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
   }, [open, editing, detail.data, reload, seededFor])
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
-  const guard = useDirtyClose(dirty, discardChangesConfirm(t))
+  const guard = useDirtyClose(dirty, { ...discardChangesConfirm(t), initialFocus: 'cancel' })
   const requestClose = () => guard(onClose)
   const set = (patch: Partial<Draft>) => { setDraft(d => ({ ...d, ...patch })) }
 
@@ -159,7 +161,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
   const switchKind = async (next: DestListKind) => {
     if (next === draft.kind || editing) return
     const hasInput = draft.text.trim() !== '' || draft.url.trim() !== '' || draft.category !== ''
-    if (hasInput && !(await confirm(switchListTypeConfirm(t)))) return
+    if (hasInput && !(await confirm({ ...switchListTypeConfirm(t), initialFocus: 'cancel' }))) return
     setDraft(d => ({ ...BLANK, kind: next, name: d.name }))
     setPreview(null); setPreviewError(null); setParseLines([]); setFetchError(null)
   }
@@ -172,6 +174,7 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
 
   const submit = async () => {
     setNameTouched(true); setSaveError(null); setFieldErrors({})
+    // The body is exactly what the old dialog sent; the server reads `side` only for custom and remote lists.
     const input: DestListInput = draft.kind === 'custom'
       ? { kind: 'custom', side: 'dest', name: draft.name.trim(), text: draft.text }
       : draft.kind === 'remote'
@@ -222,81 +225,94 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
   }
 
   const report: DestParseReport | null = preview?.report ?? null
-  const mono = { fontFamily: 'ui-monospace, monospace', fontSize: 13 }
   const title = editing
     ? t(`${L}dialog.title_edit`, { name: baseline.name || detail.data?.list.name || '' })
     : t(`${L}dialog.title_new`)
 
   return (
-    <Dialog open={open} onClose={requestClose} fullWidth maxWidth="md" fullScreen={fullScreen}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: fullScreen ? 0 : 3 } } }}>
-      <DialogTitle sx={{ pr: 6 }}>
-        {title}
-        <IconButton aria-label={t(`${L}dialog.close`)} onClick={requestClose} sx={{ position: 'absolute', right: 8, top: 8 }}>
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 2, alignContent: 'start' }}>
-        {editing && detail.isPending && <Skeleton variant="rounded" height={160} />}
-        {editing && detail.isError && <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void detail.refetch()}>{t('admin:access_control.retry')}</Button>}>{t(`${L}dialog.load_failed`)}</Alert>}
-        {stale && (
-          <Alert severity="warning" action={
-            <Button color="inherit" size="small" onClick={() => { setStale(false); setReload(n => n + 1); void detail.refetch() }}>
-              {t(`${L}dialog.load_latest`)}
-            </Button>}>
-            {t(`${L}dialog.stale`)}
-          </Alert>
+    <DetailSheet open={open} onClose={requestClose} title={title} className="data-[side=right]:sm:w-[44rem] data-[side=right]:sm:max-w-[44rem]"
+      footer={(
+        <div className="flex w-full flex-col gap-3">
+          <p className="text-sm text-muted-foreground" data-testid="list-save-effect">{footer}</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={requestClose}>{t(`${L}dialog.cancel`)}</Button>
+            <AsyncButton disabled={!canSave} onClick={submit}>{t(`${L}dialog.save`)}</AsyncButton>
+          </div>
+        </div>
+      )}>
+      <div className="flex flex-col gap-4">
+        {editing && detail.isPending && <Skeleton className="h-40 w-full" />}
+        {editing && detail.isError && (
+          <LevelAlert level="error">
+            <span className="flex flex-wrap items-center justify-between gap-2">
+              <span>{t(`${L}dialog.load_failed`)}</span>
+              <Button size="sm" variant="outline" onClick={() => void detail.refetch()}>{t('admin:access_control.retry')}</Button>
+            </span>
+          </LevelAlert>
         )}
-        {saveError && <Alert severity="error">{saveError}</Alert>}
+        {stale && (
+          <LevelAlert level="warning">
+            <span className="flex flex-wrap items-center justify-between gap-2">
+              <span>{t(`${L}dialog.stale`)}</span>
+              <Button size="sm" variant="outline" onClick={() => { setStale(false); setReload(n => n + 1); void detail.refetch() }}>
+                {t(`${L}dialog.load_latest`)}
+              </Button>
+            </span>
+          </LevelAlert>
+        )}
+        {saveError && <LevelAlert level="error">{saveError}</LevelAlert>}
 
-        <ToggleButtonGroup exclusive fullWidth={fullScreen} size="small" value={draft.kind} disabled={editing}
-          onChange={(_, v: DestListKind | null) => { if (v) void switchKind(v) }}>
-          <ToggleButton value="custom">{t(`${L}kind.custom`)}</ToggleButton>
-          <ToggleButton value="remote">{t(`${L}kind.remote`)}</ToggleButton>
-          <ToggleButton value="geosite">{t(`${L}kind.geosite`)}</ToggleButton>
-        </ToggleButtonGroup>
+        <SegmentedControl aria-label={t(`${L}dialog.type`)} value={draft.kind} disabled={editing} onChange={v => void switchKind(v)}
+          options={[
+            { value: 'custom', label: t(`${L}kind.custom`) },
+            { value: 'remote', label: t(`${L}kind.remote`) },
+            { value: 'geosite', label: t(`${L}kind.geosite`) },
+          ]} />
 
         {draft.kind !== 'geosite' && (
-          <TextField size="small" required label={t(`${L}dialog.name`)} value={draft.name} onChange={e => set({ name: e.target.value })} onBlur={() => setNameTouched(true)}
-            error={!!nameError} helperText={nameError} />
+          <Field label={t(`${L}dialog.name`)} required error={nameError}>
+            <Input value={draft.name} onChange={e => set({ name: e.target.value })} onBlur={() => setNameTouched(true)} />
+          </Field>
         )}
 
         {draft.kind === 'custom' && (
           <>
-            <Box>
-              <Typography component="label" sx={{ fontSize: 12.5, color: md.onSurfaceVariant }}>{t(`${L}dialog.text`)}</Typography>
-              <Suspense fallback={<Skeleton variant="rounded" height={208} />}>
-                <CodeEditor ref={editor} language="plain" minRows={fullScreen ? 10 : 12} value={draft.text}
-                  onChange={text => set({ text })} />
-              </Suspense>
-            </Box>
-            <Box component="details" sx={{ fontSize: 13 }}>
-              <Box component="summary" sx={{ cursor: 'pointer' }}>{t(`${L}dialog.syntax_title`)}</Box>
-              <Box component="pre" sx={{ ...mono, whiteSpace: 'pre-wrap', m: 1, overflowWrap: 'anywhere' }}>{t(`${L}dialog.syntax`)}</Box>
-            </Box>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">{t(`${L}dialog.text`)}</span>
+              <div className="overflow-hidden rounded-lg border">
+                <Suspense fallback={<Skeleton className="h-52 w-full rounded-none" />}>
+                  <CodeEditor ref={editor} language="plain" minRows={12} value={draft.text} ariaLabel={t(`${L}dialog.text`)}
+                    onChange={text => set({ text })} />
+                </Suspense>
+              </div>
+              <p className="text-xs text-muted-foreground">{t('admin:rules.editor_keyboard_hint')}</p>
+            </div>
+            <details className="text-[13px]">
+              <summary className="cursor-pointer">{t(`${L}dialog.syntax_title`)}</summary>
+              <pre className={`${MONO} m-2 whitespace-pre-wrap [overflow-wrap:anywhere]`}>{t(`${L}dialog.syntax`)}</pre>
+            </details>
           </>
         )}
 
         {draft.kind === 'remote' && (
           <>
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              <TextField size="small" required label={t(`${L}dialog.url`)} value={draft.url} sx={{ flex: '1 1 260px', minWidth: 0 }}
-                onChange={e => set({ url: e.target.value })} error={!!urlError} helperText={urlError}
-                slotProps={{ htmlInput: { style: mono, inputMode: 'url' } }} />
-              <AsyncButton variant="outlined" disabled={!httpsOk} onClick={testFetch}>{t(`${L}dialog.test_fetch`)}</AsyncButton>
-            </Box>
-            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
-              {t(`${L}dialog.refresh_follows`, { hours: lists.data?.refresh_hours ?? '…' })}
-            </Typography>
-            {fetchError && <Alert severity="error">{t(`${L}dialog.fetch_failed`, { error: fetchError })}</Alert>}
+            <div className="flex flex-wrap items-start gap-2">
+              <Field label={t(`${L}dialog.url`)} required error={urlError} className="min-w-0 flex-1 basis-64">
+                <Input value={draft.url} inputMode="url" className={MONO} onChange={e => set({ url: e.target.value })} />
+              </Field>
+              {/* The button sits level with the input, not with the label above it. */}
+              <AsyncButton variant="outline" className="mt-[1.625rem]" disabled={!httpsOk} onClick={testFetch}>{t(`${L}dialog.test_fetch`)}</AsyncButton>
+            </div>
+            <p className="text-[13px] text-muted-foreground">{t(`${L}dialog.refresh_follows`, { hours: lists.data?.refresh_hours ?? '…' })}</p>
+            {fetchError && <LevelAlert level="error">{t(`${L}dialog.fetch_failed`, { error: fetchError })}</LevelAlert>}
             {preview && preview.http_status !== undefined && (
-              <Typography sx={{ fontSize: 13 }}>
+              <p className="text-[13px]">
                 {t(`${L}dialog.fetch_result`, {
                   code: preview.http_status,
                   size: new Intl.NumberFormat(i18n.language, { style: 'unit', unit: 'kilobyte', maximumFractionDigits: 0 }).format(Math.ceil((preview.bytes ?? 0) / 1024)),
                   accepted: preview.report?.accepted ?? preview.entry_count, ignored: preview.report?.ignored ?? 0,
                 })}
-              </Typography>
+              </p>
             )}
           </>
         )}
@@ -305,38 +321,32 @@ export default function ListDialog({ open, onClose, editId, initialKind = 'custo
           <>
             <GeositeCategoryPicker category={draft.category} attrs={draft.attrs} disabled={editing}
               onChange={(category, attrs) => set({ category, attrs })} />
-            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+            <p className="text-[13px] text-muted-foreground">
               {t(`${L}dialog.geosite_note`)}
               {preview && draft.category ? ` ${t(`${L}dialog.geosite_counts`, { entries: preview.entry_count, regexps: preview.regexp_count })}` : ''}
-            </Typography>
+            </p>
           </>
         )}
 
-        {previewing && <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}><CircularProgress size={14} /><Typography sx={{ fontSize: 13 }}>{t(`${L}dialog.previewing`)}</Typography></Box>}
-        {previewError && <Alert severity="warning">{t(`${L}dialog.preview_failed`, { error: previewError })}</Alert>}
+        {previewing && <p className="flex items-center gap-2 text-[13px]"><IconSpinner aria-hidden className="size-3.5 animate-spin" />{t(`${L}dialog.previewing`)}</p>}
+        {previewError && <LevelAlert level="warning">{t(`${L}dialog.preview_failed`, { error: previewError })}</LevelAlert>}
         {parseLines.length > 0 && (
-          <Alert severity="error">
-            <Typography sx={{ fontWeight: 600, fontSize: 13 }}>{t(`${L}dialog.parse_failed`)}</Typography>
+          <LevelAlert level="error">
+            <p className="text-[13px] font-medium">{t(`${L}dialog.parse_failed`)}</p>
             {parseLines.slice(0, 20).map(l => (
-              <Box key={`${l.line}:${l.code}`} sx={{ fontSize: 13 }}>
-                <Link component="button" type="button" underline="hover" color="inherit" sx={{ font: 'inherit' }}
-                  onClick={() => editor.current?.revealLine(l.line)}>
+              <div key={`${l.line}:${l.code}`} className="text-[13px]">
+                <button type="button" className="underline-offset-2 hover:underline focus-visible:underline" onClick={() => editor.current?.revealLine(l.line)}>
                   {t(`${L}dialog.line_n`, { line: l.line })}
-                </Link>
-                {' '}<Box component="span" sx={mono}>{l.text}</Box>{' — '}{l.detail ? l.detail : reasonText(t, l.code)}
-              </Box>
+                </button>
+                {' '}<span className={MONO}>{l.text}</span>{' — '}{l.detail ? l.detail : reasonText(t, l.code)}
+              </div>
             ))}
-          </Alert>
+          </LevelAlert>
         )}
         {report && draft.kind !== 'geosite' && !previewing && (
           <ParseReport report={report} onJump={draft.kind === 'custom' ? n => editor.current?.revealLine(n) : undefined} />
         )}
-      </DialogContent>
-      <Box sx={{ px: 3, pt: 1, fontSize: 13, color: md.onSurfaceVariant }}>{footer}</Box>
-      <DialogActions>
-        <Button onClick={requestClose}>{t(`${L}dialog.cancel`)}</Button>
-        <AsyncButton variant="contained" disabled={!canSave} onClick={submit}>{t(`${L}dialog.save`)}</AsyncButton>
-      </DialogActions>
-    </Dialog>
+      </div>
+    </DetailSheet>
   )
 }

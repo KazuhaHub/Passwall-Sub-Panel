@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
-import { Alert, Autocomplete, Box, Button, Skeleton, TextField, ToggleButton, ToggleButtonGroup, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestState } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
-import FieldHint from '@/components/FieldHint'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { FieldHint } from '@/components/common/HelpTip'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import { SegmentedControl } from '@/components/form/SegmentedControl'
+import { Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxItem, ComboboxList, ComboboxValue, useComboboxAnchor } from '@/components/ui/combobox'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { useDestPolicies, useDestSourceRule, useDestSourceRules, useDestStatus, usePutSourceRule } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes, enabledPolicies, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
@@ -58,25 +63,63 @@ export function parseCidrLines(text: string): { cidrs: string[]; bad: number[] }
 
 const S = 'admin:access_control.source_rules.'
 
-/**
- * "Deny source country or region" for one inbound of a native node. It is a
- * different endpoint from the node's own save (PUT /dest/source-rules/:id), so
- * it keeps its own [Save], its own pending state and its own restart sentence;
- * it is never folded into the node dialog's OK.
- */
 /** What the host dialog asks of the draft: is it unsaved, and save it now (true = nothing left unsaved). */
 export interface SourceDraftHandle {
   dirty: () => boolean
   save: () => Promise<boolean>
 }
 
-export default function SourceRulesSection({ nodeId, dirtyRef }: {
+/** Countries to refuse, picked by typing: chips for what is chosen, each with its own remove button. */
+function CountryPicker({ options, value, onChange, label, id, disabled, ...aria }: {
+  options: readonly string[]
+  value: readonly string[]
+  onChange: (next: string[]) => void
+  label: (code: string) => string
+  id?: string
+  disabled?: boolean
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean | 'true' | 'false'
+}) {
+  const { t } = useTranslation(['admin'])
+  const anchor = useComboboxAnchor()
+  return (
+    <Combobox multiple items={options as string[]} value={value as string[]} disabled={disabled}
+      onValueChange={v => onChange(v as string[])} itemToStringLabel={(c: string) => label(c)}>
+      <ComboboxChips ref={anchor}>
+        <ComboboxValue>
+          {(values: string[]) => (
+            <>
+              {values.map(c => <ComboboxChip key={c}>{label(c)}</ComboboxChip>)}
+              <ComboboxChipsInput id={id} aria-describedby={aria['aria-describedby']} aria-invalid={aria['aria-invalid']} />
+            </>
+          )}
+        </ComboboxValue>
+      </ComboboxChips>
+      <ComboboxContent anchor={anchor}>
+        <ComboboxEmpty>{t(`${S}countries_empty`)}</ComboboxEmpty>
+        <ComboboxList>
+          {(c: string) => <ComboboxItem key={c} value={c}>{label(c)}</ComboboxItem>}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  )
+}
+
+/**
+ * "Deny source country or region" for one inbound of a native node. It is a
+ * different endpoint from the node's own save (PUT /dest/source-rules/:id), so
+ * it keeps its own [Save], its own pending state and its own restart sentence;
+ * it is never folded into the node page's save bar. The host learns whether the
+ * draft is unsaved through `dirtyRef` (read on demand) and `onDirtyChange` (as it changes).
+ */
+export default function SourceRulesSection({ nodeId, dirtyRef, onDirtyChange }: {
   nodeId: number
   /** Filled with the draft's handle; the host asks it before closing or saving the inbound. */
   dirtyRef?: MutableRefObject<SourceDraftHandle | null>
+  /** Told whenever the draft becomes unsaved or clean. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   const read = useDestSourceRule(scope, nodeId)
   const all = useDestSourceRules(scope)
@@ -111,23 +154,20 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
     [i18n.language],
   )
   const parsed = parseCidrLines(cidrText)
-
-  if (read.isPending) return <Skeleton variant="rounded" height={120} sx={{ mt: 2 }} />
-  if (read.isError || !read.data) {
-    if (isDestUnavailable(read.error)) return null
-    return (
-      <Alert severity="error" sx={{ mt: 2 }} action={<Button color="inherit" size="small" onClick={() => void read.refetch()}>{t('admin:access_control.retry')}</Button>}>
-        {t(`${S}read_failed`)}
-      </Alert>
-    )
-  }
-  if (!read.data.native) return null
-
   const dirty = !!rule && (
     state !== rule.state
     || countries.join() !== rule.countries.join()
     || parsed.cidrs.join() !== rule.cidrs.join()
   )
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+
+  if (read.isPending) return <Skeleton className="mt-4 h-32 w-full" />
+  if (read.isError || !read.data) {
+    if (isDestUnavailable(read.error)) return null
+    return <ErrorState compact className="mt-4" title={t(`${S}read_failed`)} retry={() => void read.refetch()} />
+  }
+  if (!read.data.native) return null
+
   const minutes = applyMinutes(status.data)
   const geoip = read.data.geoip_available
 
@@ -153,7 +193,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
         nodeId,
         input: { countries, cidrs: parsed.cidrs, state, updated_at: rule.updated_at ?? undefined },
       })
-      pushSnack(t(`${S}saved`), 'success')
+      pushToast({ message: t(`${S}saved`), severity: 'success' })
       return true
     } catch (err) {
       const e = destErrorOf(err)
@@ -170,59 +210,49 @@ export default function SourceRulesSection({ nodeId, dirtyRef }: {
   }
   if (dirtyRef) dirtyRef.current = { dirty: () => dirty, save }
 
+  const cidrError = parsed.bad.length > 0
+    ? t(`${S}bad_lines`, { lines: parsed.bad.join(', ') })
+    : fieldError?.field === 'cidrs' ? fieldError.text : undefined
+
   return (
-    <Box data-testid="source-rules-section" sx={{ mt: 2.5, p: 2, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>{t(`${S}title`)}</Typography>
-      <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1.5 }}>{t(`${S}hint`)}</Typography>
-      {!geoip && (
-        <Box sx={{ mb: 1.5 }}>
-          <FieldHint tone="amber" summary={t(`${S}geoip_missing.summary`)} detail={t(`${S}geoip_missing.detail`)} />
-        </Box>
-      )}
+    <section data-testid="source-rules-section" className="mt-5 grid gap-4 rounded-xl border bg-card p-4">
+      <div>
+        <h2 className="text-base font-semibold">{t(`${S}title`)}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t(`${S}hint`)}</p>
+      </div>
+      {!geoip && <div className="text-sm"><FieldHint summary={t(`${S}geoip_missing.summary`)} detail={t(`${S}geoip_missing.detail`)} /></div>}
       {rule?.note === 'geoip_unavailable' && geoip && (
-        <Box sx={{ mb: 1.5 }}>
-          <FieldHint tone="amber" summary={t(`${S}note.geoip_unavailable.summary`)} detail={t(`${S}note.geoip_unavailable.detail`)} />
-        </Box>
+        <div className="text-sm"><FieldHint summary={t(`${S}note.geoip_unavailable.summary`)} detail={t(`${S}note.geoip_unavailable.detail`)} /></div>
       )}
       {rule?.note === 'empty' && (
-        <Box sx={{ mb: 1.5 }}>
-          <FieldHint tone="muted" summary={t(`${S}note.empty.summary`)} detail={t(`${S}note.empty.detail`)} />
-        </Box>
+        <div className="text-sm"><FieldHint tone="muted" summary={t(`${S}note.empty.summary`)} detail={t(`${S}note.empty.detail`)} /></div>
       )}
-      {fieldError && !fieldError.field && <Alert severity="error" sx={{ mb: 1.5 }}>{fieldError.text}</Alert>}
-      <Autocomplete multiple size="small" options={options} value={countries} disabled={put.isPending}
-        onChange={(_, v) => setCountries(v)} filterSelectedOptions
-        getOptionLabel={c => `${countryName(c, i18n.language)} (${c})`}
-        renderInput={params => (
-          <TextField {...params} label={t(`${S}countries`)} error={fieldError?.field === 'countries'}
-            helperText={fieldError?.field === 'countries' ? fieldError.text : undefined} />
-        )} />
-      <TextField multiline minRows={3} fullWidth size="small" sx={{ mt: 2 }} value={cidrText} disabled={put.isPending}
-        label={t(`${S}cidrs`)} placeholder="203.0.113.0/24" onChange={e => setCidrText(e.target.value)}
-        error={parsed.bad.length > 0 || fieldError?.field === 'cidrs'}
-        helperText={parsed.bad.length > 0 ? t(`${S}bad_lines`, { lines: parsed.bad.join(', ') }) : fieldError?.field === 'cidrs' ? fieldError.text : t(`${S}cidrs_hint`)}
-        slotProps={{ htmlInput: { style: { fontFamily: 'ui-monospace, monospace', fontSize: 13 } } }} />
-      {dirty && (
-        <Box sx={{ mt: 1 }}>
-          <FieldHint tone="amber" summary={t(`${S}unsaved.summary`)} detail={t(`${S}unsaved.detail`)} />
-        </Box>
-      )}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1.5, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
-          <Typography variant="body2" sx={{ mb: 0.5, fontWeight: 600 }}>{t(`${S}state`)}</Typography>
-          <ToggleButtonGroup exclusive size="small" value={state} disabled={put.isPending} onChange={(_, v: DestState | null) => { if (v) setState(v) }}
-            aria-label={t(`${S}state`)}>
-            {(['off', 'report', 'on'] as const).map(st => (
-              <ToggleButton key={st} value={st}>{t(`admin:access_control.policies.state.${st}`)}</ToggleButton>
-            ))}
-          </ToggleButtonGroup>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mt: 0.5 }}>{t(`${S}state_help.${state}`)}</Typography>
-        </Box>
-        <AsyncButton variant="contained" size="small" disabled={!dirty} pending={put.isPending} onClick={save}>{t(`${S}save`)}</AsyncButton>
-      </Box>
-      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: md.onSurfaceVariant }}>
+      {fieldError && !fieldError.field && <p role="alert" className="text-sm text-destructive">{fieldError.text}</p>}
+      <Field label={t(`${S}countries`)} error={fieldError?.field === 'countries' ? fieldError.text : undefined} errorBlocksSave={false}>
+        {p => (
+          <CountryPicker id={p.id} aria-describedby={p['aria-describedby']} aria-invalid={p['aria-invalid']}
+            options={options} value={countries} onChange={setCountries} disabled={put.isPending}
+            label={c => `${countryName(c, i18n.language)} (${c})`} />
+        )}
+      </Field>
+      <Field label={t(`${S}cidrs`)} hint={t(`${S}cidrs_hint`)} error={cidrError} errorBlocksSave={false}>
+        <Textarea rows={3} className="font-mono text-[13px]" value={cidrText} disabled={put.isPending}
+          placeholder="203.0.113.0/24" onChange={e => setCidrText(e.target.value)} />
+      </Field>
+      {dirty && <div className="text-sm"><FieldHint summary={t(`${S}unsaved.summary`)} detail={t(`${S}unsaved.detail`)} /></div>}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid min-w-60 flex-1 gap-1.5">
+          <p id={`src-state-${nodeId}`} className="text-sm font-semibold">{t(`${S}state`)}</p>
+          <SegmentedControl<DestState> aria-labelledby={`src-state-${nodeId}`} value={state} disabled={put.isPending}
+            onChange={setState} className="w-fit"
+            options={(['off', 'report', 'on'] as const).map(st => ({ value: st, label: t(`admin:access_control.policies.state.${st}`) }))} />
+          <p className="text-sm text-muted-foreground">{t(`${S}state_help.${state}`)}</p>
+        </div>
+        <AsyncButton size="sm" disabled={!dirty} pending={put.isPending} onClick={save}>{t(`${S}save`)}</AsyncButton>
+      </div>
+      <p className="-mt-2 text-xs text-muted-foreground">
         {minutes === null ? t(`${S}restart_unknown`) : t(`${S}restart`, { count: minutes })}
-      </Typography>
-    </Box>
+      </p>
+    </section>
   )
 }

@@ -21,7 +21,7 @@ vi.mock('react-i18next', () => ({
 import zh from '@/locales/zh-CN/admin.json'
 import zhCommon from '@/locales/zh-CN/common.json'
 import { flatten, type Nested } from '@/i18n/options'
-import { cardFields, POLICY_CARDS, type PolicyFieldSpec } from './policyLayout'
+import { cardFields, POLICY_CARDS, type PolicyFieldSpec } from '@/views/admin/risk/policy/policyLayout'
 import PolicyField from './PolicyField'
 dict.current = { ...flatten(zhCommon as Nested), ...flatten(zh as Nested) }
 
@@ -155,5 +155,25 @@ describe('PolicyField, numbers', () => {
     expect(text).toContain('当前生效：42')
     expect(text).not.toContain('范围 20–900，默认 120')
     expect(input.placeholder).toBe('默认 120')
+  })
+})
+
+describe('PolicyField, the other kinds', () => {
+  const spec = { key: 'k', kind: 'inverted', label: 'admin:risk_center.policy.default_adornment' } as const
+
+  // An *_off key reads as its opposite: the switch says what is ON, and storing it writes the inverse.
+  it('an inverted switch shows the opposite of the stored flag and stores the inverse', () => {
+    const stored: boolean[] = []
+    render(<PolicyField spec={spec} value={true} defaults={{}} onChange={v => stored.push(v as boolean)} />)
+    const sw = screen.getByRole('switch')
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(sw)
+    expect(stored).toEqual([false])
+  })
+
+  it('a select with no stored value shows its first option', () => {
+    const select = { key: 's', kind: 'select', label: 'admin:risk_center.policy.default_adornment', options: [{ value: 'a', label: 'admin:risk_center.policy.default_adornment' }, { value: 'b', label: 'admin:risk_center.policy.out_of_range' }] } as const
+    render(<PolicyField spec={select as never} value={''} defaults={{}} onChange={() => {}} />)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('a')
   })
 })

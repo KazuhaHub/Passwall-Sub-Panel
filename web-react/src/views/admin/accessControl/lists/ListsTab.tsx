@@ -1,26 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, Link, Menu, MenuItem, Paper,
-  Skeleton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
-import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestBudgetItem, type DestList, type DestListKind, type DestPolicyRef } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
+import { AsyncButton } from '@/components/common/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
-import KpiTile, { KpiGrid } from '@/components/KpiTile'
-import { pushSnack } from '@/components/SnackbarHost'
-import { SortableTableCell } from '@/components/SortableTableCell'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
+import { DataTable } from '@/components/data/DataTable'
+import type { SortingState } from '@/components/data/dataTableTypes'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { TableSkeleton } from '@/components/feedback/LoadingState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { LevelAlert } from '@/components/LevelAlert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { IconAdd, IconChevronDown, IconWarning } from '@/lib/icons'
 import { useDeleteDestList, useDestLists, useDestPolicies, useGeositeStatus, useRefreshDestList, useUpdateGeosite } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { budgetLevel } from '@/utils/accessControl'
 import { parseListKindFilter, parseListStateFilter, type AccessNavState, type SettingsFocus } from '../accessParams'
 import { deleteListConfirm } from '../confirmCopy'
 import { destErrorText, reportDestError } from '../destErrors'
-import ListDialog from './ListDialog'
-import ListRow from './ListRow'
+import { ListCard, listColumns, type ListColumnCtx } from './listColumns'
+import ListSheet from './ListSheet'
 import { listStatus } from './listStatus'
 
 const L = 'admin:access_control.lists.'
@@ -36,18 +40,15 @@ export interface ListsTabProps {
   onOpenAllowlist: (groupId: number) => void
 }
 
-type SortColumn = 'name' | 'entries' | 'status'
-
 /**
  * THE LISTS TAB (S6): how much of each quota the lists use, which list is
  * broken (and still serving its old content), and who uses each one. The
  * filters are in the URL (`lst_state`, `lst_kind`); sorting is the page's own.
+ * A list something uses cannot be deleted (the menu says by whom); a delete the
+ * server refuses anyway (409) is explained with links, not asked again.
  */
 export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, onOpenAllowlist }: ListsTabProps) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const folded = useMediaQuery(theme.breakpoints.down('md'))
   const scope = useQueryScope()
   const location = useLocation()
   const navigate = useNavigate()
@@ -60,12 +61,11 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
   const geosite = useGeositeStatus(scope)
   const stateFilter = parseListStateFilter(params.get('lst_state'))
   const kindFilter = parseListKindFilter(params.get('lst_kind'))
-  const [sort, setSort] = useState<{ col: SortColumn; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
-  const [menu, setMenu] = useState<HTMLElement | null>(null)
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }])
   const [dialog, setDialog] = useState<{ open: boolean; editId: number | null; kind: DestListKind }>({ open: false, editId: null, kind: 'custom' })
   const [inUse, setInUse] = useState<{ name: string; usedBy: DestPolicyRef[] } | null>(null)
 
-  // Another part of the page asked for a dialog on arrival (state, never the URL): do it once, clear it.
+  // Another part of the page asked for the editor on arrival (state, never the URL): do it once, clear it.
   // Keyed by the history entry, so a second request (a new entry) is handled too.
   const handled = useRef<string | null>(null)
   useEffect(() => {
@@ -87,15 +87,8 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
   const visible = useMemo(() => {
     let out = (items ?? []).filter(l => !kindFilter || l.kind === kindFilter)
     if (stateFilter === 'problem') out = out.filter(l => listStatus(l, l.used_by.some(u => u.kind === 'policy' && enabledIds.has(u.id))).problem)
-    const sign = sort.dir === 'asc' ? 1 : -1
-    return [...out].sort((a, b) => {
-      switch (sort.col) {
-        case 'entries': return sign * (a.entry_count - b.entry_count)
-        case 'status': return sign * ((a.last_fetched_at ?? 0) - (b.last_fetched_at ?? 0))
-        default: return sign * a.name.localeCompare(b.name, i18n.language)
-      }
-    })
-  }, [items, kindFilter, stateFilter, enabledIds, sort, i18n.language])
+    return out
+  }, [items, kindFilter, stateFilter, enabledIds])
 
   const setFilter = (key: string, value: string | null) => setParams(prev => {
     const out = new URLSearchParams(prev)
@@ -104,10 +97,8 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
     return out
   }, { replace: true })
 
-  const onSort = (col: string) => setSort(s => ({ col: col as SortColumn, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' }))
-
   const doDelete = async (list: DestList) => {
-    if (!(await confirm(deleteListConfirm(t, list.name)))) return
+    if (!(await confirm({ ...deleteListConfirm(t, list.name), initialFocus: 'cancel' }))) return
     try {
       await del.mutateAsync(list.id)
       pushSnack(t(`${L}snack.deleted`, { name: list.name }), 'success')
@@ -124,80 +115,74 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
     } catch (err) { reportDestError(t, err) }
   }
 
+  // The columns are one stable array (DataTable memoises its rows on them); the handlers they call are read
+  // through a ref, so the latest render's closures run without rebuilding the columns.
+  const h = useRef({ onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh })
+  h.current = { onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh }
+  const ctx = useMemo<ListColumnCtx>(() => ({
+    t, lang: i18n.language,
+    usedEnabled: l => l.used_by.some(u => u.kind === 'policy' && enabledIds.has(u.id)),
+    onOpenEntries: id => h.current.onOpenEntries(id),
+    onEdit: id => setDialog({ open: true, editId: id, kind: 'custom' }),
+    onRefresh: l => void h.current.doRefresh(l),
+    onDelete: l => void h.current.doDelete(l),
+    onOpenPolicy: id => h.current.onOpenPolicy(id),
+    onOpenAllowlist: id => h.current.onOpenAllowlist(id),
+  }), [t, i18n.language, enabledIds])
+  const columns = useMemo(() => listColumns(ctx), [ctx])
+
   const num = new Intl.NumberFormat(i18n.language)
   const tile = (label: string, b: DestBudgetItem | undefined) => {
     const level = budgetLevel(b)
-    const color = level === 'over' ? md.error : undefined
     return (
-      <KpiTile label={label} value={b ? num.format(b.used) : '—'} color={color}
-        caption={b ? <>{t(`${L}kpi.of`, { limit: num.format(b.limit) })}{level === 'near' && <Box component="span" data-level="near" sx={{ color: theme.palette.warning.dark }}> ▲</Box>}</> : undefined} />
+      <KpiTile label={label} value={b ? num.format(b.used) : '—'} tone={level === 'over' ? 'danger' : level === 'near' ? 'warning' : undefined}
+        caption={b ? <>{t(`${L}kpi.of`, { limit: num.format(b.limit) })}{level === 'near' && <span data-level="near"> ▲</span>}</> : undefined} />
     )
   }
   const overQuota = lists.data ? (Object.values(lists.data.budget) as DestBudgetItem[]).some(b => budgetLevel(b) === 'over') : false
 
   const newMenu = (
-    <>
-      <Button variant="contained" endIcon={<ArrowDropDownIcon />} onClick={e => setMenu(e.currentTarget)}>{t(`${L}new`)}</Button>
-      <Menu anchorEl={menu} open={menu !== null} onClose={() => setMenu(null)}>
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button />}><IconAdd />{t(`${L}new`)}<IconChevronDown /></DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
         {(['custom', 'remote', 'geosite'] as const).map(k => (
-          <MenuItem key={k} onClick={() => { setMenu(null); setDialog({ open: true, editId: null, kind: k }) }}>{t(`${L}kind.${k}`)}</MenuItem>
+          <DropdownMenuItem key={k} onClick={() => setDialog({ open: true, editId: null, kind: k })}>{t(`${L}kind.${k}`)}</DropdownMenuItem>
         ))}
-      </Menu>
-    </>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 
   const unwired = lists.isError && isDestUnavailable(lists.error)
   let body
   if (lists.isPending) {
-    body = <Box sx={{ display: 'grid', gap: 1 }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} variant="rounded" height={56} />)}</Box>
+    body = <TableSkeleton rows={5} cols={5} />
   } else if (lists.isError) {
     body = unwired
-      ? <Alert severity="info">{t('admin:access_control.unwired')}</Alert>
-      : <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void lists.refetch()}>{t('admin:access_control.retry')}</Button>}>{destErrorText(t, lists.error)}</Alert>
+      ? <LevelAlert level="info">{t('admin:access_control.unwired')}</LevelAlert>
+      : <ErrorState title={destErrorText(t, lists.error)} retry={() => lists.refetch()} />
   } else if ((items ?? []).length === 0) {
-    body = (
-      <Box sx={{ p: 3, textAlign: 'center', border: `1px dashed ${md.outlineVariant}`, borderRadius: 3 }}>
-        <Typography sx={{ mb: 1.5 }}>{t(`${L}empty`)}</Typography>
-        {newMenu}
-      </Box>
-    )
+    body = <EmptyState title={t(`${L}empty`)} action={newMenu} />
   } else if (visible.length === 0) {
     body = (
-      <Box sx={{ p: 3, textAlign: 'center' }}>
-        <Typography sx={{ mb: 1 }}>{t(`${L}empty_filtered`)}</Typography>
-        <Button onClick={() => setParams(prev => { const o = new URLSearchParams(prev); o.delete('lst_state'); o.delete('lst_kind'); return o }, { replace: true })}>
-          {t(`${L}clear_filter`)}
-        </Button>
-      </Box>
+      <EmptyState title={t(`${L}empty_filtered`)}
+        action={<Button variant="outline" onClick={() => setParams(prev => { const o = new URLSearchParams(prev); o.delete('lst_state'); o.delete('lst_kind'); return o }, { replace: true })}>{t(`${L}clear_filter`)}</Button>} />
     )
   } else {
-    const rowProps = (l: DestList) => ({
-      list: l, usedByEnabled: usedEnabled(l), onOpenEntries, onEdit: (id: number) => setDialog({ open: true, editId: id, kind: 'custom' }),
-      onRefresh: doRefresh, onDelete: doDelete, onOpenPolicy, onOpenAllowlist,
-    })
-    body = folded
-      ? <Box sx={{ display: 'grid', gap: 1 }}>{visible.map(l => <ListRow key={l.id} block {...rowProps(l)} />)}</Box>
-      : (
-        <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: md.surfaceContainerLow, borderRadius: 3 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <SortableTableCell column="name" activeColumn={sort.col} activeDir={sort.dir} onSort={onSort}>{t(`${L}cols.name`)}</SortableTableCell>
-                <SortableTableCell column="entries" align="right" activeColumn={sort.col} activeDir={sort.dir} onSort={onSort}>{t(`${L}cols.entries`)}</SortableTableCell>
-                <SortableTableCell column="status" activeColumn={sort.col} activeDir={sort.dir} onSort={onSort}>{t(`${L}cols.status`)}</SortableTableCell>
-                <TableCell>{t(`${L}cols.usage`)}</TableCell>
-                <TableCell align="right"><Box component="span" sx={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>{t(`${L}cols.actions`)}</Box></TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>{visible.map(l => <ListRow key={l.id} {...rowProps(l)} />)}</TableBody>
-          </Table>
-        </TableContainer>
-      )
+    body = (
+      <DataTable<DestList>
+        aria-label={t('admin:access_control.tab_lists')}
+        data={visible} columns={columns} getRowId={l => String(l.id)} rowLabel={l => l.name}
+        pagination={false} columnMenu={false}
+        sorting={sorting} onSortingChange={setSorting}
+        onRowOpen={l => onOpenEntries(l.id)}
+        renderCard={(l, c) => <ListCard list={l} ctx={ctx} open={c.open} />}
+      />
+    )
   }
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>{(items ?? []).length > 0 && newMenu}</Box>
+    <div>
+      <div className="mb-3 flex justify-end">{(items ?? []).length > 0 && newMenu}</div>
       {lists.data && (
         <>
           <KpiGrid>
@@ -205,49 +190,50 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
             {tile(t(`${L}kpi.regexps`), lists.data.budget.regexps)}
             {tile(t(`${L}kpi.cidrs`), lists.data.budget.cidrs)}
             <KpiTile label={t(`${L}kpi.problems`)} value={num.format(problems)} caption={t(`${L}kpi.problems_caption`)}
-              color={problems > 0 ? md.error : undefined} pressed={stateFilter === 'problem'}
+              danger={problems > 0} pressed={stateFilter === 'problem'}
               onToggle={() => setFilter('lst_state', stateFilter === 'problem' ? null : 'problem')} />
           </KpiGrid>
-          {overQuota && <Typography sx={{ fontSize: 13, color: md.error, mb: 1 }}>{t(`${L}kpi.over_quota`)}</Typography>}
-          <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1 }}>
+          {overQuota && <p className="mb-2 text-[13px] text-destructive">{t(`${L}kpi.over_quota`)}</p>}
+          <p className="mb-3 text-[13px] text-muted-foreground">
             {t(`${L}refresh_note`, { hours: lists.data.refresh_hours })}{' '}
-            <Link component="button" type="button" underline="hover" sx={{ font: 'inherit', verticalAlign: 'baseline' }}
-              onClick={() => onOpenSettings('refresh')}>{t(`${L}change`)}</Link>
-          </Typography>
+            <button type="button" className="text-foreground underline underline-offset-2" onClick={() => onOpenSettings('refresh')}>{t(`${L}change`)}</button>
+          </p>
         </>
       )}
-      {/* A fixed slot for the progress bar, so the table does not jump when a re-read starts. */}
-      <Box sx={{ height: 4, mb: 0.5 }}>{lists.isFetching && !lists.isPending && <LinearProgress />}</Box>
       {lists.isRefetchError && lists.data && (
-        <Typography sx={{ fontSize: 12.5, mb: 1, color: theme.palette.warning.dark }}>{t('admin:access_control.verdict.stale')}</Typography>
+        <p className="mb-2 flex items-center gap-1 text-xs"><IconWarning aria-hidden className="size-3.5 text-warning-ink" />{t('admin:access_control.verdict.stale')}</p>
       )}
       {geosite.data && !geosite.data.current && (
-        <Alert severity="info" sx={{ mb: 1.5 }} action={
-          <AsyncButton size="small" color="inherit" onClick={async () => {
-            try { await download.mutateAsync({}); pushSnack(t(`${L}snack.downloaded`), 'success') } catch (err) { reportDestError(t, err) }
-          }}>{t(`${L}geosite_download`)}</AsyncButton>}>
-          {t(`${L}geosite_missing`)}
-        </Alert>
+        <LevelAlert level="info" className="mb-3">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span>{t(`${L}geosite_missing`)}</span>
+            <AsyncButton size="sm" variant="outline" onClick={async () => {
+              try { await download.mutateAsync({}); pushSnack(t(`${L}snack.downloaded`), 'success') } catch (err) { reportDestError(t, err) }
+            }}>{t(`${L}geosite_download`)}</AsyncButton>
+          </span>
+        </LevelAlert>
       )}
       {body}
-      <ListDialog open={dialog.open} editId={dialog.editId} initialKind={dialog.kind} onClose={() => setDialog(d => ({ ...d, open: false }))}
+      <ListSheet open={dialog.open} editId={dialog.editId} initialKind={dialog.kind} onClose={() => setDialog(d => ({ ...d, open: false }))}
         onSaved={onOpenEntries} />
-      <Dialog open={inUse !== null} onClose={() => setInUse(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('admin:access_control.confirm.list_in_use.title')}</DialogTitle>
-        <DialogContent>
-          <Typography sx={{ mb: 1 }}>{t('admin:access_control.confirm.list_in_use.message')}</Typography>
-          <Box component="ul" sx={{ m: 0, pl: 2 }}>
+      <Dialog open={inUse !== null} onOpenChange={o => { if (!o) setInUse(null) }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t('admin:access_control.confirm.list_in_use.title')}</DialogTitle>
+            <DialogDescription>{t('admin:access_control.confirm.list_in_use.message')}</DialogDescription>
+          </DialogHeader>
+          <ul className="m-0 grid list-none gap-1 p-0 text-sm">
             {(inUse?.usedBy ?? []).map(u => (
               <li key={`${u.kind}:${u.id}`}>
                 {u.kind === 'route'
                   ? <span data-testid="in-use-route">{u.name || String(u.id)}</span>
-                  : <Link component="button" type="button" onClick={() => { setInUse(null); if (u.kind === 'group') onOpenAllowlist(u.id); else onOpenPolicy(u.id) }}>{u.name || String(u.id)}</Link>}
+                  : <button type="button" className="underline underline-offset-2" onClick={() => { setInUse(null); if (u.kind === 'group') onOpenAllowlist(u.id); else onOpenPolicy(u.id) }}>{u.name || String(u.id)}</button>}
               </li>
             ))}
-          </Box>
+          </ul>
+          <DialogFooter><Button onClick={() => setInUse(null)}>{t('admin:access_control.confirm.list_in_use.action')}</Button></DialogFooter>
         </DialogContent>
-        <DialogActions><Button onClick={() => setInUse(null)}>{t('admin:access_control.confirm.list_in_use.action')}</Button></DialogActions>
       </Dialog>
-    </Box>
+    </div>
   )
 }

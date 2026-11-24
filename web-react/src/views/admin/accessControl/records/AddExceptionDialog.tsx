@@ -1,19 +1,38 @@
-import { useState } from 'react'
-import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import FieldHint from '@/components/FieldHint'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { FieldHint } from '@/components/common/HelpTip'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAddDestException, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
 import { destErrorText } from '../destErrors'
 
 const E = 'admin:access_control.records.exception.'
+
+/** One native radio with its words; native, so the checked state is the browser's and a screen reader reads a radio group. */
+function Choice({ name, value, checked, onChange, label, children }: {
+  name: string
+  value: string
+  checked: boolean
+  onChange: () => void
+  label: string
+  children?: ReactNode
+}) {
+  return (
+    <div className="grid gap-1">
+      <label className="flex min-h-8 items-center gap-2 text-sm">
+        <input type="radio" name={name} value={value} checked={checked} onChange={onChange} className="size-4 accent-primary" />
+        {label}
+      </label>
+      {children && <div className="grid gap-1 pl-6">{children}</div>}
+    </div>
+  )
+}
 
 export interface ExceptionTarget {
   /** The destination host of the hit (no port). */
@@ -42,9 +61,6 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
   onExempt: (userId: number) => void
 }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const add = useAddDestException(scope)
   const status = useDestStatus(scope, { enabled: target !== null })
@@ -73,52 +89,49 @@ export default function AddExceptionDialog({ target, onClose, onExempt }: {
   }
 
   return (
-    <Dialog open={target !== null} onClose={close} fullWidth maxWidth="sm" fullScreen={phone}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: phone ? 0 : 3 } } }}>
-      <DialogTitle>{t(`${E}title`, { dest: target?.host ?? '' })}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        <Box>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${E}where`)}</Typography>
-          {where === 'none' && <Typography variant="body2" sx={{ color: md.error }}>{t(`${E}group_gone`)}</Typography>}
-          <RadioGroup value={where === 'none' ? '' : where} onChange={(_, v) => setWhere(v as 'global' | 'exempt' | 'group')} aria-label={t(`${E}where`)}>
-            {target?.group && <FormControlLabel value="group" control={<Radio />} label={t(`${E}group`, { group: target.group.name })} />}
-            <FormControlLabel value="global" control={<Radio />} label={t(`${E}global`)} />
-            {where === 'global' && (
-              <Box sx={{ pl: 4, display: 'grid', gap: 1 }}>
-                <FieldHint tone="amber" summary={t(`${E}global_hint.summary`)} detail={t(`${E}global_hint.detail`)} />
-                <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t(`${E}first_time`)}</Typography>
-              </Box>
+    <Dialog open={target !== null} onOpenChange={open => { if (!open) close() }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>{t(`${E}title`, { dest: target?.host ?? '' })}</DialogTitle></DialogHeader>
+        <div className="grid gap-4">
+          <fieldset className="grid gap-1" aria-label={t(`${E}where`)}>
+            <legend className="mb-1 text-sm font-semibold">{t(`${E}where`)}</legend>
+            {where === 'none' && <p className="text-sm text-destructive">{t(`${E}group_gone`)}</p>}
+            {target?.group && (
+              <Choice name="where" value="group" checked={where === 'group'} onChange={() => setWhere('group')} label={t(`${E}group`, { group: target.group.name })} />
             )}
+            <Choice name="where" value="global" checked={where === 'global'} onChange={() => setWhere('global')} label={t(`${E}global`)}>
+              {where === 'global' && (
+                <>
+                  <FieldHint summary={t(`${E}global_hint.summary`)} detail={t(`${E}global_hint.detail`)} />
+                  <span className="text-xs text-muted-foreground">{t(`${E}first_time`)}</span>
+                </>
+              )}
+            </Choice>
             {target?.user && (
-              <FormControlLabel value="exempt" control={<Radio />} label={t(`${E}exempt`, { upn: target.user.upn })} />
+              <Choice name="where" value="exempt" checked={where === 'exempt'} onChange={() => setWhere('exempt')} label={t(`${E}exempt`, { upn: target.user.upn })}>
+                {where === 'exempt' && <FieldHint summary={t(`${E}exempt_hint.summary`)} detail={t(`${E}exempt_hint.detail`)} />}
+              </Choice>
             )}
-            {where === 'exempt' && (
-              <Box sx={{ pl: 4 }}>
-                <FieldHint tone="amber" summary={t(`${E}exempt_hint.summary`)} detail={t(`${E}exempt_hint.detail`)} />
-              </Box>
-            )}
-          </RadioGroup>
-        </Box>
-        {(where === 'global' || where === 'group') && (
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>{t(`${E}match`)}</Typography>
-            <RadioGroup row value={match} onChange={(_, v) => setMatch(v as 'site' | 'host')} aria-label={t(`${E}match`)}>
-              <FormControlLabel value="site" control={<Radio />} label={t('admin:access_control.test.exception.site')} />
-              <FormControlLabel value="host" control={<Radio />} label={t('admin:access_control.test.exception.host')} />
-            </RadioGroup>
-          </Box>
-        )}
-        {error && <Typography variant="body2" role="alert" sx={{ color: md.error }}>{error}</Typography>}
-        {where !== 'exempt' && where !== 'none' && (
-          <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
-            {minutes === null ? t(`${E}eta_unknown`) : t(`${E}eta`, { count: minutes })}
-          </Typography>
-        )}
+          </fieldset>
+          {(where === 'global' || where === 'group') && (
+            <fieldset className="grid gap-1" aria-label={t(`${E}match`)}>
+              <legend className="mb-1 text-sm font-semibold">{t(`${E}match`)}</legend>
+              <div className="flex flex-wrap gap-x-4">
+                <Choice name="match" value="site" checked={match === 'site'} onChange={() => setMatch('site')} label={t('admin:access_control.test.exception.site')} />
+                <Choice name="match" value="host" checked={match === 'host'} onChange={() => setMatch('host')} label={t('admin:access_control.test.exception.host')} />
+              </div>
+            </fieldset>
+          )}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {where !== 'exempt' && where !== 'none' && (
+            <p className="text-xs text-muted-foreground">{minutes === null ? t(`${E}eta_unknown`) : t(`${E}eta`, { count: minutes })}</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={close}>{t(`${E}cancel`)}</Button>
+          <AsyncButton disabled={where === 'none'} onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={close}>{t(`${E}cancel`)}</Button>
-        <AsyncButton variant="contained" disabled={where === 'none'} onClick={save}>{where === 'exempt' ? t(`${E}exempt_action`) : t(`${E}allow`)}</AsyncButton>
-      </DialogActions>
     </Dialog>
   )
 }
