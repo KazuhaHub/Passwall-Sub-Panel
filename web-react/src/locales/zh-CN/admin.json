@@ -1196,6 +1196,7 @@
       "tunnel_listener_orphan": "隧道监听器没有线路",
       "roster_identity_capacity": "客户端身份数量较多",
       "cdn_landing_unfit": "CDN 线路被撤下：节点已不适合 CDN",
+      "cdn_line_client_tls": "CDN 线路被撤下：客户端 TLS 已关闭",
       "source_guard_withheld": "线路被撤下：无法检查来源",
       "source_guard_refused": "连接被拒绝：未登记的来源地址",
       "tunnel_factor_stale": "隧道监听器的流量倍率未同步",
@@ -2383,6 +2384,7 @@
         "cloudflare_grpc": "Cloudflare 的 gRPC 端点要求使用 443 端口、TLS 和 HTTP/2。请检查客户端 TLS、CDN 端口和源站端口。",
         "grpc_authority": "mihomo 和 sing-box 用 SNI {{sni}} 作为 gRPC authority。支持独立 authority 的 URI 客户端使用 {{host}}。",
         "client_plaintext": "客户端通过明文 HTTP 连接 CDN。这一跳的 HTTP 请求和未加密的载荷在网络上可见。",
+        "httpupgrade_host_header": "此节点的 HTTPUpgrade 设置在 headers 里带了 Host，Xray 不会启动。请改用 host 字段。",
         "origin_host": "本节点要求 Host 为 {{origin_host}}，而线路发送的是 {{host}}，节点会匹配不上请求。",
         "insecure_ignored": "本节点允许不安全的 TLS。CDN 线路从不如此：CDN 出示自己的证书，客户端会验证。"
       },

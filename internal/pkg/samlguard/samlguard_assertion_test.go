@@ -2,8 +2,8 @@ package samlguard
 
 import "testing"
 
-// These tests pin the assertion-shape rules that stand in for the missing
-// upstream fix to GO-2026-6909 (crewjam/saml ≤ v0.5.1, no patched release):
+// These tests pin the assertion-shape rules written for GO-2026-6909
+// (crewjam/saml ≤ v0.5.1, fixed in v0.5.2), kept as a second line of defence:
 //
 //   - an assertion with no SAML-namespace <Subject> reaches a nil dereference
 //     in crewjam after the signature is checked (a missing <Issuer> only fails

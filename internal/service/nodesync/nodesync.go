@@ -137,6 +137,10 @@ const IssueTunnelFactorStale = "tunnel_factor_stale"
 // or adopted from a panel). The lines are withheld from subscriptions.
 const IssueCDNLandingUnfit = "cdn_landing_unfit"
 
+// IssueCDNLineClientTLS is the issue recorded for a CDN line that is withheld
+// because it has client TLS off on a landing that needs it (gRPC, Trojan).
+const IssueCDNLineClientTLS = "cdn_line_client_tls"
+
 // IssueSourceGuardWithheld is the issue recorded for a relay line that is left
 // out of subscriptions because its landing cannot tell it from the direct line
 // (its traffic factor differs and the landing cannot check where connections
@@ -168,7 +172,8 @@ func rosterCapacityIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAg
 }
 
 // cdnUnfitIssues names the CDN lines of the snapshot's nodes that are withheld
-// because their landing cannot go through a CDN, with the reason.
+// because their landing cannot go through a CDN, or because their client TLS
+// setting is refused for it, with the reason.
 func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIssue {
 	var out []domain.NodeAgentIssue
 	for _, node := range snapshot.Nodes {
@@ -176,7 +181,24 @@ func cdnUnfitIssues(snapshot *ports.NativeDesiredSnapshot) []domain.NodeAgentIss
 			continue
 		}
 		fault := domain.CDNLandingFault(node)
-		if fault == nil || fault.Code == domain.CDNFaultUnreadable {
+		if fault == nil {
+			// The landing suits a CDN; a line can still be withheld for its own
+			// client TLS setting.
+			for _, line := range node.Relays {
+				if !line.CDN() {
+					continue
+				}
+				var coded *domain.CodedValidationError
+				if err := domain.ValidateCDNRelays(node, []domain.RelayLine{line}); errors.As(err, &coded) {
+					out = append(out, domain.NodeAgentIssue{
+						Code: IssueCDNLineClientTLS, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+						Detail: fmt.Sprintf("%s (withheld from subscriptions; reason code %s)", coded.Msg, coded.Code),
+					})
+				}
+			}
+			continue
+		}
+		if fault.Code == domain.CDNFaultUnreadable {
 			continue
 		}
 		problem := domain.CDNLandingProblem(node)

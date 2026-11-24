@@ -1,5 +1,7 @@
 package render
 
+import "strings"
+
 // Partial JSON shapes that mirror what 3X-UI stores in inbound.settings and
 // inbound.streamSettings. We decode only the fields the renderer cares
 // about; anything else passes through silently.
@@ -106,22 +108,53 @@ type xuiHTTPUpgradeSettings struct {
 	Headers map[string]string `json:"headers"`
 }
 
+// headerHost returns the Host entry of a header map, matching the key
+// case-insensitively as Xray does.
+func headerHost(h map[string]string) string {
+	for k, v := range h {
+		if strings.EqualFold(k, "host") && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// setHeaderHost removes every case variant of the Host key and, when host is
+// not empty, sets a single "Host". It returns the (possibly new) map.
+func setHeaderHost(h map[string]string, host string) map[string]string {
+	for k := range h {
+		if strings.EqualFold(k, "host") {
+			delete(h, k)
+		}
+	}
+	if host == "" {
+		return h
+	}
+	if h == nil {
+		h = map[string]string{}
+	}
+	h["Host"] = host
+	return h
+}
+
 // host is the Host an HTTPUpgrade client sends: the host field, else the Host
 // header.
 func (h xuiHTTPUpgradeSettings) host() string {
-	if h.Host != "" {
-		return h.Host
+	if strings.TrimSpace(h.Host) != "" {
+		return strings.TrimSpace(h.Host)
 	}
-	return h.Headers["Host"]
+	return headerHost(h.Headers)
 }
 
-// normalizeHosts puts the Host that Xray's own host fields name into the header
-// the builders read, unless the header is set.
+// normalizeHosts settles the Host of each transport the way Xray does: the
+// host field wins and the (deprecated) Host header is only the fallback. The
+// result is a single "Host" header, which the builders read.
 func (s *xuiStreamSettings) normalizeHosts() {
-	if w := s.WSSettings; w != nil && w.Host != "" && w.Headers["Host"] == "" {
-		if w.Headers == nil {
-			w.Headers = map[string]string{}
+	if w := s.WSSettings; w != nil {
+		host := strings.TrimSpace(w.Host)
+		if host == "" {
+			host = headerHost(w.Headers)
 		}
-		w.Headers["Host"] = w.Host
+		w.Headers = setHeaderHost(w.Headers, host)
 	}
 }

@@ -142,17 +142,11 @@ func effectiveEndpoint(relay *domain.RelayLine, server string, inboundPort int, 
 		// WebSocket and HTTPUpgrade Host header, the gRPC authority.
 		if relay.Host != "" {
 			if stream.WSSettings != nil {
-				if stream.WSSettings.Headers == nil {
-					stream.WSSettings.Headers = map[string]string{}
-				}
-				stream.WSSettings.Headers["Host"] = relay.Host
+				stream.WSSettings.Headers = setHeaderHost(stream.WSSettings.Headers, relay.Host)
 			}
 			if h := stream.HTTPUpgradeSettings; h != nil {
 				h.Host = relay.Host
-				if h.Headers == nil {
-					h.Headers = map[string]string{}
-				}
-				h.Headers["Host"] = relay.Host
+				h.Headers = setHeaderHost(h.Headers, relay.Host)
 			}
 			if g := stream.GRPCSettings; g != nil {
 				g.Authority = relay.Host
