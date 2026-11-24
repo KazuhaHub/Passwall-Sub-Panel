@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { certKeys } from '@/query/keys'
 import { CA_PRESETS, DEFAULT_DIRECTORY } from './model'
-import { FormSheet, useCertsT, useCommonT } from './shared'
+import { FormDialog } from '@/components/data/FormDialog'
+import { useCertsT, useCommonT } from './shared'
 import type { CertData } from './useCertData'
 
 interface Draft { name: string; email: string; directory: string; keyType: string; eabKid: string; eabHmac: string }
@@ -65,7 +66,7 @@ export function AccountFormSheet({ account, data, onClose }: { account: ACMEAcco
   }
 
   return (
-    <FormSheet
+    <FormDialog
       title={account ? t('certs.acct_edit') : t('certs.acct_new')}
       description={t('certs.acct_subtitle')}
       dirty={dirty}
@@ -108,6 +109,6 @@ export function AccountFormSheet({ account, data, onClose }: { account: ACMEAcco
       {identityChanged && (
         <Alert role="note" className="text-warning-ink"><AlertDescription className="text-warning-ink">{t('certs.form.identity_changed_warning')}</AlertDescription></Alert>
       )}
-    </FormSheet>
+    </FormDialog>
   )
 }

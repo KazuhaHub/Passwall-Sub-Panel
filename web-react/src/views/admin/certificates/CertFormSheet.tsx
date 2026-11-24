@@ -12,7 +12,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { certKeys } from '@/query/keys'
 import { caLabel, parseDomains, sameDomains } from './model'
-import { FormSheet, useCertsT, useCommonT } from './shared'
+import { FormDialog } from '@/components/data/FormDialog'
+import { useCertsT, useCommonT } from './shared'
 import type { CertData } from './useCertData'
 
 interface Draft {
@@ -86,7 +87,7 @@ export function CertFormSheet({ cert, data, onClose }: { cert: Cert | null; data
   }
 
   return (
-    <FormSheet
+    <FormDialog
       title={cert ? t('certs.edit') : t('certs.new')}
       description={cert ? cert.name : t('certs.form.new_description')}
       dirty={dirty}
@@ -122,6 +123,6 @@ export function CertFormSheet({ cert, data, onClose }: { cert: Cert | null; data
       {domainsChanged && (
         <Alert role="note" className="text-warning-ink"><AlertDescription className="text-warning-ink">{t('certs.form.domains_changed_warning')}</AlertDescription></Alert>
       )}
-    </FormSheet>
+    </FormDialog>
   )
 }

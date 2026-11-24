@@ -7,18 +7,17 @@ import { Button } from '@/components/ui/button'
 import { DataTable } from '@/components/data/DataTable'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
-import { urlCodecs, useUrlStates } from '@/hooks/useUrlState'
 import type { UrlSelection } from '@/hooks/useUrlSelection'
 import { IconCert, IconDelete, IconEdit, IconRefresh } from '@/lib/icons'
-import { FIT, RecordCard, choiceCodec, plainColumns, singleFacet } from '../logs/shared'
+import { FIT, RecordCard, plainColumns, singleFacet } from '../logs/shared'
 import { DomainsCell, ExpiryCell, HealthCell } from './cells'
-import { caLabel, certHealth, sortCerts, type CertHealthId } from './model'
+import { caLabel, certHealth, type CertHealthId } from './model'
 import { NodeLinks, useCertsT } from './shared'
+import { HEALTH, useCertRows } from './useCertRows'
 import type { CertData } from './useCertData'
 
 // One empty list, so a list not read yet does not look like a new one on every render.
 const NONE: never[] = []
-const HEALTH: readonly CertHealthId[] = ['failed', 'expired', 'expiring', 'issuing', 'valid']
 
 export interface CertActions {
   renew: (c: Cert) => Promise<void>
@@ -31,33 +30,16 @@ export interface CertActions {
 /**
  * The list answers one question first: which certificates need attention. Problems sort to the top, the
  * state is in words with its reason, and every row says where the certificate is used. One visible action
- * (renew), the rest in the row menu; a click opens the whole certificate in a sheet (`?row=`).
+ * (renew), the rest in the row menu; a click opens the whole certificate in a dialog (`?row=`).
  */
 export function CertsTab({ data, sel, act }: { data: CertData; sel: UrlSelection<number>; act: CertActions }) {
   const t = useCertsT()
-  const [f, setF] = useUrlStates({ q: urlCodecs.string(), status: choiceCodec(HEALTH) })
-  // The words ("expires in 12 days") are as of the last read, not of every render.
-  const now = useMemo(() => Date.now(), [data.certs.dataUpdatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { f, setF, now, rows, counts } = useCertRows(data)
   const { renewBeforeDays } = data
   const accounts = data.accounts.data ?? NONE
   const creds = data.creds.data ?? NONE
   const accountOf = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts])
   const credOf = useMemo(() => new Map(creds.map(c => [c.id, c])), [creds])
-
-  const all = data.certs.data
-  const sorted = useMemo(() => (all ? sortCerts(all, now, renewBeforeDays) : []), [all, now, renewBeforeDays])
-  const rows = useMemo(() => {
-    const q = f.q.trim().toLowerCase()
-    return sorted.filter(c => {
-      if (f.status && certHealth(c, now, renewBeforeDays).id !== f.status) return false
-      return !q || c.name.toLowerCase().includes(q) || c.domains.some(d => d.toLowerCase().includes(q))
-    })
-  }, [sorted, f.q, f.status, now, renewBeforeDays])
-  const counts = useMemo(() => {
-    const out: Partial<Record<CertHealthId, number>> = {}
-    for (const c of sorted) { const id = certHealth(c, now, renewBeforeDays).id; out[id] = (out[id] ?? 0) + 1 }
-    return out
-  }, [sorted, now, renewBeforeDays])
 
   // Handlers are read through a ref so a click does not rebuild every row; what the cells SHOW (usage, accounts,
   // the clock) is in the dependencies, because a row is not redrawn unless its columns change and the nodes
