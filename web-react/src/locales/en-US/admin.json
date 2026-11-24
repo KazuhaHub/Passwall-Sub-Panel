@@ -4924,7 +4924,6 @@
       "title": "{{nodes}} nodes, {{lines}} lines"
     },
     "menu": {
-      "unsupported": "{{action}} ({{reason}})",
       "not_ready": "the node is not ready",
       "not_supported": "{{type}} does not support this"
     },
@@ -6414,7 +6413,7 @@
         "edit": "Edit",
         "refresh": "Refresh now",
         "delete": "Delete",
-        "delete_blocked": "Delete (in use)"
+        "delete_blocked": "In use, so it cannot be deleted"
       },
       "empty": "No lists yet. Policies take their destinations from lists.",
       "empty_filtered": "No matching lists",

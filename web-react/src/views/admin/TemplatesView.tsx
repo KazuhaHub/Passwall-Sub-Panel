@@ -111,7 +111,7 @@ export default function TemplatesView() {
     if (seeded(tpl)) menu.push({ id: 'reset', label: t('admin:templates.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(tpl) })
     // A protected template keeps its Delete item, off, saying why, instead of silently having none.
     menu.push(protectedRow(tpl)
-      ? { id: 'delete', label: t(seeded(tpl) ? 'admin:templates.cannot_delete_seeded' : 'admin:templates.cannot_delete_default'), icon: IconDelete, destructive: true, disabled: true }
+      ? { id: 'delete', label: t('admin:templates.row_delete'), disabledReason: t(seeded(tpl) ? 'admin:templates.cannot_delete_seeded' : 'admin:templates.cannot_delete_default'), icon: IconDelete, destructive: true, disabled: true }
       : { id: 'delete', label: t('admin:templates.row_delete'), icon: IconDelete, destructive: true, disabled: wait, onSelect: () => void confirmDelete(tpl) })
     return menu
   }

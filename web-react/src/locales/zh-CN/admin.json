@@ -4893,7 +4893,6 @@
       "title": "{{nodes}} 个节点，{{lines}} 条线路"
     },
     "menu": {
-      "unsupported": "{{action}}（{{reason}}）",
       "not_ready": "节点尚未就绪",
       "not_supported": "{{type}} 不支持"
     },
@@ -6360,7 +6359,7 @@
         "edit": "编辑",
         "refresh": "立即刷新",
         "delete": "删除",
-        "delete_blocked": "删除（使用中）"
+        "delete_blocked": "使用中，无法删除"
       },
       "empty": "还没有列表。策略都从列表里取目的地。",
       "empty_filtered": "没有符合的列表",

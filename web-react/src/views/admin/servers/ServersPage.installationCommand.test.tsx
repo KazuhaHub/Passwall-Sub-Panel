@@ -40,8 +40,9 @@ describe('Passwall Node installation', () => {
     const row = (await screen.findByText(nativeServer.name)).closest('tr')!
     fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
     expect(screen.getAllByRole('menuitem', { name: 'admin:servers.install_reinstall.action' })).toHaveLength(1)
-    // The agent upgrade is offered for a native node, here disabled with its reason in the label (the node is not ready).
-    expect(screen.getAllByRole('menuitem', { name: 'admin:servers.menu.unsupported' }).length).toBeGreaterThan(0)
+    // The agent upgrade is offered for a native node, here disabled with its reason under the label (the node is not ready).
+    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('admin:servers.menu.not_ready')).toBeTruthy()
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
     expect((screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }) as HTMLSelectElement).value).toBe('psp')
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-installation'))).toBe(false)

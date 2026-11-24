@@ -20,7 +20,7 @@ export interface RowMenuHandlers {
 }
 
 /**
- * The More menu of one server. AN ACTION THE SERVER CANNOT DO IS SHOWN DISABLED WITH ITS REASON IN THE LABEL, never
+ * The More menu of one server. AN ACTION THE SERVER CANNOT DO IS SHOWN DISABLED WITH ITS REASON UNDER THE LABEL (`disabledReason`), never
  * hidden and never offered and then refused by the backend: the capability list the backend sends per server decides
  * (S-UI has no remote upgrade, and the panel would answer 501). Actions that belong to one kind of server only (the
  * agent's, 3X-UI's route cleanup) appear for that kind; capability-gated ones appear for every kind they could apply to.
@@ -29,7 +29,6 @@ export interface RowMenuHandlers {
 export function rowMenu(s: Server, h: RowMenuHandlers, o: { t: TFunction; admin: boolean; busy: boolean }): MoreMenuItem[] {
   const { t } = o
   const native = s.panel_type === 'psp'
-  const off = (label: string, reason: string) => t('admin:servers.menu.unsupported', { action: label, reason })
   const items: MoreMenuItem[] = [{ id: 'edit', label: t('admin:servers.action.edit'), icon: IconEdit, onSelect: () => h.edit(s) }]
 
   if (o.admin) items.push({ id: 'install', label: t('admin:servers.install_reinstall.action'), icon: IconDownload, onSelect: () => h.install(s) })
@@ -37,16 +36,16 @@ export function rowMenu(s: Server, h: RowMenuHandlers, o: { t: TFunction; admin:
   if (native) {
     const label = t('admin:servers.agent_upgrade.action')
     const ready = !!s.node_upgrade_ready
-    items.push({ id: 'agent', label: ready ? label : off(label, t('admin:servers.menu.not_ready')), icon: IconUpgrade, disabled: !ready || o.busy, onSelect: () => h.upgradeAgent(s) })
+    items.push({ id: 'agent', label, disabledReason: ready ? undefined : t('admin:servers.menu.not_ready'), icon: IconUpgrade, disabled: !ready || o.busy, onSelect: () => h.upgradeAgent(s) })
   } else {
     const label = t('admin:servers.action.upgrade_panel')
     const can = hasCapability(s, 'panel.upgrade')
-    items.push({ id: 'panel', label: can ? label : off(label, t('admin:servers.menu.not_supported', { type: typeLabel(s) })), icon: IconUpgrade, disabled: !can || o.busy, onSelect: () => h.upgradePanel(s) })
+    items.push({ id: 'panel', label, disabledReason: can ? undefined : t('admin:servers.menu.not_supported', { type: typeLabel(s) }), icon: IconUpgrade, disabled: !can || o.busy, onSelect: () => h.upgradePanel(s) })
   }
 
   const coreLabel = native ? t('admin:servers.action.select_core') : t('admin:servers.action.upgrade_xray')
   const canCore = hasCapability(s, 'core.upgrade')
-  items.push({ id: 'core', label: canCore ? coreLabel : off(coreLabel, t('admin:servers.menu.not_supported', { type: typeLabel(s) })), icon: native ? IconTune : IconUpgrade, disabled: !canCore || o.busy, onSelect: () => h.core(s) })
+  items.push({ id: 'core', label: coreLabel, disabledReason: canCore ? undefined : t('admin:servers.menu.not_supported', { type: typeLabel(s) }), icon: native ? IconTune : IconUpgrade, disabled: !canCore || o.busy, onSelect: () => h.core(s) })
 
   if (native) items.push({ id: 'rotate', label: t('admin:servers.action.rotate_node_credential'), icon: IconKey, disabled: o.busy, onSelect: () => h.rotate(s) })
   items.push({ id: 'factors', label: t('admin:servers.action.line_factors'), icon: IconPercent, onSelect: () => h.lineFactors(s) })
