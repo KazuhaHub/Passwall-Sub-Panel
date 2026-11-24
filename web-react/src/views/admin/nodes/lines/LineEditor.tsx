@@ -16,13 +16,13 @@ import { SaveBar } from '@/components/form/SaveBar'
 import { InfoTip } from '@/components/common/HelpTip'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { IconRandom } from '@/lib/icons'
 import { useAllNodes, useAllServers } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import { milliToFactorText, factorTextToMilli } from '@/utils/trafficFactor'
 import { lineVisibilityHint, useLineVisibility } from '../../useLineVisibility'
+import { ServerSelect } from '../shared/ServerSelect'
 import { useNodesT } from '../shared/useNodesT'
 import { CdnFields } from './CdnFields'
 import { DirectEditor } from './DirectEditor'
@@ -234,12 +234,6 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
   const labelPreview = draft && (draft.only_line_name ? draft.name.trim() : [node.display_name, draft.name.trim()].filter(Boolean).join(' · '))
   const savedEntry = live?.entry_panel_id ?? 0
   const canSwitchMode = !!live?.id && savedEntry > 0 && (draft?.entry_panel_id ?? 0) === savedEntry && (cur === 'forward' || cur === 'tunnel')
-  const serverOptions = (
-    <>
-      {entryServers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-    </>
-  )
-
   return (
     <FormValidityProvider>
       <form className="flex flex-col gap-5" onSubmit={e => { e.preventDefault(); void save() }} noValidate>
@@ -270,11 +264,13 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
             {(cur === 'forward' || cur === 'tunnel') && (
               <>
                 <Field label={t('nodes.line.entry_server')} required hint={t('nodes.relay.entry_managed_hint')} error={error('entry') && t(`nodes.${error('entry')}`)}>
-                  <NativeSelect id={ID.entry} value={draft.entry_panel_id ?? 0} onChange={e => pickEntry(Number(e.target.value) || 0)} onBlur={() => blur('entry')}>
-                    <option value={0}>{isNew ? t('nodes.line.entry_pick') : t('nodes.line.entry_outside')}</option>
-                    {serverOptions}
-                  </NativeSelect>
+                  <ServerSelect id={ID.entry} servers={entryServers} value={draft.entry_panel_id ?? 0}
+                    placeholder={t(isNew ? 'nodes.line.entry_pick' : 'nodes.line.entry_outside')} onChange={pickEntry} onBlur={() => blur('entry')} />
                 </Field>
+                {/* A saved line can be pointed at an entry configured outside the panel. The picker lists servers only, so that choice is its own button. */}
+                {!isNew && (draft.entry_panel_id ?? 0) > 0 && (
+                  <div className="-mt-3"><Button type="button" variant="outline" size="sm" onClick={() => pickEntry(0)}>{t('nodes.line.entry_outside')}</Button></div>
+                )}
                 {canSwitchMode && (
                   <div className="flex flex-wrap items-center gap-2" data-testid="tunnel-line">
                     <Button type="button" variant="outline" size="sm" disabled={switching} onClick={() => void toggleMode(cur === 'forward' ? 'tunnel' : 'forward')}>
@@ -312,10 +308,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
             {cur === 'external' && (
               <>
                 <Field label={t('nodes.line.entry_server')} hint={t('nodes.relay.entry_external_hint')}>
-                  <NativeSelect id={ID.entry} value={0} onChange={e => pickEntry(Number(e.target.value) || 0)} disabled={isNew}>
-                    <option value={0}>{t('nodes.line.entry_outside')}</option>
-                    {!isNew && serverOptions}
-                  </NativeSelect>
+                  <ServerSelect id={ID.entry} servers={isNew ? [] : entryServers} value={0} placeholder={t('nodes.line.entry_outside')} onChange={pickEntry} disabled={isNew} />
                 </Field>
                 <Field label={t('nodes.line.entry_address')} required error={error('address') && t(`nodes.${error('address')}`)}>
                   <Input id={ID.address} value={draft.address} placeholder="relay.example.com" onChange={e => patch({ address: e.target.value })} onBlur={() => blur('address')} />
