@@ -6375,7 +6375,7 @@
       "dialog": {
         "title_new": "新建列表",
         "type": "列表类型",
-        "title_edit": "编辑列表「{{name}}」",
+        "not_found": "没有找到这个列表，可能已被删除",
         "name": "名称",
         "name_required": "名称必填",
         "text": "列表内容",
@@ -6387,6 +6387,7 @@
         "refresh_follows": "刷新：跟随全局设置（每 {{hours}} 小时）",
         "category": "分类",
         "category_option": "{{name}} · {{entries}} 条",
+        "category_required": "请选择分类",
         "attrs": "属性",
         "geosite_note": "数据来自 v2fly domain-list-community。",
         "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
@@ -6395,8 +6396,6 @@
         "footer_nodes_unknown": "运行它的节点",
         "footer_unchanged": "内容未变化，不会触发重启",
         "footer_unused": "这个列表没有被使用，保存不会影响节点",
-        "save": "保存",
-        "cancel": "取消",
         "stale": "这个列表刚被其他人修改过",
         "load_latest": "载入最新",
         "preview_failed": "无法解析：{{error}}",
@@ -6813,11 +6812,8 @@
         "blank": "新建空白策略"
       },
       "editor": {
-        "close": "关闭",
-        "cancel": "取消",
-        "save": "保存",
         "title_new": "新建策略",
-        "title_edit": "编辑策略「{{name}}」",
+        "not_found": "没有找到这条策略，可能已被删除",
         "reload": "载入最新",
         "stale": "这条策略刚被其他人修改过",
         "name": "名称",

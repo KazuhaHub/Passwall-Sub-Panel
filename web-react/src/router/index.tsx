@@ -44,6 +44,11 @@ const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
 const AccessControlView = lazy(viewLoaders['/admin/access-control'])
+// A policy and a list are pages of their own under the access-control page; their create forms sit beside them.
+const PolicyDetailRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyDetailRoute })))
+const PolicyCreateRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyCreateRoute })))
+const ListDetailRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListDetailRoute })))
+const ListCreateRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListCreateRoute })))
 const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
 const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
 const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
@@ -143,6 +148,10 @@ export const router = createBrowserRouter([
           { path: 'logs', element: <LogsRoute><LogsView /></LogsRoute> },
           { path: 'risk', element: <RiskCenterView /> },
           { path: 'access-control', element: <AccessControlView /> },
+          { path: 'access-control/policies/new', element: <PolicyCreateRoute /> },
+          { path: 'access-control/policies/:id', element: <PolicyDetailRoute /> },
+          { path: 'access-control/lists/new', element: <ListCreateRoute /> },
+          { path: 'access-control/lists/:id', element: <ListDetailRoute /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
           { path: 'node-issues', element: <NodeIssuesView /> },
           { path: 'diagnostics', element: <DiagnosticsView /> },

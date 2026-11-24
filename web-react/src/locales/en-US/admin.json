@@ -6430,7 +6430,7 @@
       "dialog": {
         "title_new": "New list",
         "type": "List type",
-        "title_edit": "Edit list \"{{name}}\"",
+        "not_found": "This list was not found. It may have been deleted.",
         "name": "Name",
         "name_required": "A name is required",
         "text": "List content",
@@ -6442,6 +6442,7 @@
         "refresh_follows": "Refresh: follows the global setting (every {{hours}} hours)",
         "category": "Category",
         "category_option": "{{name}} · {{entries}} entries",
+        "category_required": "Choose a category",
         "attrs": "Attributes",
         "geosite_note": "Data comes from v2fly domain-list-community.",
         "geosite_counts": "This category has {{entries}} entries, {{regexps}} of them regular expressions",
@@ -6452,8 +6453,6 @@
         "footer_nodes_unknown": "the nodes that run it",
         "footer_unchanged": "The content is unchanged, so nothing restarts",
         "footer_unused": "This list is not used, so saving does not affect the nodes",
-        "save": "Save",
-        "cancel": "Cancel",
         "stale": "This list was just changed by someone else",
         "load_latest": "Load latest",
         "preview_failed": "Could not parse: {{error}}",
@@ -6882,11 +6881,8 @@
         "blank": "New blank policy"
       },
       "editor": {
-        "close": "Close",
-        "cancel": "Cancel",
-        "save": "Save",
         "title_new": "New policy",
-        "title_edit": "Edit policy \"{{name}}\"",
+        "not_found": "This policy was not found. It may have been deleted.",
         "reload": "Load the latest",
         "stale": "This policy was just changed by someone else",
         "name": "Name",

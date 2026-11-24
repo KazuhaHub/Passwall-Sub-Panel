@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { confirmMock, renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
-import PolicyEditorSheet from './PolicyEditorSheet'
+import PolicyEditor from './PolicyEditor'
 import { emptyForm, formOf, inputOf } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -38,7 +38,7 @@ beforeEach(() => {
 const checked = (el: HTMLElement) => el.getAttribute('aria-checked') === 'true'
 
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditor policy={policy} initial={initial} back={{ to: '/admin/access-control', label: '访问控制' }} onCreated={vi.fn()} />)
 
 describe('counts_as_risk', () => {
   it('round-trips through the form: a block policy keeps it, an allow policy never sends it', () => {

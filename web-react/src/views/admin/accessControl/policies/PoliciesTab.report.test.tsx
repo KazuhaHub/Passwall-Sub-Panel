@@ -6,6 +6,7 @@ import { confirmMock, renderAccess, setTestLang, snack, whereIs } from '@/test/a
 import * as api from '@/api/accessControl'
 import type { DestCatalog, DestHits, DestPolicies, DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
+import { PolicyCreateRoute, PolicyDetailRoute } from './PolicyRoutes'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -418,12 +419,13 @@ describe('turning a report-only policy into a block (S4)', () => {
   })
 })
 
-describe('the editor: three states for a block policy, two for an allow policy', () => {
+const newPage = (kind: string) => renderAccess(<PolicyCreateRoute />, { route: `/admin/access-control/policies/new?kind=${kind}`, path: '/admin/access-control/policies/new' })
+
+describe('the editor page: three states for a block policy, two for an allow policy', () => {
   it('a new block policy offers Off / Report only / On, starts as Report only with the recommendation, and the admin can pick On at once', async () => {
-    renderAccess(<PoliciesTab {...props} />)
-    await screen.findByText('禁止发信')
-    fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
-    const dialog = await screen.findByRole('dialog')
+    newPage('block')
+    const dialog = document.body
+    await screen.findByLabelText(/名称/)
     const group = within(dialog).getByRole('radiogroup', { name: '状态' })
     expect(within(group).getAllByRole('radio').map(b => b.textContent?.replace('推荐', '').trim())).toEqual(['关闭', '仅报告', '开启'])
     expect(within(group).getByRole('radio', { name: /仅报告/ }).getAttribute('aria-checked')).toBe('true')
@@ -439,10 +441,9 @@ describe('the editor: three states for a block policy, two for an allow policy',
   })
 
   it('saved as the recommended Report only, the policy goes up as report', async () => {
-    renderAccess(<PoliciesTab {...props} />)
-    await screen.findByText('禁止发信')
-    fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
-    const dialog = await screen.findByRole('dialog')
+    newPage('block')
+    const dialog = document.body
+    await screen.findByLabelText(/名称/)
     fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: '新策略' } })
     fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '25' } })
     vi.mocked(api.createDestPolicy).mockResolvedValue(pol({}))
@@ -453,10 +454,9 @@ describe('the editor: three states for a block policy, two for an allow policy',
   })
 
   it('an allow policy offers Off and On only, with the one-line reason; switching a report-only block to allow drops the state to Off', async () => {
-    renderAccess(<PoliciesTab {...props} />)
-    await screen.findByText('禁止发信')
-    fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
-    const dialog = await screen.findByRole('dialog')
+    newPage('block')
+    const dialog = document.body
+    await screen.findByLabelText(/名称/)
     expect(within(dialog).getByRole('radiogroup', { name: '状态' }).textContent).toContain('仅报告')
     fireEvent.click(within(dialog).getByRole('radio', { name: '放行' }))
     const group = within(dialog).getByRole('radiogroup', { name: '状态' })
@@ -466,9 +466,9 @@ describe('the editor: three states for a block policy, two for an allow policy',
   })
 
   it('editing a report-only policy keeps its state, and says it is not a new policy: no recommendation', async () => {
-    renderAccess(<PoliciesTab {...props} />)
-    fireEvent.click(await screen.findByText('加密货币交易所'))
-    const dialog = await screen.findByRole('dialog')
+    renderAccess(<PolicyDetailRoute />, { route: '/admin/access-control/policies/3', path: '/admin/access-control/policies/:id' })
+    await screen.findByLabelText(/名称/)
+    const dialog = document.body
     const group = within(dialog).getByRole('radiogroup', { name: '状态' })
     expect(within(group).getByRole('radio', { name: '仅报告' }).getAttribute('aria-checked')).toBe('true')
     expect(within(dialog).queryByText(/新建的拦截策略建议/)).toBeNull()

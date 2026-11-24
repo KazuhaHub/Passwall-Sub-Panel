@@ -20,13 +20,13 @@ import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes, pipelineSteps, reorderWithin, reportNotDeployedCount, splitBlockByState } from '@/utils/accessControl'
 import type { AccessNavState } from '../accessParams'
+import { accessReturnState, newPolicyPath, policyPath } from '../accessRoutes'
 import { recordsHref, relativeSince } from '../records/recordsParams'
 import { deletePolicyConfirm } from '../confirmCopy'
 import { destErrorText, reportDestError } from '../destErrors'
 import ConvertToBlockDialog from './ConvertToBlockDialog'
 import StateBadge from '../allowlist/StateBadge'
-import PolicyEditorSheet from './PolicyEditorSheet'
-import { emptyForm, formOf, inputOf, type PolicyForm } from './policyForm'
+import { formOf, inputOf } from './policyForm'
 import PolicyRow, { type RowMove } from './PolicyRow'
 import { RailStep } from './PolicyRail'
 import QuotaMeters from './QuotaMeters'
@@ -75,7 +75,6 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const gate = useFirstPublishGate()
   const enableScopeOf = useEnableScopeText()
 
-  const [editing, setEditing] = useState<{ policy: DestPolicy | null; initial?: PolicyForm } | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [highlight, setHighlight] = useState<number | null>(null)
   const [converting, setConverting] = useState<DestPolicy | null>(null)
@@ -93,7 +92,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
 
   const all = useMemo(() => [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])], [policies.data])
 
-  // History state asks for a policy: open its editor and/or scroll to and mark
+  // History state asks for a policy: open its page and/or scroll to and mark
   // its row. Handled once PER REQUEST (the location entry's key), so a second
   // request while the tab stays mounted works too; cleared by a replace that
   // keeps the URL.
@@ -106,13 +105,18 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
     if (handled.current === location.key) return
     handled.current = location.key
     const target = all.find(p => p.id === (nav.openPolicy ?? nav.highlightPolicy))
+    // The editor is a page: a request to open it goes there (replacing the entry, so Back does not return to the
+    // redirect), carrying this tab's place for the page's back link.
+    if (nav.openPolicy !== undefined && target) {
+      void navigate(policyPath(target.id), { replace: true, state: accessReturnState(location.pathname, location.search) })
+      return
+    }
     void navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
     if (!target) return
     setHighlight(target.id)
     document.querySelector(`[data-policy-id="${target.id}"]`)?.scrollIntoView?.({ block: 'center' })
     if (highlightTimer.current) clearTimeout(highlightTimer.current)
     highlightTimer.current = setTimeout(() => { setHighlight(null); highlightTimer.current = null }, HIGHLIGHT_MS)
-    if (nav.openPolicy !== undefined) setEditing({ policy: target })
   }, [location, navigate, policies.data, all])
 
   if (policies.isPending) return <CardSkeleton lines={5} />
@@ -226,7 +230,9 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
     try { await del.mutateAsync(p.id) } catch (err) { reportDestError(t, err) }
   }
 
-  const duplicate = (p: DestPolicy) => setEditing({ policy: null, initial: { ...formOf(p), name: t(`${P}row.copy_name`, { name: p.name }), state: 'off', templateKey: '' } })
+  /** The editor and the create form are pages; they carry this tab's place so their back link returns to it. */
+  const open = (to: string) => void navigate(to, { state: accessReturnState(location.pathname, location.search) })
+  const duplicate = (p: DestPolicy) => open(newPolicyPath({ copy: p.id }))
 
   const confirmTemplate = async (state: DestState) => {
     if (!chooser) return
@@ -248,14 +254,14 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const useTemplate = (tpl: DestTemplate) => { setChooserError(null); setChooser(tpl) }
 
   /** What "add" opens in a step: a block policy (already report-only for the report step), or an allow policy. */
-  const blank = (k: 'allow' | 'block' | 'report'): PolicyForm => (k === 'report' ? { ...emptyForm('block'), state: 'report' } : emptyForm(k === 'allow' ? 'allow' : 'block'))
+  const addIn = (k: 'allow' | 'block' | 'report') => open(newPolicyPath({ kind: k }))
   const renderSection = (k: 'allow' | 'block' | 'report') => {
     const rows = section(k)
     return rows.length === 0
       ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed p-3">
           <p className="text-sm text-muted-foreground">{t(`${P}rail.empty_step`)}</p>
-          <Button size="sm" variant="outline" onClick={() => setEditing({ policy: null, initial: blank(k) })}>{t(`${P}rail.add_${k}`)}</Button>
+          <Button size="sm" variant="outline" onClick={() => addIn(k)}>{t(`${P}rail.add_${k}`)}</Button>
         </div>
       )
       : (
@@ -263,7 +269,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
           {rows.map((p, i) => (
             <PolicyRow key={p.id} policy={p} index={i} count={rows.length} listNames={listNames} scopeText={scopeText(p)}
               now={now} notDeployed={reportNotDeployedCount(status.data, p)} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
-              onOpen={() => setEditing({ policy: p })} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
+              onOpen={() => open(policyPath(p.id))} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
               onDuplicate={() => duplicate(p)} onDelete={() => void remove(p)} onReport={() => void toReport(p)}
               onConvert={() => setConverting(p)} onViewRecords={() => viewRecords(p)} />
           ))}
@@ -271,7 +277,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       )
   }
   const addButton = (k: 'allow' | 'block' | 'report') => (
-    <Button size="sm" variant="outline" onClick={() => setEditing({ policy: null, initial: blank(k) })}
+    <Button size="sm" variant="outline" onClick={() => addIn(k)}
       aria-label={t(`${P}rail.add_${k}_aria`)}><IconAdd />{t(`${P}rail.add_${k}`)}</Button>
   )
 
@@ -287,14 +293,14 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
             <h2 className="text-base font-semibold">{t(`${P}empty.title`)}</h2>
             <p className="text-sm text-muted-foreground">{t(`${P}empty.body`)}</p>
             <TemplateGrid catalog={catalog.data} onUse={useTemplate} onGoToLists={() => onGoToLists('new_custom')} />
-            <div><Button variant="outline" onClick={() => setEditing({ policy: null, initial: emptyForm('block') })}><IconAdd />{t(`${P}empty.blank`)}</Button></div>
+            <div><Button variant="outline" onClick={() => addIn('block')}><IconAdd />{t(`${P}empty.blank`)}</Button></div>
           </div>
         )
         : (
           <>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">{t(`${P}rail.order`)}</p>
-              <TemplateMenu catalog={catalog.data} onBlank={() => setEditing({ policy: null, initial: emptyForm('block') })}
+              <TemplateMenu catalog={catalog.data} onBlank={() => addIn('block')}
                 onUse={useTemplate} onShowUnavailable={() => setUnavailableOpen(true)} />
             </div>
             {steps.map((s, i) => {
@@ -348,9 +354,6 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
           </>
         )}
 
-      {editing && (
-        <PolicyEditorSheet open policy={editing.policy} initial={editing.initial} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
-      )}
       {/* Which state a policy comes back in, when the page cannot know. Dismissing writes nothing, and focus starts on Cancel: neither option is what a stray Enter picks. */}
       <Dialog open={choosing !== null} onOpenChange={next => { if (!next) setChoosing(null) }}>
         <DialogContent showCloseButton={false} className="sm:max-w-md" initialFocus={cancelRef}>

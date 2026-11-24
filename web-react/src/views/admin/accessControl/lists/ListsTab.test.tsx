@@ -179,24 +179,24 @@ describe('the lists tab', () => {
     expect(onOpenPolicy).toHaveBeenCalledWith(5)
   })
 
-  it('opens the dialog a nav state asks for, once', async () => {
+  it('sends an old request for the editor (history state) to the list page, replacing the entry and carrying the tab', async () => {
     vi.mocked(api.getGeositeCategories).mockResolvedValue({ categories: [] })
     const { router } = renderAccess(ui, { route })
     await screen.findByText('Internal')
     await router.navigate(route, { state: { openList: 'new_remote' } })
-    expect(await screen.findByRole('dialog', { name: '新建列表' })).toBeTruthy()
-    await waitFor(() => expect(router.state.location.state).toBeNull())
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/lists/new?kind=remote'))
+    expect(router.state.location.state).toEqual({ from: '/admin/access-control?tab=lists' })
+    await router.navigate(route, { state: { openList: 4 } })
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/lists/4'))
   })
 
-  it('handles a SECOND request while still mounted (the dialog was closed in between)', async () => {
-    vi.mocked(api.getGeositeCategories).mockResolvedValue({ categories: [] })
-    const { router } = renderAccess(ui, { route })
-    await screen.findByText('Internal')
-    await router.navigate(route, { state: { openList: 'new_remote' } })
-    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建列表' })).toBeNull())
-    await router.navigate(route, { state: { openList: 'new_custom' } })
-    expect(await screen.findByRole('dialog', { name: '新建列表' })).toBeTruthy()
+  it('opens a new list of the chosen kind, and an existing one, as pages that remember the tab', async () => {
+    const { router } = renderAccess(ui, { route: `${route}&lst_state=problem` })
+    await screen.findByText('Scam list')
+    fireEvent.click(screen.getByRole('button', { name: /新建列表/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '远程地址' }))
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/lists/new?kind=remote'))
+    expect(router.state.location.state).toEqual({ from: '/admin/access-control?tab=lists&lst_state=problem' })
   })
 
   it('never shows an unknown refresh error raw', async () => {

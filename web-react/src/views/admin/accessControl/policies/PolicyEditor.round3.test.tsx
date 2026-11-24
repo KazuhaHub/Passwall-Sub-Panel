@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
-import PolicyEditorSheet from './PolicyEditorSheet'
+import PolicyEditor from './PolicyEditor'
 import { emptyForm } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -34,9 +34,9 @@ beforeEach(() => {
 })
 
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditor policy={policy} initial={initial} back={{ to: '/admin/access-control', label: '访问控制' }} onCreated={vi.fn()} />)
 
-describe('PolicyEditorSheet round 3', () => {
+describe('PolicyEditor round 3', () => {
   it('shows a server error for description under the description field', async () => {
     vi.mocked(api.createDestPolicy).mockRejectedValue(bad('description'))
     mount(null, { ...emptyForm(), name: 'p', ports: '25' })
@@ -62,8 +62,8 @@ describe('PolicyEditorSheet round 3', () => {
     mount(pol())
     const field = await screen.findByLabelText('说明')
     fireEvent.change(field, { target: { value: '汉'.repeat(200) } }) // 200 chars, 600 bytes
-    expect(await screen.findByText(/512 字节/)).toBeTruthy()
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findAllByText(/512 字节/)).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '保存' }).getAttribute('aria-disabled')).toBe('true')
     fireEvent.change(field, { target: { value: '汉'.repeat(100) } }) // 300 bytes
     await waitFor(() => expect(screen.queryByText(/512 字节/)).toBeNull())
   })
@@ -78,8 +78,8 @@ describe('PolicyEditorSheet round 3', () => {
     mount(pol())
     const field = await screen.findByLabelText(/名称/)
     fireEvent.change(field, { target: { value: '汉'.repeat(50) } }) // 50 chars, 150 bytes
-    expect(await screen.findByText(/128 字节/)).toBeTruthy()
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findAllByText(/128 字节/)).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '保存' }).getAttribute('aria-disabled')).toBe('true')
     fireEvent.change(field, { target: { value: '汉'.repeat(40) } }) // 120 bytes
     await waitFor(() => expect(screen.queryByText(/128 字节/)).toBeNull())
   })

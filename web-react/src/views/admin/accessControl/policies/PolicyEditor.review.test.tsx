@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestList, DestPolicy } from '@/api/accessControl'
-import PolicyEditorSheet from './PolicyEditorSheet'
+import PolicyEditor from './PolicyEditor'
 import { emptyForm } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -38,9 +38,9 @@ const isOff = (el: HTMLElement) => el.hasAttribute('disabled') || el.getAttribut
 const checked = (el: HTMLElement) => el.getAttribute('aria-checked') === 'true'
 
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditor policy={policy} initial={initial} back={{ to: '/admin/access-control', label: '访问控制' }} onCreated={vi.fn()} />)
 
-describe('PolicyEditorSheet review fixes', () => {
+describe('PolicyEditor review fixes', () => {
   it('a 400 naming a field with no input shows in the dialog top error', async () => {
     vi.mocked(api.createDestPolicy).mockRejectedValue(Object.assign(new Error('x'), {
       isAxiosError: true, response: { status: 400, data: { code: 'dest_policy_invalid', field: 'inline.network', error: 'bad' } },
@@ -70,7 +70,8 @@ describe('PolicyEditorSheet review fixes', () => {
 
   it('requires a group when the scope is groups: error shown, save disabled', async () => {
     mount(null, { ...emptyForm(), name: 'p', ports: '25', scope: 'groups' })
-    expect((await screen.findByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findByRole('button', { name: '保存' })).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('至少选择一个分组')).toBeTruthy()
   })
 
   it('offers only destination lists', async () => {
