@@ -457,11 +457,12 @@ try {
   assert.equal(requests.some(request => ['PATCH', 'DELETE'].includes(request.method)), false, 'No record deletion or arbitrary patch is allowed.');
   assert.equal(count('POST', '/api/admin/servers/7/node-install-command'), 1);
   assert.equal(count('POST', '/api/admin/servers/17/node-migration-command'), 1);
-  // The list probes its visible rows each time it is shown (once per page, search or sort, and again on coming back from a
-  // server's page), so an ID may be probed more than once; what matters is that every original server is probed and no
-  // other ID ever is.
-  assert.deepEqual([...new Set(requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe')
-    .map(request => request.body.id))].sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  // A result is kept for 60 s across the trip to a server's page and back, and dropped when that server is saved, so an ID
+  // is probed again only after its own save: the first load, plus one more after each of 17, 27 and 7 was saved. Every
+  // original server is probed, no other ID ever is, and none more than twice.
+  const probed = requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe').map(request => request.body.id);
+  assert.deepEqual([...new Set(probed)].sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  for (const id of [7, 17, 27]) assert(probed.filter(probe => probe === id).length <= 2, `Server ${id} was probed more often than its saves explain.`);
   await context.close();
   assert.deepEqual(failures, [], 'Browser/fixture errors are acceptance failures.');
   console.log('PASS: real Linux Chromium built-SPA acceptance: original backends, PN defaults/full name, truthful manual recovery, fixed identity, reviewed-release consent and node-host command/copy.');

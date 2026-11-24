@@ -5,6 +5,7 @@ import { serverKeys } from '@/query/keys'
 import { useAllServers } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import type { ServerListResponse } from '@/query/servers'
+import { probeKey } from './useServerProbes'
 
 /**
  * One server, read from the list of every server: the panel has no read of a single record, and the list is a plain
@@ -20,8 +21,11 @@ export function useServerRecord(id: number) {
 }
 
 /**
- * Writes a changed record into every cached list (the paged one the Servers page shows and the one of every server), so
- * the list is right when the person goes back to it without a re-read, and invalidates them so it is re-read anyway.
+ * What a page changes in the cached lists. `patch` writes a changed record into every one of them (the paged one the
+ * Servers page shows and the one of every server), so an update is right when the person goes back to the list without a
+ * re-read; `invalidate` marks them stale, which a create or a delete uses (there is no record to patch in or out).
+ * `dropProbe` forgets one server's last connection result, so the list tests it again rather than show a result from
+ * before the server was changed or removed.
  */
 export function useServerCache() {
   const scope = useQueryScope()
@@ -33,5 +37,6 @@ export function useServerCache() {
     })
   }, [queryClient, scope])
   const invalidate = useCallback(() => queryClient.invalidateQueries({ queryKey: serverKeys.lists(scope) }), [queryClient, scope])
-  return { patch, invalidate }
+  const dropProbe = useCallback((id: number) => queryClient.removeQueries({ queryKey: probeKey(scope, id) }), [queryClient, scope])
+  return { patch, invalidate, dropProbe }
 }

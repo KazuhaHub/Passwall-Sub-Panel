@@ -79,14 +79,14 @@ afterEach(cleanup)
  * double mount), with a query client of its own so no cached rows leak between tests. The server pages the list leads to
  * (a server, a new one, an installation) are routed at their real addresses, so a test can follow the list into them.
  */
-export function mount(page: ReactElement, entry = '/admin/servers') {
+export function mount(page: ReactElement, entry = '/admin/servers', existing?: ReturnType<typeof makeTestQueryClient>) {
   const router = createMemoryRouter([
     { path: '/admin/servers/new', element: <ServerCreateRoute /> },
     { path: '/admin/servers/:id', element: <ServerRoute /> },
     { path: '/admin/servers/:id/install', element: <ServerInstallRoute /> },
     { path: '*', element: page },
   ], { initialEntries: [entry] })
-  const client = makeTestQueryClient()
+  const client = existing ?? makeTestQueryClient()
   const view = render(
     <StrictMode>
       <QueryClientProvider client={client}><ConfirmHost /><RouterProvider router={router} /></QueryClientProvider>

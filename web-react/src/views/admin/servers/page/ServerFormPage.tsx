@@ -106,6 +106,7 @@ export function ServerFormPage({ editing }: { editing: Server | null }) {
       if (current) {
         const next = await updateServer(current.id, updateRequest(current, form))
         cache.patch(prev => prev.map(s => (s.id === next.id ? next : s)))
+        cache.dropProbe(next.id)
         pushSnack(t('admin:servers.toast.saved'), 'success')
         setSaved(next)
         setEdit(null)
@@ -178,6 +179,7 @@ export function ServerFormPage({ editing }: { editing: Server | null }) {
             leaving.current = true
             setDeleting(false)
             pushSnack(t('admin:servers.toast.deleted'), 'success')
+            cache.dropProbe(current.id)
             void cache.invalidate()
             void navigate(back, { replace: true })
           }} />
