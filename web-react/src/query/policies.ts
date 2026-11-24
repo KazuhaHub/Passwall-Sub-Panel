@@ -188,6 +188,13 @@ export const policies = {
     refetchInterval: false,
     note: 'The policy page keeps a local draft seeded once; its save writes through.',
   },
+  /** One group, as its own page reads it (the page keeps its draft, so a re-read never resets the forms). */
+  groupDetail: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by group id; a save writes the result through and invalidates the lists, and the page keeps its own draft.',
+  },
   /** One account's record, as the user picker names a picked account. */
   userDetail: {
     staleTime: 15 * SECOND,

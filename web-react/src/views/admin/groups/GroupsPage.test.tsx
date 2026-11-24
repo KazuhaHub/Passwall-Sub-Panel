@@ -105,23 +105,25 @@ describe('role gating', () => {
   it('lets an operator read the list: no create, no row actions, no checkboxes, and none of the admin-only reads', async () => {
     useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
     reads()
-    mountPage(<GroupsPage />, PATH, `${PATH}?edit=5`)
+    // The old side-sheet link is not followed for them either: they were never shown the sheet.
+    const { router } = mountWithLinks(<GroupsPage />, `${PATH}?edit=5`)
     await rowOf('Team')
+    expect(router.state.location.pathname).toBe(PATH)
     expect(screen.queryByRole('button', { name: 'New group' })).toBeNull()
     expect(screen.queryByRole('button', { name: /More actions/ })).toBeNull()
     expect(screen.queryByRole('checkbox')).toBeNull()
-    // Not even a link to the sheet opens it.
-    expect(screen.queryByRole('dialog')).toBeNull()
+    // A row does not open anything for them.
+    fireEvent.click(within(await rowOf('Team')).getByText('Team'))
+    expect(router.state.location.pathname).toBe(PATH)
     expect(screen.queryByRole('columnheader', { name: /Nodes and lines/ })).toBeNull()
     expect(api.post).not.toHaveBeenCalled()
     expect(api.get.mock.calls.some(([url]) => String(url).includes('scope-settings'))).toBe(false)
   })
 
-  it('keeps the destinations tab to administrators', async () => {
+  it('gives an administrator the destinations tab on the group page', async () => {
     reads()
-    mountPage(<GroupsPage />, PATH, `${PATH}?edit=5`)
-    const sheet = await screen.findByRole('dialog')
-    expect(within(sheet).getByRole('tab', { name: 'Destinations' })).toBeTruthy()
+    mountWithLinks(<GroupsPage />, `${PATH}/5`)
+    expect(await screen.findByRole('tab', { name: 'Destinations' })).toBeTruthy()
   })
 })
 
@@ -197,19 +199,55 @@ describe('the destinations summary on the list', () => {
     expect(screen.getAllByTestId('allowlist-state')).toHaveLength(1)
   })
 
-  it('opens a group on the destinations tab from a link with ?edit and &dtab, and keeps the link', async () => {
+  it('opens a group on the destinations tab from the old ?edit and &dtab link, replacing the redirect', async () => {
     reads([{ ...team, dest_state: 'on' }], { '/admin/dest/groups': { items: [destGroup] } })
-    const { router } = mountPage(<GroupsPage />, PATH, `${PATH}?edit=5&dtab=destination`)
+    const { router } = mountWithLinks(<GroupsPage />, `${PATH}?edit=5&dtab=destination`)
     expect(await screen.findByText('Allowlist · on', {}, { timeout: 3000 })).toBeTruthy()
-    const sheet = screen.getByRole('dialog')
-    expect(within(sheet).getByRole('tab', { name: 'Destinations' }).getAttribute('aria-selected')).toBe('true')
-    expect(within(sheet).getByRole('button', { name: /Edit in access control/ })).toBeTruthy()
-    expect(router.state.location.search).toContain('edit=5')
+    expect(router.state.location.pathname).toBe(`${PATH}/5`)
+    expect(router.state.location.search).toBe('?tab=destination')
+    expect(screen.getByRole('tab', { name: 'Destinations' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('button', { name: /Edit in access control/ })).toBeTruthy()
+    // Back does not return to the redirect.
+    await router.navigate(-1)
+    expect(router.state.location.pathname).not.toBe(PATH)
   })
 
   it('a group that is not saved yet only says to save it first', async () => {
     reads([], { '/admin/dest/groups': { items: [] } })
-    mountPage(<GroupsPage />, PATH, `${PATH}?edit=new&dtab=destination`)
+    mountWithLinks(<GroupsPage />, `${PATH}/new?tab=destination`)
     expect(await screen.findByText('Save the group first, then set its access mode')).toBeTruthy()
+  })
+})
+
+describe('opening a group', () => {
+  it('goes to the group page from the row, the row\'s edit button and the menu-less list, carrying the list\'s search so Back returns to it', async () => {
+    reads()
+    mountWithLinks(<GroupsPage />, `${PATH}?q=te`)
+    const row = await rowOf('Team')
+    fireEvent.click(within(row).getByRole('button', { name: /^Edit group/ }))
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Team')
+    expect(screen.getByRole('link', { name: 'Groups' }).getAttribute('href')).toBe(`${PATH}?q=te`)
+  })
+
+  it('opens the create page from New group, and from the empty list', async () => {
+    reads([])
+    const { router } = mountWithLinks(<GroupsPage />, PATH)
+    const [link] = await screen.findAllByRole('button', { name: 'New group' })
+    expect(link.getAttribute('href')).toBe(`${PATH}/new`)
+    fireEvent.click(link)
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/new`))
+  })
+
+  it('sends the old ?edit=new link to the create page', async () => {
+    reads([])
+    const { router } = mountWithLinks(<GroupsPage />, `${PATH}?edit=new`)
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/new`))
+  })
+
+  it('leaves a malformed ?edit alone: the plain list', async () => {
+    reads()
+    const { router } = mountWithLinks(<GroupsPage />, `${PATH}?edit=abc`)
+    await rowOf('Team')
+    expect(router.state.location.pathname).toBe(PATH)
   })
 })
