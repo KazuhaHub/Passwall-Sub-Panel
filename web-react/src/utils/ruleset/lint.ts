@@ -1,3 +1,4 @@
+import type { Continuation } from './continuation'
 import type { Doc } from './parse'
 import { parseIp } from './match'
 
@@ -15,8 +16,9 @@ import { parseIp } from './match'
  *     rule that does not resolve names covers a narrow one that does not either way, and one that resolves covers both, but a
  *     wide `no-resolve` rule does not cover a narrow one that resolves (that one also matches names after DNS);
  *   - anything after a MATCH (one that does not name PASS).
- * A rule naming PASS covers nothing (matching goes on past it), and a rule with no target, or one the editor reads only as text,
- * neither covers nor is reported. Regular expressions, GeoIP and the like are never compared.
+ * A rule whose target may not be the last word covers nothing: PASS, a Rematch outbound, or a group whose members can lead to PASS
+ * (Mihomo goes on to the next rule then; see ./continuation, the one predicate the routing test uses too). A rule with no target, or one the editor
+ * reads only as text, neither covers nor is reported. Regular expressions, GeoIP and the like are never compared.
  *
  * How it stays fast (the design's budget is 50,000 rules in 100 ms): domain suffixes live in a trie of reversed labels, so a rule
  * is checked against every suffix above it in one walk down its own labels; exact domains in a map; keywords in a short list;
@@ -49,7 +51,7 @@ const ADDRESS_KINDS = new Set(['IP-CIDR', 'IP-CIDR6'])
 const lower = (o: readonly string[]) => o.map(x => x.toLowerCase())
 const has = (o: readonly string[], name: string) => lower(o).includes(name)
 
-export function findShadowed(doc: Doc): Finding[] {
+export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
   // A line the editor cannot place in the list makes every statement about order unreliable.
   if (doc.foreign.length > 0) return []
   const out: Finding[] = []
@@ -66,7 +68,8 @@ export function findShadowed(doc: Doc): Finding[] {
     const type = rule.type.toUpperCase()
     if (terminal >= 0) { out.push({ line: i, by: terminal, kind: 'after_match', duplicate: false }); return }
     if (rule.target === '') return
-    const passes = rule.target.toUpperCase() === 'PASS'
+    // A target that may carry on matching (PASS, a group that can reach PASS, a Rematch outbound) is not the last word.
+    const passes = cont.mayContinue(rule.target)
     if (type === 'MATCH') { if (!passes) terminal = i; return }
 
     const value = DOMAIN_KINDS.has(type) ? rule.value.toLowerCase() : rule.value

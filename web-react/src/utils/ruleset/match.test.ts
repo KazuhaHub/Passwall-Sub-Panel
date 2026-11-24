@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultRulesContent } from './defaultRules.fixture'
+import { continuation, type Continuation } from './continuation'
 import { evalRule, parseIp, prepareProbe, routeFor, safeRegex, type ProbeInput } from './match'
 import { parseDoc, parseLine } from './parse'
 
@@ -14,6 +15,8 @@ const ev = (rule: string, over: Partial<ProbeInput> = {}) => {
   if (!line.rule) throw new Error('not a rule: ' + rule)
   return evalRule(line.rule, probe(over))
 }
+/** Only PASS goes on; everything else is the last word (the tests below that are about groups say otherwise). */
+const FINALS: Continuation = { mayContinue: t => t.toUpperCase() === 'PASS' }
 const yes = { verdict: 'yes' }
 const no = { verdict: 'no' }
 const unknown = (reason: string) => ({ verdict: 'unknown', reason })
@@ -184,40 +187,40 @@ describe('the route through a rule list', () => {
 
   it('finds the first rule that matches and the later ones that would have', () => {
     const doc = D('- DOMAIN-SUFFIX,a.com,P\n- DOMAIN-SUFFIX,example.com,Q\n- DOMAIN,www.example.com,R\n- DOMAIN-KEYWORD,example,S\n- MATCH,F\n')
-    const r = routeFor(doc, probe({ address: 'www.example.com' }))
+    const r = routeFor(doc, probe({ address: 'www.example.com' }), FINALS)
     expect(r.first).toEqual({ line: 1, target: 'Q' })
     expect(r.certain).toBe(true)
     expect(r.later.map(l => l.line)).toEqual([2, 3, 4])
   })
 
   it('no rule at all matches', () => {
-    const r = routeFor(D('- DOMAIN,a.com,P\n'), probe())
+    const r = routeFor(D('- DOMAIN,a.com,P\n'), probe(), FINALS)
     expect(r.first).toBeNull()
     expect(r.certain).toBe(true)
   })
 
   it('an undecidable line before the match makes everything after it uncertain, and says which lines', () => {
     const doc = D('- GEOSITE,cn,CN\n- DOMAIN-SUFFIX,example.com,Q\n- MATCH,F\n')
-    const r = routeFor(doc, probe())
+    const r = routeFor(doc, probe(), FINALS)
     expect(r.first).toEqual({ line: 1, target: 'Q' })
     expect(r.certain).toBe(false)
     expect(r.maybe).toEqual([{ line: 0, target: 'CN', reason: 'client_data' }])
   })
 
   it('an undecidable line after the match changes nothing', () => {
-    const r = routeFor(D('- DOMAIN-SUFFIX,example.com,Q\n- GEOSITE,cn,CN\n'), probe())
+    const r = routeFor(D('- DOMAIN-SUFFIX,example.com,Q\n- GEOSITE,cn,CN\n'), probe(), FINALS)
     expect(r.certain).toBe(true)
     expect(r.maybe).toEqual([])
   })
 
   it('skips comments, blank lines and lines it cannot read, and counts lines from zero as the document does', () => {
-    const r = routeFor(D('# note\n\n- DOMAIN,a.com,P\n- \'DOMAIN,example.com,Z\'\n- DOMAIN,example.com,Q\n'), probe())
+    const r = routeFor(D('# note\n\n- DOMAIN,a.com,P\n- \'DOMAIN,example.com,Z\'\n- DOMAIN,example.com,Q\n'), probe(), FINALS)
     expect(r.first).toEqual({ line: 4, target: 'Q' })
   })
 
   it('the seeded rule set: copilot.microsoft.com goes to Bing, and the Ai rule at line 1947 never applies, nor does the fallback', () => {
     const doc = parseDoc(defaultRulesContent())
-    const r = routeFor(doc, probe({ address: 'copilot.microsoft.com' }))
+    const r = routeFor(doc, probe({ address: 'copilot.microsoft.com' }), FINALS)
     expect(r.first).toEqual({ line: 1784, target: 'Ⓜ️ 微软Bing' })
     expect(r.later.map(l => [l.line + 1, l.target])).toEqual([[1803, 'Ⓜ️ 微软服务'], [1947, '💬 Ai平台'], [2235, '🌍 国外媒体'], [6242, '🚀 节点选择'], [9491, '🐟 漏网之鱼']])
     // Two lines are not decidable in a browser (GEOSITE, GEOIP) and both come after, so the answer stands.
@@ -226,17 +229,125 @@ describe('the route through a rule list', () => {
 
   it('the seeded rule set: 1.1.1.1 over UDP 443 meets the QUIC rule, 1.1.1.1 over TCP 443 falls to something later', () => {
     const doc = parseDoc(defaultRulesContent())
-    const quic = routeFor(doc, probe({ address: '1.1.1.1', network: 'udp' }))
+    const quic = routeFor(doc, probe({ address: '1.1.1.1', network: 'udp' }), FINALS)
     expect(quic.first).toEqual({ line: 23, target: '⚡ QUIC控制' })
     expect(quic.certain).toBe(true)
-    const tcp = routeFor(doc, probe({ address: '1.1.1.1', network: 'tcp' }))
+    const tcp = routeFor(doc, probe({ address: '1.1.1.1', network: 'tcp' }), FINALS)
     expect(tcp.first!.line).toBeGreaterThan(23)
   })
 
   it('evaluating all 9,474 rules for a probe is quick', () => {
     const doc = parseDoc(defaultRulesContent())
     const t0 = performance.now()
-    for (let i = 0; i < 20; i++) routeFor(doc, probe({ address: `host${i}.nowhere.example` }))
+    for (let i = 0; i < 20; i++) routeFor(doc, probe({ address: `host${i}.nowhere.example` }), FINALS)
     expect((performance.now() - t0) / 20).toBeLessThan(60)
+  })
+})
+
+describe('DOMAIN-REGEX is what Mihomo runs: regexp2, ignoring case, a conservative subset only (review C)', () => {
+  it('ignores case, as Mihomo compiles it', () => {
+    expect(ev('DOMAIN-REGEX,^www\\.Google\\.com$,A', { address: 'www.google.com' })).toEqual(yes)
+    expect(ev('DOMAIN-REGEX,^www\\.google\\.com$,A', { address: 'WWW.GOOGLE.COM' })).toEqual(yes)
+  })
+
+  it('the repro: a regex the tester decides gives the answer Mihomo gives', () => {
+    const doc = parseDoc('- DOMAIN-REGEX,^www\\.Google\\.com$,A\n- MATCH,B\n')
+    const r = routeFor(doc, probe({ address: 'www.google.com' }), FINALS)
+    expect(r.first).toEqual({ line: 0, target: 'A' })
+    expect(r.certain).toBe(true)
+  })
+
+  it.each([
+    ['\\Agoogle\\.com', 'an anchor JS reads as the letter A'], ['google\\.com\\Z', ''], ['google\\z', ''], ['\\Ggoogle', ''],
+    ['(?<n>a)b', 'named group'], ['(?=a)b', 'look-ahead'], ['(?<=a)b', 'look-behind'], ['(?!a)b', ''],
+    ['(a)\\1', 'back-reference'], ['(?i)abc', 'inline flag'], ['(?s)a.b', ''], ['a*?b', 'lazy'], ['a+?b', ''], ['a*+b', 'possessive'], ['(?>a)b', 'atomic'],
+    ['\\p{L}+', 'Unicode class'], ['[^]a', 'empty negated class'], ['[a-z-[aeiou]]', 'set subtraction'], ['[[:alpha:]]', 'POSIX class'],
+    ['\\bgoogle', 'word boundary'], ['a\\x41', 'hex escape'], ['a\\u0041', ''], ['a\\n', ''], ['\\k<n>', ''],
+    ['(', 'unbalanced'], ['a)', ''], ['*a', 'nothing to repeat'], ['a**', ''], ['a{,3}', ''], ['a{2', ''], ['[a', ''],
+  ])('refuses %j (%s)', (pattern) => {
+    expect(safeRegex(pattern)).toBeNull()
+    expect(ev(`DOMAIN-REGEX,${pattern.replace(/,/g, '\\x2c')},X`)).toEqual(unknown('regex'))
+  })
+
+  it.each([
+    '^www\\.google\\.com$', 'google', '^(www\\.)?google\\.(com|cn)$', '^[a-z0-9-]+\\.example\\.com$', '^ad\\d+\\.example\\.com$', '^.*\\.example\\.com$', '^(?:a|b)c$', 'a{2,4}b', '^\\w+\\.\\w+$', '[\\w.-]+\\.com',
+    'a?b', '^x{3}$', '^\\/a\\-b$',
+  ])('accepts %j', pattern => expect(safeRegex(pattern), pattern).toBeInstanceOf(RegExp))
+
+  it('refuses more than two unbounded quantifiers, and a polynomial pattern comes back at once, undecided', () => {
+    const poly = '[a-z.]*'.repeat(8) + '!'
+    expect(safeRegex(poly)).toBeNull()
+    expect(safeRegex('a+b+c+')).toBeNull()
+    expect(safeRegex('a{1,}b*c{2,}')).toBeNull()
+    expect(safeRegex('a+b+')).toBeInstanceOf(RegExp)
+    const host = 'a'.repeat(52)
+    const t0 = performance.now()
+    expect(ev(`DOMAIN-REGEX,${poly},X`, { address: host + '.com' })).toEqual(unknown('regex'))
+    expect(performance.now() - t0).toBeLessThan(50)
+  })
+
+  it('a host longer than a domain name can be is not an address', () => {
+    expect(prepareProbe(input({ address: 'a'.repeat(254) })).ok).toBe(false)
+    expect(prepareProbe(input({ address: ('a'.repeat(60) + '.').repeat(4) + 'com' })).ok).toBe(true)
+  })
+})
+
+describe('a match is not always the last word (review D)', () => {
+  const groups = new Map([
+    ['Udp', [{ kind: 'builtin' as const, value: 'DIRECT' }, { kind: 'builtin' as const, value: 'PASS' }]],
+    ['YT', [{ kind: 'builtin' as const, value: 'DIRECT' }]],
+    ['B', [{ kind: 'builtin' as const, value: 'DIRECT' }]],
+  ])
+  const real = continuation(groups, ['R'])
+  const doc = parseDoc('- NETWORK,udp,Udp\n- DOMAIN-SUFFIX,youtube.com,YT\n- MATCH,B\n')
+
+  it('the repro: UDP to youtube.com meets a group that may pass, so the answer is not certain and YT may apply', () => {
+    const r = routeFor(doc, probe({ address: 'youtube.com', network: 'udp' }), real)
+    expect(r.first).toEqual({ line: 0, target: 'Udp' })
+    expect(r.final).toBe(false)
+    expect(r.certain).toBe(false)
+    expect(r.later.map(l => l.line)).toEqual([1, 2])
+  })
+
+  it('over TCP the first rule does not match and the YT group, which cannot pass, is final', () => {
+    const r = routeFor(doc, probe({ address: 'youtube.com', network: 'tcp' }), real)
+    expect(r.first).toEqual({ line: 1, target: 'YT' })
+    expect(r.final).toBe(true)
+    expect(r.certain).toBe(true)
+    expect(r.later.map(l => l.line)).toEqual([2])
+  })
+
+  it('a built-in outbound is final; a group the data does not know is not; a Rematch outbound is never', () => {
+    expect(routeFor(parseDoc('- MATCH,DIRECT\n'), probe(), real).final).toBe(true)
+    expect(routeFor(parseDoc('- MATCH,Mystery\n'), probe(), real).final).toBe(false)
+    expect(routeFor(parseDoc('- MATCH,R\n'), probe(), real).final).toBe(false)
+    expect(routeFor(parseDoc('- MATCH,Mystery\n'), probe(), continuation(null, [])).certain).toBe(false)
+  })
+
+  it('a first rule that is not final is not "certain" even with nothing undecided above it', () => {
+    const r = routeFor(parseDoc('- MATCH,Udp\n'), probe(), real)
+    expect(r.maybeTotal).toBe(0)
+    expect(r.certain).toBe(false)
+  })
+})
+
+describe('no-resolve after a rule that resolved the name', () => {
+  const doc = parseDoc('- IP-CIDR,1.0.0.0/8,X\n- IP-CIDR,10.0.0.0/8,Y,no-resolve\n- MATCH,F\n')
+
+  it('is listed as one that may match: by then Mihomo has the address', () => {
+    const r = routeFor(doc, probe(), FINALS)
+    expect(r.maybe.map(m => [m.line, m.reason])).toEqual([[0, 'resolve'], [1, 'resolve']])
+  })
+
+  it('stays a plain miss when no earlier rule resolves', () => {
+    const r = routeFor(parseDoc('- IP-CIDR,10.0.0.0/8,Y,no-resolve\n- MATCH,F\n'), probe(), FINALS)
+    expect(r.maybe).toEqual([])
+    expect(r.first).toEqual({ line: 1, target: 'F' })
+  })
+
+  it('with the resolved address entered it is decided: it is known once an earlier rule resolved it', () => {
+    const r = routeFor(doc, probe({ resolvedIp: '10.1.1.1' }), FINALS)
+    expect(r.first).toEqual({ line: 1, target: 'Y' })
+    expect(r.certain).toBe(true)
   })
 })

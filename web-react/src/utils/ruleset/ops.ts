@@ -1,5 +1,6 @@
 import type { Block } from './blocks'
 import { canWriteField } from './scalar'
+import { normalizeTarget, quoteLike } from './target'
 import { listIndent, makeDoc, scanRule, targetIndex, type Doc, type Line, type Span } from './parse'
 
 /**
@@ -86,16 +87,17 @@ export function rewriteRule(raw: string, patch: RulePatch): string {
       out = raw.slice(0, end) + patch.options.map(o => ',' + o).join('') + raw.slice(scan.bodyEnd)
     }
   }
-  const replace = (index: number, value: string | undefined) => {
-    if (value === undefined || index < 0 || index >= fields.length || fields[index] === value) return
+  const replace = (index: number, value: string | undefined, asTarget = false) => {
+    if (value === undefined || index < 0 || index >= fields.length) return
+    if (asTarget ? normalizeTarget(fields[index]) === value : fields[index] === value) return
     // Only what is being written is checked: a field the edit leaves alone may be something the model would not write
     // (the seeded `AND,((NETWORK,UDP),(DST-PORT,443))` has commas in its value) and stays as it is.
     if (canWriteField(value)) throw new Error('cannot write rule field')
     const s = trimmed(raw, spans[index])
-    out = out.slice(0, s.start) + value + out.slice(s.end)
+    out = out.slice(0, s.start) + (asTarget ? quoteLike(fields[index], value) : value) + out.slice(s.end)
   }
-  // The target is whichever field the backend reads it from (targetIndex), not always the third.
-  replace(targetIndex(fields), patch.target)
+  // The target is whichever field the backend reads it from (targetIndex), not always the third; a quoted one stays quoted.
+  replace(targetIndex(fields), patch.target, true)
   replace(1, patch.value)
   replace(0, patch.type)
   return out
@@ -107,9 +109,10 @@ function retargetRaw(raw: string, target: string): string {
   const scan = scanRule(raw)
   if (!scan) return raw
   const index = targetIndex(scan.fields)
-  if (index < 0 || scan.fields[index] === target) return raw
+  if (index < 0 || normalizeTarget(scan.fields[index]) === target) return raw
   const s = trimmed(raw, scan.spans[index])
-  return raw.slice(0, s.start) + target + raw.slice(s.end)
+  // The new name goes inside the quotes the field already had.
+  return raw.slice(0, s.start) + quoteLike(scan.fields[index], target) + raw.slice(s.end)
 }
 
 function replaceLine(doc: Doc, i: number, raw: string): Doc {

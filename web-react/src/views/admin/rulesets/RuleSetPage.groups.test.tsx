@@ -14,9 +14,9 @@ const saved = () => api.put.mock.calls[0][1] as { content: string; proxy_group_o
 function reads(row: Record<string, unknown> = base) {
   installReads({ '/admin/rules': list([row]), '/admin/templates': list([]), '/admin/groups': list([]) })
   // The server lists the groups the draft's rules name, as it does for real: a renamed group is a different group.
-  api.post.mockImplementation(async (_url: string, body: { content: string }) => {
+  api.post.mockImplementation(async (_url: string, body: { content: string; proxy_group_members?: Record<string, unknown[]> }) => {
     const names = [...new Set(body.content.split('\n').filter(l => l.startsWith('- ')).map(l => l.split(',')[2]))]
-    return { data: inspection({ groups: names.map(grp) }) }
+    return { data: inspection({ groups: names.map(n => ({ ...grp(n), members: body.proxy_group_members?.[n] ?? grp(n).members })) }) }
   })
 }
 afterEach(() => { vi.unstubAllGlobals() })
@@ -35,7 +35,9 @@ describe('renaming a proxy group', () => {
     expect(await within(dialog).findByText(/already has this name/)).toBeTruthy()
     expect((within(dialog).getByRole('button', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(input, { target: { value: 'Main' } })
-    expect(await within(dialog).findByText('This changes 3 rule lines and 1 member references')).toBeTruthy()
+    expect(await within(dialog).findByText('This changes 3 rule lines and 1 member references, and writes out 0 member lists that were following the group\'s name.')).toBeTruthy()
+    // What the rename does not reach is said before it is confirmed (here no template uses the rule set).
+    expect(within(dialog).getByText(/Not changed by this rename: other rule sets and users' personal rules/)).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
@@ -110,5 +112,54 @@ describe('a sub-rule', () => {
     fireEvent.change(target, { target: { value: '\u0000new' } })
     fireEvent.change(await panel.findByLabelText('Proxy group name'), { target: { value: 'Proxy' } })
     expect(await panel.findByText(/already has this name/)).toBeTruthy()
+  })
+})
+
+describe('the rename keeps what the group does (review A)', () => {
+  const seededLike = { ...base, content: '- DOMAIN,ad.example,🛑 广告拦截\n- DOMAIN,a.example,Proxy\n', proxy_group_order: [] as string[] }
+
+  // The backend derives the members of a group with no stored list from its NAME: a name with 广告拦截 in it blocks.
+  const backend = (body: { content: string; proxy_group_members?: Record<string, unknown[]> }) => {
+    const names = [...new Set(body.content.split('\n').filter(l => l.startsWith('- ')).map(l => l.split(',')[2]))]
+    const byName = (n: string) => (n.includes('广告拦截') ? [{ kind: 'builtin', value: 'REJECT' }, { kind: 'builtin', value: 'DIRECT' }] : [{ kind: 'builtin', value: 'DIRECT' }, { kind: 'node_set', value: 'remaining' }])
+    return { data: inspection({ groups: names.map(n => ({ ...grp(n), members: body.proxy_group_members?.[n] ?? byName(n) })) }) }
+  }
+
+  it('the repro: 🛑 广告拦截 renamed to Ads still blocks, because its members are written out under the new name', async () => {
+    reads(seededLike)
+    api.post.mockImplementation(async (_u: string, body: never) => backend(body))
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Proxy groups' }))
+    fireEvent.click(await screen.findByRole('button', { name: /广告拦截/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('New name'), { target: { value: 'Ads' } })
+    expect(await within(dialog).findByText('This changes 1 rule lines and 0 member references, and writes out 1 member lists that were following the group\'s name.')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().proxy_group_members.Ads).toEqual([{ kind: 'builtin', value: 'REJECT' }, { kind: 'builtin', value: 'DIRECT' }])
+  })
+
+  it('is not offered while the backend\'s members for this draft are not in', async () => {
+    reads(seededLike)
+    api.post.mockRejectedValue(new Error('network'))
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Proxy groups' }))
+    // The inspection failed: there is no group to select and no rename to offer.
+    await waitFor(() => expect(api.post).toHaveBeenCalled(), { timeout: 3000 })
+    expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull()
+  })
+
+  it('the confirmation says what the rename does not reach, naming the templates', async () => {
+    installReads({ '/admin/rules': list([seededLike]), '/admin/templates': list([{ slug: 't1', name: 'Mihomo main', client_type: 'mihomo', is_default: false, rule_sets: ['custom'], content: '' }]), '/admin/groups': list([]) })
+    api.post.mockImplementation(async (_u: string, body: never) => backend(body))
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Proxy groups' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('New name'), { target: { value: 'Main' } })
+    expect(await within(dialog).findByText(/the template's own proxy group order and users' personal rules.*\(Mihomo main\)/)).toBeTruthy()
   })
 })

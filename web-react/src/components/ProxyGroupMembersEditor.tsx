@@ -57,12 +57,17 @@ interface Props {
   renameBlocked?: string
   /** Shows the rules that name the group on the Rules tab. */
   onShowRules?: (name: string) => void
+  /**
+   * The inspection of this draft, when the page already asks for it (the routing test and the rename use it too): the editor then
+   * shows that one and sends no request of its own. `loading` is true while the answer is for an older draft.
+   */
+  sharedInspection?: { data: ProxyGroupInspection | null; loading: boolean }
 }
 
 type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = ComboOption<string | number>
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange, usage, onRename, renameBlocked, onShowRules }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange, usage, onRename, renameBlocked, onShowRules, sharedInspection }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const [inspection, setInspection] = useState<ProxyGroupInspection | null>(null)
   const [selected, setSelected] = useState('')
@@ -82,6 +87,15 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
   const serializedOptions = useMemo(() => JSON.stringify(options), [options])
   const serializedMihomo = useMemo(() => JSON.stringify([mihomoSubRules, mihomoRematchOutbounds]), [mihomoSubRules, mihomoRematchOutbounds])
   useEffect(() => {
+    if (!sharedInspection) return
+    setInspection(sharedInspection.data)
+    setLoading(sharedInspection.loading)
+    const first = sharedInspection.data?.groups
+    if (first && (!selected || !first.some(group => group.name === selected))) setSelected(first[0]?.name || '')
+  }, [sharedInspection?.data, sharedInspection?.loading]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (sharedInspection) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       setLoading(true)

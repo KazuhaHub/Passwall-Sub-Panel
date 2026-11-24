@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { RuleSet } from '@/api/rules'
+import type { ProxyGroupMember, RuleSet } from '@/api/rules'
 import { FormDialog } from '@/components/data/FormDialog'
 import { Field } from '@/components/form/Field'
 import { Input } from '@/components/ui/input'
@@ -15,11 +15,13 @@ import { newGroupNameProblem } from './targets'
  *
  * The rewrite itself is `planRename`: a pure function of the draft. The dialog hands the plan to the page, which applies it.
  */
-export function RenameGroupDialog({ draft, from, groupNames, rematchNames, onApply, onClose }: {
+export function RenameGroupDialog({ draft, from, effective, templates, rematchNames, onApply, onClose }: {
   draft: RuleSet
   from: string
-  /** Every proxy group the server lists for this draft (the names a new one must not take). */
-  groupNames: readonly string[]
+  /** The backend's effective members of every proxy group of this draft (defaults included): what the rename keeps as it is. */
+  effective: ReadonlyMap<string, readonly ProxyGroupMember[]>
+  /** The templates this rule set is bound to: where the old name lives on in other rule sets. */
+  templates: readonly string[]
   rematchNames: readonly string[]
   onApply: (plan: Extract<RenamePlan, { ok: true }>, to: string) => void
   onClose: () => void
@@ -28,8 +30,8 @@ export function RenameGroupDialog({ draft, from, groupNames, rematchNames, onApp
   const [name, setName] = useState(from)
   const [attempted, setAttempted] = useState(false)
   const to = name.trim()
-  const problem = to === from ? null : newGroupNameProblem(to, { groups: [...groupNames], rematch: [...rematchNames] })
-  const plan = useMemo(() => (to === from || problem ? null : planRename(draft, from, to)), [draft, from, to, problem])
+  const problem = to === from ? null : newGroupNameProblem(to, { groups: [...effective.keys()], rematch: [...rematchNames] })
+  const plan = useMemo(() => (to === from || problem ? null : planRename(draft, from, to, effective)), [draft, from, to, problem, effective])
   const refused = plan && !plan.ok ? plan.reason : null
   const unchanged = to === from
   const ready = plan !== null && plan.ok
@@ -52,7 +54,13 @@ export function RenameGroupDialog({ draft, from, groupNames, rematchNames, onApp
         <Input value={name} autoFocus onChange={e => setName(e.target.value)} />
       </Field>
       {refused && refused !== 'same' && <p role="alert" className="text-sm text-destructive">{t(`admin:rules.rename.unavailable.${refused}`)}</p>}
-      {plan && plan.ok && <p role="status" className="text-sm">{t('admin:rules.rename.confirm', { rules: plan.rules.toLocaleString(), refs: plan.refs.toLocaleString() })}</p>}
+      {plan && plan.ok && (
+        <div role="status" className="flex flex-col gap-2 text-sm">
+          <p>{t('admin:rules.rename.confirm', { rules: plan.rules.toLocaleString(), refs: plan.refs.toLocaleString(), lists: plan.materialised.toLocaleString() })}</p>
+          {/* What it does not reach (render.go: the template's own proxy_group_order, other rule sets and personal rules are all read by name). */}
+          <p className="text-muted-foreground">{templates.length > 0 ? t('admin:rules.rename.not_reached', { templates: templates.join('、') }) : t('admin:rules.rename.not_reached_unbound')}</p>
+        </div>
+      )}
     </FormDialog>
   )
 }

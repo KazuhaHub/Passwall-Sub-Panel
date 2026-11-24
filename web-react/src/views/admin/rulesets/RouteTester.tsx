@@ -9,6 +9,7 @@ import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
+import type { Continuation } from '@/utils/ruleset/continuation'
 import { prepareProbe, routeFor, type MaybeHit, type ProbeInput, type RouteHit, type UnknownReason } from '@/utils/ruleset/match'
 import type { Doc } from '@/utils/ruleset/parse'
 import { isBuiltinTarget } from './targets'
@@ -30,13 +31,17 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * The answer is worked out from a deferred copy of what is typed, so typing in the box is never held up by a pass over the rules.
  */
-export function RouteTester({ doc, blocks, input, setInput, textOnly, onJump }: {
+export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, groupsKnown, onJump }: {
   doc: Doc
   blocks: readonly Block[]
   input: ProbeInput
   setInput: Dispatch<SetStateAction<ProbeInput>>
   /** The document has lines the editor cannot read as a list: routing is not tested, and no line can be opened. */
   textOnly: boolean
+  /** Which targets end the matching: from the backend's reading of the draft's groups, or "unknown" when that is not in (see utils/ruleset/continuation). */
+  cont: Continuation
+  /** `cont` rests on the backend's members for this very draft (and not on "unknown"). */
+  groupsKnown: boolean
   /** Opens a line in the group it is in; absent when that is not possible (text view). */
   onJump?: (line: number) => void
 }) {
@@ -45,7 +50,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, onJump }: 
   const [moreOpen, setMoreOpen] = useState(() => input.resolvedIp !== '' || input.process !== '' || input.srcPort !== '' || input.srcIp !== '')
   const deferred = useDeferredValue(input)
   const prepared = useMemo(() => (deferred.address.trim() === '' ? null : prepareProbe(deferred)), [deferred])
-  const result = useMemo(() => (!textOnly && prepared?.ok ? routeFor(doc, prepared.probe) : null), [doc, prepared, textOnly])
+  const result = useMemo(() => (!textOnly && prepared?.ok ? routeFor(doc, prepared.probe, cont) : null), [doc, prepared, textOnly, cont])
   const problem = prepared && !prepared.ok ? prepared.problem : null
   const stale = deferred !== input
 
@@ -103,7 +108,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, onJump }: 
         ) : prepared === null ? (
           <p className="text-muted-foreground">{t('admin:rules.tester.empty')}</p>
         ) : result ? (
-          <Result t={t} doc={doc} result={result} groupOf={groupOf} lineLink={lineLink} hitRow={hitRow} />
+          <Result t={t} doc={doc} result={result} udp={deferred.network === 'udp'} resolvedEntered={deferred.resolvedIp.trim() !== ''} groupsKnown={groupsKnown} groupOf={groupOf} lineLink={lineLink} hitRow={hitRow} />
         ) : null}
       </div>
 
@@ -112,15 +117,18 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, onJump }: 
   )
 }
 
-function Result({ t, doc, result, groupOf, lineLink, hitRow }: {
+function Result({ t, doc, result, udp, resolvedEntered, groupsKnown, groupOf, lineLink, hitRow }: {
   t: TFunction
+  udp: boolean
+  resolvedEntered: boolean
+  groupsKnown: boolean
   doc: Doc
   result: ReturnType<typeof routeFor>
   groupOf: (line: number) => number
   lineLink: (line: number) => React.ReactNode
   hitRow: (hit: RouteHit, key: string) => React.ReactNode
 }) {
-  const { first, maybe, maybeTotal, later, laterTotal, passed, certain } = result
+  const { first, final, maybe, maybeTotal, later, laterTotal, passed } = result
   const [allLater, setAllLater] = useState(false)
   const shownLater = allLater ? later : later.slice(0, SHOWN_LATER)
   const reasonKey: Record<UnknownReason, string> = {
@@ -128,7 +136,7 @@ function Result({ t, doc, result, groupOf, lineLink, hitRow }: {
   }
   const maybeRow = (m: MaybeHit) => (
     <li key={m.line} className="flex min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1.5 text-xs">
-      <span className="break-words">{t(`admin:rules.tester.${reasonKey[m.reason]}`, { line: (m.line + 1).toLocaleString(), rule: ruleText(doc, m.line) })}</span>
+      <span className="break-words">{t(`admin:rules.tester.${m.reason === 'resolve' && resolvedEntered ? 'branch_resolve_entered' : reasonKey[m.reason]}`, { line: (m.line + 1).toLocaleString(), rule: ruleText(doc, m.line) })}</span>
       {m.target !== '' && <span className="text-muted-foreground">{t('admin:rules.tester.branch_if_match', { target: m.target })}</span>}
       <span>{lineLink(m.line)}</span>
     </li>
@@ -140,19 +148,19 @@ function Result({ t, doc, result, groupOf, lineLink, hitRow }: {
 
   return (
     <>
-      {!certain && (
+      {maybeTotal > 0 && (
         <Notice tone="warning">
           <p className="font-medium">{t('admin:rules.tester.uncertain_title')}</p>
           <p>{t('admin:rules.tester.uncertain_body')}</p>
         </Notice>
       )}
-      {!certain && (
+      {maybeTotal > 0 && (
         <ul className="flex flex-col gap-1.5">
           {maybe.slice(0, SHOWN_MAYBE).map(maybeRow)}
           {maybeTotal > SHOWN_MAYBE && <li className="text-xs text-muted-foreground">{t('admin:rules.tester.more_count', { count: (maybeTotal - SHOWN_MAYBE).toLocaleString() })}</li>}
         </ul>
       )}
-      {!certain && first && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.branch_else')}</p>}
+      {maybeTotal > 0 && first && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.branch_else')}</p>}
 
       {passed.map(p => <p key={p.line} className="text-xs text-muted-foreground">{t('admin:rules.tester.passed', { line: (p.line + 1).toLocaleString() })}</p>)}
 
@@ -162,15 +170,24 @@ function Result({ t, doc, result, groupOf, lineLink, hitRow }: {
           <p className="font-medium">{goes}</p>
           <p>{lineLink(first.line)}</p>
         </div>
-      ) : certain ? (
+      ) : maybeTotal === 0 ? (
         <p>{t('admin:rules.tester.no_match')}</p>
       ) : (
         <p>{t('admin:rules.tester.no_certain')}</p>
       )}
 
+      {first && !final && (
+        <Notice tone="warning">
+          <p className="font-medium">{t('admin:rules.tester.continues_title')}</p>
+          <p>{t('admin:rules.tester.continues_body', { target: first.target })}</p>
+          {!groupsKnown && <p className="mt-1 text-xs text-muted-foreground">{t('admin:rules.tester.no_groups')}</p>}
+        </Notice>
+      )}
+      {first && udp && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.udp_note')}</p>}
+
       {laterTotal > 0 && (
         <div className="flex flex-col gap-1.5">
-          <p className="text-xs text-muted-foreground">{t('admin:rules.tester.also_matching', { count: laterTotal.toLocaleString() })}</p>
+          <p className="text-xs text-muted-foreground">{t(final ? 'admin:rules.tester.also_matching' : 'admin:rules.tester.also_may_apply', { count: laterTotal.toLocaleString() })}</p>
           <ul className="flex flex-col gap-1.5">{shownLater.map(h => hitRow(h, String(h.line)))}</ul>
           {!allLater && laterTotal > SHOWN_LATER && (
             <div><Button variant="ghost" size="sm" onClick={() => setAllLater(true)}>{t('admin:rules.tester.more_count', { count: (Math.min(later.length, laterTotal) - SHOWN_LATER).toLocaleString() })}</Button></div>

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { defaultRulesContent } from './defaultRules.fixture'
+import { continuation, type Continuation } from './continuation'
 import { findShadowed, summarize, type Finding } from './lint'
 import { parseDoc } from './parse'
 
 const D = parseDoc
-const find = (text: string) => findShadowed(D(text))
+/** Only PASS goes on, as before; the tests about groups that may pass bring their own. */
+const FINALS: Continuation = { mayContinue: t => t.toUpperCase() === 'PASS' }
+const find = (text: string, cont: Continuation = FINALS) => findShadowed(D(text), cont)
 const brief = (f: Finding[]) => f.map(x => [x.line, x.by, x.kind])
 
 describe('rules an earlier rule already covers', () => {
@@ -71,6 +74,32 @@ describe('rules an earlier rule already covers', () => {
   })
 })
 
+describe('a rule that may not be the last word covers nothing (review D)', () => {
+  const real = continuation(new Map([
+    ['Udp', [{ kind: 'builtin' as const, value: 'DIRECT' }, { kind: 'builtin' as const, value: 'PASS' }]],
+    ['YT', [{ kind: 'builtin' as const, value: 'DIRECT' }]],
+  ]), ['R'])
+
+  it('a suffix aimed at a group that may pass does not shadow the rules below it', () => {
+    expect(find('- DOMAIN-SUFFIX,youtube.com,Udp\n- DOMAIN,www.youtube.com,YT\n', real)).toEqual([])
+    expect(brief(find('- DOMAIN-SUFFIX,youtube.com,YT\n- DOMAIN,www.youtube.com,Udp\n', real))).toEqual([[1, 0, 'other']])
+  })
+
+  it('nor does one aimed at a Rematch outbound, or at a group the data does not list', () => {
+    expect(find('- DOMAIN-SUFFIX,a.com,R\n- DOMAIN,www.a.com,YT\n', real)).toEqual([])
+    expect(find('- DOMAIN-SUFFIX,a.com,Mystery\n- DOMAIN,www.a.com,YT\n', real)).toEqual([])
+  })
+
+  it('a MATCH that may pass does not make the rules after it unreachable', () => {
+    expect(find('- MATCH,Udp\n- DOMAIN,b.com,YT\n', real)).toEqual([])
+    expect(brief(find('- MATCH,YT\n- DOMAIN,b.com,YT\n', real))).toEqual([[1, 0, 'after_match']])
+  })
+
+  it('an address range aimed at such a group does not cover a narrower one', () => {
+    expect(find('- IP-CIDR,10.0.0.0/8,Udp,no-resolve\n- IP-CIDR,10.1.0.0/16,YT,no-resolve\n', real)).toEqual([])
+  })
+})
+
 describe('the summary', () => {
   it('counts the three kinds', () => {
     const f = find('- DOMAIN,a.com,X\n- DOMAIN,a.com,X\n- DOMAIN,a.com,Y\n- MATCH,F\n- DOMAIN,z.com,X\n')
@@ -92,7 +121,7 @@ function covers(e: { type: string; value: string }, l: { type: string; value: st
 describe('the seeded default rule set', () => {
   const content = defaultRulesContent()
   const doc = parseDoc(content)
-  const found = findShadowed(doc)
+  const found = findShadowed(doc, FINALS)
   const domain = found.filter(f => DOMAIN_TYPES.has(doc.lines[f.line].rule!.type.toUpperCase()))
 
   it('finds the shadowed domain rules the design counted, and the copilot example', () => {
@@ -129,7 +158,7 @@ describe('the seeded default rule set', () => {
 
   it('is fast: the whole set in well under a second', () => {
     const t0 = performance.now()
-    findShadowed(doc)
+    findShadowed(doc, FINALS)
     expect(performance.now() - t0).toBeLessThan(500)
   })
 
@@ -138,7 +167,7 @@ describe('the seeded default rule set', () => {
     for (let i = 0; i < 50000; i++) lines.push(i % 7 === 0 ? `- IP-CIDR,${(i >> 8) & 255}.${i & 255}.0.0/16,T${i % 5},no-resolve` : `- DOMAIN-SUFFIX,h${i % 20000}.d${i % 13}.example,T${i % 5}`)
     const big = parseDoc(lines.join('\n') + '\n')
     const t0 = performance.now()
-    findShadowed(big)
+    findShadowed(big, FINALS)
     expect(performance.now() - t0).toBeLessThan(1000)
   })
 })

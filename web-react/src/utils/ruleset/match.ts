@@ -1,3 +1,4 @@
+import type { Continuation } from './continuation'
 import { splitFields, type Doc, type RuleInfo } from './parse'
 
 /**
@@ -42,6 +43,8 @@ export interface Probe {
   process: string
   srcPort: number | null
   srcIp: Ip | null
+  /** Set while walking a list: an earlier rule has already made Mihomo resolve the name, so the address is known from here on. */
+  resolvedEarlier?: boolean
 }
 
 export type ProbeProblem = 'address_empty' | 'address_invalid' | 'port_invalid' | 'resolved_invalid' | 'src_invalid'
@@ -87,6 +90,8 @@ export function prepareProbe(input: ProbeInput): { ok: true; probe: Probe } | { 
   if (host === '') return { ok: false, problem: 'address_empty' }
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
   if (host.endsWith('.') && !host.includes(':')) host = host.slice(0, -1)
+  // A domain name is at most 253 characters, which also bounds what a regular expression is ever run against.
+  if (host.length > 253) return { ok: false, problem: 'address_invalid' }
   const ip = parseIp(host)
   // A host name has no spaces, commas, slashes or scheme; what is typed is a host, not a URL.
   if (!ip && (host === '' || /[\s,/\\:@?#]/.test(host))) return { ok: false, problem: 'address_invalid' }
@@ -117,43 +122,79 @@ const of = (b: boolean): Verdict => (b ? YES : NO)
 // ---- regular expressions -------------------------------------------------------------------------------------------
 
 /**
- * A regular expression from a rule, as a JavaScript RegExp, or null when it should not be run here. A pattern is run only
- * when running it cannot hang the page: nothing quantified that holds a quantifier or an alternation (the shape of
- * catastrophic backtracking), no look-around, back-reference, named group or inline flag (the engines differ on these, so a
- * result would be a guess), and a length limit. A browser cannot interrupt a regular expression that is already running, so
- * refusing before it starts is the only guard there is; the test input is a host name of at most 253 characters.
+ * A regular expression from a rule, as a JavaScript RegExp, or null when it should not be run here. Mihomo compiles DOMAIN-REGEX
+ * with regexp2 (a .NET-style engine) ignoring case; this runs the pattern with JavaScript's engine and the `i` flag, which is
+ * only the same thing for a conservative subset: literals, `.`, `^` `$`, character classes (no nesting, no set operations, no
+ * empty class), the escapes `\d \w \s \D \W \S` and escaped punctuation, `* + ? {n} {n,} {n,m}` (greedy only), alternation and
+ * plain or `(?:` groups. Anything else (`\A \Z \z \G \b`, named groups, look-around, back-references, inline flags, lazy or
+ * possessive quantifiers, Unicode classes, `[^]`, ...) is read differently by the two engines and is refused, so the answer is
+ * "undecided" instead of a wrong "no".
+ *
+ * Nor is a pattern run when it could hang the page: nothing quantified that holds a quantifier or an alternation (nested
+ * quantifiers), and at most two unbounded quantifiers (`*`, `+`, `{n,}`), which also keeps polynomial blow-up out. A browser
+ * cannot interrupt a regular expression that is already running, so refusing before it starts is the only guard there is; the
+ * test input is a host name of at most 253 characters.
  */
 export function safeRegex(src: string): RegExp | null {
-  if (src.length > 200) return null
+  if (src === '' || src.length > 200) return null
+  const PUNCT = '.^$*+?()[]{}|\\/-'
+  const escapeOk = (e: string | undefined) => e !== undefined && ('dwsDWS'.includes(e) || PUNCT.includes(e))
+  const n = src.length
+  // For each open group: whether it holds a quantifier or an alternation.
   const stack: boolean[] = []
-  let inClass = false
-  for (let i = 0; i < src.length; i++) {
+  let unbounded = 0
+  // The previous token can take a quantifier (an atom or a closed group); a second one in a row would be lazy, possessive or invalid.
+  let atom = false
+  const mark = () => { if (stack.length > 0) stack[stack.length - 1] = true }
+  for (let i = 0; i < n;) {
     const ch = src[i]
     if (ch === '\\') {
-      if (/[1-9kK]/.test(src[i + 1] ?? '')) return null
+      if (!escapeOk(src[i + 1])) return null
+      i += 2; atom = true; continue
+    }
+    if (ch === '[') {
       i++
-      continue
+      if (src[i] === '^') i++
+      let members = 0
+      while (i < n && src[i] !== ']') {
+        if (src[i] === '[') return null
+        if (src[i] === '\\') { if (!escapeOk(src[i + 1])) return null; i += 2 } else i++
+        members++
+      }
+      if (i >= n || members === 0) return null
+      i++; atom = true; continue
     }
-    if (inClass) { if (ch === ']') inClass = false; continue }
-    if (ch === '[') { inClass = true; continue }
     if (ch === '(') {
-      if (src[i + 1] === '?' && src[i + 2] !== ':') return null
-      stack.push(false)
-      continue
-    }
-    if (ch === '*' || ch === '+' || ch === '|' || (ch === '{' && /^\{\d*,?\d*\}/.test(src.slice(i)))) {
-      if (stack.length > 0) stack[stack.length - 1] = true
-      continue
+      if (src[i + 1] === '?') { if (src[i + 2] !== ':') return null; i += 3 } else i++
+      stack.push(false); atom = false; continue
     }
     if (ch === ')') {
       const inner = stack.pop()
+      if (inner === undefined) return null
       const next = src[i + 1]
       if (inner && (next === '*' || next === '+' || next === '{')) return null
-      if (inner && stack.length > 0) stack[stack.length - 1] = true
+      if (inner) mark()
+      i++; atom = true; continue
     }
+    if (ch === '|') { mark(); i++; atom = false; continue }
+    if (ch === '*' || ch === '+' || ch === '?') {
+      if (!atom) return null
+      if (ch !== '?') unbounded++
+      mark(); i++; atom = false; continue
+    }
+    if (ch === '{') {
+      const m = /^\{(\d{1,4})(,(\d{0,4}))?\}/.exec(src.slice(i))
+      if (!m || !atom) return null
+      if (m[2] !== undefined && m[3] === '') unbounded++
+      else if (m[3] !== undefined && m[3] !== '' && Number(m[3]) < Number(m[1])) return null
+      mark(); i += m[0].length; atom = false; continue
+    }
+    if (ch === '}') return null
+    if (ch === '^' || ch === '$') { i++; atom = false; continue }
+    i++; atom = true
   }
-  if (stack.length > 0 || inClass) return null
-  try { return new RegExp(src) } catch { return null }
+  if (stack.length > 0 || unbounded > 2) return null
+  try { return new RegExp(src, 'i') } catch { return null }
 }
 
 const regexCache = new Map<string, RegExp | null>()
@@ -209,7 +250,9 @@ function addressRule(value: string, options: readonly string[], source: boolean,
   if (p.kind === 'ip') return of(inCidr(net, p.ip!))
   // A domain: the address is only known if it is resolved, and `no-resolve` is the rule's promise not to do that for it.
   if (hasOption(options, 'no-resolve')) {
-    // Skipped without resolving, unless an earlier rule already resolved the name, which a single rule cannot know.
+    // Skipped without resolving, unless an earlier rule already resolved the name: then Mihomo has the address and uses it.
+    if (p.resolvedEarlier) return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')
+    // On its own a rule cannot know whether an earlier one resolved it; if the resolved address would fit, that decides.
     return p.resolved && inCidr(net, p.resolved) ? unknown('resolve') : NO
   }
   return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')
@@ -292,12 +335,14 @@ export interface MaybeHit extends RouteHit { reason: UnknownReason }
 export interface RouteResult {
   /** The first rule that matches, with its line (counted from 0, as the document is); null when no rule decidably matches. */
   first: RouteHit | null
-  /** No line the tester could not decide stands above `first`: the answer is the answer. */
+  /** `first` is the last word: its target is a built-in outbound or a group that cannot lead to PASS or a Rematch outbound. When it is not, matching may go on below it. */
+  final: boolean
+  /** The answer is the answer: nothing undecided stands above `first` and `first` is final. */
   certain: boolean
   /** Lines above `first` (all of them when there is none) that could not be decided and may match first. Capped; see `maybeTotal`. */
   maybe: MaybeHit[]
   maybeTotal: number
-  /** Rules below `first` that also match and so never apply. Capped; see `laterTotal`. */
+  /** Rules below `first` that also match. When `first` is final they never apply; when it is not, they may. Capped; see `laterTotal`. */
   later: RouteHit[]
   laterTotal: number
   /** Rules that match but name PASS, which skips them and carries on (Mihomo only), above `first`. */
@@ -305,9 +350,15 @@ export interface RouteResult {
 }
 
 const CAP = 100
+const RESOLVES = new Set(['IP-CIDR', 'IP-CIDR6', 'IP-SUFFIX', 'IP-ASN', 'GEOIP'])
 
-export function routeFor(doc: Doc, p: Probe): RouteResult {
-  const out: RouteResult = { first: null, certain: true, maybe: [], maybeTotal: 0, later: [], laterTotal: 0, passed: [] }
+/**
+ * `cont` says which targets end the matching (see ./continuation): Mihomo follows a group into its current choice and goes on
+ * when that is PASS, so a match on such a group is not the last word.
+ */
+export function routeFor(doc: Doc, probe: Probe, cont: Continuation): RouteResult {
+  const out: RouteResult = { first: null, final: true, certain: true, maybe: [], maybeTotal: 0, later: [], laterTotal: 0, passed: [] }
+  const p: Probe = { ...probe, resolvedEarlier: false }
   for (let i = 0; i < doc.lines.length; i++) {
     const line = doc.lines[i]
     const rule = line.rule
@@ -316,6 +367,8 @@ export function routeFor(doc: Doc, p: Probe): RouteResult {
     // A rule with no outbound sends nothing anywhere, unless it is a jump into a sub-rule.
     if (rule.target === '' && upper !== 'SUB-RULE') continue
     const v = evalRule(rule, p)
+    // An address rule that does not say no-resolve makes Mihomo resolve a domain when it is reached, match or not.
+    if (p.kind === 'domain' && RESOLVES.has(upper) && !hasOption(rule.options, 'no-resolve') && !hasOption(rule.options, 'src')) p.resolvedEarlier = true
     if (v.verdict === 'no') continue
     if (v.verdict === 'unknown') {
       if (out.first === null) {
@@ -328,11 +381,12 @@ export function routeFor(doc: Doc, p: Probe): RouteResult {
     if (out.first === null) {
       if (rule.target.toUpperCase() === 'PASS') { out.passed.push(hit); continue }
       out.first = hit
+      out.final = !cont.mayContinue(rule.target)
     } else {
       out.laterTotal++
       if (out.later.length < CAP) out.later.push(hit)
     }
   }
-  out.certain = out.maybeTotal === 0
+  out.certain = out.maybeTotal === 0 && out.final
   return out
 }

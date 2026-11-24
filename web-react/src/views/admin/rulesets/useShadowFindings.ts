@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Continuation } from '@/utils/ruleset/continuation'
 import { findShadowed, type Finding } from '@/utils/ruleset/lint'
 import type { Doc } from '@/utils/ruleset/parse'
 
@@ -8,13 +9,16 @@ import type { Doc } from '@/utils/ruleset/parse'
  * callback where there is one. The analysis itself is a single linear pass (utils/ruleset/lint), so a rule set of 50,000
  * rules takes a fraction of a second, but it is still kept off the keystroke.
  *
- * `findings` is null while the answer for the current document is not in yet.
+ * Whether a rule covers the ones below it depends on whether it is the last word (a group that may pass does not cover), which is
+ * the backend's answer about the groups. So nothing is worked out without `cont`: it is null until that answer is in for this
+ * draft, and `findings` is null while it is, and while the analysis for the current document is not in yet.
  */
-export function useShadowFindings(doc: Doc): Finding[] | null {
-  const [done, setDone] = useState<{ doc: Doc; findings: Finding[] } | null>(null)
+export function useShadowFindings(doc: Doc, cont: Continuation | null): Finding[] | null {
+  const [done, setDone] = useState<{ doc: Doc; cont: Continuation; findings: Finding[] } | null>(null)
   useEffect(() => {
+    if (!cont) return
     let cancelled = false
-    const run = () => { if (!cancelled) setDone({ doc, findings: findShadowed(doc) }) }
+    const run = () => { if (!cancelled) setDone({ doc, cont, findings: findShadowed(doc, cont) }) }
     const w = window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void }
     // A short pause first, so a burst of edits is analysed once, at the end.
     const wait = window.setTimeout(() => {
@@ -27,6 +31,6 @@ export function useShadowFindings(doc: Doc): Finding[] | null {
       window.clearTimeout(wait)
       if (idle !== undefined) w.cancelIdleCallback?.(idle)
     }
-  }, [doc])
-  return done && done.doc === doc ? done.findings : null
+  }, [doc, cont])
+  return cont && done && done.doc === doc && done.cont === cont ? done.findings : null
 }

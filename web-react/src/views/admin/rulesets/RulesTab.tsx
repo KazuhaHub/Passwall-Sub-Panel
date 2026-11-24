@@ -21,6 +21,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
+import type { Continuation } from '@/utils/ruleset/continuation'
 import type { ProbeInput } from '@/utils/ruleset/match'
 import {
   deleteBlock, deleteLines, editRule, insertRules, mergeBlocks, mergePreview, moveBlock, moveLinesToBlock, moveLinesToNewBlock, newBlock, replaceRange,
@@ -81,7 +82,7 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
  * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groupsKnown, groupsUnavailable }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -100,6 +101,12 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   subRule?: { groups: readonly string[] }
   /** The name of the text editor (the Text view) when it is not "Main rules". */
   ariaLabel?: string
+  /** Which targets end the matching (see utils/ruleset/continuation): from the backend's reading of the draft's groups. */
+  cont: Continuation
+  /** `cont` rests on the backend's members for this very draft; until it does, no rule is said to cover another. */
+  groupsKnown: boolean
+  /** The members cannot be read at all (an operator), as opposed to not being in yet. */
+  groupsUnavailable: boolean
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
@@ -136,7 +143,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   useEffect(() => {
     if (showTarget) { setTargetFilter(showTarget.name); setTargetMode('merged'); setOpened(false) }
   }, [showTarget])
-  const findings = useShadowFindings(doc)
+  const findings = useShadowFindings(doc, groupsKnown ? cont : null)
   const choices = useMemo(() => {
     const own = targetChoices(blocks, order, rematchNames)
     if (!subRule) return own
@@ -420,7 +427,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <IconButton label={t('admin:rules.tester.back')} onClick={() => setTesterOpen(false)}><IconArrowLeft /></IconButton>
           <h2 className="text-base font-semibold">{t('admin:rules.tester.title')}</h2>
         </div>
-        <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+        <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
       </div>
     )
   }
@@ -542,7 +549,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
             <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
             <IconButton label={t('admin:rules.tester.hide_tester')} size="icon-xs" onClick={() => setTesterOpen(false)}><IconClose /></IconButton>
           </div>
-          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
         </aside>
       )}
       </div>
@@ -551,10 +558,10 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       {renderDialog()}
       {!wide && !phone && testerOpen && !subRule && (
         <DetailDialog open onClose={() => setTesterOpen(false)} size="md" title={t('admin:rules.tester.title')}>
-          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
         </DetailDialog>
       )}
-      {issuesOpen && <IssuesPanel doc={doc} findings={findings} textOnly={textOnly} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
+      {issuesOpen && <IssuesPanel doc={doc} findings={findings} textOnly={textOnly} needsGroups={groupsUnavailable && !groupsKnown} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }

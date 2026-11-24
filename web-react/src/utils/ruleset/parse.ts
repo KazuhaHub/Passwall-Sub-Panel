@@ -1,3 +1,4 @@
+import { normalizeTarget } from './target'
 import { KNOWN_TYPES, RULE_OPTIONS, SIMPLE_TYPES } from './types'
 
 /**
@@ -20,8 +21,10 @@ export interface RuleInfo {
   type: string
   /** The second field. For a logical rule that is the whole parenthesised expression. */
   value: string
-  /** The outbound, found the way the backend finds it (see `targetIndex`); '' when there is none. */
+  /** The outbound, found and read the way the backend does (see `targetIndex` and `normalizeTarget`: quotes removed); '' when there is none. */
   target: string
+  /** The target field as written (trimmed, quotes and all); '' when there is none. */
+  targetRaw: string
   /** `no-resolve` / `src` after the target, in written order. */
   options: string[]
   /** Every top-level field, trimmed. */
@@ -91,12 +94,15 @@ export function splitFields(text: string): string[] {
   return fieldSpans(text).map(s => text.slice(s.start, s.end).trim())
 }
 
-/** ruleOutboundTargetIndex (internal/service/render/mihomo_advanced.go): which field is the outbound, or -1. */
+/**
+ * ruleOutboundTargetIndex (internal/service/render/mihomo_advanced.go): which field is the outbound, or -1. Like the backend it
+ * reads each field through `normalizeTarget` first, so a quoted `'no-resolve'` is still an option and not the target.
+ */
 export function targetIndex(fields: readonly string[]): number {
   if (fields.length < 2 || fields[0].toUpperCase() === 'SUB-RULE') return -1
   const minimum = fields[0].toUpperCase() === 'MATCH' ? 1 : 2
   for (let i = fields.length - 1; i >= minimum; i--) {
-    const c = fields[i]
+    const c = normalizeTarget(fields[i])
     if (c === '' || (i > minimum && RULE_OPTIONS.has(c.toLowerCase()))) continue
     return i
   }
@@ -138,12 +144,13 @@ function ruleOf(scan: RuleScan): RuleInfo {
   const type = fields[0]
   const upper = type.toUpperCase()
   const index = targetIndex(fields)
-  const target = index >= 0 ? fields[index] : ''
+  const targetRaw = index >= 0 ? fields[index] : ''
+  const target = normalizeTarget(targetRaw)
   const options = index >= 0 ? fields.slice(index + 1).filter(f => f !== '') : []
   const quoted = fields.some(f => f[0] === '"' || f[0] === "'")
   const structured = SIMPLE_TYPES.has(upper) && !quoted && fields.length >= 3 && index === 2 && fields[1] !== ''
     && fields.slice(3).every(f => RULE_OPTIONS.has(f.toLowerCase()))
-  return { type, value: fields[1] ?? '', target, options, fields, known: KNOWN_TYPES.has(upper), structured }
+  return { type, value: fields[1] ?? '', target, targetRaw, options, fields, known: KNOWN_TYPES.has(upper), structured }
 }
 
 let nextId = 1

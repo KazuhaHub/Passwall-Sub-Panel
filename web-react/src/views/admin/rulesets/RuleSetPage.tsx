@@ -28,6 +28,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
 import { parseDoc } from '@/utils/ruleset/parse'
 import { buildBlocks } from '@/utils/ruleset/blocks'
+import { continuation } from '@/utils/ruleset/continuation'
 import { groupUsage, type RenamePlan } from '@/utils/ruleset/rename'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
@@ -39,6 +40,7 @@ import { RenameGroupDialog } from './RenameGroupDialog'
 import { RulesTab } from './RulesTab'
 import { isReservedSlug, newRuleSetPath, ruleSetPath } from './ruleSetRoutes'
 import { isBuiltinTarget } from './targets'
+import { useDraftInspection } from './useDraftInspection'
 
 /** The request body limit of the rule-set endpoints: 1 MiB for everything the middleware does not name (router.go BodyLimitByPath). */
 export const MAX_BODY_BYTES = 1 << 20
@@ -92,7 +94,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [changes, setChanges] = useState(false)
   const phone = useIsMobile()
   // The group being renamed (its name and the names a new one may not take), and the group the Proxy groups tab asked the Rules tab to show.
-  const [renaming, setRenaming] = useState<{ name: string; groups: string[] } | null>(null)
+  const [renaming, setRenaming] = useState<{ name: string } | null>(null)
   const [showTarget, setShowTarget] = useState<{ name: string; token: number } | null>(null)
   // Bumped on Discard so the rules tab starts again from the restored text with a clean history.
   const [rev, setRev] = useState(0)
@@ -110,7 +112,14 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const usedBy = useMemo(() => templates.filter(tpl => (tpl.rule_sets || []).includes(seed.slug)).map(x => x.name || x.slug), [templates, seed.slug])
 
   // A rename rewrites rule lines, so it needs the rules readable as a list: with a foreign line the editor writes nothing (see parse.ts foreignOf).
-  const renameBlocked = useMemo(() => (parseDoc(form.content).foreign.length > 0 ? t('admin:rules.rename.unavailable.text_only') : undefined), [form.content, t])
+  const textOnly = useMemo(() => parseDoc(form.content).foreign.length > 0, [form.content])
+  // What the backend says every proxy group of THIS draft is (members included); null until that answer is in for the draft as it
+  // is now. The routing test, the covered-rule findings and the rename rest on it, and none of them works the members out itself.
+  const { inspection, fresh } = useDraftInspection(form, !readOnly && (tab === 'rules' || tab === 'members'))
+  const effective = useMemo(() => (fresh && inspection ? new Map(inspection.groups.map(g => [g.name, g.members] as const)) : null), [fresh, inspection])
+  const rematchNames = useMemo(() => (form.mihomo_rematch_outbounds || []).map(o => o.name), [form.mihomo_rematch_outbounds])
+  const cont = useMemo(() => continuation(effective, rematchNames), [effective, rematchNames])
+  const renameBlocked = textOnly ? t('admin:rules.rename.unavailable.text_only') : effective === null ? t('admin:rules.rename.unavailable.not_ready') : undefined
   const usage = useCallback((name: string) => groupUsage({ content: form.content, mihomo_sub_rules: form.mihomo_sub_rules }, name), [form.content, form.mihomo_sub_rules])
   const applyRename = (plan: Extract<RenamePlan, { ok: true }>, to: string) => {
     setForm(f => ({ ...f, ...plan.patch }))
@@ -330,7 +339,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
-                showTarget={showTarget} />
+                showTarget={showTarget} cont={cont} groupsKnown={effective !== null} groupsUnavailable={readOnly} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor
@@ -349,7 +358,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
                 mihomoSubRules={form.mihomo_sub_rules}
                 mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
                 usage={usage}
-                onRename={(name, groupNames) => setRenaming({ name, groups: groupNames })}
+                onRename={name => setRenaming({ name })}
+                sharedInspection={{ data: inspection, loading: !fresh }}
                 renameBlocked={renameBlocked}
                 onShowRules={name => { setShowTarget({ name, token: Date.now() }); changeTab('rules') }}
               />
@@ -358,7 +368,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               <MihomoAdvancedRulesEditor part="sub_rules" value={form} onChange={setForm}
                 renderContent={({ index, generation, value, onChange, ariaLabel }) => (
                   <RulesTab key={`${rev}:${index}:${generation}`} content={value} setContent={onChange} readOnly={readOnly || pending} ariaLabel={ariaLabel}
-                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} />
+                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} cont={cont} groupsKnown={effective !== null} groupsUnavailable={readOnly} />
                 )} />
             </TabsContent>
             <TabsContent value="rematches" keepMounted={false}>
@@ -375,8 +385,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
           )}
         </form>
       </FormValidityProvider>
-      {renaming && (
-        <RenameGroupDialog draft={form} from={renaming.name} groupNames={renaming.groups} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)}
+      {renaming && effective && (
+        <RenameGroupDialog draft={form} from={renaming.name} effective={effective} templates={usedBy} rematchNames={rematchNames}
           onApply={applyRename} onClose={() => setRenaming(null)} />
       )}
       {changes && <ChangesDialog saved={baseline.content} draft={form.content} onClose={() => setChanges(false)} />}

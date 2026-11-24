@@ -11,7 +11,11 @@ const inspection = { groups: [], builtins: [], nodes: [], lines: [], regions: []
 
 function reads(row: Record<string, unknown> = base) {
   installReads({ '/admin/rules': list([row]), '/admin/templates': list([]), '/admin/groups': list([]) })
-  api.post.mockResolvedValue({ data: inspection })
+  // The server lists the groups the draft's rules name; none of these can reach PASS, so a match on one is the last word.
+  api.post.mockImplementation(async (_url: string, body: { content: string }) => {
+    const names = [...new Set(body.content.split('\n').filter(l => l.startsWith('- ')).map(l => l.split(',').filter(x => x !== 'no-resolve')).filter(f => f.length > 1).map(f => f[f.length - 1]))]
+    return { data: { ...inspection, groups: names.map(name => ({ name, configured: false, options: { type: 'select' }, default_members: [], members: [{ kind: 'builtin', value: 'DIRECT' }] })) } }
+  })
 }
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -31,7 +35,7 @@ describe('the routing test', () => {
     expect(await within(dialog).findByText('Matches rule DOMAIN-SUFFIX,example.com,Proxy in group 1 (Proxy), line 1.')).toBeTruthy()
     expect(within(dialog).getByText('Traffic goes to proxy group Proxy.')).toBeTruthy()
     // The DOMAIN, the keyword, the narrower suffix and the fallback all match too and never apply.
-    expect(within(dialog).getByText('4 more rules also match but come later, so they don\'t apply:')).toBeTruthy()
+    expect(await within(dialog).findByText('4 more rules also match but come later, so they don\'t apply:', undefined, { timeout: 3000 })).toBeTruthy()
     expect(within(dialog).queryByText('This result is not certain')).toBeNull()
   })
 
@@ -137,5 +141,35 @@ describe('the problems panel', () => {
     await screen.findByRole('row', { name: /P/ })
     fireEvent.click(screen.getByRole('button', { name: 'Issues and findings' }))
     expect(await screen.findByText('No issues found', undefined, { timeout: 3000 })).toBeTruthy()
+  })
+})
+
+describe('a match on a group is not always final (review D)', () => {
+  it('the repro: UDP to youtube.com meets a group that may pass, so the later rules may apply and the answer is not final', async () => {
+    reads({ ...base, content: '- NETWORK,udp,Udp\n- DOMAIN-SUFFIX,youtube.com,YT\n- MATCH,B\n' })
+    api.post.mockImplementation(async () => {
+      const names = ['Udp', 'YT', 'B']
+      return { data: { ...inspection, groups: names.map(name => ({ name, configured: false, options: { type: 'select' }, default_members: [], members: name === 'Udp' ? [{ kind: 'builtin', value: 'DIRECT' }, { kind: 'builtin', value: 'PASS' }] : [{ kind: 'builtin', value: 'DIRECT' }] })) } }
+    })
+    mountRuleSets(PAGE)
+    const dialog = await openTester()
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'UDP' }))
+    type(dialog, 'youtube.com')
+    expect(await within(dialog).findByText('This rule may not be the last word', undefined, { timeout: 3000 })).toBeTruthy()
+    expect(within(dialog).getByText('2 more rules also match and may apply:')).toBeTruthy()
+    expect(within(dialog).queryByText(/come later, so they don't apply/)).toBeNull()
+    expect(within(dialog).getByText(/Mihomo skips a proxy that doesn't support UDP/)).toBeTruthy()
+  })
+
+  it('an operator cannot read the members: a rule that sends traffic to a group is treated as one that may continue, and the tester says why', async () => {
+    reads({ ...base, content: '- DOMAIN-SUFFIX,a.example,Proxy\n' })
+    const dialogFor = async () => { fireEvent.click(await screen.findByRole('button', { name: 'Test routing' })); return await screen.findByRole('dialog') }
+    // Without the members (the draft's inspection has not answered) the answer is not final.
+    api.post.mockReturnValue(new Promise(() => {}))
+    mountRuleSets(PAGE)
+    const dialog = await dialogFor()
+    type(dialog, 'a.example')
+    expect(await within(dialog).findByText('This rule may not be the last word')).toBeTruthy()
+    expect(within(dialog).getByText(/members of the proxy groups aren't available/)).toBeTruthy()
   })
 })

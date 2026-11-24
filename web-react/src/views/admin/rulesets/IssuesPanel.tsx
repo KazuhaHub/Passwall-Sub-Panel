@@ -28,10 +28,12 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * `findings` is null while the analysis for the current text is still running (it runs when the browser is idle).
  */
-export function IssuesPanel({ doc, findings, textOnly, onJump, onClose }: {
+export function IssuesPanel({ doc, findings, textOnly, needsGroups, onJump, onClose }: {
   doc: Doc
   findings: readonly Finding[] | null
   textOnly: boolean
+  /** The members of the groups are not available (an operator cannot read them), so nothing can be said about which rule covers which. */
+  needsGroups: boolean
   onJump?: (line: number) => void
   onClose: () => void
 }) {
@@ -50,6 +52,7 @@ export function IssuesPanel({ doc, findings, textOnly, onJump, onClose }: {
     <DetailDialog open onClose={onClose} size="lg" title={t('admin:rules.issues.title')} description={t('admin:rules.issues.description')}>
       <div className="flex flex-col gap-3">
         {textOnly ? <Notice tone="warning">{t('admin:rules.issues.text_only')}</Notice>
+          : needsGroups ? <Notice tone="info">{t('admin:rules.issues.needs_groups')}</Notice>
           : findings === null ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><IconSpinner aria-hidden className="animate-spin" />{t('admin:rules.issues.computing')}</p>
           : findings.length === 0 ? <EmptyState compact title={t('admin:rules.issues.none')} />
           : ORDER.map(({ kind, level, key }) => {
