@@ -6,7 +6,7 @@ import type { DestNodeStatus } from '@/api/accessControl'
 import AuditCollectDialog from '@/components/AuditCollectDialog'
 import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import { MoreMenu, type MoreMenuItem } from '@/components/common/MoreMenu'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import DestResolveDialog from '@/components/DestResolveDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
@@ -85,7 +85,7 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
 
   return (
     <>
-      <DetailSheet open={open} onClose={onClose} className="data-[side=right]:sm:w-[36rem] data-[side=right]:sm:max-w-[36rem]"
+      <DetailDialog open={open} onClose={onClose} size="lg"
         title={t(`${C}title`, { n: status.data ? nodes.length : '…' })}>
         {status.isPending && <div className="grid gap-2">{[0, 1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>}
         {status.isError && <ErrorState compact title={t('admin:access_control.verdict.read_failed')} reason={status.error} retry={() => status.refetch()} />}
@@ -146,7 +146,7 @@ export default function CoverageSheet({ open, onClose, filter, onFilterChange, o
             </p>
           </>
         )}
-      </DetailSheet>
+      </DetailDialog>
       <AuditCollectDialog node={recordingFor} onClose={() => setRecordingFor(null)} />
       <DestResolveDialog node={resolveFor} onClose={() => setResolveFor(null)} />
     </>

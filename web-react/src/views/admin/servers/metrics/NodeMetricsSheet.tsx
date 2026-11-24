@@ -5,7 +5,7 @@ import { AsyncButton } from '@/components/common/AsyncButton'
 import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import type { Tone } from '@/components/common/tones'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
@@ -156,8 +156,9 @@ export default function NodeMetricsSheet({ server, open, onClose }: {
 
   return (
     <>
-      <DetailSheet
+      <DetailDialog
         open={open}
+        size="xl"
         onClose={onClose}
         title={t('admin:nodeMetrics.title', { name: server?.name ?? '' })}
         status={header}
@@ -167,7 +168,6 @@ export default function NodeMetricsSheet({ server, open, onClose }: {
             {t('admin:nodeMetrics.refresh')}
           </AsyncButton>
         )}
-        className="data-[side=right]:sm:w-[min(60rem,96vw)] data-[side=right]:sm:max-w-[min(60rem,96vw)]"
       >
         {/* A thin bar while a fetch runs over data that is already on screen, so a range change never goes silent. */}
         {status === 'loading' && current && <LoadingBar label={t('common:ui.feedback.loading')} />}
@@ -283,8 +283,9 @@ export default function NodeMetricsSheet({ server, open, onClose }: {
             </>
           )}
         </Tabs>
-      </DetailSheet>
-      {diagnostics && <NodeDiagnosticsSheet server={server} open={open} onClose={() => setDiagnostics(false)} />}
+        {/* Inside the dialog, so the two nest: the upper one is centred, traps focus and closes alone on Esc. */}
+        {diagnostics && <NodeDiagnosticsSheet server={server} open={open} onClose={() => setDiagnostics(false)} />}
+      </DetailDialog>
     </>
   )
 }

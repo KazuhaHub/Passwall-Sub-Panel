@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { AccessBadge } from '@/components/access/AccessBadge'
 import { AsyncButton } from '@/components/common/AsyncButton'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog, type DetailNav } from '@/components/data/DetailDialog'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,8 @@ export interface ListEntriesSheetProps {
   onEdit: (id: number) => void
   /** Opens the test sheet prefilled with an entry. */
   onTest: (target: string) => void
+  /** Previous / next over the lists. */
+  nav?: DetailNav
 }
 
 /**
@@ -32,7 +34,7 @@ export interface ListEntriesSheetProps {
  * returned them. The search is the component's own state and never reaches the URL (R12); it covers the
  * 200 shown, not the whole list.
  */
-export default function ListEntriesSheet({ listId, onClose, onEdit, onTest }: ListEntriesSheetProps) {
+export default function ListEntriesSheet({ listId, onClose, onEdit, onTest, nav }: ListEntriesSheetProps) {
   const { t, i18n } = useTranslation(['admin'])
   const scope = useQueryScope()
   const open = listId !== null
@@ -65,9 +67,9 @@ export default function ListEntriesSheet({ listId, onClose, onEdit, onTest }: Li
   ) : undefined
 
   return (
-    <DetailSheet open={open} onClose={() => { setSearch(''); onClose() }} title={list?.name ?? ''} description={source}
+    <DetailDialog open={open} size="md" nav={nav} onClose={() => { setSearch(''); onClose() }} title={list?.name ?? ''} description={source}
       status={st ? <span data-state={st.key}><AccessBadge kind={st.tone} label={t(`${L}state.${st.key}`)} /></span> : undefined}
-      actions={actions} className="data-[side=right]:sm:w-[36rem] data-[side=right]:sm:max-w-[36rem]">
+      actions={actions}>
       {q.isPending && open && <Skeleton className="h-40 w-full" />}
       {q.isError && <ErrorState compact title={t(`${L}sheet.load_failed`)} reason={q.error} retry={() => q.refetch()} />}
       {list && (
@@ -89,6 +91,6 @@ export default function ListEntriesSheet({ listId, onClose, onEdit, onTest }: Li
           </ul>
         </div>
       )}
-    </DetailSheet>
+    </DetailDialog>
   )
 }

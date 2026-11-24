@@ -7,7 +7,7 @@ import { AsyncButton } from '@/components/common/AsyncButton'
 import { FieldHint } from '@/components/common/HelpTip'
 import { nodeStateText } from '@/components/NodePolicyStatusRow'
 import { OptionCombobox } from '@/components/OptionCombobox'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { pushSnack } from '@/components/feedback/toasts'
 import { Field } from '@/components/form/Field'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
@@ -31,7 +31,7 @@ export interface TestSheetProps {
   onClose: () => void
   /** From history state: a destination, a port, an account. Never from the URL. */
   prefill?: DrawerPrefill
-  /** Closes the sheet, switches to the policies tab, highlights and opens that policy. */
+  /** Closes the dialog, switches to the policies tab, highlights and opens that policy. */
   onOpenPolicy: (policyId: number) => void
 }
 
@@ -41,9 +41,9 @@ const T = 'admin:access_control.test.'
 export default function TestSheet({ open, onClose, prefill, onOpenPolicy }: TestSheetProps) {
   const { t } = useTranslation(['admin'])
   return (
-    <DetailSheet open={open} onClose={onClose} title={t(`${T}title`)}>
+    <DetailDialog open={open} onClose={onClose} size="lg" title={t(`${T}title`)}>
       <TestBody prefill={prefill} onOpenPolicy={onOpenPolicy} />
-    </DetailSheet>
+    </DetailDialog>
   )
 }
 
