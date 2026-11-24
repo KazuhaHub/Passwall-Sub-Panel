@@ -22,38 +22,6 @@ export const CONFIG_SYNC_KEY: Record<ConfigSyncState, string> = {
 }
 
 /**
- * Dot colour per state.
- *
- * `pending` and `failed` share red because both are a failed push, but they
- * carry different wording: pending has a retry queued, failed has had its
- * retry cancelled and will not move without the operator. Collapsing them was
- * the bug — a node that had given up went on showing "pending retry" forever.
- *
- * `drift` is unreachable today (reconcile repairs a drift inside the same call
- * so no node rests in it) and is kept so the dot already works the day a
- * writer appears.
- */
-export function configSyncColor(
-  state: string,
-  md: { error: string; outlineVariant: string },
-): string {
-  switch (state) {
-    case 'synced':
-      return '#22c55e'
-    case 'drift':
-      return '#f97316'
-    case 'pending':
-    case 'failed':
-      return md.error
-    default:
-      // Anything unrecognised is drawn as "never captured" — which is why an
-      // unlisted state is worse than a missing one: it renders a different,
-      // wrong claim about the node rather than an obvious gap.
-      return md.outlineVariant
-  }
-}
-
-/**
  * A coarse "how long ago", for the config-sync tooltip.
  *
  * Coarse on purpose: the reader is deciding whether to wait or to investigate,

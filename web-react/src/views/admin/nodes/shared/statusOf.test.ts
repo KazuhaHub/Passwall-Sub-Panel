@@ -44,4 +44,28 @@ describe('statusOf precedence', () => {
     expect(statusOf(line({ published: false, withheld: 'some_future_reason' as never }))).toMatchObject({ id: 'unpublished', quiet: false }))
   it('a withheld reason beats config and health conditions below it', () =>
     expect(statusOf(direct({ published: false, withheld: 'egress', health: { state: 'unreachable', checked_at: null } }), facts({ config_sync_state: 'failed' }))).toMatchObject({ id: 'egress' }))
+
+  // The rules the retired per-state colour helpers pinned, held where the states are really drawn.
+  it('inconclusive never reads as healthy, and is not a hard failure either', () => {
+    const inconclusive = statusOf(line({ health: { state: 'inconclusive', checked_at: null } }))
+    const ok = statusOf(line())
+    const down = statusOf(line({ health: { state: 'unreachable', checked_at: null } }))
+    expect(inconclusive.tone).not.toBe(ok.tone)
+    expect(inconclusive.quiet).toBe(false)
+    expect(inconclusive.tone).not.toBe(down.tone)
+  })
+  it('a probe that has not run is kept apart from one that could not decide', () => {
+    const never = statusOf(line({ health: { state: '', checked_at: null } }))
+    const undecided = statusOf(line({ health: { state: 'inconclusive', checked_at: null } }))
+    expect(never.id).not.toBe(undecided.id)
+    expect(never.quiet).toBe(true)
+  })
+  it('a health state this client does not know is never drawn as healthy or as a failure', () =>
+    expect(statusOf(line({ health: { state: 'something_new', checked_at: null } }))).toMatchObject({ id: 'unchecked', tone: 'neutral' }))
+  it('a node whose config push gave up reads differently from one with a retry queued', () => {
+    const failed = statusOf(direct(), facts({ config_sync_state: 'failed' }))
+    const pending = statusOf(direct(), facts({ config_sync_state: 'pending' }))
+    expect(failed.id).not.toBe(pending.id)
+    expect(failed.tone).not.toBe(pending.tone)
+  })
 })
