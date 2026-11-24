@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/utils/clipboard'
 import type { CardSummary, RawFamily } from '@/utils/diagnostics'
 import { CARD_LINK, LINK_TARGET } from '@/utils/diagnosticsCatalog'
-import { Disclosure } from './Disclosure'
+import { Disclosure } from '@/components/common/Disclosure'
 import RawMetricTable from './RawMetricTable'
 import { CardStateBadge } from './StateBadge'
 import type { DiagFormat } from './useDiagFormat'
@@ -91,7 +91,7 @@ export default function SubsystemCard({ card, sentence, extra, children, familie
             summary={t('admin:diagnostics.cards.common.details', { count: fmt.count(seriesCount) })}>
             <div className="mt-2 min-w-0">
               <div className="flex justify-end">
-                <Button variant="ghost" size="sm" onClick={copyGroup}>
+                <Button variant="outline" size="sm" onClick={copyGroup}>
                   <IconCopy />{t('admin:diagnostics.cards.common.copy_group')}
                 </Button>
               </div>

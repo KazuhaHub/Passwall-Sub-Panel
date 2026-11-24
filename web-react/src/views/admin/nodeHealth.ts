@@ -1,5 +1,6 @@
 /**
- * The node health states the Go backend can write, and how each one renders.
+ * The node health states the Go backend can write, and the wording key of each. The colour of each state is
+ * decided where the states are drawn: nodes/shared/statusOf.ts (the nodes list) and dashboard/healthTone.ts.
  *
  * Extracted out of NodesView so a test can IMPORT this rather than scrape the
  * component's source — the same reason configSync.ts exists. A guard that
@@ -44,29 +45,4 @@ export const NODE_HEALTH_KEY: Record<NodeHealthState, string> = {
   panel_unreachable: 'panel_unreachable',
   inbound_missing: 'inbound_missing',
   inbound_disabled: 'inbound_disabled',
-}
-
-/**
- * Dot colour per state. `inconclusive` is amber and NEVER green: the probe ran
- * and could not decide, and a fleet whose probe has gone blind must not look
- * like a healthy one. It is also not red — an obfuscated UDP node is
- * unprobeable by design, and painting it as a failure would train the operator
- * to ignore the colour.
- */
-export function nodeHealthColor(state: string, md: { error: string; outlineVariant: string }): string {
-  switch (state) {
-    case 'ok':
-      return '#22c55e'
-    case 'unreachable':
-    case 'panel_unreachable':
-      return md.error
-    case 'inconclusive':
-      return '#eab308'
-    case 'inbound_missing':
-      return '#f97316'
-    case 'inbound_disabled':
-      return '#9ca3af'
-    default:
-      return md.outlineVariant // '' — never probed
-  }
 }

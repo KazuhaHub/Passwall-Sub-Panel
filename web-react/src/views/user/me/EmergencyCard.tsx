@@ -3,7 +3,7 @@ import { IconDiagnose, IconTime, IconTicket, IconUsage } from '@/lib/icons'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { bytesToHuman } from './format'
-import { Meter } from './Meter'
+import { Meter } from '@/components/common/Meter'
 import { useMeT } from './useMeT'
 
 type Emergency = MeProfile['emergency_access']
@@ -57,7 +57,7 @@ export function EmergencyCard({ emergency, onUse }: {
               <span>{bytesToHuman(emergency.used_bytes)} / {bytesToHuman(emergency.quota_bytes)}</span>
               <span>{usedPct.toFixed(0)}%</span>
             </div>
-            <Meter percent={usedPct} tone="info" label={t('emergency.title')} />
+            <Meter value={usedPct} tone="info" label={t('emergency.title')} />
           </div>
         )}
         <AsyncButton variant="outline" className="self-start" disabled={off} onClick={onUse}>{t('emergency.use')}</AsyncButton>

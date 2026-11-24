@@ -119,11 +119,11 @@ export function TrendTab({ scope, users, nodes, userId, nodeId, window: win, tz,
         <AsyncButton variant="outline" icon={<IconRefresh />} pending={fetching} onClick={onRefresh}>{t('traffic.refresh')}</AsyncButton>
       </div>
 
-      <KpiGrid className="my-0">
+      <KpiGrid>
         <KpiTile label={t('traffic.trend.summary_total')} value={bytesToHuman(summary.total)} />
         <KpiTile label={t('traffic.trend.summary_up')} value={bytesToHuman(summary.up)} />
         <KpiTile label={t('traffic.trend.summary_down')} value={bytesToHuman(summary.down)} />
-        <KpiTile label={t('traffic.trend.summary_range')} value={`${history?.since || '-'} → ${history?.until || '-'}`} />
+        <KpiTile label={t('traffic.trend.summary_range')} value={`${history?.since || '-'} → ${history?.until || '-'}`} valueClassName="text-sm font-medium whitespace-nowrap" />
       </KpiGrid>
 
       <Card size="sm" className="min-w-0">

@@ -18,7 +18,7 @@ import {
 } from '@/api/nodeMetrics'
 import type { Server } from '@/api/servers'
 import { useSiteStore } from '@/stores/site'
-import { Notice } from '../../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../../useAdminT'
 import NodeDiagnosticsSheet from '../dialogs/NodeDiagnosticsSheet'
 import NodeMetricsChart, { formatBits, formatBytes, formatValue, metricsTimeFormatter, type MetricsSeries } from './NodeMetricsChart'

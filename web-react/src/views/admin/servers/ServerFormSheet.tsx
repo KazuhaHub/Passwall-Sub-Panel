@@ -15,7 +15,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
-import { DialogNotice } from './dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 import { InstallMethodFields } from './install/InstallMethodFields'
 import { EMPTY_FORM, createRequest, formOf, sameForm, tokenRequired, updateRequest, validateServerForm, withPanelType, type ServerField, type ServerForm } from './serverForm'
 import type { ProbeState } from './useServerProbes'
@@ -95,7 +95,7 @@ export function ServerFormSheet({ editing, install, onInstallChange, probe, onTe
       className="data-[side=right]:sm:w-[min(40rem,96vw)] data-[side=right]:sm:max-w-[min(40rem,96vw)]"
       footer={(
         <>
-          <Button variant="ghost" disabled={busy} onClick={() => guard(onClose)}>{t('common:actions.cancel')}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => guard(onClose)}>{t('common:actions.cancel')}</Button>
           <AsyncButton pending={busy} onClick={() => submit()}>
             {t(!editing && native ? 'admin:servers.native.create_continue' : 'common:actions.ok')}
           </AsyncButton>
@@ -112,7 +112,7 @@ export function ServerFormSheet({ editing, install, onInstallChange, probe, onTe
               <option value="sui">S-UI</option>
             </NativeSelect>
           </Field>
-          {!editing && !native && <DialogNotice>{t('admin:servers.install_reinstall.new_manual')}</DialogNotice>}
+          {!editing && !native && <Notice tone="info">{t('admin:servers.install_reinstall.new_manual')}</Notice>}
         </FormSection>
 
         <FormSection title={t('admin:servers.form.group_basics')}>

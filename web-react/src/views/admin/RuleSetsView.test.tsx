@@ -45,7 +45,9 @@ describe('rule-set list', () => {
     mountPage(<RuleSetsView />, PATH)
     await openMenu('Seeded rules')
     expect(await menuItem('Restore seeded default')).toBeTruthy()
-    expect((await menuItem(/Seeded rule sets can't be deleted/)).getAttribute('aria-disabled')).toBe('true')
+    const del = await menuItem(/^Delete/)
+    expect(del.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(del.getAttribute('aria-describedby')!)?.textContent).toMatch(/Seeded rule sets can't be deleted/)
   })
 
   it('has no actions and no create button without config write access', async () => {

@@ -42,7 +42,7 @@ export function BulkActionBar({ count, hidden = 0, onClear, onClearHidden, child
         </span>
       )}
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:justify-end">{children}</div>
-      <Button variant="ghost" size="sm" className={TOUCH_HEIGHT} onClick={onClear}>{t('ui.data.clear_selection')}</Button>
+      <Button variant="outline" size="sm" className={TOUCH_HEIGHT} onClick={onClear}>{t('ui.data.clear_selection')}</Button>
     </div>
   )
 }

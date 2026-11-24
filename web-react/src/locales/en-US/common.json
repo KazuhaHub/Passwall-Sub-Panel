@@ -14,7 +14,8 @@
     "edit": "Edit",
     "delete": "Delete",
     "deleted": "Deleted",
-    "search": "Search"
+    "search": "Search",
+    "clear": "Clear"
   },
   "saved": "Saved",
   "empty": "No data",
@@ -216,6 +217,9 @@
       "graph_truncated_atleast_other": "At least {{n}} more lines not shown"
     },
     "shell": {
+      "not_found_title": "Page not found",
+      "not_found_body": "There is no page at this address. Check the address, or go back to the start page.",
+      "back_home": "Back to start page",
       "more": "More",
       "skip_to_content": "Skip to main content",
       "toggle_sidebar": "Toggle sidebar",

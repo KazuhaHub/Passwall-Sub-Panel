@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
@@ -35,11 +36,13 @@ function ComboboxTrigger({
 }
 
 function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
+  const { t } = useTranslation("common")
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
       render={<InputGroupButton variant="ghost" size="icon-xs" />}
       className={cn(className)}
+      aria-label={t("actions.clear")}
       {...props}
     >
       <XIcon className="pointer-events-none" />
@@ -70,6 +73,9 @@ function ComboboxInput({
             size="icon-xs"
             variant="ghost"
             render={<ComboboxTrigger />}
+            // ComboboxTrigger renders a real <button>; without this the Button wrapper assumes a non-button
+            // host (it has a `render`) and Base UI warns on every render.
+            nativeButton
             data-slot="input-group-button"
             className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
             disabled={disabled}
@@ -108,7 +114,7 @@ function ComboboxContent({
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"
           data-chips={!!anchor}
-          className={cn("group/combobox-content relative max-h-(--available-height) w-(--anchor-width) max-w-(--available-width) min-w-[calc(var(--anchor-width)+--spacing(7))] origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[chips=true]:min-w-(--anchor-width) data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 *:data-[slot=input-group]:m-1 *:data-[slot=input-group]:mb-0 *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:border-input/30 *:data-[slot=input-group]:bg-input/30 *:data-[slot=input-group]:shadow-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          className={cn("group/combobox-content relative max-h-(--available-height) w-(--anchor-width) max-w-(--available-width) min-w-[calc(var(--anchor-width)+--spacing(7))] origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:duration-200 data-closed:duration-[120ms] data-[chips=true]:min-w-(--anchor-width) data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 *:data-[slot=input-group]:m-1 *:data-[slot=input-group]:mb-0 *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:border-border *:data-[slot=input-group]:bg-muted *:data-[slot=input-group]:shadow-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
         />
       </ComboboxPrimitive.Positioner>
@@ -219,7 +225,7 @@ function ComboboxChips({
     <ComboboxPrimitive.Chips
       data-slot="combobox-chips"
       className={cn(
-        "flex min-h-(--control-h) flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent bg-clip-padding px-2.5 py-1 text-sm transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 has-aria-invalid:border-destructive has-aria-invalid:ring-3 has-aria-invalid:ring-destructive/20 has-data-[slot=combobox-chip]:px-1 dark:bg-input/30 dark:has-aria-invalid:border-destructive/50 dark:has-aria-invalid:ring-destructive/40",
+        "flex min-h-(--control-h) flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent bg-clip-padding px-2.5 py-1 text-sm transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 has-aria-invalid:border-destructive has-aria-invalid:ring-3 has-aria-invalid:ring-destructive/20 has-data-[slot=combobox-chip]:px-1 dark:bg-foreground/[0.04] dark:has-aria-invalid:border-destructive/50 dark:has-aria-invalid:ring-destructive/40",
         className
       )}
       {...props}

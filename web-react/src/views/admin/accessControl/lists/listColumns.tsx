@@ -62,7 +62,7 @@ export function ListStatusCell({ list, usedByEnabled, t }: { list: DestList; use
   )
 }
 
-/** The row menu. A list something uses (a policy, an allowlist group or a node's routes) cannot be deleted: the item says so instead of failing later. */
+/** The row menu. A list something uses (a policy, an allowlist group or a node's routes) cannot be deleted: the item stays, off, with the reason under it instead of failing later. */
 export function listMenu(c: ListColumnCtx, l: DestList): MoreMenuItem[] {
   const { t } = c
   const used = l.used_by.length
@@ -72,7 +72,8 @@ export function listMenu(c: ListColumnCtx, l: DestList): MoreMenuItem[] {
   if (l.kind === 'remote') items.push({ id: 'refresh', label: t(`${L}menu.refresh`), onSelect: () => c.onRefresh(l) })
   items.push({
     id: 'delete', destructive: true, disabled: used > 0, onSelect: () => c.onDelete(l),
-    label: used > 0 ? t(`${L}menu.delete_blocked`) : t(`${L}menu.delete`),
+    label: t(`${L}menu.delete`),
+    disabledReason: used > 0 ? t(`${L}menu.delete_blocked`) : undefined,
   })
   return items
 }

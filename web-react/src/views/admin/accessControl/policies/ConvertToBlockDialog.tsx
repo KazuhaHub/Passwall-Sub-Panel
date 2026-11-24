@@ -80,7 +80,7 @@ export default function ConvertToBlockDialog({ policy, days, onClose, onConfirm,
         </div>
         <DialogFooter className="sm:items-center">
           {estimable && would > 0 && (
-            <Button size="sm" variant="ghost" className="sm:mr-auto" onClick={() => policy && onViewRecords(policy)}>{t(`${C}view_records`)}</Button>
+            <Button size="sm" variant="outline" className="sm:mr-auto" onClick={() => policy && onViewRecords(policy)}>{t(`${C}view_records`)}</Button>
           )}
           <Button ref={cancelRef} variant="outline" onClick={onClose}>{t(`${C}cancel`)}</Button>
           <AsyncButton onClick={async () => { if (policy) await onConfirm(policy) }}>{t(`${C}action`)}</AsyncButton>

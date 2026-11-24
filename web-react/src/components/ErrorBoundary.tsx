@@ -107,13 +107,13 @@ export function ErrorFallback({ error, onReload, componentStack }: {
 
         {detail && (
           <div className="mt-6 text-left">
-            <Button variant="ghost" size="sm" aria-expanded={showDetails} onClick={() => setShowDetails(v => !v)}>
+            <Button variant="outline" size="sm" aria-expanded={showDetails} onClick={() => setShowDetails(v => !v)}>
               {t('error_boundary.details')}
               <IconChevronDown className={cn('transition-transform', showDetails && 'rotate-180')} />
             </Button>
             {showDetails && (
               <div className="relative mt-2 max-h-72 overflow-auto rounded-lg bg-muted p-3">
-                <Button variant="ghost" size="xs" className="absolute top-1 right-1" onClick={copyDetail}>
+                <Button variant="outline" size="xs" className="absolute top-1 right-1" onClick={copyDetail}>
                   <IconCopy />
                   {copied ? t('error_boundary.copied') : t('error_boundary.copy')}
                 </Button>

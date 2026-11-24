@@ -658,6 +658,14 @@ describe('row kinds, flags and hover (item 8)', () => {
     expect(onRowHover).toHaveBeenLastCalledWith(null)
   })
 
+  it('marks related rows with an attribute only, never a background, so the hovered row stays the most prominent', () => {
+    render(<DataTable {...base} relatedIds={['a', 'b']} />)
+    const rows = rowsOf()
+    expect(rows.map(r => r.getAttribute('data-related'))).toEqual(['true', null, 'true', null])
+    expect(rows.map(r => r.getAttribute('data-highlight'))).toEqual([null, null, null, null])
+    expect(rows[0].className).not.toMatch(/--brand/)
+  })
+
   it('marks rows highlighted from outside', () => {
     render(<DataTable {...base} highlightedIds={['a', 'b']} />)
     expect(rowsOf().map(r => r.getAttribute('data-highlight'))).toEqual(['true', null, 'true', null])
@@ -920,5 +928,14 @@ describe('handlers that arrive after the first render (item 2)', () => {
     expect(onHover).toHaveBeenLastCalledWith('r1')
     fireEvent.click(within(row).getByText('Node 01'))
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'r1' }))
+  })
+
+  it('gives a pinned cell no colour of its own: the row carries an opaque background and the cell inherits it', () => {
+    render(<DataTable data={mk(2)} columns={columns} getRowId={r => r.id} rowOptions={() => ({ state: 'dimmed' })} />)
+    const row = screen.getAllByRole('row')[1]
+    expect(row.className).toMatch(/\bbg-\[color-mix\(in_oklab,var\(--muted\)_40%,var\(--card\)\)\]/)
+    const pinned = row.querySelector('td.sticky') as HTMLElement
+    expect(pinned.className).toMatch(/\bbg-inherit\b/)
+    expect(pinned.className).not.toMatch(/\bbg-card\b|group-hover\/row:bg-/)
   })
 })

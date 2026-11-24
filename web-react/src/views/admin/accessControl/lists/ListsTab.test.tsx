@@ -134,7 +134,9 @@ describe('the lists tab', () => {
     await screen.findByText('News')
     fireEvent.click(screen.getByRole('button', { name: 'Internal 的操作' }))
     // The disabled item says by whom the list is used, so the reason is on screen.
-    expect(screen.getByRole('menuitem', { name: '删除（使用中）' }).getAttribute('aria-disabled')).toBe('true')
+    const blocked = screen.getByRole('menuitem', { name: '删除' })
+    expect(blocked.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(blocked.getAttribute('aria-describedby')!)?.textContent).toBe('使用中，无法删除')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     fireEvent.click(screen.getByRole('button', { name: 'News 的操作' }))

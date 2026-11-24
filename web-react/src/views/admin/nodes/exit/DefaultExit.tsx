@@ -58,9 +58,10 @@ export function DefaultExit({ node, exits, native, mode, exitId, onMode, onExit,
       <h2 id={labelId} className="text-sm font-medium">{t('nodes.exit.default')}</h2>
       {!native && <Alert><AlertDescription>{t('nodes.exit.not_native')}</AlertDescription></Alert>}
       <OptionCards<ExitMode> value={mode} onChange={onMode} aria-labelledby={labelId} columns={2} options={[
-        { value: 'local', title: t('nodes.exit.local'), description: t('nodes.egress.local_hint'), diagram: <ExitPicture node={node} />, disabled: !native, disabledReason: !native ? t('nodes.exit.not_native') : undefined },
+        { value: 'local', title: t('nodes.exit.local'), description: t('nodes.egress.local_hint'), diagram: <ExitPicture node={node} />, disabled: !native },
         { value: 'remote', title: t('nodes.exit.remote'), description: t('nodes.egress.tunnel_hint'), diagram: <ExitPicture node={node} exitName={exitName ?? ''} />, disabled: remoteOff,
-          disabledReason: remoteOff ? t(native ? 'nodes.exit.no_other_server' : 'nodes.exit.not_native') : undefined },
+          // When the server is not a Passwall Node the banner above already says so; repeating it on each card made the sentence appear three times.
+          disabledReason: native && noExits ? t('nodes.exit.no_other_server') : undefined },
       ]} />
       {mode === 'remote' && !remoteOff && (
         <div data-testid="egress-section" className="flex flex-col gap-3">

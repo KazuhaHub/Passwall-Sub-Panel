@@ -53,7 +53,7 @@ export function SegmentedControl<V extends string>({
     <div
       role="radiogroup"
       {...aria}
-      className={cn('inline-flex w-fit max-w-full items-center gap-0.5 rounded-lg bg-muted p-0.5', className)}
+      className={cn('inline-flex w-fit max-w-full items-center gap-0.5 rounded-lg bg-segment-track p-0.5', className)}
     >
       {options.map((o, i) => {
         const checked = o.value === value
@@ -71,10 +71,10 @@ export function SegmentedControl<V extends string>({
             onKeyDown={e => move(e, i)}
             className={cn(
               TOUCH_HEIGHT,
-              'inline-flex items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
+              'inline-flex items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/70',
               size === 'sm' ? 'h-[calc(var(--control-h)-0.75rem)] px-2.5 text-xs' : 'h-[calc(var(--control-h)-0.375rem)]',
-              checked ? 'bg-background text-foreground shadow-sm dark:bg-input/60' : 'text-foreground/70 hover:text-foreground',
-              off && 'cursor-not-allowed opacity-50 hover:text-foreground/70',
+              checked ? 'bg-segment-active font-semibold text-foreground shadow-sm ring-1 ring-segment-border' : 'text-muted-foreground hover:text-foreground',
+              off && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
               '[&_svg]:size-4 [&_svg]:shrink-0',
             )}
           >

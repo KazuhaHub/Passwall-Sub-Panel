@@ -62,6 +62,9 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-segment-track: var(--segment-track);
+    --color-segment-active: var(--segment-active);
+    --color-segment-border: var(--segment-border);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -95,7 +98,7 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
+    --background: oklch(0.972 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
@@ -103,21 +106,26 @@
     --popover-foreground: oklch(0.145 0 0);
     --primary: oklch(0.205 0 0);
     --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
+    --secondary: oklch(0.955 0 0);
     --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
+    --muted: oklch(0.955 0 0);
+    --muted-foreground: oklch(0.5 0 0);
+    --accent: oklch(0.955 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --border: oklch(0.88 0 0);
+    --input: oklch(0.66 0 0);
+    --ring: oklch(0.6 0 0);
+    /* The chart colours are the categorical series in data-tokens.css (light and dark values live there). */
+    --chart-1: var(--series-1);
+    --chart-2: var(--series-2);
+    --chart-3: var(--series-3);
+    --chart-4: var(--series-4);
+    --chart-5: var(--series-5);
+    /* Tabs and segmented switches share one look: a tinted track and a clearly raised active item (own surface, border, shadow). */
+    --segment-track: oklch(0.915 0.004 264);
+    --segment-active: oklch(1 0 0);
+    --segment-border: oklch(0.72 0.01 264);
     --radius: 0.625rem;
     --brand: oklch(0.5 0.2 264);
     --brand-foreground: oklch(0.985 0 0);
@@ -140,27 +148,25 @@
 .dark {
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
+    --card: oklch(0.235 0 0);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
+    --popover: oklch(0.235 0 0);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.922 0 0);
     --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
+    --secondary: oklch(0.29 0 0);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --muted: oklch(0.29 0 0);
+    --muted-foreground: oklch(0.76 0 0);
+    --accent: oklch(0.29 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --border: oklch(1 0 0 / 15%);
+    --input: oklch(0.55 0 0);
+    --ring: oklch(0.66 0 0);
+    --segment-track: oklch(0.3 0 0);
+    --segment-active: oklch(0.44 0 0);
+    --segment-border: oklch(0.62 0 0);
     --brand: oklch(0.72 0.14 264);
     --brand-foreground: oklch(0.145 0 0);
     --success: oklch(0.72 0.17 150);

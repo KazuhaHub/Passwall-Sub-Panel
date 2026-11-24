@@ -425,7 +425,7 @@ GET                 /api/admin/sync-tasks
 | 层 | 技术 |
 |---|---|
 | 后端 | Go 1.26, Gin, GORM |
-| 前端 | React 18, TypeScript, MUI (Material Design 3), Zustand, i18next, ECharts |
+| 前端 | React 19, TypeScript, Vite, shadcn/ui（Base UI）, Tailwind CSS v4, lucide, TanStack Table, Zustand, i18next, ECharts |
 | 构建 | Vite (前端), `go build -ldflags="-s -w"` (后端) |
 | 数据库 | SQLite (默认，纯 Go) / MySQL 8.0+ |
 | 认证 | JWT (HS256), SAML 2.0 (crewjam/saml), OIDC (coreos/go-oidc) |

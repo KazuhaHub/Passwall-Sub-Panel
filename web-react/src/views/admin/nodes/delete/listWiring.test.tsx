@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { NodeOrder, OrderRow } from '@/api/nodes'
 import { api, installReads, list, mountPage } from '../testHarness'
@@ -24,15 +24,17 @@ const reads = () => installReads({
 })
 
 describe('deleting from the nodes list', () => {
-  it('the row menu opens the impact dialog; nothing is deleted until its confirm', async () => {
+  // The row menu is about the line: deleting the node (and the other node-level work) moved to the node page's menu
+  // (covered in NodeDetailPage.test) and stays in the bulk bar (below).
+  it('the row menu of a line offers no node-level action', async () => {
     reads()
     mountPage(<NodesPage />)
     await screen.findAllByText('Node2')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Node1' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete node' }))
-    const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete node and 2 lines' }))
-    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/nodes/1', undefined))
+    await screen.findByRole('menuitem', { name: 'Open node' })
+    for (const name of ['Delete node', 'Remove from panel only', 'Recreate inbound on server', 'Disable node']) {
+      expect(screen.queryByRole('menuitem', { name })).toBeNull()
+    }
   })
 
   it('the bulk bar asks once for the whole selection, with the lines that go', async () => {

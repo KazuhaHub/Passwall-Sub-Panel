@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { IconCopy, IconDownload } from '@/lib/icons'
-import { DialogNotice } from '../dialogs/DialogNotice'
-import { Disclosure } from '../shared/Disclosure'
+import { Notice } from '@/components/common/Notice'
+import { Disclosure } from '@/components/common/Disclosure'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Field } from '@/components/form/Field'
 import { Switch } from '@/components/ui/switch'
@@ -21,7 +21,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
   if (!provisioning) return null
   const showIdentity = selection.method !== 'github' && selection.method !== 'manual'
   return (
-    <Disclosure label={t('admin:servers.native.advanced')}>
+    <Disclosure className="rounded-lg border" buttonClassName="min-h-(--control-h) px-3 text-sm font-medium" bodyClassName="flex flex-col gap-3 border-t px-3 py-3" summary={t('admin:servers.native.advanced')}>
       {hasServer && !newServer && <p className="text-sm">{t('admin:servers.passwall_node_install.existing_hint')}</p>}
       <p className="text-sm">{t('admin:servers.native.private_warning')}</p>
       {showIdentity && (
@@ -50,7 +50,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
       {selection.method === 'linux' ? (
         <>
           <h3 className="text-sm font-medium">{t('admin:servers.native.private_script_advanced')}</h3>
-          {inst.scriptError && <DialogNotice tone="danger">{inst.scriptError}</DialogNotice>}
+          {inst.scriptError && <Notice tone="danger">{inst.scriptError}</Notice>}
           <div className="flex flex-wrap gap-2">
             <BusyButton variant="outline" icon={<IconDownload />} busy={inst.scriptBusy === 'download'}
               disabled={!inst.versionValid || !!inst.scriptBusy || rotating} onClick={() => void inst.deliverScript('download')}>
@@ -79,7 +79,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
                     {file.sensitive
                       ? <ReadonlySecret label={t('admin:servers.native.file_content', { name })} value={file.content} />
                       : <ReadonlyText label={t('admin:servers.native.file_content', { name })} value={file.content} rows={4} />}
-                    <Button variant="ghost" className="self-start" onClick={() => void copyToClipboard(file.content)}><IconCopy />{t('admin:servers.native.copy_file', { name })}</Button>
+                    <Button variant="outline" className="self-start" onClick={() => void copyToClipboard(file.content)}><IconCopy />{t('admin:servers.native.copy_file', { name })}</Button>
                   </section>
                 )
               })}
@@ -93,7 +93,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
                     {step.commands?.map((command, commandIndex) => (
                       <div key={commandIndex} className="flex flex-col gap-1">
                         <ReadonlyText label={label} value={command} rows={2} />
-                        <Button variant="ghost" className="self-start" onClick={() => void copyToClipboard(command)}><IconCopy />{t('admin:servers.native.copy_step')}</Button>
+                        <Button variant="outline" className="self-start" onClick={() => void copyToClipboard(command)}><IconCopy />{t('admin:servers.native.copy_step')}</Button>
                       </div>
                     ))}
                   </section>

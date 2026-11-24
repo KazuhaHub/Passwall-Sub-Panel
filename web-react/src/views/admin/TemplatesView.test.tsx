@@ -43,7 +43,9 @@ describe('template list', () => {
     mountPage(<TemplatesView />, PATH)
     await openMenu('Seeded template')
     expect(await menuItem('Restore seeded default')).toBeTruthy()
-    expect((await menuItem(/Seeded templates can't be deleted/)).getAttribute('aria-disabled')).toBe('true')
+    const del = await menuItem(/^Delete/)
+    expect(del.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(del.getAttribute('aria-describedby')!)?.textContent).toMatch(/Seeded templates can't be deleted/)
   })
 
   it('has no create button and no row actions without config write access', async () => {

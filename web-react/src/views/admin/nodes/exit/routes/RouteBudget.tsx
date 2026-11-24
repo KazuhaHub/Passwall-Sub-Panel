@@ -1,6 +1,6 @@
 import type { RouteBudget as Budget } from '@/api/routes'
 import { InfoTip } from '@/components/common/HelpTip'
-import { cn } from '@/lib/utils'
+import { Meter } from '@/components/common/Meter'
 import { useNodesT } from '../../shared/useNodesT'
 
 /** What the routes cost the engine they run on: entries and rules as bars that turn to a warning near the limit, and the size. */
@@ -20,9 +20,7 @@ export function RouteBudget({ budget }: { budget: Budget }) {
         return (
           <div key={k} data-testid={`routes-budget-${k}`} className="grid gap-1">
             <span className="text-xs text-muted-foreground">{text}</span>
-            <div role="progressbar" aria-label={text} aria-valuemin={0} aria-valuemax={max} aria-valuenow={used} className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div className={cn('h-full rounded-full', ratio >= 0.9 ? 'bg-warning-ink' : 'bg-primary')} style={{ width: `${ratio * 100}%` }} />
-            </div>
+            <Meter value={used} max={max} label={text} className="h-1.5" barClassName={ratio >= 0.9 ? 'bg-warning-ink' : 'bg-primary'} />
           </div>
         )
       })}

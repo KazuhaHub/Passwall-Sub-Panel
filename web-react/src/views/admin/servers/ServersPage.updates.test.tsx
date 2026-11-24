@@ -117,8 +117,9 @@ describe('Server update hints and paired tray icons', () => {
     expect(await within(row).findByText('admin:servers.update_available')).toBeTruthy()
     expect(within(row).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    // Shown disabled with its reason in the label, not hidden: the upgrade is the one thing this node cannot do yet.
-    expect(screen.getByRole('menuitem', { name: 'admin:servers.menu.unsupported' }).getAttribute('aria-disabled')).toBe('true')
+    // Shown disabled with its reason under the label, not hidden: the upgrade is the one thing this node cannot do yet.
+    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('admin:servers.menu.not_ready')).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
   })
 
@@ -131,10 +132,9 @@ describe('Server update hints and paired tray icons', () => {
     expect(within(await rowFor(xui.name)).getByText('admin:servers.update_available')).toBeTruthy()
     fireEvent.click(within(suiRow).getByRole('button', { name: 'admin:servers.action.more_for' }))
     // S-UI has no remote upgrade: both entries are shown disabled with the reason, never hidden and never offered and refused.
-    const unsupported = screen.getAllByRole('menuitem', { name: 'admin:servers.menu.unsupported' })
-    expect(unsupported).toHaveLength(2)
+    const unsupported = ['admin:servers.action.upgrade_panel', 'admin:servers.action.upgrade_xray'].map(name => screen.getByRole('menuitem', { name }))
     expect(unsupported.every(item => item.getAttribute('aria-disabled') === 'true')).toBe(true)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' })).toBeNull()
+    expect(screen.getAllByText('admin:servers.menu.not_supported')).toHaveLength(2)
     expect(releaseReads).not.toHaveBeenCalled()
     expect(upgradeWrites()).toHaveLength(0)
   })

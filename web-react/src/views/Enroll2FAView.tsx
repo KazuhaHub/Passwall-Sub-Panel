@@ -73,7 +73,7 @@ export default function Enroll2FAView() {
       )}
 
       <div className="text-center">
-        <Button variant="ghost" size="sm" onClick={logout}>
+        <Button variant="outline" size="sm" onClick={logout}>
           {t('auth:enroll2fa_logout', { defaultValue: '退出登录' })}
         </Button>
       </div>

@@ -30,6 +30,13 @@ export function useFieldMessage(message: string | null): boolean {
   return field !== null
 }
 
+/**
+ * A readable line width for single-line controls: a text box, a select or a combobox stops at 40rem however wide the
+ * form is. A short value (a port, a number) sets its own narrower width on the control; a textarea or code editor is not
+ * capped here and may use the whole width. Applied here, on the Field, so no page has to remember it.
+ */
+const FIELD_WIDTH = '[&_[data-slot=input]]:max-w-[40rem] [&_[data-slot=native-select]]:max-w-[40rem] [&_[data-slot=input-group]:not(:has(textarea))]:max-w-[40rem]'
+
 /** What a control needs to be wired to its Field; a render-function child receives it. */
 export interface FieldControlProps {
   id: string
@@ -153,7 +160,7 @@ export function Field({ label, hint, error, errorBlocksSave, required, orientati
     )
   }
   return wrap(
-    <div ref={wrapper} data-slot="field" className={cn('flex min-w-0 flex-col gap-1.5', className)}>
+    <div ref={wrapper} data-slot="field" className={cn('flex min-w-0 flex-col gap-1.5', FIELD_WIDTH, className)}>
       {labelEl}
       {control}
       {note}

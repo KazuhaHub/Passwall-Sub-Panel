@@ -106,7 +106,7 @@ export default function SyncStatusCard({ userId }: { userId: number }) {
         <Button
           type="button"
           size="sm"
-          variant="ghost"
+          variant="outline"
           onClick={() => {
             // A new observation window, not just a read: the budget starts over.
             // Clearing the refusal is what makes this an actual retry — an admin

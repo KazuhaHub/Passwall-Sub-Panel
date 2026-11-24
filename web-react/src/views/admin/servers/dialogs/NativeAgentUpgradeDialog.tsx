@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { IconSpinner } from '@/lib/icons'
 import { canonicalReleaseVersion } from '@/utils/productVersion'
 import NodeReleaseSelector from '../install/NodeReleaseSelector'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 const ENDED = ['verified', 'failed', 'manual_attention', 'dispatch_closed']
 
@@ -128,12 +128,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         <DialogDescription>{t('admin:servers.agent_upgrade.requirements')}</DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-4">
-        <DialogNotice tone="warning">{t('admin:servers.agent_upgrade.warning')}</DialogNotice>
+        <Notice tone="warning">{t('admin:servers.agent_upgrade.warning')}</Notice>
         <Field label={t('admin:servers.agent_upgrade.current')}>
           <Input value={expected} readOnly />
         </Field>
         {blocked
-          ? <DialogNotice tone="warning">{blocked}</DialogNotice>
+          ? <Notice tone="warning">{blocked}</Notice>
           : <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
             initialChannel={effectiveUpdateChannel(server?.update_channel)} value={version}
             onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
@@ -142,9 +142,9 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         {!task && !blocked && canSubmit && <p className="text-sm font-medium" data-testid="upgrade-summary">
           {t('admin:servers.agent_upgrade.summary', { name: server?.name ?? '', from: expected, to: target })}
         </p>}
-        {error && <DialogNotice tone="danger">{error}</DialogNotice>}
+        {error && <Notice tone="danger">{error}</Notice>}
         {task && <>
-          <DialogNotice tone={stateTone}>{t(`admin:servers.agent_upgrade.state.${task.upgrade_state}`)}</DialogNotice>
+          <Notice tone={stateTone}>{t(`admin:servers.agent_upgrade.state.${task.upgrade_state}`)}</Notice>
           {reason && <div className="flex flex-col gap-1">
             <p className="text-sm">{t('admin:servers.agent_upgrade.reason')}</p>
             <div className="font-mono text-xs break-words whitespace-pre-wrap">{reason}</div>

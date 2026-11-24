@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import type { DestBudget } from '@/api/accessControl'
+import { Meter } from '@/components/common/Meter'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { anyBudgetOver, budgetLevel, visibleBudget, type BudgetLevel } from '@/utils/accessControl'
@@ -33,7 +34,7 @@ export default function QuotaMeters({ budget, variant, loading = false, failed =
   if (failed) {
     return (
       <p className="text-sm text-muted-foreground">
-        {t(`${Q}failed`)} {onRetry && <Button size="sm" variant="ghost" onClick={onRetry}>{t('admin:access_control.retry')}</Button>}
+        {t(`${Q}failed`)} {onRetry && <Button size="sm" variant="outline" onClick={onRetry}>{t('admin:access_control.retry')}</Button>}
       </p>
     )
   }
@@ -71,14 +72,10 @@ export default function QuotaMeters({ budget, variant, loading = false, failed =
       {kinds.map(k => {
         const item = budget?.[k]
         const level = budgetLevel(item)
-        const pct = item && item.limit > 0 ? Math.min(100, (item.used / item.limit) * 100) : 0
         return (
           <div key={k} className="mb-1 grid items-center gap-x-3 sm:grid-cols-[4.5rem_minmax(0,1fr)_7.5rem]">
             <span className="text-sm text-muted-foreground">{t(`${Q}kind.${k}`)}</span>
-            <div role="progressbar" aria-valuemin={0} aria-valuemax={item?.limit ?? 0} aria-valuenow={item?.used ?? 0}
-              aria-label={t(`${Q}kind.${k}`)} className="h-1 overflow-hidden rounded-full bg-muted">
-              <div className={cn('h-full', levelBar(level))} style={{ width: `${pct}%` }} />
-            </div>
+            <Meter value={item?.used ?? 0} max={item?.limit ?? 0} label={t(`${Q}kind.${k}`)} className="h-1" barClassName={levelBar(level)} />
             <span className={cn('text-sm tabular-nums sm:text-right', levelText(level), level !== 'ok' && 'font-semibold')}>
               {loading || !item ? '…' : `${num.format(item.used)} / ${num.format(item.limit)}`}
             </span>

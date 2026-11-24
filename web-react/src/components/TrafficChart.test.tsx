@@ -40,12 +40,13 @@ describe('TrafficChart', () => {
     expect(within(rows[2]).getAllByText('0')).toHaveLength(3)
   })
 
-  it('tells the three series apart by line style and marker as well as colour', () => {
+  it('tells the three series apart by line pattern as well as colour, with no always-on markers', () => {
     render(<TrafficChart items={items} />)
 
-    const series = setOption.mock.calls[0][0].series as { lineStyle: { type: string }; symbol: string }[]
+    const series = setOption.mock.calls[0][0].series as { lineStyle: { type: string }; showSymbol: boolean }[]
     expect(new Set(series.map(s => s.lineStyle.type)).size).toBe(3)
-    expect(new Set(series.map(s => s.symbol)).size).toBe(3)
+    expect(series.every(s => s.showSymbol === false)).toBe(true)
+    expect(setOption.mock.calls[0][0].legend.show).toBe(false)
   })
 
   it('says there is no traffic instead of drawing empty axes', () => {

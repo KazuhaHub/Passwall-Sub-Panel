@@ -62,7 +62,7 @@ function inPageOrder(list: Problem[]): Problem[] {
 }
 
 /**
- * The sticky bar at the bottom of a long form. It appears only when there is
+ * The floating bar at the bottom of a long form (sticky, see the class comment). It appears only when there is
  * something to save, so a clean form has nothing asking for attention, and it
  * stays up while a save is in flight even if the draft already matches. One bar
  * serves one section or tab: each saves on its own (audit section 0).
@@ -147,7 +147,11 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
       aria-label={t('ui.form.unsaved')}
       data-slot="save-bar"
       className={cn(
-        'sticky bottom-0 z-20 -mx-1 flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 rounded-t-xl border-t bg-popover/95 px-4 py-2.5 shadow-[0_-4px_12px_-6px_rgb(0_0_0/0.2)] backdrop-blur supports-backdrop-filter:bg-popover/80',
+        // A floating card, not a strip attached to the edge. While the page scrolls it sticks 16px above the viewport's
+        // bottom edge; sticky is bounded by the container's content box, so at the end of the page it rests in normal flow
+        // with exactly the container's own bottom padding below it (no band, no divider line). `mt-4` is the gap above it
+        // that every section has; a page may override it.
+        'sticky bottom-4 z-20 mt-4 flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-popover/95 px-4 py-2.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-popover/80',
         className,
       )}
     >
@@ -164,7 +168,7 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
         {hiddenText && <>{' '}<span className="mt-0.5 block text-xs font-normal">{hiddenText}</span></>}
       </p>
       <div className="flex items-center gap-2">
-        <Button variant="ghost" onClick={() => { discard(); onDiscard() }} disabled={pending}>{t('ui.form.discard')}</Button>
+        <Button variant="outline" onClick={() => { discard(); onDiscard() }} disabled={pending}>{t('ui.form.discard')}</Button>
         {/* aria-disabled, not disabled: a click on it does nothing, but it stays focusable, and
             the reason beside it is what describes it. */}
         <Button

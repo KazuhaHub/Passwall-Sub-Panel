@@ -99,11 +99,11 @@ describe('Exit tab: the default exit', () => {
     expect(api.put).not.toHaveBeenCalled()
   })
 
-  it('greys out the second card with its reason when the node is not on a Passwall Node server', async () => {
+  it('greys out both cards and says why once, in the banner, when the node is not on a Passwall Node server', async () => {
     open({}, [{ ...servers[0], panel_type: '3xui' }, servers[1]])
     const card = await screen.findByRole('radio', { name: /Leave through another server/ })
     expect(card.getAttribute('aria-disabled')).toBe('true')
-    expect(screen.getAllByText(/not a Passwall Node server/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/not a Passwall Node server/)).toHaveLength(1)
   })
 
   it('reports unsaved edits, including a pending choice with no server yet', async () => {

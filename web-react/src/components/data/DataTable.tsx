@@ -33,10 +33,14 @@ const OWN_CLICK = 'a,button,input,select,textarea,label,[role="checkbox"],[role=
 const DRAG_W = 2 // rem
 const SELECT_W = 2.5 // rem
 
-// A pinned cell must be opaque (scrolled content passes behind it), so it cannot
-// inherit the row's translucent tint: each row state is repeated here as the
-// equivalent opaque colour.
-const PIN_BG = 'bg-card group-hover/row:bg-muted group-data-[state=selected]/row:bg-muted group-data-[row-state=pending]/row:bg-[color-mix(in_oklab,var(--warning)_7%,var(--card))] group-data-[highlight=true]/row:bg-[color-mix(in_oklab,var(--brand)_9%,var(--card))] group-data-[active=true]/row:bg-[color-mix(in_oklab,var(--brand)_8%,var(--card))]'
+// A pinned cell must be opaque (scrolled content passes behind it) AND look exactly like the rest of its row. So the
+// ROW carries an opaque background for every state (the tint is mixed into the card colour, never a translucent
+// overlay) and a pinned cell just takes it with `bg-inherit`: it cannot drift from the row on hover, selected,
+// highlighted, active, pending or dimmed, because it has no colour of its own.
+const ROW_BG = 'bg-card hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))] data-[state=selected]:bg-muted'
+const PIN_BG = 'bg-inherit'
+// The separator of the pinned columns: only once the table really is scrolled sideways (the frame gets data-hscrolled).
+const PIN_EDGE = 'group-data-[hscrolled=true]/frame:shadow-[1px_0_0_var(--border),8px_0_8px_-6px_rgb(0_0_0/0.25)]'
 const HEAD_BG = 'bg-[color-mix(in_oklab,var(--muted),var(--card)_40%)]'
 const EMPTY_OPTIONS: RowOptions = {}
 
@@ -112,7 +116,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     data, columns, getRowId, mode = 'client', total: serverTotal, pagination = true, pageSizeOptions,
     columnMenu = true, selectable, rowLabel, bulkActions, onRowOpen, activeRowId, rowClassName, toolbar,
     loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className,
-    rowOptions, onRowHover, highlightedIds,
+    rowOptions, onRowHover, highlightedIds, relatedIds,
   } = props
   const { t, i18n } = useSpacedT()
   const server = mode === 'server'
@@ -211,6 +215,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const canOpen = (row: Row<T>) => onRowOpen !== undefined && optsOf(row).openable !== false
   const nameOf = (row: Row<T>) => rowLabel?.(row.original) ?? row.id
   const highlighted = useMemo(() => new Set(highlightedIds ?? []), [highlightedIds])
+  const related = useMemo(() => new Set(relatedIds ?? []), [relatedIds])
 
   // ---- selection ----
   const selectedIds = Object.keys(selection).filter(id => selection[id])
@@ -382,6 +387,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     'data-active': activeRowId === row.id ? 'true' : undefined,
     'data-row-state': o.state,
     'data-highlight': highlighted.has(row.id) ? 'true' : undefined,
+    'data-related': related.has(row.id) ? 'true' : undefined,
     ...o.data,
   })
 
@@ -431,6 +437,15 @@ export function DataTable<T>(props: DataTableProps<T>) {
     const widths = [...cells].map(c => c.getBoundingClientRect().width)
     if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, widths, frameW: frameRef.current?.getBoundingClientRect().width ?? 0 })
   }, [windowed, frozenWidths, freezeKey, colSpan])
+  // The pinned columns get their separator only once the table is scrolled sideways (data-hscrolled on the frame).
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) return
+    const sync = () => { if ((frame.scrollLeft > 0) !== (frame.dataset.hscrolled === 'true')) frame.dataset.hscrolled = String(frame.scrollLeft > 0) }
+    sync()
+    frame.addEventListener('scroll', sync, { passive: true })
+    return () => frame.removeEventListener('scroll', sync)
+  }, [cards])
   useLayoutEffect(() => {
     const frame = frameRef.current
     if (!windowed || !frame || typeof ResizeObserver === 'undefined') return
@@ -478,6 +493,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           selected={selection[row.id] === true}
           active={activeRowId === row.id}
           highlighted={highlighted.has(row.id)}
+          related={related.has(row.id)}
           tabStop={row.id === tabStop}
           expanded={tree ? row.getIsExpanded() : false}
           canSelect={canSelect(row)}
@@ -555,7 +571,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
             })}
           </ul>
         ) : (
-          <div ref={frameRef} className={windowed && !ownScroller ? 'overflow-x-clip' : 'scroll-pt-(--row-h) overflow-auto'} style={maxHeight ? { maxHeight } : undefined}>
+          <div ref={frameRef} className={cn('group/frame', windowed && !ownScroller ? 'overflow-x-clip' : 'scroll-pt-(--row-h) overflow-auto')} style={maxHeight ? { maxHeight } : undefined}>
             <table
               data-slot="table"
               aria-label={props['aria-label']}
@@ -751,6 +767,7 @@ interface DataRowProps<T> {
   selected: boolean
   active: boolean
   highlighted: boolean
+  related: boolean
   tabStop: boolean
   expanded: boolean
   canSelect: boolean
@@ -782,6 +799,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       data-active={p.active ? 'true' : undefined}
       data-row-state={p.state}
       data-highlight={p.highlighted ? 'true' : undefined}
+      data-related={p.related ? 'true' : undefined}
       data-drop={p.dropBefore ? 'before' : p.dropAfter ? 'after' : undefined}
       aria-rowindex={p.ariaRowIndex}
       {...p.dataAttrs}
@@ -802,10 +820,11 @@ function DataRowInner<T>(p: DataRowProps<T>) {
         p.dropAfter && '[&>td]:shadow-[inset_0_-2px_0_0_var(--brand)]',
         // Dimmed is colour, not opacity: opacity takes muted text to about 2:1. A page adds
         // its own cue (a tag) in the cells; the row only softens its background and text.
-        p.state === 'dimmed' && 'bg-muted/40 text-foreground/70 [&_.text-muted-foreground]:text-foreground/70',
-        p.state === 'pending' && 'bg-warning/[0.07] [&>td:first-child]:shadow-[inset_3px_0_0_var(--warning)]',
-        p.highlighted && 'bg-brand/[0.09]',
-        p.active && 'bg-brand/[0.07] hover:bg-brand/10',
+        ROW_BG,
+        p.state === 'dimmed' && 'bg-[color-mix(in_oklab,var(--muted)_40%,var(--card))] text-foreground/70 [&_.text-muted-foreground]:text-foreground/70',
+        p.state === 'pending' && 'bg-[color-mix(in_oklab,var(--warning)_7%,var(--card))] [&>td:first-child]:shadow-[inset_3px_0_0_var(--warning)]',
+        p.highlighted && 'bg-[color-mix(in_oklab,var(--brand)_9%,var(--card))]',
+        p.active && 'bg-[color-mix(in_oklab,var(--brand)_8%,var(--card))] hover:bg-[color-mix(in_oklab,var(--brand)_10%,var(--card))]',
         p.extraClass,
       )}
     >
@@ -838,7 +857,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
             key={cell.id}
             style={pinned.style}
             className={cn(
-              pinned.className && `${pinned.className} ${PIN_BG}`,
+              pinned.className && `${pinned.className} ${PIN_BG} ${PIN_EDGE}`,
               meta?.align === 'right' && 'text-right',
               meta?.align === 'center' && 'text-center',
               meta?.className,

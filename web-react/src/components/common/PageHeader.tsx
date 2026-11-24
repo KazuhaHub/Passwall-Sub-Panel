@@ -11,9 +11,11 @@ import { MoreMenu, type MoreMenuItem } from './MoreMenu'
  * needs a different shape is a sign the shape belongs here.
  *
  * `primary` is the single solid button on the page: the caller passes a `<Button>`
- * (default variant). `secondary` are outline or ghost buttons. `more` holds what is
+ * (default variant). `secondary` are outline buttons (a text button that stands alone is never ghost). `more` holds what is
  * left, destructive items last. On a phone the actions drop under the title and
- * wrap; the primary action is the right-most button.
+ * wrap; the primary action is the right-most button. The actions group is capped at the header's width
+ * (`max-w-full`): without the cap a `shrink-0` flex item keeps its one-line width and three buttons ran off the
+ * right edge of a 375px screen instead of wrapping.
  */
 export function PageHeader({ title, count, description, primary, secondary, more, className }: {
   title: ReactNode
@@ -37,7 +39,7 @@ export function PageHeader({ title, count, description, primary, secondary, more
         {description ? <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {hasActions && (
-        <div data-slot="page-header-actions" className="flex shrink-0 flex-wrap items-center gap-2">
+        <div data-slot="page-header-actions" className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
           {secondary}
           {primary}
           {more && more.length > 0 && <MoreMenu items={more} />}

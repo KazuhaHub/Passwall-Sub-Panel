@@ -1,4 +1,4 @@
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import type { KeysOf } from './model'
 import { Group, Nested, NumField, SwitchField } from './parts'

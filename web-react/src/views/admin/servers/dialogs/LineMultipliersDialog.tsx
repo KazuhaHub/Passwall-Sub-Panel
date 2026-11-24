@@ -15,7 +15,7 @@ import { nodeKeys } from '@/query/keys'
 import { useNodesList } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import { DEFAULT_TRAFFIC_FACTOR_MILLI, factorTextToMilli, milliToFactorText } from '@/utils/trafficFactor'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 const NODES_PARAMS = { page: 1, page_size: 500 } as const
 
@@ -110,7 +110,7 @@ export function LineMultipliersDialog({ server, onClose }: { server: Server; onC
               </ul>
             </div>
           )}
-          {applyError && <DialogNotice tone="danger">{applyError}</DialogNotice>}
+          {applyError && <Notice tone="danger">{applyError}</Notice>}
           <Field label={t('admin:servers.line_factors.field')} hint={t('admin:servers.line_factors.field_hint')} error={factorError}>
             <Input inputMode="decimal" value={text} onChange={e => setText(e.target.value)} onBlur={() => setTouched(true)} />
           </Field>

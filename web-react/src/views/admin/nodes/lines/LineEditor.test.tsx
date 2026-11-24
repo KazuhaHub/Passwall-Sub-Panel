@@ -20,6 +20,16 @@ const plan = (action: string) => refusal({ code: 'confirm_required', params: { k
 
 beforeEach(() => toast.mockReset())
 
+/** Type into the searchable entry-server picker and choose the one match. */
+async function pickEntryServer(query: string) {
+  const input = await screen.findByLabelText(/Entry server/)
+  fireEvent.mouseDown(input)
+  fireEvent.change(input, { target: { value: query } })
+  const options = await screen.findAllByRole('option')
+  expect(options).toHaveLength(1)
+  fireEvent.click(options[0])
+}
+
 describe('the type cards of a new line', () => {
   it('say why direct forward and encrypted tunnel are off when no other server can be the entry', async () => {
     serve(landing(), [servers[0]])
@@ -47,7 +57,7 @@ describe('adding a line', () => {
     serve(landing([tunnel]))
     const props = open(null)
     fireEvent.click(await screen.findByRole('radio', { name: 'Direct forward' }))
-    fireEvent.change(await screen.findByLabelText(/Entry server/), { target: { value: '2' } })
+    await pickEntryServer('gz')
     expect((screen.getByLabelText(/Line name/) as HTMLInputElement).value).toBe('Entry GZ')
     expect((screen.getByLabelText(/Entry address/) as HTMLInputElement).value).toBe('gz.example')
     fireEvent.change(screen.getByLabelText(/Entry port/), { target: { value: '20443' } })
@@ -193,6 +203,18 @@ describe('the chosen kind decides what is required', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
     expect((await screen.findAllByText('Choose an entry server')).length).toBeGreaterThan(0)
     expect(metadataPuts()).toHaveLength(0)
+  })
+
+  it('a saved forward line can be pointed at an external entry, and is saved without a server', async () => {
+    serve(landing([forward]))
+    open('F1')
+    expect((await screen.findByLabelText(/Entry server/) as HTMLInputElement).value).toBe('Entry GZ')
+    fireEvent.click(screen.getByRole('button', { name: 'Configured outside the panel (external entry)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save line' }))
+    await waitFor(() => expect(metadataPuts()).toHaveLength(1))
+    const line = (metadataPuts()[0][1] as { relays: Record<string, unknown>[] }).relays[0]
+    expect(line).toMatchObject({ id: 'F1', address: 'gz.example' })
+    expect(line.entry_panel_id ?? 0).toBe(0)
   })
 
   it('an external entry needs no entry server', async () => {

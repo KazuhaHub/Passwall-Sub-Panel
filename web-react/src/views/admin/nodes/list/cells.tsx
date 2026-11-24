@@ -26,15 +26,15 @@ export function PathCell({ item, colors, labels, nodeHref }: { item: ListRow; co
   const titleOf = nodes.map(n => [n.label, n.sublabel].filter(Boolean).join(' ')).filter(Boolean).join(' → ')
   const diagram = <PathDiagram nodes={nodes} edges={edges} size="sm" />
   return nodeHref
-    ? <Link to={nodeHref} title={`${titleOf}\n${t('nodes.action.open_node')}`} className="inline-flex max-w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
-    : <span className="inline-flex max-w-full min-w-0" title={titleOf}>{diagram}</span>
+    ? <Link to={nodeHref} title={`${titleOf}\n${t('nodes.action.open_node')}`} className="flex w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
+    : <span className="flex w-full min-w-0" title={titleOf}>{diagram}</span>
 }
 
 export function NameCell({ item, colors, hint }: { item: ListRow; colors: Map<string, LandingColor>; hint?: string }) {
   const color = colors.get(String(item.row.node_id))
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <LandingColorBar color={color} className="h-5 self-center" />
+      <LandingColorBar color={color} className="h-5 self-center transition-[width] group-data-[related=true]/row:w-2" />
       <span className="min-w-0 truncate font-medium" title={hint ?? item.row.name}>{item.row.name}</span>
     </div>
   )

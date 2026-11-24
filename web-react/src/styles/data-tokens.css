@@ -7,14 +7,18 @@
  *
  * Series 1 follows the brand so a single-series chart matches the page; the
  * rest are fixed hues chosen to stay apart from each other in both modes. The
+ * Series 1 to 5 are the ones that matter: they meet 3:1 against the card in both
+ * modes (src/styles/chartPalette.test.ts holds them to it) and stay clear of each
+ * other in OKLab. `--chart-1` to `--chart-5` in ui.css are aliases of them, so the
+ * Tailwind `chart-*` colours and the ECharts palette cannot drift apart. The
  * landing palette skips the brand on purpose: a coloured bar that happened to
  * match the selection highlight would read as "selected".
  */
 :root {
   --series-1: var(--brand);
   --series-2: oklch(0.62 0.13 200);
-  --series-3: oklch(0.72 0.15 75);
-  --series-4: oklch(0.58 0.17 305);
+  --series-3: oklch(0.66 0.14 70);
+  --series-4: oklch(0.58 0.17 325);
   --series-5: oklch(0.62 0.17 15);
   --series-6: oklch(0.6 0.14 150);
   --series-7: oklch(0.6 0.12 250);
@@ -33,7 +37,7 @@
 .dark {
   --series-2: oklch(0.74 0.12 200);
   --series-3: oklch(0.82 0.14 80);
-  --series-4: oklch(0.72 0.14 305);
+  --series-4: oklch(0.72 0.14 325);
   --series-5: oklch(0.74 0.14 15);
   --series-6: oklch(0.76 0.14 150);
   --series-7: oklch(0.74 0.11 250);

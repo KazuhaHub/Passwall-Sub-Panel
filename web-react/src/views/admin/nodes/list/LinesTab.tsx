@@ -110,12 +110,13 @@ export default function LinesTab() {
   // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
   const deletion = useNodeDeletion({ rows, serverMap })
   const handlers = useRowHandlers({ lines: lineHandlers, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
-  const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
-    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
+  const menuFor = useCallback((item: ListRow, opts?: { parent?: boolean }): MoreMenuItem[] =>
+    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, canMove: !moves.saving, withAddLine: opts?.parent }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
-  const menuOf = useCallback((item: ListRow) => menuFor(item), [menuFor])
+  const menuOf = useCallback((item: ListRow, opts?: { parent?: boolean }) => menuFor(item, opts), [menuFor])
 
-  const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
+  const hasFactor = items.some(i => i.row.traffic_factor_milli !== undefined && i.row.traffic_factor_milli !== 1000)
+  const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf, hasFactor }), [t, colors, labels, tz, admin, menuOf, hasFactor]) // eslint-disable-line react-hooks/exhaustive-deps
   const treeCols = useMemo(() => treeColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const tree = useMemo<TreeItem[]>(() => {
@@ -169,7 +170,10 @@ export default function LinesTab() {
   const firstAdded = added[0] && items.some(i => i.id === added[0]) ? added[0] : null
   useEffect(() => { if (firstAdded) tableRef.current?.scrollToRow(firstAdded) }, [firstAdded])
 
-  const highlight = useMemo(() => [...relatedIds(rows, hover), ...moves.highlighted, ...added], [rows, hover, moves.highlighted, added])
+  // Two different signals. A line just moved or added FLASHES (a tint, timed). Lines sharing the hovered row's landing
+  // or entry are only a quiet hint (their colour bar widens): the row under the pointer must stay the most prominent.
+  const highlight = useMemo(() => [...moves.highlighted, ...added], [moves.highlighted, added])
+  const related = useMemo(() => relatedIds(rows, hover), [rows, hover])
   const openItem = (item: ListRow) => { if (item.row.kind === 'separator') { if (admin) sepSel.select(String(item.row.id)) } else lineSel.select(item.id) }
 
   // `E` on a focused row opens the line editor; Enter keeps opening the sheet.
@@ -227,7 +231,7 @@ export default function LinesTab() {
   const common = {
     columnMenu: true, selectable: true, selection: checked, onSelectionChange: setChecked, pagination: false as const,
     columnVisibility: view.state.columnVisibility, onColumnVisibilityChange: view.setColumnVisibility,
-    loading, onRowHover: setHover, highlightedIds: highlight, empty, maxHeight: null,
+    loading, onRowHover: setHover, highlightedIds: highlight, relatedIds: related, empty, maxHeight: null,
     bulkActions: (ctx: { ids: string[]; clear: () => void }) => bulk(ctx.ids, ctx.clear),
   }
 
@@ -240,10 +244,10 @@ export default function LinesTab() {
         {kpi('unreachable', t('nodes.kpi.unreachable'), loading ? undefined : kpis.unreachable, 'danger')}
       </KpiGrid>
       {nodes.isError && (
-        <Alert className="mb-3"><AlertDescription className="flex flex-wrap items-center gap-2">{t('nodes.error.partial')}<Button variant="outline" size="xs" onClick={() => void nodes.refetch()}>{t('nodes.retry')}</Button></AlertDescription></Alert>
+        <Alert className="mb-4"><AlertDescription className="flex flex-wrap items-center gap-2">{t('nodes.error.partial')}<Button variant="outline" size="xs" onClick={() => void nodes.refetch()}>{t('nodes.retry')}</Button></AlertDescription></Alert>
       )}
       <FilterBar
-        className="mb-3"
+        className="mb-4"
         search={{ value: url.q, onChange: q => setUrl({ q }), placeholder: t('nodes.search.placeholder') }}
         facets={[
           { id: 'type', label: t('nodes.facet.type'), selected: filters.type, onChange: setFacet('type'), options: typeOptions },
@@ -256,9 +260,9 @@ export default function LinesTab() {
         <SegmentedControl aria-label={t('nodes.view.label')} size="sm" value={url.view} onChange={v => setUrl({ view: v })}
           options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }, { value: 'graph', label: t('nodes.view.graph') }]} />
         {moves.undoable && <Button variant="outline" size="sm" onClick={moves.undo} data-testid="undo-move">{t('nodes.toast.undo')}</Button>}
-        {admin && url.view === 'order' && filtered && <Button variant="ghost" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
+        {admin && url.view === 'order' && filtered && <Button variant="outline" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
       </FilterBar>
-      <div className="mb-3 flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
         <span>{t('nodes.list.scope_note')}</span>
         <HelpTip text={t('nodes.list.scope_help')} label={t('nodes.list.scope_help_label')} />
         {filtered && !loading && <span className="ml-2 tabular-nums">{t('nodes.list.count_filtered', { shown: shown.filter(s => s.row.kind === 'line').length, total: kpis.lines })}</span>}
@@ -308,7 +312,7 @@ export default function LinesTab() {
           activeRowId={lineSel.selected && open?.row.line_id === 'direct' ? `landing:${open.row.node_id}` : lineSel.selected}
           rowOptions={r => ({ openable: !!r.list, state: r.list ? rowStateOf(r.list) : undefined })}
           renderCard={(r, ctx) => (r.list
-            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list)} open={ctx.open} />
+            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list, { parent: true })} open={ctx.open} />
             : <span className="text-sm font-medium">{r.group.name}</span>)}
         />
       )}
@@ -317,7 +321,7 @@ export default function LinesTab() {
         item={open} newLine={editing && addingTo !== null ? { nodeName: nodeMap.get(addingTo)?.display_name ?? '' } : null}
         editor={editing ? <LineEditor nodeId={addingTo ?? open?.row.node_id ?? 0} lineId={addingTo !== null ? null : open?.row.line_id ?? null} onDirtyChange={guard.setDirty} onSaved={onEditorSaved} /> : undefined}
         siblings={siblings} colors={colors} labels={labels} tz={tz}
-        menu={open ? menuFor(open, true) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}
+        menu={open ? menuFor(open) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}
         onEdit={() => setUrl({ edit: true })} onBack={() => guard.close(() => setUrl({ edit: false }))}
         onSelect={id => lineSel.select(id, { replace: true })} onClose={closeSheet}
       />

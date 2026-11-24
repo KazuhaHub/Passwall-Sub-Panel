@@ -11,7 +11,7 @@ import {
   type NodeDiagnostic, type NodeDiagnosticSection,
 } from '@/api/nodeDiagnostics'
 import type { Server } from '@/api/servers'
-import { Notice } from '../../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../../useAdminT'
 
 /**

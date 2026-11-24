@@ -104,7 +104,12 @@ export function brandTones(hex: string, mode: 'light' | 'dark'): BrandTones {
   const c = grey ? 0 : Math.min(MAX_CHROMA, Math.max(MIN_CHROMA, chroma))
 
   if (mode === 'light') {
-    return { primary: oklchToHex(LIGHT_L, c, hue), onPrimary: '#ffffff' }
+    // The label is white, so the fill is what gives way: darken it until 4.5:1 holds, as dark mode does for its
+    // label. LIGHT_L already clears it for every hue measured (brandColor.test.ts sweeps them); the loop is the
+    // guarantee, not the usual path.
+    let primary = oklchToHex(LIGHT_L, c, hue)
+    for (let l = LIGHT_L; contrastRatio(primary, '#ffffff') < 4.5 && l > 0.05; l -= 0.02) primary = oklchToHex(l, c, hue)
+    return { primary, onPrimary: '#ffffff' }
   }
   const primary = oklchToHex(DARK_L, c, hue)
   // A deep tone of the same hue, as the presets do, but never less legible than 4.5:1.

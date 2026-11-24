@@ -186,7 +186,7 @@ function TestBody({ prefill, onOpenPolicy }: { prefill?: DrawerPrefill; onOpenPo
             <div className="flex flex-wrap justify-between gap-2">
               {result.r.verdict === 'block' && <Button size="sm" variant="outline" type="button" onClick={() => setException(true)}>{t(`${T}add_exception`)}</Button>}
               {hit?.policy_id ? (
-                <Button size="sm" variant="ghost" type="button" onClick={() => onOpenPolicy(hit.policy_id!)}>{t(`${T}open_policy`, { name: hit.name || t(`${T}deleted_policy`) })}</Button>
+                <Button size="sm" variant="outline" type="button" onClick={() => onOpenPolicy(hit.policy_id!)}>{t(`${T}open_policy`, { name: hit.name || t(`${T}deleted_policy`) })}</Button>
               ) : null}
             </div>
           </div>

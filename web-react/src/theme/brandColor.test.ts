@@ -24,6 +24,19 @@ describe('brandTones', () => {
     }
   })
 
+  it('keeps white on the fill at 4.5:1 in light mode for every hue and chroma', () => {
+    // A fixed lightness is not a contrast guarantee: the luminance of an OKLCH colour moves with its hue.
+    const worst: string[] = []
+    for (let hue = 0; hue < 360; hue += 5) {
+      for (const chroma of [0.02, 0.1, 0.17, 0.3]) {
+        const source = oklchToHex(0.6, chroma, (hue * Math.PI) / 180)
+        const t = brandTones(source, 'light')
+        if (contrastRatio(t.primary, t.onPrimary) < 4.5) worst.push(`${source} -> ${t.primary}`)
+      }
+    }
+    expect(worst).toEqual([])
+  })
+
   it('makes the fill lighter in dark mode than in light mode', () => {
     const light = brandTones('#123456', 'light').primary
     const dark = brandTones('#123456', 'dark').primary

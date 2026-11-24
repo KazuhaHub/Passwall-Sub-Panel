@@ -64,7 +64,7 @@ export function AnnouncementPopup({ announcement }: { announcement: GlobalAnnoun
           <DialogDescription className="whitespace-pre-wrap">{announcement.content}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => close(true)}>{t('announce.mute')}</Button>
+          <Button variant="outline" onClick={() => close(true)}>{t('announce.mute')}</Button>
           <Button onClick={() => close(false)}>{t('announce.ack')}</Button>
         </DialogFooter>
       </DialogContent>

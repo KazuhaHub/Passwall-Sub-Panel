@@ -1,17 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Group as GroupRow } from '@/api/types'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { pushSnack } from '@/components/feedback/toasts'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
-import { Field } from '@/components/form/Field'
-import { NativeSelect } from '@/components/ui/native-select'
-import { confirm } from '@/components/ConfirmHost'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
 import { loadScopeState, saveScopeState, type ScopeState } from '@/components/scope/scopeOverrides'
-import { useAllGroups } from '@/query/groups'
 import { useQueryScope } from '@/query/useQueryScope'
-import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useAdminT } from '../useAdminT'
+import { useAudience, scopeCountKey } from './audience'
 import { SectionForm } from './parts'
 
 /** A section with a global form and a per-group editor reports one dirty flag for both. */
@@ -24,9 +20,9 @@ export function useScopedDirty(report: (dirty: boolean) => void) {
 }
 
 /**
- * The audience of a section whose settings can also be set per group: "All users" edits the global form
- * (`children`), a group edits only the overrides that group may have (the inherit/override editor, which has its own
- * save). The global form stays mounted, hidden, while a group is shown, so its draft is not lost by looking at a group.
+ * A section whose settings can also be set per group. The audience is chosen on the page (settings/audience.tsx):
+ * "All users" shows the global form (`children`), a group shows only the overrides that group may have (the
+ * inherit/override editor, which has its own save). The global form stays mounted, hidden, while a group is shown, so its draft is not lost by looking at a group.
  * A failed read of the group list leaves the global form as the only audience.
  */
 export function ScopeShell({ categories, onScopeDirty, children }: {
@@ -35,28 +31,11 @@ export function ScopeShell({ categories, onScopeDirty, children }: {
   children: ReactNode
 }) {
   const t = useAdminT()
-  const scope = useQueryScope()
-  const groups = useAllGroups(scope)
-  const [groupId, setGroupId] = useState(0)
-  const editorDirty = useRef(false)
-  const reportEditor = useCallback((dirty: boolean) => { editorDirty.current = dirty; onScopeDirty(dirty) }, [onScopeDirty])
-
-  async function choose(next: number) {
-    if (next === groupId) return
-    // Leaving a group's editor drops what was typed in it: ask first, the same as leaving the page.
-    if (groupId !== 0 && editorDirty.current && !(await confirm({ ...discardChangesConfirm(t), destructive: true, initialFocus: 'cancel' }))) return
-    setGroupId(next)
-  }
-
-  const list: GroupRow[] = groups.data ?? []
+  const { groupId, setEditorDirty } = useAudience()
+  const reportEditor = useCallback((dirty: boolean) => { setEditorDirty(dirty); onScopeDirty(dirty) }, [onScopeDirty, setEditorDirty])
   return (
     <div className="flex flex-col gap-5">
-      <Field label={t('settings.scope.audience')} hint={groupId === 0 ? undefined : t('settings.scope.override_hint')}>
-        <NativeSelect id="settings-audience" value={String(groupId)} onChange={e => void choose(Number(e.target.value))}>
-          <option value="0">{t('settings.scope.all_users')}</option>
-          {list.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </NativeSelect>
-      </Field>
+      {groupId !== 0 && <p className="text-sm text-muted-foreground">{t('settings.scope.override_hint')}</p>}
       <div hidden={groupId !== 0}>{children}</div>
       {groupId !== 0 && <GroupEditor key={groupId} groupId={groupId} categories={categories} report={reportEditor} />}
     </div>
@@ -70,6 +49,8 @@ function GroupEditor({ groupId, categories, report }: { groupId: number; categor
   const [failed, setFailed] = useState(false)
   const [initial, setInitial] = useState('')
   const [pending, setPending] = useState(false)
+  const queryClient = useQueryClient()
+  const scope = useQueryScope()
 
   const load = useCallback(() => {
     setFailed(false)
@@ -87,6 +68,7 @@ function GroupEditor({ groupId, categories, report }: { groupId: number; categor
     try {
       await saveScopeState(groupId, state)
       await load()
+      void queryClient.invalidateQueries({ queryKey: scopeCountKey(scope) })
       pushSnack(t('settings.saved'), 'success')
     } catch {
       pushSnack(t('groups.scope.save_error'), 'error')

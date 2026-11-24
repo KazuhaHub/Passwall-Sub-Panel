@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, useRouteError, isRouteErrorResponse } fr
 import { lazy } from 'react'
 import { ErrorFallback } from '@/components/ErrorBoundary'
 import RequireAuth from './RequireAuth'
+import NotFoundView from '@/views/NotFoundView'
 import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
 import { panelPath } from '@/panelPath'
@@ -53,6 +54,9 @@ const UiKitUserShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/Ui
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
+
+function AdminNotFound() { return <NotFoundView home="/admin/dashboard" /> }
+function UserNotFound() { return <NotFoundView home="/user/me" /> }
 
 function RootRedirect() {
   const role = useAuthStore(s => s.role)
@@ -130,6 +134,8 @@ export const router = createBrowserRouter([
           { path: 'settings', element: <SettingsView /> },
           { path: 'language-packs', element: <LanguagePacksView /> },
           ...PLACEHOLDER_PATHS.map(p => ({ path: p, element: <PlaceholderView /> })),
+          // An unknown /admin/... address: a not-found page in the shell, not a silent bounce to the dashboard.
+          { path: '*', element: <AdminNotFound /> },
         ],
       },
     ],
@@ -143,6 +149,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="me" replace /> },
           { path: 'me', element: <MeView /> },
+          { path: '*', element: <UserNotFound /> },
         ],
       },
     ],
@@ -154,7 +161,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [{ index: true, element: <Enroll2FAView /> }],
   },
-      // Catch-all: any unknown URL bounces to the role-based home.
+      // Catch-all outside /admin and /user: any unknown URL bounces to the role-based home.
       { path: '*', element: <RootRedirect /> },
     ],
   },

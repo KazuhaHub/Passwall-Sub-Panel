@@ -288,7 +288,7 @@ export function DestBlockPanel({ ev, userId }: { ev: DestBlockEvidence; userId?:
       <Caption>{t('admin:risk_signals.dest_block_nodes', { count: ev.nodes })}</Caption>
       {canView && userId !== undefined && (
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2"
+          <Button variant="outline" size="sm" className="-ml-2"
             onClick={() => void navigate(`/admin/access-control${recordsHref({ user_id: userId, since, action: 'block' })}`)}>
             {t('admin:risk_signals.dest_block_view_hits')}
             <IconChevronRight />

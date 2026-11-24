@@ -5,7 +5,7 @@ import type { Tone } from '@/components/common/tones'
 import type { UsageReport } from '@/api/traffic'
 import { useSiteStore } from '@/stores/site'
 import { bytesToHuman, expiryOf } from './format'
-import { Meter } from './Meter'
+import { Meter } from '@/components/common/Meter'
 import { useMeT } from './useMeT'
 
 const GB = 1024 * 1024 * 1024
@@ -71,7 +71,7 @@ export function UsageCard({ limitBytes, usage, usageLoading, expireAt, resetPeri
               </div>
               {!unlimited && (
                 <>
-                  <Meter className="mt-2" percent={percent} tone={meterTone} label={t('profile.traffic_used')} />
+                  <Meter className="mt-2" value={percent} tone={meterTone} label={t('profile.traffic_used')} />
                   <p className="mt-1.5 text-sm text-muted-foreground tabular-nums">{t('profile.traffic_left', { value: bytesToHuman(Math.max(0, limitBytes - usedBytes)) })}</p>
                 </>
               )}

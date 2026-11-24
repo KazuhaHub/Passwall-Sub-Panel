@@ -114,7 +114,7 @@ export default function RuleSetsView() {
     if (seeded(rs)) menu.push({ id: 'reset', label: t('admin:rules.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(rs) })
     // A seeded rule set cannot be deleted; the item stays, off, and says why instead of vanishing.
     menu.push(seeded(rs)
-      ? { id: 'delete', label: t('admin:rules.cannot_delete_seeded'), icon: IconDelete, destructive: true, disabled: true }
+      ? { id: 'delete', label: t('admin:rules.row_delete'), disabledReason: t('admin:rules.cannot_delete_seeded'), icon: IconDelete, destructive: true, disabled: true }
       : { id: 'delete', label: t('admin:rules.row_delete'), icon: IconDelete, destructive: true, disabled: wait, onSelect: () => void confirmDelete(rs) })
     return menu
   }

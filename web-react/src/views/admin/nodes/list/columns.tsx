@@ -17,7 +17,10 @@ export interface ColumnCtx {
   tz: string
   /** An administrator's link to a node; undefined for an operator, who has no detail page. */
   nodeHref?: (nodeId: number) => string
-  menuOf: (item: ListRow) => MoreMenuItem[]
+  /** `parent` is a landing's parent row in the by-node view, whose menu also offers Add line (the landing is what it adds to). */
+  /** Some visible row has a traffic multiplier: only then is the column drawn. */
+  hasFactor?: boolean
+  menuOf: (item: ListRow, opts?: { parent?: boolean }) => MoreMenuItem[]
 }
 
 // The default columns share the frame in percentages (max-w-0 lets a cell shrink below its content) and clip with an
@@ -34,15 +37,17 @@ const sortless = { enableSorting: false } as const
 export function orderColumns(c: ColumnCtx): ColumnDef<ListRow, any>[] {
   const { t } = c
   return [
-    { id: 'line', header: t('nodes.col.line'), ...sortless, meta: { hideable: false, label: t('nodes.col.line'), className: FIT + ' w-[26%]' },
+    { id: 'line', header: t('nodes.col.line'), ...sortless, meta: { hideable: false, label: t('nodes.col.line'), className: FIT + ' w-[16%]' },
       cell: ctx => <NameCell item={ctx.row.original} colors={c.colors} /> },
-    { id: 'path', header: t('nodes.col.path'), ...sortless, meta: { label: t('nodes.col.path'), className: FIT + ' w-[34%]' },
+    { id: 'path', header: t('nodes.col.path'), ...sortless, meta: { label: t('nodes.col.path'), className: FIT + ' w-[38%]' },
       cell: ctx => <PathCell item={ctx.row.original} colors={c.colors} labels={c.labels} nodeHref={c.nodeHref?.(ctx.row.original.row.node_id ?? 0)} /> },
-    { id: 'address', header: t('nodes.col.address'), ...sortless, meta: { label: t('nodes.col.address'), className: FIT + ' w-[20%]' },
+    { id: 'address', header: t('nodes.col.address'), ...sortless, meta: { label: t('nodes.col.address'), className: FIT + ' w-[22%]' },
       cell: ctx => <AddressCell row={ctx.row.original.row} /> },
-    { id: 'factor', header: t('nodes.col.factor'), ...sortless, meta: { label: t('nodes.col.factor'), align: 'right', className: 'w-16' },
-      cell: ctx => <FactorCell row={ctx.row.original.row} /> },
-    { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status'), className: FIT + ' w-[20%]' },
+    // A narrow fixed column, and absent altogether while no row on the list has a multiplier (it is empty on most lists).
+    ...(c.hasFactor ? [{ id: 'factor', header: t('nodes.col.factor'), ...sortless, meta: { label: t('nodes.col.factor'), align: 'right' as const, className: 'w-14' },
+      cell: (ctx: { row: { original: ListRow } }) => <FactorCell row={ctx.row.original.row} /> }] : []),
+    // No ellipsis here: a status says why in words, and a clipped word ("Direct line hidde") is worse than a wider column.
+    { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status'), className: 'w-[18%] min-w-[11.5rem]' },
       cell: ctx => <StatusCell item={ctx.row.original} /> },
     { id: 'landing_server', header: t('nodes.col.landing_server'), ...sortless, meta: { label: t('nodes.col.landing_server'), defaultHidden: true },
       cell: ctx => ctx.row.original.row.landing?.panel_name ?? '' },
@@ -86,7 +91,7 @@ export function treeColumns(c: ColumnCtx): ColumnDef<TreeItem, any>[] {
     { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status') },
       cell: ctx => ctx.row.original.list && <StatusCell item={ctx.row.original.list} /> },
     { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: t('nodes.col.actions') },
-      cell: ctx => ctx.row.original.list && <RowMenu items={c.menuOf(ctx.row.original.list)} name={ctx.row.original.list.row.name} /> },
+      cell: ctx => ctx.row.original.list && <RowMenu items={c.menuOf(ctx.row.original.list, { parent: true })} name={ctx.row.original.list.row.name} /> },
   ]
 }
 

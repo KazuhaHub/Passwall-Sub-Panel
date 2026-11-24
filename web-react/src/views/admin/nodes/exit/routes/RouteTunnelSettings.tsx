@@ -76,7 +76,7 @@ export function RouteTunnelSettings({ entry, exit, name, defaultExitNodes = [] }
   const Chevron = open ? IconChevronDown : IconChevronRight
   return (
     <div data-testid="route-tunnel" className="rounded-lg border p-2">
-      <Button type="button" variant="ghost" size="sm" data-testid="route-tunnel-toggle" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+      <Button type="button" variant="outline" size="sm" data-testid="route-tunnel-toggle" aria-expanded={open} onClick={() => setOpen(o => !o)}>
         <Chevron />{t('nodes.routes.tunnel.title', { name })}
       </Button>
       {open && (

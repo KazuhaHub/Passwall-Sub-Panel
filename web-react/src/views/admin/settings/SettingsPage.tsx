@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState, type ComponentType } from 'react'
 import { useSearchParams } from 'react-router'
+import { Notice } from '@/components/common/Notice'
 import { PageHeader } from '@/components/common/PageHeader'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { useTabParam } from '@/hooks/useTabParam'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useDirtyTabs } from '../nodes/detail/useDirtyTabs'
 import { useAdminT } from '../useAdminT'
+import { AudienceProvider, AudienceRail, useAudience } from './audience'
 import { BrandSection } from './BrandSection'
 import { DirtySectionsContext } from './dirtyContext'
 import { GeneralSection } from './GeneralSection'
@@ -66,7 +68,15 @@ function useJump(entry: SearchEntry | null, done: () => void) {
  * asks anything. Leaving the PAGE asks once, and names the sections that have unsaved changes.
  */
 export function SettingsPage() {
+  return <AudienceProvider><SettingsPageInner /></AudienceProvider>
+}
+
+/** The sections whose settings a group can override (they host a ScopeShell). The rest are global only. */
+const SCOPED: readonly SectionKey[] = ['general', 'security', 'subscription']
+
+function SettingsPageInner() {
   const t = useAdminT()
+  const { groupId } = useAudience()
   const [tab, setTab] = useTabParam<SectionKey>('tab', 'general', SECTIONS)
   const [, setParams] = useSearchParams()
   const [visited, setVisited] = useState<ReadonlySet<SectionKey>>(new Set([tab]))
@@ -97,12 +107,19 @@ export function SettingsPage() {
       <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 md:sticky md:top-4 md:self-start">
           <SettingsSearch onPick={pick} />
+          {/* Who before what: the audience, then the sections. Both fit in an 800px-tall window (the audience list scrolls inside 14rem). */}
+          <AudienceRail />
           <SettingsNav active={tab} onSelect={select} dirty={dirty} />
         </aside>
         <DirtySectionsContext.Provider value={dirty}><div className="min-w-0 max-w-3xl">
           {SECTIONS.map(s => {
             const Section = COMPONENTS[s]
-            return shown.has(s) && <div key={s} id={sectionDomId(s)} hidden={tab !== s}><Section onDirtyChange={report[s]} /></div>
+            return shown.has(s) && (
+              <div key={s} id={sectionDomId(s)} hidden={tab !== s}>
+                {groupId !== 0 && !SCOPED.includes(s) && <Notice tone="info" className="mb-4">{t('settings.scope.global_only')}</Notice>}
+                <Section onDirtyChange={report[s]} />
+              </div>
+            )
           })}
         </div></DirtySectionsContext.Provider>
       </div>

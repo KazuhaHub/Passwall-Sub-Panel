@@ -183,7 +183,7 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
           </Field>
         </PopoverContent>
       </Popover>
-      {narrowed && <Button variant="ghost" onClick={clearAll}>{t('admin:risk_center.queue.clear_filters')}</Button>}
+      {narrowed && <Button variant="outline" onClick={clearAll}>{t('admin:risk_center.queue.clear_filters')}</Button>}
     </div>
   )
 
@@ -297,7 +297,7 @@ export function RecordDetail({ rec, sentence = true }: { rec: FlagRecord; senten
       )}
       {hasParams && (
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setRaw(v => !v)} aria-expanded={raw}>
+          <Button variant="outline" size="sm" className="-ml-2" onClick={() => setRaw(v => !v)} aria-expanded={raw}>
             {raw ? t('admin:risk_center.flags.raw_hide') : t('admin:risk_center.flags.raw_show')}
           </Button>
         </div>

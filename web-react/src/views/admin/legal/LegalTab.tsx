@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { useTranslation } from 'react-i18next'
 import { useAdminLegal } from '@/query/legal'
 import { useQueryScope } from '@/query/useQueryScope'
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import LegalEditorSheet from './LegalEditorSheet'
 import LegalHistorySheet from './LegalHistorySheet'
@@ -105,7 +105,7 @@ function DocumentCard({ kind, data, onEdit, onHistory }: { kind: LegalKind; data
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center gap-2">
         <h3 className="flex-1 text-base leading-snug font-medium">{name}</h3>
-        <Button variant="ghost" size="sm" onClick={onHistory}>{t('admin:settings.legal.history')}</Button>
+        <Button variant="outline" size="sm" onClick={onHistory}>{t('admin:settings.legal.history')}</Button>
         <Button variant="outline" size="sm" onClick={onEdit}>{t('admin:settings.legal.edit')}</Button>
       </CardHeader>
       <CardContent>

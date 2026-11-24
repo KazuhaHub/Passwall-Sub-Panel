@@ -18,7 +18,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useFrontOptions, useFronts } from '@/query/fronts'
 import { frontKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import FrontEditor from './FrontEditor'
 import FrontGraphPanel from './FrontGraphPanel'
@@ -115,7 +115,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
         title={title}
         status={view.kind === 'list' ? <HelpTip text={t('admin:servers.fronts.help.what')} /> : undefined}
         actions={view.kind === 'edit'
-          ? <Button variant="ghost" size="sm" onClick={() => guardClose(backToList)}><IconArrowLeft />{t('admin:servers.fronts.back')}</Button>
+          ? <Button variant="outline" size="sm" onClick={() => guardClose(backToList)}><IconArrowLeft />{t('admin:servers.fronts.back')}</Button>
           : tab === 'fronts' ? add : undefined}
         className="data-[side=right]:sm:w-[min(60rem,96vw)] data-[side=right]:sm:max-w-[min(60rem,96vw)]"
       >

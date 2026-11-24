@@ -119,7 +119,7 @@ export default function VerifyEmailView() {
           </form>
           <div className="flex flex-col items-center gap-1 text-center">
             {resend === 'sent' && <p className="text-sm text-muted-foreground">{t('auth:verify_email_resent')}</p>}
-            <Button variant="ghost" size="sm" onClick={() => void doResend()}
+            <Button variant="outline" size="sm" onClick={() => void doResend()}
               disabled={!ident.trim() || resendLeft > 0 || resend === 'sending'}>
               {resendLeft > 0
                 ? t('auth:verify_email_resend_in', { sec: resendLeft })

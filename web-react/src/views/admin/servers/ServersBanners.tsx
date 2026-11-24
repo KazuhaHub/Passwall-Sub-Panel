@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { CompatStatusResponse, Server } from '@/api/servers'
 import { compatNotice } from '@/utils/compatNotice'
-import { DialogNotice } from './dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 /**
  * The compatibility state worth saying before the list, split by what the operator does next. Too old means upgrade
@@ -21,19 +21,19 @@ export function ServersBanners({ items, compat }: { items: Server[]; compat: Com
   if (!any) return null
   return (
     <div className="mb-4 flex flex-col gap-3">
-      {items.some(s => s.panel_type === '3xui') && <DialogNotice>{t('admin:servers.retired_routes.upgrade_notice')}</DialogNotice>}
-      {notice && <DialogNotice tone="warning">{t(`admin:servers.compat_notice.${notice.kind}`, notice.values)}</DialogNotice>}
+      {items.some(s => s.panel_type === '3xui') && <Notice tone="info">{t('admin:servers.retired_routes.upgrade_notice')}</Notice>}
+      {notice && <Notice tone="warning">{t(`admin:servers.compat_notice.${notice.kind}`, notice.values)}</Notice>}
       {tooOld.length > 0 && (
-        <DialogNotice tone="danger">
+        <Notice tone="danger">
           <span className="block font-medium">{t('admin:servers.compat.banner_title_too_old', { count: tooOld.length })}</span>
           <span className="block">{t('admin:servers.compat.banner_body_too_old', { panels: list(tooOld) })}</span>
-        </DialogNotice>
+        </Notice>
       )}
       {untested.length > 0 && (
-        <DialogNotice tone="warning">
+        <Notice tone="warning">
           <span className="block font-medium">{t('admin:servers.compat.banner_title_untested', { count: untested.length })}</span>
           <span className="block">{t('admin:servers.compat.banner_body_untested', { panels: list(untested) })}</span>
-        </DialogNotice>
+        </Notice>
       )}
     </div>
   )

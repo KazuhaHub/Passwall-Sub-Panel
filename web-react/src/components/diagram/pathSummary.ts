@@ -19,6 +19,8 @@ export interface PathNode {
   label?: string
   /** A port or a region: small text under (md) or after (sm) the label. */
   sublabel?: string
+  /** The sublabel is a secondary name (a server), not a port: a narrow table cell may drop it before truncating a name. A port is never dropped. */
+  sublabelOptional?: boolean
   status?: PathTone
   /** For a landing node: the colour that ties it to the same landing elsewhere on the page. */
   landingColor?: LandingColor

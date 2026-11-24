@@ -89,8 +89,7 @@
     "positive_int": "Must be a positive integer",
     "range": "Value out of allowed range",
     "too_short": "Too short",
-    "too_long": "Too long",
-    "form_has_errors": "Please fix the highlighted fields first"
+    "too_long": "Too long"
   },
   "dashboard": {
     "summary_failed": "Dashboard data is temporarily unavailable",
@@ -146,7 +145,11 @@
     "scope": {
       "audience": "Audience",
       "all_users": "All users (global default)",
-      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default."
+      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default.",
+      "overrides_count_one": "{{count}} override",
+      "overrides_count_other": "{{count}} overrides",
+      "filter": "Filter groups",
+      "global_only": "These settings apply to all users and cannot be set per group."
     },
     "feature_pending": "This tab is being migrated to React + MUI (next iteration). Use the Vue version meanwhile.",
     "general": {
@@ -714,12 +717,6 @@
         "disabled": "Disabled",
         "actions": "Actions"
       },
-      "client_table": {
-        "name": "Client",
-        "platforms": "Platforms",
-        "format": "Format",
-        "enabled": "Enabled"
-      },
       "order_note": "Order matters. A client is matched against the families from top to bottom and the first match wins, so keep a more specific family above a more general one (for example V2rayNG above V2RayN). Drag a row, or use its handle with the keyboard, to change the order.",
       "name_required": "Enter a name for this family.",
       "unnamed_family": "Unnamed family",
@@ -972,7 +969,6 @@
     "subtitle": "A template = client format + bound rule sets. Subscription rendering uses the bindings set here.",
     "create": "New template",
     "edit_title": "Edit template",
-    "selection_count": "{{count}} selected",
     "batch_delete": "Bulk delete",
     "field": {
       "slug": "Slug",
@@ -1215,35 +1211,6 @@
       "route_skipped": "Route not sent",
       "route_regexp_skipped": "Route regexp entries skipped",
       "route_policy_approximate": "Policy approximated on a route"
-    },
-    "code_summaries": {
-      "core_telemetry_failed": "The node could not read core state or traffic counters.",
-      "core_convergence_failed": "The core did not accept the requested runtime changes.",
-      "object_pending_timeout": "A configuration or client object stayed pending past its deadline.",
-      "object_rejected_timeout": "A rejected object stayed unchanged and needs review.",
-      "segment_rejected": "The node rejected a received configuration document.",
-      "roster_ahead_of_config": "The client list depends on a configuration not yet received.",
-      "attachment_unknown_listener": "The client list references a listener missing from configuration.",
-      "directives_ahead_of_roster": "The policy depends on a client list not yet received.",
-      "directive_unknown_client": "The policy references a client missing from the client list.",
-      "report_missing_object": "A required object was absent from a full node report.",
-      "destination_policy_report_only_not_deployed": "This node did not receive all the report-only rules (the rule budget is exceeded, or they were restricted away from inbounds whose sniffing cannot support them); blocking is unaffected.",
-      "destination_policy_resolve_not_deployed": "This node stays as-is (hostnames are not resolved): an inbound whose sniffing is routeOnly:true or unreadable would substitute the name that is resolved. Everything else in the policy runs as usual.",
-      "task_identity_conflict": "One task ID was used with different operation inputs.",
-      "task_replay_fenced": "The node could not prove a safe fresh task start.",
-      "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity.",
-      "front_withheld": "A saved SNI shared port was not sent to this server (see the detail for why); the listeners behind it keep their own ports.",
-      "tunnel_listener_orphan": "A tunnel listener's line is gone. Remove the listener from the server's port usage or from its node page.",
-      "roster_identity_capacity": "This server has at least 20,000 client identities. The sync size limit depends on the encoded data, including listener attachments.",
-      "cdn_landing_unfit": "A node's CDN lines are left out of subscriptions because the node's transport no longer works behind a CDN (see the detail for the line and the reason). Change the node back, or remove the line.",
-      "source_guard_withheld": "A relay line is left out of subscriptions because the node cannot tell it from the direct line (its multiplier differs and the server cannot check sources), or because the addresses its traffic comes from are not known yet. See the detail for the line.",
-      "source_guard_refused": "A landing refused connections for a line from an address that is not among the line's source addresses. If the address is legitimate, add it in the line's source addresses.",
-      "tunnel_factor_stale": "A tunnel listener's copy of its line's traffic factor is out of date. Save the line's traffic factor again.",
-      "routes_not_sent": "A node's saved routes by destination were not sent to this server (see the detail for why); its traffic leaves through the default exit.",
-      "route_listener_withheld": "A listener was sent without its routes because they could not be sent (see the detail for why); its traffic leaves through the default exit.",
-      "route_skipped": "A route has no destination it can send and was left out of the config.",
-      "route_regexp_skipped": "Regexp entries of a list were skipped in a route: routes take no regexp.",
-      "route_policy_approximate": "On Xray, a destination-policy rule with a regexp or keyword cannot be combined exactly with a route and was approximated."
     },
     "filter": {
       "all": "All review states",
@@ -1822,7 +1789,6 @@
       "advanced": "Advanced",
       "disposal": "Action",
       "default_adornment": "Default",
-      "reset_default": "Reset to default",
       "range_default": "Range {{min}}–{{max}}, default {{d}}",
       "min_default": "At least {{min}}, default {{d}}",
       "default_only": "Default {{d}}",
@@ -1982,7 +1948,6 @@
     "subtitle": "Rule sets are reusable snippets — they only participate in subscription rendering when bound to a template.",
     "create": "New rule set",
     "edit_title": "Edit rule set",
-    "selection_count": "{{count}} selected",
     "batch_enable": "Bulk enable",
     "batch_disable": "Bulk disable",
     "batch_delete": "Bulk delete",
@@ -1992,17 +1957,14 @@
       "sort": "Sort",
       "enabled": "Enabled",
       "direct_subscription_domain": "DIRECT subscription domain",
-      "proxy_group_order": "Proxy group order",
       "content": "Main rules"
     },
     "placeholder": {
       "slug": "ad_block",
       "name": "Ad blocking",
-      "proxy_group_order": "🚀 Proxy\n💬 AI\n🎮 Gaming",
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the main rules.",
       "direct_subscription_domain": "When enabled, the subscription Base URL hostname is prepended as DOMAIN-SUFFIX,<hostname>,DIRECT. Nothing is generated without a valid subscription Base URL; when disabled, subscription updates follow the other rules."
     },
     "tabs": {
@@ -2051,9 +2013,7 @@
       "system_default": "System default",
       "unsaved": "Has unsaved changes",
       "no_groups": "No proxy groups were detected in the main rules",
-      "first_default": "The first item is selected by default in the client",
       "restore_default": "Restore system default",
-      "default_badge": "Default",
       "group_type": "Proxy group type",
       "type": {
         "select": "Manual selection (select)",
@@ -4924,7 +4884,6 @@
       "title": "{{nodes}} nodes, {{lines}} lines"
     },
     "menu": {
-      "unsupported": "{{action}} ({{reason}})",
       "not_ready": "the node is not ready",
       "not_supported": "{{type}} does not support this"
     },
@@ -6414,7 +6373,7 @@
         "edit": "Edit",
         "refresh": "Refresh now",
         "delete": "Delete",
-        "delete_blocked": "Delete (in use)"
+        "delete_blocked": "In use, so it cannot be deleted"
       },
       "empty": "No lists yet. Policies take their destinations from lists.",
       "empty_filtered": "No matching lists",
@@ -6457,7 +6416,6 @@
         "url": "Address",
         "url_https": "Only https addresses are supported",
         "test_fetch": "Test fetch",
-        "fetching": "Fetching…",
         "fetch_result": "Fetch result  HTTP {{code}} · {{size}} · {{accepted}} accepted · {{ignored}} ignored",
         "fetch_failed": "Fetch failed: {{error}}",
         "refresh_follows": "Refresh: follows the global setting (every {{hours}} hours)",
@@ -6494,7 +6452,6 @@
         "more_one": "{{count}} more",
         "more_other": "{{count}} more",
         "warnings": "Warnings",
-        "entries_only": "{{count}} accepted, {{regexps}} of them regular expressions",
         "jump": "Go to line {{line}}",
         "reason": {
           "rewritten_to_network": "Rewritten: the IP range was aligned to its network address",
@@ -6600,7 +6557,6 @@
       "hits_source_rule": "Source rule · {{name}}",
       "hits_list_separator": ", ",
       "allowlist_report": "Allowlist · report only",
-      "allowlist_on": "Allowlist · on",
       "usage_title": "Per-site usage",
       "usage_help": "Connections per hour, not traffic, grouped by the site's registrable domain (such as google.com); direct IP connections are counted as \"(ip)\". No URL paths or source IPs. Only Xray nodes that record usage have data; the top 20 sites are listed and the rest are summed in one row. Counts are best effort.",
       "usage_audit": "Only administrators can open this, and every view is written to the admin audit log.",

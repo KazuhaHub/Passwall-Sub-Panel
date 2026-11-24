@@ -307,7 +307,7 @@ export default function PolicyEditorSheet({ open, policy, initial, onClose, onSa
             <QuotaMeters variant="full" budget={preview.budget ?? undefined} loading={preview.loading} failed={false} />
             {preview.failed && (
               <p className="text-sm text-muted-foreground">
-                {t('admin:access_control.policies.quota.failed')} <Button size="sm" variant="ghost" onClick={() => setRetry(n => n + 1)}>{t('admin:access_control.retry')}</Button>
+                {t('admin:access_control.policies.quota.failed')} <Button size="sm" variant="outline" onClick={() => setRetry(n => n + 1)}>{t('admin:access_control.retry')}</Button>
               </p>
             )}
           </div>

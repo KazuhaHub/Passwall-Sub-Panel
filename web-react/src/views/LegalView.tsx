@@ -117,9 +117,9 @@ function LegalPage({ kind }: { kind: LegalKind }) {
           )}
 
           <div className="mt-8 flex flex-wrap items-center gap-2 border-t pt-4">
-            <Button variant="ghost" className="min-h-11 sm:min-h-0" onClick={goBack}>{t('legal.back_and_other')}</Button>
+            <Button variant="outline" className="min-h-11 sm:min-h-0" onClick={goBack}>{t('legal.back_and_other')}</Button>
             {/* A real link, not a button rendered as one: it goes to another page. */}
-            <RouterLink to={`/legal/${other}`} className={buttonVariants({ variant: 'ghost', className: 'min-h-11 sm:min-h-0' })}>
+            <RouterLink to={`/legal/${other}`} className={buttonVariants({ variant: 'outline', className: 'min-h-11 sm:min-h-0' })}>
               {t(`legal.kind.${other}`)}
             </RouterLink>
           </div>

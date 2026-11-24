@@ -55,7 +55,7 @@ export default function UnmanagedTab({ onImported }: { onImported: () => void })
       id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('nodes.col.actions') },
       cell: c => admin && (
         <div className="flex justify-end gap-2">
-          {c.row.original.ClientCount > 0 && <Button variant="ghost" size="sm" onClick={() => setClaim(c.row.original)}>{t('nodes.claim')}</Button>}
+          {c.row.original.ClientCount > 0 && <Button variant="outline" size="sm" onClick={() => setClaim(c.row.original)}>{t('nodes.claim')}</Button>}
           <Button variant="outline" size="sm" onClick={() => setImporting(c.row.original)}>{t('nodes.import')}</Button>
         </div>
       ),

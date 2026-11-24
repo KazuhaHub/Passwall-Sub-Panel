@@ -99,7 +99,7 @@ function Wizard({ servers, writable }: { servers: Server[]; writable: Server[] }
             landingName={w.form.display_name} exitName={servers.find(s => s.id === w.egress)?.name ?? null} />
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-          <Button type="button" variant="ghost" disabled={w.creating} render={<Link to="/admin/nodes" />}>{t('common:actions.cancel')}</Button>
+          <Button type="button" variant="outline" disabled={w.creating} render={<Link to="/admin/nodes" />}>{t('common:actions.cancel')}</Button>
           <div className="flex items-center gap-2">
             {w.step > 0 && <Button type="button" variant="outline" disabled={w.busy} onClick={w.goBack}>{t('nodes.setup.back')}</Button>}
             <Button type="submit" disabled={w.busy}>{t(label)}</Button>

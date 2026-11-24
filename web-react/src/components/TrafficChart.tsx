@@ -6,7 +6,9 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers'
 import type { TrafficHistoryItem } from '@/api/traffic'
 import { EmptyState } from '@/components/feedback/EmptyState'
-import { chartBaseOption, useChartTokens } from '@/hooks/useChartTokens'
+import { ChartLegend, useHiddenSeries } from '@/components/common/ChartLegend'
+import { useChartTokens } from '@/hooks/useChartTokens'
+import { chartBase, dashOf, lineSeries, tooltipFrame, tooltipHtml } from '@/lib/chartKit'
 import { bytesToHuman } from '@/utils/trafficBytes'
 
 // Register only what we actually render: a line chart with axis/tooltip/legend.
@@ -27,8 +29,8 @@ interface Props {
  *
  * Three things beyond the picture, because a canvas says nothing to a screen reader and
  * hue alone says little to a colour-blind eye:
- *  - the three series differ in line style AND marker (solid circle, dashed square, dotted
- *    triangle), so the legend and the lines tell them apart without the palette;
+ *  - the three series differ in line pattern (solid, dashed, dotted), drawn the same in the HTML legend, so they are
+ *    told apart without the palette; the options come from lib/chartKit like every other chart;
  *  - the chart is a role="img" with a one-sentence summary (range and total);
  *  - the same numbers are available as a table under a disclosure, which is also the way
  *    to read an exact figure without hovering.
@@ -37,6 +39,7 @@ interface Props {
 export default function TrafficChart({ items, height = 360 }: Props) {
   const { t } = useTranslation('admin')
   const tk = useChartTokens()
+  const { hidden, toggle } = useHiddenSeries()
   const ref = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
   const empty = items.length === 0
@@ -70,25 +73,30 @@ export default function TrafficChart({ items, height = 360 }: Props) {
   useEffect(() => {
     const chart = chartRef.current
     if (!chart || empty) return
-    const base = chartBaseOption(tk)
+    const base = chartBase(tk, [names.up, names.down, names.total], hidden)
+    const rows = [names.up, names.down, names.total]
     chart.setOption({
       ...base,
       tooltip: {
-        ...base.tooltip,
-        trigger: 'axis',
-        valueFormatter: (v: number | string) => bytesToHuman(Number(v)),
+        ...tooltipFrame(tk),
+        formatter: (raw: unknown) => {
+          const list = raw as { axisValueLabel?: string; seriesName: string; value: number | string; dataIndex: number }[]
+          if (!Array.isArray(list) || !list.length) return ''
+          return tooltipHtml(list[0].axisValueLabel ?? '', list.map(p => ({
+            name: p.seriesName, value: bytesToHuman(Number(p.value)), color: tk.series[rows.indexOf(p.seriesName)] ?? tk.series[0], dash: dashOf(rows.indexOf(p.seriesName)),
+          })), tk)
+        },
       },
-      legend: { ...base.legend, data: [names.up, names.down, names.total], top: 4 },
-      grid: { left: 64, right: 24, top: 40, bottom: 32 },
-      xAxis: { ...base.xAxis, type: 'category', data: items.map(i => i.date), splitLine: { show: false } },
+      grid: { left: 64, right: 24, top: 16, bottom: 32 },
+      xAxis: { ...base.xAxis, type: 'category', data: items.map(i => i.date) },
       yAxis: { ...base.yAxis, type: 'value', axisLabel: { ...base.yAxis.axisLabel, formatter: (v: number) => bytesToHuman(v) } },
       series: [
-        { name: names.up, type: 'line', data: items.map(i => i.up_bytes), smooth: true, symbol: 'circle', symbolSize: 6, lineStyle: { type: 'solid', width: 2 }, areaStyle: { opacity: 0.1 } },
-        { name: names.down, type: 'line', data: items.map(i => i.down_bytes), smooth: true, symbol: 'rect', symbolSize: 6, lineStyle: { type: 'dashed', width: 2 }, areaStyle: { opacity: 0.1 } },
-        { name: names.total, type: 'line', data: items.map(i => i.total_bytes), smooth: true, symbol: 'triangle', symbolSize: 7, lineStyle: { type: 'dotted', width: 2.5 } },
+        lineSeries(0, { name: names.up, data: items.map(i => i.up_bytes) }),
+        lineSeries(1, { name: names.down, data: items.map(i => i.down_bytes) }),
+        lineSeries(2, { name: names.total, data: items.map(i => i.total_bytes) }),
       ],
     }, true)
-  }, [items, tk, names, empty])
+  }, [items, tk, names, empty, hidden])
 
   if (empty) return <EmptyState compact title={t('traffic.chart.empty')} className="min-h-40" />
 
@@ -97,6 +105,8 @@ export default function TrafficChart({ items, height = 360 }: Props) {
 
   return (
     <div>
+      <ChartLegend className="mb-1" hidden={hidden} onToggle={toggle}
+        items={[names.up, names.down, names.total].map((name, i) => ({ name, color: tk.series[i], dash: dashOf(i) }))} />
       <div ref={ref} role="img" aria-label={summary} style={{ width: '100%', height }} />
       <details className="mt-2 text-sm">
         <summary className="inline-flex min-h-8 cursor-pointer items-center rounded text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">

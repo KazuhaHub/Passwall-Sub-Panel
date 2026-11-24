@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 import { useTabParam } from '@/hooks/useTabParam'
 import { settingsKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import { MAIL_VARS } from './mailVars'
 import { settingId } from './model'
@@ -128,7 +128,7 @@ export function MailTemplates({ templates, onDirtyChange }: { templates: MailTem
             <Textarea id={settingId(`mail_template_${active}_body`)} rows={12} className="font-mono text-[13px]" value={current.body} onChange={e => patch({ body: e.target.value })} />
           </Field>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => void reset()}>{t('settings.mail.tpl_reset')}</Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => void reset()}>{t('settings.mail.tpl_reset')}</Button>
             <div className="flex flex-wrap gap-2">
               <AsyncButton type="button" variant="outline" pending={previewing} onClick={showPreview}>{t('settings.mail.tpl_preview')}</AsyncButton>
               <AsyncButton type="button" pending={busy} disabled={!edits[active]} onClick={save}>{t('settings.mail.tpl_save')}</AsyncButton>
@@ -163,7 +163,7 @@ function VariablesButton() {
   const t = useAdminT()
   return (
     <Popover>
-      <PopoverTrigger render={<Button type="button" variant="ghost" />}><IconHelp />{t('settings.mail.tpl_vars_button')}</PopoverTrigger>
+      <PopoverTrigger render={<Button type="button" variant="outline" />}><IconHelp />{t('settings.mail.tpl_vars_button')}</PopoverTrigger>
       <PopoverContent align="end" className="max-h-[min(32rem,70vh)] w-[min(30rem,92vw)] overflow-y-auto">
         <p className="mb-1 text-sm font-medium">{t('settings.mail.tpl_vars_title')}</p>
         <p className="mb-3 text-xs text-muted-foreground">{t('settings.mail.tpl_vars_hint')}</p>

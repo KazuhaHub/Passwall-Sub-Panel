@@ -1,6 +1,7 @@
 import { Field } from '@/components/form/Field'
 import { NativeSelect } from '@/components/ui/native-select'
 import { cn } from '@/lib/utils'
+import { NAV_ACTIVE, NAV_ITEM } from './audience'
 import { useAdminT } from '../useAdminT'
 import { SECTIONS, SECTION_LABEL, type SectionKey } from './model'
 
@@ -18,7 +19,7 @@ export function SettingsNav({ active, onSelect, dirty }: { active: SectionKey; o
           {SECTIONS.map(s => (
             <li key={s}>
               <button type="button" aria-current={active === s ? 'page' : undefined} onClick={() => onSelect(s)}
-                className={cn('flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50', active === s && 'bg-accent font-medium')}>
+                className={cn(NAV_ITEM, active === s && NAV_ACTIVE)}>
                 <span className="min-w-0 truncate">{t(SECTION_LABEL[s])}</span>
                 {dirty.includes(s) && (
                   <>

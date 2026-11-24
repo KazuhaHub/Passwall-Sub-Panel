@@ -6,7 +6,7 @@ import { confirm } from '@/components/ConfirmHost'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 type Busy = 'preview' | 'cleanup' | null
 
@@ -73,12 +73,12 @@ export default function RetiredRouteCleanupDialog({ server, onClose }: { server:
           {busy && <p role="status" className="text-muted-foreground">
             {t(busy === 'preview' ? 'admin:servers.retired_routes.previewing' : 'admin:servers.retired_routes.cleaning')}
           </p>}
-          {error && <DialogNotice tone="danger">{error}</DialogNotice>}
-          {removed !== null && <DialogNotice tone="success">{t('admin:servers.retired_routes.removed', { count: removed })}</DialogNotice>}
+          {error && <Notice tone="danger">{error}</Notice>}
+          {removed !== null && <Notice tone="success">{t('admin:servers.retired_routes.removed', { count: removed })}</Notice>}
           {preview && (preview.rule_tags.length === 0
-            ? <DialogNotice>{t('admin:servers.retired_routes.empty')}</DialogNotice>
+            ? <Notice tone="info">{t('admin:servers.retired_routes.empty')}</Notice>
             : <>
-                <DialogNotice tone="warning">{t('admin:servers.retired_routes.confirm', { count: preview.rule_tags.length })}</DialogNotice>
+                <Notice tone="warning">{t('admin:servers.retired_routes.confirm', { count: preview.rule_tags.length })}</Notice>
                 <ul className="m-0 flex max-h-48 list-none flex-col gap-1 overflow-y-auto rounded-lg bg-muted/50 p-2 text-xs [overflow-wrap:anywhere]">
                   {preview.rule_tags.map((tag, index) => <li key={`${tag}-${index}`}><code>{tag}</code></li>)}
                 </ul>

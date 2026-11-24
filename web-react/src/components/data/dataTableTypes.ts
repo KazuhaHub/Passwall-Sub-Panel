@@ -158,6 +158,12 @@ interface DataTableBase<T> {
   onRowHover?: (id: string | null) => void
   /** Rows to mark highlighted from outside (rows sharing the hovered row's landing, say). */
   highlightedIds?: readonly string[]
+  /**
+   * Rows related to the hovered one (same landing, same entry). A QUIET hint: the row only gets `data-related="true"`
+   * and no background, so the row under the pointer stays the most prominent one; the page decides what the mark
+   * changes inside a cell (the landing bar widens, say). `highlightedIds` is the loud, timed signal (a moved row).
+   */
+  relatedIds?: readonly string[]
 
   /** Makes rows a tree: children render under their parent, indented, expandable. */
   getSubRows?: (row: T) => T[] | undefined

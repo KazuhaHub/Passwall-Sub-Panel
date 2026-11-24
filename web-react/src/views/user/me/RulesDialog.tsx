@@ -82,7 +82,7 @@ export function RulesDialog({ open, canEdit, onClose }: { open: boolean; canEdit
         <DialogFooter>
           {/* One click to a starting point that can then be changed, instead of staring at the placeholder. */}
           {canEdit && !text.trim() && !busy && (
-            <Button type="button" variant="ghost" className="sm:mr-auto" onClick={() => setText(t('rules.placeholder'))}>{t('rules.insert_example')}</Button>
+            <Button type="button" variant="outline" className="sm:mr-auto" onClick={() => setText(t('rules.placeholder'))}>{t('rules.insert_example')}</Button>
           )}
           <Button type="button" variant="outline" disabled={busy} onClick={() => void requestClose()}>{canEdit ? t('common.cancel') : t('common.ok')}</Button>
           {canEdit && <AsyncButton disabled={!dirty} pending={busy} onClick={save}>{t('common.ok')}</AsyncButton>}

@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { IconCopy, IconDownload } from '@/lib/icons'
-import { DialogNotice } from '../dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 import { BusyButton } from './BusyButton'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -16,7 +16,7 @@ export function GithubMaterials({ inst }: { inst: NativeInstallation }) {
   if (!provisioning) return null
   return (
     <div className="flex flex-col gap-4">
-      <DialogNotice>{t('admin:servers.native.github_manual_summary')}</DialogNotice>
+      <Notice tone="info">{t('admin:servers.native.github_manual_summary')}</Notice>
       <ReadonlyText label={t('admin:servers.native.github_install_command')} value={publicInstallCommands.install} rows={3} />
       <Button variant="default" className="self-start" onClick={() => void copyToClipboard(publicInstallCommands.install)}><IconCopy />{t('admin:servers.native.copy_github_command')}</Button>
       <ReadonlyText label={t('admin:servers.native.github_install_only_command')} value={publicInstallCommands.installOnly} rows={3} />
@@ -26,9 +26,9 @@ export function GithubMaterials({ inst }: { inst: NativeInstallation }) {
       <ReadonlyValue label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} copy={false} />
       <ReadonlySecret label={t('admin:servers.native.credential')} value={provisioning.credential} />
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.endpoint)}><IconCopy />{t('admin:servers.native.copy_endpoint')}</Button>
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.agent_id)}><IconCopy />{t('admin:servers.native.copy_agent_id')}</Button>
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.credential)}><IconCopy />{t('admin:servers.native.copy_credential')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.endpoint)}><IconCopy />{t('admin:servers.native.copy_endpoint')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.agent_id)}><IconCopy />{t('admin:servers.native.copy_agent_id')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.credential)}><IconCopy />{t('admin:servers.native.copy_credential')}</Button>
       </div>
       <p className="text-sm text-muted-foreground">{t('admin:servers.native.github_connect_hint')}</p>
     </div>
@@ -42,7 +42,7 @@ export function ManualIdentity({ inst }: { inst: NativeInstallation }) {
   if (!provisioning) return null
   return (
     <div className="flex flex-col gap-3">
-      <DialogNotice>{t('admin:servers.native.offline_summary')}</DialogNotice>
+      <Notice tone="info">{t('admin:servers.native.offline_summary')}</Notice>
       <ReadonlyValue label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} />
       <ReadonlyValue label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} />
       <ReadonlySecret label={t('admin:servers.native.credential')} value={provisioning.credential} />
@@ -56,8 +56,8 @@ export function GeneratedMaterials({ inst }: { inst: NativeInstallation }) {
   const { selection, installCommand, commandExpired, files } = inst
   return (
     <>
-      {inst.commandError && <DialogNotice tone="danger">{inst.commandError}</DialogNotice>}
-      {inst.filesError && <DialogNotice tone="danger">{inst.filesError}</DialogNotice>}
+      {inst.commandError && <Notice tone="danger">{inst.commandError}</Notice>}
+      {inst.filesError && <Notice tone="danger">{inst.filesError}</Notice>}
       {selection.method === 'linux' && installCommand && (
         <NodeInstallCommand command={installCommand.command} expiresAt={installCommand.expires_at} disabled={commandExpired} onExpired={inst.expireCommand} />
       )}
