@@ -274,7 +274,10 @@ describe('saving', () => {
     mountRuleSets(PAGE)
     fireEvent.click(await tab('Sub-rules (1)'))
     expect((await screen.findByLabelText('Sub-rule name') as HTMLInputElement).value).toBe('ai-rules')
-    fireEvent.change(await screen.findByRole('textbox', { name: 'ai-rules' }), { target: { value: '- MATCH,REJECT' } })
+    // The sub-rule is edited in the same grouped editor as the main rules: its one group is open, aim it at REJECT.
+    const panel = within(await screen.findByRole('tabpanel'))
+    fireEvent.change(await panel.findByLabelText('Target'), { target: { value: 'REJECT' } })
+    fireEvent.click(await panel.findByRole('button', { name: 'Change to REJECT (1 lines)' }))
     fireEvent.click(await tab('Rematch outbounds (1)'))
     fireEvent.change(await screen.findByLabelText('Rematch name'), { target: { value: 'ai-v2' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))

@@ -95,3 +95,20 @@ describe('on a phone', () => {
     expect(await screen.findByLabelText(/^Name/)).toBeTruthy()
   })
 })
+
+describe('a sub-rule', () => {
+  it('is edited in the grouped editor, with the rule set\'s proxy groups as targets and no routing test', async () => {
+    reads({ ...base, mihomo_sub_rules: [{ name: 'ai', content: '- DOMAIN,x.example,Other\n- MATCH,DIRECT\n' }] })
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Sub-rules (1)' }))
+    const panel = within(await screen.findByRole('tabpanel'))
+    const target = await panel.findByLabelText('Target') as HTMLSelectElement
+    // Its own group, a group only the main rules name, and the built-in outbounds.
+    expect(Array.from(target.options).map(o => o.value)).toEqual(expect.arrayContaining(['Other', 'Proxy', 'Block', 'DIRECT', 'REJECT']))
+    expect(panel.queryByRole('button', { name: 'Test routing' })).toBeNull()
+    // A name the main rules already use is not a new group.
+    fireEvent.change(target, { target: { value: '\u0000new' } })
+    fireEvent.change(await panel.findByLabelText('Proxy group name'), { target: { value: 'Proxy' } })
+    expect(await panel.findByText(/already has this name/)).toBeTruthy()
+  })
+})

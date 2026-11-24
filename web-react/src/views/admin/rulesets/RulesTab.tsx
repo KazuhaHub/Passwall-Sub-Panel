@@ -32,7 +32,7 @@ import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
 import { EMPTY_PROBE, RouteTester } from './RouteTester'
-import { targetChoices } from './targets'
+import { isBuiltinTarget, targetChoices } from './targets'
 import { TargetView } from './TargetView'
 import { TextLinesDialog } from './TextLinesDialog'
 import { useRuleDoc } from './useRuleDoc'
@@ -79,7 +79,7 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
  * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -90,6 +90,14 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   serverIssues: readonly ProxyGroupIssue[]
   /** Asks for the rules of one outbound to be shown (the Proxy groups tab's "Show its rules"); `token` makes a repeat of the same request count. */
   showTarget?: { name: string; token: number } | null
+  /**
+   * Set when this edits a sub-rule instead of the main rules: its targets are the rule set's proxy groups, which the main rules
+   * (and the other sub-rules) name, so those are offered as targets and count as taken names; and the routing test, which
+   * walks the main rules, is not shown.
+   */
+  subRule?: { groups: readonly string[] }
+  /** The name of the text editor (the Text view) when it is not "Main rules". */
+  ariaLabel?: string
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
@@ -124,7 +132,11 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
     if (showTarget) { setTargetFilter(showTarget.name); setTargetMode('merged'); setOpened(false) }
   }, [showTarget])
   const findings = useShadowFindings(doc)
-  const choices = useMemo(() => targetChoices(blocks, order, rematchNames), [blocks, order, rematchNames])
+  const choices = useMemo(() => {
+    const own = targetChoices(blocks, order, rematchNames)
+    if (!subRule) return own
+    return { ...own, groups: [...own.groups, ...subRule.groups.filter(g => !own.groups.includes(g) && !rematchNames.includes(g) && !isBuiltinTarget(g))] }
+  }, [blocks, order, rematchNames, subRule])
   const current = blocks[Math.min(selected, blocks.length - 1)] as Block | undefined
   const currentIndex = current?.index ?? 0
 
@@ -396,7 +408,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const showDetail = !phone || opened || merged
 
   // On a phone the test is a screen of its own, in place of the rules.
-  if (phone && testerOpen) {
+  if (phone && testerOpen && !subRule) {
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
@@ -463,19 +475,19 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
             <IconWarning />
             {findings !== null && findings.length > 0 ? t('admin:rules.issues.button', { count: findings.length.toLocaleString() }) : t('admin:rules.issues.title')}
           </Button>
-          <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={() => setTesterOpen(o => !o)}>{t('admin:rules.tester.title')}</Button>
+          {!subRule && <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={() => setTesterOpen(o => !o)}>{t('admin:rules.tester.title')}</Button>}
         </span>
       </div>
       <p role="status" aria-live="polite" className="min-h-4 text-xs text-muted-foreground">{resultsText || announce}</p>
 
-      <div className={wide && testerOpen ? 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]' : 'min-w-0'}>
+      <div className={wide && testerOpen && !subRule ? 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]' : 'min-w-0'}>
       <div className="min-w-0">
       {shownView === 'text' ? (
         <div className="flex flex-col gap-1.5">
           {phone && <p className="text-xs text-muted-foreground">{t('admin:rules.text.mobile_hint')}</p>}
           <div className="overflow-hidden rounded-lg border">
             <Suspense fallback={<div className="grid h-96 place-items-center"><IconSpinner aria-hidden className="animate-spin text-muted-foreground" /></div>}>
-              <CodeEditor value={content} onChange={setContent} readOnly={readOnly} ariaLabel={t('admin:rules.field.content')} />
+              <CodeEditor value={content} onChange={setContent} readOnly={readOnly} ariaLabel={ariaLabel ?? t('admin:rules.field.content')} />
             </Suspense>
           </div>
           <p className="text-xs text-muted-foreground">{t('admin:rules.editor_keyboard_hint')}</p>
@@ -519,7 +531,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </div>
       )}
       </div>
-      {wide && testerOpen && (
+      {wide && testerOpen && !subRule && (
         <aside aria-label={t('admin:rules.tester.title')} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
@@ -532,7 +544,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       <input ref={fileInput} type="file" accept=".txt,.list,.yaml,.yml,.conf,text/plain" hidden aria-hidden tabIndex={-1}
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void readFile(f) }} />
       {renderDialog()}
-      {!wide && !phone && testerOpen && (
+      {!wide && !phone && testerOpen && !subRule && (
         <DetailDialog open onClose={() => setTesterOpen(false)} size="md" title={t('admin:rules.tester.title')}>
           <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
         </DetailDialog>

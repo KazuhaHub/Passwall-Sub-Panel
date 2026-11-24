@@ -27,6 +27,7 @@ import { ruleKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
 import { parseDoc } from '@/utils/ruleset/parse'
+import { buildBlocks } from '@/utils/ruleset/blocks'
 import { groupUsage, type RenamePlan } from '@/utils/ruleset/rename'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
@@ -37,6 +38,7 @@ import { cloneProxyGroupMembers, cloneProxyGroupOptions, cloneRuleSet, EMPTY, sa
 import { RenameGroupDialog } from './RenameGroupDialog'
 import { RulesTab } from './RulesTab'
 import { isReservedSlug, newRuleSetPath, ruleSetPath } from './ruleSetRoutes'
+import { isBuiltinTarget } from './targets'
 
 /** The request body limit of the rule-set endpoints: 1 MiB for everything the middleware does not name (router.go BodyLimitByPath). */
 export const MAX_BODY_BYTES = 1 << 20
@@ -118,6 +120,15 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     setRenaming(null)
     pushToast({ message: t('admin:rules.rename.done', { name: to }), severity: 'success' })
   }
+
+  // The proxy groups the rules name, main rules and sub-rules alike: what a sub-rule's targets may be, and the names a new group may not take.
+  const ruleGroups = useMemo(() => {
+    const names = new Set<string>()
+    for (const text of [form.content, ...(form.mihomo_sub_rules ?? []).map(r => r.content)]) {
+      for (const b of buildBlocks(parseDoc(text))) if (b.kind === 'rules' && b.target && !isBuiltinTarget(b.target)) names.add(b.target)
+    }
+    return [...names]
+  }, [form.content, form.mihomo_sub_rules])
 
   const warn = (message: string) => pushToast({ message, severity: 'warning' })
   const changeTab = (next: Tab) => {
@@ -236,8 +247,9 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       }
       const el = e.target as HTMLElement | null
       if (e.key === '/' && !e.metaKey && !e.ctrlKey && !el?.closest('input, textarea, select, [contenteditable="true"], .cm-editor')) {
-        const box = document.querySelector<HTMLInputElement>('[data-rules-search]')
-        if (box && box.offsetParent !== null) { e.preventDefault(); box.focus() }
+        // The Rules tab and a sub-rule's editor each have one; the visible one is the one meant.
+        const box = [...document.querySelectorAll<HTMLInputElement>('[data-rules-search]')].find(b => b.offsetParent !== null)
+        if (box) { e.preventDefault(); box.focus() }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -343,7 +355,11 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               />
             </TabsContent>
             <TabsContent value="sub_rules" keepMounted={false}>
-              <MihomoAdvancedRulesEditor part="sub_rules" value={form} onChange={setForm} />
+              <MihomoAdvancedRulesEditor part="sub_rules" value={form} onChange={setForm}
+                renderContent={({ index, generation, value, onChange, ariaLabel }) => (
+                  <RulesTab key={`${rev}:${index}:${generation}`} content={value} setContent={onChange} readOnly={readOnly || pending} ariaLabel={ariaLabel}
+                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} />
+                )} />
             </TabsContent>
             <TabsContent value="rematches" keepMounted={false}>
               <MihomoAdvancedRulesEditor part="rematches" value={form} onChange={setForm} revealRematchIssues={rematchSeen} />
