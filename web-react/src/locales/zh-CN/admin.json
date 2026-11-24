@@ -3324,7 +3324,12 @@
       "account": "账户信息",
       "sub_hidden": "管理员和运营人员账户的订阅链接对运营人员隐藏。",
       "not_found": "该用户已不存在",
-      "close": "关闭"
+      "forbidden": "你无权打开该用户",
+      "unsaved_in": "{{tabs}}有未保存的修改",
+      "tab_separator": "、"
+    },
+    "header": {
+      "no_totp": "该用户未设置验证器应用"
     },
     "table": {
       "display_name": "显示名",
@@ -3434,7 +3439,6 @@
       "passkeys": "管理通行密钥",
       "resume_service": "恢复代理服务",
       "suspend_service": "暂停代理服务",
-      "account_security": "账号安全",
       "risk_details": "风控详情"
     },
     "security": {

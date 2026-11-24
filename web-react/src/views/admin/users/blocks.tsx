@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-/** A titled block of a sheet tab: a heading, an optional line under it, then the content. */
+/** A titled block of a user-page tab: a heading, an optional line under it, then the content. */
 export function Block({ title, description, actions, children, className }: {
   title: ReactNode
   description?: ReactNode

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { Link, Navigate, useLocation } from 'react-router'
 import { runReconcile } from '@/api/reconcile'
-import type { ListResponse, User } from '@/api/types'
+import type { User } from '@/api/types'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { MoreMenu } from '@/components/common/MoreMenu'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -13,85 +13,55 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { useDrawerParam } from '@/hooks/useDrawerParam'
+import { useObjectLink } from '@/components/common/objectReturn'
 import { IconDelete, IconRefresh, IconSync } from '@/lib/icons'
-import { useAllGroups } from '@/query/groups'
-import { userKeys } from '@/query/keys'
-import { useRiskLevels } from '@/query/riskCenter'
-import { useTopTraffic } from '@/query/traffic'
 import { useUsersList } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
-import { useAuthStore } from '@/stores/auth'
-import { useCan } from '@/utils/permissions'
 import { accountStateOf, proxyEnabled } from '@/utils/userAccess'
 import RiskUserDrawer from '../risk/drawer/RiskUserDrawer'
 import { singleFacet } from '../logs/shared'
 import { UserCard } from './cells'
 import { userColumns } from './columns'
-import { UsersContext, type UsersCtx } from './context'
-import type { DialogState } from './dialogs'
+import { UsersContext } from './context'
 import { canManageUser, canSelect } from './model'
 import { RowActions } from './RowActions'
 import { UserDialogs } from './UserDialogs'
-import { UserSheet } from './UserSheet'
+import { legacyUserTarget, NEW_USER_PATH } from './userRoutes'
 import { useAdminT } from './useAdminT'
 import { useBatchActions } from './useBatchActions'
-import { useUserActions } from './useUserActions'
+import { useUsersWorkspace } from './useUsersWorkspace'
 import { useUserListView } from './useUserListView'
-import { useUserSheet } from './useUserSheet'
-
-const NO_GROUPS: never[] = []
 
 /**
- * The Users page: a server-paged list an admin scans (who, group, status, traffic against quota, expiry, last
- * seen), one user in a wide sheet, and the bulk bar. Everything that is a place is in the URL: the page, the
- * keyword, the order, the group filter, the opened user and its tab, the risk drawer.
+ * The Users list: a server-paged table an admin scans (who, group, status, traffic against quota, expiry, last
+ * seen) and the bulk bar. A user is NOT opened here: the name, the row and the edit button go to the user's own page
+ * (`/admin/users/:id`), carrying this list's place so its back link returns to the same page, search and order.
+ * Everything that is a place is in the URL: the page, the keyword, the order, the group filter, the risk drawer.
+ *
+ * `?user=<id>` / `?user=new` are the addresses the old side sheet used; they are sent on to the new routes (see
+ * `legacyUserTarget`) because bookmarks and other pages still carry them.
  */
 export default function UsersPage() {
+  const legacy = legacyUserTarget(useLocation().search)
+  return legacy ? <Navigate to={legacy} replace /> : <UsersList />
+}
+
+function UsersList() {
   const t = useAdminT()
   const scope = useQueryScope()
-  const queryClient = useQueryClient()
-  const auth = useAuthStore()
-  const admin = useCan('config.write')
-  const canElevate = useCan('users.elevate')
-  // The risk center is admin-only: an operator is shown neither its column nor its drawer, and never reads /levels, which would answer 403.
-  const canRisk = useCan('risk.view')
+  const link = useObjectLink()
   const view = useUserListView()
-  const sheet = useUserSheet()
-  // The risk center's drawer over this page (`?risk=<id>`): a copied link reopens it and Back closes it. Opening it from the sheet hands over to it (the sheet's own params go), and closing it comes back to the sheet.
-  const riskDrawer = useDrawerParam('risk', { exclusive: ['user', 'tab'] })
+  const { ctx, dialog, setDialog, riskDrawer, canRisk } = useUsersWorkspace({ usageLimit: view.pageSize })
+  const { admin, canElevate } = ctx
 
   const usersQuery = useUsersList(scope, view.params)
   const items = usersQuery.data?.items
   const total = usersQuery.data?.total
   const rows = items ?? []
 
-  const groups = useAllGroups(scope).data ?? NO_GROUPS
-  // The risk column: ONE read for the whole list, keyed by account id. Decoration only: a failed read leaves it blank and the list works as before.
-  const levels = useRiskLevels(scope, { enabled: canRisk }).data
-  // Per-user period usage, from the Top-N leaderboard through the shared cache. It walks every user server-side, so it never rides the list refresh; `limit` tracks the page size.
-  const top = useTopTraffic(scope, Math.max(view.pageSize, 25))
-  const usage = useMemo(() => new Map((top.data ?? []).map(r => [r.user_id, r.period_used_bytes])), [top.data])
-  const usedBytesOf = (id: number) => usage.get(id)
-
-  const [dialog, setDialog] = useState<DialogState | null>(null)
   const [selection, setSelection] = useState<Record<string, boolean>>({})
 
-  /** Re-reads the list, and the opened user when it is not on this page. */
-  const sheetId = typeof sheet.target === 'number' ? sheet.target : 0
-  const reload = async () => {
-    await Promise.all([
-      usersQuery.refetch(),
-      sheetId > 0 ? queryClient.invalidateQueries({ queryKey: userKeys.detail(scope, sheetId) }) : undefined,
-    ])
-  }
-  /** A saved row goes into the cached list and detail at once, so nothing shows the stale one while a refetch is under way. */
-  const patchRow = (u: User) => {
-    queryClient.setQueryData<ListResponse<User>>(userKeys.list(scope, view.params), prev => (prev ? { ...prev, items: prev.items.map(x => (x.id === u.id ? u : x)) } : prev))
-    queryClient.setQueryData(userKeys.detail(scope, u.id), u)
-  }
-
-  const act = useUserActions({ reload, setDialog, afterDelete: id => { if (sheet.target === id) sheet.exit() } })
+  const { act, groups, usedBytesOf, reload } = ctx
   const batch = useBatchActions({ reload, invalidateUsage: act.invalidateUsage, setDialog, clearSelection: () => setSelection({}) })
 
   // A batch is assembled on one page of one query: reset when THAT changes, not whenever the rows arrive as a new array, which dropped a batch the admin was still putting together on every background refresh.
@@ -116,11 +86,6 @@ export default function UsersPage() {
       else pushSnack(t('users.reconcile.summary_no_fix', { scanned: report.scanned }), 'success')
       await reload()
     } catch { /* reported by the request layer */ } finally { setReconciling(false) }
-  }
-
-  const ctx: UsersCtx = {
-    act, groups, usedBytesOf, levels, selfId: auth.userId, role: auth.role, canElevate, canRisk, admin, reload, patchRow,
-    openRisk: id => riskDrawer.open(id), openUser: (id, tab) => sheet.open(id, tab), setDialog,
   }
 
   // Columns depend on the language and the role only; what the cells draw arrives through the context (see columns.tsx).
@@ -152,7 +117,7 @@ export default function UsersPage() {
 
   const empty = filtered
     ? <EmptyState compact title={t('users.empty_filtered')} action={<Button variant="outline" size="sm" onClick={view.clearFilters}>{t('logs.clear_filters')}</Button>} />
-    : <EmptyState compact title={t('users.empty')} description={t('users.empty_hint')} action={<Button size="sm" onClick={() => sheet.open('new')}>{t('users.create')}</Button>} />
+    : <EmptyState compact title={t('users.empty')} description={t('users.empty_hint')} action={<Button size="sm" render={<Link {...link(NEW_USER_PATH)} />}>{t('users.create')}</Button>} />
 
   return (
     <UsersContext.Provider value={ctx}>
@@ -160,7 +125,7 @@ export default function UsersPage() {
         <PageHeader
           title={t('users.title')}
           count={total}
-          primary={<Button onClick={() => sheet.open('new')}>{t('users.create')}</Button>}
+          primary={<Button render={<Link {...link(NEW_USER_PATH)} />}>{t('users.create')}</Button>}
           // isFetching, not isPending: it is false again once the first page has loaded, even mid-refetch, and on a slow link the click must visibly go busy.
           secondary={<AsyncButton variant="outline" icon={<IconRefresh />} pending={usersQuery.isFetching} onClick={() => usersQuery.refetch()}>{t('users.refresh')}</AsyncButton>}
           // Reconcile is an admin endpoint: for an operator it would only answer 403, so it is not offered.
@@ -196,8 +161,7 @@ export default function UsersPage() {
             selectable: canSelect(u) && canManageUser(u, canElevate),
             state: act.busy.has(u.id) ? 'pending' : accountStateOf(u) === 'active' && proxyEnabled(u) ? undefined : 'dimmed',
           })}
-          onRowOpen={u => sheet.open(u.id)}
-          activeRowId={typeof sheet.target === 'number' ? String(sheet.target) : null}
+          onRowOpen={u => ctx.openUser(u.id)}
           renderCard={u => <UserCard user={u} usedBytes={usedBytesOf(u.id)} actions={<RowActions user={u} />} />}
           maxHeight={null}
           toolbar={(
@@ -210,7 +174,6 @@ export default function UsersPage() {
           )}
           empty={empty}
         />
-        <UserSheet sheet={sheet} rows={rows} loading={usersQuery.isPending} />
         <UserDialogs state={dialog} setState={setDialog} reload={reload} toggleBatch={batch.toggleAccount} />
         {/* Above every modal (riskDrawerZIndex). Not mounted for an operator: a link to ?risk= would only read a 403. */}
         {canRisk && <RiskUserDrawer userId={riskDrawer.id} onClose={riskDrawer.close} host="users" />}

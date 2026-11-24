@@ -14,7 +14,7 @@ import { canQuickRenew, renewedExpireAt } from './model'
 import { useAdminT } from './useAdminT'
 
 /**
- * Every single-user action, with its confirmation and its toast, shared by the row menu and the sheet so the
+ * Every single-user action, with its confirmation and its toast, shared by the row menu and the user's page so the
  * two cannot say different things. Each returns when the request settles; a failure is already toasted by the
  * request layer, so it only ends the wait. `busy` holds the ids with a request in flight: a row shows it, and
  * a second click on the same account is ignored instead of sending a second request.
@@ -23,7 +23,7 @@ export function useUserActions({ reload, setDialog, afterDelete }: {
   /** Re-reads the list (and the opened user) after a write. */
   reload: () => Promise<unknown>
   setDialog: (d: DialogState) => void
-  /** The account is gone: the sheet that was open on it closes. */
+  /** The account is gone: the page that was open on it leaves. */
   afterDelete: (id: number) => void
 }) {
   const t = useAdminT()
