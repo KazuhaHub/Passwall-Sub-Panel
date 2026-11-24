@@ -9,7 +9,8 @@ import type { Doc } from './parse'
  * so merging them would change where traffic goes.
  */
 export interface Block {
-  kind: 'rules' | 'text'
+  /** 'notarget': lines that name no outbound (a SUB-RULE jump, a rule missing its target). Not a group traffic can be sent to, so nothing is added to, pasted into or moved into one. */
+  kind: 'rules' | 'text' | 'notarget'
   /** Position in the list of groups. */
   index: number
   /** The outbound every rule here names; '' for a text block or rules with no target. */
@@ -43,7 +44,7 @@ export function buildBlocks(doc: Doc): Block[] {
       // The note: comment lines directly above, with nothing between them and the first rule.
       let start = i
       while (start > 0 && lines[start - 1].kind === 'comment' && (blocks.length === 0 || start - 1 >= blocks[blocks.length - 1].end)) start--
-      blocks.push({ kind: 'rules', index: blocks.length, target, start, ruleStart: i, end: j, count: j - i, fallback })
+      blocks.push({ kind: target === '' ? 'notarget' : 'rules', index: blocks.length, target, start, ruleStart: i, end: j, count: j - i, fallback })
       i = j
     } else if (line.kind === 'text') {
       let j = i + 1

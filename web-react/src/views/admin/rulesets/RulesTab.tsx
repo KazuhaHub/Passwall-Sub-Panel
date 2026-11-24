@@ -15,6 +15,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { IconAdd, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner } from '@/lib/icons'
 import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
+import { problemsOf, type Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
 import {
   deleteBlock, deleteLines, editRule, insertRules, mergeBlocks, mergePreview, moveBlock, moveLinesToBlock, moveLinesToNewBlock, newBlock, replaceRange,
@@ -39,15 +40,28 @@ function storedView(): View {
   try { return localStorage.getItem(VIEW_KEY) === 'text' ? 'text' : 'blocks' } catch { return 'blocks' }
 }
 
+// A dialog names what it works on by LINE ID, never by index: indexes move with every edit, ids do not. Groups are named by
+// the id of their first line. All of it is turned into indexes only at the moment the edit is applied, against the document
+// as it is then, and an id that is no longer there means "nothing is written" (see `run`).
 type Dialog =
-  | { kind: 'edit'; line: number }
-  | { kind: 'add' }
-  | { kind: 'paste'; where: PasteWhere; text?: string }
+  | { kind: 'edit'; id: number }
+  | { kind: 'add'; block: number }
+  | { kind: 'paste'; where: { kind: 'into'; block: number } | { kind: 'new'; before: number | null }; text?: string }
   | { kind: 'move_block'; block: number }
-  | { kind: 'move_rows'; block: number; lines: number[] }
-  | { kind: 'text'; start: number; end: number }
+  | { kind: 'move_rows'; block: number; ids: number[] }
+  | { kind: 'text'; ids: number[] }
 
 const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i)
+const idxOf = (d: Doc, id: number) => d.lines.findIndex(l => l.id === id)
+/** The indexes of lines named by id, or null if any of them is gone. */
+const indexesOf = (d: Doc, ids: readonly number[]): number[] | null => {
+  const at = new Map(d.lines.map((l, i) => [l.id, i]))
+  const out: number[] = []
+  for (const id of ids) { const i = at.get(id); if (i === undefined) return null; out.push(i) }
+  return out
+}
+const blockOfLine = (d: Doc, bl: readonly Block[], id: number): Block | null => { const i = idxOf(d, id); return i < 0 ? null : blockAt(bl, i) }
+const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): number => (before === null ? bl.length : (blockOfLine(d, bl, before)?.index ?? -1))
 
 /**
  * The Rules tab (design 3.2): the groups of rules in match order on the left, the open group's rules in the middle, and
@@ -82,6 +96,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const fileInput = useRef<HTMLInputElement>(null)
   const importInto = useRef<number>(0)
 
+  const problems = useMemo(() => problemsOf(doc), [doc])
   const choices = useMemo(() => targetChoices(blocks, order, rematchNames), [blocks, order, rematchNames])
   const current = blocks[Math.min(selected, blocks.length - 1)] as Block | undefined
   const currentIndex = current?.index ?? 0
@@ -113,6 +128,19 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   // ---- edits -----------------------------------------------------------------------------------------------------
   const select = (index: number) => { setSelected(index); setOpened(true) }
 
+  /**
+   * Applies an edit written against the document as it is AT THIS MOMENT. The edit returns null when something it names
+   * (a line id, a group) is gone; then nothing is written and the person is told, so a stale selection can never land
+   * on whatever line has since taken its index.
+   */
+  const run = (edit: (d: Doc, bl: Block[]) => Doc | null): boolean => {
+    let missing = false
+    const changed = apply((d, bl) => { const r = edit(d, bl); if (r === null) { missing = true; return d } return r })
+    if (missing) pushToast({ message: t('admin:rules.stale_line'), severity: 'warning' })
+    return changed
+  }
+  const firstLineId = (b: Block) => doc.lines[b.start].id
+
   const reorder = ({ movedId, beforeId }: ReorderCall) => {
     const from = Number(movedId)
     const before = beforeId === null ? blocks.length : Number(beforeId)
@@ -122,27 +150,31 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
     setAnnounce(t('admin:rules.move.announce', { from: from + 1, to: to + 1 }))
   }
 
-  const addGroup = (before: number) => setDialog({ kind: 'paste', where: { kind: 'new', before } })
+  const addGroup = (before: number) => setDialog({ kind: 'paste', where: { kind: 'new', before: before < blocks.length ? firstLineId(blocks[before]) : null } })
 
   const copyBlock = (b: Block, plain: boolean) => {
     const lines = doc.lines.slice(b.ruleStart, b.end).map(l => l.raw.replace(/\r$/, ''))
     void copyToClipboard((plain ? lines.map(l => l.replace(/^\s*-\s+/, '').split(',').slice(1, 2).join('')) : lines.map(l => l.trimStart())).join('\n') + '\n')
   }
 
+  const label = (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.kind === 'notarget' ? t('admin:rules.blocks.no_target') : b.target)
+
   const removeBlock = async (b: Block) => {
+    const id = firstLineId(b)
     const ok = await confirm({
       title: t('admin:rules.blocks.delete'),
-      message: t('admin:rules.blocks.delete_confirm', { target: b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.target, count: b.count }),
+      message: t('admin:rules.blocks.delete_confirm', { target: label(b), count: b.count }),
       confirmText: t('admin:rules.blocks.delete'),
       destructive: true,
       initialFocus: 'cancel',
     })
-    if (ok) apply((d, bl) => deleteBlock(d, bl[b.index]))
+    if (ok) run((d, bl) => { const hit = blockOfLine(d, bl, id); return hit ? deleteBlock(d, hit) : null })
   }
 
   const mergeNext = async (b: Block) => {
     const preview = mergePreview(doc, blocks, b.index)
     if (!preview.ok) return
+    const id = firstLineId(b)
     const ok = preview.lines.length === 0 || await confirm({
       title: t('admin:rules.blocks.merge'),
       message: `${t('admin:rules.blocks.merge_confirm')}\n${preview.lines.join('\n')}`,
@@ -150,17 +182,17 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       destructive: true,
       initialFocus: 'cancel',
     })
-    if (ok) apply((d, bl) => mergeBlocks(d, bl, b.index))
+    if (ok) run((d, bl) => { const hit = blockOfLine(d, bl, id); return hit ? mergeBlocks(d, bl, hit.index) : null })
   }
 
   const menuOf = useCallback((b: Block): MoreMenuItem[] => {
     const items: MoreMenuItem[] = [
-      { id: 'move', label: t('admin:rules.move.title'), onSelect: () => setDialog({ kind: 'move_block', block: b.index }) },
+      { id: 'move', label: t('admin:rules.move.title'), onSelect: () => setDialog({ kind: 'move_block', block: doc.lines[b.start].id }) },
       { id: 'above', label: t('admin:rules.blocks.add_above'), icon: IconAdd, onSelect: () => addGroup(b.index) },
       { id: 'below', label: t('admin:rules.blocks.add_below'), icon: IconAdd, onSelect: () => addGroup(b.index + 1) },
     ]
     if (mergePreview(doc, blocks, b.index).ok) items.push({ id: 'merge', label: t('admin:rules.blocks.merge'), icon: IconReset, onSelect: () => void mergeNext(b) })
-    if (b.kind === 'rules') {
+    if (b.kind !== 'text') {
       items.push({ id: 'copy_rules', label: t('admin:rules.matchers.copy_rules'), icon: IconCopy, separatorBefore: true, onSelect: () => copyBlock(b, false) })
       items.push({ id: 'copy_list', label: t('admin:rules.matchers.copy_list'), icon: IconCopy, onSelect: () => copyBlock(b, true) })
     }
@@ -172,7 +204,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement
-    if (el.closest('input, textarea, select, [contenteditable="true"], .cm-editor')) return
+    if (el.closest('input, textarea, select, [contenteditable="true"], .cm-editor, [role="dialog"]')) return
+    // With a dialog open, undo would change the document under it.
+    if (dialog !== null) return
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !readOnly && view === 'blocks') {
       e.preventDefault()
       if (e.shiftKey) history.redo(); else history.undo()
@@ -200,64 +234,109 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const renderDialog = () => {
     if (!dialog) return null
     const close = () => setDialog(null)
+    // The indexes the dialog's ids mean in the document as drawn now (nothing can change it while the dialog is open).
+    const blockNow = (id: number) => blockOfLine(doc, blocks, id)
     switch (dialog.kind) {
       case 'edit': {
-        const line = doc.lines[dialog.line]
+        const at = idxOf(doc, dialog.id)
+        const line = doc.lines[at]
         const rule = line?.rule
         if (!rule) return null
+        const id = dialog.id
         if (!rule.structured) {
           return <TextLinesDialog title={t('admin:rules.matchers.edit_lines_as_text')} initial={line.raw.replace(/\r$/, '')} onClose={close}
-            onSubmit={text => { apply(d => replaceRange(d, dialog.line, dialog.line + 1, text)); close() }} />
+            onSubmit={text => { run(d => { const i = idxOf(d, id); return i < 0 ? null : replaceRange(d, i, i + 1, text) }); close() }} />
         }
         return <RuleEditDialog mode="edit" groupName={rule.target} initial={{ type: rule.type, value: rule.value, options: rule.options }} onClose={close}
-          onSubmit={r => { apply(d => editRule(d, dialog.line, { type: r.type, value: r.value, options: r.options })); close() }} />
+          onSubmit={r => { run(d => { const i = idxOf(d, id); return i < 0 ? null : editRule(d, i, { type: r.type, value: r.value, options: r.options }) }); close() }} />
       }
       case 'add': {
-        const b = current
-        if (!b) return null
+        const b = blockNow(dialog.block)
+        if (!b || b.kind !== 'rules') return null
+        const id = dialog.block
         return <RuleEditDialog mode="add" groupName={b.target} initial={{ type: 'DOMAIN-SUFFIX', value: '', options: [] }} onClose={close}
-          onSubmit={r => { apply((d, bl) => insertRules(d, bl[b.index].end, [r], b.target)); close() }} />
+          onSubmit={r => { run((d, bl) => { const hit = blockOfLine(d, bl, id); return hit ? insertRules(d, hit.end, [r], hit.target) : null }); close() }} />
       }
       case 'paste': {
-        const where = dialog.where
+        const w = dialog.where
+        const where: PasteWhere = w.kind === 'into' ? { kind: 'into', block: blockNow(w.block)?.index ?? 0 } : { kind: 'new', before: beforeIndex(doc, blocks, w.before) }
         return <PasteDialog where={where} doc={doc} blocks={blocks} choices={choices} initialText={dialog.text} onClose={close}
           onSubmit={(entries: PasteEntry[], target) => {
             const rules = entries.map(e => ({ type: e.type, value: e.value, options: e.options }))
-            if (where.kind === 'into') apply((d, bl) => insertRules(d, bl[where.block].end, rules, bl[where.block].target))
-            else {
-              apply((d, bl) => newBlock(d, bl, where.before, target, rules))
-              setSelected(where.before)
-              setOpened(true)
+            const ok = run((d, bl) => {
+              if (w.kind === 'into') { const hit = blockOfLine(d, bl, w.block); return hit && hit.kind === 'rules' ? insertRules(d, hit.end, rules, hit.target) : null }
+              const before = beforeIndex(d, bl, w.before)
+              return before < 0 ? null : newBlock(d, bl, before, target, rules)
+            })
+            if (ok && w.kind === 'new') { setSelected(where.kind === 'new' ? where.before : 0); setOpened(true) }
+            if (ok) {
+              setAnnounce(t('admin:rules.paste.added', { count: rules.length.toLocaleString() }))
+              pushToast({ message: t('admin:rules.paste.added', { count: rules.length.toLocaleString() }), severity: 'success' })
             }
-            setAnnounce(t('admin:rules.paste.added', { count: rules.length.toLocaleString() }))
-            pushToast({ message: t('admin:rules.paste.added', { count: rules.length.toLocaleString() }), severity: 'success' })
             close()
           }} />
       }
-      case 'move_block':
-        return <MoveToDialog mode="block" blocks={blocks} from={dialog.block} choices={choices} onClose={close}
+      case 'move_block': {
+        const from = blockNow(dialog.block)
+        if (!from) return null
+        const id = dialog.block
+        return <MoveToDialog mode="block" blocks={blocks} from={from.index} choices={choices} onClose={close}
           onSubmit={choice => {
-            const from = dialog.block
-            const before = choice.kind === 'top' ? 0 : choice.kind === 'after' ? choice.block + 1 : from
-            if (apply((d, bl) => moveBlock(d, bl, from, before))) {
-              const to = before > from ? before - 1 : before
+            const moved = run((d, bl) => {
+              const hit = blockOfLine(d, bl, id)
+              if (!hit) return null
+              const before = choice.kind === 'top' ? 0 : choice.kind === 'after' ? choice.block + 1 : hit.index
+              return moveBlock(d, bl, hit.index, before)
+            })
+            if (moved) {
+              const before = choice.kind === 'top' ? 0 : choice.kind === 'after' ? choice.block + 1 : from.index
+              const to = before > from.index ? before - 1 : before
               setSelected(to)
-              setAnnounce(t('admin:rules.move.announce', { from: from + 1, to: to + 1 }))
+              setAnnounce(t('admin:rules.move.announce', { from: from.index + 1, to: to + 1 }))
             }
             close()
           }} />
-      case 'move_rows':
-        return <MoveToDialog mode="rows" blocks={blocks} from={dialog.block} choices={choices} count={dialog.lines.length} onClose={close}
+      }
+      case 'move_rows': {
+        const from = blockNow(dialog.block)
+        if (!from || from.kind !== 'rules') return null
+        const ids = dialog.ids
+        const destId = (i: number) => doc.lines[blocks[i].start].id
+        return <MoveToDialog mode="rows" blocks={blocks} from={from.index} choices={choices} count={ids.length} onClose={close}
           onSubmit={(choice: MoveChoice) => {
-            const { lines, block } = dialog
-            if (choice.kind === 'into') { apply((d, bl) => moveLinesToBlock(d, bl, lines, choice.block)); setSelected(choice.block - (lines.length === blocks[block].count && choice.block > block ? 1 : 0)) }
-            else if (choice.kind === 'new') { apply((d, bl) => moveLinesToNewBlock(d, bl, lines, choice.target, choice.before)); setSelected(choice.before) }
+            if (choice.kind === 'into') {
+              const dest = destId(choice.block)
+              const ok = run((d, bl) => {
+                const at = indexesOf(d, ids); const hit = blockOfLine(d, bl, dest)
+                return at && hit && hit.kind === 'rules' ? moveLinesToBlock(d, bl, at, hit.index) : null
+              })
+              if (ok) setSelected(choice.block - (ids.length === from.count && choice.block > from.index ? 1 : 0))
+            } else if (choice.kind === 'new') {
+              const before = choice.before < blocks.length ? destId(choice.before) : null
+              const ok = run((d, bl) => {
+                const at = indexesOf(d, ids); const b = beforeIndex(d, bl, before)
+                return at && b >= 0 ? moveLinesToNewBlock(d, bl, at, choice.target, b) : null
+              })
+              if (ok) setSelected(choice.before)
+            }
             close()
           }} />
+      }
       case 'text': {
-        const text = doc.lines.slice(dialog.start, dialog.end).map(l => l.raw.replace(/\r$/, '')).join('\n')
+        const at = indexesOf(doc, dialog.ids)
+        if (!at) return null
+        const ids = dialog.ids
+        const text = at.map(i => doc.lines[i].raw.replace(/\r$/, '')).join('\n')
         return <TextLinesDialog title={t('admin:rules.matchers.edit_lines_as_text')} initial={text} onClose={close}
-          onSubmit={next => { apply(d => replaceRange(d, dialog.start, dialog.end, next)); close() }} />
+          onSubmit={next => {
+            run(d => {
+              const now = indexesOf(d, ids)
+              // The lines must still be there and still be one run.
+              if (!now || now.some((v, k) => k > 0 && v !== now[k - 1] + 1)) return null
+              return replaceRange(d, now[0], now[now.length - 1] + 1, next)
+            })
+            close()
+          }} />
       }
     }
   }
@@ -274,6 +353,17 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <AlertDescription>
             <p className="font-medium">{t('admin:rules.issues.main_rules')}</p>
             <ul className="list-disc pl-4">{serverIssues.map((i, n) => <li key={n}>{i.message}</li>)}</ul>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {problems.length > 0 && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <ul className="list-disc pl-4">
+              {problems.slice(0, 5).map(p => <li key={p.id}>{t('admin:rules.problems.indent', { line: p.line + 1 })}</li>)}
+              {problems.length > 5 && <li>{t('admin:rules.paste.more', { count: problems.length - 5 })}</li>}
+            </ul>
           </AlertDescription>
         </Alert>
       )}
@@ -296,8 +386,8 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         )}
         {!readOnly && view === 'blocks' && (
           <span className="flex items-center gap-1">
-            <Button variant="outline" size="sm" disabled={!history.canUndo} onClick={history.undo}>{t('admin:rules.undo')}</Button>
-            <Button variant="outline" size="sm" disabled={!history.canRedo} onClick={history.redo}>{t('admin:rules.redo')}</Button>
+            <Button variant="outline" size="sm" disabled={!history.canUndo || dialog !== null} onClick={history.undo}>{t('admin:rules.undo')}</Button>
+            <Button variant="outline" size="sm" disabled={!history.canRedo || dialog !== null} onClick={history.redo}>{t('admin:rules.redo')}</Button>
           </span>
         )}
         <span className="text-xs text-muted-foreground tabular-nums">{stats}</span>
@@ -335,15 +425,15 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
                 <BlockDetail
                   key={`${current.index}:${current.target}:${current.kind}`}
                   doc={doc} block={current} choices={choices} readOnly={readOnly} query={q} phone={phone} onBack={() => setOpened(false)}
-                  onEditRow={line => setDialog({ kind: 'edit', line })}
-                  onAddRow={() => setDialog({ kind: 'add' })}
-                  onPaste={() => setDialog({ kind: 'paste', where: { kind: 'into', block: current.index } })}
-                  onImport={() => { importInto.current = current.index; fileInput.current?.click() }}
-                  onDeleteRows={lines => { apply(d => deleteLines(d, lines)); setAnnounce(t('admin:rules.matchers.deleted', { count: lines.length })) }}
-                  onMoveRows={lines => setDialog({ kind: 'move_rows', block: current.index, lines })}
-                  onRetarget={target => apply(d => retargetLines(d, range(current.ruleStart, current.end), target))}
-                  onSetNote={text => apply((d, bl) => setNote(d, bl[current.index], text))}
-                  onEditText={(start, end) => setDialog({ kind: 'text', start, end })}
+                  onEditRow={id => setDialog({ kind: 'edit', id })}
+                  onAddRow={() => setDialog({ kind: 'add', block: firstLineId(current) })}
+                  onPaste={() => setDialog({ kind: 'paste', where: { kind: 'into', block: firstLineId(current) } })}
+                  onImport={() => { importInto.current = firstLineId(current); fileInput.current?.click() }}
+                  onDeleteRows={ids => { if (run(d => { const at = indexesOf(d, ids); return at ? deleteLines(d, at) : null })) setAnnounce(t('admin:rules.matchers.deleted', { count: ids.length })) }}
+                  onMoveRows={ids => setDialog({ kind: 'move_rows', block: firstLineId(current), ids })}
+                  onRetarget={target => { const id = firstLineId(current); run((d, bl) => { const hit = blockOfLine(d, bl, id); return hit ? retargetLines(d, range(hit.ruleStart, hit.end), target) : null }) }}
+                  onSetNote={text => { const id = firstLineId(current); run((d, bl) => { const hit = blockOfLine(d, bl, id); return hit ? setNote(d, hit, text) : null }) }}
+                  onEditText={ids => setDialog({ kind: 'text', ids })}
                 />
               ) : blocks.length > 0 ? <p className="text-sm text-muted-foreground">{t('admin:rules.blocks.select_hint')}</p> : null}
             </div>

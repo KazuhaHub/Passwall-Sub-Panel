@@ -5,65 +5,72 @@ import { parseDoc, serializeDoc, type Doc } from '@/utils/ruleset/parse'
 const HISTORY = 60
 
 /**
- * The structured view's hold on the draft: `content` is the one source of truth (it is what is saved), the document
- * and its groups are read from it, and every structured edit is a function from document to document whose result is
- * written back as text. Each edit is one step of the undo history (design 3.12 item 8); text mode has CodeMirror's own
- * history, so a whole stretch in text mode counts as one step here (`beginText` / `endText`).
+ * The structured view's hold on the draft. `content` is the one source of truth (it is what is saved); the DOCUMENT read
+ * from it is kept alongside, because lines carry ids that must survive edits (selections and open dialogs name lines by
+ * id). While `content` is what the last edit produced, the kept document is used as it is; any other content (the text
+ * view typed into, a discard, a restore) is read afresh and its lines get new ids.
  *
- * The two stacks live in refs (an updater function must stay pure, and a step must not run twice) with a counter to
- * redraw the buttons that read them.
+ * Every structured edit is a function from document to document and one step of the undo history, which holds documents,
+ * not text, so undoing brings back the old ids with the old lines (design 3.12 item 8). Text mode has CodeMirror's own
+ * history: a whole stretch in text mode is one step here (`beginText` / `endText`).
+ *
+ * The stacks live in refs (a step must not run twice) with a counter to redraw the buttons that read them.
  */
 export function useRuleDoc(content: string, setContent: (next: string) => void) {
-  const doc = useMemo(() => parseDoc(content), [content])
+  const kept = useRef<{ content: string; doc: Doc }>({ content, doc: parseDoc(content) })
+  if (kept.current.content !== content) kept.current = { content, doc: parseDoc(content) }
+  const doc = kept.current.doc
   const blocks = useMemo(() => buildBlocks(doc), [doc])
-  const past = useRef<string[]>([])
-  const future = useRef<string[]>([])
+  const past = useRef<Doc[]>([])
+  const future = useRef<Doc[]>([])
   const [, redraw] = useState(0)
-  const live = useRef(content)
-  live.current = content
 
-  const remember = (text: string) => { past.current = [...past.current.slice(-(HISTORY - 1)), text] }
+  const remember = (d: Doc) => { past.current = [...past.current.slice(-(HISTORY - 1)), d] }
+  const show = (d: Doc) => {
+    const text = serializeDoc(d)
+    kept.current = { content: text, doc: d }
+    setContent(text)
+    redraw(n => n + 1)
+  }
 
-  /** Applies an edit; false when it changed nothing. */
+  /** Applies an edit to the document as it is now; false when it changed nothing. */
   const apply = useCallback((edit: (doc: Doc, blocks: Block[]) => Doc): boolean => {
-    const before = live.current
-    const d = parseDoc(before)
-    const next = serializeDoc(edit(d, buildBlocks(d)))
-    if (next === before) return false
+    const before = kept.current.doc
+    const next = edit(before, buildBlocks(before))
+    if (next === before || serializeDoc(next) === kept.current.content) return false
     remember(before)
     future.current = []
-    live.current = next
-    setContent(next)
-    redraw(n => n + 1)
+    show(next)
     return true
+    // `show` only touches refs and the stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContent])
 
   const undo = useCallback(() => {
     const prev = past.current[past.current.length - 1]
-    if (prev === undefined) return
+    if (!prev) return
     past.current = past.current.slice(0, -1)
-    future.current = [live.current, ...future.current]
-    live.current = prev
-    setContent(prev)
-    redraw(n => n + 1)
+    future.current = [kept.current.doc, ...future.current]
+    show(prev)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContent])
 
   const redo = useCallback(() => {
     const [next, ...rest] = future.current
-    if (next === undefined) return
+    if (!next) return
     future.current = rest
-    remember(live.current)
-    live.current = next
-    setContent(next)
-    redraw(n => n + 1)
+    remember(kept.current.doc)
+    show(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContent])
 
-  const textStart = useRef<string | null>(null)
-  const beginText = useCallback(() => { textStart.current = live.current }, [])
+  const textStart = useRef<Doc | null>(null)
+  const beginText = useCallback(() => { textStart.current = kept.current.doc }, [])
   const endText = useCallback(() => {
     const start = textStart.current
     textStart.current = null
-    if (start !== null && start !== live.current) { remember(start); future.current = []; redraw(n => n + 1) }
+    if (start && serializeDoc(start) !== kept.current.content) { remember(start); future.current = []; redraw(n => n + 1) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return { doc, blocks, apply, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0, beginText, endText }

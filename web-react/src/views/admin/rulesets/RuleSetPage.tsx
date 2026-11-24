@@ -24,6 +24,7 @@ import { IconCopy, IconDelete } from '@/lib/icons'
 import { ruleKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
+import { parseDoc, problemsOf } from '@/utils/ruleset/parse'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './actions'
@@ -89,7 +90,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const dirty = !readOnly && !sameRuleSet(form, baseline)
   useObjectLeaveGuard({ dirty, copy: discardChangesConfirm(t), bypass: leaving })
 
-  const slugTaken = !editing && existingSlugs.includes(form.slug)
+  // Slugs are file names, and the file system may fold case: `Custom` would overwrite `custom`.
+  const slugTaken = !editing && existingSlugs.some(s => s.toLowerCase() === form.slug.toLowerCase())
   const slugReserved = !editing && isReservedSlug(form.slug)
   const slugError = attempted && !form.slug ? t('admin:rules.validate.slug_name_required')
     : attempted && slugTaken ? t('admin:rules.validate.slug_exists', { slug: form.slug })
@@ -118,6 +120,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     // The server refuses a larger body in a middleware, with nothing the person could act on; say it here, before any request.
     const size = bytesOf(form)
     if (size > MAX_BODY_BYTES) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(MAX_BODY_BYTES) })); return }
+    // The server would read some lines differently from the editor (an item indented differently from the list): say which, write nothing.
+    const bad = problemsOf(parseDoc(form.content))
+    if (bad.length > 0) { changeTab('rules'); warn(t('admin:rules.problems.indent', { line: bad[0].line + 1 })); return }
+    // From here the editor is locked (`pending`) until the answer is in, so nothing typed meanwhile is overwritten by the response or reported as saved.
     setPending(true)
     try {
       let draft = form
@@ -264,6 +270,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         {/* A dialog opened from inside the page is portaled out of the DOM but not out of React's tree, so ITS submit
             reaches this handler too: only this form's own submit saves the rule set. */}
         <form onSubmit={e => { e.preventDefault(); if (e.target === e.currentTarget) void save() }} noValidate>
+          {/* A disabled fieldset switches off every native control inside it: the members, sub-rule and Rematch editors while a save runs. */}
+          <fieldset disabled={pending} className="min-w-0 border-0 p-0">
           <Tabs value={tab} onValueChange={v => changeTab(v as Tab)}>
             <div className="max-w-full overflow-x-auto">
               <TabsList>
@@ -276,7 +284,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
             </div>
             {/* The rules and the basics stay built while another tab is shown (the text and the history are in them); the three that ask the server as they open are built only when shown, as the sheet's were. */}
             <TabsContent value="rules" keepMounted>
-              <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly}
+              <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
@@ -304,9 +312,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               <MihomoAdvancedRulesEditor part="rematches" value={form} onChange={setForm} revealRematchIssues={rematchSeen} />
             </TabsContent>
             <TabsContent value="basics" keepMounted>
-              <BasicsTab form={form} setForm={setForm} editing={editing} readOnly={readOnly} slugError={slugError} nameError={nameError} usedBy={usedBy} />
+              <BasicsTab form={form} setForm={setForm} editing={editing} readOnly={readOnly || pending} slugError={slugError} nameError={nameError} usedBy={usedBy} />
             </TabsContent>
           </Tabs>
+          </fieldset>
           {!readOnly && (
             <SaveBar dirty={dirty} pending={pending} onSave={() => void save()}
               onDiscard={() => { setForm(cloneRuleSet(editing ? baseline : seed)); setAttempted(false); setRematchSeen(false); setRuleIssues([]); setRev(r => r + 1) }} />

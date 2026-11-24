@@ -1,6 +1,7 @@
 import type { Block } from './blocks'
 import type { Doc } from './parse'
 import { fieldSpans } from './parse'
+import { canWriteField, type FieldProblem } from './scalar'
 import { isIPv4, isIPv6 } from './validate'
 import { KNOWN_TYPES, RULE_OPTIONS, SIMPLE_TYPES } from './types'
 
@@ -16,7 +17,7 @@ export interface PasteEntry {
   value: string
   options: string[]
   /** 'wildcard': `*.x` read as a suffix, which also matches `x` itself. 'url_host': the host name taken from a URL. */
-  note?: 'wildcard' | 'url_host'
+  note?: 'wildcard' | 'url_host' | 'comment'
   /** 1-based line of the input. */
   line: number
 }
@@ -28,6 +29,8 @@ export interface PasteScan {
   /** Rule lines that named a target of their own, which is dropped in favour of the group's. */
   ignoredTarget: number
   unrecognized: { line: number; text: string }[]
+  /** Read as a rule but not writable as one (a quote, a ` #`...): never added, with the reason. */
+  rejected: { line: number; text: string; reason: FieldProblem }[]
 }
 
 const DOMAIN_RE = /^(?=.{1,253}$)[^\s,/:#\\|^*+@?[\]()'"<>]+(\.[^\s,/:#\\|^*+@?[\]()'"<>]+)+$/u
@@ -40,6 +43,15 @@ function readLine(text: string, line: number, bare: BareDomainType): { entry?: P
   // A provider file lists its items as `- 'x'`.
   let s = text.trim().replace(/^-\s+/, '')
   s = s.replace(/^(['"])(.*)\1$/, '$2').trim()
+  // A trailing ` # comment` is a comment in the list's YAML, not part of the value: drop it and say so.
+  const hash = s.search(/\s#/)
+  const commented = hash >= 0
+  if (commented) s = s.slice(0, hash).trim()
+  const done = (r: ReturnType<typeof readLine>) => (commented && r.entry && !r.entry.note ? { ...r, entry: { ...r.entry, note: 'comment' as const } } : r)
+  return done(readStripped(s, line, bare))
+}
+
+function readStripped(s: string, line: number, bare: BareDomainType): { entry?: PasteEntry; ignoredTarget?: boolean; unrecognized?: boolean } {
 
   // A full rule line: its type is one the panel knows.
   const comma = s.indexOf(',')
@@ -85,16 +97,21 @@ function readLine(text: string, line: number, bare: BareDomainType): { entry?: P
 }
 
 export function scanPaste(text: string, bare: BareDomainType = 'DOMAIN-SUFFIX'): PasteScan {
-  const out: PasteScan = { entries: [], comments: 0, ignoredTarget: 0, unrecognized: [] }
+  const out: PasteScan = { entries: [], comments: 0, ignoredTarget: 0, unrecognized: [], rejected: [] }
   const rows = text.split(/\r\n|\r|\n/)
   // The empty piece after a final newline is not a blank line the person wrote.
   if (rows.length > 0 && rows[rows.length - 1] === '') rows.pop()
   rows.forEach((raw, i) => {
     const s = raw.trim()
     if (s === '' || s.startsWith('#')) { out.comments++; return }
-    if (/^payload:\s*$/i.test(s)) return
+    if (/^(payload|rules):\s*$/i.test(s)) return
     const r = readLine(raw, i + 1, bare)
-    if (r.entry) { out.entries.push(r.entry); if (r.ignoredTarget) out.ignoredTarget++ } else out.unrecognized.push({ line: i + 1, text: s })
+    if (!r.entry) { out.unrecognized.push({ line: i + 1, text: s }); return }
+    // One decision for what a line may carry: the model's (scalar.ts), the same the writer applies.
+    const bad = canWriteField(r.entry.value)
+    if (bad) { out.rejected.push({ line: i + 1, text: s, reason: bad }); return }
+    out.entries.push(r.entry)
+    if (r.ignoredTarget) out.ignoredTarget++
   })
   return out
 }

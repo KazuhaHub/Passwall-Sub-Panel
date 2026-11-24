@@ -11,12 +11,16 @@ const NEW = '\u0000new'
 
 /**
  * Where a rule sends traffic (design 3.4): the existing proxy groups, the built-in outbounds with what each does, and
- * the Rematch outbounds, plus a deliberate "New proxy group…" that asks for a name and checks it. `onChange` is told
- * only about a target that is usable, so a half-typed new name never reaches the caller.
+ * the Rematch outbounds, plus a deliberate "New proxy group…" that asks for a name and checks it.
+ *
+ * `onChange` reports what the control holds RIGHT NOW: the chosen target, or null when it holds none (nothing picked yet,
+ * or a new name that is empty or not usable). It is called on every change, never only when the value is valid, so the
+ * caller can never keep a target from an earlier state; a caller turns null into a disabled confirm button.
+ * The name reported is exactly the name typed, trimmed.
  */
 export function TargetSelect({ value, onChange, choices, label, allowNew = true, disabled }: {
   value: string
-  onChange: (target: string) => void
+  onChange: (target: string | null) => void
   choices: TargetChoices
   label: string
   allowNew?: boolean
@@ -24,7 +28,7 @@ export function TargetSelect({ value, onChange, choices, label, allowNew = true,
 }) {
   const { t } = useTranslation(['admin'])
   // What the select shows is its own state: the caller applies a change later (a button says what it will do), so
-  // `value` stays the current target meanwhile.
+  // `value` is only where it starts.
   const [shown, setShown] = useState(value)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
@@ -38,7 +42,7 @@ export function TargetSelect({ value, onChange, choices, label, allowNew = true,
           value={creating ? NEW : shown}
           disabled={disabled}
           onChange={e => {
-            if (e.target.value === NEW) { setCreating(true); return }
+            if (e.target.value === NEW) { setCreating(true); onChange(newGroupNameProblem(name, choices) === null ? name.trim() : null); return }
             setCreating(false)
             setShown(e.target.value)
             onChange(e.target.value)
@@ -64,14 +68,14 @@ export function TargetSelect({ value, onChange, choices, label, allowNew = true,
         </NativeSelect>
       </Field>
       {creating && (
-        <Field label={t('admin:rules.target.new_group_name')} error={name !== '' && problem ? t(`admin:rules.target.${problem}`) : undefined}>
+        <Field label={t('admin:rules.target.new_group_name')} errorBlocksSave={false} error={problem ? t(`admin:rules.target.${problem}`) : undefined}>
           <Input
             value={name}
             autoFocus
             onChange={e => {
               const next = e.target.value
               setName(next)
-              if (newGroupNameProblem(next, choices) === null) onChange(next.trim())
+              onChange(newGroupNameProblem(next, choices) === null ? next.trim() : null)
             }}
           />
         </Field>

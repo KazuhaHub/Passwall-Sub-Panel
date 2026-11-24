@@ -43,8 +43,8 @@ export function BlockDirectory({ doc, blocks, shown, hits, selected, onSelect, r
         id: 'group', header: t('admin:rules.blocks.title'), enableSorting: false, meta: { hideable: false, label: t('admin:rules.blocks.title'), className: 'max-w-0 overflow-hidden' },
         cell: ({ row }) => {
           const b = row.original
-          const note = b.kind === 'rules' ? noteOf(doc, b).split('\n')[0] : ''
-          const name = b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.target || '—'
+          const note = b.kind !== 'text' ? noteOf(doc, b).split('\n')[0] : ''
+          const name = b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.kind === 'notarget' ? t('admin:rules.blocks.no_target') : b.target
           return (
             <div className="flex min-w-0 flex-col" title={note ? `${name}\n${note}` : name}>
               <span className="flex min-w-0 items-center gap-1.5">
@@ -86,7 +86,7 @@ export function BlockDirectory({ doc, blocks, shown, hits, selected, onSelect, r
     data: shown,
     columns,
     getRowId: (b: Block) => String(b.index),
-    rowLabel: (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.target),
+    rowLabel: (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.kind === 'notarget' ? t('admin:rules.blocks.no_target') : b.target),
     onRowOpen: (b: Block) => onSelect(b.index),
     activeRowId: String(selected),
     columnMenu: false,

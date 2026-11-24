@@ -60,7 +60,8 @@ export function RuleEditDialog({ mode, groupName, initial, onSubmit, onClose }: 
       }}
     >
       <Field label={t('admin:rules.matchers.col_type')} hint={singboxSupports(type) ? t('admin:rules.matchers.support_both') : t('admin:rules.matchers.support_mihomo')}>
-        <NativeSelect value={type} onChange={e => {
+        {/* The type keeps the spelling it had (`domain` stays `domain`) unless it is changed here; the select shows its canonical name. */}
+        <NativeSelect value={listed.includes(upper) ? upper : type} onChange={e => {
           const next = e.target.value
           setType(next)
           // A new address rule starts with "do not resolve", as every address rule of the seeded set has it.

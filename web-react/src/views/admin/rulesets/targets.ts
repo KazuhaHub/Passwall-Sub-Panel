@@ -1,4 +1,5 @@
 import type { Block } from '@/utils/ruleset/blocks'
+import { canWriteField } from '@/utils/ruleset/scalar'
 import { BUILTIN_TARGETS } from '@/utils/ruleset/types'
 
 export interface TargetChoices {
@@ -25,8 +26,9 @@ export function targetChoices(blocks: readonly Block[], order: readonly string[]
 
 /** Why a new group name cannot be used, as a locale key, or null. Same rules as the backend's validateMihomoSymbol plus "not taken". */
 export function newGroupNameProblem(name: string, choices: TargetChoices): 'name_invalid' | 'name_taken' | null {
-  if (name.trim() === '' || /[,\r\n]/.test(name)) return 'name_invalid'
   const n = name.trim()
+  // Whatever the model would not write into a line is not a name either (a ` #`, a quote...).
+  if (canWriteField(n) || /^(no-resolve|src)$/i.test(n)) return 'name_invalid'
   if (choices.groups.includes(n) || choices.rematch.includes(n) || BUILTIN.has(n)) return 'name_taken'
   return null
 }

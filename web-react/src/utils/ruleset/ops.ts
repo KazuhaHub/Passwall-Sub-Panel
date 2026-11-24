@@ -1,5 +1,6 @@
 import type { Block } from './blocks'
-import { parseDoc, parseLine, scanRule, targetIndex, type Doc, type Line, type Span } from './parse'
+import { canWriteField } from './scalar'
+import { listIndent, makeDoc, scanRule, targetIndex, type Doc, type Line, type Span } from './parse'
 
 /**
  * Every edit the editor can make, as a pure function from document to document. The rule that matters (design 3.12,
@@ -20,32 +21,35 @@ export interface RuleStyle {
   cr: '' | '\r'
 }
 
+/**
+ * How lines written at `at` look: the list's indent, and CRLF when the document uses it. The one place CRLF is not
+ * written is a line that becomes the unterminated last line of a document with no final newline.
+ */
 export function styleNear(doc: Doc, at: number): RuleStyle {
-  const probe = (i: number): RuleStyle | null => {
-    const line = doc.lines[i]
-    if (!line) return null
-    const scan = line.kind === 'rule' ? scanRule(line.raw) : null
-    return { indent: scan?.indent ?? '', cr: line.raw.endsWith('\r') ? '\r' : '' }
-  }
-  for (let d = 0; d < doc.lines.length; d++) {
-    for (const i of [at - 1 - d, at + d]) {
-      const line = doc.lines[i]
-      if (line?.kind === 'rule') return probe(i)!
-    }
-  }
-  return { indent: '', cr: '' }
+  const terminated = doc.trailingNewline || at < doc.lines.length
+  const lastBare = doc.trailingNewline ? doc.lines.length : doc.lines.length - 1
+  const crlf = doc.lines.slice(0, lastBare).some(l => l.raw.endsWith('\r'))
+  return { indent: listIndent(doc) ?? '', cr: crlf && terminated ? '\r' : '' }
 }
 
 export function formatRule(rule: NewRule, target: string, style: RuleStyle): string {
+  const bad = canWriteField(rule.type) ?? canWriteField(rule.value) ?? canWriteField(target)
+  if (bad) throw new Error(`cannot write rule field (${bad})`)
   return `${style.indent}- ${rule.type},${rule.value},${target}${(rule.options ?? []).map(o => ',' + o).join('')}${style.cr}`
 }
 
-function splice(doc: Doc, start: number, remove: number, insert: Line[]): Doc {
-  const lines = doc.lines.slice()
+type Raw = { raw: string; id?: number }
+
+/** Every edit ends here: the lines are read again as a whole (the kind of a line depends on the list's indent), ids kept. */
+function build(doc: Doc, lines: readonly Raw[], trailingNewline = doc.trailingNewline): Doc {
+  return makeDoc(lines, trailingNewline)
+}
+
+function splice(doc: Doc, start: number, remove: number, insert: readonly Raw[]): Doc {
+  const lines: Raw[] = doc.lines.slice()
   lines.splice(start, remove, ...insert)
   // A document that had no lines ends with a newline once it has some, like every list a person saves.
-  const trailingNewline = doc.lines.length === 0 && insert.length > 0 ? true : doc.trailingNewline
-  return { lines, trailingNewline }
+  return build(doc, lines, doc.lines.length === 0 && insert.length > 0 ? true : doc.trailingNewline)
 }
 
 const trimmed = (raw: string, s: Span): Span => {
@@ -82,7 +86,7 @@ export function rewriteRule(raw: string, patch: RulePatch): string {
     }
   }
   const replace = (index: number, value: string | undefined) => {
-    if (value === undefined || index >= fields.length || fields[index] === value) return
+    if (value === undefined || index < 0 || index >= fields.length || fields[index] === value) return
     const s = trimmed(raw, spans[index])
     out = out.slice(0, s.start) + value + out.slice(s.end)
   }
@@ -93,21 +97,22 @@ export function rewriteRule(raw: string, patch: RulePatch): string {
   return out
 }
 
-/** Rewrites the target of a rule line wherever the backend finds it (the last real field; MATCH's second). */
+/** Rewrites the target of a rule line in the field the backend reads it from (targetIndex). A line with no target field is left alone. */
 function retargetRaw(raw: string, target: string): string {
-  const line = parseLine(raw)
+  if (canWriteField(target)) throw new Error('cannot aim a rule at an empty or unwritable target')
   const scan = scanRule(raw)
-  if (!scan || !line.rule || line.rule.target === '' || line.rule.target === target) return raw
-  const index = scan.fields.lastIndexOf(line.rule.target)
+  if (!scan) return raw
+  const index = targetIndex(scan.fields)
+  if (index < 0 || scan.fields[index] === target) return raw
   const s = trimmed(raw, scan.spans[index])
   return raw.slice(0, s.start) + target + raw.slice(s.end)
 }
 
 function replaceLine(doc: Doc, i: number, raw: string): Doc {
   if (doc.lines[i].raw === raw) return doc
-  const lines = doc.lines.slice()
-  lines[i] = parseLine(raw)
-  return { ...doc, lines }
+  const lines: Raw[] = doc.lines.slice()
+  lines[i] = { raw, id: doc.lines[i].id }
+  return build(doc, lines)
 }
 
 export function editRule(doc: Doc, line: number, patch: RulePatch): Doc {
@@ -115,13 +120,13 @@ export function editRule(doc: Doc, line: number, patch: RulePatch): Doc {
 }
 
 export function retargetLines(doc: Doc, lines: readonly number[], target: string): Doc {
-  const out = doc.lines.slice()
+  const out: Raw[] = doc.lines.slice()
   let changed = false
   for (const i of lines) {
     const next = retargetRaw(out[i].raw, target)
-    if (next !== out[i].raw) { out[i] = parseLine(next); changed = true }
+    if (next !== out[i].raw) { out[i] = { raw: next, id: out[i].id }; changed = true }
   }
-  return changed ? { ...doc, lines: out } : doc
+  return changed ? build(doc, out) : doc
 }
 
 export function renameTarget(doc: Doc, from: string, to: string): { doc: Doc; changed: number } {
@@ -132,13 +137,13 @@ export function renameTarget(doc: Doc, from: string, to: string): { doc: Doc; ch
 export function insertRules(doc: Doc, at: number, rules: readonly NewRule[], target: string): Doc {
   if (rules.length === 0) return doc
   const style = styleNear(doc, at)
-  return splice(doc, at, 0, rules.map(r => parseLine(formatRule(r, target, style))))
+  return splice(doc, at, 0, rules.map(r => ({ raw: formatRule(r, target, style) })))
 }
 
 export function deleteLines(doc: Doc, lines: readonly number[]): Doc {
   if (lines.length === 0) return doc
   const drop = new Set(lines)
-  return { ...doc, lines: doc.lines.filter((_, i) => !drop.has(i)) }
+  return build(doc, doc.lines.filter((_, i) => !drop.has(i)))
 }
 
 /** Removes `lines` and inserts the given lines at `at` (an index in the document BEFORE the removal). */
@@ -150,7 +155,7 @@ function relocate(doc: Doc, lines: readonly number[], at: number, make: (moved: 
   const rest = doc.lines.filter((_, i) => !drop.has(i))
   const lines2 = rest.slice()
   lines2.splice(at - before, 0, ...make(moved))
-  return { ...doc, lines: lines2 }
+  return build(doc, lines2)
 }
 
 const span = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i)
@@ -188,9 +193,9 @@ export function moveLinesToNewBlock(doc: Doc, blocks: readonly Block[], lines: r
 }
 
 /** Writes `text` as comment lines, one per line, in the style of the document. */
-function noteLines(text: string, style: RuleStyle): Line[] {
+function noteLines(text: string, style: RuleStyle): Raw[] {
   if (text.trim() === '') return []
-  return text.replace(/\r\n?/g, '\n').split('\n').map(l => parseLine(`${style.indent}# ${l}`.trimEnd() + style.cr))
+  return text.replace(/\r\n?/g, '\n').split('\n').map(l => ({ raw: `${style.indent}# ${l}`.trimEnd() + style.cr }))
 }
 
 export function setNote(doc: Doc, block: Block, text: string): Doc {
@@ -207,7 +212,7 @@ export function deleteBlock(doc: Doc, block: Block): Doc {
 export function newBlock(doc: Doc, blocks: readonly Block[], before: number, target: string, rules: readonly NewRule[], note = ''): Doc {
   const at = slot(doc, blocks, before)
   const style = styleNear(doc, at)
-  const lines = [...noteLines(note, style), ...rules.map(r => parseLine(formatRule(r, target, style)))]
+  const lines = [...noteLines(note, style), ...rules.map(r => ({ raw: formatRule(r, target, style) }))]
   return splice(doc, at, 0, lines)
 }
 
@@ -226,8 +231,20 @@ export function mergeBlocks(doc: Doc, blocks: readonly Block[], i: number): Doc 
   return splice(doc, blocks[i].end, blocks[i + 1].ruleStart - blocks[i].end, [])
 }
 
-/** Replaces the lines [start, end) with `text`, read again (the "edit as text" of a few lines). */
+/**
+ * Replaces the lines [start, end) with `text`, read again (the "edit as text" of a few lines). List items in it are
+ * brought to the list's indent (a snippet copied from a Clash config is indented two spaces), and take the document's
+ * line ending. Whole-document edits in the text view are not normalised here: CodeMirror hands over its own text, and a
+ * line it leaves at another indent is flagged and blocks the save instead.
+ */
 export function replaceRange(doc: Doc, start: number, end: number, text: string): Doc {
-  const fresh = text === '' ? [] : parseDoc(text.replace(/\n$/, '')).lines
+  const raws = text === '' ? [] : text.replace(/\r$/, '').split('\n').map(l => l.replace(/\r$/, ''))
+  const rest = { lines: [...doc.lines.slice(0, start), ...doc.lines.slice(end)] }
+  const indent = listIndent(rest) ?? listIndent({ lines: raws.map(raw => ({ raw })) as Line[] }) ?? ''
+  const style = styleNear(doc, end)
+  const fresh = raws.map(raw => {
+    const m = /^( *)(-(?: .*)?)$/.exec(raw)
+    return { raw: (m && m[1] !== indent ? indent + m[2] : raw) + style.cr }
+  })
   return splice(doc, start, end - start, fresh)
 }

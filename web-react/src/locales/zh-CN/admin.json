@@ -2145,7 +2145,13 @@
       "value_space": "域名不能包含空格",
       "value_cidr": "请输入有效的地址或地址段，例如 10.0.0.0/8",
       "value_port": "请输入不超过 65535 的端口，或形如 1000-2000 的范围",
-      "value_network": "请填写 tcp 或 udp"
+      "value_network": "请填写 tcp 或 udp",
+      "unsafe_comment": "空格加 # 在列表中表示注释，不能出现在匹配内容中",
+      "unsafe_colon": "冒号加空格不能出现在匹配内容中",
+      "unsafe_quote": "匹配内容中不能含有引号",
+      "unsafe_template": "匹配内容中不能含有 {{ }}",
+      "unsafe_indicator": "匹配内容不能以这个字符开头",
+      "unsafe_parens": "括号必须成对"
     },
     "toast": {
       "saved": "已保存",
@@ -2234,7 +2240,8 @@
       "select_hint": "在左侧选择一个分组",
       "back": "返回分组列表",
       "matchers": "{{target}} 的规则",
-      "menu": "第 {{index}} 组的操作"
+      "menu": "第 {{index}} 组的操作",
+      "no_target": "没有目标的行"
     },
     "target": {
       "groups": "代理组",
@@ -2340,7 +2347,23 @@
       "more": "另有 {{count}} 条",
       "submit": "添加 {{count}} 条",
       "added": "已添加 {{count}} 条",
-      "file_too_large": "文件超过 {{size}}，请拆分后导入"
+      "file_too_large": "文件超过 {{size}}，请拆分后导入",
+      "uses_target": "添加到：{{target}}",
+      "needs_target": "请为新分组选择目标。",
+      "rejected": "{{count}} 行无法写成规则，不会添加",
+      "comment_stripped": "{{count}} 行末尾带有注释，已去掉",
+      "reason": {
+        "empty": "为空",
+        "comma": "含有逗号",
+        "newline": "含有换行",
+        "space_edge": "以空格开头或结尾",
+        "comment": "含有注释（\" #\"）",
+        "colon": "含有冒号加空格",
+        "quote": "含有引号",
+        "template": "含有 {{ }}",
+        "indicator": "以有特殊含义的字符开头",
+        "parens": "括号不成对"
+      }
     },
     "move": {
       "title": "移动到…",
@@ -2370,6 +2393,11 @@
       "removed_line": "删除：",
       "kept_line": "未更改：",
       "truncated": "另有 {{count}} 处更改未显示。"
+    },
+    "stale_line": "这一行在你选择之后已经变化，所以没有写入任何内容。请重新选择。",
+    "slug_unreachable": "标识「{{slug}}」是保留的，所以这个规则集没有页面。仍可在此删除。",
+    "problems": {
+      "indent": "第 {{line}} 行的缩进与列表中其余各行不同，服务器会错误地读取这份列表。请在文本视图中修正它的缩进。"
     }
   },
   "nodes": {

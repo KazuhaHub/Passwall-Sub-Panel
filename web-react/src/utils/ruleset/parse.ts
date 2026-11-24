@@ -32,14 +32,28 @@ export interface RuleInfo {
 }
 
 export interface Line {
+  /**
+   * Who this line is, for as long as the document lives: assigned when the line is first read, carried by every edit
+   * that keeps the line (a rewrite, a move) and never reused. Selections and open dialogs name lines by id, because a
+   * line's index changes with every edit above it; an id that is gone means the line is gone.
+   */
+  id: number
   /** The line as it was, including a trailing `\r` when the document uses CRLF. Never contains `\n`. */
   raw: string
   kind: LineKind
   rule?: RuleInfo
+  /**
+   * 'indent': the line looks like a list item but is indented differently from the first one. The backend reads the
+   * content as a YAML sequence, where such a line is folded into the previous entry or ends the list, so it is not a
+   * rule however it looks, and a save with one is refused.
+   */
+  problem?: 'indent'
 }
 
 export interface Doc {
   lines: Line[]
+  /** The indent of the list: that of the first item (see `listIndent`). null when there is no item. */
+  indent: string | null
   /** The text ended with a newline (the last element of `split('\n')` was empty). */
   trailingNewline: boolean
 }
@@ -133,22 +147,63 @@ function ruleOf(scan: RuleScan): RuleInfo {
   return { type, value: fields[1] ?? '', target, options, fields, known: KNOWN_TYPES.has(upper), structured }
 }
 
-export function parseLine(raw: string): Line {
-  if (raw.trim() === '') return { raw, kind: 'blank' }
-  if (raw.trimStart().startsWith('#')) return { raw, kind: 'comment' }
+let nextId = 1
+const newId = () => nextId++
+
+const ITEM_RE = /^( *)-(?: |$)/
+
+/**
+ * The indent of the list. The backend reads `content` as a YAML sequence (parseRuleSequence in
+ * internal/service/render/mihomo_advanced.go, yaml.Unmarshal into []string): the first item fixes the indent, an item
+ * indented more is not an item but a continuation of the scalar before it, and one indented less ends the list.
+ */
+export function listIndent(doc: Pick<Doc, 'lines'>): string | null {
+  for (const l of doc.lines) {
+    const m = ITEM_RE.exec(l.raw)
+    if (m) return m[1]
+  }
+  return null
+}
+
+function derive(raw: string, id: number, indent: string | null): Line {
+  if (raw.trim() === '') return { id, raw, kind: 'blank' }
+  if (raw.trimStart().startsWith('#')) return { id, raw, kind: 'comment' }
+  const item = ITEM_RE.exec(raw)
+  if (item && indent !== null && item[1] !== indent) return { id, raw, kind: 'text', problem: 'indent' }
   const scan = scanRule(raw)
-  return scan ? { raw, kind: 'rule', rule: ruleOf(scan) } : { raw, kind: 'text' }
+  return scan ? { id, raw, kind: 'rule', rule: ruleOf(scan) } : { id, raw, kind: 'text' }
+}
+
+/** One line on its own (no list to compare the indent with). */
+export function parseLine(raw: string, indent: string | null = null, id: number = newId()): Line {
+  return derive(raw, id, indent)
+}
+
+/**
+ * Builds a document from lines (keeping the ids of those that have one). The kind of a line depends on the whole list
+ * (its indent), so every edit comes back through here.
+ */
+export function makeDoc(lines: readonly { raw: string; id?: number }[], trailingNewline: boolean): Doc {
+  const indent = listIndent({ lines: lines as Line[] })
+  return { lines: lines.map(l => derive(l.raw, l.id ?? newId(), indent)), indent, trailingNewline }
 }
 
 export function parseDoc(text: string): Doc {
-  if (text === '') return { lines: [], trailingNewline: false }
+  if (text === '') return { lines: [], indent: null, trailingNewline: false }
   const parts = text.split('\n')
   const trailingNewline = parts[parts.length - 1] === ''
   if (trailingNewline) parts.pop()
-  return { lines: parts.map(parseLine), trailingNewline }
+  return makeDoc(parts.map(raw => ({ raw })), trailingNewline)
 }
 
 export function serializeDoc(doc: Doc): string {
   const body = doc.lines.map(l => l.raw).join('\n')
   return doc.trailingNewline ? body + '\n' : body
+}
+
+/** Lines the server would read differently from the editor; saving with any is refused. */
+export function problemsOf(doc: Doc): { line: number; id: number; kind: 'indent' }[] {
+  const out: { line: number; id: number; kind: 'indent' }[] = []
+  doc.lines.forEach((l, i) => { if (l.problem) out.push({ line: i, id: l.id, kind: l.problem }) })
+  return out
 }

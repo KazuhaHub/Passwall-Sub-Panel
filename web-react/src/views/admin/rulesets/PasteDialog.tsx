@@ -37,7 +37,8 @@ export function PasteDialog({ where, doc, blocks, choices, initialText = '', onS
   const [text, setText] = useState(initialText)
   const [bare, setBare] = useState<BareDomainType>('DOMAIN-SUFFIX')
   const [checkedText, setCheckedText] = useState<string | null>(initialText ? initialText : null)
-  const [target, setTarget] = useState('')
+  // The group's target as the picker holds it right now: null until a usable one is chosen (new groups only).
+  const [target, setTarget] = useState<string | null>(null)
   const into = where.kind === 'into' ? blocks[where.block] : null
   const groupName = into ? into.target : t('admin:rules.paste.new_group_title')
 
@@ -48,7 +49,7 @@ export function PasteDialog({ where, doc, blocks, choices, initialText = '', onS
     return { scan, review: reviewPaste(scan.entries, doc, blocks, place) }
   }, [checkedText, bare, where, doc, blocks])
 
-  const needsTarget = where.kind === 'new' && target === ''
+  const needsTarget = where.kind === 'new' && target === null
   const count = review?.review.add.length ?? 0
   const byType = useMemo(() => {
     const m = new Map<string, number>()
@@ -56,6 +57,7 @@ export function PasteDialog({ where, doc, blocks, choices, initialText = '', onS
     return [...m]
   }, [review])
   const notes = (review?.review.add ?? []).filter(e => e.note)
+  const commented = notes.filter(e => e.note === 'comment').length
   const wildcards = notes.filter(e => e.note === 'wildcard')
   const urls = notes.filter(e => e.note === 'url_host')
 
@@ -66,17 +68,21 @@ export function PasteDialog({ where, doc, blocks, choices, initialText = '', onS
       description={groupName}
       dirty={text.trim() !== ''}
       pending={false}
+      submitDisabled={checkedText === text && (needsTarget || count === 0)}
       submitLabel={review && checkedText === text ? t('admin:rules.paste.submit', { count: count.toLocaleString() }) : t('admin:rules.paste.check')}
       onClose={onClose}
       onSubmit={() => {
         if (checkedText !== text) { setCheckedText(text); return }
         if (count === 0 || needsTarget) return
-        onSubmit(review!.review.add, target)
+        onSubmit(review!.review.add, into ? into.target : target!)
       }}
     >
       {where.kind === 'new' && (
-        <TargetSelect value={target} choices={choices} label={t('admin:rules.blocks.target')} onChange={setTarget} />
+        <TargetSelect value="" choices={choices} label={t('admin:rules.blocks.target')} onChange={setTarget} />
       )}
+      <p className="text-sm text-muted-foreground">
+        {(into ? into.target : target) ? t('admin:rules.paste.uses_target', { target: into ? into.target : target }) : t('admin:rules.paste.needs_target')}
+      </p>
       <Field label={t('admin:rules.paste.list_label')}>
         <Textarea
           className="min-h-40 font-mono text-xs"
@@ -109,9 +115,12 @@ export function PasteDialog({ where, doc, blocks, choices, initialText = '', onS
               {review.scan.comments > 0 && <li>{t('admin:rules.paste.skipped_comment', { count: review.scan.comments })}</li>}
               {review.scan.ignoredTarget > 0 && <li>{t('admin:rules.paste.ignored_target', { count: review.scan.ignoredTarget })}</li>}
               {review.scan.unrecognized.length > 0 && <li>{t('admin:rules.paste.unrecognized', { count: review.scan.unrecognized.length })}</li>}
+              {review.scan.rejected.length > 0 && <li>{t('admin:rules.paste.rejected', { count: review.scan.rejected.length })}</li>}
+              {commented > 0 && <li>{t('admin:rules.paste.comment_stripped', { count: commented })}</li>}
             </ul>
-            {review.scan.unrecognized.length > 0 && (
+            {(review.scan.unrecognized.length > 0 || review.scan.rejected.length > 0) && (
               <ul className="max-h-24 overflow-auto font-mono text-xs text-muted-foreground">
+                {review.scan.rejected.slice(0, SHOWN).map(u => <li key={`r${u.line}`} className="truncate">{u.line}: {u.text} — {t(`admin:rules.paste.reason.${u.reason}`)}</li>)}
                 {review.scan.unrecognized.slice(0, SHOWN).map(u => <li key={u.line} className="truncate">{u.line}: {u.text}</li>)}
               </ul>
             )}

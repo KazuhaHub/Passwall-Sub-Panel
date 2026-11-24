@@ -29,7 +29,7 @@ import { countLines } from './rulesets/model'
 import { RowActions } from './subscription/RowActions'
 import { RowCard } from './subscription/RowCard'
 import { StatusDot } from '@/components/common/StatusDot'
-import { legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
+import { isReservedSlug, legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
 
 const NONE: never[] = []
 
@@ -60,6 +60,11 @@ function RuleSetsList() {
   const link = useObjectLink()
   // The page opened carries this list's place (search), so its back link returns to the list the way it was left.
   const open = (to: string) => { const l = link(to); void navigate(l.to, { state: l.state }) }
+  // A rule set whose slug is `new` (in any case) cannot have a page: its address is the create page's. It stays in the list, and can be deleted from it.
+  const openRuleSet = (rs: RuleSet) => {
+    if (isReservedSlug(rs.slug)) { pushToast({ message: t('admin:rules.slug_unreachable', { slug: rs.slug }), severity: 'warning' }); return }
+    open(ruleSetPath(rs.slug))
+  }
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -146,7 +151,7 @@ function RuleSetsList() {
   }
 
   const columns = useMemo(() => ruleSetColumns({
-    t, usedBy, canConfig, busy, onEdit: rs => open(ruleSetPath(rs.slug)),
+    t, usedBy, canConfig, busy, onEdit: openRuleSet,
     menuOf,
   // The row handlers close over the lists they read; they are rebuilt with the columns when those change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,13 +188,13 @@ function RuleSetsList() {
         selectable={canConfig}
         selection={checked}
         onSelectionChange={setChecked}
-        onRowOpen={rs => open(ruleSetPath(rs.slug))}
+        onRowOpen={openRuleSet}
         rowOptions={r => ({ selectable: !seeded(r), state: busy.has(r.slug) ? 'pending' : r.enabled ? undefined : 'dimmed' })}
         renderCard={(r, ctx) => (
           <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
             status={<StatusDot tone={r.enabled ? 'success' : 'neutral'} label={t(r.enabled ? 'admin:rules.status.enabled' : 'admin:rules.status.disabled')} />}
             detail={`${t('admin:rules.table.lines')}: ${countLines(r.content)} · ${usedBy(r).join('、') || t('admin:rules.status.no_usage')}`}
-            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => open(ruleSetPath(r.slug))} menu={menuOf(r)} /> : undefined} />
+            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => openRuleSet(r)} menu={menuOf(r)} /> : undefined} />
         )}
         toolbar={(
           <FilterBar

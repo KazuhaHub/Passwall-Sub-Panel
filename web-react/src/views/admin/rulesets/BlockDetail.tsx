@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 
@@ -19,7 +19,8 @@ import { TargetSelect } from './TargetSelect'
 import type { TargetChoices } from './targets'
 
 interface Row {
-  line: number
+  /** The line's id (not its index: that changes with every edit above it). */
+  id: number
   type: string
   /** What the match column shows: the value, or for a rule the form cannot edit everything after its type. */
   shown: string
@@ -42,36 +43,48 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   query: string
   phone: boolean
   onBack: () => void
-  onEditRow: (line: number) => void
+  onEditRow: (id: number) => void
   onAddRow: () => void
   onPaste: () => void
   onImport: () => void
-  onDeleteRows: (lines: number[]) => void
-  onMoveRows: (lines: number[]) => void
+  onDeleteRows: (ids: number[]) => void
+  onMoveRows: (ids: number[]) => void
   onRetarget: (target: string) => void
   onSetNote: (text: string) => void
-  onEditText: (start: number, end: number) => void
+  onEditText: (ids: number[]) => void
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const [local, setLocal] = useState('')
   const [types, setTypes] = useState<string[]>([])
   const [checked, setChecked] = useState<Record<string, boolean>>({})
+  // The target the picker holds now (null: none, or a new name that is not usable).
   const [pending, setPending] = useState<string | null>(null)
   const [noteDraft, setNoteDraft] = useState<string | null>(null)
-  const note = block.kind === 'rules' ? noteOf(doc, block) : ''
+  const note = block.kind !== 'text' ? noteOf(doc, block) : ''
+  // A run of lines with no target is not a group traffic can be sent to: it is shown and can be edited or deleted, but nothing is added to it, pasted into it or moved out of it.
+  const noTarget = block.kind === 'notarget'
 
   const rows = useMemo<Row[]>(() => {
-    if (block.kind !== 'rules') return []
+    if (block.kind === 'text') return []
     const out: Row[] = []
     for (let i = block.ruleStart; i < block.end; i++) {
       const r = doc.lines[i].rule!
       out.push({
-        line: i, type: r.type, options: r.options, known: r.known, structured: r.structured,
+        id: doc.lines[i].id, type: r.type, options: r.options, known: r.known, structured: r.structured,
         shown: r.structured ? r.value : r.fields.slice(1).join(','),
       })
     }
     return out
   }, [doc, block])
+
+  // A selection names lines by id; the ones an edit removed are dropped from it.
+  useEffect(() => {
+    setChecked(prev => {
+      const live = new Set(rows.map(r => String(r.id)))
+      const keep = Object.fromEntries(Object.entries(prev).filter(([id, on]) => on && live.has(id)))
+      return Object.keys(keep).length === Object.keys(prev).length ? prev : keep
+    })
+  }, [rows])
 
   const needle = [query, local].map(s => s.trim().toLowerCase()).filter(Boolean)
   const shown = useMemo(() => rows.filter(r => {
@@ -89,8 +102,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   }, [rows, t])
 
   const rowMenu = (r: Row): MoreMenuItem[] => [
-    { id: 'move', label: t('admin:rules.matchers.move_to'), onSelect: () => onMoveRows([r.line]) },
-    { id: 'delete', label: t('admin:rules.matchers.delete_named', { value: r.shown }), icon: IconDelete, destructive: true, onSelect: () => onDeleteRows([r.line]) },
+    ...(noTarget ? [] : [{ id: 'move', label: t('admin:rules.matchers.move_to'), onSelect: () => onMoveRows([r.id]) }]),
+    { id: 'delete', label: t('admin:rules.matchers.delete_named', { value: r.shown }), icon: IconDelete, destructive: true, onSelect: () => onDeleteRows([r.id]) },
   ]
 
   const columns = useMemo<ColumnDef<Row, any>[]>(() => {
@@ -115,7 +128,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
         id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('admin:rules.table.actions'), className: 'w-20' },
         cell: ({ row }) => (
           <span className="inline-flex items-center justify-end gap-0.5">
-            <IconButton label={t('admin:rules.matchers.edit_named', { value: row.original.shown })} size="icon-xs" onClick={() => onEditRow(row.original.line)}><IconEdit /></IconButton>
+            <IconButton label={t('admin:rules.matchers.edit_named', { value: row.original.shown })} size="icon-xs" onClick={() => onEditRow(row.original.id)}><IconEdit /></IconButton>
             <MoreMenu items={rowMenu(row.original)} size="icon-xs" label={t('admin:rules.matchers.row_menu', { value: row.original.shown })} />
           </span>
         ),
@@ -129,7 +142,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   const range = block.kind === 'rules'
     ? (block.count === 1 ? t('admin:rules.blocks.line_single', { line: block.ruleStart + 1 }) : t('admin:rules.blocks.line_range', { from: block.ruleStart + 1, to: block.end }))
     : t('admin:rules.blocks.line_range', { from: block.start + 1, to: block.end })
-  const heading = block.kind === 'text' ? t('admin:rules.blocks.text_block', { count: block.count }) : block.target || '—'
+  const heading = block.kind === 'text' ? t('admin:rules.blocks.text_block', { count: block.count }) : noTarget ? t('admin:rules.blocks.no_target') : block.target
   const retargetCount = block.count
   const wanted = pending !== null && pending !== block.target ? pending : null
 
@@ -148,7 +161,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
           <pre className="max-h-[50dvh] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
             {doc.lines.slice(block.start, block.end).map(l => l.raw.replace(/\r$/, '')).join('\n')}
           </pre>
-          {!readOnly && <div><Button variant="outline" onClick={() => onEditText(block.start, block.end)}>{t('admin:rules.matchers.edit_lines_as_text')}</Button></div>}
+          {!readOnly && <div><Button variant="outline" onClick={() => onEditText(doc.lines.slice(block.start, block.end).map(l => l.id))}>{t('admin:rules.matchers.edit_lines_as_text')}</Button></div>}
         </div>
       ) : (
         <>
@@ -173,7 +186,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             )}
           </div>
 
-          {!readOnly && block.target !== '' && (
+          {!readOnly && !noTarget && (
             <div className="flex min-w-0 flex-col gap-2">
               <TargetSelect key={block.index + block.target} value={block.target} choices={choices} label={t('admin:rules.blocks.target')} onChange={setPending} />
               {wanted !== null && (
@@ -189,7 +202,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             aria-label={t('admin:rules.blocks.matchers', { target: heading })}
             data={shown}
             columns={columns}
-            getRowId={r => String(r.line)}
+            getRowId={r => String(r.id)}
             rowLabel={r => r.shown}
             pagination={false}
             columnMenu={false}
@@ -197,7 +210,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             selectable={!readOnly}
             selection={checked}
             onSelectionChange={setChecked}
-            onRowOpen={readOnly ? undefined : r => onEditRow(r.line)}
+            onRowOpen={readOnly ? undefined : r => onEditRow(r.id)}
             toolbar={(
               <FilterBar
                 aria-label={t('admin:rules.matchers.filter_label')}
@@ -205,7 +218,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
                 facets={typeOptions.length > 1 ? [{ id: 'type', label: t('admin:rules.matchers.filter_type'), options: typeOptions, selected: types, onChange: setTypes }] : []}
                 onClearAll={() => { setLocal(''); setTypes([]) }}
               >
-                {!readOnly && (
+                {!readOnly && !noTarget && (
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     <Button size="sm" onClick={onAddRow}><IconAdd />{t('admin:rules.matchers.add')}</Button>
                     <Button size="sm" variant="outline" onClick={onPaste}><IconFile />{t('admin:rules.matchers.paste')}</Button>
@@ -219,7 +232,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
               : <EmptyState compact title={t('admin:rules.matchers.no_match')} action={<Button variant="outline" onClick={() => { setLocal(''); setTypes([]) }}>{t('admin:rules.clear_search')}</Button>} />}
             bulkActions={readOnly ? undefined : (ctx => (
               <>
-                <Button variant="outline" size="sm" onClick={() => { onMoveRows(ctx.ids.map(Number)); setChecked({}) }}>{t('admin:rules.matchers.move_to')}</Button>
+                {!noTarget && <Button variant="outline" size="sm" onClick={() => { onMoveRows(ctx.ids.map(Number)); setChecked({}) }}>{t('admin:rules.matchers.move_to')}</Button>}
                 <Button variant="outline" size="sm" className="text-destructive" onClick={() => { onDeleteRows(ctx.ids.map(Number)); setChecked({}) }}>
                   <IconDelete />{t('admin:rules.matchers.delete_selected', { count: ctx.ids.length })}
                 </Button>

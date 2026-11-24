@@ -2155,7 +2155,13 @@
       "value_space": "A domain cannot contain spaces",
       "value_cidr": "Enter a valid address or range, such as 10.0.0.0/8",
       "value_port": "Enter a port number up to 65535, or a range such as 1000-2000",
-      "value_network": "Use tcp or udp"
+      "value_network": "Use tcp or udp",
+      "unsafe_comment": "A space followed by # starts a comment in the list, so it can't be part of a value",
+      "unsafe_colon": "A colon followed by a space can't be part of a value",
+      "unsafe_quote": "Quotation marks can't be part of a value",
+      "unsafe_template": "{{ }} can't be part of a value",
+      "unsafe_indicator": "A value can't start with this character",
+      "unsafe_parens": "Parentheses must be balanced"
     },
     "toast": {
       "saved": "Saved",
@@ -2244,7 +2250,8 @@
       "select_hint": "Select a group on the left",
       "back": "Back to groups",
       "matchers": "Rules in {{target}}",
-      "menu": "Actions for group {{index}}"
+      "menu": "Actions for group {{index}}",
+      "no_target": "Lines with no target"
     },
     "target": {
       "groups": "Proxy groups",
@@ -2350,7 +2357,23 @@
       "more": "{{count}} more",
       "submit": "Add {{count}}",
       "added": "Added {{count}}",
-      "file_too_large": "The file is larger than {{size}}. Split it and import again."
+      "file_too_large": "The file is larger than {{size}}. Split it and import again.",
+      "uses_target": "Adds to: {{target}}",
+      "needs_target": "Choose a target for the new group.",
+      "rejected": "{{count}} lines can't be written as rules and won't be added",
+      "comment_stripped": "{{count}} lines had a trailing comment, which was left out",
+      "reason": {
+        "empty": "empty",
+        "comma": "contains a comma",
+        "newline": "contains a line break",
+        "space_edge": "starts or ends with a space",
+        "comment": "contains a comment (\" #\")",
+        "colon": "contains a colon followed by a space",
+        "quote": "contains a quotation mark",
+        "template": "contains {{ }}",
+        "indicator": "starts with a character that has a special meaning",
+        "parens": "has unbalanced parentheses"
+      }
     },
     "move": {
       "title": "Move to…",
@@ -2380,6 +2403,11 @@
       "removed_line": "Removed:",
       "kept_line": "Unchanged:",
       "truncated": "{{count}} more changed sections are not shown."
+    },
+    "stale_line": "That line has changed since you chose it, so nothing was written. Choose it again.",
+    "slug_unreachable": "The slug \"{{slug}}\" is reserved, so this rule set has no page. You can still delete it here.",
+    "problems": {
+      "indent": "Line {{line}} is indented differently from the rest of the list, so the server would read the list wrongly. Fix its indentation in the Text view."
     }
   },
   "nodes": {

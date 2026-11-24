@@ -16,7 +16,12 @@ function reads(rows: unknown[] = [base, seeded]) {
   api.post.mockResolvedValue({ data: inspection() })
 }
 
-const rowOf = async (name: string) => (await screen.findByText(name)).closest('tr')!
+// Waits for the ROW, not just its text: the name must be inside a table row (closest('tr')) before the test climbs to it.
+const rowOf = (name: string) => waitFor(() => {
+  const row = screen.getByText(name).closest('tr')
+  expect(row).not.toBeNull()
+  return row as HTMLElement
+})
 async function openMenu(name: string) {
   const row = await rowOf(name)
   fireEvent.click(within(row).getByRole('button', { name: new RegExp(`More actions for ${name}`) }))
@@ -95,6 +100,21 @@ describe('deleting and restoring', () => {
     expect((within(row).getByRole('button', { name: /^Edit rule set/ }) as HTMLButtonElement).disabled).toBe(true)
     finish()
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: 'Restored to the seeded default', severity: 'success' }))
+  })
+})
+
+describe('a rule set whose slug is reserved', () => {
+  it('has no page, says so, and can still be deleted from the list', async () => {
+    reads([{ ...base, slug: 'NEW', name: 'Odd one' }])
+    api.delete.mockResolvedValue({})
+    mountRuleSets('/admin/rules')
+    fireEvent.click(await rowOf('Odd one'))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('reserved'), severity: 'warning' }))
+    expect(where()).toBe('/admin/rules')
+    fireEvent.click(within(await rowOf('Odd one')).getByRole('button', { name: /More actions for Odd one/ }))
+    fireEvent.click(await menuItem('Delete'))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/rules/NEW'))
   })
 })
 

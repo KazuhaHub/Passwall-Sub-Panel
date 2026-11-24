@@ -398,3 +398,221 @@ describe('an operator', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 })
+
+// ---- the review of #425 ------------------------------------------------------------------------------------------------
+const rule2 = (c: string) => ({ ...base, content: c })
+const hasLine = (c: string, l: string) => c.split('\n').includes(l)
+
+describe('selections and dialogs name lines by id (review 1)', () => {
+  const five = '- DOMAIN,a.example,P\n- DOMAIN,b.example,P\n- DOMAIN,c.example,P\n- DOMAIN,d.example,P\n- DOMAIN,e.example,P\n- DOMAIN,z.example,Next\n'
+
+  it('delete 2 selected removes the lines that were ticked, even after another line above them was deleted', async () => {
+    reads([rule2(five)])
+    mountRuleSets(PAGE)
+    await openGroup(/^1P|^1 ?P/)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /c\.example/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: /d\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for b\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete b\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Delete 2 selected/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe('- DOMAIN,a.example,P\n- DOMAIN,e.example,P\n- DOMAIN,z.example,Next\n')
+  })
+
+  it('Move to… moves the ticked lines, not whatever now has their indexes', async () => {
+    reads([rule2(five)])
+    mountRuleSets(PAGE)
+    await openGroup(/^1P|^1 ?P/)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /d\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for a\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete a\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to…' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const lines = saved().content.split('\n')
+    expect(lines.filter(l => l.endsWith(',Next')).sort()).toEqual(['- DOMAIN,d.example,Next', '- DOMAIN,z.example,Next'])
+    expect(lines).not.toContain('- DOMAIN,a.example,P')
+    expect(lines).toContain('- DOMAIN,e.example,P')
+  })
+
+  it('undo does nothing while a dialog is open', async () => {
+    reads([rule2(five)])
+    mountRuleSets(PAGE)
+    await openGroup(/^1P|^1 ?P/)
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for a\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete a\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Edit b\.example/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.keyDown(dialog, { key: 'z', ctrlKey: true })
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Cancel' }), { key: 'z', metaKey: true })
+    expect((screen.getByRole('button', { name: 'Undo', hidden: true }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(within(dialog).getByLabelText('Match'), { target: { value: 'bb.example' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe('- DOMAIN,bb.example,P\n- DOMAIN,c.example,P\n- DOMAIN,d.example,P\n- DOMAIN,e.example,P\n- DOMAIN,z.example,Next\n')
+  })
+})
+
+describe('what the server reads as the list (review 2)', () => {
+  it('names a line indented differently, and does not save', async () => {
+    reads([rule2('- DOMAIN,a.com,P1\n- MATCH,Final\n  - DOMAIN-SUFFIX,x.com,Proxy\n')])
+    mountRuleSets(PAGE)
+    expect(await screen.findByText(/Line 3 is indented differently/)).toBeTruthy()
+    fireEvent.click(await tab('General'))
+    fireEvent.change(await label(/^Name/), { target: { value: 'N' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringMatching(/Line 3 is indented differently/), severity: 'warning' }))
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('a pasted Clash snippet indented two spaces lands at the document\'s indent', async () => {
+    reads([rule2('- DOMAIN,a.example,P\n')])
+    mountRuleSets(PAGE)
+    await openGroup(/P/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Paste list' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'rules:\n  - DOMAIN-SUFFIX,b.example,Other\n  - IP-CIDR,1.2.3.0/24,Other,no-resolve\n' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Add 2' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe('- DOMAIN,a.example,P\n- DOMAIN-SUFFIX,b.example,P\n- IP-CIDR,1.2.3.0/24,P,no-resolve\n')
+  })
+})
+
+describe('lines with no target (review 3)', () => {
+  const content3 = '- DOMAIN,a.example,P\n- SUB-RULE,(NETWORK,UDP),sub1\n- SUB-RULE,(NETWORK,TCP),sub1\n'
+  it('are their own kind of group: nothing is added, pasted or moved into them', async () => {
+    reads([rule2(content3)])
+    mountRuleSets(PAGE)
+    await openGroup(/Lines with no target/)
+    expect(await screen.findByRole('heading', { name: /2 · Lines with no target/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Paste list' })).toBeNull()
+    expect(screen.queryByLabelText('Target')).toBeNull()
+    // Moving rules from the first group offers only groups that have a target.
+    await openGroup(/^1P|^1 ?P/)
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for a\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByRole('option', { name: /Lines with no target/ })).toBeNull()
+  })
+})
+
+describe('values that would break the line (review 4)', () => {
+  it('paste drops a trailing comment, refuses a quote with the reason, and the count equals what is written', async () => {
+    reads([rule2('- DOMAIN,a.example,P\n')])
+    mountRuleSets(PAGE)
+    await openGroup(/P/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Paste list' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: "DOMAIN-SUFFIX,example.com # ads\nPROCESS-NAME,it's\n" } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check' }))
+    expect(await within(dialog).findByText('1 can be added')).toBeTruthy()
+    expect(within(dialog).getByText(/1 lines can't be written as rules/)).toBeTruthy()
+    expect(within(dialog).getByText(/contains a quotation mark/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe('- DOMAIN,a.example,P\n- DOMAIN-SUFFIX,example.com,P\n')
+  })
+
+  it('the row form refuses such a value', async () => {
+    reads([rule2('- PROCESS-NAME,ok,P\n')])
+    mountRuleSets(PAGE)
+    await openGroup(/^1 ?P/)
+    fireEvent.click(await screen.findByRole('button', { name: /Edit ok/ }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Match'), { target: { value: "it's" } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(await within(dialog).findByText(/Quotation marks can't be part of a value/)).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /unsaved/i })).toBeNull()
+  })
+})
+
+describe('the target is what was typed (review 5)', () => {
+  async function openNewGroup() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add group' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'new.example\n' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Check' }))
+    await within(dialog).findByText('1 can be added')
+    return dialog
+  }
+  const addButton = (d: HTMLElement) => within(d).getByRole('button', { name: 'Add 1' }) as HTMLButtonElement
+
+  it('a new group named like an existing one is refused, not stored under a shortened name', async () => {
+    reads([rule2(content)])
+    mountRuleSets(PAGE)
+    await group(/Proxy/)
+    const dialog = await openNewGroup()
+    fireEvent.change(within(dialog).getByLabelText('Target'), { target: { value: '\u0000new' } })
+    fireEvent.change(await within(dialog).findByLabelText('Proxy group name'), { target: { value: 'Proxy' } })
+    expect(await within(dialog).findByText(/already has this name/)).toBeTruthy()
+    expect(addButton(dialog).disabled).toBe(true)
+    expect(within(dialog).getByText('Choose a target for the new group.')).toBeTruthy()
+  })
+
+  it('switching from an existing group to a new one with no name leaves no target', async () => {
+    reads([rule2(content)])
+    mountRuleSets(PAGE)
+    await group(/Proxy/)
+    const dialog = await openNewGroup()
+    fireEvent.change(within(dialog).getByLabelText('Target'), { target: { value: 'Block' } })
+    expect(addButton(dialog).disabled).toBe(false)
+    expect(within(dialog).getByText('Adds to: Block')).toBeTruthy()
+    fireEvent.change(within(dialog).getByLabelText('Target'), { target: { value: '\u0000new' } })
+    expect(addButton(dialog).disabled).toBe(true)
+    fireEvent.change(await within(dialog).findByLabelText('Proxy group name'), { target: { value: 'Fresh' } })
+    expect(within(dialog).getByText('Adds to: Fresh')).toBeTruthy()
+    fireEvent.click(addButton(dialog))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(hasLine(saved().content, '- DOMAIN-SUFFIX,new.example,Fresh')).toBe(true)
+  })
+})
+
+describe('smaller faults', () => {
+  it('shows a lower-case type as it is, and opening and saving the row changes nothing', async () => {
+    reads([rule2('- domain,x.example,P\n')])
+    mountRuleSets(PAGE)
+    await openGroup(/P/)
+    fireEvent.click(await screen.findByRole('button', { name: /Edit x\.example/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByLabelText('Type') as HTMLSelectElement).value).toBe('DOMAIN')
+    fireEvent.change(within(dialog).getByLabelText('Match'), { target: { value: 'y.example' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe('- domain,y.example,P\n')
+  })
+
+  it('locks the editor while the save runs', async () => {
+    reads()
+    api.put.mockImplementation(() => new Promise(() => {}))
+    mountRuleSets(PAGE)
+    fireEvent.click(await tab('General'))
+    fireEvent.change(await label(/^Name/), { target: { value: 'N' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect((await label(/^Name/) as HTMLInputElement).disabled).toBe(true)
+    fireEvent.click(await tab('Rules'))
+    expect(screen.queryByRole('button', { name: 'Add group' })).toBeNull()
+  })
+
+  it('refuses a new slug that differs from an existing one only in case', async () => {
+    reads()
+    mountRuleSets('/admin/rules/new')
+    fireEvent.change(await label(/^Slug/), { target: { value: 'CUSTOM' } })
+    fireEvent.change(await label(/^Name/), { target: { value: 'N' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('already exists'), severity: 'warning' }))
+    expect(api.put).not.toHaveBeenCalled()
+  })
+})
