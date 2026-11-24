@@ -5,7 +5,6 @@ import { StatusBadge } from '@/components/common/StatusBadge'
 import type { Tone } from '@/components/common/tones'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { useUserUsage } from '@/query/traffic'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
@@ -68,10 +67,11 @@ export function ReviewBadges({ review }: { review: ReviewBadge }) {
 /**
  * Who the account is and where its service stands: names, group, the two access axes (said apart, so a
  * service hold never reads as the account being disabled), the review badges, the hold's time and the
- * message the user was given, and the period's usage with the way to its trend. The title and the
- * description are the sheet's own, so the dialog is named by the account.
+ * message the user was given, and the period's usage with the way to its trend. The dialog's own title is the
+ * fixed "risk details" caption (it is also what names the dialog while the summary is loading or has failed);
+ * the account's name is the first line here.
  */
-export default function DrawerHeader({ summary }: { summary: RiskUserSummary }) {
+export default function DialogHeader({ summary }: { summary: RiskUserSummary }) {
   const { t } = useRiskT()
   const scope = useQueryScope()
   const panelTz = useSiteStore(s => s.timezone)
@@ -87,12 +87,12 @@ export default function DrawerHeader({ summary }: { summary: RiskUserSummary }) 
     <div data-testid="risk-drawer-header" className="flex flex-col gap-2">
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{t('admin:risk_center.drawer.title')}</p>
-        <SheetTitle className="text-base break-all">{u.upn}</SheetTitle>
-        <SheetDescription className="mt-0.5 flex flex-wrap gap-x-2 text-xs">
+        <p className="text-base leading-snug font-medium break-all">{u.upn}</p>
+        <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
           {u.display_name && <span>{u.display_name}</span>}
           <span>{`#${u.id}`}</span>
           {u.group_name && <span>{u.group_name}</span>}
-        </SheetDescription>
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <span className="inline-flex items-center gap-1.5 text-sm">

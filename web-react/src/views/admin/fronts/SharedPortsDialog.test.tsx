@@ -44,7 +44,7 @@ async function openEditorForNew() {
   return dialog
 }
 
-describe('Shared ports sheet', () => {
+describe('Shared ports dialog', () => {
   it('says Xray is needed and turns adding off, with the reason, when the server cannot run fronts', async () => {
     install(view({ support: { supported: false, reason: 'engine_not_xray' } }))
     const dialog = await open()

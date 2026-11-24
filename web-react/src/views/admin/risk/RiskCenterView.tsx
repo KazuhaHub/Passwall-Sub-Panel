@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import UserAutocomplete from '@/components/UserAutocomplete'
 import { useCan } from '@/utils/permissions'
-import RiskUserDrawer from './drawer/RiskUserDrawer'
+import RiskUserDialog from './dialog/RiskUserDialog'
 import { useDrawerParam } from './drawerParam'
 import LiveConnectionsTab from './LiveConnectionsTab'
 import PolicyTab from './policy/PolicyTab'
@@ -100,7 +100,7 @@ export default function RiskCenterView() {
         <TabsContent value="records"><RecordsTab onOpenUser={drawer.open} /></TabsContent>
         <TabsContent value="policy"><PolicyTab /></TabsContent>
       </Tabs>
-      <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
+      <RiskUserDialog userId={drawer.id} onClose={drawer.close} host="risk" />
     </div>
   )
 }

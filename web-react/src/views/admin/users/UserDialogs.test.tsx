@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { api, mountPage, serve, toast, user } from './testHarness'
 import UsersPage from './UsersPage'
 
-vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: () => null }))
+vi.mock('../risk/dialog/RiskUserDialog', () => ({ default: () => null }))
 
 const SECURITY = '/admin/users?user=2&tab=security'
 

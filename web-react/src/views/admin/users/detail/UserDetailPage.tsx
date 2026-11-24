@@ -13,7 +13,7 @@ import { UserActivity } from '../../UserActivity'
 import { UserNodeUsage } from '../../UserNodeUsage'
 import { UserServerUsage } from '../../UserServerUsage'
 import { discardChangesConfirm } from '../../accessControl/confirmCopy'
-import RiskUserDrawer from '../../risk/drawer/RiskUserDrawer'
+import RiskUserDialog from '../../risk/dialog/RiskUserDialog'
 import { RoleBadge, SsoBadge } from '../cells'
 import { UsersContext, useUsers } from '../context'
 import { EditTab } from '../EditTab'
@@ -118,7 +118,7 @@ export default function UserDetailPage({ id }: { id: number }) {
         : <LoadedUser key={user.id} user={user} back={back} leaving={leaving} />}
       <UserDialogs state={ws.dialog} setState={ws.setDialog} reload={ws.ctx.reload} toggleBatch={NOOP_BATCH} />
       {/* Above every modal. Not mounted for an operator: a link to ?risk= would only read a 403. */}
-      {ws.canRisk && <RiskUserDrawer userId={ws.riskDrawer.id} onClose={ws.riskDrawer.close} host="users" />}
+      {ws.canRisk && <RiskUserDialog userId={ws.riskDrawer.id} onClose={ws.riskDrawer.close} host="users" />}
     </UsersContext.Provider>
   )
 }

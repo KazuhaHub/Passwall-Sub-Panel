@@ -4,7 +4,7 @@ import { IconArrowLeft } from '@/lib/icons'
 import { deleteFront, frontErrorOf, type Front, type FrontError } from '@/api/fronts'
 import type { Server } from '@/api/servers'
 import { HelpTip } from '@/components/common/HelpTip'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
@@ -32,8 +32,8 @@ type View = { kind: 'list' } | { kind: 'edit'; front: Front | null }
 
 /**
  * The shared ports (SNI fronts) of one Passwall Node server, and the view of every port the server uses, in a
- * wide sheet over the servers page: the list with its picture, and the editor of one port as a page inside the
- * sheet (so a long form has room, a bar and an unsaved-changes guard). Mount only while open: it reads on mount.
+ * wide dialog (a bottom sheet on a phone) over the servers page: the list with its picture, and the editor of one port as a page inside the
+ * dialog (so a long form has room, a bar and an unsaved-changes guard). Mount only while open: it reads on mount.
  */
 export default function SharedPortsDialog({ server, onClose }: { server: Server; onClose: () => void }) {
   const t = useAdminT()
@@ -109,7 +109,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
 
   return (
     <>
-      <DetailSheet
+      <DetailDialog
         open
         onClose={() => guardClose(onClose)}
         title={title}
@@ -117,7 +117,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
         actions={view.kind === 'edit'
           ? <Button variant="outline" size="sm" onClick={() => guardClose(backToList)}><IconArrowLeft />{t('admin:servers.fronts.back')}</Button>
           : tab === 'fronts' ? add : undefined}
-        className="data-[side=right]:sm:w-[min(60rem,96vw)] data-[side=right]:sm:max-w-[min(60rem,96vw)]"
+        size="xl"
       >
         {view.kind === 'edit' && data && options.data ? (
           <FrontEditor key={view.front?.id ?? 'new'} panelId={server.id} front={view.front} options={options.data}
@@ -163,7 +163,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
             )}
           </div>
         )}
-      </DetailSheet>
+      </DetailDialog>
       {plan && (
         <FrontPlanDialog
           error={plan.error}

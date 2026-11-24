@@ -10,7 +10,7 @@ import { formatDualTz, formatMsDualTz } from '@/utils/datetime'
 import type { GeoAnomaly } from '@/api/geoAnomalies'
 import type { QueueCounts, QueueRow, QueueView } from '@/api/riskCenter'
 import type { GeoIPStatus } from '@/api/settings'
-import RiskUserDrawer from '../drawer/RiskUserDrawer'
+import RiskUserDialog from '../dialog/RiskUserDialog'
 import { useDrawerParam } from '../drawerParam'
 import QueueTab from './QueueTab'
 
@@ -170,7 +170,7 @@ function Page() {
   return (
     <>
       <QueueTab onOpenUser={drawer.open} onOpenLive={openLive} onOpenPolicy={openPolicy} />
-      <RiskUserDrawer userId={drawer.id} onClose={drawer.close} host="risk" />
+      <RiskUserDialog userId={drawer.id} onClose={drawer.close} host="risk" />
       <Where />
       <Navigator />
     </>

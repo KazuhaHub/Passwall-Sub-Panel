@@ -1657,7 +1657,6 @@
     "retry": "重试",
     "drawer": {
       "title": "风控详情",
-      "close": "关闭",
       "not_found": "用户不存在或已删除",
       "axis_account": "账号",
       "axis_service": "代理服务",

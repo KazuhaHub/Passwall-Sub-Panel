@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as acApi from '@/api/accessControl'
 import * as riskApi from '@/api/riskCenter'
 import { confirmMock, renderAccess, setTestLang, whereIs } from '@/test/accessControlHarness'
-import RiskUserDrawer from './RiskUserDrawer'
+import RiskUserDialog from './RiskUserDialog'
 import { pick } from '../testSelect'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -19,7 +19,7 @@ vi.mock('@/api/riskCenter', async importOriginal => ({ ...await importOriginal<t
 for (const t of ['Overview', 'Connections', 'Devices', 'Timeline']) {
   vi.doMock(`./${t}Tab`, () => ({ default: () => <p data-testid={`${t}-tab`} /> }))
 }
-vi.mock('./DrawerHeader', () => ({ default: () => <p data-testid="risk-drawer-header" /> }))
+vi.mock('./DialogHeader', () => ({ default: () => <p data-testid="risk-drawer-header" /> }))
 vi.mock('../../accessControl/dialogs/AddExemptionDialog', () => ({
   default: ({ open, lockedUserId }: { open: boolean; lockedUserId?: number }) => open ? <p data-testid="add-exemption">{lockedUserId}</p> : null,
 }))
@@ -47,20 +47,20 @@ const tabs = () => screen.getAllByRole('tab').map(t => t.textContent)
 
 describe('the access tab', () => {
   it.each(['risk', 'users', 'access'] as const)('is the fifth tab for an admin on host %s', async host => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host={host} />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host={host} />)
     await screen.findByTestId('risk-drawer-header')
     expect(tabs()).toHaveLength(5)
     expect(tabs()[4]).toBe('访问')
   })
 
   it('is absent for an operator', async () => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="users" />, { role: 'operator' })
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="users" />, { role: 'operator' })
     await screen.findByTestId('risk-drawer-header')
     expect(tabs()).toHaveLength(4)
   })
 
   it('reads the account only after the tab is chosen', async () => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="risk" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="risk" />)
     await screen.findByTestId('risk-drawer-header')
     expect(acApi.getDestUser).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('tab', { name: '访问' }))
@@ -72,19 +72,19 @@ describe('the access tab', () => {
 
   it('names the allowlist the group is under, in the group words, and the unrestricted one by what it is', async () => {
     vi.mocked(acApi.getDestUser).mockResolvedValue(view({ group: { id: 2, name: 'Team A', state: 'report', state_changed_at: Date.now() - 3600_000, mode: 'allowlist', stage: null } }))
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText('白名单 · 仅报告 · 第 1 天')).toBeTruthy()
     expect(screen.queryByText('不限')).toBeNull()
   })
 
   it('host access opens on it', async () => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText('Team A')).toBeTruthy()
     expect(screen.getByRole('tab', { name: '访问' }).getAttribute('aria-selected')).toBe('true')
   })
 
   it('opens the exemption dialog locked to this account', async () => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     fireEvent.click(await screen.findByRole('button', { name: '豁免此账号…' }))
     expect((await screen.findByTestId('add-exemption')).textContent).toBe('7')
   })
@@ -95,7 +95,7 @@ describe('the access tab', () => {
       expires_at: null, expired: false,
     } }))
     vi.mocked(acApi.deleteDestExemption).mockResolvedValue()
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText(/豁免：debugging · 由 root/)).toBeTruthy()
     expect(screen.getByText('访问策略不对这个账号生效')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '取消豁免' }))
@@ -105,13 +105,13 @@ describe('the access tab', () => {
 
   it('shows a tab-local error with a retry', async () => {
     vi.mocked(acApi.getDestUser).mockRejectedValueOnce(new Error('x'))
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     expect(await screen.findByText('读取这个账号的访问信息失败')).toBeTruthy()
     expect(screen.getAllByRole('tab')).toHaveLength(5)
   })
 
   it('falls back to the overview when the permission to see the access tab goes while it is selected', async () => {
-    renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+    renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
     await screen.findByText('Team A')
     act(() => { useAuthStore.setState({ role: 'operator' }) })
     await waitFor(() => expect(tabs()).toHaveLength(4))
@@ -139,7 +139,7 @@ describe('the access tab: the hits of this account (S16, 2c)', () => {
   beforeEach(() => {
     vi.mocked(acApi.getDestStatus).mockResolvedValue({ apply_eta_ms: 0, nodes, generation: 0, published_generation: 0, paused: false, publish_error: null, policy_notes: {}, totals: {} } as unknown as acApi.DestStatus)
   })
-  const open = () => renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+  const open = () => renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
 
   it('lists each rule that was hit: its action, the count, the destinations most hit and the nodes they were hit on', async () => {
     vi.mocked(acApi.getDestUser).mockResolvedValue(hits())
@@ -208,7 +208,7 @@ describe('the access tab: per-site usage of this account (S16, tier B)', () => {
     effective_days: 1, nodes, items: [{ site: 'google.com', count: 1204 }, { site: '(ip)', count: 40 }],
     others: { sites: 3, count: 12 }, total: 1256, dropped_in_range: 0, ...over,
   })
-  const open = () => renderAccess(<RiskUserDrawer userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
+  const open = () => renderAccess(<RiskUserDialog userId={7} onClose={vi.fn()} host="access" initialTab="access" />)
   const available = (over: Partial<acApi.DestUserView> = {}) => view({ usage_available: true, usage_nodes: nodes, ...over })
   beforeEach(() => {
     vi.mocked(acApi.getDestSettings).mockResolvedValue({ settings: {} as never, defaults: {}, effective: { dest_usage_retention_days: 7 } as never })

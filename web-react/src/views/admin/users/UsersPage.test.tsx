@@ -6,7 +6,7 @@ import { account, api, lastParams, mountPage, searchOf, serve, user, where } fro
 import UsersPage from './UsersPage'
 
 // The risk drawer has its own tests; it is the page's neighbour, not what this tests.
-vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: ({ userId }: { userId: number | null }) => (userId ? <div data-testid="risk-drawer">{userId}</div> : null) }))
+vi.mock('../risk/dialog/RiskUserDialog', () => ({ default: ({ userId }: { userId: number | null }) => (userId ? <div data-testid="risk-drawer">{userId}</div> : null) }))
 
 const GB = 1024 ** 3
 const rowOf = async (name: string) => (await screen.findByRole('row', { name: new RegExp(name) }))

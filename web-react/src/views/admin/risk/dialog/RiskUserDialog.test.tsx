@@ -9,7 +9,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { RiskUserSummary } from '@/api/riskCenter'
 import ConfirmHost, { confirm } from '@/components/ConfirmHost'
-import RiskUserDrawer from './RiskUserDrawer'
+import RiskUserDialog from './RiskUserDialog'
 import { pick } from '../testSelect'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -154,7 +154,7 @@ function serve(user: () => RiskUserSummary | Error = () => summary()) {
 function tree(userId: number | null, onClose = vi.fn(), host: 'risk' | 'users' = 'risk') {
   return (
     <MemoryRouter>
-      <RiskUserDrawer userId={userId} onClose={onClose} host={host} />
+      <RiskUserDialog userId={userId} onClose={onClose} host={host} />
     </MemoryRouter>
   )
 }
@@ -175,7 +175,7 @@ afterEach(() => {
   useAuthStore.setState({ role: '' })
 })
 
-describe('RiskUserDrawer', () => {
+describe('RiskUserDialog', () => {
   it('stays below a confirm raised while it is open, so the confirm can be answered', async () => {
     // The policy page's leave guard: a route link in the drawer (查看用量趋势, the logs links) leaves a
     // dirty 策略 tab, and the guard asks through the app's one confirm. Beneath the drawer's backdrop it
@@ -183,7 +183,7 @@ describe('RiskUserDrawer', () => {
     serve()
     render(
       <MemoryRouter>
-        <RiskUserDrawer userId={7} onClose={vi.fn()} host="risk" />
+        <RiskUserDialog userId={7} onClose={vi.fn()} host="risk" />
         <ConfirmHost />
       </MemoryRouter>,
       { wrapper: queryWrapper(makeTestQueryClient()) },
@@ -194,7 +194,7 @@ describe('RiskUserDrawer', () => {
 
     // jsdom loads no stylesheet, so stacking is read from the z-index utility each layer carries.
     const asked = (await screen.findByText('leave-guard')).closest('[role="alertdialog"]')!
-    const sheet = document.querySelector('[data-slot="sheet-content"]')!
+    const sheet = document.querySelector('[data-slot="detail-dialog"]')!
     const level = (el: Element) => Number(/(?:^|\s)z-\[?(\d+)\]?/.exec(el.className)?.[1])
     expect(level(asked)).toBeGreaterThan(level(sheet))
     expect(level(document.querySelector('[data-slot="alert-dialog-overlay"]')!)).toBeGreaterThan(level(sheet))
@@ -404,7 +404,7 @@ describe('RiskUserDrawer', () => {
     const onClose = vi.fn()
     mount(7, onClose)
     await header()
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭详情' }))
     expect(onClose).toHaveBeenCalled()
   })
 

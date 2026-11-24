@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { account, api, group, list, mountPage, searchOf, serve, toast, user, where } from './testHarness'
 import UsersPage from './UsersPage'
 
-vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: () => null }))
+vi.mock('../risk/dialog/RiskUserDialog', () => ({ default: () => null }))
 
 const GB = 1024 ** 3
 /** Opens the row's edit form, as an admin does. */
