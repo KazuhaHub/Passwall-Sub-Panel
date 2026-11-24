@@ -240,10 +240,10 @@ export default function LinesTab() {
         {kpi('unreachable', t('nodes.kpi.unreachable'), loading ? undefined : kpis.unreachable, 'danger')}
       </KpiGrid>
       {nodes.isError && (
-        <Alert className="mb-3"><AlertDescription className="flex flex-wrap items-center gap-2">{t('nodes.error.partial')}<Button variant="outline" size="xs" onClick={() => void nodes.refetch()}>{t('nodes.retry')}</Button></AlertDescription></Alert>
+        <Alert className="mb-4"><AlertDescription className="flex flex-wrap items-center gap-2">{t('nodes.error.partial')}<Button variant="outline" size="xs" onClick={() => void nodes.refetch()}>{t('nodes.retry')}</Button></AlertDescription></Alert>
       )}
       <FilterBar
-        className="mb-3"
+        className="mb-4"
         search={{ value: url.q, onChange: q => setUrl({ q }), placeholder: t('nodes.search.placeholder') }}
         facets={[
           { id: 'type', label: t('nodes.facet.type'), selected: filters.type, onChange: setFacet('type'), options: typeOptions },
@@ -258,7 +258,7 @@ export default function LinesTab() {
         {moves.undoable && <Button variant="outline" size="sm" onClick={moves.undo} data-testid="undo-move">{t('nodes.toast.undo')}</Button>}
         {admin && url.view === 'order' && filtered && <Button variant="ghost" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
       </FilterBar>
-      <div className="mb-3 flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
         <span>{t('nodes.list.scope_note')}</span>
         <HelpTip text={t('nodes.list.scope_help')} label={t('nodes.list.scope_help_label')} />
         {filtered && !loading && <span className="ml-2 tabular-nums">{t('nodes.list.count_filtered', { shown: shown.filter(s => s.row.kind === 'line').length, total: kpis.lines })}</span>}

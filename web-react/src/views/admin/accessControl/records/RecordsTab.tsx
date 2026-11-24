@@ -208,7 +208,7 @@ export default function RecordsTab({ onOpenUser, onTestDestination, onOpenSettin
     <div>
       {!hits.isPending && data && !hideTiles && (
         <div data-testid="hits-tiles">
-          <KpiGrid className="mt-0">
+          <KpiGrid>
             {(['block', 'observe'] as const).map(a => (
               <KpiTile key={a} label={t(`${R}tiles.${a}`)} value={num.format(a === 'block' ? data.summary.block : data.summary.observe)}
                 pressed={filter.action === a} onToggle={() => patch({ action: filter.action === a ? undefined : a })} />

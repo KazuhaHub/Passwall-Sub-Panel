@@ -12,7 +12,7 @@ import { TONE_STYLE, type Tone } from './tones'
  * A `tone` (from common/tones.ts, the one source of tone colours) draws a thin bar on
  * the left edge; only success and danger also colour the figure itself.
  */
-export function KpiTile({ label, value, caption, danger, tone, icon, title, pressed, onToggle, className }: {
+export function KpiTile({ label, value, caption, danger, tone, icon, title, pressed, onToggle, className, valueClassName }: {
   label: string
   /** undefined shows a dash: "not known yet" must not read as zero. */
   value: ReactNode
@@ -26,6 +26,8 @@ export function KpiTile({ label, value, caption, danger, tone, icon, title, pres
   pressed?: boolean
   onToggle?: () => void
   className?: string
+  /** Overrides the figure's text size, for a value that is words or a date range rather than a number. */
+  valueClassName?: string
 }) {
   const t: Tone = tone ?? (danger ? 'danger' : 'neutral')
   const body = (
@@ -33,7 +35,7 @@ export function KpiTile({ label, value, caption, danger, tone, icon, title, pres
       {t !== 'neutral' && <span data-slot="kpi-tone-bar" aria-hidden="true" className={cn('absolute inset-y-2 left-0 w-0.5 rounded-full', TONE_STYLE[t].dot)} />}
       <span className="flex w-full items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3.5">{icon}{label}</span>
       {/* Amber text on white is too faint at this weight, so warning and info keep the plain foreground. */}
-      <span className={cn('block text-[1.0625rem] leading-snug font-semibold tabular-nums [overflow-wrap:anywhere]', t === 'danger' ? 'text-destructive' : t === 'success' ? 'text-success' : 'text-foreground')}>{value === undefined ? '—' : value}</span>
+      <span className={cn('block text-[1.0625rem] leading-snug font-semibold tabular-nums [overflow-wrap:anywhere]', valueClassName, t === 'danger' ? 'text-destructive' : t === 'success' ? 'text-success' : 'text-foreground')}>{value === undefined ? '—' : value}</span>
       {caption ? <span className="block text-xs text-muted-foreground tabular-nums">{caption}</span> : null}
     </>
   )
@@ -63,7 +65,12 @@ export function KpiTile({ label, value, caption, danger, tone, icon, title, pres
   )
 }
 
-/** Two tiles a row on a phone, as many as fit on a wider screen. */
+/**
+ * Two tiles a row on a phone, as many as fit on a wider screen. The page's vertical rhythm is 16px: a block owns the
+ * space BELOW it (`mb-4`, the same as PageHeader), so whatever follows the row never touches it, and a page that
+ * stacks its blocks with `space-y-4` / `gap-4` gets the same distance. It carries no top margin: a `my-*` here
+ * would beat the container's `space-y-*` and glue the next block on. Tiles sit 12px apart.
+ */
 export function KpiGrid({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('my-3 grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))]', className)}>{children}</div>
+  return <div className={cn('mb-4 grid grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))]', className)}>{children}</div>
 }

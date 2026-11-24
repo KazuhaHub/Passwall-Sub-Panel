@@ -65,7 +65,7 @@ export default function DashboardView() {
     <div className="p-4 sm:p-6">
       <PageHeader title={t('dashboard.title')} />
 
-      <KpiGrid className="mt-0 mb-6">
+      <KpiGrid>
         <KpiTile
           icon={<IconUsers aria-hidden />}
           label={t('dashboard.metric.users')}
