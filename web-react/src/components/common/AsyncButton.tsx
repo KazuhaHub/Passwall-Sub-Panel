@@ -5,9 +5,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton } from './IconButton'
 import { usePendingClick, type ClickHandler } from './usePendingClick'
 
-// The same pending semantics as components/AsyncButton.tsx (see usePendingClick),
-// on the shadcn button. A separate file, not an edit of that one, because its
-// callers are MUI pages that pass MUI props.
+// Pending semantics (see usePendingClick) on the shadcn button.
 
 export type AsyncButtonProps = Omit<ComponentProps<typeof Button>, 'onClick'> & {
   onClick?: ClickHandler

@@ -6,18 +6,17 @@ const USER_MODE_KEY = 'psp-user-theme-mode'
 const USER_DENSITY_KEY = 'psp-user-density'
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
-// Density controls how tightly MUI components pack their content.
-//   - comfortable: MUI defaults (current pre-beta.13 behaviour) — taller
-//     inputs, larger buttons, 56px+ table rows.
-//   - compact: Cloudreve-style trim — size="small" inputs/tables,
-//     43-50px rows, 36px tabs, tighter dialog padding, smaller h4.
+// Density controls how tightly controls and table rows pack. It is mirrored onto
+// <html data-density>, where styles/ui.css turns it into --control-h and --row-h.
+//   - comfortable: taller controls and rows.
+//   - compact: shorter controls and rows.
 // Choice persists in localStorage. The default for a visitor with no saved
 // choice is "compact" (owner decision); a saved choice is always honoured.
 export type Density = 'comfortable' | 'compact'
 
 interface AppearanceState {
   // System default — populated from /auth/methods on app boot.
-  // Falls back to M3 baseline purple until the site store loads.
+  // Falls back to the default preset (blue) until the site store loads.
   systemColor: string
   // User-level override stored in localStorage. null = follow system.
   userColor: string | null

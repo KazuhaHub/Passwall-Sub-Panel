@@ -1,9 +1,8 @@
 // ONE PLACE THE APP'S ICONS ARE CHOSEN. Pages import the semantic name from here
 // (`IconEdit`, `IconServer`), never a lucide icon directly, so the same idea looks
-// the same on every page and a swap is one line. The old->new table for the
-// Material icons the app used before is in web-react/docs/icon-mapping.md; a page
-// being migrated replaces `import EditOutlinedIcon from '@mui/icons-material/EditOutlined'`
-// with `import { IconEdit } from '@/lib/icons'` and nothing else changes.
+// the same on every page and a swap is one line. The table of the Material icons the
+// app used before the move to lucide is in web-react/docs/icon-mapping.md (history,
+// and the source of the quick-link names kept in components/QuickLinkIcon.tsx).
 //
 // Names say what the icon MEANS ("IconDelete"), not what it looks like ("IconTrash"):
 // two meanings may share a glyph (IconVerified and IconPolicy are both a checked

@@ -13,7 +13,6 @@ import {
   AlertDialogMedia,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useInertMuiModals } from '@/lib/inertModals'
 import { cn } from '@/lib/utils'
 
 export interface ConfirmOpts {
@@ -55,15 +54,14 @@ export function confirm(opts: ConfirmOpts): Promise<boolean> {
   })
 }
 
-// Where the confirm sits in the stack. It must be ABOVE every MUI layer a page can have
-// open under it: modals, drawers and the dialogs a drawer raises over itself (1300 to
-// 1302), popovers and menus, and tooltips (1500), because a tooltip left open on the
-// button that raised the confirm would otherwise paint over it. It must stay BELOW the
-// toasts (components/feedback/ToastHost.tsx, z-[1700]), so a toast about the answer is never
-// hidden by the dialog. A route link in the risk drawer can trip the policy page's leave
-// guard, whose confirm used to open beneath the drawer's backdrop where no click could
-// reach it. Tailwind's z-50 is below all of this, so the level is set explicitly while
-// both UI libraries are on screen.
+// Where the confirm sits in the stack. It must be ABOVE every layer a page can have open
+// under it: dialogs, sheets and the dialogs a sheet raises over itself, popovers and
+// menus, and tooltips, because a tooltip left open on the button that raised the confirm
+// would otherwise paint over it. It must stay BELOW the toasts
+// (components/feedback/ToastHost.tsx, z-[1700]), so a toast about the answer is never
+// hidden by the dialog. A route link in a sheet can trip the policy page's leave guard,
+// whose confirm would otherwise open beneath the sheet's backdrop where no click could
+// reach it. The shadcn primitives sit at z-50, so the level is set explicitly.
 const ABOVE_EVERY_MODAL = 'z-[1600]'
 
 export default function ConfirmHost() {
@@ -76,9 +74,6 @@ export default function ConfirmHost() {
     setStateExternal = setState
     return () => { setStateExternal = null }
   }, [])
-
-  // MUI modals beneath the confirm are made inert while it is open (see the hook).
-  useInertMuiModals(state.open)
 
   function close(answer: boolean) {
     // opts stay while the exit animation runs so the text does not vanish first.

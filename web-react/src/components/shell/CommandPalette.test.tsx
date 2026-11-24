@@ -130,16 +130,6 @@ describe('another dialog open', () => {
     await screen.findByRole('combobox')
   })
 
-  it('treats a mounted MUI modal as a dialog, and a hidden one as not', () => {
-    const modal = document.createElement('div')
-    modal.className = 'MuiModal-root MuiDrawer-root'
-    document.body.appendChild(modal)
-    expect(anotherDialogIsOpen()).toBe(true)
-    modal.classList.add('MuiModal-hidden')
-    expect(anotherDialogIsOpen()).toBe(false)
-    modal.remove()
-  })
-
   it('does not take Ctrl+Shift+K or Ctrl+Alt+K', async () => {
     render(<Harness providers={[nav('admin')]} />)
     press({ shiftKey: true })

@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { COLOR_PRESETS } from './presets'
 import { applyHtmlAppearance, brandPresetFor } from './htmlAppearance'
-import { tokensFromSource } from './tokensFromSource'
+import { brandTones } from './brandColor'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -63,21 +63,21 @@ describe('applyHtmlAppearance', () => {
     expect(root.style.getPropertyValue('--sidebar-primary')).toBe('')
   })
 
-  it('sets --brand inline for a custom colour, from the same tone the MUI theme uses', () => {
+  it('sets --brand inline for a custom colour, from brandTones', () => {
     applyHtmlAppearance(root, { mode: 'dark', density: 'compact', color: '#123456' })
     expect(root.dataset.brand).toBe('custom')
-    const primary = tokensFromSource('#123456', 'dark').primary
+    const primary = brandTones('#123456', 'dark').primary
     expect(root.style.getPropertyValue('--brand')).toBe(primary)
     expect(root.style.getPropertyValue('--sidebar-primary')).toBe(primary)
   })
 
-  it('sets the foreground colours inline too, from the same tone the MUI theme uses', () => {
+  it('sets the foreground colours inline too, from brandTones', () => {
     applyHtmlAppearance(root, { mode: 'light', density: 'compact', color: '#123456' })
-    const on = tokensFromSource('#123456', 'light').onPrimary
+    const on = brandTones('#123456', 'light').onPrimary
     expect(root.style.getPropertyValue('--brand-foreground')).toBe(on)
     expect(root.style.getPropertyValue('--sidebar-primary-foreground')).toBe(on)
     applyHtmlAppearance(root, { mode: 'dark', density: 'compact', color: '#123456' })
-    expect(root.style.getPropertyValue('--brand-foreground')).toBe(tokensFromSource('#123456', 'dark').onPrimary)
+    expect(root.style.getPropertyValue('--brand-foreground')).toBe(brandTones('#123456', 'dark').onPrimary)
   })
 
   it('removes the inline foregrounds when going back to a preset', () => {
@@ -113,18 +113,16 @@ describe('stylesheet', () => {
   })
 })
 
-// The stylesheet hard-codes each preset's brand colours (a stylesheet cannot
-// call tokensFromSource). Derive the expected values from the same function the
-// MUI theme uses, for every preset and both modes, so the two cannot drift.
-describe('stylesheet brand values match the MUI theme derivation', () => {
+// A preset's four brand variables are written out in the stylesheet, for both modes; a
+// preset with a missing one would fall back to the default brand colour in that mode only.
+describe('stylesheet brand variables', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
   const declared = (selector: string): Record<string, string> => {
     const escaped = selector.replace(/[.[\]"]/g, '\\$&')
     const m = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)
     if (!m) throw new Error(`no rule for ${selector}`)
-    const block = m[1]
     return Object.fromEntries(
-      block.split(';').map(d => d.trim()).filter(Boolean).map(d => {
+      m[1].split(';').map(d => d.trim()).filter(Boolean).map(d => {
         const i = d.indexOf(':')
         return [d.slice(0, i).trim(), d.slice(i + 1).trim().toLowerCase()]
       }),
@@ -132,13 +130,13 @@ describe('stylesheet brand values match the MUI theme derivation', () => {
   }
   for (const preset of COLOR_PRESETS) {
     for (const mode of ['light', 'dark'] as const) {
-      it(`${preset.id} ${mode}`, () => {
-        const t = tokensFromSource(preset.hex, mode)
+      it(`${preset.id} ${mode} defines fill and foreground as hex`, () => {
         const got = declared(mode === 'dark' ? `.dark[data-brand="${preset.id}"]` : `:root[data-brand="${preset.id}"]`)
-        expect(got['--brand']).toBe(t.primary.toLowerCase())
-        expect(got['--sidebar-primary']).toBe(t.primary.toLowerCase())
-        expect(got['--brand-foreground']).toBe(t.onPrimary.toLowerCase())
-        expect(got['--sidebar-primary-foreground']).toBe(t.onPrimary.toLowerCase())
+        for (const v of ['--brand', '--sidebar-primary', '--brand-foreground', '--sidebar-primary-foreground']) {
+          expect(got[v]).toMatch(/^#[0-9a-f]{6}$/)
+        }
+        expect(got['--sidebar-primary']).toBe(got['--brand'])
+        expect(got['--sidebar-primary-foreground']).toBe(got['--brand-foreground'])
       })
     }
   }

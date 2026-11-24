@@ -9,7 +9,8 @@ vi.mock('@/i18n', async () => {
   return { default: { t: (k: string, o?: Record<string, unknown>) => translate('common', k, o) } }
 })
 
-import SnackbarHost, { pushSnack } from '../SnackbarHost'
+import SnackbarHost from './ToastHost'
+import { pushSnack } from './toasts'
 import { useAuthStore } from '@/stores/auth'
 import { notifySyncPending, setSyncPendingNavigator } from './syncPendingToast'
 import { openToastLog, pushToast } from './toasts'
@@ -653,7 +654,6 @@ describe('placement', () => {
     ['a non-modal dialog', () => { const m = document.createElement('div'); m.setAttribute('role', 'dialog'); return m }],
     ['the navigation sheet', () => { const m = modal(); m.setAttribute('data-slot', 'sidebar'); return m }],
     ['the log panel', () => { const m = modal(); m.setAttribute('data-slot', 'toast-log'); return m }],
-    ['an MUI popover', () => { const m = document.createElement('div'); m.className = 'MuiModal-root MuiPopover-root'; return m }],
   ])('does not move toasts for %s', async (_n, make) => {
     narrow(true)
     render(<SnackbarHost />)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
@@ -7,26 +7,11 @@ import { IconFingerprint, IconShield } from '@/lib/icons'
 import { Button } from '@/components/ui/button'
 import { CardSkeleton } from '@/components/feedback/LoadingState'
 import { useAuthStore } from '@/stores/auth'
-import { selectEffectiveColor, resolveEffectiveMode, useAppearanceStore } from '@/stores/appearance'
 import { homeForRole } from '@/router/home'
-import { tokensFromSource } from '@/theme/tokensFromSource'
 import TwoFactorDialog from '@/views/user/TwoFactorDialog'
 import PasskeyDialog from '@/views/user/PasskeyDialog'
 import { AuthLayout } from '@/views/auth/AuthLayout'
 import { OrDivider } from '@/views/auth/parts'
-
-// The two enrolment dialogs live under views/user and are still drawn with the M3 colour
-// tokens passed in as a prop (the portal pages have not moved yet). The tokens are computed
-// from the appearance store directly, without a theme provider; when those dialogs move to
-// the new components this goes away with the prop.
-function useM3Tokens() {
-  const mode = useAppearanceStore(s => s.mode)
-  const color = useAppearanceStore(selectEffectiveColor)
-  return useMemo(() => {
-    const systemDark = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
-    return tokensFromSource(color, resolveEffectiveMode(mode, systemDark))
-  }, [mode, color])
-}
 
 // Enroll2FAView is the mandatory-2FA gate: an account that an admin requires to
 // have a second factor (per-user / group / staff-wide) lands here until it
@@ -38,7 +23,6 @@ export default function Enroll2FAView() {
   const { t } = useTranslation(['auth', 'user'])
   const navigate = useNavigate()
   const auth = useAuthStore()
-  const md = useM3Tokens()
 
   const [profile, setProfile] = useState<MeProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -94,10 +78,10 @@ export default function Enroll2FAView() {
         </Button>
       </div>
 
-      <TwoFactorDialog open={totpOpen} enabled={false} hasPasskey={false} md={md}
+      <TwoFactorDialog open={totpOpen} enabled={false} hasPasskey={false}
         onClose={() => setTotpOpen(false)} onChanged={() => { setTotpOpen(false); void refresh() }} />
       <PasskeyDialog open={passkeyOpen} available={!!profile?.passkey_available}
-        credentials={profile?.passkey_credentials ?? []} md={md}
+        credentials={profile?.passkey_credentials ?? []}
         onClose={() => setPasskeyOpen(false)} onChanged={() => { setPasskeyOpen(false); void refresh() }} />
     </AuthLayout>
   )

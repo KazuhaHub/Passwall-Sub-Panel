@@ -13,7 +13,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
 import { IconWarning } from '@/lib/icons'
 import { cn } from '@/lib/utils'
-import { useInertMuiModals } from '@/lib/inertModals'
 import { useReviewAction } from '@/query/riskCenter'
 import { useSetServiceStatus } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -297,8 +296,6 @@ function ActionDialog({ open, busy, copy, cancelText, onCancel, onConfirm }: {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const [note, setNote] = useState('')
   const [also, setAlso] = useState(copy.check?.initial ?? false)
-  // The Users page still hosts MUI dialogs on this branch; they are made inert while this one is over them.
-  useInertMuiModals(open)
   return (
     <AlertDialog open={open} onOpenChange={next => { if (!next && !busy) onCancel() }}>
       <AlertDialogContent initialFocus={cancelRef} overlay={{ className: ABOVE_EVERY_MODAL }}

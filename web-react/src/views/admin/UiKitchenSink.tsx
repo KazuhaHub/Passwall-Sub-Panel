@@ -42,7 +42,7 @@ export default function UiKitchenSink() {
         <Card>
           <CardHeader>
             <CardTitle>Appearance</CardTitle>
-            <CardDescription>Drives the same store the MUI pages read.</CardDescription>
+            <CardDescription>Drives the appearance store the whole app reads.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">

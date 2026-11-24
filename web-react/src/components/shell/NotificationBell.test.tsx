@@ -14,9 +14,7 @@ vi.mock('react-i18next', async () => (await import('@/test/i18nMock')).reactI18n
 
 import { NotificationBell } from './NotificationBell'
 
-// Ported from components/NotificationBell.test.tsx: same cases, same copy, same routes.
-// What changed is the query for the button (it is named by what it does now, not by a
-// literal English aria-label) and for the icon (a lucide class, not a MUI test id).
+// The button is found by what it does (its accessible name), and the icon by its lucide class.
 
 function Location() {
   const loc = useLocation()

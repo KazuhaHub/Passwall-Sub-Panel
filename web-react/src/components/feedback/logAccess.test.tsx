@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('react-i18next', async () => (await import('@/test/i18nMock')).reactI18nextMock())
 vi.mock('@/i18n', () => ({ default: { t: (k: string) => k } }))
 
-import SnackbarHost, { pushSnack } from '../SnackbarHost'
+import SnackbarHost from './ToastHost'
+import { pushSnack } from './toasts'
 import { ToastLogButton } from '../shell/ToastLogButton'
 import { openToastLog, useToastLogSummary } from './toasts'
 import { useToastBottomOffset } from './useToastBottomOffset'

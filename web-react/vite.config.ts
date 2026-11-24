@@ -24,12 +24,6 @@ const CHUNK_BY_PACKAGE = new Map<string, string>([
   // React core and the small libraries every chunk shares.
   ...['react', 'react-dom', 'scheduler', 'react-router', 'cookie-es', '@remix-run/route-pattern',
     'use-sync-external-store', '@babel/runtime', 'clsx', 'tslib'].map(n => [n, 'vendor-react'] as const),
-  ...['@mui/material', '@mui/icons-material', '@mui/system', '@mui/utils', '@mui/styled-engine',
-    '@mui/private-theming', '@mui/types', '@emotion/react', '@emotion/styled', '@emotion/cache',
-    '@emotion/serialize', '@emotion/sheet', '@emotion/utils', '@emotion/hash', '@emotion/unitless',
-    '@emotion/use-insertion-effect-with-fallbacks', '@emotion/is-prop-valid',
-    '@emotion/memoize', '@popperjs/core', 'react-transition-group', 'react-is', 'prop-types',
-    'hoist-non-react-statics', 'stylis', 'csstype', 'dom-helpers', 'object-assign', '@emotion/weak-memoize'].map(n => [n, 'vendor-mui'] as const),
   ...['echarts', 'zrender'].map(n => [n, 'vendor-echarts'] as const),
   ...['i18next', 'react-i18next', 'html-parse-stringify', 'void-elements'].map(n => [n, 'vendor-i18n'] as const),
   ...['@base-ui/react', '@base-ui/utils', 'tabbable', 'reselect'].map(n => [n, 'vendor-base-ui'] as const),
@@ -121,7 +115,7 @@ export default defineConfig({
         // Split heavy vendor deps into stable named chunks instead of
         // bundling everything into one ~700KB main bundle. Each chunk
         // is cached independently — a small app-code change no longer
-        // invalidates the React/MUI/echarts caches, and the chunks
+        // invalidates the React/echarts caches, and the chunks
         // download in parallel rather than blocking on the megabundle.
         // Keep the chunk count low (no granular per-package) — a long
         // chunk list also hurts because HTTP/2 multiplex still pays

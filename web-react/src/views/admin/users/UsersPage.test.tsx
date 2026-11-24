@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { account, api, lastParams, mountPage, searchOf, serve, user, where } from './testHarness'
 import UsersPage from './UsersPage'
 
-// The risk drawer is a still-MUI component of another change, that needs the app theme; it is the page's neighbour, not what this tests.
+// The risk drawer has its own tests; it is the page's neighbour, not what this tests.
 vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: ({ userId }: { userId: number | null }) => (userId ? <div data-testid="risk-drawer">{userId}</div> : null) }))
 
 const GB = 1024 ** 3

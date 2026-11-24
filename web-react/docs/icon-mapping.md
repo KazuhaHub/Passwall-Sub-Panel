@@ -1,6 +1,6 @@
 # Icon mapping: Material icons to `@/lib/icons`
 
-Generated from the icons the app imported from `@mui/icons-material` before the migration (every distinct one under `src/`). Import the semantic name from `@/lib/icons`; do not import `lucide-react` directly in a page.
+Generated from the Material icons the app used before the move to lucide (every distinct one under `src/`). Import the semantic name from `@/lib/icons`; do not import `lucide-react` directly in a page.
 
 | Material icon (old) | Semantic export | lucide icon | Note |
 | --- | --- | --- | --- |

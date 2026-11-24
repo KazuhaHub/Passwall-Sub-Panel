@@ -288,7 +288,7 @@ try {
   const checks = {
     'React root rendered': /<\w+/.test(root),
     'login form rendered': /<form\b/.test(root),
-    'MUI SVG icon rendered': /<svg\b/.test(root),
+    'icon rendered': /<svg\b/.test(root),
     'React error #130 absent': !/Minified React error #130/.test(`${result.stdout}\n${result.logs.join('\n')}\n${result.stderr}`),
   }
   const failed = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name)

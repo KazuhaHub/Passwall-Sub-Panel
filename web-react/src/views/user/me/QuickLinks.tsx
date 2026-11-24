@@ -3,7 +3,7 @@ import { pushSnack } from '@/components/feedback/toasts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { isHttpUrl } from './format'
-import { QuickLinkGlyph } from './QuickLinkGlyph'
+import { QuickLinkIcon } from '@/components/QuickLinkIcon'
 import { useMeT } from './useMeT'
 
 type Open = (l: Pick<QuickLink, 'url' | 'new_window'>) => void
@@ -34,7 +34,7 @@ function LinkTile({ link, onOpen }: { link: QuickLink; onOpen: Open }) {
     >
       <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
         {/* A tile with no icon still gets a glyph, so a mixed grid stays aligned. */}
-        <QuickLinkGlyph icon={link.icon || 'mui:Link'} />
+        <QuickLinkIcon icon={link.icon || 'mui:Link'} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium" title={link.label}>{link.label}</span>

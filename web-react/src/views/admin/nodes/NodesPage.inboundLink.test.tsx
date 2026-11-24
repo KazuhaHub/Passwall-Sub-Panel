@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react'
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { render, screen, waitFor } from '@testing-library/react'
@@ -8,12 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { useAuthStore } from '@/stores/auth'
 import { api, installReads, list, node, server } from '@/test/adminSaveHarness'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
-import { createAppTheme } from '@/theme'
 import NodeDetailRoute from './NodeDetailRoute'
 import NodesPage, { legacyRedirect } from './NodesPage'
 
 const inbound = { id: 1, protocol: 'vless', remark: 'old-name', enable: true, port: 443, listen: '', settings: '{"decryption":"none"}', stream_settings: '{"network":"tcp","security":"none"}', sniffing: '{}', allocate: '' }
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
 const dest = {
   '/admin/dest/source-rules/1': { rule: { node_id: 1, countries: [], cidrs: [], state: 'off', updated_at: null }, native: true, geoip_available: true },
   '/admin/dest/source-rules': { items: [], geoip_available: true },
@@ -46,7 +43,7 @@ const mountAt = (path: string, panelType = 'psp', role: 'admin' | 'operator' = '
     { path: '/admin/nodes', element: <NodesPage /> },
     { path: '/admin/nodes/:id', element: <NodeDetailRoute /> },
   ], { initialEntries: [path] })
-  render(<StrictMode><QueryClientProvider client={makeTestQueryClient()}><ThemeProvider theme={theme}><RouterProvider router={router} /></ThemeProvider></QueryClientProvider></StrictMode>)
+  render(<StrictMode><QueryClientProvider client={makeTestQueryClient()}><RouterProvider router={router} /></QueryClientProvider></StrictMode>)
   return router
 }
 

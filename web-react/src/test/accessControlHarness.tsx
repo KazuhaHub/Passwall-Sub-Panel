@@ -1,5 +1,4 @@
 import type { ReactElement } from 'react'
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { cleanup, render, type RenderResult } from '@testing-library/react'
@@ -18,7 +17,6 @@ import enAuth from '@/locales/en-US/auth.json'
 import enUser from '@/locales/en-US/user.json'
 import enLanguage from '@/locales/en-US/language.json'
 import { flatten, type Nested } from '@/i18n/options'
-import { createAppTheme } from '@/theme'
 import { useAuthStore } from '@/stores/auth'
 import { makeTestQueryClient } from './queryTestUtils'
 
@@ -91,8 +89,7 @@ vi.mock('@/components/ConfirmHost', () => ({ confirm: hoistedConfirm, default: (
 export const confirmMock = hoistedConfirm
 
 const hoistedSnack = vi.hoisted(() => vi.fn())
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: hoistedSnack, default: () => null }))
-// The rebuilt pages raise toasts through feedback/toasts (pushToast, or pushSnack by its new path); both
+// Pages raise toasts through feedback/toasts (pushToast, or pushSnack); both
 // land on the same spy, so a test asserts `snack(message, severity)` whichever door the page used.
 vi.mock('@/components/feedback/toasts', async importOriginal => ({
   ...await importOriginal<typeof import('@/components/feedback/toasts')>(),
@@ -127,7 +124,6 @@ export interface RenderAccessOptions {
   /** The route to start on, with its query string. */
   route?: string
   role?: 'admin' | 'operator' | 'user'
-  mode?: 'light' | 'dark'
   client?: QueryClient
   /** The route pattern `ui` is mounted at, for a page that reads its params. */
   path?: string
@@ -135,10 +131,9 @@ export interface RenderAccessOptions {
 
 export function renderAccess(
   ui: ReactElement,
-  { route = '/admin/access-control', role = 'admin', mode = 'light', client = makeTestQueryClient(), path }: RenderAccessOptions = {},
+  { route = '/admin/access-control', role = 'admin', client = makeTestQueryClient(), path }: RenderAccessOptions = {},
 ): RenderResult & { client: QueryClient; router: ReturnType<typeof createMemoryRouter> } {
   useAuthStore.setState({ role, userId: 1, authEpoch: 1 })
-  const theme = createAppTheme({ mode, sourceColor: '#6750a4', language: lang.current })
   const router = createMemoryRouter(
     [
       ...(path ? [{ path, element: ui }] : []),
@@ -150,9 +145,7 @@ export function renderAccess(
     { initialEntries: [route] },
   )
   const result = render(
-    <QueryClientProvider client={client}>
-      <ThemeProvider theme={theme}><RouterProvider router={router} /></ThemeProvider>
-    </QueryClientProvider>,
+    <QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>,
   )
   return Object.assign(result, { client, router })
 }

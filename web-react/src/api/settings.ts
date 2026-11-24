@@ -150,7 +150,7 @@ export interface UISettings {
   quick_links: QuickLink[]
   global_announcement: GlobalAnnouncement
   footer_text: string
-  /** M3 source hex color used as the system-default theme. Empty falls back to the frontend default. */
+  /** Brand colour (#RRGGBB) used as the system-default theme. Empty falls back to the frontend default. */
   theme_color: string
   /** Notify thresholds (moved out of mail_settings in v9; admin edits them
    *  in the global settings page now, not the mail page). */

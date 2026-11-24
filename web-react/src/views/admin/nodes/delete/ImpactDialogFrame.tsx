@@ -4,10 +4,9 @@ import { IconWarning } from '@/lib/icons'
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogMedia, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useInertMuiModals } from '@/lib/inertModals'
 import { cn } from '@/lib/utils'
 
-// Above every MUI layer the page may still have open (ConfirmHost uses the same level, for the same reason) and
+// Above every layer the page may have open (ConfirmHost uses the same level, for the same reason) and
 // below the toasts, so the answer to a delete is never hidden by the dialog that asked.
 const ABOVE_EVERY_MODAL = 'z-[1600]'
 
@@ -33,8 +32,6 @@ export function ImpactDialogFrame({ title, description, cancelRef, cancelLabel, 
   actions?: ReactNode
 }) {
   const { t } = useTranslation('common')
-  // The nodes page still hosts MUI editors on this branch; they are made inert while a dialog sits above them.
-  useInertMuiModals(true)
   return (
     <AlertDialog open onOpenChange={open => { if (!open) onClose() }}>
       <AlertDialogContent

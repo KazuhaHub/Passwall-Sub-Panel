@@ -1,9 +1,7 @@
 /*
  * Tailwind v4 + shadcn (base-nova) stylesheet: the ordinary global setup, as in
- * the reference project. Tailwind's preflight applies to the whole document and
- * the migrated app is expected to be 100% shadcn; MUI remains only on pages that
- * have not been migrated yet, and is allowed to look different meanwhile (its
- * CssBaseline and global theme rules were removed so they cannot fight this).
+ * the reference project. Tailwind's preflight applies to the whole document;
+ * nothing else sets global styles.
  *
  * Utilities are generated from every file under src/ (Tailwind's automatic
  * detection). That also scans i18n JSON and tests, so a few unused bare-word
@@ -182,10 +180,10 @@
 
 /*
  * Brand presets. appearance.ts offers six source colours; useHtmlAppearance puts
- * the matching id on <html data-brand>. The values are the tones the MUI theme
- * derives from the same source (tone 40 in light, tone 80 in dark), so the two
- * stacks agree on the brand colour while both are on screen. A colour that is
- * not a preset gets data-brand="custom" and an inline --brand instead.
+ * the matching id on <html data-brand>. The values are the Material 3 tones of each
+ * source colour (tone 40 in light, tone 80 in dark, tone 20 for the label), written out
+ * so the stylesheet needs no palette generator. A colour that is not a preset gets
+ * data-brand="custom" and inline values from theme/brandColor.ts instead.
  * The `.dark[data-brand=...]` rules have the same specificity as `:root[data-brand=...]`
  * and come after them, so dark wins by source order. (Plain `.dark` for the token
  * block, as in the reference project.)
@@ -233,6 +231,15 @@
   }
   ::selection {
     background: color-mix(in oklch, var(--ring) 35%, transparent);
+  }
+}
+
+/* The slide of the indeterminate bar in components/RequestProgressBar. */
+@theme inline {
+  --animate-request-progress: request-progress 1.3s ease-in-out infinite;
+  @keyframes request-progress {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(250%); }
   }
 }
 

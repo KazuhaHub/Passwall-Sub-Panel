@@ -42,7 +42,7 @@ vi.mock('axios', () => ({
   },
 }))
 vi.mock('@/i18n', () => ({ default: { t: mocks.translate, exists: mocks.exists } }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: mocks.pushSnack }))
+vi.mock('@/components/feedback/toasts', () => ({ pushSnack: mocks.pushSnack }))
 vi.mock('@/components/feedback/syncPendingToast', () => ({ notifySyncPending: mocks.notifySyncPending }))
 vi.mock('@/panelPath', () => ({
   panelAPIBase: '/panel/api',

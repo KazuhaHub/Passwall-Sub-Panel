@@ -1,7 +1,6 @@
 import { RelationGraph } from '@/components/diagram/RelationGraph'
 import { denseGraphSample } from './uiKitData/sampleData'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Dialog as MuiDialog, DialogActions, DialogContent, DialogTitle, Button as MuiButton, MenuItem as MuiMenuItem, Select as MuiSelect } from '@mui/material'
 
 import { AsyncButton, AsyncIconButton } from '@/components/common/AsyncButton'
 import { CopyButton, CopyText } from '@/components/common/CopyButton'
@@ -19,7 +18,7 @@ import { ErrorState } from '@/components/feedback/ErrorState'
 import { CardSkeleton, PageSkeleton, TableSkeleton } from '@/components/feedback/LoadingState'
 import { notifySyncPending } from '@/components/feedback/syncPendingToast'
 import { useToastBottomOffset } from '@/components/feedback/useToastBottomOffset'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
 import { AppShell } from '@/components/shell/AppShell'
 import { UserShell } from '@/components/shell/UserShell'
 import { ADMIN_NAV } from '@/components/shell/adminNav'
@@ -87,7 +86,6 @@ function StickyBar() {
 
 function Gallery({ role, setRole }: { role: Role; setRole: (r: Role) => void }) {
   const [pressed, setPressed] = useState<string | null>('failing')
-  const [muiOpen, setMuiOpen] = useState(false)
   const [bar, setBar] = useState(false)
   const [shadcnOpen, setShadcnOpen] = useState(false)
 
@@ -160,7 +158,7 @@ function Gallery({ role, setRole }: { role: Role; setRole: (r: Role) => void }) 
         </KpiGrid>
       </div>
 
-      <Block title="Feedback" note="Toasts, the confirm dialog, and the queued-sync toast. Confirm also over a MUI dialog (both libraries are on screen until the pages are migrated).">
+      <Block title="Feedback" note="Toasts, the confirm dialog, and the queued-sync toast. Confirm also over a dialog: the confirm must sit above it.">
         <Button variant="outline" onClick={() => pushSnack('Saved', 'success')}>success</Button>
         <Button variant="outline" onClick={() => pushSnack('Heads up', 'warning')}>warning</Button>
         <Button variant="outline" onClick={() => pushSnack('Could not reach the server. Check it and try again.', 'error')}>error</Button>
@@ -174,23 +172,13 @@ function Gallery({ role, setRole }: { role: Role; setRole: (r: Role) => void }) 
         <Button variant="outline" onClick={() => { for (let i = 1; i <= 200; i++) pushSnack(`Error ${i}`, 'error') }}>200 errors in one tick</Button>
         <Button variant="outline" onClick={() => void confirm({ title: 'Remove this item?', message: 'It will stop working at once.\nThis cannot be undone.' }).then(v => pushSnack(String(v), 'info'))}>confirm</Button>
         <Button variant="outline" onClick={() => void confirm({ title: 'Delete node Tokyo-1', message: 'Its 12 subscribers lose this node. This cannot be undone.', destructive: true, confirmText: 'Delete node' }).then(v => pushSnack(String(v), 'info'))}>confirm (destructive)</Button>
-        <Button variant="outline" onClick={() => setMuiOpen(true)}>over a MUI dialog</Button>
-        <Button variant="outline" onClick={() => setShadcnOpen(true)}>shadcn dialog</Button>
-        <MuiSelect size="small" value="a" data-testid="mui-select" sx={{ minWidth: 120 }}>
-          <MuiMenuItem value="a">MUI select</MuiMenuItem><MuiMenuItem value="b">Another</MuiMenuItem>
-        </MuiSelect>
+        <Button variant="outline" onClick={() => setShadcnOpen(true)}>over a dialog</Button>
         <ShadDialog open={shadcnOpen} onOpenChange={setShadcnOpen}>
           <ShadDialogContent>
-            <ShadDialogHeader><ShadDialogTitle>A shadcn dialog</ShadDialogTitle><ShadDialogDescription>Toasts raised while it is open are still announced.</ShadDialogDescription></ShadDialogHeader>
+            <ShadDialogHeader><ShadDialogTitle>A dialog</ShadDialogTitle><ShadDialogDescription>Toasts raised while it is open are still announced.</ShadDialogDescription></ShadDialogHeader>
+            <Button variant="outline" onClick={() => void confirm({ title: 'Leave this page?', message: 'You have unsaved changes.', destructive: true, confirmText: 'Leave' }).then(v => pushSnack(String(v), 'info'))}>Ask for confirmation</Button>
           </ShadDialogContent>
         </ShadDialog>
-        <MuiDialog open={muiOpen} onClose={() => setMuiOpen(false)}>
-          <DialogTitle>A MUI dialog</DialogTitle>
-          <DialogContent>
-            <MuiButton onClick={() => void confirm({ title: 'Leave this page?', message: 'You have unsaved changes.', destructive: true, confirmText: 'Leave' }).then(v => pushSnack(String(v), 'info'))}>Ask for confirmation</MuiButton>
-          </DialogContent>
-          <DialogActions><MuiButton onClick={() => setMuiOpen(false)}>Close</MuiButton></DialogActions>
-        </MuiDialog>
       </Block>
 
       <div className="grid gap-4 lg:grid-cols-2">

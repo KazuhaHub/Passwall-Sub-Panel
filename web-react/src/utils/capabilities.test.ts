@@ -74,7 +74,7 @@ describe('deviceCapIsInert', () => {
 })
 
 describe('the views that collect a device cap consult the predicate', () => {
-  // Read as source rather than rendered: these are two large MUI forms whose
+  // Read as source rather than rendered: these are two large forms whose
   // fields are reached through dialogs and tabs, and a locator-based test that
   // silently matched nothing would report success. Deleting either call site
   // is the regression this exists to catch.

@@ -12,7 +12,7 @@ import { useAdminT } from './users/useAdminT'
 
 /** UserActivity shows a user's recent sign-in events (a per-user slice of the authentication log).
  *  Read-only; reads the latest few auth_events for the user through the shared query cache. It is
- *  also rendered inside the risk center's drawer, which is still an MUI page, so it brings no page
+ *  also rendered inside the risk center's drawer, so it brings no page
  *  frame or padding of its own. */
 export function UserActivity({ userId, showTitle = true }: {
   userId: number

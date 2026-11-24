@@ -2,13 +2,16 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-import type { AppLanguage } from '@/theme'
 import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
 import { NAMESPACES, flatten, I18N_STATIC_OPTIONS, type Nested } from './options'
 
 // Language-pack schema version, mirrors service/locale.Format on the backend.
 // The exported "base template" stamps this into `psp_language_pack`.
 export const LANGUAGE_PACK_FORMAT = 1
+
+// The built-in languages are 'zh-CN' | 'zh-TW' | 'en-US', but runtime-uploaded language
+// packs can register any code, so this is a plain string.
+export type AppLanguage = string
 
 // The built-in languages are compiled into the bundle. Runtime-uploaded
 // packs are appended to SUPPORTED_LANGUAGES at boot (see loadManifest), so this

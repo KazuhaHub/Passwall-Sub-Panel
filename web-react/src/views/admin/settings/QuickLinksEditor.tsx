@@ -36,7 +36,7 @@ function IconInput({ id, value, onChange }: { id: string; value: string; onChang
   return (
     <div className="flex items-center gap-1.5">
       <span className="flex size-(--control-h) shrink-0 items-center justify-center rounded-lg border bg-muted/40" aria-hidden>
-        {value ? <QuickLinkIcon icon={value} size={18} /> : null}
+        {value ? <QuickLinkIcon icon={value} className="size-4.5" /> : null}
       </span>
       <Input id={id} value={value} placeholder="😀 / https://… / mui:" onChange={e => onChange(e.target.value)} />
       <Popover>
@@ -48,7 +48,7 @@ function IconInput({ id, value, onChange }: { id: string; value: string; onChang
           {QUICK_LINK_ICONS.map(ic => (
             <button key={ic.key} type="button" aria-pressed={value === `mui:${ic.key}`} onClick={() => onChange(`mui:${ic.key}`)}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent aria-pressed:bg-accent">
-              <ic.Icon fontSize="small" />{ic.label}
+              <ic.Icon aria-hidden className="size-4" />{ic.label}
             </button>
           ))}
         </PopoverContent>

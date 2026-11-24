@@ -6,7 +6,7 @@
 // menu button (it exists on every screen width, in the old bars and in the new shell) and the main
 // landmark.
 
-/** Marks the account-menu button of whichever bar is on screen; the old MUI bars and the shell both carry it. */
+/** Marks the account-menu button of whichever bar is on screen (the admin and the user shell both carry it). */
 export const ACCOUNT_MENU_ATTR = 'data-psp-account-menu'
 
 /** The element to focus when the proper return target is gone, or null when the page has neither. */

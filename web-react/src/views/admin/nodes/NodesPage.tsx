@@ -64,7 +64,7 @@ function Page() {
   const sepSel = useUrlSelection('sep')
   const order = useNodeOrder(scope)
   const lineCount = useMemo(() => order.data?.rows.filter(r => r.kind === 'line').length, [order.data])
-  // The shell gives the content area no padding (the pages still on MUI bring their own), so this page pads itself, as the node and create pages do.
+  // The shell gives the content area no padding so every page pads itself, as the node and create pages do.
   return (
     <div className="p-4 sm:p-6">
       <PageHeader

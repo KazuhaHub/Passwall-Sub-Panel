@@ -7,15 +7,14 @@ import { TONE_STYLE, type Tone } from '@/components/common/tones'
 import { TOUCH_TARGET } from '@/components/common/touchTarget'
 import { Button } from '@/components/ui/button'
 import { IconClose, IconError, IconInfo, IconSuccess, IconWarning } from '@/lib/icons'
-import { useInertMuiModals } from '@/lib/inertModals'
 import { cn } from '@/lib/utils'
 import { useSpacedT } from '@/i18n/spacing'
 import { useAuthStore } from '@/stores/auth'
 import { attachToastStore, registerToastLogOpener } from './toasts'
 import { createToastStore, type LogEntry, type Severity, type ToastView } from './toastStore'
 
-// Stacking, from the bottom: MUI modals, drawers and popovers 1300-1302, MUI tooltips
-// 1500, the confirm dialog 1600, then these. A toast about the answer to a confirm must
+// Stacking, from the bottom: dialogs, sheets, popovers and tooltips (the primitives'
+// z-50), the confirm dialog 1600, then these. A toast about the answer to a confirm must
 // not be hidden by it, so toasts sit above it, and the log panel opened from a toast
 // above them.
 const TOASTS_Z = 'z-[1700]'
@@ -107,7 +106,6 @@ function LogPanel({ open, onClose, entries, omitted, returnFocus, language }: {
   returnFocus: () => HTMLElement | false
 }) {
   const { t } = useSpacedT()
-  useInertMuiModals(open)
   const rows = [...entries].reverse()
   return (
     <DialogPrimitive.Root
@@ -170,11 +168,10 @@ function LogPanel({ open, onClose, entries, omitted, returnFocus, language }: {
 }
 
 // The toast layer's own containers are exempt from what dialog libraries do to the rest of
-// the page. Base UI and MUI set aria-hidden (and Base UI inert) on every body child that is
+// the page. Base UI sets aria-hidden and inert on every body child that is
 // not the dialog, which silences a live region: an error pushed from inside a dialog was
 // never announced. Each container carries an explicit aria-live (which Base UI leaves
-// alone), and this strips aria-hidden/inert the moment any library puts it back (MUI's
-// modal hides body children without looking).
+// alone), and this strips aria-hidden/inert the moment the library puts it back.
 function useLiveExempt(...refs: RefObject<HTMLElement | null>[]) {
   useEffect(() => {
     const observers: MutationObserver[] = []
@@ -197,8 +194,8 @@ function useLiveExempt(...refs: RefObject<HTMLElement | null>[]) {
 }
 
 const NARROW = '(max-width: 767px)'
-// MODAL DIALOGS only: role dialog with aria-modal (Base UI's and MUI's both carry it) or an
-// alertdialog. Not menus, listboxes or popovers (an MUI Select on a phone is a Popover with
+// MODAL DIALOGS only: role dialog with aria-modal (Base UI's carries it) or an
+// alertdialog. Not menus, listboxes or popovers (a Select on a phone is a popover with
 // role=listbox, and must not move the toasts), not the mobile navigation sheet, and not the
 // toasts' own log panel, whose title the toasts would sit on.
 const MODAL = '[role="dialog"][aria-modal="true"]:not([data-slot="toast-log"]):not([data-slot="sidebar"]), [role="alertdialog"]'

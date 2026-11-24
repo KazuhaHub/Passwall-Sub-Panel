@@ -1,5 +1,5 @@
 import i18n from '@/i18n'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
 
 // copyToClipboard hardens the typical `navigator.clipboard.writeText`
 // path with:
