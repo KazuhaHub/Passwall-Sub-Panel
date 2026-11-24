@@ -158,7 +158,8 @@ describe('turning on a policy whose earlier state is not known (after a reload)'
     const dialog = await open()
     expect(within(dialog).getByText('开启「禁止 BT」？')).toBeTruthy()
     const cancel = within(dialog).getByRole('button', { name: '取消' })
-    expect(document.activeElement).toBe(cancel)
+    // The dialog moves focus after it opens, so wait for it rather than read it on the same tick.
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     fireEvent.click(cancel) // what Enter does on a focused button
     expect(api.updateDestPolicy).not.toHaveBeenCalled()
     expect(confirmMock).not.toHaveBeenCalled()
