@@ -32,6 +32,7 @@ const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRout
 const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
 const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
 const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
+const LegalEditorRoute = lazy(() => import('@/views/admin/legal/LegalEditorRoute'))
 const NodesPage = lazy(viewLoaders['/admin/nodes'])
 const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
@@ -147,6 +148,8 @@ export const router = createBrowserRouter([
           { path: 'diagnostics', element: <DiagnosticsView /> },
           { path: 'traffic', element: <TrafficView /> },
           { path: 'settings', element: <SettingsView /> },
+          // A legal document's editor is a page under Settings (terms | privacy), so the sidebar keeps Settings lit.
+          { path: 'settings/legal/:kind', element: <LegalEditorRoute /> },
           { path: 'language-packs', element: <LanguagePacksView /> },
           ...PLACEHOLDER_PATHS.map(p => ({ path: p, element: <PlaceholderView /> })),
           // An unknown /admin/... address: a not-found page in the shell, not a silent bounce to the dashboard.
