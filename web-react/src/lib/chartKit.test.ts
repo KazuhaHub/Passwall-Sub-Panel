@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { readChartTokens } from '@/hooks/useChartTokens'
 import { chartBase, dashOf, tooltipHtml } from './chartKit'
