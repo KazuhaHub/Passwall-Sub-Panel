@@ -15,6 +15,16 @@ export type MoveChoice =
   | { kind: 'into'; block: number }
   | { kind: 'new'; before: number; target: string }
 
+/**
+ * Where a whole group can go: "top" (unless it is already first) and after any group except itself and the one it already
+ * follows. Empty when there is nowhere to move it.
+ */
+export function moveBlockOptions(blocks: readonly Block[], from: number): string[] {
+  const out: string[] = from > 0 ? ['top'] : []
+  for (const b of blocks) if (b.index !== from && b.index !== from - 1) out.push(`after:${b.index}`)
+  return out
+}
+
 const label = (b: Block, text: string) => `${b.index + 1} · ${text} (${b.count.toLocaleString()})`
 
 /**
@@ -34,12 +44,16 @@ export function MoveToDialog({ mode, blocks, from, choices, count, onSubmit, onC
   onClose: () => void
 }) {
   const { t } = useTranslation(['admin', 'common'])
-  const textOf = (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.target || '—')
+  const textOf = (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.kind === 'notarget' ? t('admin:rules.blocks.no_target') : b.target || '—')
   // Rules go only into a group that has a target; a run of lines with none is not a place to send them.
   const others = blocks.filter(b => b.index !== from && b.kind === 'rules')
-  const [place, setPlace] = useState<string>(mode === 'block' ? (from === 0 ? 'top' : `after:${from - 1}`) : `into:${others[0]?.index ?? from}`)
+  const blockPlaces = moveBlockOptions(blocks, from)
+  // The first place that really is an option below.
+  const [place, setPlaceState] = useState<string>(mode === 'block' ? blockPlaces[0] ?? '' : others[0] ? `into:${others[0].index}` : 'new_before')
   // null: the picker holds no usable target (nothing chosen, or a new name that is empty or taken).
   const [target, setTarget] = useState<string | null>(null)
+  // A change of place starts the target again: the picker below is built anew for each place (its key), so the target must not outlive it.
+  const setPlace = (next: string) => { setPlaceState(next); setTarget(null) }
   const isNew = place === 'new_before' || place === 'new_after'
   const fromBlock = blocks[from]
 
@@ -58,7 +72,7 @@ export function MoveToDialog({ mode, blocks, from, choices, count, onSubmit, onC
       description={mode === 'block' ? textOf(fromBlock) : t('admin:rules.matchers.selected_count', { count: count ?? 0 })}
       dirty
       pending={false}
-      submitDisabled={isNew && target === null}
+      submitDisabled={(isNew && target === null) || place === ''}
       submitLabel={t('admin:rules.move.submit')}
       onClose={onClose}
       onSubmit={() => { const c = choice(); if (c) onSubmit(c) }}
@@ -67,8 +81,9 @@ export function MoveToDialog({ mode, blocks, from, choices, count, onSubmit, onC
         <NativeSelect value={place} onChange={e => setPlace(e.target.value)}>
           {mode === 'block' ? (
             <>
-              <option value="top">{t('admin:rules.move.first')}</option>
-              {blocks.filter(b => b.index !== from && b.index !== from - 1).map(b => <option key={b.index} value={`after:${b.index}`}>{label(b, textOf(b))}</option>)}
+              {blockPlaces.map(p => p === 'top'
+                ? <option key="top" value="top">{t('admin:rules.move.first')}</option>
+                : <option key={p} value={p}>{label(blocks[Number(p.slice(6))], textOf(blocks[Number(p.slice(6))]))}</option>)}
             </>
           ) : (
             <>
@@ -79,7 +94,7 @@ export function MoveToDialog({ mode, blocks, from, choices, count, onSubmit, onC
           )}
         </NativeSelect>
       </Field>
-      {isNew && <TargetSelect value="" choices={choices} label={t('admin:rules.blocks.target')} onChange={setTarget} />}
+      {isNew && <TargetSelect key={place} value="" choices={choices} label={t('admin:rules.blocks.target')} onChange={setTarget} />}
       {mode === 'rows' && (dest || (isNew && target !== null)) && fromBlock && (
         <p className="text-sm text-muted-foreground">
           {t('admin:rules.move.changes_target', { from: fromBlock.target, to: dest ? dest.target : target })}

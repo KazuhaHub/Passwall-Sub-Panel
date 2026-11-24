@@ -2150,7 +2150,8 @@
       "unsafe_quote": "匹配内容中不能含有引号",
       "unsafe_template": "匹配内容中不能含有 {{ }}",
       "unsafe_indicator": "匹配内容不能以这个字符开头",
-      "unsafe_parens": "括号必须成对"
+      "unsafe_parens": "括号必须成对",
+      "unsafe_control": "匹配内容中不能含有控制字符"
     },
     "toast": {
       "saved": "已保存",
@@ -2361,7 +2362,8 @@
         "quote": "含有引号",
         "template": "含有 {{ }}",
         "indicator": "以有特殊含义的字符开头",
-        "parens": "括号不成对"
+        "parens": "括号不成对",
+        "control": "含有控制字符"
       }
     },
     "move": {
@@ -2374,7 +2376,8 @@
       "changes_target": "这些条目的去向将由 {{from}} 变为 {{to}}",
       "submit": "移动",
       "blocked_filter": "查找或筛选时不能拖动，请使用「移动到…」",
-      "announce": "第 {{from}} 组已移到第 {{to}} 位"
+      "announce": "第 {{from}} 组已移到第 {{to}} 位",
+      "no_destination": "没有其他位置可以移动这个分组"
     },
     "search": {
       "placeholder": "查找域名、IP 或规则…",
@@ -2396,7 +2399,18 @@
     "stale_line": "这一行在你选择之后已经变化，所以没有写入任何内容。请重新选择。",
     "slug_unreachable": "标识「{{slug}}」是保留的，所以这个规则集没有页面。仍可在此删除。",
     "problems": {
-      "indent": "第 {{line}} 行的缩进与列表中其余各行不同，服务器会错误地读取这份列表。请在文本视图中修正它的缩进。"
+      "indent": "分组视图无法安全地表示其中一些行，修正之前只能使用文本视图。请让每条规则单独占一行，以 \"- \" 开头并保持相同缩进。"
+    },
+    "foreign": {
+      "line": "第 {{line}} 行：{{why}}",
+      "continuation": "是上一行的延续，分组视图无法显示",
+      "indent": "缩进与第一个条目不同",
+      "tab": "使用制表符缩进",
+      "key": "不是列表条目",
+      "marker": "是文档分隔符",
+      "block_scalar": "是多行条目的开头",
+      "empty_item": "是空条目",
+      "linebreak": "含有 Unicode 换行符"
     }
   },
   "nodes": {

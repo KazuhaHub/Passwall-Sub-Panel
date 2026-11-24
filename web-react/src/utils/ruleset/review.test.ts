@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { buildBlocks } from './blocks'
+import { defaultRulesContent } from './defaultRules.fixture'
 import { reviewPaste, scanPaste } from './detect'
 import { diffLines } from './diff'
 import { deleteLines, insertRules, moveBlock, moveLinesToBlock, newBlock, replaceRange, retargetLines, rewriteRule, editRule } from './ops'
-import { listIndent, parseDoc, parseLine, problemsOf, serializeDoc, splitFields } from './parse'
+import { foreignOf, listIndent, parseDoc, parseLine, serializeDoc, splitFields } from './parse'
 import { canWriteField } from './scalar'
 import { validateRuleValue } from './validate'
 import { newGroupNameProblem } from '../../views/admin/rulesets/targets'
@@ -43,38 +44,45 @@ describe('line identity survives edits (review 1)', () => {
   })
 })
 
-describe('what the backend reads as the list (review 2)', () => {
+const foreign = (s: string) => parseDoc(s).foreign.map(f => [f.line, f.reason])
+
+describe('the strict dialect: anything else is foreign (re-review 1)', () => {
   it('reads the first item as fixing the indent', () => {
     expect(listIndent(D('# c\n  - DOMAIN,a,P\n  - DOMAIN,b,Q\n'))).toBe('  ')
     expect(listIndent(D('foo\n'))).toBeNull()
   })
 
-  it('a deeper item after a scalar is not a rule: the backend folds it into the scalar', () => {
-    const d = D('- DOMAIN,a.com,P1\n- MATCH,Final\n  - DOMAIN-SUFFIX,x.com,Proxy\n')
-    expect(d.lines.map(l => l.kind)).toEqual(['rule', 'rule', 'text'])
-    expect(problemsOf(d)).toEqual([{ line: 2, id: d.lines[2].id, kind: 'indent' }])
-    expect(buildBlocks(d).map(b => b.kind)).toEqual(['rules', 'rules', 'text'])
+  // Each of these is read by the backend differently from how the editor would show it.
+  it.each([
+    ['a continuation that starts with a comma moves the target', '- DOMAIN,a.com,PROXY\n  ,DIRECT\n- DOMAIN,b.com,REJECT\n', [[1, 'continuation']]],
+    ['a continuation after an item', '- DOMAIN,a.com,PROXY\n  .evil\n', [[1, 'continuation']]],
+    ['an item whose value continues on the next line', '- DOMAIN,x.com,PROXY\n- DOMAIN,a.com,\n  DIRECT\n', [[2, 'continuation']]],
+    ['a document marker', '- A\n---\n- B', [[1, 'marker']]],
+    ['a tab in the indent', '\t- X', [[0, 'tab']]],
+    ['a tab after the dash', '-\tX', [[0, 'tab']]],
+    ['a key line and what is under it', 'rules:\n  - X', [[0, 'key']]],
+    ['a first line that is not an item', 'foo\n- X', [[0, 'key']]],
+    ['a block scalar header and its body', '- |\n  - DOMAIN,a,DIRECT\n- DOMAIN,b,DIRECT', [[0, 'block_scalar'], [1, 'indent']]],
+    ['a folded scalar header', '- >\n  x\n', [[0, 'block_scalar'], [1, 'continuation']]],
+    ['an item at another indent after a scalar', '- DOMAIN,a.com,P1\n- MATCH,Final\n  - DOMAIN-SUFFIX,x.com,Proxy\n', [[2, 'indent']]],
+    ['a first item that is indented, then a shallower one', '  - DOMAIN,a,P\n- DOMAIN,b,Q\n', [[1, 'indent']]],
+    ['a Unicode line break inside a line', 'foo\u2028- x', [[0, 'linebreak']]],
+    ['an empty item', '- DOMAIN,a,P\n-\n', [[1, 'empty_item']]],
+  ])('%s', (_n, text, expected) => expect(foreign(text as string)).toEqual(expected))
+
+  it.each([
+    '', '\n', '# c\n  - DOMAIN,a,P\n  - DOMAIN,b,Q\n', '- DOMAIN,a,P\n# x\n\n   # y\n- DOMAIN,b,Q\n', '- DOMAIN,a,P\r\n- DOMAIN,b,Q\r\n',
+    "- 'quoted,rule'\n- DOMAIN,{{ x }},P\n",
+  ])('a plain document has no foreign line: %j', text => expect(foreign(text)).toEqual([]))
+
+  it('the seeded default rule set has none', () => {
+    expect(foreignOf(parseDoc(defaultRulesContent()).lines)).toEqual([])
   })
 
-  it('a first item that is indented makes the shallower ones the problem: the server keeps only the first', () => {
-    const d = D('  - DOMAIN,a,P\n- DOMAIN,b,Q\n')
-    expect(d.lines.map(l => l.kind)).toEqual(['rule', 'text'])
-    expect(problemsOf(d).map(p => p.line)).toEqual([1])
-  })
-
-  it('has no problem when every item shares the indent, and the round trip is unchanged', () => {
-    for (const s of ['  - DOMAIN,a,P\n  - DOMAIN,b,Q\n', '- DOMAIN,a,P\n# x\n- DOMAIN,b,Q\n', '- a,b,c\n  continued\n']) {
-      expect(problemsOf(D(s))).toEqual([])
-      expect(text(D(s))).toBe(s)
-    }
-  })
-
-  it('re-reads the whole document after an edit: deleting the first item changes which indent is the list\'s', () => {
+  it('is re-read after an edit: deleting the first item changes which indent is the list\'s', () => {
     const d = D('- DOMAIN,a,P\n  - DOMAIN,b,Q\n')
-    expect(problemsOf(d)).toHaveLength(1)
-    const e = deleteLines(d, [0])
-    expect(problemsOf(e)).toEqual([])
-    expect(e.lines[0].kind).toBe('rule')
+    expect(d.foreign).toHaveLength(1)
+    expect(deleteLines(d, [0]).foreign).toEqual([])
   })
 
   it('writes pasted rules at the document indent, wherever the snippet was indented', () => {
@@ -86,7 +94,6 @@ describe('what the backend reads as the list (review 2)', () => {
   it('edits as text are brought to the document indent', () => {
     const d = D('- DOMAIN,a,P\n- DOMAIN,b,P\n')
     expect(text(replaceRange(d, 1, 2, '    - DOMAIN,x,P\n    - DOMAIN,y,P'))).toBe('- DOMAIN,a,P\n- DOMAIN,x,P\n- DOMAIN,y,P\n')
-    expect(problemsOf(replaceRange(d, 1, 2, '    - DOMAIN,x,P'))).toEqual([])
   })
 
   it('skips a `rules:` header when pasting a Clash snippet', () => {
@@ -118,6 +125,7 @@ describe('no target is not a target (review 3)', () => {
 
 describe('what can be written as a field (review 4)', () => {
   const bad: [string, string][] = [
+    ['foo\t#bar', 'comment'], ['a:\tb', 'colon'], ['foo\u2028- x', 'newline'], ['a\u0085b', 'newline'], ['\u0001', 'control'], ['a\u007fb', 'control'], ['a\tb', 'control'],
     ['', 'empty'], ['  ', 'empty'], ['a b # ads', 'comment'], ['x #y', 'comment'], ['a: b', 'colon'], ['a:', 'colon'], ["it's", 'quote'], ['"q"', 'quote'], ['a"b', 'quote'],
     ['{{ x }}', 'template'], ['[a]', 'indicator'], ['{a}', 'indicator'], ['- a', 'indicator'], ['!a', 'indicator'], ['&a', 'indicator'], ['*a', 'indicator'], ['|a', 'indicator'],
     ['>a', 'indicator'], ['%a', 'indicator'], ['@a', 'indicator'], ['`a', 'indicator'], ['a(b', 'parens'], ['a,b', 'comma'], ['a\nb', 'newline'], [' a', 'space_edge'], ['a ', 'space_edge'],
@@ -178,6 +186,22 @@ describe('what can be written as a field (review 4)', () => {
     expect(newGroupNameProblem("it's", c)).toBe('name_invalid')
     expect(newGroupNameProblem('Proxy', c)).toBe('name_taken')
     expect(newGroupNameProblem('Fresh', c)).toBeNull()
+  })
+})
+
+describe('editing writes only checked fields', () => {
+  it('refuses to write an unsafe field', () => {
+    expect(() => rewriteRule('- DOMAIN,a,X', { value: 'b # c' })).toThrow()
+    expect(() => rewriteRule('- DOMAIN,a,X', { target: '' })).toThrow()
+    expect(() => rewriteRule('- DOMAIN,a,X', { type: "it's" })).toThrow()
+    expect(() => editRule(D('- DOMAIN,a,X\n'), 0, { value: "it's" })).toThrow()
+  })
+
+  it('leaves an existing unsafe field alone: the seeded AND line stays editable and retargetable', () => {
+    const raw = '- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制'
+    expect(rewriteRule(raw, { value: '((NETWORK,UDP),(DST-PORT,443))' })).toBe(raw)
+    expect(rewriteRule(raw, { target: 'REJECT' })).toBe('- AND,((NETWORK,UDP),(DST-PORT,443)),REJECT')
+    expect(rewriteRule(raw, { type: 'and' })).toBe('- and,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制')
   })
 })
 

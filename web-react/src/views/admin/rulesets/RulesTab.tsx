@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useDeferredValue, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ProxyGroupIssue } from '@/api/rules'
@@ -15,7 +15,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { IconAdd, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner } from '@/lib/icons'
 import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
-import { problemsOf, type Doc } from '@/utils/ruleset/parse'
+import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
 import {
   deleteBlock, deleteLines, editRule, insertRules, mergeBlocks, mergePreview, moveBlock, moveLinesToBlock, moveLinesToNewBlock, newBlock, replaceRange,
@@ -23,7 +23,7 @@ import {
 } from '@/utils/ruleset/ops'
 import { BlockDetail } from './BlockDetail'
 import { BlockDirectory } from './BlockDirectory'
-import { MoveToDialog, type MoveChoice } from './MoveToDialog'
+import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
 import { targetChoices } from './targets'
@@ -96,13 +96,23 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const fileInput = useRef<HTMLInputElement>(null)
   const importInto = useRef<number>(0)
 
-  const problems = useMemo(() => problemsOf(doc), [doc])
+  // A document with any line outside the dialect the structured view understands (parse.ts foreignOf) is edited as text only:
+  // an edit next to such a line could change what the server reads. The view moves to Text by itself, and stays there until
+  // the person chooses Groups again (which is possible once no foreign line is left), so fixing the last one while typing does not pull the editor away.
+  const foreign = doc.foreign
+  const textOnly = foreign.length > 0
   const choices = useMemo(() => targetChoices(blocks, order, rematchNames), [blocks, order, rematchNames])
   const current = blocks[Math.min(selected, blocks.length - 1)] as Block | undefined
   const currentIndex = current?.index ?? 0
 
+  useEffect(() => {
+    if (textOnly && view === 'blocks') { history.beginText(); setViewState('text') }
+    // `history.beginText` is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textOnly, view])
+  const shownView: View = textOnly ? 'text' : view
   const setView = (next: View) => {
-    if (next === view) return
+    if (next === view || (next === 'blocks' && textOnly)) return
     if (next === 'text') history.beginText(); else history.endText()
     setViewState(next)
     try { localStorage.setItem(VIEW_KEY, next) } catch { /* private window: the choice just is not remembered */ }
@@ -187,7 +197,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   const menuOf = useCallback((b: Block): MoreMenuItem[] => {
     const items: MoreMenuItem[] = [
-      { id: 'move', label: t('admin:rules.move.title'), onSelect: () => setDialog({ kind: 'move_block', block: doc.lines[b.start].id }) },
+      moveBlockOptions(blocks, b.index).length === 0
+        ? { id: 'move', label: t('admin:rules.move.title'), disabled: true, disabledReason: t('admin:rules.move.no_destination') }
+        : { id: 'move', label: t('admin:rules.move.title'), onSelect: () => setDialog({ kind: 'move_block', block: doc.lines[b.start].id }) },
       { id: 'above', label: t('admin:rules.blocks.add_above'), icon: IconAdd, onSelect: () => addGroup(b.index) },
       { id: 'below', label: t('admin:rules.blocks.add_below'), icon: IconAdd, onSelect: () => addGroup(b.index + 1) },
     ]
@@ -207,7 +219,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
     if (el.closest('input, textarea, select, [contenteditable="true"], .cm-editor, [role="dialog"]')) return
     // With a dialog open, undo would change the document under it.
     if (dialog !== null) return
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !readOnly && view === 'blocks') {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !readOnly && shownView === 'blocks') {
       e.preventDefault()
       if (e.shiftKey) history.redo(); else history.undo()
     }
@@ -357,26 +369,27 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </Alert>
       )}
 
-      {problems.length > 0 && (
-        <Alert variant="destructive">
+      {textOnly && (
+        <Alert>
           <AlertDescription>
+            <p className="font-medium">{t('admin:rules.problems.indent')}</p>
             <ul className="list-disc pl-4">
-              {problems.slice(0, 5).map(p => <li key={p.id}>{t('admin:rules.problems.indent', { line: p.line + 1 })}</li>)}
-              {problems.length > 5 && <li>{t('admin:rules.paste.more', { count: problems.length - 5 })}</li>}
+              {foreign.slice(0, 6).map(f => <li key={f.id}>{t('admin:rules.foreign.line', { line: f.line + 1, why: t(`admin:rules.foreign.${f.reason}`) })}</li>)}
+              {foreign.length > 6 && <li>{t('admin:rules.paste.more', { count: foreign.length - 6 })}</li>}
             </ul>
           </AlertDescription>
         </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label={t('admin:rules.toolbar')}>
-        <div className="relative min-w-0 flex-1 basis-64 sm:max-w-md">
+        {shownView === 'blocks' && <div className="relative min-w-0 flex-1 basis-64 sm:max-w-md">
           <IconSearch aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input ref={search} value={query} className="pl-8" placeholder={t('admin:rules.search.placeholder')} aria-label={t('admin:rules.search.placeholder')}
             onChange={e => setQuery(e.target.value)} onKeyDown={onSearchKey} data-rules-search />
-        </div>
-        <SegmentedControl<View> aria-label={t('admin:rules.view.label')} value={view} onChange={setView}
-          options={[{ value: 'blocks', label: t('admin:rules.view.blocks') }, { value: 'text', label: t('admin:rules.view.text') }]} />
-        {view === 'blocks' && targets.length > 1 && (
+        </div>}
+        <SegmentedControl<View> aria-label={t('admin:rules.view.label')} value={shownView} onChange={setView}
+          options={[{ value: 'blocks', label: t('admin:rules.view.blocks'), disabled: textOnly }, { value: 'text', label: t('admin:rules.view.text') }]} />
+        {shownView === 'blocks' && targets.length > 1 && (
           <div className="w-48">
             <NativeSelect aria-label={t('admin:rules.search.by_target')} value={targetFilter} onChange={e => setTargetFilter(e.target.value)}>
               <option value="">{t('admin:rules.search.by_target')}</option>
@@ -384,7 +397,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
             </NativeSelect>
           </div>
         )}
-        {!readOnly && view === 'blocks' && (
+        {!readOnly && shownView === 'blocks' && (
           <span className="flex items-center gap-1">
             <Button variant="outline" size="sm" disabled={!history.canUndo || dialog !== null} onClick={history.undo}>{t('admin:rules.undo')}</Button>
             <Button variant="outline" size="sm" disabled={!history.canRedo || dialog !== null} onClick={history.redo}>{t('admin:rules.redo')}</Button>
@@ -394,7 +407,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       </div>
       <p role="status" aria-live="polite" className="min-h-4 text-xs text-muted-foreground">{resultsText || announce}</p>
 
-      {view === 'text' ? (
+      {shownView === 'text' ? (
         <div className="flex flex-col gap-1.5">
           {phone && <p className="text-xs text-muted-foreground">{t('admin:rules.text.mobile_hint')}</p>}
           <div className="overflow-hidden rounded-lg border">

@@ -24,7 +24,6 @@ import { IconCopy, IconDelete } from '@/lib/icons'
 import { ruleKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
-import { parseDoc, problemsOf } from '@/utils/ruleset/parse'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './actions'
@@ -120,9 +119,6 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     // The server refuses a larger body in a middleware, with nothing the person could act on; say it here, before any request.
     const size = bytesOf(form)
     if (size > MAX_BODY_BYTES) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(MAX_BODY_BYTES) })); return }
-    // The server would read some lines differently from the editor (an item indented differently from the list): say which, write nothing.
-    const bad = problemsOf(parseDoc(form.content))
-    if (bad.length > 0) { changeTab('rules'); warn(t('admin:rules.problems.indent', { line: bad[0].line + 1 })); return }
     // From here the editor is locked (`pending`) until the answer is in, so nothing typed meanwhile is overwritten by the response or reported as saved.
     setPending(true)
     try {
@@ -205,13 +201,16 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   // Ctrl/Cmd+S saves and "/" goes to the search box, as the design lists.
   const saveRef = useRef(save)
   saveRef.current = save
+  const pendingRef = useRef(pending)
+  pendingRef.current = pending
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        if (dirtyRef.current) void saveRef.current()
+        // Not while a dialog is open (it is the thing being worked on) or a save is already running.
+        if (dirtyRef.current && !pendingRef.current && !document.querySelector('[role="dialog"], [role="alertdialog"]')) void saveRef.current()
         return
       }
       const el = e.target as HTMLElement | null

@@ -81,12 +81,16 @@ export function rewriteRule(raw: string, patch: RulePatch): string {
   if (patch.options !== undefined && fields.length >= 3) {
     const current = fields.slice(3).filter(f => f !== '')
     if (current.join('\u0000') !== patch.options.join('\u0000')) {
+      if (patch.options.some(o => canWriteField(o))) throw new Error('cannot write rule option')
       const end = trimmed(raw, spans[2]).end
       out = raw.slice(0, end) + patch.options.map(o => ',' + o).join('') + raw.slice(scan.bodyEnd)
     }
   }
   const replace = (index: number, value: string | undefined) => {
     if (value === undefined || index < 0 || index >= fields.length || fields[index] === value) return
+    // Only what is being written is checked: a field the edit leaves alone may be something the model would not write
+    // (the seeded `AND,((NETWORK,UDP),(DST-PORT,443))` has commas in its value) and stays as it is.
+    if (canWriteField(value)) throw new Error('cannot write rule field')
     const s = trimmed(raw, spans[index])
     out = out.slice(0, s.start) + value + out.slice(s.end)
   }

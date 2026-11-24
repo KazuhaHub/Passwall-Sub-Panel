@@ -5,17 +5,19 @@
  * written, whatever the person typed or pasted; it is refused with the reason. Quoting would also survive both
  * readings, but it would make the line something the editor then treats as unreadable, so the model refuses instead.
  */
-export type FieldProblem = 'empty' | 'comma' | 'newline' | 'space_edge' | 'comment' | 'colon' | 'quote' | 'template' | 'indicator' | 'parens'
+export type FieldProblem = 'empty' | 'comma' | 'newline' | 'control' | 'space_edge' | 'comment' | 'colon' | 'quote' | 'template' | 'indicator' | 'parens'
 
 const INDICATORS = '[{&*!|>%@`'
 
 export function canWriteField(s: string): FieldProblem | null {
   if (s.trim() === '') return 'empty'
-  if (/[\r\n]/.test(s)) return 'newline'
+  // U+2028, U+2029 and U+0085 are line breaks to a YAML reader, as \n is.
+  if (/[\r\n\u2028\u2029\u0085]/.test(s)) return 'newline'
   if (s !== s.trim()) return 'space_edge'
   if (s.includes(',')) return 'comma'
-  if (/(^| )#/.test(s)) return 'comment'
-  if (s.includes(': ') || s.endsWith(':')) return 'colon'
+  if (/(^|[ \t])#/.test(s)) return 'comment'
+  if (/:[ \t]/.test(s) || s.endsWith(':')) return 'colon'
+  if (/[\u0000-\u001f\u007f]/.test(s)) return 'control'
   if (s.includes("'") || s.includes('"')) return 'quote'
   if (s.includes('{{')) return 'template'
   if (INDICATORS.includes(s[0]) || s.startsWith('- ') || s === '-') return 'indicator'

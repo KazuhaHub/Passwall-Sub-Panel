@@ -2160,7 +2160,8 @@
       "unsafe_quote": "Quotation marks can't be part of a value",
       "unsafe_template": "{{ }} can't be part of a value",
       "unsafe_indicator": "A value can't start with this character",
-      "unsafe_parens": "Parentheses must be balanced"
+      "unsafe_parens": "Parentheses must be balanced",
+      "unsafe_control": "Control characters can't be part of a value"
     },
     "toast": {
       "saved": "Saved",
@@ -2371,7 +2372,8 @@
         "quote": "contains a quotation mark",
         "template": "contains {{ }}",
         "indicator": "starts with a character that has a special meaning",
-        "parens": "has unbalanced parentheses"
+        "parens": "has unbalanced parentheses",
+        "control": "contains a control character"
       }
     },
     "move": {
@@ -2384,7 +2386,8 @@
       "changes_target": "These entries will go to {{to}} instead of {{from}}",
       "submit": "Move",
       "blocked_filter": "You can't drag while searching or filtering. Use Move to… instead.",
-      "announce": "Group {{from}} moved to position {{to}}"
+      "announce": "Group {{from}} moved to position {{to}}",
+      "no_destination": "There is nowhere else to move this group"
     },
     "search": {
       "placeholder": "Find a domain, IP or rule…",
@@ -2406,7 +2409,18 @@
     "stale_line": "That line has changed since you chose it, so nothing was written. Choose it again.",
     "slug_unreachable": "The slug \"{{slug}}\" is reserved, so this rule set has no page. You can still delete it here.",
     "problems": {
-      "indent": "Line {{line}} is indented differently from the rest of the list, so the server would read the list wrongly. Fix its indentation in the Text view."
+      "indent": "The group view can't represent some lines safely, so only the Text view is available until they are fixed. Put each rule on its own line, starting with \"- \" at the same indent."
+    },
+    "foreign": {
+      "line": "Line {{line}}: {{why}}",
+      "continuation": "continues the line above, which the group view can't show",
+      "indent": "indented differently from the first item",
+      "tab": "uses a tab for indentation",
+      "key": "is not a list item",
+      "marker": "is a document marker",
+      "block_scalar": "starts a multi-line entry",
+      "empty_item": "is an empty item",
+      "linebreak": "contains a Unicode line break"
     }
   },
   "nodes": {

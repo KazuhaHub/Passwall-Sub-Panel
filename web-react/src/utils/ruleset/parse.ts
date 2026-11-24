@@ -42,21 +42,20 @@ export interface Line {
   raw: string
   kind: LineKind
   rule?: RuleInfo
-  /**
-   * 'indent': the line looks like a list item but is indented differently from the first one. The backend reads the
-   * content as a YAML sequence, where such a line is folded into the previous entry or ends the list, so it is not a
-   * rule however it looks, and a save with one is refused.
-   */
-  problem?: 'indent'
 }
 
 export interface Doc {
   lines: Line[]
   /** The indent of the list: that of the first item (see `listIndent`). null when there is no item. */
   indent: string | null
+  /** Lines outside the dialect the structured editor understands (see `foreignOf`). Any one makes the document text-only. */
+  foreign: ForeignLine[]
   /** The text ended with a newline (the last element of `split('\n')` was empty). */
   trailingNewline: boolean
 }
+
+export type ForeignReason = 'continuation' | 'indent' | 'tab' | 'key' | 'marker' | 'block_scalar' | 'empty_item' | 'linebreak'
+export interface ForeignLine { line: number; id: number; reason: ForeignReason }
 
 export interface Span { start: number; end: number }
 
@@ -110,7 +109,7 @@ const RULE_RE = /^( *)-( +)(\S(?:[^]*\S)?)\s*$/
 function plainScalar(s: string): boolean {
   if ('\'"[{&*!|>%@`#?:,'.includes(s[0])) return false
   if (s.startsWith('- ')) return false
-  if (s.includes('{{') || s.includes(' #') || s.includes(': ') || s.endsWith(':')) return false
+  if (s.includes('{{') || /[ \t]#/.test(s) || /:[ \t]/.test(s) || s.endsWith(':') || /[\u2028\u2029\u0085]/.test(s)) return false
   return true
 }
 
@@ -169,7 +168,7 @@ function derive(raw: string, id: number, indent: string | null): Line {
   if (raw.trim() === '') return { id, raw, kind: 'blank' }
   if (raw.trimStart().startsWith('#')) return { id, raw, kind: 'comment' }
   const item = ITEM_RE.exec(raw)
-  if (item && indent !== null && item[1] !== indent) return { id, raw, kind: 'text', problem: 'indent' }
+  if (item && indent !== null && item[1] !== indent) return { id, raw, kind: 'text' }
   const scan = scanRule(raw)
   return scan ? { id, raw, kind: 'rule', rule: ruleOf(scan) } : { id, raw, kind: 'text' }
 }
@@ -185,11 +184,12 @@ export function parseLine(raw: string, indent: string | null = null, id: number 
  */
 export function makeDoc(lines: readonly { raw: string; id?: number }[], trailingNewline: boolean): Doc {
   const indent = listIndent({ lines: lines as Line[] })
-  return { lines: lines.map(l => derive(l.raw, l.id ?? newId(), indent)), indent, trailingNewline }
+  const out = lines.map(l => derive(l.raw, l.id ?? newId(), indent))
+  return { lines: out, indent, foreign: foreignOf(out), trailingNewline }
 }
 
 export function parseDoc(text: string): Doc {
-  if (text === '') return { lines: [], indent: null, trailingNewline: false }
+  if (text === '') return { lines: [], indent: null, foreign: [], trailingNewline: false }
   const parts = text.split('\n')
   const trailingNewline = parts[parts.length - 1] === ''
   if (trailingNewline) parts.pop()
@@ -201,9 +201,35 @@ export function serializeDoc(doc: Doc): string {
   return doc.trailingNewline ? body + '\n' : body
 }
 
-/** Lines the server would read differently from the editor; saving with any is refused. */
-export function problemsOf(doc: Doc): { line: number; id: number; kind: 'indent' }[] {
-  const out: { line: number; id: number; kind: 'indent' }[] = []
-  doc.lines.forEach((l, i) => { if (l.problem) out.push({ line: i, id: l.id, kind: l.problem }) })
+/**
+ * THE DIALECT the structured editor understands, defined strictly instead of by listing the YAML shapes that go wrong.
+ * A document is plain when every line is one of: blank; a full-line comment (`#` after optional spaces); a list item
+ * `<indent>- <text>` at the one list indent (the first item's), spaces only. Every other line is FOREIGN: a continuation
+ * line, an item at another indent, a tab in the indent or after the dash, a `key:` line or any non-item first line, a
+ * `---` / `...` marker, a block-scalar header (`- |`, `- >`), an empty item, a line holding a Unicode line break. The
+ * backend reads such lines in ways the editor does not model (a continuation folds into the item before it and can
+ * change its target), so an edit next to one could change what the server reads: a document with any foreign line is
+ * edited as text only, and says which lines and why.
+ */
+export function foreignOf(lines: readonly { raw: string; id: number }[]): ForeignLine[] {
+  const out: ForeignLine[] = []
+  let indent: string | null = null
+  lines.forEach((l, line) => {
+    const raw = l.raw.replace(/\r$/, '')
+    const bad = (reason: ForeignReason) => out.push({ line, id: l.id, reason })
+    if (/[\u2028\u2029\u0085]/.test(raw)) return bad('linebreak')
+    if (raw.trim() === '') return
+    if (/^ *#/.test(raw)) return
+    if (/^---(\s|$)|^\.\.\.(\s|$)/.test(raw)) return bad('marker')
+    if (/^ *\t/.test(raw) || /^ *-\t/.test(raw)) return bad('tab')
+    const m = /^( *)- +(\S.*)$/.exec(raw)
+    if (!m) {
+      if (/^ *-\s*$/.test(raw)) return bad('empty_item')
+      return bad(indent === null ? 'key' : 'continuation')
+    }
+    if (indent === null) indent = m[1]
+    else if (m[1] !== indent) return bad('indent')
+    if (/^[|>][-+0-9]*(\s|$)/.test(m[2])) return bad('block_scalar')
+  })
   return out
 }

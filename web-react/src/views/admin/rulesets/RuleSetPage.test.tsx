@@ -459,16 +459,49 @@ describe('selections and dialogs name lines by id (review 1)', () => {
 })
 
 describe('what the server reads as the list (review 2)', () => {
-  it('names a line indented differently, and does not save', async () => {
-    reads([rule2('- DOMAIN,a.com,P1\n- MATCH,Final\n  - DOMAIN-SUFFIX,x.com,Proxy\n')])
+  // The group view cannot show these safely (the backend reads each differently from how the groups would draw it):
+  // the Rules tab is the text view only, with a notice, and nothing structured is offered.
+  it.each([
+    ['a continuation that moves the target', '- DOMAIN,a.com,PROXY\n  ,DIRECT\n- DOMAIN,b.com,REJECT\n'],
+    ['a continuation that Add would have joined', '- DOMAIN,a.com,PROXY\n  .evil\n'],
+    ['a value that continues on the next line', '- DOMAIN,x.com,PROXY\n- DOMAIN,a.com,\n  DIRECT\n'],
+    ['a document marker', '- A\n---\n- B'],
+    ['a tab indent', '\t- X'],
+    ['a tab after the dash', '-\tX'],
+    ['a key line', 'rules:\n  - X'],
+    ['a first line that is not an item', 'foo\n- X'],
+    ['a block scalar', '- |\n  - DOMAIN,a,DIRECT\n- DOMAIN,b,DIRECT'],
+    ['an indented first item', '  - DOMAIN,a,P\n- DOMAIN,b,Q\n'],
+  ])('is text only for %s', async (_name, text) => {
+    reads([rule2(text)])
     mountRuleSets(PAGE)
-    expect(await screen.findByText(/Line 3 is indented differently/)).toBeTruthy()
+    expect((await screen.findByRole('textbox', { name: 'Main rules' }) as HTMLTextAreaElement).value).toBe(text)
+    expect(screen.getByText(/can't represent some lines safely/)).toBeTruthy()
+    expect((screen.getByRole('radio', { name: 'Groups' }) as HTMLInputElement).getAttribute('aria-disabled') === 'true' || (screen.getByRole('radio', { name: 'Groups' }) as HTMLButtonElement).disabled).toBe(true)
+    for (const name of ['Add group', 'Paste list', 'Add', 'Undo']) expect(screen.queryByRole('button', { name })).toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+  })
+
+  it('names the foreign lines by number, and a Basics-only edit of such a rule set still saves, content untouched', async () => {
+    const text = '- DOMAIN,a.com,PROXY\n  .evil\n'
+    reads([rule2(text)])
+    mountRuleSets(PAGE)
+    expect(await screen.findByText(/Line 2: continues the line above/)).toBeTruthy()
     fireEvent.click(await tab('General'))
     fireEvent.change(await label(/^Name/), { target: { value: 'N' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringMatching(/Line 3 is indented differently/), severity: 'warning' }))
-    expect(api.post).not.toHaveBeenCalled()
-    expect(api.put).not.toHaveBeenCalled()
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(saved().content).toBe(text)
+  })
+
+  it('typing a foreign line in the text view puts the document in text-only state', async () => {
+    reads()
+    mountRuleSets(PAGE)
+    await group(/Proxy/)
+    fireEvent.click(screen.getByRole('radio', { name: 'Text' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Main rules' }), { target: { value: content + '  continued\n' } })
+    expect(await screen.findByText(/can't represent some lines safely/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add group' })).toBeNull()
   })
 
   it('a pasted Clash snippet indented two spaces lands at the document\'s indent', async () => {
@@ -614,5 +647,81 @@ describe('smaller faults', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('already exists'), severity: 'warning' }))
     expect(api.put).not.toHaveBeenCalled()
+  })
+})
+
+describe('the review of #425, round two', () => {
+  const content2 = '- DOMAIN,a.example,P\n- DOMAIN,b.example,P\n- DOMAIN,c.example,Q\n'
+
+  it('Move to…: a new-group target does not outlive the place it was chosen for', async () => {
+    reads([rule2(content2)])
+    mountRuleSets(PAGE)
+    await openGroup(/^1 ?P/)
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for a\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to…' }))
+    const dialog = await screen.findByRole('dialog')
+    const place = within(dialog).getByLabelText('Move into group')
+    const move = () => within(dialog).getByRole('button', { name: 'Move' }) as HTMLButtonElement
+    fireEvent.change(place, { target: { value: 'new_before' } })
+    fireEvent.change(within(dialog).getByLabelText('Target'), { target: { value: 'DIRECT' } })
+    expect(move().disabled).toBe(false)
+    fireEvent.change(place, { target: { value: 'into:1' } })
+    fireEvent.change(place, { target: { value: 'new_after' } })
+    expect(move().disabled).toBe(true)
+  })
+
+  it('Move to… for a group starts on a place that exists, and is unavailable when there is none', async () => {
+    reads([rule2(content2)])
+    mountRuleSets(PAGE)
+    fireEvent.click(await within(await group(/^1 ?P/)).findByRole('button', { name: /Actions for group 1/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to…' }))
+    const dialog = await screen.findByRole('dialog')
+    const select = within(dialog).getByLabelText('Place after this group') as HTMLSelectElement
+    expect([...select.options].map(o => o.value)).toContain(select.value)
+    expect(select.value).toBe('after:1')
+  })
+
+  it('has no Move to… for a lone group, and says why', async () => {
+    reads([rule2('- DOMAIN,a.example,P\n')])
+    mountRuleSets(PAGE)
+    fireEvent.click(await within(await group(/^1 ?P/)).findByRole('button', { name: /Actions for group 1/ }))
+    const item = await screen.findByRole('menuitem', { name: 'Move to…' })
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toMatch(/nowhere else/)
+  })
+
+  it('Ctrl+S saves nothing while a dialog is open', async () => {
+    reads([rule2(content2)])
+    mountRuleSets(PAGE)
+    await openGroup(/^1 ?P/)
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for a\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete a\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Edit b\.example/ }))
+    await screen.findByRole('dialog')
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  // The original repro, with its numbers: a group on lines 10-14, lines 13 and 14 ticked, line 11 deleted from its menu.
+  it('tick 13 and 14, delete 11, "Delete 2 selected": exactly 13 and 14 go, nothing of the next group', async () => {
+    const filler = Array.from({ length: 9 }, (_, i) => `- DOMAIN,f${i + 1}.example,F`).join('\n')
+    const grp = [10, 11, 12, 13, 14].map(n => `- DOMAIN,l${n}.example,P`).join('\n')
+    reads([rule2(`${filler}\n${grp}\n- DOMAIN,next.example,Next\n- DOMAIN,next2.example,Next\n`)])
+    // The filler and the group share no target, so they are two groups, the second being lines 10-14.
+    mountRuleSets(PAGE)
+    await openGroup(/^2 ?P/)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /l13\.example/ }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: /l14\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /More actions for l11\.example/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete l11\.example/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Delete 2 selected/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const lines = saved().content.split('\n')
+    expect(lines.filter(l => l.endsWith(',P'))).toEqual(['- DOMAIN,l10.example,P', '- DOMAIN,l12.example,P'])
+    expect(lines).toContain('- DOMAIN,next.example,Next')
+    expect(lines).toContain('- DOMAIN,next2.example,Next')
   })
 })
