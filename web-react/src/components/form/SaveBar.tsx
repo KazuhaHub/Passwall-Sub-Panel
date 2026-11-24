@@ -1,4 +1,6 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useContext, useId, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { DialogFooterSlot } from '@/components/ui/dialog-footer-slot'
 import { Loader2Icon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'
@@ -77,6 +79,8 @@ function inPageOrder(list: Problem[]): Problem[] {
  */
 export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, onSave, onDiscard, className }: SaveBarProps) {
   const { t } = useSpacedT()
+  // Inside a DetailDialog the bar lives in the dialog's footer, flat and full width, not floating over the body.
+  const footerSlot = useContext(DialogFooterSlot)
   const visible = dirty || pending
   const { issues, discard } = useFormValidity()
   const reasonId = useId()
@@ -137,11 +141,7 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
   }
   const hiddenText = hidden && canGo ? (hidden.name ? t('ui.form.invalid_hidden', { name: hidden.name }) : t('ui.form.invalid_hidden_unnamed')) : null
   const spoken = pending ? t('ui.form.saving') : hiddenText ?? (dirty ? (blocked && count > 0 ? t('ui.form.invalid_status', { count }) : t('ui.form.unsaved')) : '')
-  return (
-    <>
-      {/* Always in the page: a live region announces a change in its text, not its own arrival. */}
-      <p role="status" className="sr-only">{spoken}</p>
-      {visible && (
+  const bar = (
     <div
       role="region"
       aria-label={t('ui.form.unsaved')}
@@ -151,7 +151,9 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
         // bottom edge; sticky is bounded by the container's content box, so at the end of the page it rests in normal flow
         // with exactly the container's own bottom padding below it (no band, no divider line). `mt-4` is the gap above it
         // that every section has; a page may override it.
-        'sticky bottom-4 z-20 mt-4 flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-popover/95 px-4 py-2.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-popover/80',
+        footerSlot
+          ? 'flex w-full flex-wrap items-center gap-x-4 gap-y-2'
+          : 'sticky bottom-4 z-20 mt-4 flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-popover/95 px-4 py-2.5 shadow-lg backdrop-blur supports-backdrop-filter:bg-popover/80',
         className,
       )}
     >
@@ -184,7 +186,12 @@ export function SaveBar({ dirty, pending, disabled, message, errors, saveLabel, 
         </Button>
       </div>
     </div>
-      )}
+  )
+  return (
+    <>
+      {/* Always in the page: a live region announces a change in its text, not its own arrival. */}
+      <p role="status" className="sr-only">{spoken}</p>
+      {visible && (footerSlot ? createPortal(bar, footerSlot) : bar)}
     </>
   )
 }

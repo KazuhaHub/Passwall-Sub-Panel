@@ -5,7 +5,7 @@ import { type DestExemption } from '@/api/accessControl'
 import { AccessBadge } from '@/components/access/AccessBadge'
 import { MoreMenu } from '@/components/common/MoreMenu'
 import { confirm } from '@/components/ConfirmHost'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
@@ -21,7 +21,7 @@ import { removeExemptionConfirm } from '../confirmCopy'
 import { reportDestError } from '../destErrors'
 import AddExemptionDialog from './AddExemptionDialog'
 
-export interface ExemptionsSheetProps {
+export interface ExemptionsDialogProps {
   open: boolean
   onClose: () => void
   /** Hands over to the account drawer: replaces `sheet=exemptions` with `user=<id>`. */
@@ -32,7 +32,7 @@ const X = 'admin:access_control.exemptions.'
 const HOUR = 3_600_000
 
 /** S5: every exemption in one place, each with who added it, why and when it ends. */
-export default function ExemptionsSheet({ open, onClose, onOpenUser }: ExemptionsSheetProps) {
+export default function ExemptionsDialog({ open, onClose, onOpenUser }: ExemptionsDialogProps) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const q = useDestExemptions(scope, { enabled: open })
@@ -65,7 +65,7 @@ export default function ExemptionsSheet({ open, onClose, onOpenUser }: Exemption
 
   return (
     <>
-      <DetailSheet open={open} onClose={onClose} title={t(`${X}title`)} description={t(`${X}lead`)}
+      <DetailDialog open={open} onClose={onClose} size="md" title={t(`${X}title`)} description={t(`${X}lead`)}
         actions={<Button size="sm" onClick={() => setDialog({ open: true })}>{t(`${X}add`)}</Button>}>
         {q.isPending && <div className="grid gap-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>}
         {q.isError && <ErrorState compact title={t(`${X}load_failed`)} reason={q.error} retry={() => q.refetch()} />}
@@ -93,8 +93,9 @@ export default function ExemptionsSheet({ open, onClose, onOpenUser }: Exemption
             })}
           </ul>
         )}
-      </DetailSheet>
-      <AddExemptionDialog open={dialog.open} existing={dialog.existing} onClose={() => setDialog({ open: false })} />
+        {/* Inside the dialog, so the two nest: the upper one is centred, traps focus and closes alone on Esc. */}
+        <AddExemptionDialog open={dialog.open} existing={dialog.existing} onClose={() => setDialog({ open: false })} />
+      </DetailDialog>
     </>
   )
 }

@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads, mount } from '../testHarness'
-import NodeDiagnosticsSheet from './NodeDiagnosticsSheet'
+import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import type { Server } from '@/api/servers'
 
 
@@ -24,12 +24,12 @@ const server: Server = {
   has_api_token: false, has_password: false, auth_method: '', insecure_https: false,
 }
 
-describe('NodeDiagnosticsSheet Collect button', () => {
+describe('NodeDiagnosticsDialog Collect button', () => {
   it('shows a spinner for the whole request and ignores a second click', async () => {
     installReads({})
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NodeDiagnosticsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeDiagnosticsDialog server={server} open onClose={() => {}} />)
 
     const collectButton = screen.getByText('admin:nodeDiagnostics.collect').closest('button')!
     fireEvent.click(collectButton)

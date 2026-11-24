@@ -74,6 +74,7 @@ export function useDrawerParam<T = number>(
   const value = read(params.get(param))
   // `riskDrawer` is the mark the first version wrote; an entry it pushed still closes by going Back.
   const mark = location.state as (DrawerState & { riskDrawer?: string }) | null
+  const marked = !!(mark?.drawer || mark?.riskDrawer)
   const pushedHere = mark?.drawer === param || mark?.riskDrawer === param
   // The options are literals at the call site, new on every render: read them
   // through a ref so open and close keep their identity.
@@ -93,11 +94,14 @@ export function useDrawerParam<T = number>(
       replace: opts.replace === true,
       state: {
         ...(location.state as DrawerState | null),
-        drawer: param,
+        // A replacing open takes over the entry it is on: that entry stays "pushed by a drawer" if it was (now by this
+        // one) and stays unmarked if it was not. Marking it regardless would make close() go Back off a page that
+        // was opened from a pasted link.
+        ...(opts.replace === true && !marked ? {} : { drawer: param }),
         ...(opts.prefill ? { prefill: opts.prefill } : {}),
       } satisfies DrawerState,
     })
-  }, [param, setParams, location.state])
+  }, [param, setParams, location.state, marked])
 
   const close = useCallback(() => {
     if (pushedHere) {

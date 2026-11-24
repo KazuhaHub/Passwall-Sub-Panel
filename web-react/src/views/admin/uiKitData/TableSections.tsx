@@ -12,7 +12,7 @@ import type { LandingColor } from '@/components/diagram/landingColor'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { DataTable } from '@/components/data/DataTable'
 import type { DataTableHandle } from '@/components/data/dataTableTypes'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { FilterBar } from '@/components/data/FilterBar'
 import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
 import { StatusBadge } from '@/components/common/StatusBadge'
@@ -151,8 +151,9 @@ export function NodesTableSection() {
         )}
       />
       {bulkLog && <p className="text-xs text-muted-foreground">最近的批量操作：{bulkLog}</p>}
-      <DetailSheet
+      <DetailDialog
         open={selection.isOpen}
+        size="sm"
         onClose={selection.clear}
         title={selected?.name ?? `未找到 ${selection.selected}`}
         status={selected && <StatusCell status={selected.status} />}
@@ -168,7 +169,7 @@ export function NodesTableSection() {
             <dt className="text-muted-foreground">编号</dt><dd className="font-mono">{selected.id}</dd>
           </dl>
         )}
-      </DetailSheet>
+      </DetailDialog>
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => view.reset()}>恢复此表的默认视图</Button>
       </div>

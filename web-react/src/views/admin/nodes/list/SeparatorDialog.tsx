@@ -5,7 +5,7 @@ import { Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxCont
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { AsyncButton } from '@/components/common/AsyncButton'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { Field } from '@/components/form/Field'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { confirm } from '@/components/ConfirmHost'
@@ -19,11 +19,11 @@ interface NodeOption { id: number; name: string }
 interface Draft { name: string; enabled: boolean; mode: SeparatorMode; nodes: NodeOption[] }
 
 /**
- * The separator sheet (design 2.6): create from the header button, edit from the row. The same fields as the old
- * dialog, in a sheet so the list stays in view. A new separator is created at the END of the order (the form has
+ * The separator dialog (design 2.6): create from the header button, edit from the row. The same fields as the old
+ * dialog, in a dialog so the list stays in view. A new separator is created at the END of the order (the form has
  * no position, as before); the caller highlights it so it is found and moved with drag or Move to….
  */
-export function SeparatorSheet({ separatorId, separators, nodes, onClose, onSaved }: {
+export function SeparatorDialog({ separatorId, separators, nodes, onClose, onSaved }: {
   /** 'new', or the id being edited; null closed. */
   separatorId: number | 'new' | null
   separators: readonly Separator[]
@@ -81,8 +81,9 @@ function SeparatorForm({ open, existing, isNew, nodes, onClose, onSaved }: {
   }
 
   return (
-    <DetailSheet
+    <DetailDialog
       open={open}
+      size="md"
       onClose={close}
       title={t(isNew ? 'nodes.separator.create_title' : 'nodes.separator.edit_title')}
       description={t('nodes.separator.hint')}
@@ -137,6 +138,6 @@ function SeparatorForm({ open, existing, isNew, nodes, onClose, onSaved }: {
           <Switch checked={draft.enabled} onCheckedChange={enabled => setDraft(d => ({ ...d, enabled }))} />
         </Field>
       </div>
-    </DetailSheet>
+    </DetailDialog>
   )
 }

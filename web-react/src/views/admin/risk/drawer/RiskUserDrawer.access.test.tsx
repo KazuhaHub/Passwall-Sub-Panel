@@ -20,7 +20,7 @@ for (const t of ['Overview', 'Connections', 'Devices', 'Timeline']) {
   vi.doMock(`./${t}Tab`, () => ({ default: () => <p data-testid={`${t}-tab`} /> }))
 }
 vi.mock('./DrawerHeader', () => ({ default: () => <p data-testid="risk-drawer-header" /> }))
-vi.mock('../../accessControl/sheets/AddExemptionDialog', () => ({
+vi.mock('../../accessControl/dialogs/AddExemptionDialog', () => ({
   default: ({ open, lockedUserId }: { open: boolean; lockedUserId?: number }) => open ? <p data-testid="add-exemption">{lockedUserId}</p> : null,
 }))
 

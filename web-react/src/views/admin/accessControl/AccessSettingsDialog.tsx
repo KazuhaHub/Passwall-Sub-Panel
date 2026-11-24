@@ -5,7 +5,7 @@ import { destErrorOf, isDestUnavailable, type DestSettings } from '@/api/accessC
 import PolicyField, { outOfRange, type FieldSpec } from '@/components/PolicyField'
 import { confirm } from '@/components/ConfirmHost'
 import { AsyncButton } from '@/components/common/AsyncButton'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { FormValidityProvider, useFormValidity } from '@/components/form/FormValidity'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushToast } from '@/components/feedback/toasts'
@@ -138,11 +138,11 @@ function AccessSettings({ open, focus, onClose }: AccessSettingsDialogProps) {
   )
 
   return (
-    <DetailSheet
+    <DetailDialog
       open={open}
       onClose={close}
+      size="md"
       title={t(`${S}title`)}
-      className="data-[side=right]:sm:w-[34rem] data-[side=right]:sm:max-w-[34rem]"
       footer={(
         <>
           <span className="mr-auto self-center text-sm text-muted-foreground">{count > 0 ? t(`${S}changed`, { count }) : ''}</span>
@@ -206,6 +206,6 @@ function AccessSettings({ open, focus, onClose }: AccessSettingsDialogProps) {
           </>
         )}
       </div>
-    </DetailSheet>
+    </DetailDialog>
   )
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { deleteACMEAccount, deleteCert, deleteDNSCred, renewCert, type ACMEAccount, type Cert, type DNSCredential } from '@/api/certs'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -12,17 +12,19 @@ import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
 import { IconRefresh } from '@/lib/icons'
 import { certKeys } from '@/query/keys'
-import { AccountFormSheet } from './certificates/AccountFormSheet'
+import { AccountFormDialog } from './certificates/AccountFormDialog'
 import { AccountsTab } from './certificates/AccountsTab'
-import { CertDetailSheet } from './certificates/CertDetail'
-import { CertFormSheet } from './certificates/CertFormSheet'
+import { CertDetailDialog } from './certificates/CertDetail'
+import { CertFormDialog } from './certificates/CertFormDialog'
 import { CertsTab, type CertActions } from './certificates/CertsTab'
-import { CredFormSheet } from './certificates/CredFormSheet'
+import { CredFormDialog } from './certificates/CredFormDialog'
 import { CredsTab } from './certificates/CredsTab'
 import { DeleteDialog } from './certificates/DeleteDialog'
 import { RenewalSettings } from './certificates/RenewalSettings'
 import { caLabel } from './certificates/model'
 import { NodeLinks, useCertsT, useCommonT } from './certificates/shared'
+import { useCertRows } from './certificates/useCertRows'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { useCertData } from './certificates/useCertData'
 import { parseRowId } from './logs/shared'
 
@@ -40,8 +42,8 @@ type Removal =
 
 /**
  * Certificates: issue them, see which need attention, and manage the CA accounts and DNS credentials they
- * are issued with. The three lists are tabs (`?tab=`); a certificate opens in a sheet (`?row=`), and the
- * three forms open in a wide sheet each. This page is administrator-only on the server: an operator who
+ * are issued with. The three lists are tabs (`?tab=`); a certificate opens in a dialog (`?row=`), and the
+ * three forms open in a dialog each. This page is administrator-only on the server: an operator who
  * reaches it is told so rather than shown raw errors.
  */
 export default function CertificatesView() {
@@ -58,6 +60,10 @@ export default function CertificatesView() {
   const creds = data.creds.data ?? []
   const certs = data.certs.data ?? []
   const refresh = () => data.reload()
+  // Previous / next walk the certificates the list shows, in its order (attention first, narrowed by its filters).
+  const certRows = useCertRows(data).rows
+  const certIds = useMemo(() => certRows.map(x => x.id), [certRows])
+  const nav = useRecordNav(certIds, sel.selected, sel.select)
 
   // A tab switch clears what belongs to the tab it leaves: the opened certificate and the list's own
   // keyword and filter (they would carry over into a list they mean nothing for).
@@ -87,7 +93,7 @@ export default function CertificatesView() {
 
   const certActions: CertActions = {
     renew,
-    // The detail sheet and the form sheet are both modal: close the first before opening the second.
+    // The detail dialog and the form dialog are both modal: close the first before opening the second.
     edit: cert => { sel.clear(); setEditor({ kind: 'cert', item: cert }) },
     remove: cert => setRemoval({ kind: 'cert', item: cert }),
     create: () => setEditor({ kind: 'cert', item: null }),
@@ -163,11 +169,11 @@ export default function CertificatesView() {
         )}
       </div>
 
-      {shown && !editor && <CertDetailSheet cert={shown} data={data} act={certActions} onClose={sel.clear} />}
+      {shown && !editor && <CertDetailDialog cert={shown} data={data} act={certActions} nav={nav} onClose={sel.clear} />}
 
-      {editor?.kind === 'cert' && <CertFormSheet cert={editor.item} data={data} onClose={() => setEditor(null)} />}
-      {editor?.kind === 'account' && <AccountFormSheet account={editor.item} data={data} onClose={() => setEditor(null)} />}
-      {editor?.kind === 'cred' && <CredFormSheet cred={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'cert' && <CertFormDialog cert={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'account' && <AccountFormDialog account={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'cred' && <CredFormDialog cred={editor.item} data={data} onClose={() => setEditor(null)} />}
 
       {removal?.kind === 'cert' && (() => {
         const nodes = nodesOf(removal.item)

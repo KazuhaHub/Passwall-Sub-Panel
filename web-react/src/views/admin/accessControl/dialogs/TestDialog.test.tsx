@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { renderAccess, snack, whereIs } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
-import TestSheet from './TestSheet'
+import TestDialog from './TestDialog'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -31,7 +31,7 @@ beforeEach(() => {
 
 const run = () => fireEvent.click(screen.getByRole('button', { name: '测试' }))
 
-describe('TestSheet: report-only hits', () => {
+describe('TestDialog: report-only hits', () => {
   // A report-only rule's step keeps its kind and name; report_only is what says a hit on it does not block.
   const reportHit = (): api.DestTestResult => blocked({
     verdict: 'observe', terminating_step: 'p3',
@@ -45,7 +45,7 @@ describe('TestSheet: report-only hits', () => {
 
   it('says it would have been blocked, in the report-only tone, never the retired "watch only" and never a raw key', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(reportHit())
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'www.binance.com' } })
     run()
     const verdict = await screen.findByTestId('test-verdict')
@@ -66,7 +66,7 @@ describe('TestSheet: report-only hits', () => {
         { step: 2, kind: 'block', policy_id: 1, name: 'No mail', result: 'miss' },
       ],
     }))
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'example.com' } })
     run()
     const verdict = await screen.findByTestId('test-verdict')
@@ -83,7 +83,7 @@ describe('TestSheet: report-only hits', () => {
       verdict: 'block', terminating_step: 's4',
       steps: [{ step: 1, kind: 'source', report_only: false, node_id: 4, rule_id: 's4', result: 'hit', entry: 'CN' }],
     }))
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'example.com' } })
     run()
     expect(await screen.findByText('被入站的来源规则拦截（CN）')).toBeTruthy()
@@ -91,10 +91,10 @@ describe('TestSheet: report-only hits', () => {
   })
 })
 
-describe('TestSheet', () => {
+describe('TestDialog', () => {
   it('starts with an instruction, tests on submit and shows the verdict, the trace and the shadowed hit', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     expect(screen.getByText('输入目的地，看它在哪一步被放行或拦截')).toBeTruthy()
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'smtp.gmail.com' } })
     fireEvent.change(screen.getByRole('textbox', { name: '端口' }), { target: { value: '587' } })
@@ -108,7 +108,7 @@ describe('TestSheet', () => {
 
   it('a pasted URL is cut down to its host with the hint, and the prefill never touches the URL', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked({ verdict: 'default', terminating_step: '', steps: [] }))
-    const { router } = renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} prefill={{ target: 'https://example.com/a?b=1' }} />, { route: '/admin/access-control?sheet=test' })
+    const { router } = renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} prefill={{ target: 'https://example.com/a?b=1' }} />, { route: '/admin/access-control?sheet=test' })
     expect(await screen.findByText('只看主机名，看不到网址路径')).toBeTruthy()
     run()
     await waitFor(() => expect(api.testDestination).toHaveBeenCalledWith(expect.objectContaining({ target: 'example.com' })))
@@ -117,7 +117,7 @@ describe('TestSheet', () => {
   })
 
   it('validates the port and the source IP before asking', async () => {
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.com' } })
     fireEvent.change(screen.getByRole('textbox', { name: '端口' }), { target: { value: '99999' } })
     fireEvent.change(screen.getByRole('textbox', { name: /来源 IP/ }), { target: { value: 'nope' } })
@@ -131,7 +131,7 @@ describe('TestSheet', () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked({ unpublished: true }))
     vi.mocked(api.publishDest).mockResolvedValue({ published_generation: 2, generation: 2, unpublished: false })
     const onOpenPolicy = vi.fn()
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={onOpenPolicy} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={onOpenPolicy} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.com' } })
     run()
     expect(await screen.findByText('有改动尚未下发，结果按已下发的版本判断')).toBeTruthy()
@@ -146,7 +146,7 @@ describe('TestSheet', () => {
       verdict: 'block', terminating_step: 'trailing_dot', builtin: 'trailing_dot', conditional: false, unpublished: false, nodes: [], notes: ['hostname_skips_ip_rules'],
       steps: [{ step: 1, kind: 'builtin', builtin: 'trailing_dot', result: 'hit' }],
     })
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'example.com.' } })
     run()
     expect(await screen.findByText('被节点内置规则拦截：以 . 结尾的主机名')).toBeTruthy()
@@ -157,7 +157,7 @@ describe('TestSheet', () => {
   it('adds a global allow exception for the tested host', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
     vi.mocked(api.addDestException).mockResolvedValue({ entry: 'smtp.gmail.com', created: null })
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'smtp.gmail.com' } })
     run()
     fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
@@ -172,7 +172,7 @@ describe('TestSheet', () => {
     async function open() {
       vi.mocked(api.testDestination).mockResolvedValue(refused())
       vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
-      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
       fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
       run()
       fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
@@ -207,7 +207,7 @@ describe('TestSheet', () => {
     it('a group that is gone but still published has no default: it says so, and nothing is added until a choice', async () => {
       vi.mocked(api.testDestination).mockResolvedValue(blocked({ terminating_step: 'g4', steps: [{ step: 1, kind: 'group', rule_id: 'g4', group_id: 4, name: '', result: 'hit' }] }))
       vi.mocked(api.addDestException).mockResolvedValue({ entry: 'figma.com', created: null })
-      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
       fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
       run()
       fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
@@ -221,7 +221,7 @@ describe('TestSheet', () => {
 
     it('a deleted group shows no global warning until the global choice is made', async () => {
       vi.mocked(api.testDestination).mockResolvedValue(blocked({ terminating_step: 'g4', steps: [{ step: 1, kind: 'group', rule_id: 'g4', group_id: 4, name: '', result: 'hit' }] }))
-      renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+      renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
       fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'figma.com' } })
       run()
       fireEvent.click(await screen.findByRole('button', { name: '加入放行例外…' }))
@@ -242,7 +242,7 @@ describe('TestSheet', () => {
 
   it('sends resolved_ips only when filled, split on commas and spaces', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
     run()
     await waitFor(() => expect(api.testDestination).toHaveBeenCalledTimes(1))
@@ -254,13 +254,13 @@ describe('TestSheet', () => {
   })
 
   it('hints that the resolved IPs matter only for an on_demand node or inbound', () => {
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     expect(screen.getByText(/只有选了按需解析（on_demand）的节点或入站时才会用到，否则忽略/)).toBeTruthy()
   })
 
   it('a failed lookup sends an empty resolved_ips, disables and clears the IP field', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked())
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
     const ips = screen.getByRole('textbox', { name: /解析出的 IP/ }) as HTMLInputElement
     fireEvent.change(ips, { target: { value: '10.0.0.1' } })
@@ -278,7 +278,7 @@ describe('TestSheet', () => {
   })
 
   it('validates the resolved IPs before asking', async () => {
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
     fireEvent.change(screen.getByRole('textbox', { name: /解析出的 IP/ }), { target: { value: '10.0.0.1 nope' } })
     run()
@@ -288,7 +288,7 @@ describe('TestSheet', () => {
 
   it('says the result is conditional when the host name was not resolved', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked({ verdict: 'default', terminating_step: '', steps: [], notes: ['hostname_needs_resolution'] }))
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
     run()
     expect(await screen.findByText(/节点会解析这个主机名，而这里没有解析/)).toBeTruthy()
@@ -297,7 +297,7 @@ describe('TestSheet', () => {
 
   it('says an empty resolution is engine-dependent', async () => {
     vi.mocked(api.testDestination).mockResolvedValue(blocked({ verdict: 'default', terminating_step: '', steps: [], notes: ['resolution_failed_engine_dependent'] }))
-    renderAccess(<TestSheet open onClose={() => {}} onOpenPolicy={() => {}} />)
+    renderAccess(<TestDialog open onClose={() => {}} onOpenPolicy={() => {}} />)
     fireEvent.change(screen.getByRole('textbox', { name: /目的地/ }), { target: { value: 'a.example' } })
     run()
     expect(await screen.findByText(/Xray 放行，sing-box 拒绝连接/)).toBeTruthy()

@@ -19,7 +19,7 @@ import { useDestHits, useDestPolicies, useDestSettings, useDestStatus } from '@/
 import { useQueryScope } from '@/query/useQueryScope'
 import { useSiteStore } from '@/stores/site'
 import { collectingNodeCount, enabledPolicies, isNativeKind } from '@/utils/accessControl'
-import AddExemptionDialog from '../sheets/AddExemptionDialog'
+import AddExemptionDialog from '../dialogs/AddExemptionDialog'
 import type { SettingsFocus } from '../accessParams'
 import { destErrorText } from '../destErrors'
 import AddExceptionDialog, { type ExceptionTarget } from './AddExceptionDialog'

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { Navigate, useLocation, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
@@ -29,12 +30,12 @@ import { pauseConfirm, resumeConfirm } from './confirmCopy'
 import { reportDestError } from './destErrors'
 import AllowlistTab from './allowlist/AllowlistTab'
 import ListsTab from './lists/ListsTab'
-import ListEntriesSheet from './lists/ListEntriesSheet'
+import ListEntriesDialog from './lists/ListEntriesDialog'
 import PoliciesTab from './policies/PoliciesTab'
 import RecordsTab from './records/RecordsTab'
-import CoverageSheet from './sheets/CoverageSheet'
-import ExemptionsSheet from './sheets/ExemptionsSheet'
-import TestSheet from './sheets/TestSheet'
+import CoverageDialog from './dialogs/CoverageDialog'
+import ExemptionsDialog from './dialogs/ExemptionsDialog'
+import TestDialog from './dialogs/TestDialog'
 import VerdictBar from './VerdictBar'
 
 const HELP_KEY: Record<AccessTab, string> = {
@@ -79,6 +80,11 @@ export default function AccessControlView() {
   const sheet = useDrawerParam<AccessSheet>('sheet', { parse: parseAccessSheet, exclusive: ['user'], companions: ['list', 'node_state'] })
   const account = useDrawerParam('user', { exclusive: ['sheet', 'list', 'node_state'] })
   const prefill = (location.state as DrawerState | null)?.prefill
+  // The list dialog's previous / next walk the lists by name, the order the lists tab opens in. (A column sort or a filter
+  // chosen in that tab is the tab's own and is not carried here.)
+  const listIds = useMemo(() => [...(listsRead.data?.items ?? [])].sort((a, b) => a.name.localeCompare(b.name)).map(l => l.id), [listsRead.data])
+  const openListId = sheet.value === 'list' ? parseListId(params.get('list')) : null
+  const listNav = useRecordNav(listIds, openListId, id => sheet.open('list', { replace: true, extra: { list: String(id) } }))
 
   // Replace, not push: a tab switch is a view of the same page, and Back should leave the page.
   const setTab = (next: AccessTab, state?: AccessNavState) => setParams(prev => {
@@ -232,12 +238,12 @@ export default function AccessControlView() {
           </>
         )}
 
-      <TestSheet open={sheet.value === 'test'} onClose={sheet.close} prefill={prefill} onOpenPolicy={openPolicy} />
-      <CoverageSheet open={sheet.value === 'nodes'} onClose={sheet.close} filter={nodeFilter}
+      <TestDialog open={sheet.value === 'test'} onClose={sheet.close} prefill={prefill} onOpenPolicy={openPolicy} />
+      <CoverageDialog open={sheet.value === 'nodes'} onClose={sheet.close} filter={nodeFilter}
         onFilterChange={setNodeFilter} onOpenSettings={openSettings} />
-      <ExemptionsSheet open={sheet.value === 'exemptions'} onClose={sheet.close}
+      <ExemptionsDialog open={sheet.value === 'exemptions'} onClose={sheet.close}
         onOpenUser={id => account.open(id, { replace: true })} />
-      <ListEntriesSheet listId={sheet.value === 'list' ? parseListId(params.get('list')) : null} onClose={sheet.close}
+      <ListEntriesDialog listId={openListId} nav={listNav} onClose={sheet.close}
         onEdit={id => {
           // A sheet that was PUSHED is closed by going Back, so history keeps one
           // page entry; the dialog is opened once that navigation has landed.

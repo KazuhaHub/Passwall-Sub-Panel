@@ -117,7 +117,9 @@
       "facet_more": "{{first}}等{{count}}项",
       "search_clear": "清除搜索",
       "clear_all": "清除全部筛选",
-      "detail_close": "关闭详情"
+      "detail_close": "关闭详情",
+      "detail_prev": "上一条",
+      "detail_next": "下一条"
     },
     "form": {
       "unsaved": "有未保存的修改",

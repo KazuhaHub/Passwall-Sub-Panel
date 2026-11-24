@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { SubClientApp, SubClientFamily, SubRenderFormat } from '@/api/settings'
 import { IconAdd, IconDelete } from '@/lib/icons'
 import { IconButton } from '@/components/common/IconButton'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { Field } from '@/components/form/Field'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,9 +17,9 @@ const FORMATS: SubRenderFormat[] = ['mihomo', 'sing-box', 'uri-list']
 /**
  * The editor of one detection family and its import apps. It edits the PAGE's draft directly (there is no
  * second draft with an Apply button): the page's save bar and leave guard already cover every change, so a
- * second layer of "unsaved" would only add a step. Closing the sheet loses nothing.
+ * second layer of "unsaved" would only add a step. Closing the dialog loses nothing.
  */
-export function FamilySheet({ families, index, onChange, onClose }: {
+export function FamilyDialog({ families, index, onChange, onClose }: {
   families: SubClientFamily[]
   /** The family being edited; null: closed. */
   index: number | null
@@ -29,16 +29,16 @@ export function FamilySheet({ families, index, onChange, onClose }: {
   const { t } = useTranslation('admin')
   const family = index === null ? undefined : families[index]
   return (
-    <DetailSheet
+    <DetailDialog
       open={family !== undefined}
+      size="lg"
       onClose={onClose}
       title={family ? (family.name.trim() || t('settings.subscription.unnamed_family')) : ''}
       description={t('settings.subscription.registry_hint')}
-      className="data-[side=right]:sm:w-[44rem] data-[side=right]:sm:max-w-[44rem]"
       footer={<Button variant="outline" onClick={onClose}>{t('settings.subscription.sheet_done')}</Button>}
     >
       {family && index !== null && <FamilyForm key={index} family={family} fi={index} families={families} onChange={onChange} />}
-    </DetailSheet>
+    </DetailDialog>
   )
 }
 

@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/input'
 import { IconAdd, IconDelete } from '@/lib/icons'
 import { certKeys } from '@/query/keys'
 import { buildCredentials, isCustomProvider } from './model'
-import { FormSheet, useCertsT, useCommonT } from './shared'
+import { FormDialog } from '@/components/data/FormDialog'
+import { useCertsT, useCommonT } from './shared'
 import type { CertData } from './useCertData'
 
 interface Pair { k: string; v: string }
@@ -21,7 +22,7 @@ interface Pair { k: string; v: string }
  * does not know) takes free KEY / VALUE pairs. Values are write-only: the server returns only the key names,
  * so on an existing credential every box starts empty and an empty box keeps the stored value.
  */
-export function CredFormSheet({ cred, data, onClose }: { cred: DNSCredential | null; data: CertData; onClose: () => void }) {
+export function CredFormDialog({ cred, data, onClose }: { cred: DNSCredential | null; data: CertData; onClose: () => void }) {
   const t = useCertsT()
   const c = useCommonT()
   const queryClient = useQueryClient()
@@ -72,7 +73,7 @@ export function CredFormSheet({ cred, data, onClose }: { cred: DNSCredential | n
   }
 
   return (
-    <FormSheet
+    <FormDialog
       title={cred ? t('certs.cred_edit') : t('certs.cred_new')}
       description={t('certs.cred_subtitle')}
       dirty={dirty}
@@ -124,6 +125,6 @@ export function CredFormSheet({ cred, data, onClose }: { cred: DNSCredential | n
           )
         })
       ))}
-    </FormSheet>
+    </FormDialog>
   )
 }

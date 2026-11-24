@@ -3,7 +3,7 @@ import { IconSpinner } from '@/lib/icons'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import type { Tone } from '@/components/common/tones'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
@@ -33,7 +33,7 @@ const SEVERITY_TONE: Record<Severity, Tone> = { info: 'neutral', warning: 'warni
 const CHECK_TONE: Record<string, Tone> = { ok: 'success', warning: 'warning', failed: 'danger', unavailable: 'neutral' }
 const STATUS_TONE: Record<string, Tone> = { succeeded: 'success', failed: 'danger', indeterminate: 'warning' }
 
-export default function NodeDiagnosticsSheet({ server, open, onClose }: {
+export default function NodeDiagnosticsDialog({ server, open, onClose }: {
   server: Server | null
   open: boolean
   onClose: () => void
@@ -89,8 +89,9 @@ export default function NodeDiagnosticsSheet({ server, open, onClose }: {
   const waiting = diagnostic !== null && !isTerminalNodeDiagnostic(diagnostic.status)
 
   return (
-    <DetailSheet
+    <DetailDialog
       open={open}
+      size="xl"
       onClose={onClose}
       title={t('admin:nodeDiagnostics.title', { name: server?.name ?? '' })}
       status={diagnostic && <StatusBadge tone={STATUS_TONE[diagnostic.status] ?? 'neutral'} label={t(`admin:nodeDiagnostics.status.${diagnostic.status}`)} />}
@@ -102,7 +103,6 @@ export default function NodeDiagnosticsSheet({ server, open, onClose }: {
           {t('admin:nodeDiagnostics.collect')}
         </AsyncButton>
       )}
-      className="data-[side=right]:sm:w-[min(48rem,96vw)] data-[side=right]:sm:max-w-[min(48rem,96vw)]"
     >
       <div className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-2">
@@ -216,6 +216,6 @@ export default function NodeDiagnosticsSheet({ server, open, onClose }: {
           </>
         )}
       </div>
-    </DetailSheet>
+    </DetailDialog>
   )
 }

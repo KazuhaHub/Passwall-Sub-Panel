@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { downloadCert, getCertDetail, type Cert, type CertPEM } from '@/api/certs'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { CopyButton } from '@/components/common/CopyButton'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog, type DetailNav } from '@/components/data/DetailDialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { LoadingState } from '@/components/feedback/LoadingState'
@@ -17,10 +17,10 @@ import type { CertActions } from './CertsTab'
 import type { CertData } from './useCertData'
 
 /**
- * One certificate in full, in the sheet a row opens. The list's copy of the certificate is shown at once
+ * One certificate in full, in the dialog a row opens. The list's copy of the certificate is shown at once
  * and the detail read (which also carries the issuance task of a pending one) replaces it when it arrives.
  */
-export function CertDetailSheet({ cert, data, act, onClose }: { cert: Cert; data: CertData; act: CertActions; onClose: () => void }) {
+export function CertDetailDialog({ cert, data, act, nav, onClose }: { cert: Cert; data: CertData; act: CertActions; nav?: DetailNav; onClose: () => void }) {
   const t = useCertsT()
   const detail = useQuery({
     queryKey: [...certKeys.all(data.scope), 'detail', cert.id],
@@ -37,8 +37,10 @@ export function CertDetailSheet({ cert, data, act, onClose }: { cert: Cert; data
   const [pem, setPem] = useState(false)
 
   return (
-      <DetailSheet
+      <DetailDialog
         open
+        size="lg"
+        nav={nav}
         onClose={onClose}
         title={shown.name}
         status={<HealthCell cert={shown} health={health} reason={false} />}
@@ -85,9 +87,9 @@ export function CertDetailSheet({ cert, data, act, onClose }: { cert: Cert; data
           </DetailRow>
         </DetailList>
         {shown.fingerprint && <MaterialSection cert={shown} onView={() => setPem(true)} />}
-        {/* Inside the sheet, so the two dialogs nest and focus stays trapped in the top one. */}
+        {/* Inside the dialog, so the two dialogs nest and focus stays trapped in the top one. */}
         {pem && <PemDialog id={shown.id} onClose={() => setPem(false)} />}
-      </DetailSheet>
+      </DetailDialog>
   )
 }
 

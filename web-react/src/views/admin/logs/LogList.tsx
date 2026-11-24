@@ -1,10 +1,11 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { BulkContext, RowOptions } from '@/components/data/dataTableTypes'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { DataTable } from '@/components/data/DataTable'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { FilterBar, type FilterBarFacet } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
@@ -57,7 +58,7 @@ export interface LogListProps<T> {
 
 /**
  * One server-paged record list: filter row with the result count, the table (cards on a phone), and
- * the record in a sheet. The keyword, the page and the open record live in the URL (useLogView).
+ * the record in a dialog. The keyword, the page and the open record live in the URL (useLogView).
  */
 export function LogList<T>(p: LogListProps<T>) {
   const t = useAdminT()
@@ -65,6 +66,9 @@ export function LogList<T>(p: LogListProps<T>) {
   const items = query.data?.items
   const record = view.sel.selected === null ? undefined : items?.find(r => p.getId(r) === view.sel.selected)
   const { selected, clear } = view.sel
+  // Previous / next walk the rows on this page, in the order the table shows them.
+  const keys = useMemo(() => (items ?? []).map(p.getId), [items, p.getId])
+  const nav = useRecordNav(keys, selected, view.sel.select)
 
   // A link to a record that is not on this page (another page, another filter, purged since) opens
   // nothing; drop the stale parameter once the list has settled instead of leaving it in the address.
@@ -130,15 +134,17 @@ export function LogList<T>(p: LogListProps<T>) {
         )}
         empty={empty}
       />
-      <DetailSheet
+      <DetailDialog
         open={shown !== null}
+        size="lg"
+        nav={nav}
         onClose={view.sel.clear}
         title={shown?.title ?? ''}
         status={shown?.status}
         actions={shown?.actions}
       >
         {shown?.body}
-      </DetailSheet>
+      </DetailDialog>
     </div>
   )
 }

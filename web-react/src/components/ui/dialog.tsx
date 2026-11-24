@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
+import { DialogFooterSlot } from "@/components/ui/dialog-footer-slot"
 import { XIcon } from "lucide-react"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -58,7 +59,7 @@ function DialogContent({
         )}
         {...props}
       >
-        {children}
+        <DialogFooterSlot.Provider value={null}>{children}</DialogFooterSlot.Provider>
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"

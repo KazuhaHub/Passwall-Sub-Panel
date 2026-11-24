@@ -65,26 +65,40 @@ describe('LogsView', () => {
     expect(screen.queryByText('iOS 17.5 · iPhone15,2')).toBeNull()
   })
 
-  it('opens the record in a sheet whose address is a link, and closes it with Back-able state', async () => {
+  it('opens the record in a dialog whose address is a link, and closes it with Back-able state', async () => {
     reads({ '/admin/audit': list([{ id: 9, actor: 'root', action: 'PUT /api/admin/nodes/3', target: 'node 3', ip: '198.51.100.2', at: '2026-09-20T00:00:00Z', before_json: '{"a":1}', after_json: '{"a":2}' }]) })
     const m = mount('/admin/logs?tab=audit')
     fireEvent.click(await screen.findByText('node 3'))
-    const sheet = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('dialog')
     expect(here(m)).toBe('/admin/logs?tab=audit&row=9')
-    expect(within(sheet).getByText('PUT /api/admin/nodes/3')).toBeTruthy()
+    expect(within(dialog).getByText('PUT /api/admin/nodes/3')).toBeTruthy()
     // JSON is pretty-printed in a block that can be copied whole.
-    expect(within(sheet).getByText(/"a": 2/)).toBeTruthy()
-    expect(within(sheet).getAllByRole('button', { name: /^Copy/ }).length).toBe(2)
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Close details' }))
+    expect(within(dialog).getByText(/"a": 2/)).toBeTruthy()
+    expect(within(dialog).getAllByRole('button', { name: /^Copy/ }).length).toBe(2)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close details' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(here(m)).toBe('/admin/logs?tab=audit')
+  })
+
+  it('steps to the previous and next record of the page through the address, and stops at the ends', async () => {
+    reads()
+    const m = mount('/admin/logs?row=2')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=3'))
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=2'))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=1'))
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true))
   })
 
   it('a tab switch leaves the page, keyword and record behind', async () => {
     reads()
     const m = mount('/admin/logs?page=3&q=alice&row=2')
     await screen.findAllByText('alice')
-    // The sheet is modal, so the rest of the page is hidden from the tree while it is open.
+    // The dialog is modal, so the rest of the page is hidden from the tree while it is open.
     fireEvent.click(screen.getByRole('tab', { name: 'Audit logs', hidden: true }))
     await waitFor(() => expect(here(m)).toBe('/admin/logs?tab=audit'))
   })

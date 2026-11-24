@@ -14,7 +14,7 @@ import { FactorCell, StatusCell } from '../list/cells'
 import { landingColorsOf } from '../list/listModel'
 import type { ListRow } from '../list/types'
 import { useNodeList } from '../list/useNodeList'
-import { LineEditSheet } from '../lines/LineEditSheet'
+import { LineEditDialog } from '../lines/LineEditDialog'
 import { useLineActions } from '../lines/useLineActions'
 import { pathOf, type PathLabels } from '../shared/pathOf'
 import { useNodesT } from '../shared/useNodesT'
@@ -81,7 +81,7 @@ export default function LinesTab({ nodeId }: { nodeId: number }) {
         ? <EmptyState compact title={t('nodes.line.tabs.no_lines')} action={<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>{t('nodes.detail.back')}</Button>} />
         : <ul className="flex flex-col gap-3">{mine.map(card)}</ul>}
       {editing && (
-        <LineEditSheet nodeId={nodeId} lineId={edit === 'new' ? null : edit} param="edit" onClose={() => setEdit('')}
+        <LineEditDialog nodeId={nodeId} lineId={edit === 'new' ? null : edit} param="edit" onClose={() => setEdit('')}
           title={edit === 'direct' ? t('nodes.action.edit_direct') : t('nodes.line.edit_title', { name: mine.find(i => i.row.line_id === edit)?.row.name ?? '' })}
           onSaved={() => setEdit('')} />
       )}

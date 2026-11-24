@@ -117,7 +117,9 @@
       "facet_more": "{{first}} and {{rest}} more",
       "search_clear": "Clear search",
       "clear_all": "Clear all filters",
-      "detail_close": "Close details"
+      "detail_close": "Close details",
+      "detail_prev": "Previous record",
+      "detail_next": "Next record"
     },
     "form": {
       "unsaved": "You have unsaved changes",
