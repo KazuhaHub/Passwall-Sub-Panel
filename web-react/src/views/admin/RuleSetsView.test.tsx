@@ -2,6 +2,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads, list, mountPage, toast } from './subscription/testHarness'
+import { mountRuleSets, where } from './rulesets/testHarness'
 import RuleSetsView from './RuleSetsView'
 
 const PATH = '/admin/rules'
@@ -21,7 +22,6 @@ async function openMenu(name: string) {
   fireEvent.click(within(row).getByRole('button', { name: new RegExp(`More actions for ${name}`) }))
 }
 const menuItem = (name: RegExp | string) => screen.findByRole('menuitem', { name })
-const sheet = () => screen.findByRole('dialog')
 
 describe('rule-set list', () => {
   it('shows the rule sets with their usage and says why a failed read failed', async () => {
@@ -98,183 +98,43 @@ describe('deleting and restoring', () => {
   })
 })
 
-describe('the rule-set sheet', () => {
-  it('saves an edited rule set with exactly the body the old editor sent (everything else as loaded)', async () => {
-    const rich = {
-      ...base,
-      proxy_group_order: ['B', 'A'],
-      proxy_group_members: { A: [{ kind: 'builtin', value: 'DIRECT' }] },
-      proxy_group_options: { A: { type: 'select' } },
-      mihomo_sub_rules: [{ name: 'ai', content: '- MATCH,DIRECT' }],
-      mihomo_rematch_outbounds: [{ name: 'R', target_rematch_name: 'x', target_sub_rule: 'ai' }],
-    }
-    reads([rich])
-    api.post.mockResolvedValue({ data: inspection({ groups: [
-      { name: 'A', configured: true, options: { type: 'select' }, default_members: [], members: [] },
-      { name: 'B', configured: false, options: { type: 'select' }, default_members: [], members: [] },
-    ] }) })
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Renamed' } })
-    fireEvent.change(within(dialog).getByLabelText('Sort'), { target: { value: '7' } })
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Main rules' }), { target: { value: '- DOMAIN,b.example,A\n- MATCH,B' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-    expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', {
-      slug: 'custom', name: 'Renamed', sort: 7, enabled: true, direct_subscription_domain: false,
-      content: '- DOMAIN,b.example,A\n- MATCH,B',
-      proxy_group_order: ['B', 'A'],
-      proxy_group_members: { A: [{ kind: 'builtin', value: 'DIRECT' }] },
-      proxy_group_options: { A: { type: 'select' } },
-      mihomo_sub_rules: [{ name: 'ai', content: '- MATCH,DIRECT' }],
-      mihomo_rematch_outbounds: [{ name: 'R', target_rematch_name: 'x', target_sub_rule: 'ai' }],
-    })
-    // The server was asked to inspect the same draft first.
-    expect(api.post).toHaveBeenCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({ content: '- DOMAIN,b.example,A\n- MATCH,B', mihomo_sub_rules: rich.mihomo_sub_rules }), expect.anything())
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    // The table shows the saved row without reloading the list.
-    expect(await screen.findByText('Renamed')).toBeTruthy()
-  })
-
-  it('creates with the blank defaults the old editor used, and refuses an existing slug', async () => {
+describe('opening a rule set', () => {
+  it('sends the row, its edit button, New rule set and Duplicate to the rule set pages, carrying the list\'s place', async () => {
     reads()
-    mountPage(<RuleSetsView />, PATH)
+    mountRuleSets('/admin/rules?q=cus')
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
+    await waitFor(() => expect(where()).toBe('/admin/rules/custom'))
+    fireEvent.click(await screen.findByRole('link', { name: /Rule sets/ }))
+    await waitFor(() => expect(where()).toBe('/admin/rules?q=cus'))
     fireEvent.click(await screen.findByRole('button', { name: 'New rule set' }))
-    const dialog = await sheet()
-    fireEvent.change(within(dialog).getByLabelText(/^Slug/), { target: { value: 'custom' } })
-    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Dup' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('already exists'), severity: 'warning' }))
-    expect(api.put).not.toHaveBeenCalled()
-    fireEvent.change(within(dialog).getByLabelText(/^Slug/), { target: { value: 'fresh' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-    expect(api.put).toHaveBeenCalledWith('/admin/rules/fresh', {
-      slug: 'fresh', name: 'Dup', sort: 100, enabled: true, direct_subscription_domain: false,
-      proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [], content: '',
-    })
+    await waitFor(() => expect(where()).toBe('/admin/rules/new'))
   })
 
-  it('duplicates into a new rule set named after the original, carrying its content and metadata', async () => {
-    reads([{ ...base, proxy_group_members: { A: [{ kind: 'builtin', value: 'DIRECT' }] } }])
-    const { router } = mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(await (async () => { await openMenu('Custom rules'); return menuItem('Duplicate as a new rule set') })())
-    const dialog = await sheet()
-    expect(router.state.location.search).toContain('copy=custom')
-    expect((within(dialog).getByLabelText(/^Slug/) as HTMLInputElement).value).toBe('custom-copy')
-    expect((within(dialog).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Custom rules (Copy)')
-    expect((within(dialog).getByRole('textbox', { name: 'Main rules' }) as HTMLTextAreaElement).value).toBe(base.content)
-    expect((within(dialog).getByLabelText(/^Slug/) as HTMLInputElement).disabled).toBe(false)
-  })
-
-  it('confirms before removing the settings of a group the rules no longer contain, and saves nothing on Keep', async () => {
-    reads([{ ...base, content: '- MATCH,Keep', proxy_group_order: ['Gone', 'Keep'], proxy_group_members: { Gone: [{ kind: 'builtin', value: 'DIRECT' }] } }])
-    api.post.mockResolvedValue({ data: inspection({ groups: [{ name: 'Keep', configured: false, options: { type: 'select' }, default_members: [], members: [] }] }) })
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'N' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    const ask = await screen.findByRole('alertdialog')
-    expect(within(ask).getByText(/Gone/)).toBeTruthy()
-    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
-    fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect(api.put).not.toHaveBeenCalled()
-    expect((within(dialog).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('N')
-  })
-
-  it('does not save while the server reports an error in a Rematch outbound, and takes the person to that tab', async () => {
-    reads([{ ...base, mihomo_rematch_outbounds: [{ name: '', target_rematch_name: '', target_sub_rule: '' }] }])
-    api.post.mockResolvedValue({ data: inspection({ issues: [{ level: 'error', section: 'rematch_outbound', name: '', code: 'invalid_name', params: { index: 0 }, message: 'invalid' }] }) })
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'N' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(within(dialog).getByRole('tab', { name: /Rematch outbounds/ }).getAttribute('aria-selected')).toBe('true'))
-    expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('Rematch'), severity: 'warning' })
-    expect(api.put).not.toHaveBeenCalled()
-    // Shown now that a save was tried.
-    expect(await within(dialog).findByText(/cannot be empty or contain commas/)).toBeTruthy()
-  })
-
-  it('edits the sub-rules and the Rematch outbounds on their own tabs and saves them with the draft', async () => {
-    reads([{ ...base, content: '- DOMAIN,ai.example,AI', mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }], mihomo_rematch_outbounds: [{ name: 'AI', target_rematch_name: 'ai', target_sub_rule: 'ai-rules' }] }])
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    // The counts are on the tabs.
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Sub-rules (1)' }))
-    expect((await within(dialog).findByLabelText('Sub-rule name') as HTMLInputElement).value).toBe('ai-rules')
-    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'ai-rules' }), { target: { value: '- MATCH,REJECT' } })
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Rematch outbounds (1)' }))
-    fireEvent.change(await within(dialog).findByLabelText('Rematch name'), { target: { value: 'ai-v2' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-    expect(api.put.mock.calls[0][1]).toMatchObject({
-      mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,REJECT' }],
-      mihomo_rematch_outbounds: [{ name: 'AI', target_rematch_name: 'ai-v2', target_sub_rule: 'ai-rules' }],
-    })
-  })
-
-  it('shows Rematch errors only once the tab has been left or a save was tried', async () => {
-    reads([{ ...base, mihomo_rematch_outbounds: [{ name: '', target_rematch_name: '', target_sub_rule: '' }] }])
-    api.post.mockResolvedValue({ data: inspection({ issues: [{ level: 'error', section: 'rematch_outbound', name: '', code: 'invalid_name', params: { index: 0 }, message: 'invalid' }] }) })
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Rematch outbounds (1)' }))
-    await waitFor(() => expect(api.post).toHaveBeenCalled())
-    expect(within(dialog).queryByText(/cannot be empty or contain commas/)).toBeNull()
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Main rules' }))
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Rematch outbounds (1)' }))
-    expect(await within(dialog).findByText(/cannot be empty or contain commas/)).toBeTruthy()
-  })
-
-  it('keeps precise line identities when a rule set with line members is edited and saved', async () => {
-    const line = { kind: 'line' as const, node_id: 17, line_id: 'stable-relay-id' }
-    reads([{ ...base, content: '- MATCH,Pick', proxy_group_members: { Pick: [line] } }])
-    api.post.mockResolvedValue({ data: inspection({
-      groups: [{ name: 'Pick', configured: true, options: { type: 'select' }, default_members: [], members: [line] }],
-      lines: [{ node_id: 17, line_id: line.line_id, display_name: 'Node B', kind: 'relay', available: true }],
-    }) })
-    mountPage(<RuleSetsView />, PATH)
-    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
-    const dialog = await sheet()
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Proxy group members' }))
-    expect((await within(dialog).findByTitle('line:17:stable-relay-id')).textContent).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'Main rules' }))
-    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'new-name' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-    expect(api.put.mock.calls[0][1].proxy_group_members).toEqual({ Pick: [line] })
-  })
-
-  it('asks before the sheet is closed with unsaved edits, and not when nothing changed', async () => {
+  it('sends Duplicate to the create page with the source named', async () => {
     reads()
-    const { router } = mountPage(<RuleSetsView />, PATH, `${PATH}?edit=custom`)
-    const dialog = await sheet()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close details' }))
-    await waitFor(() => expect(router.state.location.search).toBe(''))
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-
-    router.navigate(`${PATH}?edit=custom`)
-    const again = await sheet()
-    fireEvent.change(within(again).getByLabelText(/^Name/), { target: { value: 'Changed' } })
-    fireEvent.click(within(again).getByRole('button', { name: 'Close details' }))
-    const ask = await screen.findByRole('alertdialog')
-    expect(router.state.location.search).toBe('?edit=custom')
-    fireEvent.click(within(ask).getByRole('button', { name: /Keep editing/ }))
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect((within(again).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Changed')
+    mountRuleSets('/admin/rules')
+    await openMenu('Custom rules')
+    fireEvent.click(await menuItem('Duplicate as a new rule set'))
+    await waitFor(() => expect(where()).toBe('/admin/rules/new?copy=custom'))
   })
 
-  it('says how to leave the code editor with the keyboard', async () => {
+  it.each([
+    ['?edit=custom', '/admin/rules/custom'],
+    ['?edit=new', '/admin/rules/new'],
+    ['?edit=new&copy=custom', '/admin/rules/new?copy=custom'],
+  ])('sends an old sheet link %s on to %s', async (search, to) => {
     reads()
-    mountPage(<RuleSetsView />, PATH, `${PATH}?edit=custom`)
-    expect(await screen.findByText(/press Escape and then Tab/)).toBeTruthy()
+    mountRuleSets(`/admin/rules${search}`)
+    await waitFor(() => expect(where()).toBe(to))
+  })
+
+  it('lets an operator open a rule set, which the list could not before', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore.setState({ role: 'operator', userId: 1, hasToken: true })
+    reads()
+    mountRuleSets('/admin/rules')
+    fireEvent.click(await rowOf('Custom rules'))
+    await waitFor(() => expect(where()).toBe('/admin/rules/custom'))
   })
 })
 

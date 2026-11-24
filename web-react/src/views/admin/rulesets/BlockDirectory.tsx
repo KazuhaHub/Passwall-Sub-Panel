@@ -10,8 +10,10 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { noteOf, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 
-/** The height the two scrolling columns share: what is left of the screen under the page header and tabs. */
+/** The height of the directory's scroll box: what is left of the screen under the page header, tabs and toolbar. */
 export const COLUMN_HEIGHT = 'max(24rem, calc(100dvh - 21rem))'
+/** The rules table sits under the group's note and target, so it gets less of the screen. */
+export const TABLE_HEIGHT = 'max(20rem, calc(100dvh - 27rem))'
 
 /**
  * The left column (design 3.3): the groups in match order, each with its place, target and rule count. A row opens the

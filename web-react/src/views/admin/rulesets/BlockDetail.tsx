@@ -13,7 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { IconAdd, IconArrowLeft, IconDelete, IconEdit, IconFile, IconUpload } from '@/lib/icons'
 import { noteOf, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
-import { COLUMN_HEIGHT } from './BlockDirectory'
+import { TABLE_HEIGHT } from './BlockDirectory'
 import { typeName } from './ruleTypes'
 import { TargetSelect } from './TargetSelect'
 import type { TargetChoices } from './targets'
@@ -96,7 +96,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   const columns = useMemo<ColumnDef<Row, any>[]>(() => {
     const cols: ColumnDef<Row, any>[] = [
       {
-        id: 'type', header: t('admin:rules.matchers.col_type'), accessorFn: r => r.type.toUpperCase(), meta: { hideable: false, label: t('admin:rules.matchers.col_type'), className: 'w-44 max-w-0 truncate' },
+        id: 'type', header: t('admin:rules.matchers.col_type'), accessorFn: r => r.type.toUpperCase(), meta: { hideable: false, label: t('admin:rules.matchers.col_type'), className: 'w-44 whitespace-nowrap' },
         cell: ({ row }) => <span title={row.original.type}>{typeName(t, row.original.type, row.original.known)}</span>,
       },
       {
@@ -152,7 +152,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-1">
+          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">{t('admin:rules.blocks.note')}</span>
               {!readOnly && noteDraft === null && (
@@ -173,17 +174,16 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
           </div>
 
           {!readOnly && block.target !== '' && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="min-w-0 sm:w-80">
-                <TargetSelect key={block.index + block.target} value={block.target} choices={choices} label={t('admin:rules.blocks.target')} onChange={setPending} />
-              </div>
+            <div className="flex min-w-0 flex-col gap-2">
+              <TargetSelect key={block.index + block.target} value={block.target} choices={choices} label={t('admin:rules.blocks.target')} onChange={setPending} />
               {wanted !== null && (
-                <Button className="sm:mb-5" onClick={() => { onRetarget(wanted); setPending(null) }}>
+                <Button className="w-fit max-w-full whitespace-normal" onClick={() => { onRetarget(wanted); setPending(null) }}>
                   {t('admin:rules.blocks.change_target', { target: wanted, count: retargetCount })}
                 </Button>
               )}
             </div>
           )}
+          </div>
 
           <DataTable<Row>
             aria-label={t('admin:rules.blocks.matchers', { target: heading })}
@@ -193,7 +193,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             rowLabel={r => r.shown}
             pagination={false}
             columnMenu={false}
-            maxHeight={COLUMN_HEIGHT}
+            maxHeight={TABLE_HEIGHT}
             selectable={!readOnly}
             selection={checked}
             onSelectionChange={setChecked}

@@ -227,7 +227,9 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       : { id: 'delete', label: t('admin:rules.row_delete'), icon: IconDelete, destructive: true, disabled: acting, onSelect: () => void remove() })
   }
 
-  const stats = useDeferredValue(useMemo(() => (dirty ? diffStats(split(baseline.content), split(form.content)) : { added: 0, removed: 0 }), [dirty, baseline.content, form.content]))
+  // The +N −M on the review button is worked out from the deferred text, so a keystroke or an edit is not held up by a diff of the whole document.
+  const draftContent = useDeferredValue(form.content)
+  const stats = useMemo(() => (dirty ? diffStats(split(baseline.content), split(draftContent)) : { added: 0, removed: 0 }), [dirty, baseline.content, draftContent])
   const subCount = form.mihomo_sub_rules?.length ?? 0
   const rematchCount = form.mihomo_rematch_outbounds?.length ?? 0
   const withCount = (label: string, n: number) => (n ? `${label} (${n})` : label)
