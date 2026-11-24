@@ -5,7 +5,9 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { EmptyState } from '@/components/feedback/EmptyState'
-import { useChartTokens } from '@/hooks/useChartTokens'
+import { ChartLegend, useHiddenSeries } from '@/components/common/ChartLegend'
+import { useChartTokens, type ChartTokens } from '@/hooks/useChartTokens'
+import { chartBase, dashOf, lineSeries, tooltipFrame, tooltipHtml } from '@/lib/chartKit'
 import { useSiteStore } from '@/stores/site'
 
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
@@ -60,63 +62,47 @@ export function metricsTimeFormatter(locale: string | undefined, timeZone: strin
   catch { return new Intl.DateTimeFormat(undefined, { ...options, timeZone: undefined }) }
 }
 
-const LINE_TYPES = ['solid', 'dashed', 'dotted'] as const
-
-/** Explicit, separate legend/plot/axis bands prevent theme defaults overlapping. */
-export function metricsChartOption({ times, series, coverage, from, to, locale, timeZone, colors, textColor, lineColor, coverageLabel, tooltipStyle }: {
+/** Explicit plot bands keep the axis labels clear of the lines; the legend is plain HTML above the canvas (ChartLegend). */
+export function metricsChartOption({ times, series, coverage, from, to, locale, timeZone, tk, hidden = new Set(), coverageLabel }: {
   times: string[]; series: MetricsSeries[]; coverage?: number[]; from?: string; to?: string
-  locale?: string; timeZone: string; colors: string[]; textColor: string; lineColor: string; coverageLabel: string
-  /** Popover colours from the chart tokens; absent in tests, where the ECharts defaults are fine. */
-  tooltipStyle?: { backgroundColor: string; borderColor: string; textStyle: { color: string } }
+  locale?: string; timeZone: string; tk: ChartTokens; hidden?: ReadonlySet<string>; coverageLabel: string
 }): echarts.EChartsCoreOption {
   const instants = times.map(time => new Date(time).getTime())
   const span = Date.parse(to ?? times.at(-1) ?? '') - Date.parse(from ?? times[0] ?? '')
   const axisTime = metricsTimeFormatter(locale, timeZone, span >= 86400_000)
   const tooltipTime = metricsTimeFormatter(locale, timeZone, true)
   const unit = series[0]?.unit ?? 'count'
+  const base = chartBase(tk, series.map(item => item.name), hidden)
   return {
-    backgroundColor: 'transparent', color: colors,
-    textStyle: { fontFamily: 'inherit', color: textColor },
-    grid: { left: 12, right: 20, top: 52, bottom: 12, containLabel: true },
-    legend: {
-      type: 'scroll', top: 0, left: 0, right: 0, bottom: 'auto',
-      itemWidth: 16, itemHeight: 8, textStyle: { color: textColor, fontSize: 12 },
-      pageTextStyle: { color: textColor },
-    },
+    ...base,
+    grid: { left: 12, right: 20, top: 12, bottom: 12, containLabel: true },
     tooltip: {
-      trigger: 'axis', confine: true, ...tooltipStyle,
-      // Canvas text avoids interpreting interface names or locale strings as HTML.
-      renderMode: 'richText',
+      ...tooltipFrame(tk),
       formatter: (raw: unknown) => {
         const items = raw as { seriesName: string; value: [number, number | null]; dataIndex: number }[]
         if (!Array.isArray(items) || !items.length) return ''
         const index = items[0].dataIndex
-        const lines = [tooltipTime.format(instants[index])]
-        for (const item of items) {
-          const value = item.value[1]
-          lines.push(`${item.seriesName}: ${value == null ? '—' : formatValue(value, unit)}`)
-        }
-        if (coverage?.[index] !== undefined) lines.push(`${coverageLabel}: ${coverage[index]} s`)
-        return lines.join('\n')
+        const rows = items.map(item => {
+          const at = series.findIndex(s => s.name === item.seriesName)
+          return { name: item.seriesName, value: item.value[1] == null ? '—' : formatValue(item.value[1], unit), color: tk.series[at % tk.series.length] ?? tk.series[0], dash: dashOf(at) }
+        })
+        if (coverage?.[index] !== undefined) rows.push({ name: coverageLabel, value: `${coverage[index]} s`, color: tk.mutedText, dash: 'solid' })
+        return tooltipHtml(tooltipTime.format(instants[index]), rows, tk)
       },
     },
     xAxis: {
-      type: 'time', min: from ? Date.parse(from) : undefined, max: to ? Date.parse(to) : undefined,
+      ...base.xAxis, type: 'time', min: from ? Date.parse(from) : undefined, max: to ? Date.parse(to) : undefined,
       splitNumber: 4,
-      axisLabel: { color: textColor, hideOverlap: true, margin: 12, formatter: (value: number) => axisTime.format(value) },
-      axisLine: { lineStyle: { color: lineColor } }, axisTick: { show: false },
+      axisLabel: { ...base.xAxis.axisLabel, hideOverlap: true, margin: 12, formatter: (value: number) => axisTime.format(value) },
     },
     yAxis: {
-      type: 'value', min: 0, splitNumber: 3,
-      axisLabel: { color: textColor, formatter: (value: number) => formatValue(value, unit) },
-      splitLine: { lineStyle: { color: lineColor, opacity: 0.55 } },
+      ...base.yAxis, type: 'value', min: 0, splitNumber: 3,
+      axisLabel: { ...base.yAxis.axisLabel, formatter: (value: number) => formatValue(value, unit) },
     },
-    series: series.map((item, index) => ({
-      name: item.name, type: 'line',
-      data: item.values.map((value, index) => [instants[index], value]),
-      // Line style as well as hue tells two series apart (the same rule TrafficChart follows).
-      showSymbol: false, connectNulls: false, smooth: false, lineStyle: { width: 2, type: LINE_TYPES[index % LINE_TYPES.length] },
-      emphasis: { focus: 'series' },
+    series: series.map((item, index) => lineSeries(index, {
+      name: item.name,
+      data: item.values.map((value, i) => [instants[i], value]),
+      connectNulls: false,
     })),
   }
 }
@@ -133,6 +119,7 @@ export default function NodeMetricsChart({ times, series, coverage, height = 240
   const { t, i18n } = useTranslation('admin')
   const timeZone = useSiteStore(state => state.timezone)
   const tk = useChartTokens()
+  const { hidden, toggle } = useHiddenSeries()
   const [tableOpen, setTableOpen] = useState(false)
   // Unavailable series must not look like a zero-valued host/container series.
   const visible = useMemo(() => series.filter(item => item.values.some(value => value != null)), [series])
@@ -156,17 +143,18 @@ export default function NodeMetricsChart({ times, series, coverage, height = 240
 
   useEffect(() => {
     chartRef.current?.setOption(metricsChartOption({
-      times, series: visible, coverage, from, to, locale: i18n?.resolvedLanguage, timeZone,
-      colors: tk.series, textColor: tk.mutedText, lineColor: tk.axisLine, coverageLabel: t('admin:nodeMetrics.coverage'),
-      tooltipStyle: { backgroundColor: tk.tooltipBg, borderColor: tk.tooltipBorder, textStyle: { color: tk.tooltipText } },
+      times, series: visible, coverage, from, to, locale: i18n?.resolvedLanguage, timeZone, tk, hidden,
+      coverageLabel: t('admin:nodeMetrics.coverage'),
     }), true)
-  }, [times, visible, coverage, from, to, tk, timeZone, i18n?.resolvedLanguage, t, hasData])
+  }, [times, visible, coverage, from, to, tk, hidden, timeZone, i18n?.resolvedLanguage, t, hasData])
 
   const timeFormat = useMemo(() => metricsTimeFormatter(i18n?.resolvedLanguage, timeZone, true), [i18n?.resolvedLanguage, timeZone])
 
   if (!hasData) return <EmptyState compact title={t('admin:nodeMetrics.noHistory')} className="min-h-32" />
   return (
     <div className="min-w-0">
+      <ChartLegend className="mb-1" hidden={hidden} onToggle={toggle}
+        items={visible.map((item, i) => ({ name: item.name, color: tk.series[i % tk.series.length], dash: dashOf(i) }))} />
       <div ref={ref} role="img" aria-label={label} style={{ width: '100%', height }} />
       <details className="mt-2 text-sm" onToggle={event => setTableOpen(event.currentTarget.open)}>
         <summary className="inline-flex min-h-8 cursor-pointer items-center rounded text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
