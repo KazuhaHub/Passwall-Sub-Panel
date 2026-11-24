@@ -93,7 +93,7 @@ export function PathDiagram({ nodes, edges = [], size = 'md', orientation = 'aut
       data-slot="path-diagram"
       data-size={size}
       data-orientation={vertical ? 'vertical' : 'horizontal'}
-      className={cn(size === 'sm' ? 'inline-flex max-w-full min-w-0 align-middle' : 'w-full min-w-0 contain-inline-size', className)}
+      className={cn(size === 'sm' ? 'block w-full min-w-0 @container' : 'w-full min-w-0 contain-inline-size', className)}
     >
       <div
         aria-hidden="true"
@@ -148,8 +148,9 @@ function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
       <NodeIcon node={node} className="size-3.5 shrink-0 text-muted-foreground" />
       {!iconOnly && (
         <>
-          <span className="max-w-[9rem] truncate font-medium text-foreground">{label}</span>
-          {node.sublabel && <span className="font-mono text-[10px] text-muted-foreground">{node.sublabel}</span>}
+          <span className="min-w-0 max-w-[16rem] truncate font-medium text-foreground">{label}</span>
+          {/* The small server label is the first thing to go when the cell is narrow: names matter more. It stays in the title of the cell. */}
+          {node.sublabel && <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground @[30rem]:inline">{node.sublabel}</span>}
         </>
       )}
       {node.status && <StatusDot tone={node.status} />}

@@ -26,8 +26,8 @@ export function PathCell({ item, colors, labels, nodeHref }: { item: ListRow; co
   const titleOf = nodes.map(n => [n.label, n.sublabel].filter(Boolean).join(' ')).filter(Boolean).join(' → ')
   const diagram = <PathDiagram nodes={nodes} edges={edges} size="sm" />
   return nodeHref
-    ? <Link to={nodeHref} title={`${titleOf}\n${t('nodes.action.open_node')}`} className="inline-flex max-w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
-    : <span className="inline-flex max-w-full min-w-0" title={titleOf}>{diagram}</span>
+    ? <Link to={nodeHref} title={`${titleOf}\n${t('nodes.action.open_node')}`} className="flex w-full min-w-0 rounded-sm outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{diagram}</Link>
+    : <span className="flex w-full min-w-0" title={titleOf}>{diagram}</span>
 }
 
 export function NameCell({ item, colors, hint }: { item: ListRow; colors: Map<string, LandingColor>; hint?: string }) {
