@@ -1,5 +1,5 @@
 import { StatusBadge } from '@/components/common/StatusBadge'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -22,7 +22,7 @@ export default function LegalHistorySheet({ kind, onClose }: { kind: LegalKind; 
   const versions = [...(q.data?.versions ?? [])].sort((a, b) => b.published_at.localeCompare(a.published_at) || b.id - a.id)
 
   return (
-    <DetailSheet open onClose={onClose} title={t('admin:settings.legal.history_sheet.title', { doc })}>
+    <DetailDialog open size="md" onClose={onClose} title={t('admin:settings.legal.history_sheet.title', { doc })}>
       {q.isLoading && <div className="flex flex-col gap-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-12 rounded-lg" />)}</div>}
       {q.isError && !q.data && <ErrorState compact title={t('admin:settings.legal.load_failed')} retry={() => q.refetch()} />}
       {q.data && versions.length === 0 && <EmptyState compact title={t('admin:settings.legal.history_sheet.empty')} />}
@@ -37,6 +37,6 @@ export default function LegalHistorySheet({ kind, onClose }: { kind: LegalKind; 
           </li>
         ))}
       </ul>
-    </DetailSheet>
+    </DetailDialog>
   )
 }

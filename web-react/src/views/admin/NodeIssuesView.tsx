@@ -8,8 +8,9 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { confirm } from '@/components/ConfirmHost'
 import { DataTable } from '@/components/data/DataTable'
 import { DataTablePagination } from '@/components/data/DataTablePagination'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { FilterBar } from '@/components/data/FilterBar'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
@@ -34,7 +35,7 @@ import { REVIEW_STATES, VIEWS, acknowledgedParam, groupParam, issueTitle, pendin
 /**
  * What the node agents reported, grouped by server and kind of problem so a hundred repeats of one
  * condition read as one line. Grouping is only presentation: every report keeps its own id, is listed
- * in the sheet, and is reviewed (acknowledged) by that id. "Reviewed" is a note that someone looked,
+ * in the dialog, and is reviewed (acknowledged) by that id. "Reviewed" is a note that someone looked,
  * not a claim the node recovered, and these are reports, not a live health check; the page says both.
  */
 export default function NodeIssuesView() {
@@ -66,6 +67,9 @@ export default function NodeIssuesView() {
   const total = query.data?.total
   const groups = useMemo(() => groupNodeIssues(items ?? []), [items])
   const openGroup = sel.selected === null ? undefined : groups.find(g => g.id === sel.selected)
+  // Previous / next walk the groups on this page, in the order the table shows them.
+  const groupIds = useMemo(() => groups.map(g => g.id), [groups])
+  const nav = useRecordNav(groupIds, sel.selected, sel.select)
 
   // ---- selection: REPORT ids, as at the moment each was ticked ----
   // Ticking a group row stores that group's unreviewed ids as they are then. A refetch (the list
@@ -280,8 +284,10 @@ export default function NodeIssuesView() {
           />
         )}
       </div>
-      <DetailSheet
+      <DetailDialog
         open={shown !== undefined}
+        size="lg"
+        nav={nav}
         onClose={sel.clear}
         title={shown ? issueTitle(shown, url.view, t) : ''}
         description={shown ? serverNameOf(shown, t) : undefined}
@@ -303,7 +309,7 @@ export default function NodeIssuesView() {
         )}
       >
         {shown && <GroupDetail group={shown} view={url.view} canOperate={canOperate} chosen={chosen} onToggle={toggleRecord} busyId={busyId} locked={locked} onAcknowledge={acknowledgeOne} />}
-      </DetailSheet>
+      </DetailDialog>
     </>,
   )
 }

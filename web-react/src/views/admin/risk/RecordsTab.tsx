@@ -10,7 +10,8 @@ import { IconButton } from '@/components/common/IconButton'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import type { Tone } from '@/components/common/tones'
 import { DataTable } from '@/components/data/DataTable'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Field } from '@/components/form/Field'
 import { Badge } from '@/components/ui/badge'
@@ -95,7 +96,7 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
   const update = (patch: Partial<RecordsFilters>) => {
     setUrlParams(prev => recordsSearch(prev, patch), { replace: true })
   }
-  // The record open in the sheet is the page's own, not the URL's: nothing about a record goes in the
+  // The record open in the dialog is the page's own, not the URL's: nothing about a record goes in the
   // address beyond the filters it already holds.
   const [openId, setOpenId] = useState<number | null>(null)
 
@@ -116,6 +117,9 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
   const hidden = (filters.level ? 1 : 0) + (filters.event ? 1 : 0)
   const narrowed = !!(who || filters.source || filters.level || filters.event || filters.since || filters.until)
   const record = openId === null ? undefined : rows?.find(r => r.id === openId)
+  // Previous / next walk the records on this page, in the order the table shows them.
+  const rowIds = useMemo(() => (rows ?? []).map(r => r.id), [rows])
+  const nav = useRecordNav(rowIds, openId, setOpenId)
   const err = error
     ? (isAxiosError(error) ? String(error.response?.data?.error ?? error.message) : String(error))
     : ''
@@ -225,8 +229,10 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
         toolbar={toolbar}
         empty={empty}
       />
-      <DetailSheet
+      <DetailDialog
         open={record !== undefined}
+        size="lg"
+        nav={nav}
         onClose={() => setOpenId(null)}
         title={record ? userLabel(record) : ''}
         status={record && <StatusBadge tone={levelTone(record.level)} label={t(flagEventKey(record.event), { defaultValue: record.event })} />}
@@ -236,12 +242,12 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
         )}
       >
         {record && <RecordDetail rec={record} />}
-      </DetailSheet>
+      </DetailDialog>
     </div>
   )
 }
 
-/** The record's time in panel time, exact (the sheet and the title carry the zone). */
+/** The record's time in panel time, exact (the dialog and the title carry the zone). */
 function AtCell({ ms }: { ms: number }) {
   const panelTz = useSiteStore(s => s.timezone)
   return <span>{formatMsDualTz(ms, panelTz)}</span>

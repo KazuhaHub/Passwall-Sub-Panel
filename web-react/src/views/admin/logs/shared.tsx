@@ -15,7 +15,7 @@ import { formatRegion } from '@/utils/geo'
 import type { GeoLocation } from '@/api/subLogs'
 
 // Pieces shared by the three record lists this package owns (Logs, Sync tasks, Node issues). They all
-// show server-paged records that an admin scans for one thing, and open the full record in a sheet.
+// show server-paged records that an admin scans for one thing, and open the full record in a dialog.
 
 /** The admin namespace's `t` with interpolation boundaries resolved, keys read `logs.…`, `sync_tasks.…`. */
 export function useAdminT(): TFunction {
@@ -102,7 +102,7 @@ export function IpCell({ ip, region }: { ip?: string; region?: GeoLocation }) {
   )
 }
 
-/** Label / value rows for a sheet. */
+/** Label / value rows for a dialog. */
 export function DetailList({ children, className }: { children: ReactNode; className?: string }) {
   return <dl className={cn('grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm', className)}>{children}</dl>
 }
@@ -143,7 +143,7 @@ export function ResultCount({ total }: { total: number | undefined }) {
   return <span className="text-sm text-muted-foreground tabular-nums" aria-live="polite">{t('logs.result_count', { count: total })}</span>
 }
 
-/** A row at phone width: a title, an optional status, and a few quiet lines. The card itself opens the sheet. */
+/** A row at phone width: a title, an optional status, and a few quiet lines. The card itself opens the dialog. */
 export function RecordCard({ title, status, lines }: { title: ReactNode; status?: ReactNode; lines: ReactNode[] }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
