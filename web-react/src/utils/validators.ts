@@ -132,7 +132,7 @@ export function isValidGroupId(v: number | ''): boolean {
   return typeof v === 'number' && Number.isInteger(v) && v > 0
 }
 
-// ISO date (YYYY-MM-DD). MUI date input emits this shape. Empty is valid —
+// ISO date (YYYY-MM-DD), the shape a date input emits. Empty is valid —
 // callers gate that with the required flag.
 export function isIsoDate(v: string): boolean {
   if (!v) return true

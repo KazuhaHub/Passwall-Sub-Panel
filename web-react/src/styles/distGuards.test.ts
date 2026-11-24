@@ -48,7 +48,7 @@ describe('checkPreloads', () => {
     expect(checkPreloads(html)).toHaveLength(2)
   })
   it('accepts the existing vendor chunks', () => {
-    const html = '<link rel="modulepreload" href="./assets/vendor-react-a.js"><link rel="modulepreload" href="./assets/vendor-mui-b.js">'
+    const html = '<link rel="modulepreload" href="./assets/vendor-react-a.js"><link rel="modulepreload" href="./assets/vendor-echarts-b.js">'
     expect(checkPreloads(html)).toEqual([])
   })
 })
