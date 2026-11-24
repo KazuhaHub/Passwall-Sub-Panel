@@ -147,12 +147,12 @@ describe('the list sheet', () => {
 
   it('closing with unsaved input asks first; closing a clean dialog does not', async () => {
     renderAccess(dialog())
-    fireEvent.click(await screen.findByTitle('Close details'))
+    fireEvent.click(await screen.findByTitle('关闭详情'))
     expect(confirmMock).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
     type('名称', 'x')
     confirmMock.mockResolvedValueOnce(false)
-    fireEvent.click(screen.getByTitle('Close details'))
+    fireEvent.click(screen.getByTitle('关闭详情'))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '放弃未保存的修改？' })))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
