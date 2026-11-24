@@ -37,7 +37,12 @@ export function countLines(s: string): number {
   return s ? s.split('\n').filter(l => l.trim()).length : 0
 }
 
-/** Whether the draft differs from the one the sheet opened with (what Save and the leave guard key on). */
+/**
+ * Whether the draft differs from the one the page opened with (what Save and the leave guard key on). The content, by far
+ * the largest field (a rule set can be half a megabyte), is compared as the strings they are and the rest as before, so a
+ * keystroke does not serialise the whole document.
+ */
 export function sameRuleSet(a: RuleSet, b: RuleSet): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  if (a.content !== b.content) return false
+  return JSON.stringify({ ...a, content: '' }) === JSON.stringify({ ...b, content: '' })
 }

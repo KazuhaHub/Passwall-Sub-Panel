@@ -1,6 +1,7 @@
 import type { Block } from './blocks'
 import type { Doc } from './parse'
 import { fieldSpans } from './parse'
+import { isIPv4, isIPv6 } from './validate'
 import { KNOWN_TYPES, RULE_OPTIONS, SIMPLE_TYPES } from './types'
 
 /**
@@ -30,19 +31,6 @@ export interface PasteScan {
 }
 
 const DOMAIN_RE = /^(?=.{1,253}$)[^\s,/:#\\|^*+@?[\]()'"<>]+(\.[^\s,/:#\\|^*+@?[\]()'"<>]+)+$/u
-
-function isIPv4(s: string): boolean {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(s)
-  if (!m) return false
-  return [m[1], m[2], m[3], m[4]].every(o => Number(o) <= 255) && (m[5] === undefined || Number(m[5]) <= 32)
-}
-
-function isIPv6(s: string): boolean {
-  const [host, prefix, ...rest] = s.split('/')
-  if (rest.length > 0 || !host.includes(':') || !/^[0-9a-fA-F:.]+$/.test(host)) return false
-  if (prefix !== undefined && !(/^\d{1,3}$/.test(prefix) && Number(prefix) <= 128)) return false
-  try { new URL(`http://[${host}]/`); return true } catch { return false }
-}
 
 function entry(type: string, value: string, options: string[], line: number, note?: PasteEntry['note']): PasteEntry {
   return note ? { type, value, options, note, line } : { type, value, options, line }
