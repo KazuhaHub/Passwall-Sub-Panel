@@ -22,8 +22,6 @@ interface Props {
   enabled: boolean
   /** Whether the account has a passkey: enables turning TOTP off with a passkey assertion (for a user who lost the authenticator). */
   hasPasskey: boolean
-  /** Accepted and ignored. The enrolment page still passes the colour tokens the old dialog needed. */
-  md?: unknown
   onClose: () => void
   /** Called after a successful enable/disable so the parent can refresh the profile. */
   onChanged: () => void

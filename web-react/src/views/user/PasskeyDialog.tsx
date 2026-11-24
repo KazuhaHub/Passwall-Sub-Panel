@@ -23,8 +23,6 @@ interface Props {
   open: boolean
   available: boolean
   credentials: PasskeyCredential[]
-  /** Accepted and ignored. The enrolment page still passes the colour tokens the old dialog needed. */
-  md?: unknown
   onClose: () => void
   onChanged: () => void
 }

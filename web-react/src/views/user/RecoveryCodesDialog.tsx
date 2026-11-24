@@ -24,8 +24,6 @@ interface Props {
   hasPasskey: boolean
   /** Whether the account has TOTP on. Together with hasPasskey and remaining it decides which proof is offered first, as login does. */
   totpEnabled: boolean
-  /** Accepted and ignored. Kept so callers written for the old dialog still compile. */
-  md?: unknown
   onClose: () => void
   /** Called after a successful regenerate so the parent can refresh the count. */
   onChanged: () => void

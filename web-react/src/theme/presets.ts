@@ -1,5 +1,6 @@
-// M3 baseline palette source colors. Each one feeds material-color-utilities
-// to generate a full tonal scheme.
+// The brand colours offered in the appearance menu. Each is the source colour of a Material 3
+// tonal palette; the fill and label tones derived from it (light and dark) are written out in
+// styles/ui.css under the same id, which is what the page actually uses.
 export interface ColorPreset {
   id: string
   labelKey: string
