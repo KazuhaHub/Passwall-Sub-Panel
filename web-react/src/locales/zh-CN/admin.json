@@ -4192,7 +4192,12 @@
     "test_all": "测试全部",
     "search_placeholder": "搜索名称 / URL",
     "no_match": "没有匹配的服务器",
-    "edit_title": "编辑 {{name}}",
+    "detail": {
+      "not_found": "没有此服务器，它可能已被删除。",
+      "forbidden": "你无权访问此服务器。",
+      "install_not_found": "没有此 Passwall Node 服务器，它可能已被删除，或不是 Passwall Node。",
+      "create_forbidden": "仅全局管理员可添加服务器。"
+    },
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
     "batch_upgrade_xray": "批量升级 Xray",
@@ -4871,7 +4876,6 @@
       "group_basics": "基本信息",
       "group_node": "Passwall Node",
       "group_connection": "连接",
-      "group_test": "连接测试",
       "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
     },
     "resource_state": "资源：{{state}}"
