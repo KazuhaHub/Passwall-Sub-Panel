@@ -27,6 +27,7 @@ import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
 import { targetChoices } from './targets'
+import { TargetView } from './TargetView'
 import { TextLinesDialog } from './TextLinesDialog'
 import { useRuleDoc } from './useRuleDoc'
 
@@ -71,7 +72,7 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * The right-hand column of the design (the routing tester) is not built yet: the grid has room for it and the middle
  * column takes the width meanwhile.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -80,6 +81,8 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   rematchNames: readonly string[]
   /** What the server said about the main rules the last time a save was checked. */
   serverIssues: readonly ProxyGroupIssue[]
+  /** Asks for the rules of one outbound to be shown (the Proxy groups tab's "Show its rules"); `token` makes a repeat of the same request count. */
+  showTarget?: { name: string; token: number } | null
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
@@ -90,6 +93,8 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const [opened, setOpened] = useState(false)
   const [query, setQuery] = useState('')
   const [targetFilter, setTargetFilter] = useState('')
+  // With a target chosen, the middle column either lists every rule of that target together (to read) or opens one group (to edit).
+  const [targetMode, setTargetMode] = useState<'merged' | 'runs'>('merged')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [announce, setAnnounce] = useState('')
   const search = useRef<HTMLInputElement>(null)
@@ -101,6 +106,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   // the person chooses Groups again (which is possible once no foreign line is left), so fixing the last one while typing does not pull the editor away.
   const foreign = doc.foreign
   const textOnly = foreign.length > 0
+  useEffect(() => {
+    if (showTarget) { setTargetFilter(showTarget.name); setTargetMode('merged'); setOpened(false) }
+  }, [showTarget])
   const choices = useMemo(() => targetChoices(blocks, order, rematchNames), [blocks, order, rematchNames])
   const current = blocks[Math.min(selected, blocks.length - 1)] as Block | undefined
   const currentIndex = current?.index ?? 0
@@ -136,7 +144,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const targets = useMemo(() => [...new Set(blocks.filter(b => b.kind === 'rules' && b.target).map(b => b.target))], [blocks])
 
   // ---- edits -----------------------------------------------------------------------------------------------------
-  const select = (index: number) => { setSelected(index); setOpened(true) }
+  const select = (index: number) => { setSelected(index); setOpened(true); setTargetMode('runs') }
 
   /**
    * Applies an edit written against the document as it is AT THIS MOMENT. The edit returns null when something it names
@@ -355,8 +363,10 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   const stats = t('admin:rules.stats', { rules: blocks.reduce((n, b) => n + (b.kind === 'rules' ? b.count : 0), 0).toLocaleString(), blocks: blocks.length.toLocaleString() })
   const resultsText = !q ? '' : hitTotal === 0 ? t('admin:rules.search.none', { query }) : t('admin:rules.search.results', { count: hitTotal, blocks: hits?.size ?? 0 })
-  const showDirectory = !phone || !opened
-  const showDetail = !phone || opened
+  // On a phone the directory and the open group are two screens; the merged list of a target is a screen of its own.
+  const merged = targetFilter !== '' && targetMode === 'merged'
+  const showDirectory = !phone || (!opened && !merged)
+  const showDetail = !phone || opened || merged
 
   return (
     <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
@@ -389,9 +399,13 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </div>}
         <SegmentedControl<View> aria-label={t('admin:rules.view.label')} value={shownView} onChange={setView}
           options={[{ value: 'blocks', label: t('admin:rules.view.blocks'), disabled: textOnly }, { value: 'text', label: t('admin:rules.view.text') }]} />
-        {shownView === 'blocks' && targets.length > 1 && (
+        {shownView === 'blocks' && targetFilter !== '' && (
+          <SegmentedControl<'merged' | 'runs'> aria-label={t('admin:rules.targetview.label')} value={targetMode} onChange={setTargetMode}
+            options={[{ value: 'merged', label: t('admin:rules.targetview.merged') }, { value: 'runs', label: t('admin:rules.targetview.runs') }]} />
+        )}
+        {shownView === 'blocks' && (targets.length > 1 || targetFilter !== '') && (
           <div className="w-48">
-            <NativeSelect aria-label={t('admin:rules.search.by_target')} value={targetFilter} onChange={e => setTargetFilter(e.target.value)}>
+            <NativeSelect aria-label={t('admin:rules.search.by_target')} value={targetFilter} onChange={e => { setTargetFilter(e.target.value); setTargetMode('merged') }}>
               <option value="">{t('admin:rules.search.by_target')}</option>
               {targets.map(x => <option key={x} value={x}>{x}</option>)}
             </NativeSelect>
@@ -434,7 +448,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           )}
           {showDetail && (
             <div className="min-w-0">
-              {current ? (
+              {merged ? (
+                <TargetView doc={doc} blocks={blocks} target={targetFilter} query={q} onOpenGroup={select} />
+              ) : current ? (
                 <BlockDetail
                   key={`${current.index}:${current.target}:${current.kind}`}
                   doc={doc} block={current} choices={choices} readOnly={readOnly} query={q} phone={phone} onBack={() => setOpened(false)}

@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -18,18 +18,23 @@ import MihomoAdvancedRulesEditor from '@/components/MihomoAdvancedRulesEditor'
 import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useTabParam } from '@/hooks/useTabParam'
 import { IconCopy, IconDelete } from '@/lib/icons'
 import { ruleKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
+import { parseDoc } from '@/utils/ruleset/parse'
+import { groupUsage, type RenamePlan } from '@/utils/ruleset/rename'
 import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './actions'
 import { BasicsTab } from './BasicsTab'
 import { ChangesDialog } from './ChangesDialog'
 import { cloneProxyGroupMembers, cloneProxyGroupOptions, cloneRuleSet, EMPTY, sameRuleSet } from './model'
+import { RenameGroupDialog } from './RenameGroupDialog'
 import { RulesTab } from './RulesTab'
 import { isReservedSlug, newRuleSetPath, ruleSetPath } from './ruleSetRoutes'
 
@@ -83,6 +88,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [acting, setActing] = useState(false)
   const [ruleIssues, setRuleIssues] = useState<ProxyGroupIssue[]>([])
   const [changes, setChanges] = useState(false)
+  const phone = useIsMobile()
+  // The group being renamed (its name and the names a new one may not take), and the group the Proxy groups tab asked the Rules tab to show.
+  const [renaming, setRenaming] = useState<{ name: string; groups: string[] } | null>(null)
+  const [showTarget, setShowTarget] = useState<{ name: string; token: number } | null>(null)
   // Bumped on Discard so the rules tab starts again from the restored text with a clean history.
   const [rev, setRev] = useState(0)
 
@@ -97,6 +106,18 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     : attempted && slugReserved ? t('admin:rules.validate.slug_reserved', { slug: form.slug }) : undefined
   const nameError = attempted && !form.name ? t('admin:rules.validate.slug_name_required') : undefined
   const usedBy = useMemo(() => templates.filter(tpl => (tpl.rule_sets || []).includes(seed.slug)).map(x => x.name || x.slug), [templates, seed.slug])
+
+  // A rename rewrites rule lines, so it needs the rules readable as a list: with a foreign line the editor writes nothing (see parse.ts foreignOf).
+  const renameBlocked = useMemo(() => (parseDoc(form.content).foreign.length > 0 ? t('admin:rules.rename.unavailable.text_only') : undefined), [form.content, t])
+  const usage = useCallback((name: string) => groupUsage({ content: form.content, mihomo_sub_rules: form.mihomo_sub_rules }, name), [form.content, form.mihomo_sub_rules])
+  const applyRename = (plan: Extract<RenamePlan, { ok: true }>, to: string) => {
+    setForm(f => ({ ...f, ...plan.patch }))
+    // The Rules tab starts again from the renamed text with a clean history: undoing a rename there would bring back the old
+    // name in the rules but not in the member lists.
+    setRev(r => r + 1)
+    setRenaming(null)
+    pushToast({ message: t('admin:rules.rename.done', { name: to }), severity: 'success' })
+  }
 
   const warn = (message: string) => pushToast({ message, severity: 'warning' })
   const changeTab = (next: Tab) => {
@@ -272,7 +293,19 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
           {/* A disabled fieldset switches off every native control inside it: the members, sub-rule and Rematch editors while a save runs. */}
           <fieldset disabled={pending} className="min-w-0 border-0 p-0">
           <Tabs value={tab} onValueChange={v => changeTab(v as Tab)}>
-            <div className="max-w-full overflow-x-auto">
+            {/* On a phone the tabs are a menu: five of them do not fit a row, and a row that scrolls hides what is off screen. */}
+            {phone && (
+              <div className="mb-3">
+                <NativeSelect aria-label={t('admin:rules.tabs.label')} value={tab} onChange={e => changeTab(e.target.value as Tab)}>
+                  <option value="rules">{t('admin:rules.tabs.rules')}</option>
+                  {!readOnly && <option value="members">{t('admin:rules.tabs.members')}</option>}
+                  {!readOnly && <option value="sub_rules">{withCount(t('admin:rules.mihomo.sub_rules'), subCount)}</option>}
+                  {!readOnly && <option value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</option>}
+                  <option value="basics">{t('admin:rules.tabs.basics')}</option>
+                </NativeSelect>
+              </div>
+            )}
+            {!phone && <div className="max-w-full overflow-x-auto">
               <TabsList>
                 <TabsTrigger value="rules">{t('admin:rules.tabs.rules')}</TabsTrigger>
                 {!readOnly && <TabsTrigger value="members">{t('admin:rules.tabs.members')}</TabsTrigger>}
@@ -280,11 +313,12 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
                 {!readOnly && <TabsTrigger value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</TabsTrigger>}
                 <TabsTrigger value="basics">{t('admin:rules.tabs.basics')}</TabsTrigger>
               </TabsList>
-            </div>
+            </div>}
             {/* The rules and the basics stay built while another tab is shown (the text and the history are in them); the three that ask the server as they open are built only when shown, as the sheet's were. */}
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
-                order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues} />
+                order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
+                showTarget={showTarget} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor
@@ -302,6 +336,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
                 draft={form}
                 mihomoSubRules={form.mihomo_sub_rules}
                 mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
+                usage={usage}
+                onRename={(name, groupNames) => setRenaming({ name, groups: groupNames })}
+                renameBlocked={renameBlocked}
+                onShowRules={name => { setShowTarget({ name, token: Date.now() }); changeTab('rules') }}
               />
             </TabsContent>
             <TabsContent value="sub_rules" keepMounted={false}>
@@ -321,6 +359,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
           )}
         </form>
       </FormValidityProvider>
+      {renaming && (
+        <RenameGroupDialog draft={form} from={renaming.name} groupNames={renaming.groups} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)}
+          onApply={applyRename} onClose={() => setRenaming(null)} />
+      )}
       {changes && <ChangesDialog saved={baseline.content} draft={form.content} onClose={() => setChanges(false)} />}
     </ObjectPage>
   )

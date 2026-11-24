@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { IconAdd, IconArrowDown, IconArrowUp, IconDelete, IconDrag, IconReset, IconSpinner } from '@/lib/icons'
+import { IconAdd, IconArrowDown, IconArrowUp, IconDelete, IconDrag, IconEdit, IconReset, IconSpinner } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from '@/utils/proxyGroupMembers'
 
@@ -46,12 +46,23 @@ interface Props {
   mihomoSubRules?: MihomoSubRule[]
   mihomoRematchOutbounds?: MihomoRematchOutbound[]
   onValidationChange?: (hasErrors: boolean) => void
+  /**
+   * What the rules say about a group, for the heading (design 3.11): how many groups of rules and how many rules name it. All
+   * four props below are optional and come together; without them the editor is the plain members editor it always was.
+   */
+  usage?: (name: string) => { blocks: number; rules: number }
+  /** Asks the page to rename the group. `groupNames` is every group the server lists, for the name check. */
+  onRename?: (name: string, groupNames: string[]) => void
+  /** Why renaming is not possible now (shown on the disabled button), or undefined when it is. */
+  renameBlocked?: string
+  /** Shows the rules that name the group on the Rules tab. */
+  onShowRules?: (name: string) => void
 }
 
 type AddKind = 'node' | 'line' | 'builtin' | 'proxy_group' | 'rematch' | 'region' | 'tag' | 'remaining'
 type AddOption = ComboOption<string | number>
 
-export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, draft, mihomoSubRules = [], mihomoRematchOutbounds = [], onValidationChange, usage, onRename, renameBlocked, onShowRules }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const [inspection, setInspection] = useState<ProxyGroupInspection | null>(null)
   const [selected, setSelected] = useState('')
@@ -119,6 +130,7 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
 
   const current = inspection?.groups.find(group => group.name === selected)
   const currentPreview = preview?.groups.find(group => group.name === selected)
+  const usedBy = useMemo(() => (usage && current ? usage(current.name) : undefined), [usage, current])
   const currentConfigured = Object.prototype.hasOwnProperty.call(members, selected)
   const currentOptionsConfigured = Object.prototype.hasOwnProperty.call(options, selected)
   const currentMembers = members[selected] || current?.default_members || []
@@ -310,10 +322,28 @@ export default function ProxyGroupMembersEditor({ content, groupOrder, initialGr
               <h3 className="text-lg font-semibold break-words">{current.name}</h3>
               <p className="text-xs text-muted-foreground">{t(`admin:rules.members.type_hint.${currentType}`)}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={resetCurrent} disabled={!currentConfigured && !currentOptionsConfigured}>
-              <IconReset />{t('admin:rules.members.restore_default')}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {onRename && (
+                <span title={renameBlocked}>
+                  <Button variant="outline" size="sm" disabled={renameBlocked !== undefined} onClick={() => onRename(current.name, (inspection?.groups ?? []).map(g => g.name))}>
+                    <IconEdit />{t('admin:rules.rename.action')}
+                  </Button>
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={resetCurrent} disabled={!currentConfigured && !currentOptionsConfigured}>
+                <IconReset />{t('admin:rules.members.restore_default')}
+              </Button>
+            </div>
           </div>
+          {renameBlocked !== undefined && <p className="mt-1 text-xs text-muted-foreground">{renameBlocked}</p>}
+          {usedBy && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+              <span>{usedBy.rules === 0 ? t('admin:rules.groups.not_used') : t('admin:rules.groups.used_by', { blocks: usedBy.blocks.toLocaleString(), rules: usedBy.rules.toLocaleString() })}</span>
+              {onShowRules && usedBy.rules > 0 && (
+                <button type="button" className="underline underline-offset-4" onClick={() => onShowRules(current.name)}>{t('admin:rules.groups.show_rules')}</button>
+              )}
+            </p>
+          )}
 
           <div className="mt-4 flex flex-col gap-3 rounded-lg bg-muted/40 p-3">
             <Field label={t('admin:rules.members.group_type')}>

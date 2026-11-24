@@ -1967,7 +1967,8 @@
     "tabs": {
       "rules": "规则",
       "members": "代理组",
-      "basics": "基本信息"
+      "basics": "基本信息",
+      "label": "页面分区"
     },
     "mihomo": {
       "rematches": "Rematch 出站",
@@ -2410,6 +2411,35 @@
       "block_scalar": "是多行条目的开头",
       "empty_item": "是空条目",
       "linebreak": "含有 Unicode 换行符"
+    },
+    "groups": {
+      "used_by": "被 {{blocks}} 个分组、{{rules}} 条规则引用",
+      "not_used": "没有规则引用这个代理组",
+      "show_rules": "在规则页查看"
+    },
+    "rename": {
+      "action": "重命名",
+      "title": "重命名代理组",
+      "new_name": "新名称",
+      "submit": "重命名",
+      "confirm": "将修改 {{rules}} 行规则和 {{refs}} 处成员引用",
+      "hint": "规则、成员列表和代理组顺序会一起更新。保存规则集之前不会生效，选择「放弃」可恢复原名。",
+      "done": "已重命名为 {{name}}，保存规则集后生效。",
+      "unavailable": {
+        "text_only": "规则中有只能按文本显示的行，请先在文本视图中处理。",
+        "unreadable": "有些只能按文本显示的行仍在使用这个代理组，无法安全地重命名。"
+      }
+    },
+    "targetview": {
+      "label": "显示方式",
+      "runs": "按分组",
+      "merged": "合并查看",
+      "note": "所有指向「{{target}}」的规则，共 {{count}} 条，分布在 {{blocks}} 个分组，合在一起方便查看。规则的顺序决定去向，所以不能在这里修改。要修改规则，请打开所属分组。",
+      "col_group": "分组",
+      "col_line": "行",
+      "open": "打开第 {{index}} 组",
+      "table": "指向 {{target}} 的全部规则",
+      "back_to": "按分组编辑"
     }
   },
   "nodes": {

@@ -1977,7 +1977,8 @@
     "tabs": {
       "rules": "Rules",
       "members": "Proxy groups",
-      "basics": "General"
+      "basics": "General",
+      "label": "Section"
     },
     "mihomo": {
       "rematches": "Rematch outbounds",
@@ -2420,6 +2421,35 @@
       "block_scalar": "starts a multi-line entry",
       "empty_item": "is an empty item",
       "linebreak": "contains a Unicode line break"
+    },
+    "groups": {
+      "used_by": "Used by {{blocks}} groups, {{rules}} rules",
+      "not_used": "No rule uses this proxy group",
+      "show_rules": "Show its rules"
+    },
+    "rename": {
+      "action": "Rename",
+      "title": "Rename proxy group",
+      "new_name": "New name",
+      "submit": "Rename",
+      "confirm": "This changes {{rules}} rule lines and {{refs}} member references",
+      "hint": "The rules, the member lists and the group order are all updated. Nothing is saved until you save the rule set, and Discard brings the old name back.",
+      "done": "Renamed to {{name}}. Save the rule set to apply it.",
+      "unavailable": {
+        "text_only": "The rules have lines the editor can only show as text. Fix them in the Text view first.",
+        "unreadable": "Some lines the editor can only show as text still name this proxy group, so they can't be renamed safely."
+      }
+    },
+    "targetview": {
+      "label": "Show",
+      "runs": "By group",
+      "merged": "All together",
+      "note": "Every rule that points at \"{{target}}\": {{count}} in {{blocks}} groups, shown together to read. The order of the rules decides where traffic goes, so they can't be edited here. Open a group to change its rules.",
+      "col_group": "Group",
+      "col_line": "Line",
+      "open": "Open group {{index}}",
+      "table": "All rules that point at {{target}}",
+      "back_to": "Edit by group"
     }
   },
   "nodes": {

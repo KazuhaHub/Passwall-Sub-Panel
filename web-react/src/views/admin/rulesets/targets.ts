@@ -16,6 +16,17 @@ const BUILTIN = new Set<string>(BUILTIN_TARGETS)
  * them the same way), so a typo here would quietly make a new one, which is why the picker lists the existing ones
  * and makes a new group a deliberate step.
  */
+/*
+ * What is NOT offered, and why (checked against internal/service/render, 2026-11):
+ * - Subscription lines. The backend does resolve a line name used as a rule target (line_names.go lineNameCatalog.resolve), but
+ *   by the line's name AS RENDERED, which carries the `{{ factor }}` placeholder and the region flag the template switches on
+ *   (newLineNameCatalog: base is the render item's name). The inspection data has only the stored display name, so the
+ *   editor could not write a name that is certain to resolve, and an unresolvable one makes the subscription of a user it does not resolve for fail to
+ *   render (ambiguous / unavailable line errors, line_names.go) instead of failing at save. A line is made a member of a proxy group on the
+ *   Proxy groups tab, which stores a node and line identity; a rule then points at that group. A line name a rule already has stays what the picker shows.
+ * - Sub-rules. A sub-rule name is the third field of a `SUB-RULE` line, which has no outbound at all (targetIndex returns -1 for
+ *   it); named as the target of an ordinary rule it would simply become a proxy group with that name.
+ */
 export function targetChoices(blocks: readonly Block[], order: readonly string[], rematch: readonly string[]): TargetChoices {
   const rematchSet = new Set(rematch)
   const used = new Set<string>()
