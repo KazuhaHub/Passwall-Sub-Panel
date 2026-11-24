@@ -1004,11 +1004,13 @@
       "missing_targets": "Rule targets not found in the template's proxy groups: {{names}}",
       "groups_ok": "Detected {{n}} proxy groups; rule targets match.",
       "no_binding": "Nothing bound — only nodes, proxy groups, and personal rules will render.",
-      "incomplete": "Template content is too short to analyze."
+      "incomplete": "Template content is too short to analyze.",
+      "propagation": "Changes can take up to a minute to reach subscriptions."
     },
     "validate": {
       "slug_name_required": "Slug and name are required",
-      "slug_exists": "A template with slug \"{{slug}}\" already exists — choose a different slug"
+      "slug_exists": "A template with slug \"{{slug}}\" already exists — choose a different slug",
+      "slug_reserved": "The slug \"{{slug}}\" is reserved — choose a different slug"
     },
     "toast": {
       "saved": "Saved",
@@ -1037,7 +1039,13 @@
     "empty": "No templates yet",
     "empty_hint": "Subscription rendering needs at least one template for each client type.",
     "cannot_delete_default": "The default template can't be deleted — make another template the default first",
-    "no_rule_sets": "No rule sets"
+    "no_rule_sets": "No rule sets",
+    "readonly_note": "You can view this template but not change it.",
+    "detail": {
+      "not_found": "This template was not found",
+      "forbidden": "You cannot open this template",
+      "forbidden_create": "You cannot create templates"
+    }
   },
   "sync_tasks": {
     "title": "Sync tasks",
