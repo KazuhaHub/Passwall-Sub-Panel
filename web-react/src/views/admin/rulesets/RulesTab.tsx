@@ -16,6 +16,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { IconAdd, IconArrowLeft, IconClose, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
@@ -40,6 +41,7 @@ import { useShadowFindings } from './useShadowFindings'
 
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
+const WIDE_QUERY = '(min-width: 1440px)'
 const VIEW_KEY = 'psp_ruleset_view'
 type View = 'blocks' | 'text'
 const IMPORT_LIMIT = 1 << 20
@@ -113,10 +115,13 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [announce, setAnnounce] = useState('')
   // The routing test: on a wide screen a third column, on a narrower one a dialog, on a phone a screen of its own. What was typed
-  // in it is kept here so that moving between the three, or closing it, does not lose it.
-  const wide = useMediaQuery('(min-width: 1280px)')
-  const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(min-width: 1280px)').matches)
+  // in it is kept here so that moving between the three, or closing it, does not lose it. "Wide" is 1440px, not the design's
+  // 1280: with the sidebar open a 1280px window leaves about 1000px for the page, and three columns there squeeze the rules
+  // table to about 225px (seen in the browser), so the column starts where the table keeps room.
+  const wide = useMediaQuery(WIDE_QUERY)
+  const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(WIDE_QUERY).matches)
   const [probe, setProbe] = useState<ProbeInput>(EMPTY_PROBE)
+  const testerColumn = wide && testerOpen && !subRule
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [focusRow, setFocusRow] = useState<{ id: number; token: number } | null>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -480,7 +485,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       </div>
       <p role="status" aria-live="polite" className="min-h-4 text-xs text-muted-foreground">{resultsText || announce}</p>
 
-      <div className={wide && testerOpen && !subRule ? 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]' : 'min-w-0'}>
+      <div className={testerColumn ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_20rem] gap-4' : 'min-w-0'}>
       <div className="min-w-0">
       {shownView === 'text' ? (
         <div className="flex flex-col gap-1.5">
@@ -493,7 +498,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <p className="text-xs text-muted-foreground">{t('admin:rules.editor_keyboard_hint')}</p>
         </div>
       ) : (
-        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
+        <div className={cn('grid min-w-0 gap-4', testerColumn ? 'lg:grid-cols-[minmax(13rem,16rem)_minmax(0,1fr)]' : 'lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]')}>
           {showDirectory && (
             <div className="flex min-w-0 flex-col gap-2">
               <p className="text-xs text-muted-foreground">{t('admin:rules.blocks.order_hint')}</p>
@@ -531,7 +536,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </div>
       )}
       </div>
-      {wide && testerOpen && !subRule && (
+      {testerColumn && (
         <aside aria-label={t('admin:rules.tester.title')} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
