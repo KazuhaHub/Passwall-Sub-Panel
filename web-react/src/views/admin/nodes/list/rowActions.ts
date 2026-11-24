@@ -8,7 +8,6 @@ import { IconDelete, IconEdit } from '@/lib/icons'
  * the package provides them, so N1 ships no button that does nothing:
  *   N2 fills toggleLine, deleteLine and addLine (the line editor and its save path);
  *   N4 replaces deleteNode / removeFromPanel with the impact dialogs.
- * Until then edit entries open the legacy MUI editors and the node-level actions use the old confirmations.
  */
 export interface RowActionHandlers {
   editLine: (row: OrderRow) => void

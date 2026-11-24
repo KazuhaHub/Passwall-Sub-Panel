@@ -48,7 +48,7 @@ describe('PolicyEditorSheet review fixes', () => {
     mount(null, { ...emptyForm(), name: 'p', ports: '25' })
     fireEvent.click(await screen.findByRole('button', { name: '保存' }))
     expect(await screen.findByText('策略的内容无效')).toBeTruthy()
-    expect(document.querySelector('[role="alert"], .MuiAlert-message')?.textContent).toContain('策略的内容无效')
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('策略的内容无效')
   })
 
   it('BitTorrent is disabled for allow and cleared when switching to allow', async () => {

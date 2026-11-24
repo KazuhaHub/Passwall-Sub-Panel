@@ -28,19 +28,6 @@ describe('@/lib/icons', () => {
     }
   })
 
-  // THE MIGRATION TABLE MUST COVER EVERY MATERIAL ICON STILL IN USE, so a page
-  // being migrated never has to pick its own replacement. A new import of an
-  // unmapped icon fails here and the table gets a row. (Once the last MUI import
-  // is gone this test has nothing left to check and goes with them.)
-  it('maps every Material icon the app imports', () => {
-    const used = new Set<string>()
-    for (const file of walk(src)) {
-      for (const m of readFileSync(file, 'utf8').matchAll(/@mui\/icons-material\/([A-Za-z0-9]+)/g)) used.add(m[1])
-    }
-    const missing = [...used].filter(name => !doc.includes(`| \`${name}\` |`))
-    expect(missing).toEqual([])
-  })
-
   it('has a table row for every semantic export, and an export for every table row', () => {
     const inTable = new Set([...doc.matchAll(/\| `(Icon[A-Za-z]+)` \|/g)].map(m => m[1]))
     const exported = new Set(Object.keys(icons))
@@ -53,7 +40,7 @@ describe('@/lib/icons', () => {
   it('is the only way the shared building blocks reach lucide', () => {
     const offenders = ['components/common', 'components/feedback', 'components/shell']
       .flatMap(d => walk(join(src, d)))
-      .concat(join(src, 'components/ConfirmHost.tsx'), join(src, 'components/SnackbarHost.tsx'))
+      .concat(join(src, 'components/ConfirmHost.tsx'))
       .filter(f => /from ['"]lucide-react['"]/.test(readFileSync(f, 'utf8')))
     expect(offenders).toEqual([])
   })

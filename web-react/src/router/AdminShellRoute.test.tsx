@@ -103,7 +103,7 @@ describe('AdminShellRoute navigation', () => {
     mount()
     const content = document.getElementById('main-content')!
     expect(within(content).getByTestId('page')).toBeTruthy()
-    // The MUI pages carry their own padding and width, as they did under the old layout.
+    // Each page pads and sizes itself (p-4 sm:p-6); the shell adds nothing around it.
     expect(content.className).toContain('p-0')
     expect(content.className).toContain('max-w-none')
     // The shell's own responsive padding is switched off at every width, not only the base one.

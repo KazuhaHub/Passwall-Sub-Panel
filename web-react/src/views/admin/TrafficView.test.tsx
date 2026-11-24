@@ -10,7 +10,7 @@ vi.mock('@/api/client', () => ({ client: api }))
 vi.mock('@/i18n', () => ({ default: { t: (k: string) => k, language: 'zh-CN' } }))
 // ECharts has no layout in jsdom and throws on dispose; not what this tests.
 vi.mock('@/components/TrafficChart', () => ({ default: () => null }))
-// Still a MUI component that needs the app theme, and owned by another change; not what this file tests.
+// A separate section with its own tests; not what this file tests.
 vi.mock('./UserServerUsage', () => ({ UserServerUsage: () => null }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

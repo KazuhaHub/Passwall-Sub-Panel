@@ -4,10 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 // THE CLOSED STYLE RULES OF THE ACCESS-CONTROL PAGE (plan §7.0 #2, #3, §7.6).
-// Colours come from the theme's M3 tokens and the closed tone table; state is
-// drawn by ToneBadge, never <Chip color=…>. A hex literal or an rgba() in these
-// files is a colour the table does not have; a coloured Chip is a state the
-// theme's MuiChip override will repaint as grey. Scanned: every non-test source
+// Colours come from the CSS tokens and the closed tone table; state is
+// drawn by StatusBadge. A hex literal or an rgba() in these
+// files is a colour the table does not have. Scanned: every non-test source
 // under views/admin/accessControl and the components this page added.
 
 const here = fileURLToPath(new URL('.', import.meta.url))

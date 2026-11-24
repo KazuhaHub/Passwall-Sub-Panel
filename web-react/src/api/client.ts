@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import i18n from '@/i18n'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
 import { notifySyncPending } from '@/components/feedback/syncPendingToast'
 import { panelAPIBase, panelURL } from '@/panelPath'
 import { announcePending, isUserObserved, syncPendingOf, userIdFromURL } from './syncPending'

@@ -8,7 +8,7 @@ import type { AccessToneKind } from '@/utils/accessControl'
 // THE ACCESS-CONTROL PAGES' CLOSED STATUS TABLE, in the new components' vocabulary: one row per
 // MEANING (a synonym shares its row), each a tone from common/tones.ts plus its own icon, so no two
 // rows are told apart by colour alone and none shares a (tone, icon) pair (accessStatus.test.ts holds
-// that). utils/accessControl.ts keeps the old MUI table for the risk pages, which still read it.
+// that). utils/accessControl.ts holds the tone kinds this table is keyed by.
 //
 // "Block" is a word, not an alarm: its tone is neutral and only the icon is drawn in the danger ink.
 

@@ -1,10 +1,8 @@
 import { StrictMode, type ReactElement } from 'react'
-import { ThemeProvider } from '@mui/material/styles'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { useAuthStore } from '@/stores/auth'
 import { makeTestQueryClient } from './queryTestUtils'
 
@@ -12,7 +10,10 @@ const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delet
 const snack = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack }))
+vi.mock('@/components/feedback/toasts', async importOriginal => ({
+  ...await importOriginal<typeof import('@/components/feedback/toasts')>(),
+  pushSnack: snack,
+}))
 vi.mock('@/i18n', () => ({ default: { t: (key: string) => key, language: 'en-US' } }))
 vi.mock('react-i18next', () => ({
   useTranslation: (namespace: string | string[] = 'admin') => ({
@@ -70,18 +71,14 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
 export function mountWithClient(page: ReactElement) {
   const client = makeTestQueryClient()
   const result = render(
     <StrictMode>
       <MemoryRouter>
-        <ThemeProvider theme={theme}>
-          {/* A client per mount: migrated views read through the query cache,
-              and a shared client would leak cached rows between tests. */}
-          <QueryClientProvider client={client}>{page}</QueryClientProvider>
-        </ThemeProvider>
+        {/* A client per mount: views read through the query cache,
+            and a shared client would leak cached rows between tests. */}
+        <QueryClientProvider client={client}>{page}</QueryClientProvider>
       </MemoryRouter>
     </StrictMode>,
   )

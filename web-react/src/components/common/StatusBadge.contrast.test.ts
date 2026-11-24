@@ -6,10 +6,8 @@ import { TONES, TONE_STYLE } from './tones'
 
 // EVERY BADGE'S WORDS READ AT 4.5:1 in both themes (WCAG AA for the 12px text a
 // badge uses), and its dot or icon at 3:1 (WCAG's bar for a graphical object).
-// This is the port of ToneBadge.contrast.test.ts to the Tailwind tokens: the old
-// test read the colours off the MUI theme object, this one reads them off
-// styles/ui.css, which is where the new stack defines them, so a token edited
-// there is held to the same bar. The words are --foreground on the tinted fill
+// The colours are read off styles/ui.css, where the tokens are defined, so a
+// token edited there is held to the same bar. The words are --foreground on the tinted fill
 // (the hue is on the icon), which is what makes the amber and red tones pass.
 
 const css = readFileSync(fileURLToPath(new URL('../../styles/ui.css', import.meta.url)), 'utf8')

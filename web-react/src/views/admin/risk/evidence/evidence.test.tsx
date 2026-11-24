@@ -103,12 +103,11 @@ describe('DetectorStateChip', () => {
 // The detector states are drawn by the one StatusBadge, from the closed tone table: the words are always
 // there, and a state that needs attention also carries an icon, so none is told by colour alone.
 describe('DetectorStateChip is a StatusBadge', () => {
-  it('draws no MUI chip for a state', () => {
+  it('draws every state as a badge', () => {
     mount(<>
       <DetectorStateChip state="flagged" /><DetectorStateChip state="suspect" /><DetectorStateChip state="clean" /><DetectorStateChip state="unknown" />
       <DetectorStateChip state="idle" /><DetectorStateChip state="exempt" /><DetectorStateChip state="disabled" /><DetectorStateChip state="not_computed" />
     </>)
-    expect(document.querySelectorAll('.MuiChip-root')).toHaveLength(0)
     expect(document.querySelectorAll('[data-testid="detector-state"]')).toHaveLength(8)
   })
 

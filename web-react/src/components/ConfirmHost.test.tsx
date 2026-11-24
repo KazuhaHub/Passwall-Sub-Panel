@@ -73,59 +73,13 @@ describe('ConfirmHost', () => {
     await waitFor(() => expect(document.activeElement).toBe(ok))
   })
 
-  it('stacks above every MUI layer, tooltips included', async () => {
+  it('stacks above every dialog layer, tooltips included', async () => {
     render(<ConfirmHost />)
     ask({ title: 't', message: 'm' })
     const dialog = await screen.findByRole('alertdialog')
-    // Above MUI tooltips (1500), which sit above its modals and popovers.
+    // Above the primitives' z-50 layers (dialogs, popovers, tooltips); below the toasts.
     expect(dialog.className).toContain('z-[1600]')
     expect(document.querySelector('[data-slot="alert-dialog-overlay"]')!.className).toContain('z-[1600]')
-  })
-
-  it('makes a MUI modal beneath it inert while open, and releases it after', async () => {
-    const modal = document.createElement('div')
-    modal.className = 'MuiModal-root'
-    document.body.appendChild(modal)
-    render(<ConfirmHost />)
-    const settled = ask({ title: 't', message: 'm' })
-    await screen.findByRole('alertdialog')
-    expect(modal.hasAttribute('inert')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(settled.value).toBe(false))
-    expect(modal.hasAttribute('inert')).toBe(false)
-    modal.remove()
-  })
-
-  it('also makes inert a MUI modal that opens while the confirm is already up', async () => {
-    render(<ConfirmHost />)
-    const settled = ask({ title: 't', message: 'm' })
-    await screen.findByRole('alertdialog')
-    const late = document.createElement('div')
-    late.className = 'MuiModal-root'
-    document.body.appendChild(late)
-    await waitFor(() => expect(late.hasAttribute('inert')).toBe(true))
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(settled.value).toBe(false))
-    expect(late.hasAttribute('inert')).toBe(false)
-    late.remove()
-  })
-
-  it('keeps focus in the confirm when a MUI modal opens over it and takes focus first', async () => {
-    render(<ConfirmHost />)
-    ask({ title: 't', message: 'm' })
-    const ok = await screen.findByRole('button', { name: '确定' })
-    await waitFor(() => expect(document.activeElement).toBe(ok))
-    const late = document.createElement('div')
-    late.className = 'MuiModal-root'
-    const inner = document.createElement('button')
-    inner.tabIndex = 0
-    late.appendChild(inner)
-    document.body.appendChild(late)
-    inner.focus()
-    expect(document.activeElement).toBe(inner)
-    // MUI's trap has taken focus; the modal is made inert and focus goes back to the confirm.
-    await waitFor(() => expect(document.activeElement).toBe(ok))
-    late.remove()
   })
 
   it('answers false to a confirm that a second one replaces, so no caller hangs', async () => {

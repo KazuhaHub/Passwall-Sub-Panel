@@ -15,15 +15,14 @@ import { eventOrigin, isCodeEditorTarget, isTypingTarget } from '@/lib/typing'
 import type { CommandContext, CommandEntry, CommandProvider } from './commands'
 
 // Another dialog is on screen if there is a role=dialog or alertdialog that is not
-// the palette itself (Base UI and MUI dialogs both set the role), or an MUI modal
-// that is mounted and not hidden (a drawer, which has no dialog role of its own).
+// the palette itself (sheets and drawers carry the dialog role too).
 // Opening ⌘K over one would stack a second modal on a task the user is in the
 // middle of, and a confirm that is waiting on an answer must not be buried.
 export function anotherDialogIsOpen(): boolean {
   for (const el of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
     if (!el.querySelector('[data-slot="command"]')) return true
   }
-  return document.querySelector('.MuiModal-root:not(.MuiModal-hidden)') !== null
+  return false
 }
 
 export function isMacPlatform(): boolean {
