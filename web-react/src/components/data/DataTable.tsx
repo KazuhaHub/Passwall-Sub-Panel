@@ -116,7 +116,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     data, columns, getRowId, mode = 'client', total: serverTotal, pagination = true, pageSizeOptions,
     columnMenu = true, selectable, rowLabel, bulkActions, onRowOpen, activeRowId, rowClassName, toolbar,
     loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className,
-    rowOptions, onRowHover, highlightedIds,
+    rowOptions, onRowHover, highlightedIds, relatedIds,
   } = props
   const { t, i18n } = useSpacedT()
   const server = mode === 'server'
@@ -215,6 +215,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const canOpen = (row: Row<T>) => onRowOpen !== undefined && optsOf(row).openable !== false
   const nameOf = (row: Row<T>) => rowLabel?.(row.original) ?? row.id
   const highlighted = useMemo(() => new Set(highlightedIds ?? []), [highlightedIds])
+  const related = useMemo(() => new Set(relatedIds ?? []), [relatedIds])
 
   // ---- selection ----
   const selectedIds = Object.keys(selection).filter(id => selection[id])
@@ -386,6 +387,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     'data-active': activeRowId === row.id ? 'true' : undefined,
     'data-row-state': o.state,
     'data-highlight': highlighted.has(row.id) ? 'true' : undefined,
+    'data-related': related.has(row.id) ? 'true' : undefined,
     ...o.data,
   })
 
@@ -491,6 +493,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           selected={selection[row.id] === true}
           active={activeRowId === row.id}
           highlighted={highlighted.has(row.id)}
+          related={related.has(row.id)}
           tabStop={row.id === tabStop}
           expanded={tree ? row.getIsExpanded() : false}
           canSelect={canSelect(row)}
@@ -764,6 +767,7 @@ interface DataRowProps<T> {
   selected: boolean
   active: boolean
   highlighted: boolean
+  related: boolean
   tabStop: boolean
   expanded: boolean
   canSelect: boolean
@@ -795,6 +799,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       data-active={p.active ? 'true' : undefined}
       data-row-state={p.state}
       data-highlight={p.highlighted ? 'true' : undefined}
+      data-related={p.related ? 'true' : undefined}
       data-drop={p.dropBefore ? 'before' : p.dropAfter ? 'after' : undefined}
       aria-rowindex={p.ariaRowIndex}
       {...p.dataAttrs}

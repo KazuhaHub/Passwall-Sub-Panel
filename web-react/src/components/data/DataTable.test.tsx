@@ -658,6 +658,14 @@ describe('row kinds, flags and hover (item 8)', () => {
     expect(onRowHover).toHaveBeenLastCalledWith(null)
   })
 
+  it('marks related rows with an attribute only, never a background, so the hovered row stays the most prominent', () => {
+    render(<DataTable {...base} relatedIds={['a', 'b']} />)
+    const rows = rowsOf()
+    expect(rows.map(r => r.getAttribute('data-related'))).toEqual(['true', null, 'true', null])
+    expect(rows.map(r => r.getAttribute('data-highlight'))).toEqual([null, null, null, null])
+    expect(rows[0].className).not.toMatch(/--brand/)
+  })
+
   it('marks rows highlighted from outside', () => {
     render(<DataTable {...base} highlightedIds={['a', 'b']} />)
     expect(rowsOf().map(r => r.getAttribute('data-highlight'))).toEqual(['true', null, 'true', null])

@@ -169,7 +169,10 @@ export default function LinesTab() {
   const firstAdded = added[0] && items.some(i => i.id === added[0]) ? added[0] : null
   useEffect(() => { if (firstAdded) tableRef.current?.scrollToRow(firstAdded) }, [firstAdded])
 
-  const highlight = useMemo(() => [...relatedIds(rows, hover), ...moves.highlighted, ...added], [rows, hover, moves.highlighted, added])
+  // Two different signals. A line just moved or added FLASHES (a tint, timed). Lines sharing the hovered row's landing
+  // or entry are only a quiet hint (their colour bar widens): the row under the pointer must stay the most prominent.
+  const highlight = useMemo(() => [...moves.highlighted, ...added], [moves.highlighted, added])
+  const related = useMemo(() => relatedIds(rows, hover), [rows, hover])
   const openItem = (item: ListRow) => { if (item.row.kind === 'separator') { if (admin) sepSel.select(String(item.row.id)) } else lineSel.select(item.id) }
 
   // `E` on a focused row opens the line editor; Enter keeps opening the sheet.
@@ -227,7 +230,7 @@ export default function LinesTab() {
   const common = {
     columnMenu: true, selectable: true, selection: checked, onSelectionChange: setChecked, pagination: false as const,
     columnVisibility: view.state.columnVisibility, onColumnVisibilityChange: view.setColumnVisibility,
-    loading, onRowHover: setHover, highlightedIds: highlight, empty, maxHeight: null,
+    loading, onRowHover: setHover, highlightedIds: highlight, relatedIds: related, empty, maxHeight: null,
     bulkActions: (ctx: { ids: string[]; clear: () => void }) => bulk(ctx.ids, ctx.clear),
   }
 

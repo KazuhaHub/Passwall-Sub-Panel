@@ -34,7 +34,7 @@ export function NameCell({ item, colors, hint }: { item: ListRow; colors: Map<st
   const color = colors.get(String(item.row.node_id))
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <LandingColorBar color={color} className="h-5 self-center" />
+      <LandingColorBar color={color} className="h-5 self-center transition-[width] group-data-[related=true]/row:w-2" />
       <span className="min-w-0 truncate font-medium" title={hint ?? item.row.name}>{item.row.name}</span>
     </div>
   )
