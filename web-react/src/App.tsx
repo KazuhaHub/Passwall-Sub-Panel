@@ -51,5 +51,5 @@ export default function App() {
 }
 
 function RouteFallback() {
-  return <div className="fixed inset-0 grid place-items-center p-6"><PageSkeleton className="w-full max-w-3xl" /></div>
+  return <div className="min-h-svh bg-background"><PageSkeleton /></div>
 }

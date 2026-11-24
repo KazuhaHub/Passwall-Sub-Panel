@@ -18,13 +18,29 @@ function Region({ className, children }: { className?: string; children: React.R
   )
 }
 
-/** A page: a heading bar and a body block. The Suspense fallback of a route. */
-export function PageSkeleton({ className }: { className?: string }) {
+/**
+ * A page while its code or data loads: the same frame as a real page (`p-4 sm:p-6`), a title bar, a toolbar line and
+ * a table block, spaced at the page rhythm (16px), so nothing jumps when the page appears. The Suspense fallback of a
+ * route. `framed={false}` omits the frame and the title, for a skeleton that sits inside a page that already has its
+ * own padding and header (the toolbar and the table block remain).
+ */
+export function PageSkeleton({ className, framed = true }: { className?: string; framed?: boolean }) {
   return (
-    <Region className={cn('space-y-3', className)}>
-      <Skeleton className="h-7 w-48" />
-      <Skeleton className="h-4 w-80 max-w-full" />
-      <Skeleton className="mt-4 h-64 w-full" />
+    <Region className={cn(framed && 'p-4 sm:p-6', className)}>
+      <div className="space-y-4">
+        {framed && <Skeleton className="h-7 w-48" />}
+        <div className="flex flex-wrap gap-2">
+          <Skeleton className="h-(--control-h) w-full sm:w-64" />
+          <Skeleton className="h-(--control-h) w-24" />
+          <Skeleton className="h-(--control-h) w-24" />
+        </div>
+        <div className="overflow-hidden rounded-xl border bg-card">
+          <div className="flex h-(--row-h) items-center gap-4 border-b bg-muted/50 px-3">
+            {Array.from({ length: 5 }, (_, c) => <Skeleton key={c} className={cn('h-3.5', c === 0 ? 'w-1/4' : 'flex-1')} />)}
+          </div>
+          <TableSkeleton rows={6} cols={5} />
+        </div>
+      </div>
     </Region>
   )
 }

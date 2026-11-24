@@ -88,7 +88,7 @@ export default function SubClientsView() {
         {header}
         {settingsQuery.isError
           ? <ErrorState title={t('admin:settings.load_failed')} reason={settingsQuery.error} retry={() => settingsQuery.refetch()} />
-          : <PageSkeleton />}
+          : <PageSkeleton framed={false} />}
       </div>
     )
   }
