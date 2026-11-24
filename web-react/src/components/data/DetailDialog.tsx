@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode, RefObject } from 'react'
+import { createContext, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogDescription, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { TOUCH_TARGET } from '@/components/common/touchTarget'
+
+/**
+ * Where a SaveBar inside the dialog goes: the footer element, once it is mounted. The bar keeps its place in the
+ * form's React tree (so FormValidityProvider and its state are untouched) and is drawn into the footer through a
+ * portal, fixed below the scrolling body instead of floating over the fields. Null outside a DetailDialog.
+ */
+export const DialogFooterSlot = createContext<HTMLElement | null>(null)
 
 export type DetailDialogSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -67,9 +74,13 @@ export interface DetailDialogProps {
 export function DetailDialog({ open, onClose, title, status, description, actions, footer, children, size = 'md', nav, initialFocus, onSubmit, className }: DetailDialogProps) {
   const { t } = useSpacedT()
   const phone = useIsMobile()
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
 
   const body = <div data-slot="detail-dialog-body" className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-  const foot = footer ? <div data-slot="detail-dialog-footer" className="flex flex-shrink-0 flex-row flex-wrap items-center justify-end gap-2 border-t bg-muted/40 p-4">{footer}</div> : null
+  // Always mounted (hidden while empty) so a SaveBar can portal into it. The bottom padding keeps the buttons above a phone's home indicator.
+  const foot = (
+    <div ref={setSlot} data-slot="detail-dialog-footer" className="flex flex-shrink-0 flex-row flex-wrap items-center justify-end gap-2 border-t bg-muted/40 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] empty:hidden">{footer}</div>
+  )
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!next) onClose() }}>
@@ -116,11 +127,13 @@ export function DetailDialog({ open, onClose, title, status, description, action
               </DialogPrimitive.Close>
             </div>
           </header>
-          {onSubmit ? (
-            <form noValidate className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>{body}{foot}</form>
-          ) : (
-            <>{body}{foot}</>
-          )}
+          <DialogFooterSlot.Provider value={slot}>
+            {onSubmit ? (
+              <form noValidate className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>{body}{foot}</form>
+            ) : (
+              <>{body}{foot}</>
+            )}
+          </DialogFooterSlot.Provider>
         </DialogPrimitive.Popup>
       </DialogPortal>
     </Dialog>
