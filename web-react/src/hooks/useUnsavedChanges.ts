@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useBlocker } from 'react-router'
+import { useGuardRegistration } from './useLeaveGuard'
 
 export interface UnsavedChangesOptions {
   /**
@@ -57,36 +57,16 @@ export function useUnsavedChanges(dirty: boolean, opts: UnsavedChangesOptions = 
   const leavesRef = useRef(leaves)
   leavesRef.current = leaves
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
-    if (allowRef.current) { allowRef.current = false; return false }
-    return dirtyRef.current && leavesRef.current(nextLocation, currentLocation)
+  // Registered with the shared guard registry (hooks/useLeaveGuard): one blocker for the whole router, however many guards are mounted.
+  useGuardRegistration({
+    // The ref, not the prop: markSaved() clears it before React renders the save.
+    get dirty() { return dirtyRef.current },
+    leaves: (next, current) => {
+      if (allowRef.current) { allowRef.current = false; return false }
+      return leavesRef.current(next, current)
+    },
+    ask: opts.confirm ?? (async () => window.confirm(t('ui.form.unsaved_leave'))),
   })
-
-  // Read through a ref so the effect below runs once per blocked navigation,
-  // not once per render while the question is open.
-  const ask = useRef<() => Promise<boolean>>(async () => true)
-  useEffect(() => {
-    ask.current = opts.confirm ?? (async () => window.confirm(t('ui.form.unsaved_leave')))
-  })
-
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return
-    let live = true
-    void ask.current().then(ok => {
-      if (!live) return
-      if (ok) blocker.proceed()
-      else blocker.reset()
-    })
-    return () => { live = false }
-  }, [blocker])
-
-  // The listener is always attached and asks the ref, so a save that clears the
-  // draft stops the prompt at once.
-  useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (dirtyRef.current) e.preventDefault() }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [])
 
   return {
     markSaved: useCallback(() => { dirtyRef.current = false }, []),
