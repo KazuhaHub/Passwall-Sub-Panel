@@ -163,6 +163,32 @@ describe('the risk policy lives in the risk center', () => {
   })
 })
 
+describe('the audience rail', () => {
+  const scopeRead = { '/admin/groups/1/scope-settings': { overrides: { 'notify.expire_before_days': '5' }, overridable: ['notify.expire_before_days', 'security.emergency_access_enabled'] } }
+
+  it('lists All users first, then each group with a quiet count of its overrides, and the selected entry is marked', async () => {
+    reads(scopeRead)
+    mountAdmin(<SettingsView />, '/admin/settings')
+    const rail = (await screen.findByRole('heading', { name: 'Audience' })).closest('section')!
+    const entry = await within(rail).findByRole('button', { name: new RegExp(`^${group.name}`) })
+    await waitFor(() => expect(entry.textContent).toContain('1'))
+    expect(within(entry).getByText('1 override')).toBeTruthy()
+    const names = within(rail).getAllByRole('button').map(b => b.textContent ?? '')
+    expect(names[0]).toBe('All users (global default)')
+    expect(within(rail).getByRole('button', { name: 'All users (global default)' }).getAttribute('aria-current')).toBe('true')
+    fireEvent.click(entry)
+    await waitFor(() => expect(entry.getAttribute('aria-current')).toBe('true'))
+    expect(await screen.findByText('Notification thresholds')).toBeTruthy()
+  })
+
+  it('says a global-only section cannot be set per group while a group is selected, and keeps its form', async () => {
+    reads(scopeRead)
+    mountAdmin(<SettingsView />, `/admin/settings?tab=brand&audience=${group.id}`)
+    expect(await screen.findByText('These settings apply to all users and cannot be set per group.')).toBeTruthy()
+    expect(await screen.findByText('Site text')).toBeTruthy()
+  })
+})
+
 describe('read failure', () => {
   it('reports a failed settings read instead of spinning forever', async () => {
     api.get.mockRejectedValue(new Error('offline'))

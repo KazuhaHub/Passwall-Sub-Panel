@@ -140,9 +140,12 @@
     "saved": "已保存",
     "panel_path_sso_notice": "面板路径已更新；如启用了 SSO，请同步更新身份提供商中登记的回调地址。",
     "scope": {
-      "audience": "适用对象",
+      "audience": "适用范围",
       "all_users": "所有用户（全局默认）",
-      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。"
+      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
+      "overrides_count_other": "{{count}} 项覆盖",
+      "filter": "筛选分组",
+      "global_only": "这些设置对所有用户生效，不能按分组设置。"
     },
     "feature_pending": "该 tab 正在迁移到 React + MUI（下个版本）。当前请使用 Vue 版本管理这些字段。",
     "general": {
