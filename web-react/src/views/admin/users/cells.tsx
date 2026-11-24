@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { RiskLevels } from '@/api/riskCenter'
 import type { Role, User } from '@/api/types'
+import { Meter } from '@/components/common/Meter'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -64,14 +65,10 @@ export function UserCell({ user }: { user: User }) {
   )
 }
 
-/** A thin bar for used against the limit; the numbers beside it say the same, so it is decoration for the eye. */
-export function Meter({ used, limit, className }: { used: number; limit: number; className?: string }) {
-  const ratio = limit > 0 ? Math.min(1, used / limit) : 0
-  return (
-    <div aria-hidden className={cn('h-1 w-full overflow-hidden rounded-full bg-muted', className)}>
-      <div className={cn('h-full rounded-full', ratio >= 1 ? 'bg-destructive' : ratio >= 0.9 ? 'bg-warning' : 'bg-brand')} style={{ width: `${ratio * 100}%` }} />
-    </div>
-  )
+/** The bar of a user's period usage. The numbers beside it say the same, so it is decoration for the eye: amber from 90%, red at the limit. */
+export function UsageMeter({ used, limit, className }: { used: number; limit: number; className?: string }) {
+  const ratio = limit > 0 ? used / limit : 0
+  return <Meter value={used} max={limit} className={cn('h-1', className)} barClassName={ratio >= 1 ? 'bg-destructive' : ratio >= 0.9 ? 'bg-warning' : 'bg-brand'} />
 }
 
 /**
@@ -89,7 +86,7 @@ export function TrafficCell({ user, usedBytes }: { user: User; usedBytes: number
   return (
     <div className="flex min-w-0 flex-col items-end gap-1">
       <span className={cn('whitespace-nowrap tabular-nums', over && 'font-medium text-destructive')}>{used ?? '—'} / {limit} GB</span>
-      <Meter used={used ?? 0} limit={limit} className="w-20" />
+      <UsageMeter used={used ?? 0} limit={limit} className="w-20" />
     </div>
   )
 }

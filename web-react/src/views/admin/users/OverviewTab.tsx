@@ -10,7 +10,7 @@ import { useSiteStore } from '@/stores/site'
 import { formatDualTz } from '@/utils/datetime'
 import { accountEnabledForEdit } from '@/utils/userAccess'
 import { Block, Fact, Facts } from './blocks'
-import { AxisBadge, ExpiryCell, LastSeenCell, Meter, RoleBadge, SsoBadge } from './cells'
+import { AxisBadge, ExpiryCell, LastSeenCell, RoleBadge, UsageMeter, SsoBadge } from './cells'
 import { useUsers } from './context'
 import { EmergencyWindow } from './emergency'
 import { bytesToGB, canQuickRenew, canResumeService, canSuspendService } from './model'
@@ -78,7 +78,7 @@ export function OverviewTab({ user, manageable }: { user: User; manageable: bool
 
       <Block title={t('users.detail.usage')}
         actions={<Button size="sm" variant="outline" render={<Link to={`/admin/traffic?tab=trend&scope=user&user=${user.id}`} />}>{t('users.detail.view_usage')}</Button>}>
-        {limitGB > 0 && <Meter used={usedGB ?? 0} limit={limitGB} className="h-2" />}
+        {limitGB > 0 && <UsageMeter used={usedGB ?? 0} limit={limitGB} className="h-2" />}
         <Facts>
           <Fact label={t('users.detail.period_used')}><span className="tabular-nums">{usedGB ?? '—'} GB</span></Fact>
           <Fact label={t('users.detail.limit')}><span className="tabular-nums">{limitGB > 0 ? `${limitGB} GB` : t('users.detail.unlimited')}</span></Fact>
