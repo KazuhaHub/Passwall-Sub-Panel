@@ -29,7 +29,7 @@ require (
 )
 
 require (
-	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
