@@ -1,5 +1,6 @@
 import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react"
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
@@ -35,11 +36,13 @@ function ComboboxTrigger({
 }
 
 function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
+  const { t } = useTranslation("common")
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
       render={<InputGroupButton variant="ghost" size="icon-xs" />}
       className={cn(className)}
+      aria-label={t("actions.clear")}
       {...props}
     >
       <XIcon className="pointer-events-none" />
@@ -70,6 +73,9 @@ function ComboboxInput({
             size="icon-xs"
             variant="ghost"
             render={<ComboboxTrigger />}
+            // ComboboxTrigger renders a real <button>; without this the Button wrapper assumes a non-button
+            // host (it has a `render`) and Base UI warns on every render.
+            nativeButton
             data-slot="input-group-button"
             className="group-has-data-[slot=combobox-clear]/input-group:hidden data-pressed:bg-transparent"
             disabled={disabled}

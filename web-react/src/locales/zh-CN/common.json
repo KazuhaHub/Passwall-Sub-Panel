@@ -14,7 +14,8 @@
     "edit": "编辑",
     "delete": "删除",
     "deleted": "已删除",
-    "search": "搜索"
+    "search": "搜索",
+    "clear": "清除"
   },
   "saved": "已保存",
   "empty": "暂无数据",
