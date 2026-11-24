@@ -176,7 +176,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│         React 18 + MUI (Material Design 3) 管理后台 SPA        │
+│      React 19 + shadcn/ui (Base UI) + Tailwind 管理后台 SPA     │
 │                                                               │
 │  /login          [SSO 登录] 或 [本地账号登录 + 2FA/passkey]     │
 │  Dashboard       仪表盘                                       │
@@ -1672,7 +1672,7 @@ IdP 响应验签/校验通过 →
 | 密码 | `golang.org/x/crypto/bcrypt` | cost=10 |
 | JWT | `github.com/golang-jwt/jwt/v5` | HS256 |
 | AES-GCM | `crypto/aes` 标准库 | 凭证加密 |
-| 前端 | React 18 + Vite + MUI (Material Design 3) + Zustand | v2.0 起从 Vue 3 + Element Plus 全量重写 |
+| 前端 | React 19 + Vite + shadcn/ui（Base UI）+ Tailwind CSS v4 + lucide + TanStack Table + Zustand | v2.0 起从 Vue 3 + Element Plus 全量重写为 React + MUI，其后界面层换成 shadcn/ui |
 | 国际化 | i18next + react-i18next | zh-CN / en-US |
 | 图表 | ECharts（按需 import）| 流量趋势 |
 | 前端打包 | `go:embed` 嵌到二进制 | 单二进制部署 |
@@ -1733,7 +1733,7 @@ volumes:
 | # | 决策点 | 选定 | 状态 |
 |---|---|---|---|
 | 1 | 数据库 | MySQL 8.0 + SQLite 双驱动 | ✅ 已实现 |
-| 2 | 前端框架 | React 18 + MUI + TypeScript（v2.0 起，原 v1 为 Vue 3 + Element Plus） | ✅ 已实现 |
+| 2 | 前端框架 | React 19 + shadcn/ui（Base UI）+ Tailwind CSS v4 + TypeScript（v2.0 起，原 v1 为 Vue 3 + Element Plus；界面层原为 MUI，已替换） | ✅ 已实现 |
 | 3 | SSO 方案 | SAML + OIDC 双支持 | ✅ 已实现 |
 | 4 | 同步策略 | 异步任务队列 (sync_tasks) | ✅ 已实现 |
 | 5 | 用户标识 | UPN 统一标识（移除 username/source） | ✅ 已实现 |
