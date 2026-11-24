@@ -66,7 +66,7 @@ export const BrandSection = memo(function BrandSection({ onDirtyChange }: { onDi
             <Input type="color" aria-label={t('settings.brand.theme_color_picker')} value={v.theme_color || '#0061A4'}
               className="size-(--control-h) shrink-0 cursor-pointer p-1" onChange={e => patch({ theme_color: e.target.value.toUpperCase() })} />
             <Input id={settingId('theme_color')} value={v.theme_color} placeholder="#0061A4" onChange={e => patch({ theme_color: e.target.value })} />
-            {v.theme_color && <Button type="button" variant="ghost" onClick={() => patch({ theme_color: '' })}>{t('settings.brand.theme_color_clear')}</Button>}
+            {v.theme_color && <Button type="button" variant="outline" onClick={() => patch({ theme_color: '' })}>{t('settings.brand.theme_color_clear')}</Button>}
           </div>
         </Field>
       </Group>

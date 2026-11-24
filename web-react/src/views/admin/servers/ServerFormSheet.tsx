@@ -95,7 +95,7 @@ export function ServerFormSheet({ editing, install, onInstallChange, probe, onTe
       className="data-[side=right]:sm:w-[min(40rem,96vw)] data-[side=right]:sm:max-w-[min(40rem,96vw)]"
       footer={(
         <>
-          <Button variant="ghost" disabled={busy} onClick={() => guard(onClose)}>{t('common:actions.cancel')}</Button>
+          <Button variant="outline" disabled={busy} onClick={() => guard(onClose)}>{t('common:actions.cancel')}</Button>
           <AsyncButton pending={busy} onClick={() => submit()}>
             {t(!editing && native ? 'admin:servers.native.create_continue' : 'common:actions.ok')}
           </AsyncButton>

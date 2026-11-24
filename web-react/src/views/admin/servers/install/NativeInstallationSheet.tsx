@@ -59,7 +59,7 @@ export function NativeInstallationSheet({ server, initialProvisioning, onClose, 
       className="data-[side=right]:sm:w-[min(44rem,96vw)] data-[side=right]:sm:max-w-[min(44rem,96vw)]"
       footer={(
         <>
-          <Button variant="ghost" onClick={onClose}>{t('common:actions.close')}</Button>
+          <Button variant="outline" onClick={onClose}>{t('common:actions.close')}</Button>
           {/* A real link: it goes to the nodes page, so it is announced as one and opens in a new tab like one. */}
           <Link to="/admin/nodes" onClick={onClose} className={buttonVariants({ variant: inst.status?.state === 'running' ? 'default' : 'outline' })}>{t('admin:servers.native.configure_nodes')}</Link>
         </>

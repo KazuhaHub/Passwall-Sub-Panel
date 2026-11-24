@@ -156,7 +156,7 @@ export function ThemeMenu() {
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>{userColor ? t('user_override') : t('system_default')}: {effective}</span>
             {userColor && (
-              <Button type="button" variant="ghost" size="xs" onClick={() => { setUserColor(null); setDraft(systemColor.toUpperCase()) }}>
+              <Button type="button" variant="outline" size="xs" onClick={() => { setUserColor(null); setDraft(systemColor.toUpperCase()) }}>
                 {t('reset')}
               </Button>
             )}

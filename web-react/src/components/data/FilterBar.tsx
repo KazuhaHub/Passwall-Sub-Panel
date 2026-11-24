@@ -106,7 +106,7 @@ export function FilterBar({ search, facets = [], onClearAll, children, className
       ))}
       {children}
       {filtered && onClearAll && (
-        <Button variant="ghost" size="sm" className={TOUCH_HEIGHT} onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
+        <Button variant="outline" size="sm" className={TOUCH_HEIGHT} onClick={() => { setDraft(''); reported.current = ''; clearTimeout(timer.current); onClearAll() }}>
           {t('ui.data.clear_all')}
         </Button>
       )}

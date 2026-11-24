@@ -79,7 +79,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
                     {file.sensitive
                       ? <ReadonlySecret label={t('admin:servers.native.file_content', { name })} value={file.content} />
                       : <ReadonlyText label={t('admin:servers.native.file_content', { name })} value={file.content} rows={4} />}
-                    <Button variant="ghost" className="self-start" onClick={() => void copyToClipboard(file.content)}><IconCopy />{t('admin:servers.native.copy_file', { name })}</Button>
+                    <Button variant="outline" className="self-start" onClick={() => void copyToClipboard(file.content)}><IconCopy />{t('admin:servers.native.copy_file', { name })}</Button>
                   </section>
                 )
               })}
@@ -93,7 +93,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
                     {step.commands?.map((command, commandIndex) => (
                       <div key={commandIndex} className="flex flex-col gap-1">
                         <ReadonlyText label={label} value={command} rows={2} />
-                        <Button variant="ghost" className="self-start" onClick={() => void copyToClipboard(command)}><IconCopy />{t('admin:servers.native.copy_step')}</Button>
+                        <Button variant="outline" className="self-start" onClick={() => void copyToClipboard(command)}><IconCopy />{t('admin:servers.native.copy_step')}</Button>
                       </div>
                     ))}
                   </section>

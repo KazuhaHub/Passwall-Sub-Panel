@@ -133,7 +133,7 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
       <div className="mt-1.5 flex flex-wrap gap-2">
         <AsyncButton variant="outline" size="sm" disabled={disabled || busy} onClick={() => preview('update')}>{t(`${R}check_update`)}</AsyncButton>
         {s.previous && (
-          <AsyncButton variant="ghost" size="sm" disabled={disabled || busy} onClick={() => preview('rollback')}>{t(`${R}rollback`, { tag: s.previous.tag })}</AsyncButton>
+          <AsyncButton variant="outline" size="sm" disabled={disabled || busy} onClick={() => preview('rollback')}>{t(`${R}rollback`, { tag: s.previous.tag })}</AsyncButton>
         )}
       </div>
       {error && (
@@ -141,7 +141,7 @@ export default function RuleDataPanel({ mode, onModeChange, disabled }: {
           <IconError aria-hidden />
           <AlertDescription className="flex items-start justify-between gap-2">
             <span>{error}</span>
-            <Button variant="ghost" size="xs" onClick={() => setError('')}>{t('common:actions.close')}</Button>
+            <Button variant="outline" size="xs" onClick={() => setError('')}>{t('common:actions.close')}</Button>
           </AlertDescription>
         </Alert>
       )}

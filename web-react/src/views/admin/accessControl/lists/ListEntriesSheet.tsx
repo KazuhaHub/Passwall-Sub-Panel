@@ -83,7 +83,7 @@ export default function ListEntriesSheet({ listId, onClose, onEdit, onTest }: Li
             {shown.map(e => (
               <li key={e} className="flex items-center justify-between gap-2 border-b py-1">
                 <span className="min-w-0 truncate font-mono text-[13px]" title={e}>{e}</span>
-                <Button variant="ghost" size="sm" className="shrink-0" onClick={() => onTest(e)}>{t(`${L}sheet.test`)}</Button>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => onTest(e)}>{t(`${L}sheet.test`)}</Button>
               </li>
             ))}
           </ul>

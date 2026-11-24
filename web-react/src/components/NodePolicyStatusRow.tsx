@@ -140,7 +140,7 @@ export default function NodePolicyStatusRow({
 
   const actions: ReactNode[] = []
   const link = (id: string, text: string, onClick: () => void) => (
-    <Button key={id} size="sm" variant="ghost" onClick={onClick}>{text}<IconChevronRight data-icon="inline-end" /></Button>
+    <Button key={id} size="sm" variant="outline" onClick={onClick}>{text}<IconChevronRight data-icon="inline-end" /></Button>
   )
   if (key === 'rejected' && onRetry) {
     actions.push(<AsyncButton key="retry" size="sm" variant="outline" onClick={() => onRetry(node.agent_id)}>{t(`${S}node_action.retry`)}</AsyncButton>)

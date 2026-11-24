@@ -88,7 +88,7 @@ function FindingFooter({ f, fmt, base, cur, onShowData }: RowProps) {
             {fmt.t('admin:diagnostics.links.open', { page: fmt.t(link.nav) })}
           </Link>
         )}
-        <Button variant="ghost" size="sm" onClick={() => onShowData(f.card)}>{fmt.t('admin:diagnostics.problems.show_data')}</Button>
+        <Button variant="outline" size="sm" onClick={() => onShowData(f.card)}>{fmt.t('admin:diagnostics.problems.show_data')}</Button>
       </div>
     </div>
   )

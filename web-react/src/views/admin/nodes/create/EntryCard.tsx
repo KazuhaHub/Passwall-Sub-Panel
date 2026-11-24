@@ -43,7 +43,7 @@ export function EntryCard({ entry, canTunnel, busy, showAll, touched, onTouch, o
     <div data-testid="setup-entry" className="flex flex-col gap-3 rounded-lg border p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{t(`nodes.setup.kind.${kind}`)}</span>
-        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onRemove}>{t('nodes.relay.remove')}</Button>
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onRemove}>{t('nodes.relay.remove')}</Button>
       </div>
       <Field label={t('nodes.relay.name')}>
         <Input value={line.name} disabled={busy} onChange={e => onPatch({ name: e.target.value })} />

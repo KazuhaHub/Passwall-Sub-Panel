@@ -58,7 +58,7 @@ export function ActionsColumn({ s }: { s: Server }) {
   const c = useServersCtx()
   return (
     <div className="flex items-center justify-end gap-1">
-      <AsyncButton variant="ghost" size="sm" disabled={c.testing !== null && c.testing !== s.id} pending={c.testing === s.id} onClick={() => c.onTest(s)}>
+      <AsyncButton variant="outline" size="sm" disabled={c.testing !== null && c.testing !== s.id} pending={c.testing === s.id} onClick={() => c.onTest(s)}>
         {t('admin:servers.action.test')}
       </AsyncButton>
       <MoreMenu items={c.menuOf(s)} size="icon-xs" label={t('admin:servers.action.more_for', { name: s.name })} />

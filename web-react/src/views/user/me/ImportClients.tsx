@@ -63,7 +63,7 @@ export function RecommendedClient({ profile, client, onShowMore }: {
             <Button variant="outline" onClick={() => openNew(client.install_url)}><IconDownload />{t('import.install')}</Button>
             {tutorial && <Button variant="outline" className="col-span-2 sm:col-auto" onClick={() => openNew(tutorial)}><IconHelp />{t('import.tutorial')}</Button>}
           </div>
-          {onShowMore && <Button variant="ghost" className="sm:ml-auto" onClick={onShowMore}><IconDevices />{t('import.others_title')}</Button>}
+          {onShowMore && <Button variant="outline" className="sm:ml-auto" onClick={onShowMore}><IconDevices />{t('import.others_title')}</Button>}
         </div>
       </CardContent>
     </Card>

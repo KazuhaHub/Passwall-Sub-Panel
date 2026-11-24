@@ -34,7 +34,7 @@ export default function QuotaMeters({ budget, variant, loading = false, failed =
   if (failed) {
     return (
       <p className="text-sm text-muted-foreground">
-        {t(`${Q}failed`)} {onRetry && <Button size="sm" variant="ghost" onClick={onRetry}>{t('admin:access_control.retry')}</Button>}
+        {t(`${Q}failed`)} {onRetry && <Button size="sm" variant="outline" onClick={onRetry}>{t('admin:access_control.retry')}</Button>}
       </p>
     )
   }

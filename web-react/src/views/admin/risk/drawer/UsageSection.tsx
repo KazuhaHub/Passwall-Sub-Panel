@@ -93,7 +93,7 @@ export default function UsageSection({ userId, available, nodes }: {
             </NativeSelect>
           </div>
         )}
-        <AsyncButton size="sm" variant={asked ? 'ghost' : 'outline'} onClick={() => run(range, panelId)}>{t(`${D}usage_view`)}</AsyncButton>
+        <AsyncButton size="sm" variant="outline" onClick={() => run(range, panelId)}>{t(`${D}usage_view`)}</AsyncButton>
       </div>
       {read.isError && (
         <Alert variant="destructive">

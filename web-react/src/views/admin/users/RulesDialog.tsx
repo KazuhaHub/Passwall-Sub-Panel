@@ -62,7 +62,7 @@ export function RulesDialog({ user, onClose }: { user: User; onClose: () => void
           : <Textarea rows={12} className="font-mono text-[0.8125rem]" aria-label={t('users.rules.title', { upn: user.upn })} value={text}
               onChange={e => setText(e.target.value)} placeholder={t('users.rules.placeholder')} />}
         <DialogFooter>
-          <Button variant="ghost" disabled={loading || saving || !dirty} onClick={() => setText(saved)}>{t('users.rules.reset')}</Button>
+          <Button variant="outline" disabled={loading || saving || !dirty} onClick={() => setText(saved)}>{t('users.rules.reset')}</Button>
           <Button variant="outline" disabled={saving} onClick={() => void close()}>{t('common:actions.cancel')}</Button>
           <AsyncButton pending={saving} disabled={loading || !dirty} onClick={save}>{t('users.rules.save')}</AsyncButton>
         </DialogFooter>

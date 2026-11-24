@@ -83,7 +83,7 @@ export function TwoFactorStep(p: TwoFactorStepProps) {
             {t('twofa_submit')}
           </AsyncButton>
           {p.mode === 'email' && (
-            <Button type="button" variant="ghost" size="sm" className="w-full" disabled={p.busy || p.emailCd > 0} onClick={p.onSendEmail}>
+            <Button type="button" variant="outline" size="sm" className="w-full" disabled={p.busy || p.emailCd > 0} onClick={p.onSendEmail}>
               <IconMail />
               {p.emailCd > 0 ? emailWait : t('twofa_email_resend', { defaultValue: '重新发送验证码' })}
             </Button>
@@ -110,13 +110,13 @@ export function TwoFactorStep(p: TwoFactorStepProps) {
             </div>
           </div>
         ) : (
-          <Button type="button" variant="ghost" size="sm" className="w-full" disabled={p.busy} onClick={p.onShowPicker}>
+          <Button type="button" variant="outline" size="sm" className="w-full" disabled={p.busy} onClick={p.onShowPicker}>
             {t('twofa_use_other', { defaultValue: '使用其他方式验证' })}
           </Button>
         )
       )}
 
-      <Button type="button" variant="ghost" size="sm" className="w-full" disabled={p.busy} onClick={p.onBack}>
+      <Button type="button" variant="outline" size="sm" className="w-full" disabled={p.busy} onClick={p.onBack}>
         {t('twofa_back')}
       </Button>
     </div>

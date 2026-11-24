@@ -162,7 +162,7 @@ function HitsSection({ userId, days, items, available, onViewAll, onNodes }: {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">{t('admin:access_control.drawer.hits_title', { days })}</h3>
         {available !== false && items.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={onViewAll}>
+          <Button variant="outline" size="sm" onClick={onViewAll}>
             {t('admin:access_control.drawer.hits_view_all')}<IconChevronRight />
           </Button>
         )}

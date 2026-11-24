@@ -115,7 +115,7 @@ export default function SharedPortsDialog({ server, onClose }: { server: Server;
         title={title}
         status={view.kind === 'list' ? <HelpTip text={t('admin:servers.fronts.help.what')} /> : undefined}
         actions={view.kind === 'edit'
-          ? <Button variant="ghost" size="sm" onClick={() => guardClose(backToList)}><IconArrowLeft />{t('admin:servers.fronts.back')}</Button>
+          ? <Button variant="outline" size="sm" onClick={() => guardClose(backToList)}><IconArrowLeft />{t('admin:servers.fronts.back')}</Button>
           : tab === 'fronts' ? add : undefined}
         className="data-[side=right]:sm:w-[min(60rem,96vw)] data-[side=right]:sm:max-w-[min(60rem,96vw)]"
       >

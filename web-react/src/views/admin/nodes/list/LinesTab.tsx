@@ -259,7 +259,7 @@ export default function LinesTab() {
         <SegmentedControl aria-label={t('nodes.view.label')} size="sm" value={url.view} onChange={v => setUrl({ view: v })}
           options={[{ value: 'order', label: t('nodes.view.order') }, { value: 'node', label: t('nodes.view.node') }, { value: 'graph', label: t('nodes.view.graph') }]} />
         {moves.undoable && <Button variant="outline" size="sm" onClick={moves.undo} data-testid="undo-move">{t('nodes.toast.undo')}</Button>}
-        {admin && url.view === 'order' && filtered && <Button variant="ghost" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
+        {admin && url.view === 'order' && filtered && <Button variant="outline" size="sm" onClick={clearAll}>{t('nodes.order.clear_to_drag')}</Button>}
       </FilterBar>
       <div className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
         <span>{t('nodes.list.scope_note')}</span>

@@ -26,9 +26,9 @@ export function GithubMaterials({ inst }: { inst: NativeInstallation }) {
       <ReadonlyValue label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} copy={false} />
       <ReadonlySecret label={t('admin:servers.native.credential')} value={provisioning.credential} />
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.endpoint)}><IconCopy />{t('admin:servers.native.copy_endpoint')}</Button>
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.agent_id)}><IconCopy />{t('admin:servers.native.copy_agent_id')}</Button>
-        <Button variant="ghost" onClick={() => void copyToClipboard(provisioning.credential)}><IconCopy />{t('admin:servers.native.copy_credential')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.endpoint)}><IconCopy />{t('admin:servers.native.copy_endpoint')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.agent_id)}><IconCopy />{t('admin:servers.native.copy_agent_id')}</Button>
+        <Button variant="outline" onClick={() => void copyToClipboard(provisioning.credential)}><IconCopy />{t('admin:servers.native.copy_credential')}</Button>
       </div>
       <p className="text-sm text-muted-foreground">{t('admin:servers.native.github_connect_hint')}</p>
     </div>

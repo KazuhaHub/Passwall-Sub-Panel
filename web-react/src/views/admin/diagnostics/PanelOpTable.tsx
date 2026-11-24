@@ -100,7 +100,7 @@ export default function PanelOpTable({ rows, fmt }: { rows: PanelOpRow[]; fmt: D
         </Table>
       ))}
       {rows.length > FIRST_ROWS && (
-        <Button variant="ghost" size="sm" className="mt-1" onClick={() => setAll(a => !a)}>
+        <Button variant="outline" size="sm" className="mt-1" onClick={() => setAll(a => !a)}>
           {all
             ? t('admin:diagnostics.cards.panel_api.show_less')
             : t('admin:diagnostics.cards.panel_api.show_all', { count: fmt.count(rows.length) })}

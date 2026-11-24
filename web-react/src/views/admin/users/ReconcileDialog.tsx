@@ -46,7 +46,7 @@ export function ReconcileDialog({ report, onClose }: { report: ReconcileReport; 
           </div>
         )}
         <DialogFooter>
-          {issues.length > 0 && <Button variant="ghost" onClick={() => setDetails(v => !v)}>{t(details ? 'users.reconcile.hide_details' : 'users.reconcile.show_details')}</Button>}
+          {issues.length > 0 && <Button variant="outline" onClick={() => setDetails(v => !v)}>{t(details ? 'users.reconcile.hide_details' : 'users.reconcile.show_details')}</Button>}
           <Button onClick={onClose}>{t('common:actions.ok')}</Button>
         </DialogFooter>
       </DialogContent>

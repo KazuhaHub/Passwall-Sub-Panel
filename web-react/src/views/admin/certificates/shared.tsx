@@ -65,7 +65,7 @@ export function FormSheet({ title, description, dirty, pending, submitLabel, onS
           </SheetHeader>
           <div ref={body} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
           <SheetFooter className="mt-0 flex-row justify-end border-t">
-            <Button type="button" variant="ghost" disabled={pending} onClick={() => guard(onClose)}>{c('actions.cancel')}</Button>
+            <Button type="button" variant="outline" disabled={pending} onClick={() => guard(onClose)}>{c('actions.cancel')}</Button>
             <AsyncButton type="submit" pending={pending}>{submitLabel}</AsyncButton>
           </SheetFooter>
         </form>

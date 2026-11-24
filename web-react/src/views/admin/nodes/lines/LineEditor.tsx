@@ -247,7 +247,7 @@ function LineForm({ nodeId, lineId, node, servers, tagOptions, onDirtyChange, on
         ) : (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">{t('nodes.line.type_summary', { type: t(`nodes.type.${cur ?? 'external'}`) })}</span>
-            {isNew && <Button type="button" variant="ghost" size="xs" onClick={() => setChoosing(true)}>{t('nodes.line.change_type')}</Button>}
+            {isNew && <Button type="button" variant="outline" size="xs" onClick={() => setChoosing(true)}>{t('nodes.line.change_type')}</Button>}
             {!isNew && cur === 'cdn' && <span className="text-xs text-muted-foreground">{t('nodes.cdn.entry_hint')}</span>}
           </div>
         )}

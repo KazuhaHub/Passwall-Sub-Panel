@@ -255,7 +255,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed p-3">
           <p className="text-sm text-muted-foreground">{t(`${P}rail.empty_step`)}</p>
-          <Button size="sm" variant="ghost" onClick={() => setEditing({ policy: null, initial: blank(k) })}>{t(`${P}rail.add_${k}`)}</Button>
+          <Button size="sm" variant="outline" onClick={() => setEditing({ policy: null, initial: blank(k) })}>{t(`${P}rail.add_${k}`)}</Button>
         </div>
       )
       : (

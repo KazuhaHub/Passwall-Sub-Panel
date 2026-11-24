@@ -113,7 +113,7 @@ export function RealityScanner({ open, panelId, sourceName, onClose, onUse }: {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{row.latencyMs > 0 ? `${row.latencyMs} ms` : '—'}</TableCell>
                   <TableCell className="text-right">
-                    <Button type="button" size="sm" variant="ghost" onClick={() => { onUse(row); onClose() }}>{t('nodes.create_dialog.reality_scan_use')}</Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => { onUse(row); onClose() }}>{t('nodes.create_dialog.reality_scan_use')}</Button>
                   </TableCell>
                 </TableRow>
               ))}
