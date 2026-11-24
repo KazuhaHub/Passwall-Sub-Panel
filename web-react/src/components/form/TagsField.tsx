@@ -136,7 +136,7 @@ export function TagsField({
     <div
       data-slot="tags-field"
       className={cn(
-        'relative flex min-h-(--control-h) w-full min-w-0 flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent px-1.5 py-1 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30',
+        'relative flex min-h-(--control-h) w-full min-w-0 flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent px-1.5 py-1 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-foreground/[0.04]',
         'data-[invalid=true]:border-destructive data-[invalid=true]:ring-3 data-[invalid=true]:ring-destructive/20',
         disabled && 'pointer-events-none opacity-50',
         className,

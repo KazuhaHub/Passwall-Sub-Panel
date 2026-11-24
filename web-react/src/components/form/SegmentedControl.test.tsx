@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import '@/test/initI18n'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -46,8 +48,21 @@ describe('SegmentedControl', () => {
 })
 
 describe('SegmentedControl contrast', () => {
-  it('draws unselected options in foreground at 70%, not the muted grey that is 4.34:1 on the track', () => {
+  it('draws unselected options in the muted token and the selected one raised on its own surface', () => {
     render(<SegmentedControl aria-label="Mode" value="a" onChange={() => {}} options={options} />)
-    expect(screen.getByRole('radio', { name: 'Gamma' }).className).toContain('text-foreground/70')
+    expect(screen.getByRole('radio', { name: 'Gamma' }).className).toContain('text-muted-foreground')
+    const selected = screen.getByRole('radio', { checked: true })
+    expect(selected.className).toMatch(/bg-segment-active/)
+    expect(selected.className).toMatch(/font-semibold/)
+    expect(selected.className).toMatch(/ring-segment-border/)
+  })
+
+  // The muted grey is what an unselected option is drawn in, on the track: it must stay readable (4.5:1) in both themes.
+  it.each([['light', /(?:^|\n):root\s*\{([^}]*--background[^}]*)\}/], ['dark', /(?:^|\n)\.dark\s*\{([^}]*)\}/]] as const)('muted text on the %s track is at least 4.5:1', (_, re) => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
+    const decl = (name: string) => new RegExp(`${name}:\\s*oklch\\(([\\d.]+)`).exec(re.exec(css)![1])![1]
+    const y = (L: number) => { const v = L ** 3; return v } // a grey: linear luminance is L cubed
+    const [a, b] = [y(Number(decl('--muted-foreground'))), y(Number(decl('--segment-track')))]
+    expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
   })
 })
