@@ -10,12 +10,6 @@ export interface TargetChoices {
 
 const BUILTIN = new Set<string>(BUILTIN_TARGETS)
 
-/**
- * The outbounds a rule can point at, from what the rule set itself says. Proxy groups have no list of their own: a
- * name that appears as a target and is not a built-in outbound or a Rematch outbound IS a group (the backend finds
- * them the same way), so a typo here would quietly make a new one, which is why the picker lists the existing ones
- * and makes a new group a deliberate step.
- */
 /*
  * What is NOT offered, and why (checked against internal/service/render, 2026-11):
  * - Subscription lines. The backend does resolve a line name used as a rule target (line_names.go lineNameCatalog.resolve), but
@@ -26,6 +20,12 @@ const BUILTIN = new Set<string>(BUILTIN_TARGETS)
  *   Proxy groups tab, which stores a node and line identity; a rule then points at that group. A line name a rule already has stays what the picker shows.
  * - Sub-rules. A sub-rule name is the third field of a `SUB-RULE` line, which has no outbound at all (targetIndex returns -1 for
  *   it); named as the target of an ordinary rule it would simply become a proxy group with that name.
+ */
+/**
+ * The outbounds a rule can point at, from what the rule set itself says. Proxy groups have no list of their own: a
+ * name that appears as a target and is not a built-in outbound or a Rematch outbound IS a group (the backend finds
+ * them the same way), so a typo here would quietly make a new one, which is why the picker lists the existing ones
+ * and makes a new group a deliberate step.
  */
 export function targetChoices(blocks: readonly Block[], order: readonly string[], rematch: readonly string[]): TargetChoices {
   const rematchSet = new Set(rematch)
