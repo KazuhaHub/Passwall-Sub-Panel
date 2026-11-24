@@ -52,7 +52,9 @@
       "source_guard_listener_transport": "This change would make the listener of {{node}} read connection sources from X-Forwarded-For (sing-box does this on every transport except plain TCP), so connections could no longer be told apart by where they come from. These lines cost something other than the direct line and rely on that: {{lines}}. Give them the direct factor or remove them first.",
       "source_guard_listener_trust": "This change would make the listener of {{node}} trust X-Forwarded-For or a PROXY header, so connections could no longer be told apart by where they come from. These lines cost something other than the direct line and rely on that: {{lines}}. Give them the direct factor or remove them first.",
       "link_reality_engines": "A sing-box entry cannot use a REALITY tunnel to an Xray exit. Use Shadowsocks 2022.",
-      "engine_reality_links": "This change would leave REALITY tunnels from a sing-box entry to an Xray exit, which cannot connect: {{links}}. Change those tunnels to Shadowsocks 2022 first."
+      "engine_reality_links": "This change would leave REALITY tunnels from a sing-box entry to an Xray exit, which cannot connect: {{links}}. Change those tunnels to Shadowsocks 2022 first.",
+      "cdn_client_tls_trojan": "CDN line \"{{line}}\" of {{node}} has client TLS off, but Trojan always uses TLS, so clients cannot connect to the CDN without it. Turn client TLS on.",
+      "cdn_client_tls_grpc": "CDN line \"{{line}}\" of {{node}} has client TLS off, but gRPC through a CDN needs TLS from the client (Cloudflare serves gRPC over HTTPS only). Turn client TLS on."
     }
   },
   "auth": {

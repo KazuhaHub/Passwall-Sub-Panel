@@ -65,21 +65,22 @@ func portList(ports []int) string {
 // CDN issue codes. Each is shown with an explanation in the editor; Params
 // carry the values the sentence names.
 const (
-	CDNIssueCertNotCovering   = "cert_not_covering"   // an inline certificate on the landing does not cover the domain
-	CDNIssueCertUnverifiable  = "cert_unverifiable"   // the landing's certificate cannot be read here (a file, or none)
-	CDNIssueServerName        = "server_name_differs" // the landing's TLS serverName is not the domain
-	CDNIssueOriginPort        = "origin_port"         // the landing's port is not one Cloudflare proxies
-	CDNIssueLinePort          = "line_port"           // the line's port is not one Cloudflare proxies
-	CDNIssuePortDiffers       = "port_differs"        // the line's port is not the landing's port
-	CDNIssueSNIDiffers        = "sni_differs"         // the SNI is not the domain
-	CDNIssueHostDiffers       = "host_differs"        // the Host is not the domain
-	CDNIssueInsecureIgnored   = "insecure_ignored"    // the landing allows insecure TLS; the line never does
-	CDNIssueLandingNotCapable = "landing_not_capable" // the landing cannot go through a CDN (also a save refusal)
-	CDNIssueOriginPlaintext   = "origin_plaintext"    // the CDN reaches the landing without TLS
-	CDNIssueClientPlaintext   = "client_plaintext"    // clients reach the CDN without TLS
-	CDNIssueOriginHost        = "origin_host"         // the landing expects another Host than the line sends
-	CDNIssueCloudflareGRPC    = "cloudflare_grpc"     // Cloudflare gRPC requires port 443 with TLS
-	CDNIssueGRPCAuthority     = "grpc_authority"      // some clients use SNI as the authority
+	CDNIssueCertNotCovering   = "cert_not_covering"       // an inline certificate on the landing does not cover the domain
+	CDNIssueCertUnverifiable  = "cert_unverifiable"       // the landing's certificate cannot be read here (a file, or none)
+	CDNIssueServerName        = "server_name_differs"     // the landing's TLS serverName is not the domain
+	CDNIssueOriginPort        = "origin_port"             // the landing's port is not one Cloudflare proxies
+	CDNIssueLinePort          = "line_port"               // the line's port is not one Cloudflare proxies
+	CDNIssuePortDiffers       = "port_differs"            // the line's port is not the landing's port
+	CDNIssueSNIDiffers        = "sni_differs"             // the SNI is not the domain
+	CDNIssueHostDiffers       = "host_differs"            // the Host is not the domain
+	CDNIssueInsecureIgnored   = "insecure_ignored"        // the landing allows insecure TLS; the line never does
+	CDNIssueLandingNotCapable = "landing_not_capable"     // the landing cannot go through a CDN (also a save refusal)
+	CDNIssueOriginPlaintext   = "origin_plaintext"        // the CDN reaches the landing without TLS
+	CDNIssueClientPlaintext   = "client_plaintext"        // clients reach the CDN without TLS
+	CDNIssueOriginHost        = "origin_host"             // the landing expects another Host than the line sends
+	CDNIssueCloudflareGRPC    = "cloudflare_grpc"         // Cloudflare gRPC requires port 443 with TLS
+	CDNIssueGRPCAuthority     = "grpc_authority"          // some clients use SNI as the authority
+	CDNIssueHTTPUpgradeHeader = "httpupgrade_host_header" // Xray refuses an HTTPUpgrade Host set inside headers
 )
 
 // CDNIssue is a warning about a CDN line: it does not block saving.
@@ -128,6 +129,17 @@ func parseCDNStream(n *Node) (cdnStream, bool) {
 	return s, true
 }
 
+// headerHostFold returns the Host header value, matching the key
+// case-insensitively as Xray does.
+func headerHostFold(h map[string]string) string {
+	for k, v := range h {
+		if strings.EqualFold(k, "host") && strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // originHost is the HTTP Host the landing expects.
 func (s cdnStream) originHost() string {
 	first := func(vals ...string) string {
@@ -141,11 +153,13 @@ func (s cdnStream) originHost() string {
 	switch s.Network {
 	case "ws":
 		if s.WSSettings != nil {
-			return first(s.WSSettings.Headers["Host"], s.WSSettings.Host)
+			// Xray reads wsSettings.host and falls back to the deprecated
+			// Host header only when it is empty.
+			return first(s.WSSettings.Host, headerHostFold(s.WSSettings.Headers))
 		}
 	case "httpupgrade":
 		if s.HTTPUpgradeSettings != nil {
-			return first(s.HTTPUpgradeSettings.Host, s.HTTPUpgradeSettings.Headers["Host"])
+			return first(s.HTTPUpgradeSettings.Host, headerHostFold(s.HTTPUpgradeSettings.Headers))
 		}
 	}
 	return ""
@@ -412,6 +426,12 @@ func SettleCDNLines(previous, lines []RelayLine) error {
 	return nil
 }
 
+// Codes of the refusals ValidateCDNRelays words in the reader's language.
+const (
+	CodeCDNClientTLSTrojan = "cdn_client_tls_trojan"
+	CodeCDNClientTLSGRPC   = "cdn_client_tls_grpc"
+)
+
 // ValidateCDNRelays refuses CDN lines on a landing that cannot be a CDN origin,
 // naming the node and the lines. It is checked on every save of the lines and
 // of the landing's own transport, so a CDN line never sits on a node it cannot
@@ -429,12 +449,22 @@ func ValidateCDNRelays(landing *Node, lines []RelayLine) error {
 	if problem := CDNLandingProblem(landing); problem != "" {
 		return fmt.Errorf("%w: CDN line %s: %s", ErrValidation, strings.Join(names, ", "), problem)
 	}
-	if Protocol(strings.ToLower(landing.DesiredProtocol)) == ProtoTrojan {
-		for i, line := range lines {
-			if line.CDN() && line.ClientTLS != nil && !*line.ClientTLS {
-				return fmt.Errorf("%w: CDN line %s of node %q: Trojan always uses TLS, so clients cannot connect to the CDN without it", ErrValidation,
-					firstNonEmptyText(line.Name, line.Domain, strconv.Itoa(i+1)), landing.DisplayName)
-			}
+	trojan := Protocol(strings.ToLower(landing.DesiredProtocol)) == ProtoTrojan
+	stream, _ := parseCDNStream(landing)
+	grpc := stream.Network == "grpc"
+	for i, line := range lines {
+		if !line.CDN() || line.ClientTLS == nil || *line.ClientTLS {
+			continue
+		}
+		name := firstNonEmptyText(line.Name, line.Domain, strconv.Itoa(i+1))
+		params := map[string]string{"line": name, "node": landing.DisplayName}
+		switch {
+		case trojan:
+			return &CodedValidationError{Code: CodeCDNClientTLSTrojan, Params: params,
+				Msg: fmt.Sprintf("CDN line %s of node %q: Trojan always uses TLS, so clients cannot connect to the CDN without it", name, landing.DisplayName)}
+		case grpc:
+			return &CodedValidationError{Code: CodeCDNClientTLSGRPC, Params: params,
+				Msg: fmt.Sprintf("CDN line %s of node %q: gRPC through a CDN needs TLS from the client (Cloudflare serves gRPC over HTTPS only)", name, landing.DisplayName)}
 		}
 	}
 	return nil
@@ -528,6 +558,11 @@ func CDNWarnings(landing *Node, line RelayLine) []CDNIssue {
 		if clientTLS && !strings.EqualFold(line.Host, line.SNI) {
 			add(CDNIssueGRPCAuthority, true, "host", line.Host, "sni", line.SNI)
 		}
+	}
+	if s.Network == "httpupgrade" && s.HTTPUpgradeSettings != nil && headerHostFold(s.HTTPUpgradeSettings.Headers) != "" {
+		// Xray does not start an HTTPUpgrade inbound with a Host inside headers;
+		// the host field is the only place for it.
+		add(CDNIssueHTTPUpgradeHeader, true)
 	}
 	if oh := s.originHost(); oh != "" && !strings.EqualFold(oh, line.Host) {
 		add(CDNIssueOriginHost, true, "origin_host", oh, "host", line.Host)

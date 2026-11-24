@@ -286,9 +286,30 @@ func TestCDNLine_ClientTLSIsIndependentOfTheOrigin(t *testing.T) {
 		if sb["tls"] != nil || sb["server_port"] != 8080 {
 			t.Errorf("%s sing-box client TLS off: %v", proto, sb)
 		}
-		raw, _ := buildURI("x", n, u, cdnInbound(proto, cdnWS), "", "", off)
-		if strings.Contains(raw, "sni") || strings.Contains(raw, "tls") && proto == "vless" && strings.Contains(raw, "security=tls") {
-			t.Errorf("%s uri client TLS off: %s", proto, raw)
+		raw, err := buildURI("x", n, u, cdnInbound(proto, cdnWS), "", "", off)
+		if err != nil || raw == "" {
+			t.Fatalf("%s uri client TLS off: %q, %v", proto, raw, err)
+		}
+		if proto == "vmess" {
+			body, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(raw, "vmess://"))
+			if err != nil {
+				t.Fatalf("vmess uri client TLS off: %v", err)
+			}
+			var cfg map[string]string
+			if err := json.Unmarshal(body, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if cfg["tls"] != "" || cfg["sni"] != "" {
+				t.Errorf("vmess uri client TLS off: %v", cfg)
+			}
+		} else {
+			parsed, err := url.Parse(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if q := parsed.Query(); q.Get("security") == "tls" || q.Get("sni") != "" {
+				t.Errorf("%s uri client TLS off: %s", proto, raw)
+			}
 		}
 	}
 	// The Host header is read from Xray's wsSettings.host and replaced by the line's.
@@ -392,5 +413,41 @@ func TestCDNLine_UsesActualInboundForCompatibility(t *testing.T) {
 	}
 	if got, err := buildURI("L CF", n, u, inb, "", "", line); got != "" || err != nil {
 		t.Errorf("URI rendered the incompatible live inbound: %v, %v", got, err)
+	}
+}
+
+// Xray reads wsSettings.host first and the deprecated Host header only when it
+// is empty; the key is matched case-insensitively.
+func TestWSHostPrecedenceAndHeaderCase(t *testing.T) {
+	n := &domain.Node{ID: 1, DisplayName: "L", ServerAddress: "origin.example.com"}
+	u := &domain.User{UUID: "uuid-1"}
+	mk := func(host, headers string) string {
+		return `{"network":"ws","security":"tls","tlsSettings":{"serverName":"origin.example.com"},"wsSettings":{"path":"/ws","host":"` + host + `","headers":` + headers + `}}`
+	}
+	for _, tc := range []struct{ name, stream, want string }{
+		{"host wins", mk("a.com", `{"Host":"b.com"}`), "a.com"},
+		{"lowercase header fallback", mk("", `{"host":"b.com"}`), "b.com"},
+		{"host wins over lowercase header", mk("a.com", `{"host":"b.com"}`), "a.com"},
+	} {
+		in := cdnInbound("vless", tc.stream)
+		got, _ := emitProxy("x", n, u, in, "", "", nil, false)
+		h := got["ws-opts"].(map[string]any)["headers"].(map[string]string)
+		if h["Host"] != tc.want || len(h) != 1 {
+			t.Errorf("%s: mihomo headers %v", tc.name, h)
+		}
+		sb, _ := emitSingBoxOutbound("x", n, u, in, "", "", nil)
+		if h := sb["transport"].(map[string]any)["headers"].(map[string]string); h["Host"] != tc.want || len(h) != 1 {
+			t.Errorf("%s: sing-box headers %v", tc.name, h)
+		}
+		raw, _ := buildURI("x", n, u, in, "", "", nil)
+		if parsed, err := url.Parse(raw); err != nil || parsed.Query().Get("host") != tc.want {
+			t.Errorf("%s: uri %s", tc.name, raw)
+		}
+		// A line's Host override replaces every case variant with one Host.
+		line := cdnLine("104.16.1.1")
+		got, _ = emitProxy("x", n, u, in, "", "", line, false)
+		if h := got["ws-opts"].(map[string]any)["headers"].(map[string]string); h["Host"] != "cdn.example.com" || len(h) != 1 {
+			t.Errorf("%s: line override headers %v", tc.name, h)
+		}
 	}
 }

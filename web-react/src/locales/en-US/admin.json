@@ -1203,6 +1203,7 @@
       "tunnel_listener_orphan": "Tunnel listener without a line",
       "roster_identity_capacity": "Large client roster",
       "cdn_landing_unfit": "CDN line withheld: its node no longer suits a CDN",
+      "cdn_line_client_tls": "CDN line withheld: client TLS is off",
       "source_guard_withheld": "Line withheld: its source cannot be checked",
       "source_guard_refused": "Connection refused: unregistered source address",
       "tunnel_factor_stale": "Tunnel listener's traffic factor out of date",
@@ -2393,6 +2394,7 @@
         "cloudflare_grpc": "Cloudflare gRPC requires an HTTPS endpoint on port 443 with HTTP/2. Check client TLS and the edge and origin ports.",
         "grpc_authority": "mihomo and sing-box use SNI {{sni}} for gRPC authority. URI clients that support a separate authority use {{host}}.",
         "client_plaintext": "Clients connect to the CDN over plaintext HTTP. The HTTP request and any unencrypted payload are visible on that hop.",
+        "httpupgrade_host_header": "This node's HTTPUpgrade settings carry a Host inside headers, which Xray refuses to start with. Set the host field instead.",
         "origin_host": "This node expects the Host {{origin_host}} but the line sends {{host}}, so the node would not match the request.",
         "insecure_ignored": "This node allows insecure TLS. A CDN line never does: the CDN presents its own certificate, which clients verify."
       },

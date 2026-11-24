@@ -27,3 +27,18 @@ func TestCDNLandingUnfitIssue(t *testing.T) {
 		t.Fatalf("issues = %+v", got)
 	}
 }
+
+// A line withheld for its client TLS setting on a gRPC or Trojan landing raises
+// cdn_line_client_tls with the reason code.
+func TestCDNLineClientTLSIssue(t *testing.T) {
+	off := false
+	line := []domain.RelayLine{{ID: "c", Name: "CF", Mode: domain.RelayModeCDN, Domain: "cdn.example.com", ClientTLS: &off, Enabled: true}}
+	snapshot := &ports.NativeDesiredSnapshot{Nodes: []*domain.Node{
+		{ID: 1, DisplayName: "Tokyo", DesiredProtocol: "vless", StreamSettings: `{"network":"grpc","security":"tls","tlsSettings":{}}`, Relays: line},
+		{ID: 2, DisplayName: "Osaka", DesiredProtocol: "vless", StreamSettings: `{"network":"ws","security":"tls","tlsSettings":{}}`, Relays: line},
+	}}
+	got := cdnUnfitIssues(snapshot)
+	if len(got) != 1 || got[0].Code != IssueCDNLineClientTLS || !strings.Contains(got[0].Detail, domain.CodeCDNClientTLSGRPC) || !strings.Contains(got[0].Detail, "Tokyo") {
+		t.Fatalf("issues = %+v", got)
+	}
+}
