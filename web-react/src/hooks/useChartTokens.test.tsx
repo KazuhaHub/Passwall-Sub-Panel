@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chartBaseOption, readChartTokens, useChartTokens } from './useChartTokens'
+import { readChartTokens, useChartTokens } from './useChartTokens'
 
 const root = document.documentElement
 
@@ -61,16 +61,6 @@ describe('useChartTokens', () => {
     const first = result.current
     rerender()
     expect(result.current).toBe(first)
-  })
-})
-
-describe('chartBaseOption', () => {
-  it('turns tokens into the axis, tooltip and text options every chart repeats', () => {
-    root.style.setProperty('--popover', '#101010')
-    const o = chartBaseOption(readChartTokens(root))
-    expect(o.tooltip.backgroundColor).toBe('#101010')
-    expect(o.color).toHaveLength(8)
-    expect(o.backgroundColor).toBe('transparent')
   })
 })
 

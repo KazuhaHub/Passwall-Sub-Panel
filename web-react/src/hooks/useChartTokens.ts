@@ -113,25 +113,3 @@ export function useChartTokens(): ChartTokens {
   }, [])
   return tokens
 }
-
-/** The option fragments nearly every chart repeats: palette, text, axes, tooltip. */
-export function chartBaseOption(tk: ChartTokens) {
-  const axis = {
-    axisLabel: { color: tk.mutedText },
-    axisLine: { lineStyle: { color: tk.axisLine } },
-    splitLine: { lineStyle: { color: tk.grid, opacity: 0.6 } },
-  }
-  return {
-    backgroundColor: 'transparent',
-    color: tk.series,
-    textStyle: { color: tk.text },
-    legend: { textStyle: { color: tk.mutedText } },
-    tooltip: {
-      backgroundColor: tk.tooltipBg,
-      borderColor: tk.tooltipBorder,
-      textStyle: { color: tk.tooltipText },
-    },
-    xAxis: axis,
-    yAxis: axis,
-  }
-}
