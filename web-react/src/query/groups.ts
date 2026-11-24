@@ -1,5 +1,5 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
-import { listAllGroups, listGroups, type GroupListParams } from '@/api/groups'
+import { getGroup, listAllGroups, listGroups, type GroupListParams } from '@/api/groups'
 import type { Group, ListResponse } from '@/api/types'
 import { groupKeys } from './keys'
 import { freshness, policies } from './policies'
@@ -41,4 +41,17 @@ export function allGroupsQuery(scope: QueryScope) {
 
 export function useAllGroups(scope: QueryScope) {
   return useQuery(allGroupsQuery(scope))
+}
+
+/**
+ * One group, by id, for its page. Silent: the page says what a failure means in its own frame. Disabled for an id
+ * that is not a positive integer, so an unparsed address never asks for /admin/groups/0.
+ */
+export function groupDetailQuery(scope: QueryScope, id: number) {
+  return queryOptions({
+    queryKey: groupKeys.detail(scope, id),
+    queryFn: ({ signal }): Promise<Group> => getGroup(id, { signal, silent: true }),
+    enabled: id > 0,
+    ...freshness(policies.groupDetail),
+  })
 }

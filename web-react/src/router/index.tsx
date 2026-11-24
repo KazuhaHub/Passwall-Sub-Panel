@@ -28,6 +28,8 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
+const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRoute'))
+const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
 const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
 const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
 const NodesPage = lazy(viewLoaders['/admin/nodes'])
@@ -116,6 +118,9 @@ export const router = createBrowserRouter([
           { path: 'servers', element: <ServersView /> },
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
+          // A group is a page of its own; `?edit=<id>` on the list (the old side sheet's address) is sent on to these.
+          { path: 'groups/new', element: <GroupCreatePage /> },
+          { path: 'groups/:id', element: <GroupDetailRoute /> },
           { path: 'users', element: <UsersView /> },
           // A user is a page of its own; `?user=<id>` on the list (the old side sheet's address) is sent on to these.
           { path: 'users/new', element: <UserCreatePage /> },

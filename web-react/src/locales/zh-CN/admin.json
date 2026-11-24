@@ -3596,6 +3596,13 @@
     "retry": "重试",
     "create": "新增分组",
     "edit_title": "编辑分组",
+    "detail": {
+      "not_found": "这个分组不存在或已被删除",
+      "forbidden": "你没有权限打开这个分组",
+      "staff_only": "只有管理员可以编辑分组",
+      "unsaved_in": "以下标签页有未保存的修改：{{tabs}}",
+      "tab_separator": "、"
+    },
     "search_placeholder": "搜索名称 / slug",
     "no_match": "没有匹配的分组",
     "batch_delete": "批量删除",
@@ -3697,7 +3704,8 @@
       "nodes": "节点和线路",
       "layout": "布局",
       "limits": "限额",
-      "overrides": "覆盖项"
+      "overrides": "覆盖项",
+      "unsaved": "有未保存的修改"
     },
     "members": {
       "count": "本组共有 {{count}} 名成员",

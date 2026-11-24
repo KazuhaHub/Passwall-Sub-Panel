@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
+// The group page: what a save sends, the leave guard, and what each tab does (these were the side sheet's tests).
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { useAuthStore } from '@/stores/auth'
 import { api, empty, everyKey, mountWithLinks, PATH, previewOf, reads, scopeReply, team, toast } from './testHarness'
 import GroupsPage from './GroupsPage'
 
-const open = async (entry = `${PATH}?edit=5`) => {
+// A group is a page now: `sheet` is kept as the name of "where the page's controls are" so the bodies below read as before.
+const open = async (entry = `${PATH}/5`) => {
   const mounted = mountWithLinks(<GroupsPage />, entry)
-  const sheet = await screen.findByRole('dialog')
-  return { ...mounted, sheet }
+  await screen.findByRole('heading', { level: 1 })
+  return { ...mounted, sheet: document.body }
 }
 const tab = (sheet: HTMLElement, name: string) => fireEvent.click(within(sheet).getByRole('tab', { name }))
 const save = (sheet: HTMLElement) => fireEvent.click(within(sheet).getByRole('button', { name: 'Save' }))
@@ -24,7 +27,7 @@ async function openSection(sheet: HTMLElement, name: RegExp) {
 describe('what a save sends', () => {
   it('PUTs the group the way the old dialog did (legacy conditions rewritten, an empty limit cleared), then the overrides that changed', async () => {
     reads()
-    const { sheet } = await open()
+    const { sheet, router } = await open()
     fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Team 2' } })
     tab(sheet, 'Overrides')
     await openSection(sheet, /Notification thresholds/)
@@ -43,7 +46,39 @@ describe('what a save sends', () => {
     const order = api.put.mock.calls.map(([url]) => String(url))
     expect(order.indexOf('/admin/groups/5')).toBeLessThan(order.indexOf('/admin/groups/5/scope-settings'))
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: 'Updated', severity: 'success' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // The page stays where it was (the sheet used to close): the person may carry on with another tab.
+    expect(router.state.location.pathname).toBe(`${PATH}/5`)
+  })
+
+  it('is clean after a save: the overrides are read again, so a second save sends nothing twice', async () => {
+    reads()
+    let held: Record<string, string> = { 'notify.expire_before_days': '7' }
+    const base = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, cfg?: unknown) => (url === '/admin/groups/5/scope-settings' ? { data: scopeReply(held) } : base(url, cfg)))
+    api.put.mockImplementation(async (url: string, body: { value?: string }) => {
+      if (url === '/admin/groups/5/scope-settings') held = { ...held, 'notify.expire_before_days': String(body.value) }
+      return { data: url === '/admin/groups/5' ? { group: { ...team, members: 0 } } : {} }
+    })
+    const { sheet } = await open()
+    tab(sheet, 'Overrides')
+    await openSection(sheet, /Notification thresholds/)
+    fireEvent.change(await within(sheet).findByRole('spinbutton', { name: /Expiry reminder/ }), { target: { value: '9' } })
+    save(sheet)
+    await waitFor(() => expect(putsTo('/admin/groups/5/scope-settings')).toHaveLength(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull())
+    expect(putsTo('/admin/groups/5/scope-settings')).toHaveLength(1)
+  })
+
+  it('keeps the member count the list read when the save answers without one (the 2FA question after a save still names them)', async () => {
+    reads()
+    const { sheet } = await open()
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Team 2' } })
+    save(sheet)
+    await waitFor(() => expect(putsTo('/admin/groups/5')).toHaveLength(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).toBeNull())
+    fireEvent.click(within(sheet).getByRole('switch', { name: /Require this group's members/ }))
+    save(sheet)
+    expect(within(await screen.findByRole('alertdialog')).getByText(/This group has 3 members/)).toBeTruthy()
   })
 
   it('tells an emptied limit (the group states nothing) from a typed 0 (unlimited)', async () => {
@@ -73,9 +108,9 @@ describe('what a save sends', () => {
   })
 
   it('creates with the blank defaults, leaving unstated limits out, and asks for a slug and a name first', async () => {
-    reads([])
-    api.post.mockImplementation(async (url: string) => url.endsWith('node-preview') ? previewOf() : { data: { id: 9 } })
-    const { sheet } = await open(`${PATH}?edit=new`)
+    reads([], { '/admin/groups/9': { ...empty, id: 9, slug: 'fresh', name: 'Fresh' }, '/admin/groups/9/scope-settings': scopeReply() })
+    api.post.mockImplementation(async (url: string) => url.endsWith('node-preview') ? previewOf() : { data: { ...empty, id: 9, slug: 'fresh', name: 'Fresh' } })
+    const { sheet, router } = await open(`${PATH}/new`)
     fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Fresh' } })
     save(sheet)
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: 'Slug is required', severity: 'warning' }))
@@ -88,9 +123,13 @@ describe('what a save sends', () => {
       slug: 'fresh', name: 'Fresh', tag_filter: { all: false, mode: 'all', tags: [] }, remark: '', require_2fa: false,
     })
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: 'Created', severity: 'success' }))
+    // The new group's own page opens, with no "discard your changes?" for the form that was just saved.
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/9`))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Fresh'))
   })
 
-  it('keeps the sheet open on the state the server holds when an override write fails', async () => {
+  it('stays on the state the server holds when an override write fails', async () => {
     reads()
     api.put.mockImplementation(async (url: string) => {
       if (url.endsWith('/scope-settings')) throw new Error('refused')
@@ -103,7 +142,7 @@ describe('what a save sends', () => {
     save(sheet)
     await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('failed to save'), severity: 'error' }))
     expect(toast).not.toHaveBeenCalledWith({ message: 'Updated', severity: 'success' })
-    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Team')
   })
 })
 
@@ -115,7 +154,7 @@ describe('requiring two-step verification', () => {
     save(sheet)
     const ask = await screen.findByRole('alertdialog')
     expect(within(ask).getByText(/This group has 3 members/)).toBeTruthy()
-    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' })))
     fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(api.put).not.toHaveBeenCalled()
@@ -128,7 +167,7 @@ describe('requiring two-step verification', () => {
   it('does not ask for a group with nobody in it', async () => {
     reads()
     api.put.mockResolvedValue({ data: { group: empty } })
-    const { sheet } = await open(`${PATH}?edit=6`)
+    const { sheet } = await open(`${PATH}/6`)
     fireEvent.click(within(sheet).getByRole('switch', { name: /Require this group's members/ }))
     save(sheet)
     await waitFor(() => expect(putsTo('/admin/groups/6')).toHaveLength(1))
@@ -137,32 +176,174 @@ describe('requiring two-step verification', () => {
 })
 
 describe('the unsaved-changes guard', () => {
-  it('asks before closing a draft, keeps it on Cancel, and drops it on Discard', async () => {
+  const back = () => screen.getByRole('link', { name: 'Groups' })
+
+  it('asks before the page is left with a draft, keeps it on Keep, and drops it on Discard', async () => {
     reads()
     const { sheet, router } = await open()
     fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Draft' } })
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Close details' }))
+    fireEvent.click(back())
     const ask = await screen.findByRole('alertdialog')
     fireEvent.click(within(ask).getByRole('button', { name: /Keep|Cancel/ }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-    expect(screen.getByRole('dialog')).toBeTruthy()
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Close details' }))
+    expect(router.state.location.pathname).toBe(`${PATH}/5`)
+    expect((within(sheet).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Draft')
+    fireEvent.click(back())
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Discard/ }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(router.state.location.search).not.toContain('edit=')
+    await waitFor(() => expect(router.state.location.pathname).toBe(PATH))
     expect(api.put).not.toHaveBeenCalled()
   })
 
-  it('closes a clean sheet without asking, and asks before a link takes a draft to another page', async () => {
+  it('names the tabs that hold the draft', async () => {
+    reads()
+    const { sheet } = await open()
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Draft' } })
+    tab(sheet, 'Limits')
+    const traffic = within(sheet).getByLabelText(/Traffic limit/)
+    fireEvent.change(traffic, { target: { value: '5' } })
+    fireEvent.blur(traffic)
+    fireEvent.click(back())
+    expect(within(await screen.findByRole('alertdialog')).getByText('Unsaved changes in: General, Limits')).toBeTruthy()
+  })
+
+  it('moves between tabs without asking and keeps the draft, and marks the tab that holds it', async () => {
+    reads()
+    const { sheet, router } = await open()
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Draft' } })
+    expect(within(within(sheet).getByRole('tab', { name: /General/ })).getByRole('img', { name: 'Unsaved changes' })).toBeTruthy()
+    tab(sheet, 'Layout')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(router.state.location.search).toBe('?tab=layout')
+    fireEvent.click(within(sheet).getByRole('tab', { name: /General/ }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect((within(sheet).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Draft')
+  })
+
+  it('leaves a clean page without asking', async () => {
+    reads()
+    const { router } = await open()
+    fireEvent.click(back())
+    await waitFor(() => expect(router.state.location.pathname).toBe(PATH))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('asks before a link takes a draft to another page, and before it is carried to another group', async () => {
     reads()
     const { sheet, router } = await open()
     tab(sheet, 'Layout')
+    tab(sheet, 'General')
     fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Draft' } })
+    tab(sheet, 'Layout')
     fireEvent.click(await within(sheet).findByRole('link', { name: 'Open the Nodes page' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Keep|Cancel/ }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(router.state.location.pathname).toBe(`${PATH}/5`)
+    void router.navigate(`${PATH}/6`)
     const ask = await screen.findByRole('alertdialog')
-    expect(router.state.location.pathname).toBe(PATH)
+    expect(router.state.location.pathname).toBe(`${PATH}/5`)
     fireEvent.click(within(ask).getByRole('button', { name: /Discard/ }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/nodes'))
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/6`))
+    // The other group starts from its own saved state, not from the draft.
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('Spare')
+    expect((within(document.body).getByLabelText(/^Name/) as HTMLInputElement).value).toBe('Spare')
+  })
+
+  it('asks before a new group with a typed name is abandoned', async () => {
+    reads([])
+    const { sheet } = await open(`${PATH}/new`)
+    fireEvent.change(within(sheet).getByLabelText(/^Slug/), { target: { value: 'x' } })
+    fireEvent.click(back())
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+  })
+})
+
+describe('a group that cannot be shown', () => {
+  const gone = (status: number) => Object.assign(new Error('x'), { response: { status } })
+
+  it.each(['abc', '0', '-2', '1.5'])('says there is no such group for the address /%s, without asking the server', async id => {
+    reads()
+    mountWithLinks(<GroupsPage />, `${PATH}/${id}`)
+    expect(await screen.findByText('This group no longer exists')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Groups' }).getAttribute('href')).toBe(PATH)
+    expect(api.get).not.toHaveBeenCalled()
+  })
+
+  it('says so for a group the server does not have, and when it is not ours to open, in the same frame', async () => {
+    reads([team, empty], { '/admin/groups/5': gone(404), '/admin/groups/6': gone(403) })
+    const { unmount } = mountWithLinks(<GroupsPage />, `${PATH}/5`)
+    expect(await screen.findByText('This group no longer exists')).toBeTruthy()
+    unmount()
+    mountWithLinks(<GroupsPage />, `${PATH}/6`)
+    expect(await screen.findByText('You cannot open this group')).toBeTruthy()
+  })
+
+  it('offers a retry when the read fails some other way', async () => {
+    reads([team, empty], { '/admin/groups/5': gone(500) })
+    mountWithLinks(<GroupsPage />, `${PATH}/5`)
+    expect(await screen.findByRole('button', { name: /Retry/ })).toBeTruthy()
+  })
+
+  it('keeps an operator out of the page and the create form (they only read the list), with no read of the group', async () => {
+    useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+    reads()
+    const { unmount } = mountWithLinks(<GroupsPage />, `${PATH}/5`)
+    expect(await screen.findByText('Only administrators can edit groups')).toBeTruthy()
+    unmount()
+    mountWithLinks(<GroupsPage />, `${PATH}/new`)
+    expect(await screen.findByText('Only administrators can edit groups')).toBeTruthy()
+    expect(api.get).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
+describe('the header', () => {
+  it('names the group, its slug, its members and its saved state, and offers View members and Delete in More', async () => {
+    reads([{ ...team, require_2fa: true, dest_state: 'report' }, empty])
+    await open()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Team')
+    expect(screen.getByText('team')).toBeTruthy()
+    expect(screen.getAllByText('Members in this group: 3').length).toBeGreaterThan(0)
+    expect(screen.getByText('Two-step verification: Required')).toBeTruthy()
+    expect(screen.getByText('Allowlist · report only')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /More/ }))
+    expect(await screen.findByRole('menuitem', { name: 'View members' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeTruthy()
+  })
+
+  it('titles the create page "New group" and has no More menu', async () => {
+    reads([])
+    await open(`${PATH}/new`)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('New group')
+    expect(screen.queryByRole('button', { name: /More/ })).toBeNull()
+  })
+
+  it('deletes an empty group from its page after the usual question, and leaves for the list without asking about a draft', async () => {
+    reads()
+    api.delete.mockResolvedValue({})
+    const { sheet, router } = await open(`${PATH}/6`)
+    fireEvent.change(within(sheet).getByLabelText(/^Name/), { target: { value: 'Draft' } })
+    fireEvent.click(screen.getByRole('button', { name: /More/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(within(ask).getByText('Delete group Spare?')).toBeTruthy()
+    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
+    expect(api.delete).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/groups/6'))
+    await waitFor(() => expect(router.state.location.pathname).toBe(PATH))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('does not ask to delete a group that has members: it says how many and offers Users', async () => {
+    reads()
+    const { router } = await open()
+    fireEvent.click(screen.getByRole('button', { name: /More/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(within(ask).getByText(/3 users are in this group/)).toBeTruthy()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Go to Users' }))
+    expect(api.delete).not.toHaveBeenCalled()
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/users'))
   })
 })
 
@@ -202,14 +383,14 @@ describe('the nodes and lines tab', () => {
 
   it('previews a group being created against no saved group', async () => {
     reads([])
-    const { sheet } = await open(`${PATH}?edit=new`)
+    const { sheet } = await open(`${PATH}/new`)
     tab(sheet, 'Nodes and lines')
     await waitFor(() => expect(api.post.mock.calls.some(([url]) => url === '/admin/groups/node-preview')).toBe(true))
   })
 
   it('suggests the regions, tags and nodes that exist, and still takes one that does not', async () => {
     reads()
-    const { sheet } = await open(`${PATH}?edit=6`)
+    const { sheet } = await open(`${PATH}/6`)
     tab(sheet, 'Nodes and lines')
     fireEvent.click(await within(sheet).findByRole('switch', { name: 'Match all nodes' }))
     const region = await within(sheet).findByRole('combobox', { name: 'Region' })
@@ -276,7 +457,7 @@ describe('the overrides tab', () => {
 
   it('asks to save a new group first', async () => {
     reads([])
-    const { sheet } = await open(`${PATH}?edit=new`)
+    const { sheet } = await open(`${PATH}/new`)
     tab(sheet, 'Overrides')
     expect(within(sheet).getByText('Save the group first, then set per-group overrides here.')).toBeTruthy()
   })
