@@ -28,6 +28,8 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
+const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
+const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
 const NodesPage = lazy(viewLoaders['/admin/nodes'])
 const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
@@ -115,6 +117,9 @@ export const router = createBrowserRouter([
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
           { path: 'users', element: <UsersView /> },
+          // A user is a page of its own; `?user=<id>` on the list (the old side sheet's address) is sent on to these.
+          { path: 'users/new', element: <UserCreatePage /> },
+          { path: 'users/:id', element: <UserDetailRoute /> },
           { path: 'nodes', element: <NodesPage /> },
           // Admin only (D3); until N2 and N3 these shells offer the legacy editors.
           { path: 'nodes/new', element: <NodeCreateRoute /> },

@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router'
 import type { RiskLevels } from '@/api/riskCenter'
 import type { Role, User } from '@/api/types'
 import { Meter } from '@/components/common/Meter'
+import { useObjectLink } from '@/components/common/objectReturn'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -10,6 +12,7 @@ import { formatDualTz } from '@/utils/datetime'
 import { formatRelativeTimeShort } from '@/utils/relativeTime'
 import { accountAxis, serviceAxis, type Axis } from './status'
 import { bytesToGB } from './model'
+import { userPath } from './userRoutes'
 import { useAdminT } from './useAdminT'
 
 /** One axis as words: a healthy state is a quiet dot, anything else a badge that says why on hover. */
@@ -51,12 +54,16 @@ export function SsoBadge({ user }: { user: User }) {
   return <Badge variant="secondary" title={`${provider}${user.sso_subject ? `  (${user.sso_subject})` : ''}`}>{protocol.toUpperCase()}</Badge>
 }
 
-/** Who: the login name first, the display name under it; the role only when it is not the ordinary one. */
+/**
+ * Who: the login name first, the display name under it; the role only when it is not the ordinary one. The login
+ * name is a link to the user's page (so it opens in a new tab like any link), carrying the list's place for the back link.
+ */
 export function UserCell({ user }: { user: User }) {
+  const link = useObjectLink()
   return (
     <div className="flex min-w-0 flex-col">
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate font-medium" title={user.upn}>{user.upn}</span>
+        <Link {...link(userPath(user.id))} className="min-w-0 truncate font-medium underline-offset-2 hover:underline focus-visible:underline" title={user.upn}>{user.upn}</Link>
         {user.role !== 'user' && <RoleBadge role={user.role} />}
         <SsoBadge user={user} />
       </div>
@@ -149,7 +156,7 @@ export function RiskCell({ userId, levels, open }: { userId: number; levels: Ris
   )
 }
 
-/** A phone-width row: who, the two statuses, and the figures an admin scans. The card opens the sheet. */
+/** A phone-width row: who, the two statuses, and the figures an admin scans. The card opens the user's page. */
 export function UserCard({ user, usedBytes, actions }: { user: User; usedBytes: number | undefined; actions: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">

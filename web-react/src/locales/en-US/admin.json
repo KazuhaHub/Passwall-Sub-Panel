@@ -3346,7 +3346,12 @@
       "account": "Account details",
       "sub_hidden": "The subscription link of an admin or operator account is hidden from operators.",
       "not_found": "This user no longer exists",
-      "close": "Close"
+      "forbidden": "You cannot open this user",
+      "unsaved_in": "{{tabs}} has unsaved changes",
+      "tab_separator": ", "
+    },
+    "header": {
+      "no_totp": "No authenticator app is set up"
     },
     "table": {
       "display_name": "Display name",
@@ -3456,7 +3461,6 @@
       "passkeys": "Manage passkeys",
       "resume_service": "Resume proxy service",
       "suspend_service": "Suspend proxy service",
-      "account_security": "Account security",
       "risk_details": "Risk details"
     },
     "security": {

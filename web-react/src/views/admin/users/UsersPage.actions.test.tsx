@@ -240,7 +240,7 @@ it('re-reads the risk column and the opened user after this page resumes the ser
   serve([user], { '/admin/risk-center/levels': {} })
   fireEvent.click(await screen.findByRole('button', { name: 'Resume proxy service' }))
   await waitFor(() => expect(levelsCalls()).toBeGreaterThan(before))
-  // The sheet shows the fresh row's state, not the snapshot it opened with.
+  // The page shows the fresh row's state, not the snapshot it opened with.
   await waitFor(() => expect(screen.queryAllByText('Proxy service suspended')).toHaveLength(0))
   expect(screen.getAllByText('Proxy service active').length).toBeGreaterThan(0)
 })

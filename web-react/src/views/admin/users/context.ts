@@ -3,9 +3,9 @@ import type { RiskLevels } from '@/api/riskCenter'
 import type { Group, Role, User } from '@/api/types'
 import type { DialogState } from './dialogs'
 import type { UserActions } from './useUserActions'
-import type { SheetTab } from './useUserSheet'
+import type { UserTab } from './userRoutes'
 
-/** What the sheet's tabs share with the page, so none of them is passed ten props. */
+/** What the list, a user's page and their tabs share, so none of them is passed ten props. */
 export interface UsersCtx {
   act: UserActions
   groups: readonly Group[]
@@ -22,13 +22,13 @@ export interface UsersCtx {
   canRisk: boolean
   /** Admins only: reads the risk center, the servers and the per-user cap facts, which an operator's token cannot. */
   admin: boolean
-  /** Re-reads the list (and the opened user) after a write. */
+  /** Re-reads every users query that is on screen (the list, the opened user) after a write. */
   reload: () => Promise<unknown>
-  /** Puts a saved row into the cached list and detail, so nothing shows the stale one while a refetch is under way. */
+  /** Puts a saved row into the cached lists and detail, so nothing shows the stale one while a refetch is under way. */
   patchRow: (u: User) => void
   openRisk: (userId: number) => void
-  /** Opens the sheet on a user, on a tab. */
-  openUser: (userId: number, tab?: SheetTab) => void
+  /** Opens a user's page, on a tab, remembering the list's place for its back link. */
+  openUser: (userId: number, tab?: UserTab) => void
   setDialog: (d: DialogState) => void
 }
 

@@ -8,27 +8,23 @@ import SyncStatusCard from '@/components/SyncStatusCard'
 import { Button } from '@/components/ui/button'
 import { useSiteStore } from '@/stores/site'
 import { formatDualTz } from '@/utils/datetime'
-import { accountEnabledForEdit } from '@/utils/userAccess'
 import { Block, Fact, Facts } from './blocks'
 import { AxisBadge, ExpiryCell, LastSeenCell, RoleBadge, UsageMeter, SsoBadge } from './cells'
 import { useUsers } from './context'
 import { EmergencyWindow } from './emergency'
-import { bytesToGB, canQuickRenew, canResumeService, canSuspendService } from './model'
+import { bytesToGB, canQuickRenew } from './model'
 import { accountAxis, serviceAxis, type Axis } from './status'
 import { useAdminT } from './useAdminT'
 
-/** One of the two switches: its state in words, what that means, why when the server said so, and what an admin can do about it. */
-function AxisRow({ title, caption, axis, extra, actions }: { title: string; caption: string; axis: Axis; extra?: string[]; actions?: React.ReactNode }) {
+/** One of the two switches: its state in words, what that means and why when the server said so. What an admin can do about it is in the page header, beside the name. */
+function AxisRow({ title, caption, axis, extra }: { title: string; caption: string; axis: Axis; extra?: string[] }) {
   const t = useAdminT()
   const lines = [axis.explain ? t(axis.explain, axis.vars) : '', axis.detail, ...(extra ?? [])].filter(Boolean)
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-        <div className="min-w-0">
-          <div className="text-xs text-muted-foreground">{title} · {caption}</div>
-          <div className="mt-1"><AxisBadge axis={axis} /></div>
-        </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      <div className="min-w-0">
+        <div className="text-xs text-muted-foreground">{title} · {caption}</div>
+        <div className="mt-1"><AxisBadge axis={axis} /></div>
       </div>
       {lines.length > 0 && <p className="text-sm text-muted-foreground">{lines.join(' ')}</p>}
     </div>
@@ -38,16 +34,14 @@ function AxisRow({ title, caption, axis, extra, actions }: { title: string; capt
 /**
  * The first tab: who the account is and whether it works, told per switch. The ACCOUNT switch (signing in to the
  * panel) and the SERVICE switch (the subscription) are independent, so each has its own state and its own
- * actions: disabling the account also turns the subscription off, but an over-quota or expired user can still
- * sign in, and suspending the service leaves the account alone.
+ * explanation: disabling the account also turns the subscription off, but an over-quota or expired user can still
+ * sign in, and suspending the service leaves the account alone. The two switches themselves are in the page header.
  */
 export function OverviewTab({ user, manageable }: { user: User; manageable: boolean }) {
   const t = useAdminT()
   const tz = useSiteStore(s => s.timezone)
-  const { act, selfId, usedBytesOf, canRisk, openRisk } = useUsers()
+  const { act, usedBytesOf, canRisk, openRisk } = useUsers()
   const groupName = useGroupName(user.group_id)
-  const accountOn = accountEnabledForEdit(user)
-  const self = user.id === selfId
   const used = usedBytesOf(user.id)
   const usedGB = used === undefined ? null : bytesToGB(used)
   const limitGB = bytesToGB(user.traffic_limit_bytes)
@@ -58,21 +52,9 @@ export function OverviewTab({ user, manageable }: { user: User; manageable: bool
   return (
     <div className="flex flex-col gap-4">
       <Block title={t('users.detail.status')} description={t('users.axis.intro')}>
-        <AxisRow title={t('users.axis.account_title')} caption={t('users.axis.account_caption')} axis={accountAxis(user)} extra={accountExtra}
-          actions={manageable && (
-            accountOn
-              ? <Button size="sm" variant="outline" aria-disabled={self || undefined} title={self ? t('users.field.account_self_locked') : undefined}
-                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50" onClick={() => { if (!self) act.askToggleAccount(user, false) }}>{t('users.action.disable')}</Button>
-              : <Button size="sm" variant="outline" onClick={() => act.askToggleAccount(user, true)}>{t('users.action.enable')}</Button>
-          )} />
+        <AxisRow title={t('users.axis.account_title')} caption={t('users.axis.account_caption')} axis={accountAxis(user)} extra={accountExtra} />
         <div className="border-t" />
-        <AxisRow title={t('users.axis.service_title')} caption={t('users.axis.service_caption')} axis={serviceAxis(user)} extra={serviceExtra}
-          actions={manageable && (
-            <>
-              {canResumeService(user) && <AsyncButton size="sm" variant="outline" onClick={() => act.resume(user)}>{t('users.more_menu.resume_service')}</AsyncButton>}
-              {canSuspendService(user) && <AsyncButton size="sm" variant="outline" onClick={() => act.suspend(user)}>{t('users.more_menu.suspend_service')}</AsyncButton>}
-            </>
-          )} />
+        <AxisRow title={t('users.axis.service_title')} caption={t('users.axis.service_caption')} axis={serviceAxis(user)} extra={serviceExtra} />
         <EmergencyWindow user={user} />
       </Block>
 
@@ -111,7 +93,7 @@ export function OverviewTab({ user, manageable }: { user: User; manageable: bool
       </Block>
 
       <Block title={t('users.detail.account')}
-        // Hands over to the risk center's drawer for this account (the sheet's parameters go, and closing the drawer comes back here). Admins only: an operator's token cannot read the risk center.
+        // Opens the risk center's drawer over this page (`?risk=`); closing it comes back here. Admins only: an operator's token cannot read the risk center.
         actions={canRisk && <Button size="sm" variant="outline" onClick={() => openRisk(user.id)}>{t('users.risk_lookup')}</Button>}>
         <Facts>
           <Fact label={t('users.field.display_name')} hidden={!user.display_name}>{user.display_name}</Fact>

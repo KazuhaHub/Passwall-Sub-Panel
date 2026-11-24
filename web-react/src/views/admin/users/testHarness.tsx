@@ -9,6 +9,8 @@ import { flatten, type Nested } from '@/i18n/options'
 import enAdmin from '@/locales/en-US/admin.json'
 import { useAuthStore } from '@/stores/auth'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
+import UserCreatePage from './UserCreatePage'
+import UserDetailRoute from './UserDetailRoute'
 
 // Shared set-up of the users page tests: the request client is mocked, the REAL English strings are loaded
 // (common from initI18n, admin added here), and the page runs in a data router like in the app. Not part of the app.
@@ -93,8 +95,18 @@ function Where() {
   return <p data-testid="where">{loc.pathname + loc.search}</p>
 }
 
-export function mountPage(page: ReactElement, entry = '/admin/users') {
-  const router = createMemoryRouter([{ path: '/admin/users', element: <>{page}<Where /></> }, { path: '/admin/traffic', element: <p>traffic</p> }], { initialEntries: [entry] })
+/**
+ * The list (the `page` given), a user's page and the create page, at the addresses the app gives them, so a click
+ * from the list lands where it does in the app. `initialEntries` lets a test start from a history.
+ */
+export function mountPage(page: ReactElement, entry: string | string[] = '/admin/users') {
+  const entries = Array.isArray(entry) ? entry : [entry]
+  const router = createMemoryRouter([
+    { path: '/admin/users', element: <>{page}<Where /></> },
+    { path: '/admin/users/new', element: <><UserCreatePage /><Where /></> },
+    { path: '/admin/users/:id', element: <><UserDetailRoute /><Where /></> },
+    { path: '/admin/traffic', element: <p>traffic</p> },
+  ], { initialEntries: entries, initialIndex: entries.length - 1 })
   const client = makeTestQueryClient()
   const view = render(<QueryClientProvider client={client}><ConfirmHost /><RouterProvider router={router} /></QueryClientProvider>)
   return { router, client, ...view }

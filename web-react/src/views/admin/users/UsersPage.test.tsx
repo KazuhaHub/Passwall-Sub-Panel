@@ -175,27 +175,42 @@ describe('the risk column', () => {
     await waitFor(() => expect(screen.queryByTestId('risk-drawer')).toBeNull())
   })
 
-  it('offers 风控 details for any account in the row menu to an admin, and not to an operator', async () => {
+  it('keeps the row menu to what makes sense without opening the user', async () => {
     serve([account(7, 'clean')])
-    const { unmount } = mountPage(<UsersPage />)
+    mountPage(<UsersPage />)
     await openRowMenu('clean')
+    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Copy subscription URL', 'Renew 30 days', 'Disable account', 'Suspend proxy service', 'Delete'])
+  })
+
+  it('offers 风控 details for any account in the page menu to an admin, and not to an operator', async () => {
+    serve([account(7, 'clean')])
+    const { unmount } = mountPage(<UsersPage />, '/admin/users/7')
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }))
     expect(await screen.findByRole('menuitem', { name: 'Risk details' })).toBeTruthy()
     unmount()
     useAuthStore.setState({ role: 'operator', userId: 1, hasToken: true })
-    mountPage(<UsersPage />)
-    await openRowMenu('clean')
-    expect(await screen.findByRole('menuitem', { name: 'Account security' })).toBeTruthy()
+    mountPage(<UsersPage />, '/admin/users/7')
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }))
+    expect(await screen.findByRole('menuitem', { name: 'Reset password' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Risk details' })).toBeNull()
   })
 
-  it("hands over to the drawer from the sheet's risk lookup, and Back returns to the sheet", async () => {
+  it("opens the drawer over the user's page from its risk lookup, and Back returns to the page", async () => {
     serve([flagged], { '/admin/risk-center/levels': LEVELS })
-    const { router } = mountPage(<UsersPage />, '/admin/users?user=2')
+    const { router } = mountPage(<UsersPage />, '/admin/users/2')
     fireEvent.click(await screen.findByRole('button', { name: 'Risk lookup' }))
     await waitFor(() => expect(searchOf().get('risk')).toBe('2'))
-    expect(searchOf().get('user')).toBeNull()
+    expect(where().startsWith('/admin/users/2?')).toBe(true)
     await router.navigate(-1)
-    await waitFor(() => expect(searchOf().get('user')).toBe('2'))
+    await waitFor(() => expect(where()).toBe('/admin/users/2'))
+    expect(screen.queryByTestId('risk-drawer')).toBeNull()
+  })
+
+  it('opens the drawer over a user page for a link to ?risk=<id>', async () => {
+    serve([flagged], { '/admin/risk-center/levels': LEVELS })
+    mountPage(<UsersPage />, '/admin/users/2?tab=security&risk=2')
+    expect((await screen.findByTestId('risk-drawer')).textContent).toBe('2')
+    expect(await screen.findByRole('tab', { name: /Security/, selected: true })).toBeTruthy()
   })
 
   it('opens the risk drawer from a chip with risk=<id> in the address', async () => {
@@ -234,14 +249,148 @@ describe('an operator', () => {
 
 it('opens the user named in the address, on the tab named there, and keeps the token out of it', async () => {
   serve([user])
-  mountPage(<UsersPage />, '/admin/users?user=2&tab=security')
+  mountPage(<UsersPage />, '/admin/users/2?tab=security')
   expect(await screen.findByRole('tab', { name: 'Security', selected: true })).toBeTruthy()
   expect(where()).not.toContain('token-2')
 })
 
-it('opens a user who is not on this page by reading that user', async () => {
+it('opens a user who is not on any list page by reading that user', async () => {
   serve([user], { '/admin/users/12': account(12, 'elsewhere') })
-  mountPage(<UsersPage />, '/admin/users?user=12')
+  mountPage(<UsersPage />, '/admin/users/12')
   expect((await screen.findAllByText('elsewhere@example.test')).length).toBeGreaterThan(0)
   expect(api.get.mock.calls.some(c => c[0] === '/admin/users/12')).toBe(true)
+})
+
+describe('the old ?user= addresses', () => {
+  it.each([
+    ['/admin/users?user=2', '/admin/users/2'],
+    ['/admin/users?user=2&tab=security', '/admin/users/2?tab=security'],
+    ['/admin/users?user=2&tab=nonsense', '/admin/users/2'],
+    ['/admin/users?user=new', '/admin/users/new'],
+  ])('%s is sent on to %s', async (from, to) => {
+    serve([user])
+    mountPage(<UsersPage />, from)
+    await waitFor(() => expect(where()).toBe(to))
+  })
+
+  it('replaces the entry, so Back does not return to the redirect', async () => {
+    serve([user])
+    const { router } = mountPage(<UsersPage />, ['/admin/users?q=a', '/admin/users?user=2'])
+    await waitFor(() => expect(where()).toBe('/admin/users/2'))
+    await router.navigate(-1)
+    await waitFor(() => expect(where()).toBe('/admin/users?q=a'))
+  })
+
+  it('leaves a malformed id alone: the list opens', async () => {
+    serve([user])
+    mountPage(<UsersPage />, '/admin/users?user=abc')
+    expect(await screen.findByText('old-name')).toBeTruthy()
+    expect(where()).toBe('/admin/users?user=abc')
+  })
+})
+
+describe("a user's page", () => {
+  it("says so in the page's own frame when there is no such user, with a way back", async () => {
+    serve([user], { '/admin/users/99': Object.assign(new Error('gone'), { response: { status: 404 } }) })
+    mountPage(<UsersPage />, '/admin/users/99')
+    expect(await screen.findByText('This user no longer exists')).toBeTruthy()
+    expect(screen.getAllByRole('link', { name: 'Users' }).length).toBeGreaterThan(0)
+  })
+
+  it('treats an address that is not a number as no such user, without asking the server', async () => {
+    serve([user])
+    mountPage(<UsersPage />, '/admin/users/abc')
+    expect(await screen.findByText('This user no longer exists')).toBeTruthy()
+    expect(api.get.mock.calls.some(c => String(c[0]).startsWith('/admin/users/abc'))).toBe(false)
+  })
+
+  it('says it is not open to you for a 403, and offers a retry for any other failure', async () => {
+    serve([user], { '/admin/users/98': Object.assign(new Error('no'), { response: { status: 403 } }), '/admin/users/97': Object.assign(new Error('boom'), { response: { status: 500 } }) })
+    const { unmount } = mountPage(<UsersPage />, '/admin/users/98')
+    expect(await screen.findByText('You cannot open this user')).toBeTruthy()
+    unmount()
+    mountPage(<UsersPage />, '/admin/users/97')
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Retry|Try again/ })).toBeTruthy()
+  })
+
+  it("goes back to the list as it was left: the name opens the page, the back link restores page, search and order", async () => {
+    serve([user])
+    mountPage(<UsersPage />, '/admin/users?q=old&sort=upn-asc&page=1')
+    fireEvent.click(await screen.findByRole('link', { name: user.upn }))
+    await screen.findByRole('heading', { level: 1, name: user.upn })
+    const back = screen.getByRole('link', { name: 'Users' })
+    expect(back.getAttribute('href')).toBe('/admin/users?q=old&sort=upn-asc&page=1')
+    fireEvent.click(back)
+    await waitFor(() => expect(where()).toBe('/admin/users?q=old&sort=upn-asc&page=1'))
+    await waitFor(() => expect(lastParams('/admin/users')).toMatchObject({ keyword: 'old', sort_by: 'upn', sort_dir: 'asc' }))
+  })
+
+  it('opens on a click of the row too, and its back link is the plain list when opened cold', async () => {
+    serve([user])
+    const { unmount } = mountPage(<UsersPage />, '/admin/users?q=old')
+    fireEvent.click((await screen.findByText('old-name')).closest('tr')!)
+    await waitFor(() => expect(where()).toBe('/admin/users/2'))
+    expect((await screen.findByRole('link', { name: 'Users' })).getAttribute('href')).toBe('/admin/users?q=old')
+    unmount()
+    mountPage(<UsersPage />, '/admin/users/2')
+    expect((await screen.findByRole('link', { name: 'Users' })).getAttribute('href')).toBe('/admin/users')
+  })
+
+  it('shows who the user is and both switches in words, with the explanations one tap away', async () => {
+    serve([{ ...user, role: 'operator', expire_at: '2020-01-01T00:00:00Z' }])
+    mountPage(<UsersPage />, '/admin/users/2')
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe(user.upn)
+    expect(screen.getByText('old-name · user@example.test')).toBeTruthy()
+    const header = document.querySelector('[data-slot="object-page-header"]') as HTMLElement
+    expect(within(header).getByText('Operator')).toBeTruthy()
+    // Account and service are separate lines: an expired user can still sign in.
+    expect(within(header).getByText('Account')).toBeTruthy()
+    expect(within(header).getByText('Proxy service')).toBeTruthy()
+    fireEvent.click(within(header).getAllByRole('button', { name: /sign in/ })[0])
+  })
+
+  it('disables the account from the header with the reason dialog, and asks nothing of your own account', async () => {
+    serve([user, account(1, 'me')])
+    mountPage(<UsersPage />, '/admin/users/2')
+    fireEvent.click(await screen.findByRole('button', { name: 'Disable account' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Disable/ }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/users/2/set-enabled', { enabled: false, reason: undefined }))
+  })
+
+  it('switches off Disable on your own account, with the reason', async () => {
+    serve([account(1, 'me')])
+    mountPage(<UsersPage />, '/admin/users/1')
+    const off = await screen.findByRole('button', { name: 'Disable account' })
+    expect(off.getAttribute('aria-disabled')).toBe('true')
+    expect(off.getAttribute('title')).toBe('You cannot disable your own account')
+    fireEvent.click(off)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('puts the rest in More: reset 2FA is off with its reason when no authenticator app is set up', async () => {
+    serve([user])
+    mountPage(<UsersPage />, '/admin/users/2')
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }))
+    const item = await screen.findByRole('menuitem', { name: 'Reset authenticator app (TOTP)' })
+    expect(item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true').toBe(true)
+    expect(screen.getByText('No authenticator app is set up')).toBeTruthy()
+    for (const name of ['Copy subscription URL', 'Renew 30 days', 'Reset password', 'Reset credentials', 'Delete']) {
+      expect(screen.getByRole('menuitem', { name })).toBeTruthy()
+    }
+  })
+
+  it('deletes from the page after a confirmation naming the user, then leaves for the list without asking', async () => {
+    serve([user])
+    mountPage(<UsersPage />, '/admin/users/2')
+    fireEvent.click(await screen.findByRole('button', { name: 'More' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog.textContent).toContain(user.upn)
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/users/2'))
+    await waitFor(() => expect(where()).toBe('/admin/users'))
+  })
 })
