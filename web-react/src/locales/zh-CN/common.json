@@ -212,6 +212,9 @@
       "graph_truncated_atleast_other": "至少另有{{n}}条线路未列出"
     },
     "shell": {
+      "not_found_title": "页面不存在",
+      "not_found_body": "此地址没有对应的页面。请检查地址，或回到起始页。",
+      "back_home": "回到起始页",
       "more": "更多",
       "skip_to_content": "跳到主要内容",
       "toggle_sidebar": "展开或收起侧栏",
