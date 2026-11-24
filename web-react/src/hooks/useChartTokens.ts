@@ -10,14 +10,11 @@ import '@/styles/data-tokens.css'
  * from <html> and converted to sRGB through a 1x1 canvas, which is what the
  * browser would paint anyway.
  *
- * HOW TrafficChart AND NodeMetricsChart WILL SWITCH (not done in this package):
- * - replace `useTheme().palette.md` with `const tk = useChartTokens()`;
- * - `md.onSurfaceVariant` (axis labels, legend text) -> `tk.mutedText`;
- * - `md.outlineVariant` (axis line, split lines) -> `tk.axisLine` / `tk.grid`;
- * - `md.primary` / `md.tertiary` (series) -> `tk.series[0]` / `tk.series[1]`, or
- *   spread `chartBaseOption(tk)` first so tooltip, text and palette come free;
- * - add `tk` to the dependency array of the effect that calls setOption, so a
- *   mode or brand change repaints the chart without remounting it.
+ * TrafficChart and NodeMetricsChart both read it: `tk.series` is the categorical palette (series 1 follows the
+ * brand; `--chart-1` to `--chart-5` alias the same values), `tk.mutedText` the axis labels and legend text,
+ * `tk.axisLine` / `tk.grid` the axis and split lines. Spread `chartBaseOption(tk)` first so tooltip, text and
+ * palette come free, and put `tk` in the dependency list of the effect that calls setOption so a mode or brand
+ * change repaints the chart without remounting it.
  */
 export interface ChartTokens {
   /** Categorical series colours, 8 of them; the first follows the brand. */

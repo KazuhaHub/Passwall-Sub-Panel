@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { NativeSelect } from '@/components/ui/native-select'
 import { IconExternalLink } from '@/lib/icons'
 import { useCan } from '@/utils/permissions'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 const BACKENDS = ['psp', '3xui', 'sui'] as const
 const LABELS: Record<PanelType, string> = { psp: 'Passwall Node', '3xui': '3X-UI', sui: 'S-UI' }
@@ -48,19 +48,19 @@ export function ReinstallBackendDialog({ server, onClose, onNativeInstall, onNat
         <DialogTitle>{t('admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
         {canConfigure && <DialogDescription>{t('admin:servers.install_reinstall.original', { id: server?.id, backend: LABELS[original] })}</DialogDescription>}
       </DialogHeader>
-      {!canConfigure ? <DialogNotice tone="danger">{t('admin:servers.install_reinstall.forbidden')}</DialogNotice> : <div className="flex flex-col gap-4">
+      {!canConfigure ? <Notice tone="danger">{t('admin:servers.install_reinstall.forbidden')}</Notice> : <div className="flex flex-col gap-4">
         <Field label={t('admin:servers.install_reinstall.backend')}>
           <NativeSelect value={target} onChange={event => setTarget(event.target.value as PanelType)}>
             {BACKENDS.map(backend => <option key={backend} value={backend}>{LABELS[backend]}</option>)}
           </NativeSelect>
         </Field>
         {sameBackend
-          ? <DialogNotice>{t(nativeReinstall
+          ? <Notice tone="info">{t(nativeReinstall
             ? 'admin:servers.install_reinstall.native_same'
-            : 'admin:servers.install_reinstall.manual_same')}</DialogNotice>
-          : <DialogNotice tone="warning">{t('admin:servers.install_reinstall.switch_warning', {
+            : 'admin:servers.install_reinstall.manual_same')}</Notice>
+          : <Notice tone="warning">{t('admin:servers.install_reinstall.switch_warning', {
             original: LABELS[original], target: LABELS[target],
-          })}</DialogNotice>}
+          })}</Notice>}
         {nativeMigration && <p>{t('admin:servers.install_reinstall.switch_precheck')}</p>}
         {manualReinstall && <>
           <Field label={t('admin:servers.install_reinstall.method')}>
@@ -70,7 +70,7 @@ export function ReinstallBackendDialog({ server, onClose, onNativeInstall, onNat
               <option value="automatic" disabled>{t('admin:servers.install_reinstall.automatic_unavailable')}</option>
             </NativeSelect>
           </Field>
-          <DialogNotice tone="warning">{t('admin:servers.install_reinstall.manual_unverified')}</DialogNotice>
+          <Notice tone="warning">{t('admin:servers.install_reinstall.manual_unverified')}</Notice>
           <ol className="list-decimal space-y-1.5 pl-5">
             <li>{t('admin:servers.install_reinstall.manual_backup')}</li>
             <li>{t('admin:servers.install_reinstall.manual_install', { backend: LABELS[target] })}</li>
@@ -82,9 +82,9 @@ export function ReinstallBackendDialog({ server, onClose, onNativeInstall, onNat
             <IconExternalLink aria-hidden className="size-3.5" />
           </a>
         </>}
-        {!sameBackend && !nativeMigration && <DialogNotice tone="danger">
+        {!sameBackend && !nativeMigration && <Notice tone="danger">
           {t('admin:servers.install_reinstall.switch_unavailable')}
-        </DialogNotice>}
+        </Notice>}
       </div>}
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>{t('common:actions.close')}</Button>

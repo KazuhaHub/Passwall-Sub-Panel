@@ -8,7 +8,7 @@ import { pushSnack } from '@/components/feedback/toasts'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { NativeSelect } from '@/components/ui/native-select'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 /**
  * The core of one server. A 3X-UI server upgrades its Xray in place: a version list read from the panel, or "latest".
@@ -144,7 +144,7 @@ export function CoreDialog({ server, onClose, onSelected, onUpgraded, onBusy }: 
               })}
             </NativeSelect>
           </Field>
-          {native && !loading && releases.length === 0 && <DialogNotice tone="danger">{t('admin:servers.field.core_catalog_unavailable')}</DialogNotice>}
+          {native && !loading && releases.length === 0 && <Notice tone="danger">{t('admin:servers.field.core_catalog_unavailable')}</Notice>}
           {native && selectedRelease && (
             <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 p-3 text-sm">
               <p className="font-medium">{t(`admin:servers.core_tier.${selectedRelease.tier}`)}</p>

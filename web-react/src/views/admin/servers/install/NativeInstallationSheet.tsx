@@ -9,7 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { effectiveUpdateChannel } from '@/utils/nodeReleaseUpdate'
-import { DialogNotice } from '../dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 import { AgentStatus } from './AgentStatus'
 import { InstallAdvanced } from './InstallAdvanced'
 import { GeneratedMaterials, GenerateButton, GithubMaterials, ManualIdentity } from './InstallMaterials'
@@ -70,18 +70,18 @@ export function NativeInstallationSheet({ server, initialProvisioning, onClose, 
           onChange={next => { inst.invalidateMaterials(); inst.setVersion(''); inst.setSelection(next) }} />
         {inst.installationLoading && <p role="status" className="text-sm text-muted-foreground">{t('admin:servers.native.installation_loading')}</p>}
         {inst.installationError && (
-          <DialogNotice tone="danger">
+          <Notice tone="danger">
             <span className="flex flex-wrap items-center gap-2">{inst.installationError}
               <Button variant="outline" size="sm" onClick={inst.retryInstallation}>{t('common:actions.retry')}</Button></span>
-          </DialogNotice>
+          </Notice>
         )}
         {inst.credentialUnavailable && (
           <div className="flex flex-col gap-3">
-            <DialogNotice tone="warning">{t('admin:servers.native.legacy_credential_hint')}</DialogNotice>
+            <Notice tone="warning">{t('admin:servers.native.legacy_credential_hint')}</Notice>
             <Field label={t('admin:servers.native.old_credential')}>
               <Input type="password" value={inst.oldCredential} autoComplete="off" disabled={inst.credentialBusy} onChange={event => inst.setOldCredential(event.target.value)} />
             </Field>
-            {inst.credentialError && <DialogNotice tone="danger">{inst.credentialError}</DialogNotice>}
+            {inst.credentialError && <Notice tone="danger">{inst.credentialError}</Notice>}
             <div className="flex flex-wrap gap-2">
               {/* The import is a write plus a re-read of the installation; its own wait is shown, not just a disabled button. */}
               <BusyButton busy={inst.credentialBusy} disabled={!inst.oldCredential.trim() || rotating} onClick={() => void inst.saveOldCredential()}>
@@ -109,16 +109,16 @@ export function NativeInstallationSheet({ server, initialProvisioning, onClose, 
                     other replaces it. Both are off by default; the panel never picks. */}
                 <CheckOption checked={inst.replaceIdentity} disabled={!server} onChange={inst.setReplaceIdentity}
                   label={t('admin:servers.native.replace_identity')} hint={t('admin:servers.native.replace_identity_hint')} />
-                {inst.replaceIdentity && <DialogNotice tone="warning">{t('admin:servers.native.replace_identity_warning')}</DialogNotice>}
+                {inst.replaceIdentity && <Notice tone="warning">{t('admin:servers.native.replace_identity_warning')}</Notice>}
                 {/* THE COMMAND IS REFUSED AT THE HOST, NOT HERE, when the node is on another release and neither
                     answer is chosen — and that refusal arrives as a message about identity that names nothing
                     about the version. So it is said here, before the command is generated. */}
                 {inst.reportedVersion && version.trim() && inst.reportedVersion !== version.trim() && !inst.upgradeInPlace && !inst.replaceIdentity && (
-                  <DialogNotice tone="warning">{t('admin:servers.native.upgrade_in_place_needed', { version: inst.reportedVersion })}</DialogNotice>
+                  <Notice tone="warning">{t('admin:servers.native.upgrade_in_place_needed', { version: inst.reportedVersion })}</Notice>
                 )}
               </div>
             )}
-            {provisioning.endpoint.startsWith('http://') && <DialogNotice tone="warning">{t('admin:servers.native.http_warning')}</DialogNotice>}
+            {provisioning.endpoint.startsWith('http://') && <Notice tone="warning">{t('admin:servers.native.http_warning')}</Notice>}
             {selection.method === 'github' ? <GithubMaterials inst={inst} /> : (
               <>
                 {selection.method === 'manual' && <ManualIdentity inst={inst} />}

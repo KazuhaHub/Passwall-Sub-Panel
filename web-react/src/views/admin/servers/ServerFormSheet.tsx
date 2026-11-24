@@ -15,7 +15,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
-import { DialogNotice } from './dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 import { InstallMethodFields } from './install/InstallMethodFields'
 import { EMPTY_FORM, createRequest, formOf, sameForm, tokenRequired, updateRequest, validateServerForm, withPanelType, type ServerField, type ServerForm } from './serverForm'
 import type { ProbeState } from './useServerProbes'
@@ -112,7 +112,7 @@ export function ServerFormSheet({ editing, install, onInstallChange, probe, onTe
               <option value="sui">S-UI</option>
             </NativeSelect>
           </Field>
-          {!editing && !native && <DialogNotice>{t('admin:servers.install_reinstall.new_manual')}</DialogNotice>}
+          {!editing && !native && <Notice tone="info">{t('admin:servers.install_reinstall.new_manual')}</Notice>}
         </FormSection>
 
         <FormSection title={t('admin:servers.form.group_basics')}>

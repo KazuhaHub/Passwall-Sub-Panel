@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { IconCopy, IconDownload } from '@/lib/icons'
-import { DialogNotice } from '../dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 import { Disclosure } from '../shared/Disclosure'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Field } from '@/components/form/Field'
@@ -50,7 +50,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
       {selection.method === 'linux' ? (
         <>
           <h3 className="text-sm font-medium">{t('admin:servers.native.private_script_advanced')}</h3>
-          {inst.scriptError && <DialogNotice tone="danger">{inst.scriptError}</DialogNotice>}
+          {inst.scriptError && <Notice tone="danger">{inst.scriptError}</Notice>}
           <div className="flex flex-wrap gap-2">
             <BusyButton variant="outline" icon={<IconDownload />} busy={inst.scriptBusy === 'download'}
               disabled={!inst.versionValid || !!inst.scriptBusy || rotating} onClick={() => void inst.deliverScript('download')}>

@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { useCan } from '@/utils/permissions'
 import { canonicalReleaseVersion } from '@/utils/productVersion'
 import NodeReleaseSelector from '../install/NodeReleaseSelector'
-import { DialogNotice } from './DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 const knownIssues = new Set([
   'missing_snapshot', 'unsupported_protocol', 'inbound_expiry', 'external_files', 'fallback_dependency',
@@ -251,7 +251,7 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
         {loading && <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <IconSpinner aria-hidden className="size-4 animate-spin" /><span>{t('admin:servers.migration.loading')}</span>
         </div>}
-        {error && <DialogNotice tone={server?.panel_type === 'psp' && canRead ? 'info' : 'danger'}>{t(error)}</DialogNotice>}
+        {error && <Notice tone={server?.panel_type === 'psp' && canRead ? 'info' : 'danger'}>{t(error)}</Notice>}
         {server?.panel_type === 'psp' && canRead && onNativeInstall &&
           <Button className="self-start" onClick={closeAfterNative}>{t('admin:servers.migration.continue_native_install')}</Button>}
         {error && server?.panel_type !== 'psp' && !supported && <p className="text-sm">{t('admin:servers.migration.unsupported_next')}</p>}
@@ -259,12 +259,12 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
           <p className="text-sm">{t('admin:servers.migration.summary', {
             server: preview.server_id, nodes: preview.node_count, clients: preview.client_count, core: preview.core_version,
           })}</p>
-          {preview.blockers.length > 0 && <DialogNotice tone="danger">
+          {preview.blockers.length > 0 && <Notice tone="danger">
             <p className="font-medium">{t('admin:servers.migration.blockers')}</p>
             <ul className="mt-1 flex flex-col gap-1">
               {preview.blockers.map((issue, index) => <li key={`${issue.code}:${index}`}>{issueMessage(issue)}</li>)}
             </ul>
-          </DialogNotice>}
+          </Notice>}
           {preview.blockers.some(issue => issue.code === 'config_not_synced' || issue.code === 'missing_snapshot') &&
             // A real link (role link, openable in a new tab), styled as the outline button beside it.
             <RouterLink to="/admin/nodes" className={buttonVariants({ variant: 'outline', className: 'self-start' })} onClick={closeDialog}>
@@ -273,12 +273,12 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
           {preview.blockers.some(issue => issue.code === 'source_not_3xui') && <p className="text-sm">
             {t('admin:servers.migration.source_changed_next')}
           </p>}
-          {criticalWarnings.length > 0 && <DialogNotice tone="warning">
+          {criticalWarnings.length > 0 && <Notice tone="warning">
             <p className="font-medium">{t('admin:servers.migration.warnings')}</p>
             <ul className="mt-1 flex flex-col gap-1">
               {criticalWarnings.map((issue, index) => <li key={`${issue.code}:${index}`}>{issueMessage(issue)}</li>)}
             </ul>
-          </DialogNotice>}
+          </Notice>}
           {preview.core_requires_ack && <CheckLine checked={acknowledged} label={t('admin:servers.migration.ack_restricted_core')}
             onChange={checked => {
               clearCommand()
@@ -290,7 +290,7 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
               setChoice({ serverID, core: preview.recommended_core_version!, acknowledge: false })
             }}>{t('admin:servers.migration.use_recommended_core', { version: preview.recommended_core_version })}</Button>}
           {ready ? <>
-            <DialogNotice tone="success">{t('admin:servers.migration.ready')}</DialogNotice>
+            <Notice tone="success">{t('admin:servers.migration.ready')}</Notice>
             <p className="text-sm">{t('admin:servers.migration.deployment_safety')}</p>
             <CheckLine checked={managedOnly} label={t('admin:servers.migration.ack_managed_only')} onChange={checked => {
               clearCommand()
@@ -300,7 +300,7 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
               clearCommand()
               setConfirmation({ serverID, managedOnly, singleInstance: checked })
             }} />
-          </> : preview.can_migrate && <DialogNotice tone="danger">{t('admin:servers.migration.invalid_command')}</DialogNotice>}
+          </> : preview.can_migrate && <Notice tone="danger">{t('admin:servers.migration.invalid_command')}</Notice>}
         </>}
         {supported && <>
           {/* What the button does, with the server and the release named, before it is pressed. Issuing the command
@@ -311,7 +311,7 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
           <Button className="self-start" disabled={!canGenerate || commandBusy} onClick={() => void generateCommand()}>
             {commandBusy && <IconSpinner aria-hidden className="animate-spin" />}{t('admin:servers.migration.generate_node_command')}
           </Button>
-          {commandError && <DialogNotice tone="danger">{t(commandError)}</DialogNotice>}
+          {commandError && <Notice tone="danger">{t(commandError)}</Notice>}
           {command && <NodeInstallCommand key={command.binding} command={command.command} expiresAt={command.expires_at}
             disabled={command.expired || !canGenerate} onExpired={() => setIssuedCommand({ ...command, command: '', expired: true })} />}
           {command && !command.expired && <p className="text-sm">{t('admin:servers.migration.command_next')}</p>}

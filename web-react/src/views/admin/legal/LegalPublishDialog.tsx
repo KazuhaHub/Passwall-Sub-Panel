@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { legalKeys } from '@/query/keys'
 import { useAffectedUsers } from '@/query/legal'
 import { useQueryScope } from '@/query/useQueryScope'
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 
 /** How many characters were added to and removed from `from` to make `to`: what

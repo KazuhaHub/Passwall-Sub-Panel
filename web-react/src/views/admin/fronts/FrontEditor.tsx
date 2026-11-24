@@ -20,7 +20,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { frontKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
-import { Notice } from '../Notice'
+import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import {
   changedLinkIDs, draftIssues, draftOf, inputOf, leaving, linesFor, listenersFor, newRouteKey, newlyMoved, targetKey, type Draft, type DraftIssue,

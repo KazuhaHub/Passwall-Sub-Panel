@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { NativeAgentStatus } from '@/api/servers'
-import { DialogNotice } from '../dialogs/DialogNotice'
+import { Notice } from '@/components/common/Notice'
 
 /**
  * What the agent is doing now and what to do next, in words. Three kinds of "not reporting" are different causes with
@@ -13,11 +13,11 @@ export function AgentStatus({ status, error }: { status: NativeAgentStatus | nul
   return (
     <section className="flex flex-col gap-2" aria-label={t('admin:servers.native.status_title')}>
       <h3 className="text-sm font-medium">{t('admin:servers.native.status_title')}</h3>
-      {error && <DialogNotice tone="warning">{t('admin:servers.native.status_stale')} {error}</DialogNotice>}
-      <DialogNotice tone={tone}>
+      {error && <Notice tone="warning">{t('admin:servers.native.status_stale')} {error}</Notice>}
+      <Notice tone={tone}>
         <span className="block font-medium">{t(`admin:servers.native.agent_status.${state}`)}</span>
         <span className="block text-sm">{t(`admin:servers.native.status_next.${state}`)}</span>
-      </DialogNotice>
+      </Notice>
     </section>
   )
 }
