@@ -86,8 +86,7 @@
     "positive_int": "请填入大于 0 的整数",
     "range": "数值不在允许范围内",
     "too_short": "长度太短",
-    "too_long": "长度超出限制",
-    "form_has_errors": "请先修正表单中标红的字段"
+    "too_long": "长度超出限制"
   },
   "dashboard": {
     "summary_failed": "暂时无法加载概览数据",
@@ -711,12 +710,6 @@
         "disabled": "已停用",
         "actions": "操作"
       },
-      "client_table": {
-        "name": "客户端",
-        "platforms": "平台",
-        "format": "格式",
-        "enabled": "启用"
-      },
       "order_note": "顺序很重要。客户端按从上到下的顺序匹配检测族，命中第一个即停止，因此请把更具体的族放在更通用的族之前（例如 V2rayNG 放在 V2RayN 之前）。拖动行，或用键盘操作行上的拖动手柄，即可调整顺序。",
       "name_required": "请填写该检测族的名称。",
       "unnamed_family": "未命名检测族",
@@ -968,7 +961,6 @@
     "subtitle": "一个方案由客户端模板和绑定规则集组成，订阅渲染会以这里的绑定为准。",
     "create": "新增方案",
     "edit_title": "编辑配置方案",
-    "selection_count": "已选 {{count}}",
     "batch_delete": "批量删除",
     "field": {
       "slug": "Slug",
@@ -1209,35 +1201,6 @@
       "route_skipped": "路由未下发",
       "route_regexp_skipped": "路由跳过了正则条目",
       "route_policy_approximate": "路由上的策略为近似处理"
-    },
-    "code_summaries": {
-      "core_telemetry_failed": "节点未能读取内核运行状态或流量计数。",
-      "core_convergence_failed": "内核未能应用所要求的运行配置。",
-      "object_pending_timeout": "配置或客户端对象超过期限后仍等待应用。",
-      "object_rejected_timeout": "被拒绝的对象持续未变更，需要人工查看。",
-      "segment_rejected": "节点拒绝了收到的配置文档。",
-      "roster_ahead_of_config": "客户端列表依赖的配置尚未收到。",
-      "attachment_unknown_listener": "客户端列表引用的入站不在配置中。",
-      "directives_ahead_of_roster": "策略依赖的客户端列表尚未收到。",
-      "directive_unknown_client": "策略引用的客户端不在列表中。",
-      "report_missing_object": "完整节点报告缺少应有的对象。",
-      "destination_policy_report_only_not_deployed": "这台节点没有收到全部仅报告规则（超出规则预算；或在嗅探不足的入站上被限定/去掉）；拦截规则不受影响。",
-      "destination_policy_resolve_not_deployed": "这台节点保持按原样（不解析主机名）：某个入站的嗅探开了 routeOnly:true 或无法解析，会替换被解析的名字；其余策略照常执行。",
-      "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
-      "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
-      "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。",
-      "front_withheld": "一个已保存的 SNI 共用端口没有发给这台服务器（原因见详情），它后面的监听器保持自己的端口。",
-      "tunnel_listener_orphan": "隧道监听器的线路已不存在。请在服务器的端口占用里或它的节点页移除该监听器。",
-      "roster_identity_capacity": "这台服务器至少有 20,000 个客户端身份。同步大小取决于编码后的数据，包括身份关联的监听器。",
-      "cdn_landing_unfit": "节点的传输已无法放在 CDN 后面，它的 CDN 线路不再出现在订阅里（详情里有线路和原因）。请把节点改回去，或删除这条线路。",
-      "source_guard_withheld": "一条中转线路不出现在订阅里：节点无法把它与直连区分开（倍率不同而服务器无法检查来源），或还不知道它的流量来自哪些地址。线路见详情。",
-      "source_guard_refused": "落地拒绝了某条线路来自一个不在该线路来源地址里的地址的连接。如果这个地址是合法的，请把它加入线路的来源地址。",
-      "tunnel_factor_stale": "隧道监听器保存的线路流量倍率已过期。请重新保存该线路的流量倍率。",
-      "routes_not_sent": "某个节点已保存的按目标分流路由没有发给这台服务器（原因见详情），它的流量走默认出口。",
-      "route_listener_withheld": "某个入站因路由无法下发而不带路由发送（原因见详情），它的流量走默认出口。",
-      "route_skipped": "有一条路由没有可下发的目标，已从配置中省略。",
-      "route_regexp_skipped": "路由跳过了列表中的正则条目：路由不接受正则。",
-      "route_policy_approximate": "在 Xray 上，使用正则或关键字的目标策略规则无法与路由精确组合，已做近似处理。"
     },
     "filter": {
       "all": "全部查看状态",
@@ -1814,7 +1777,6 @@
       "advanced": "高级",
       "disposal": "处置",
       "default_adornment": "默认",
-      "reset_default": "恢复默认",
       "range_default": "范围 {{min}}–{{max}}，默认 {{d}}",
       "min_default": "不小于 {{min}}，默认 {{d}}",
       "default_only": "默认 {{d}}",
@@ -1973,7 +1935,6 @@
     "subtitle": "规则集是可复用片段，只有绑定到配置方案后才会参与订阅渲染。",
     "create": "新增规则集",
     "edit_title": "编辑规则集",
-    "selection_count": "已选 {{count}}",
     "batch_enable": "批量启用",
     "batch_disable": "批量禁用",
     "batch_delete": "批量删除",
@@ -1983,17 +1944,14 @@
       "sort": "排序",
       "enabled": "启用",
       "direct_subscription_domain": "DIRECT 订阅域名",
-      "proxy_group_order": "代理组顺序",
       "content": "主规则"
     },
     "placeholder": {
       "slug": "ad_block",
       "name": "广告拦截",
-      "proxy_group_order": "🚀 节点选择\n💬 Ai平台\n🎮 游戏平台",
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个代理组名。未列出的代理组会放在开头，并保持主规则中的首次出现顺序。",
       "direct_subscription_domain": "开启后，会在该规则集前面自动生成 DOMAIN-SUFFIX,<订阅域名>,DIRECT。未配置有效的订阅 Base URL 时不会生成；关闭后订阅更新按其它规则处理。"
     },
     "tabs": {
@@ -2042,9 +2000,7 @@
       "system_default": "系统默认",
       "unsaved": "有未保存的修改",
       "no_groups": "主规则中尚未识别到代理组",
-      "first_default": "第一项是客户端默认选中的出口",
       "restore_default": "恢复系统默认",
-      "default_badge": "默认",
       "group_type": "代理组类型",
       "type": {
         "select": "手动选择（select）",
@@ -6402,7 +6358,6 @@
         "url": "地址",
         "url_https": "只支持 https 地址",
         "test_fetch": "测试拉取",
-        "fetching": "正在拉取…",
         "fetch_result": "拉取结果  HTTP {{code}} · {{size}} · 接受 {{accepted}} 条 · 忽略 {{ignored}} 条",
         "fetch_failed": "拉取失败：{{error}}",
         "refresh_follows": "刷新：跟随全局设置（每 {{hours}} 小时）",
@@ -6436,7 +6391,6 @@
         "duplicates": "重复 {{count}} 条",
         "more_other": "还有 {{count}} 条",
         "warnings": "提醒",
-        "entries_only": "接受 {{count}} 条，其中正则 {{regexps}} 条",
         "jump": "跳到第 {{line}} 行",
         "reason": {
           "rewritten_to_network": "已改写：IP 段已对齐到网络号",
@@ -6542,7 +6496,6 @@
       "hits_source_rule": "来源规则 · {{name}}",
       "hits_list_separator": "、",
       "allowlist_report": "白名单 · 仅报告",
-      "allowlist_on": "白名单 · 开启",
       "usage_title": "按网站用量",
       "usage_help": "连接次数，不是流量；按小时、按网站的主域名汇总（如 google.com），以 IP 直连的记为「(ip)」。不含网址路径和来源 IP。只有记录用量的 Xray 节点上才有数据；列出最常用的前 20 个网站，其余合并为一行；次数为尽力而为。",
       "usage_audit": "只有管理员能查看，每次查看都会记入管理审计日志。",
