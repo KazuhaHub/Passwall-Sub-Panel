@@ -79,7 +79,7 @@ export function PolicyCreateRoute() {
   const { seed, invalid } = parseNewPolicySeed(params)
   if (!canView) return <Navigate to="/admin/dashboard" replace />
   if (invalid) return <PolicyNotFound />
-  return seed.copy ? <CopyLoader id={seed.copy} /> : <Creator initial={blankOf(seed.kind ?? 'block')} />
+  return seed.copy ? <CopyLoader key={`copy-${seed.copy}`} id={seed.copy} /> : <Creator key={seed.kind ?? 'block'} initial={blankOf(seed.kind ?? 'block')} />
 }
 
 /** A step's blank form: report-only is a block policy that starts in its report state. */
@@ -96,7 +96,7 @@ function CopyLoader({ id }: { id: number }) {
   if (!initial.current && source) {
     initial.current = { ...formOf(source), name: t(`${P}row.copy_name`, { name: source.name }), state: 'off', templateKey: '' }
   }
-  if (initial.current) return <Creator initial={initial.current} />
+  if (initial.current) return <Creator key={`copy-${id}`} initial={initial.current} />
   if (state) return <ObjectPage back={back} state={state} />
   if (fetching) return <ObjectPage back={back} state={{ kind: 'loading' }} />
   return <ObjectPage back={back} state={{ kind: 'not_found', title: t(`${P}editor.not_found`) }} />

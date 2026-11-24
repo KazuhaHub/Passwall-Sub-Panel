@@ -194,8 +194,14 @@ export default function ListEditor({ editId, initialKind = 'custom', back, onCre
         ? await save.mutateAsync({ id: editId, input: { ...input, updated_at: savedAt ?? detail.data.list.updated_at } })
         : await create.mutateAsync(input)
       pushSnack(t(`${L}snack.saved`, { name: out.list.name }), 'success')
+      if (editing) {
+        // Continue from what the server stored (a trimmed name and address), not from what was typed: the refetch
+        // reseeds the stored values, and a baseline made from the typed ones would stay "changed" for good.
+        const stored: Draft = { ...draft, name: out.list.name, url: draft.kind === 'remote' ? (out.list.source_url ?? draft.url.trim()) : draft.url }
+        setDraft(stored); setBaseline(stored); setSavedAt(out.list.updated_at)
+        return
+      }
       setBaseline(draft)
-      if (editing) { setSavedAt(out.list.updated_at); return }
       finished.current = true
       onCreated(out.list.id)
     } catch (err) {
@@ -261,7 +267,7 @@ export default function ListEditor({ editId, initialKind = 'custom', back, onCre
         ? <Button variant="outline" onClick={() => void navigate(`${ACCESS_PATH}?tab=lists&sheet=list&list=${editId}`)}>{t(`${L}menu.view`)}</Button>
         : undefined}>
       <FormValidityProvider>
-        <PageForm busy={saving || create.isPending || save.isPending} onSubmit={() => void submit()}>
+        <PageForm>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
             <div className="flex min-w-0 flex-col gap-4">
               {stale && (
@@ -276,6 +282,8 @@ export default function ListEditor({ editId, initialKind = 'custom', back, onCre
               )}
               {saveError && <LevelAlert level="error">{saveError}</LevelAlert>}
 
+              {/* Locked while a save runs: what is typed then would be wiped by the reseed from the saved list. */}
+              <fieldset disabled={saving} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
               {/* Three long labels do not fit a 375px phone: the control scrolls inside its own box instead of widening the page. */}
               <div className="max-w-full overflow-x-auto">
                 <SegmentedControl aria-label={t(`${L}dialog.type`)} value={draft.kind} disabled={editing} onChange={v => void switchKind(v)}
@@ -299,7 +307,7 @@ export default function ListEditor({ editId, initialKind = 'custom', back, onCre
                     <div className="overflow-hidden rounded-lg border">
                       <Suspense fallback={<Skeleton className="h-52 w-full rounded-none" />}>
                         <CodeEditor ref={editor} language="plain" minRows={16} value={draft.text} ariaLabel={t(`${L}dialog.text`)}
-                          onChange={text => set({ text })} />
+                          readOnly={saving} onChange={text => set({ text })} />
                       </Suspense>
                     </div>
                     <p className="text-xs text-muted-foreground">{t('admin:rules.editor_keyboard_hint')}</p>
@@ -344,6 +352,8 @@ export default function ListEditor({ editId, initialKind = 'custom', back, onCre
                   </p>
                 </>
               )}
+
+              </fieldset>
 
               {previewing && <p className="flex items-center gap-2 text-[13px]"><IconSpinner aria-hidden className="size-3.5 animate-spin" />{t(`${L}dialog.previewing`)}</p>}
               {previewError && <LevelAlert level="warning">{t(`${L}dialog.preview_failed`, { error: previewError })}</LevelAlert>}

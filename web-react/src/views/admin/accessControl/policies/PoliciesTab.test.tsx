@@ -7,7 +7,7 @@ import * as api from '@/api/accessControl'
 import * as groupsApi from '@/api/groups'
 import type { DestCatalog, DestPolicies, DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
-import { PolicyDetailRoute } from './PolicyRoutes'
+import { PolicyCreateRoute, PolicyDetailRoute } from './PolicyRoutes'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -247,6 +247,23 @@ describe('the policy page', () => {
     expect(whereIs(router)).toBe('/admin/access-control/policies/1')
   })
 
+  it('Enter in a text box (or a form submit) writes nothing: saving is a click', async () => {
+    editPage(1)
+    const name = await screen.findByLabelText(/名称/)
+    fireEvent.change(name, { target: { value: 'x' } })
+    fireEvent.keyDown(name, { key: 'Enter' })
+    fireEvent.submit(name.closest('form')!)
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.updateDestPolicy).not.toHaveBeenCalled()
+  })
+
+  it('a copy and a blank policy are keyed by their seed: another seed starts a fresh form', async () => {
+    const view = renderAccess(<PolicyCreateRoute />, { route: '/admin/access-control/policies/new?copy=1', path: '/admin/access-control/policies/new' })
+    expect((await screen.findByLabelText(/名称/) as HTMLInputElement).value).toContain('禁止发信')
+    await view.router.navigate('/admin/access-control/policies/new?copy=2')
+    await waitFor(() => expect((screen.getByLabelText(/名称/) as HTMLInputElement).value).toContain('禁止 BT'))
+  })
+
   it('a second Save while one is running does not write twice', async () => {
     let release!: () => void
     vi.mocked(api.updateDestPolicy).mockReturnValue(new Promise(r => { release = () => r(pol({})) }))
@@ -255,7 +272,6 @@ describe('the policy page', () => {
     const save = await screen.findByRole('button', { name: '保存' })
     fireEvent.click(save)
     fireEvent.click(save)
-    fireEvent.submit(save.closest('form')!)
     release()
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledTimes(1))
   })

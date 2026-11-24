@@ -261,7 +261,7 @@ export default function PolicyEditor({ policy: initialPolicy, initial, back, onC
   return (
     <ObjectPage back={back} title={policy ? policy.name : t(`${D}title_new`)} badges={badges}>
       <FormValidityProvider>
-        <PageForm busy={busy} onSubmit={() => void save()}>
+        <PageForm>
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
             <div className="grid min-w-0 gap-5">
               {stale && (

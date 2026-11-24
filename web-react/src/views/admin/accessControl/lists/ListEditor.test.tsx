@@ -165,6 +165,34 @@ describe('the list editor page', () => {
     expect(view.router.state.location.pathname).not.toBe('/admin/dashboard')
   })
 
+  it('Enter in the name (or a form submit) writes nothing', async () => {
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0, http_status: 200, bytes: 10 })
+    renderAccess(dialog({ initialKind: 'remote' }))
+    type('名称', 'Feed')
+    type('地址', 'https://example.org/list.txt')
+    const name = screen.getByLabelText(/^名称/)
+    fireEvent.keyDown(name, { key: 'Enter' })
+    fireEvent.submit(name.closest('form')!)
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.createDestList).not.toHaveBeenCalled()
+  })
+
+  it('after an edit is saved the page is clean even when the typed name had spaces around it', async () => {
+    const list = { ...written(4).list, name: 'Risky' }
+    vi.mocked(api.getDestList).mockResolvedValue({ list, samples: [], source_text: 'a.com' })
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0 })
+    vi.mocked(api.updateDestList).mockResolvedValue({ list: { ...list, updated_at: 3 }, report: null })
+    renderAccess(dialog({ editId: 4 }))
+    await waitFor(() => expect((screen.getByLabelText('code') as HTMLTextAreaElement).value).toBe('a.com'))
+    await screen.findByTestId('parse-report')
+    type('名称', ' Risky ')
+    await screen.findByRole('button', { name: '保存' })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.updateDestList).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '保存' })).toBeNull())
+    expect((screen.getByLabelText(/^名称/) as HTMLInputElement).value).toBe('Risky')
+  })
+
   it('a second Save while one is running does not write twice', async () => {
     vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0, http_status: 200, bytes: 10 })
     let release: (w: api.DestListWrite) => void = () => undefined
@@ -175,7 +203,6 @@ describe('the list editor page', () => {
     const save = screen.getByRole('button', { name: '保存' })
     fireEvent.click(save)
     fireEvent.click(save)
-    fireEvent.submit(save.closest('form')!)
     release(written(8))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(8))
     expect(api.createDestList).toHaveBeenCalledTimes(1)

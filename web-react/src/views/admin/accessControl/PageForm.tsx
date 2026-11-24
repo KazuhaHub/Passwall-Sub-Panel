@@ -1,30 +1,11 @@
 import type { ReactNode } from 'react'
-import { useFormValidity } from '@/components/form/FormValidity'
 
 /**
- * The form element of an editor page. A form with several text boxes and no submit button is not submitted by Enter
- * in the browser, so Enter in a plain single-line box (not a picker, a code editor or a button) is sent to submit
- * here. Enter in a text box saves, with the same two refusals the Save button has: while
- * the form holds a problem (the SaveBar names it) and while a save is already running, so a second Enter or a click
- * beside it never starts a second write. Must sit inside the FormValidityProvider.
+ * The form element of an editor page. Saving is a deliberate click on the SaveBar's button, never a keystroke: Enter
+ * in a text box must not write (it confirms an input-method candidate in zh-CN, and this area decides what the nodes
+ * block), so a submit is swallowed here and the browser's own implicit submission is never wired to the save.
+ * `display: contents` keeps the form out of the layout.
  */
-export function PageForm({ onSubmit, busy, children }: { onSubmit: () => void; busy: boolean; children: ReactNode }) {
-  const { blocked } = useFormValidity()
-  return (
-    <form
-      className="contents" noValidate
-      onSubmit={e => { e.preventDefault(); if (!blocked && !busy) onSubmit() }}
-      onKeyDown={e => {
-        const el = e.target as HTMLElement
-        // A picker's input (role=combobox) uses Enter to choose; only a plain text box saves.
-        if (e.key !== 'Enter' || e.defaultPrevented || el.tagName !== 'INPUT' || el.getAttribute('role')) return
-        const type = (el as HTMLInputElement).type
-        if (type !== 'text' && type !== 'url' && type !== 'search') return
-        e.preventDefault()
-        e.currentTarget.requestSubmit()
-      }}
-    >
-      {children}
-    </form>
-  )
+export function PageForm({ children }: { children: ReactNode }) {
+  return <form className="contents" noValidate onSubmit={e => e.preventDefault()}>{children}</form>
 }
