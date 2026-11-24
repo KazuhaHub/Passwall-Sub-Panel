@@ -9,27 +9,34 @@ import { pushToast } from '@/components/feedback/toasts'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { DetailDialog } from '@/components/data/DetailDialog'
+import { IconButton } from '@/components/common/IconButton'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { IconAdd, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner } from '@/lib/icons'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { IconAdd, IconArrowLeft, IconClose, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner, IconWarning } from '@/lib/icons'
 import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
+import type { ProbeInput } from '@/utils/ruleset/match'
 import {
   deleteBlock, deleteLines, editRule, insertRules, mergeBlocks, mergePreview, moveBlock, moveLinesToBlock, moveLinesToNewBlock, newBlock, replaceRange,
   retargetLines, setNote,
 } from '@/utils/ruleset/ops'
+import { IssuesPanel } from './IssuesPanel'
 import { BlockDetail } from './BlockDetail'
 import { BlockDirectory } from './BlockDirectory'
 import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
+import { EMPTY_PROBE, RouteTester } from './RouteTester'
 import { targetChoices } from './targets'
 import { TargetView } from './TargetView'
 import { TextLinesDialog } from './TextLinesDialog'
 import { useRuleDoc } from './useRuleDoc'
+import { useShadowFindings } from './useShadowFindings'
 
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
@@ -69,8 +76,8 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * the same text as one document when that is easier. Both views edit the draft `content`; switching loses nothing, because
  * an edit rewrites only the lines it names (see utils/ruleset/ops).
  *
- * The right-hand column of the design (the routing tester) is not built yet: the grid has room for it and the middle
- * column takes the width meanwhile.
+ * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
+ * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
 export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget }: {
   content: string
@@ -97,6 +104,13 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const [targetMode, setTargetMode] = useState<'merged' | 'runs'>('merged')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [announce, setAnnounce] = useState('')
+  // The routing test: on a wide screen a third column, on a narrower one a dialog, on a phone a screen of its own. What was typed
+  // in it is kept here so that moving between the three, or closing it, does not lose it.
+  const wide = useMediaQuery('(min-width: 1280px)')
+  const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(min-width: 1280px)').matches)
+  const [probe, setProbe] = useState<ProbeInput>(EMPTY_PROBE)
+  const [issuesOpen, setIssuesOpen] = useState(false)
+  const [focusRow, setFocusRow] = useState<{ id: number; token: number } | null>(null)
   const search = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const importInto = useRef<number>(0)
@@ -109,6 +123,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   useEffect(() => {
     if (showTarget) { setTargetFilter(showTarget.name); setTargetMode('merged'); setOpened(false) }
   }, [showTarget])
+  const findings = useShadowFindings(doc)
   const choices = useMemo(() => targetChoices(blocks, order, rematchNames), [blocks, order, rematchNames])
   const current = blocks[Math.min(selected, blocks.length - 1)] as Block | undefined
   const currentIndex = current?.index ?? 0
@@ -158,6 +173,18 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
     return changed
   }
   const firstLineId = (b: Block) => doc.lines[b.start].id
+
+  /** Opens a line (from the routing test or the problems panel) in its group, with anything that would hide it cleared. */
+  const jumpToLine = (line: number) => {
+    const b = blockAt(blocks, line)
+    if (!b || textOnly) return
+    setQuery(''); setTargetFilter(''); setTargetMode('runs')
+    if (shownView === 'text') setView('blocks')
+    setSelected(b.index); setOpened(true)
+    setFocusRow({ id: doc.lines[line].id, token: Date.now() })
+    // The narrower layouts show the test over the page; the page is what the jump is for.
+    if (!wide) setTesterOpen(false)
+  }
 
   const reorder = ({ movedId, beforeId }: ReorderCall) => {
     const from = Number(movedId)
@@ -368,6 +395,19 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const showDirectory = !phone || (!opened && !merged)
   const showDetail = !phone || opened || merged
 
+  // On a phone the test is a screen of its own, in place of the rules.
+  if (phone && testerOpen) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <IconButton label={t('admin:rules.tester.back')} onClick={() => setTesterOpen(false)}><IconArrowLeft /></IconButton>
+          <h2 className="text-base font-semibold">{t('admin:rules.tester.title')}</h2>
+        </div>
+        <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
       {serverIssues.length > 0 && (
@@ -418,9 +458,18 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           </span>
         )}
         <span className="text-xs text-muted-foreground tabular-nums">{stats}</span>
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setIssuesOpen(true)}>
+            <IconWarning />
+            {findings !== null && findings.length > 0 ? t('admin:rules.issues.button', { count: findings.length.toLocaleString() }) : t('admin:rules.issues.title')}
+          </Button>
+          <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={() => setTesterOpen(o => !o)}>{t('admin:rules.tester.title')}</Button>
+        </span>
       </div>
       <p role="status" aria-live="polite" className="min-h-4 text-xs text-muted-foreground">{resultsText || announce}</p>
 
+      <div className={wide && testerOpen ? 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]' : 'min-w-0'}>
+      <div className="min-w-0">
       {shownView === 'text' ? (
         <div className="flex flex-col gap-1.5">
           {phone && <p className="text-xs text-muted-foreground">{t('admin:rules.text.mobile_hint')}</p>}
@@ -453,7 +502,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
               ) : current ? (
                 <BlockDetail
                   key={`${current.index}:${current.target}:${current.kind}`}
-                  doc={doc} block={current} choices={choices} readOnly={readOnly} query={q} phone={phone} onBack={() => setOpened(false)}
+                  doc={doc} block={current} choices={choices} readOnly={readOnly} query={q} phone={phone} onBack={() => setOpened(false)} focusRow={focusRow}
                   onEditRow={id => setDialog({ kind: 'edit', id })}
                   onAddRow={() => setDialog({ kind: 'add', block: firstLineId(current) })}
                   onPaste={() => setDialog({ kind: 'paste', where: { kind: 'into', block: firstLineId(current) } })}
@@ -469,9 +518,26 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           )}
         </div>
       )}
+      </div>
+      {wide && testerOpen && (
+        <aside aria-label={t('admin:rules.tester.title')} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
+            <IconButton label={t('admin:rules.tester.hide_tester')} size="icon-xs" onClick={() => setTesterOpen(false)}><IconClose /></IconButton>
+          </div>
+          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+        </aside>
+      )}
+      </div>
       <input ref={fileInput} type="file" accept=".txt,.list,.yaml,.yml,.conf,text/plain" hidden aria-hidden tabIndex={-1}
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void readFile(f) }} />
       {renderDialog()}
+      {!wide && !phone && testerOpen && (
+        <DetailDialog open onClose={() => setTesterOpen(false)} size="md" title={t('admin:rules.tester.title')}>
+          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} onJump={jumpToLine} />
+        </DetailDialog>
+      )}
+      {issuesOpen && <IssuesPanel doc={doc} findings={findings} textOnly={textOnly} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }

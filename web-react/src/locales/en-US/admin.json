@@ -2222,7 +2222,20 @@
       "mobile_hint": "On a phone, the group view is easier to edit with"
     },
     "issues": {
-      "main_rules": "Main rules"
+      "main_rules": "Main rules",
+      "button": "{{count}} findings",
+      "title": "Issues and findings",
+      "none": "No issues found",
+      "computing": "Checking…",
+      "text_only": "The rules have lines the editor can't read as a list. Fix them in the Text view to check for rules that are covered by earlier ones.",
+      "show_more": "Show {{count}} more",
+      "level": {
+        "error": "Error",
+        "warning": "Warning",
+        "info": "Info"
+      },
+      "summary": "{{count}} rules never apply",
+      "description": "Rules that an earlier rule already covers. This list only reports; nothing is changed."
     },
     "blocks": {
       "title": "Rule groups",
@@ -2450,6 +2463,65 @@
       "open": "Open group {{index}}",
       "table": "All rules that point at {{target}}",
       "back_to": "Edit by group"
+    },
+    "tester": {
+      "title": "Test routing",
+      "address": "Address",
+      "address_placeholder": "Domain or IP",
+      "port": "Port",
+      "network": "Network",
+      "more": "More conditions",
+      "resolved_ip": "Resolved IP",
+      "process": "Process name",
+      "src_port": "Source port",
+      "src_ip": "Source IP",
+      "empty": "Enter a domain or IP to see which rule it matches and which proxy group it uses.",
+      "matched": "Matches rule {{rule}} in group {{index}} ({{group}}), line {{line}}.",
+      "goes_group": "Traffic goes to proxy group {{target}}.",
+      "goes_builtin": "Traffic is {{action}}.",
+      "action": {
+        "DIRECT": "sent directly",
+        "REJECT": "rejected",
+        "REJECT-DROP": "dropped"
+      },
+      "no_match": "No rule matches. Mihomo applies the client's default.",
+      "no_certain": "No rule is certain to match.",
+      "also_matching": "{{count}} more rules also match but come later, so they don't apply:",
+      "uncertain_title": "This result is not certain",
+      "uncertain_body": "These rules can't be evaluated here, and one of them may match first:",
+      "branch_client_data": "Line {{line}} {{rule}} needs data from the client and can't be checked here.",
+      "branch_resolve": "Line {{line}} {{rule}} is an IP rule; Mihomo resolves the domain here. Enter the resolved IP for a definite result.",
+      "branch_input": "Line {{line}} {{rule}} needs a condition that wasn't entered (see More conditions).",
+      "branch_regex": "Line {{line}} {{rule}} has a regular expression that can't be run safely here.",
+      "branch_sub_rule": "Line {{line}} {{rule}} jumps into a sub-rule, which can't be followed here.",
+      "branch_unsupported": "Line {{line}} {{rule}} is a rule this tester can't evaluate.",
+      "branch_if_match": "If it matches → {{target}}",
+      "branch_else": "If none of them match, matching continues:",
+      "passed": "Line {{line}} matches, but its target is PASS, so it is skipped and matching continues.",
+      "scope": "Tests this rule set's draft only. In a real subscription, the user's personal rules, the direct subscription domain rule and rule sets earlier in the template are matched first.",
+      "mihomo_only": "Judged in Mihomo's rule order. sing-box skips some rule types, so its result can differ.",
+      "ip_note": "An IP address is tested as a connection with no domain name.",
+      "text_only": "The rules have lines the editor can't read as a list, so routing can't be tested until they are fixed.",
+      "problem": {
+        "address_invalid": "Enter a domain or an IP address, without a URL, port or spaces",
+        "port_invalid": "The port must be a number from 0 to 65535",
+        "resolved_invalid": "The resolved IP isn't a valid address",
+        "src_invalid": "The source port or source IP isn't valid"
+      },
+      "more_count": "{{count}} more",
+      "go_to_line": "Go to line {{line}}",
+      "back": "Back to the rules",
+      "show_tester": "Show the routing test",
+      "hide_tester": "Hide the routing test"
+    },
+    "lint": {
+      "shadowed_same": "Line {{line}} matches first with the same target; this line is redundant",
+      "shadowed_other": "Line {{line}} matches first ({{winner}}); this line never applies",
+      "duplicate": "Identical to line {{line}}",
+      "after_match": "Comes after the fallback rule (line {{line}}) and never matches",
+      "group_other": "Never applies: matched first by an earlier rule with a different target",
+      "group_same": "Redundant: an earlier rule already sends the same traffic to the same target",
+      "group_after": "Never matches: comes after the fallback rule"
     }
   },
   "nodes": {
