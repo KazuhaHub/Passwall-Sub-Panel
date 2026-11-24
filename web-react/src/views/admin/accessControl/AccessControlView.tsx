@@ -21,7 +21,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
 import { useCan } from '@/utils/permissions'
 import AccessSettingsDialog from './AccessSettingsDialog'
-import AccountDrawerHost from './AccountDrawerHost'
+import AccountDialogHost from './AccountDialogHost'
 import {
   parseAccessSheet, parseAccessTab, parseListId, parseNodeFilter, type AccessNavState, type AccessSheet,
   type AccessTab, type NodeFilter, type SettingsFocus,
@@ -256,7 +256,7 @@ export default function AccessControlView() {
         }}
         onTest={target => sheet.open('test', { replace: true, prefill: { target } })} />
       <AccessSettingsDialog open={settings.open} focus={settings.focus} onClose={() => setSettings({ open: false })} />
-      <AccountDrawerHost userId={account.value} onClose={account.close} />
+      <AccountDialogHost userId={account.value} onClose={account.close} />
     </div>
   )
 }

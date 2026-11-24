@@ -20,22 +20,22 @@ import { useRiskT } from '../useRiskT'
 import AccessTab from './AccessTab'
 import ConnectionsTab from './ConnectionsTab'
 import DevicesTab from './DevicesTab'
-import DrawerHeader from './DrawerHeader'
+import DialogHeader from './DialogHeader'
 import OverviewTab from './OverviewTab'
 import TimelineTab from './TimelineTab'
 
-export type DrawerTab = 'overview' | 'connections' | 'devices' | 'timeline' | 'access'
+export type DialogTab = 'overview' | 'connections' | 'devices' | 'timeline' | 'access'
 /** The fifth tab is the access-control one: only an admin is offered it. */
-const TABS: readonly DrawerTab[] = ['overview', 'connections', 'devices', 'timeline', 'access']
+const TABS: readonly DialogTab[] = ['overview', 'connections', 'devices', 'timeline', 'access']
 
-export type DrawerHost = 'risk' | 'users' | 'access'
+export type DialogHost = 'risk' | 'users' | 'access'
 
 /** The actions shown as buttons; the rest (undo, trust) sit behind ⋯. */
 const PRIMARY: readonly RiskActionKind[] = ['pause', 'convert_manual', 'resume', 'dismiss', 'redismiss']
 
 function ActionBar({ subject, host, onStart }: {
   subject: RiskSubject
-  host: DrawerHost
+  host: DialogHost
   onStart: (kind: RiskActionKind, subject: RiskSubject) => void
 }) {
   const { t } = useRiskT()
@@ -80,16 +80,16 @@ function ActionBar({ subject, host, onStart }: {
  * overview with no dialog left open. A refresh of the summary replaces its data in place: the dialog and
  * the tab the admin is on stay. It reads nothing while closed.
  */
-export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
+export default function RiskUserDialog({ userId, onClose, host, initialTab }: {
   userId: number | null
   onClose: () => void
   /** 'users' when the Users page hosts it: its link back to that page is
    *  left out. 'access' is the access-control page, which opens on the
    *  access tab. */
-  host: DrawerHost
+  host: DialogHost
   /** The tab each open starts on; the access host defaults to 'access', the
    *  others to the overview. */
-  initialTab?: DrawerTab
+  initialTab?: DialogTab
 }) {
   const { t } = useRiskT()
   const scope = useQueryScope()
@@ -101,11 +101,11 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
 
   const canAccess = useCan('access.view')
   const tabs = TABS.filter(k => k !== 'access' || canAccess)
-  const startTab: DrawerTab = initialTab ?? (host === 'access' ? 'access' : 'overview')
-  const landing: DrawerTab = tabs.includes(startTab) ? startTab : 'overview'
-  const [tabState, setTab] = useState<DrawerTab>(landing)
+  const startTab: DialogTab = initialTab ?? (host === 'access' ? 'access' : 'overview')
+  const landing: DialogTab = tabs.includes(startTab) ? startTab : 'overview'
+  const [tabState, setTab] = useState<DialogTab>(landing)
   // A tab the role can no longer see (the permission went while it was open) reads as the overview.
-  const tab: DrawerTab = tabs.includes(tabState) ? tabState : 'overview'
+  const tab: DialogTab = tabs.includes(tabState) ? tabState : 'overview'
   // Each open edge and each switch of account resets the transient UI.
   const openKey = open ? String(userId) : ''
   const [seenKey, setSeenKey] = useState(openKey)
@@ -122,8 +122,8 @@ export default function RiskUserDrawer({ userId, onClose, host, initialTab }: {
   let body
   if (data) {
     body = (
-      <Tabs value={tab} onValueChange={v => setTab(v as DrawerTab)} className="gap-0">
-        <DrawerHeader summary={data} />
+      <Tabs value={tab} onValueChange={v => setTab(v as DialogTab)} className="gap-0">
+        <DialogHeader summary={data} />
         {/* The tab strip stays put at the top of the scrolling body while a long tab scrolls under it. */}
         <div className="sticky top-0 z-10 -mx-4 mt-3 overflow-x-auto border-b bg-popover px-4 py-2">
           <TabsList aria-label={t('admin:risk_center.drawer.title')}>

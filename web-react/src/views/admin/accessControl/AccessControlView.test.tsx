@@ -32,7 +32,7 @@ vi.mock('./dialogs/CoverageDialog', () => ({ default: ({ open }: { open: boolean
 vi.mock('./dialogs/ExemptionsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="exemptions-sheet" /> : null }))
 vi.mock('./lists/ListEntriesDialog', () => ({ default: ({ listId, onEdit }: { listId: number | null; onEdit: (id: number) => void }) => listId ? <button data-testid="entries-sheet" onClick={() => onEdit(listId)}>{listId}</button> : null }))
 vi.mock('./AccessSettingsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="settings-dialog" /> : null }))
-vi.mock('./AccountDrawerHost', () => ({ default: ({ userId }: { userId: number | null }) => userId ? <p data-testid="account-drawer">{userId}</p> : null }))
+vi.mock('./AccountDialogHost', () => ({ default: ({ userId }: { userId: number | null }) => userId ? <p data-testid="account-drawer">{userId}</p> : null }))
 vi.mock('@/components/UserAutocomplete', () => ({ default: ({ fullWidth }: { fullWidth?: boolean }) => <input aria-label="pick" data-fullwidth={String(!!fullWidth)} /> }))
 
 const node = (over: Partial<DestNodeStatus> = {}): DestNodeStatus => ({

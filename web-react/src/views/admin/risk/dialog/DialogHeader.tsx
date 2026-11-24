@@ -71,7 +71,7 @@ export function ReviewBadges({ review }: { review: ReviewBadge }) {
  * fixed "risk details" caption (it is also what names the dialog while the summary is loading or has failed);
  * the account's name is the first line here.
  */
-export default function DrawerHeader({ summary }: { summary: RiskUserSummary }) {
+export default function DialogHeader({ summary }: { summary: RiskUserSummary }) {
   const { t } = useRiskT()
   const scope = useQueryScope()
   const panelTz = useSiteStore(s => s.timezone)

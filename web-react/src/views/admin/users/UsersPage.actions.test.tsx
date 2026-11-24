@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { account, api, mountPage, serve, toast, user } from './testHarness'
 import UsersPage from './UsersPage'
 
-vi.mock('../risk/drawer/RiskUserDrawer', () => ({ default: () => null }))
+vi.mock('../risk/dialog/RiskUserDialog', () => ({ default: () => null }))
 
 // A deferred promise the test settles on its own schedule: a slow (3-10 s) upstream answer.
 function deferred<T = unknown>() {

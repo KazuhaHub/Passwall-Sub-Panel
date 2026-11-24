@@ -18,7 +18,7 @@ import { IconDelete, IconRefresh, IconSync } from '@/lib/icons'
 import { useUsersList } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
 import { accountStateOf, proxyEnabled } from '@/utils/userAccess'
-import RiskUserDrawer from '../risk/drawer/RiskUserDrawer'
+import RiskUserDialog from '../risk/dialog/RiskUserDialog'
 import { singleFacet } from '../logs/shared'
 import { UserCard } from './cells'
 import { userColumns } from './columns'
@@ -176,7 +176,7 @@ function UsersList() {
         />
         <UserDialogs state={dialog} setState={setDialog} reload={reload} toggleBatch={batch.toggleAccount} />
         {/* Above every modal (riskDrawerZIndex). Not mounted for an operator: a link to ?risk= would only read a 403. */}
-        {canRisk && <RiskUserDrawer userId={riskDrawer.id} onClose={riskDrawer.close} host="users" />}
+        {canRisk && <RiskUserDialog userId={riskDrawer.id} onClose={riskDrawer.close} host="users" />}
       </div>
     </UsersContext.Provider>
   )

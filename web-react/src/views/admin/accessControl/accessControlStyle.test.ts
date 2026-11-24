@@ -26,7 +26,7 @@ const files = [
   join(srcRoot, 'components/access/AccessBadge.tsx'),
   join(srcRoot, 'components/access/accessStatus.ts'),
   join(srcRoot, 'views/admin/servers/dialogs/ServerAccessDialog.tsx'),
-  join(srcRoot, 'views/admin/risk/drawer/AccessTab.tsx'),
+  join(srcRoot, 'views/admin/risk/dialog/AccessTab.tsx'),
 ]
 
 // Comments may name a colour; strip them before looking.
