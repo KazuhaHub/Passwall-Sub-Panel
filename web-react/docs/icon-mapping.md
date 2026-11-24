@@ -78,6 +78,8 @@ Generated from the Material icons the app used before the move to lucide (every 
 | `Group` | `IconUsers` | `Users` |  |
 | `Workspaces` | `IconGroups` | `Boxes` | groups page |
 | `Storage` | `IconServer` | `Server` | servers page (upstream machines) |
+| `Power` | `IconPower` | `Power` | enable or disable a line or node (row menu) |
+| `Reorder` | `IconReorder` | `ArrowUpDown` | Move to… in the nodes row menu |
 | `Dns` | `IconNode` | `Network` | nodes page |
 | `Https` | `IconCert` | `FileBadge` | certificates page |
 | `Rule` | `IconRules` | `ListChecks` | rule sets page |
