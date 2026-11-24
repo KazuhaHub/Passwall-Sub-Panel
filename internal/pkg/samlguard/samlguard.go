@@ -10,8 +10,8 @@
 //     differently-trusted assertion alongside a legitimate one.
 //   - Weak signature algorithms. crewjam accepts whatever the IdP declares,
 //     including rsa-sha1 (ADFS's and legacy Keycloak's historical default).
-//   - Assertion shape (GO-2026-6909, no patched crewjam release). A signed
-//     assertion lacking <Subject> reaches a nil dereference in crewjam's
+//   - Assertion shape (GO-2026-6909, fixed in crewjam v0.5.2; kept as a second
+//     line of defence). A signed assertion lacking <Subject> reaches a nil dereference in crewjam's
 //     validateAssertion (Issuer is a value field, so a missing one only fails
 //     the issuer comparison; it is required here anyway). And crewjam's
 //     Subject.NameID field carries no tag and NameID has no XMLName, so
