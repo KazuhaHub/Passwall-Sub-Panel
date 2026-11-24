@@ -14,7 +14,7 @@ import {
   type WindowMode,
 } from '@/utils/diagnostics'
 import { CARD_ORDER, type CardId } from '@/utils/diagnosticsCatalog'
-import { Disclosure } from './Disclosure'
+import { Disclosure } from '@/components/common/Disclosure'
 import { panelTime } from './panelTime'
 import RawMetricTable, { childLabel, familyDesc, familyLabel } from './RawMetricTable'
 import type { DiagFormat } from './useDiagFormat'

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { IconCopy, IconDownload } from '@/lib/icons'
 import { Notice } from '@/components/common/Notice'
-import { Disclosure } from '../shared/Disclosure'
+import { Disclosure } from '@/components/common/Disclosure'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Field } from '@/components/form/Field'
 import { Switch } from '@/components/ui/switch'
@@ -21,7 +21,7 @@ export function InstallAdvanced({ inst, newServer, rotating, hasServer }: { inst
   if (!provisioning) return null
   const showIdentity = selection.method !== 'github' && selection.method !== 'manual'
   return (
-    <Disclosure label={t('admin:servers.native.advanced')}>
+    <Disclosure className="rounded-lg border" buttonClassName="min-h-(--control-h) px-3 text-sm font-medium" bodyClassName="flex flex-col gap-3 border-t px-3 py-3" summary={t('admin:servers.native.advanced')}>
       {hasServer && !newServer && <p className="text-sm">{t('admin:servers.passwall_node_install.existing_hint')}</p>}
       <p className="text-sm">{t('admin:servers.native.private_warning')}</p>
       {showIdentity && (

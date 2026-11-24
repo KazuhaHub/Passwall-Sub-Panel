@@ -15,7 +15,7 @@ import {
   type SessionBase,
 } from '@/utils/diagnostics'
 import { LINK_TARGET, type CardId } from '@/utils/diagnosticsCatalog'
-import { Disclosure } from './Disclosure'
+import { Disclosure } from '@/components/common/Disclosure'
 import { SeverityBadge } from './StateBadge'
 import type { DiagFormat } from './useDiagFormat'
 
