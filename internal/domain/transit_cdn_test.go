@@ -325,3 +325,55 @@ func TestCDNWarnings_GRPC(t *testing.T) {
 		t.Errorf("missing gRPC warnings: %s", got)
 	}
 }
+
+// Xray reads wsSettings.host first and the Host header only when it is empty,
+// and matches the header key case-insensitively.
+func TestCDNWarnings_OriginHostPrecedenceAndCase(t *testing.T) {
+	line := RelayLine{ID: "a", Mode: RelayModeCDN, Domain: "cdn.example.com", Address: "1.1.1.1", Port: 443, SNI: "cdn.example.com"}
+	ws := func(extra string) *Node {
+		return cdnNode("vless", `{"network":"ws","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"wsSettings":{`+extra+`}}`)
+	}
+	warns := func(n *Node, host string) bool {
+		l := line
+		l.Host = host
+		return strings.Contains(codes(CDNWarnings(n, l)), CDNIssueOriginHost)
+	}
+	both := ws(`"host":"a.com","headers":{"Host":"b.com"}`)
+	if warns(both, "a.com") || !warns(both, "b.com") {
+		t.Errorf("host must win over headers.Host")
+	}
+	lower := ws(`"headers":{"host":"b.com"}`)
+	if warns(lower, "b.com") || !warns(lower, "a.com") {
+		t.Errorf("a lowercase host header must be read")
+	}
+}
+
+func TestValidateCDNRelays_ClientTLSOff(t *testing.T) {
+	off := false
+	line := RelayLine{ID: "a", Name: "CF-1", Mode: RelayModeCDN, Domain: "cdn.example.com", ClientTLS: &off}
+	for code, n := range map[string]*Node{
+		CodeCDNClientTLSGRPC:   cdnNode("vless", tlsStream("grpc", "")),
+		CodeCDNClientTLSTrojan: cdnNode("trojan", tlsStream("ws", "")),
+	} {
+		err := ValidateCDNRelays(n, []RelayLine{line})
+		var coded *CodedValidationError
+		if !errors.Is(err, ErrValidation) || !errors.As(err, &coded) || coded.Code != code {
+			t.Errorf("%s: refusal = %v", code, err)
+		}
+	}
+	if err := ValidateCDNRelays(cdnNode("vless", tlsStream("ws", "")), []RelayLine{line}); err != nil {
+		t.Errorf("ws with client TLS off must be allowed: %v", err)
+	}
+}
+
+func TestCDNWarnings_HTTPUpgradeHostHeader(t *testing.T) {
+	line := RelayLine{ID: "a", Mode: RelayModeCDN, Domain: "cdn.example.com", Address: "1.1.1.1", Port: 443, SNI: "cdn.example.com", Host: "cdn.example.com"}
+	bad := cdnNode("vless", `{"network":"httpupgrade","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"httpupgradeSettings":{"headers":{"host":"cdn.example.com"}}}`)
+	if got := codes(CDNWarnings(bad, line)); !strings.Contains(got, CDNIssueHTTPUpgradeHeader) {
+		t.Errorf("a Host inside HTTPUpgrade headers must warn: %s", got)
+	}
+	ok := cdnNode("vless", `{"network":"httpupgrade","security":"tls","tlsSettings":{"serverName":"cdn.example.com"},"httpupgradeSettings":{"host":"cdn.example.com"}}`)
+	if got := codes(CDNWarnings(ok, line)); strings.Contains(got, CDNIssueHTTPUpgradeHeader) {
+		t.Errorf("the host field must not warn: %s", got)
+	}
+}

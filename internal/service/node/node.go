@@ -1258,6 +1258,10 @@ func (s *Service) updateInboundConfigLockedNode(ctx context.Context, n *domain.N
 	next := *n
 	inboundcfg.ApplySpec(&next, spec)
 	if err := domain.ValidateCDNRelays(&next, next.Relays); err != nil {
+		var coded *domain.CodedValidationError
+		if errors.As(err, &coded) {
+			return fmt.Errorf("%w (the change would leave a CDN line whose client TLS setting does not fit the transport: turn client TLS on for the line, or remove it first)", err)
+		}
 		return fmt.Errorf("%w (the change would leave its CDN lines without a transport a CDN can carry: remove those lines first, or keep a TLS + WebSocket, gRPC or HTTPUpgrade transport)", err)
 	}
 	if err := s.checkListenerGuard(ctx, n, &next); err != nil {

@@ -51,7 +51,9 @@
       "source_guard_listener_transport": "此更改会使 {{node}} 的监听器从 X-Forwarded-For 取连接来源（sing-box 在除纯 TCP 以外的所有传输上都这样），无法再按来源区分连接。以下线路的倍率与直连不同，依赖这一点：{{lines}}。请先把它们改为直连倍率或删除。",
       "source_guard_listener_trust": "此更改会使 {{node}} 的监听器信任 X-Forwarded-For 或 PROXY 头，无法再按来源区分连接。以下线路的倍率与直连不同，依赖这一点：{{lines}}。请先把它们改为直连倍率或删除。",
       "link_reality_engines": "sing-box 入口不能通过 REALITY 隧道连接 Xray 出口，请改用 Shadowsocks 2022。",
-      "engine_reality_links": "此更改会使以下从 sing-box 入口到 Xray 出口的 REALITY 隧道无法连接：{{links}}。请先把这些隧道改为 Shadowsocks 2022。"
+      "engine_reality_links": "此更改会使以下从 sing-box 入口到 Xray 出口的 REALITY 隧道无法连接：{{links}}。请先把这些隧道改为 Shadowsocks 2022。",
+      "cdn_client_tls_trojan": "{{node}} 的 CDN 线路「{{line}}」关闭了客户端 TLS，但 Trojan 始终使用 TLS，客户端不开 TLS 就连不上 CDN。请开启客户端 TLS。",
+      "cdn_client_tls_grpc": "{{node}} 的 CDN 线路「{{line}}」关闭了客户端 TLS，但经 CDN 的 gRPC 需要客户端使用 TLS（Cloudflare 只通过 HTTPS 提供 gRPC）。请开启客户端 TLS。"
     }
   },
   "auth": {
