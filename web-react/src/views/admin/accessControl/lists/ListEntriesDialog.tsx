@@ -42,6 +42,9 @@ export default function ListEntriesDialog({ listId, onClose, onEdit, onTest, nav
   const policies = useDestPolicies(scope, { enabled: open })
   const refresh = useRefreshDestList(scope)
   const [search, setSearch] = useState('')
+  // Stepping to another list starts a fresh search: the old words were about the old list's entries.
+  const [searchedList, setSearchedList] = useState(listId)
+  if (searchedList !== listId) { setSearchedList(listId); setSearch('') }
 
   const list = q.data?.list
   const enabledUsed = !!list && list.used_by.some(u => [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])].some(p => p.id === u.id && p.state !== 'off'))

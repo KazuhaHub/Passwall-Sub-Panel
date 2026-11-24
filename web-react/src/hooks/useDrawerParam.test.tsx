@@ -28,6 +28,7 @@ function Harness() {
       <p data-testid="user">{user.value === null ? 'none' : String(user.value)}</p>
       <button onClick={() => sheet.open('test', { prefill: { target: 'smtp.example.com', port: 587 } })}>open sheet</button>
       <button onClick={() => sheet.open('nodes')}>open nodes</button>
+      <button onClick={() => sheet.open('nodes', { replace: true })}>replace nodes</button>
       <button onClick={() => sheet.close()}>close sheet</button>
       <button onClick={() => user.open(7)}>open user</button>
       <button onClick={() => user.open(7, { replace: true })}>open user replace</button>
@@ -120,5 +121,28 @@ describe('useDrawerParam with string values and exclusive drawers', () => {
     // Pushed by us: close goes Back instead of replacing in place.
     act(() => { fireEvent.click(screen.getByText('close user')) })
     expect(where()).toBe('/admin/dashboard')
+  })
+})
+
+// Stepping through the records of an open sheet replaces its entry. A replacing open must not change
+// whether the entry counts as pushed by this drawer: a close would otherwise go Back off a page that
+// was opened from a pasted link (nothing to go back to), or leave a pushed entry behind.
+describe('useDrawerParam replacing an open drawer', () => {
+  it('keeps an entry that was not pushed unmarked, so closing replaces instead of going Back', () => {
+    mount(['/admin/dashboard', '/admin/access-control?sheet=test'])
+    fireEvent.click(screen.getByText('replace nodes'))
+    expect(where()).toBe('/admin/access-control?sheet=nodes')
+    expect(JSON.parse(screen.getByTestId('state').textContent!)?.drawer).toBeUndefined()
+    fireEvent.click(screen.getByText('close sheet'))
+    expect(where()).toBe('/admin/access-control')
+  })
+
+  it('keeps a pushed entry marked, so closing still goes Back', () => {
+    mount(['/admin/dashboard', '/admin/access-control'])
+    fireEvent.click(screen.getByText('open sheet'))
+    fireEvent.click(screen.getByText('replace nodes'))
+    expect(JSON.parse(screen.getByTestId('state').textContent!).drawer).toBe('sheet')
+    fireEvent.click(screen.getByText('close sheet'))
+    expect(where()).toBe('/admin/access-control')
   })
 })

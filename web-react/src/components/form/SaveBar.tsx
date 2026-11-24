@@ -1,6 +1,6 @@
 import { useContext, useId, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { DialogFooterSlot } from '@/components/data/DetailDialog'
+import { DialogFooterSlot } from '@/components/ui/dialog-footer-slot'
 import { Loader2Icon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { Button } from '@/components/ui/button'

@@ -84,7 +84,6 @@ describe('LogsView', () => {
     reads()
     const m = mount('/admin/logs?row=2')
     const dialog = await screen.findByRole('dialog')
-    expect(dialog.textContent).toContain('2 of 3')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }))
     await waitFor(() => expect(here(m)).toBe('/admin/logs?row=3'))
     await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true))

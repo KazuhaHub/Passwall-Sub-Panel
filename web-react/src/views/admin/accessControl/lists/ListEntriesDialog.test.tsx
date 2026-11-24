@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
@@ -39,6 +40,18 @@ describe('the entries sheet', () => {
     expect(onTest).toHaveBeenCalledWith('login.fake-bank.net')
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(onEdit).toHaveBeenCalledWith(2)
+  })
+
+  it('starts a fresh search when it steps to another list', async () => {
+    function Stepper() {
+      const [id, setId] = useState(2)
+      return <><button onClick={() => setId(3)}>step</button><ListEntriesDialog listId={id} onClose={onClose} onEdit={onEdit} onTest={onTest} /></>
+    }
+    renderAccess(<Stepper />)
+    await screen.findByText('Scam list')
+    fireEvent.change(screen.getByLabelText('搜索条目'), { target: { value: 'fake' } })
+    fireEvent.click(screen.getByRole('button', { name: 'step', hidden: true }))
+    await waitFor(() => expect((screen.getByLabelText('搜索条目') as HTMLInputElement).value).toBe(''))
   })
 
   it('offers refresh for a remote list only and starts it', async () => {

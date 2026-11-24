@@ -119,8 +119,7 @@
       "clear_all": "清除全部筛选",
       "detail_close": "关闭详情",
       "detail_prev": "上一条",
-      "detail_next": "下一条",
-      "detail_position": "第{{current}}条，共{{total}}条"
+      "detail_next": "下一条"
     },
     "form": {
       "unsaved": "有未保存的修改",

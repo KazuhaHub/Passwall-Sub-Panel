@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderInRouter } from '@/test/routerHarness'
 import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { SaveBar } from '@/components/form/SaveBar'
+import { FormValidityProvider } from '@/components/form/FormValidity'
 import { DetailDialog } from './DetailDialog'
 import { FormDialog } from './FormDialog'
 import { useRecordNav } from './useRecordNav'
@@ -109,17 +111,17 @@ describe('DetailDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('names the previous and next buttons, disables them at the ends and shows the position', () => {
+  it('names the previous and next buttons, disables them at the ends', () => {
     const onNext = vi.fn()
-    const { rerender } = render(<DetailDialog open onClose={() => {}} title="T" nav={{ onNext, position: { current: 1, total: 3 } }}>x</DetailDialog>)
+    const { rerender } = render(<DetailDialog open onClose={() => {}} title="T" nav={{ onNext }}>x</DetailDialog>)
     const prev = screen.getByRole('button', { name: 'Previous record' }) as HTMLButtonElement
     const next = screen.getByRole('button', { name: 'Next record' }) as HTMLButtonElement
     expect(prev.disabled).toBe(true)
     expect(next.disabled).toBe(false)
-    expect(screen.getByRole('dialog').textContent).toContain('1 of 3')
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/\d of \d/)
     fireEvent.click(next)
     expect(onNext).toHaveBeenCalledTimes(1)
-    rerender(<DetailDialog open onClose={() => {}} title="T" nav={{ onPrev: () => {}, position: { current: 3, total: 3 } }}>x</DetailDialog>)
+    rerender(<DetailDialog open onClose={() => {}} title="T" nav={{ onPrev: () => {} }}>x</DetailDialog>)
     expect((screen.getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(false)
   })
@@ -167,6 +169,29 @@ describe('stacked dialogs', () => {
   })
 })
 
+describe('save bar placement', () => {
+  const bar = <FormValidityProvider><SaveBar dirty onSave={() => {}} onDiscard={() => {}} /></FormValidityProvider>
+
+  it('goes into the footer of the dialog that holds it', () => {
+    render(<DetailDialog open onClose={() => {}} title="T">{bar}</DetailDialog>)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.querySelector('[data-slot="detail-dialog-footer"] [data-slot="save-bar"]')).toBeTruthy()
+    expect(dialog.querySelector('[data-slot="detail-dialog-body"] [data-slot="save-bar"]')).toBeNull()
+  })
+
+  it('stays in a plain dialog opened from it, and does not leak into the outer footer', () => {
+    render(
+      <DetailDialog open onClose={() => {}} title="Outer">
+        <Dialog open><DialogContent><DialogTitle>Inner</DialogTitle>{bar}</DialogContent></Dialog>
+      </DetailDialog>,
+    )
+    const outer = document.querySelector('[data-slot="detail-dialog"]') as HTMLElement
+    const inner = screen.getByRole('dialog', { name: 'Inner' })
+    expect(outer.querySelector('[data-slot="detail-dialog-footer"] [data-slot="save-bar"]')).toBeNull()
+    expect(inner.querySelector('[data-slot="save-bar"]')).toBeTruthy()
+  })
+})
+
 describe('FormDialog', () => {
   it('submits with Cancel and the submit button in the footer, and refuses to close while saving', () => {
     const onSubmit = vi.fn()
@@ -187,16 +212,16 @@ describe('FormDialog', () => {
 describe('useRecordNav', () => {
   function Probe({ keys, current, select }: { keys: number[]; current: number | null; select: (k: number) => void }) {
     const nav = useRecordNav(keys, current, select)
-    return <div>{nav ? `${nav.position?.current}/${nav.position?.total} prev:${nav.onPrev ? 'y' : 'n'} next:${nav.onNext ? 'y' : 'n'}` : 'none'}</div>
+    return <div>{nav ? `prev:${nav.onPrev ? 'y' : 'n'} next:${nav.onNext ? 'y' : 'n'}` : 'none'}</div>
   }
   it('steps through the loaded keys in order and ends at the first and last', () => {
     const select = vi.fn()
     const { container, rerender } = render(<Probe keys={[5, 9, 2]} current={9} select={select} />)
-    expect(container.textContent).toBe('2/3 prev:y next:y')
+    expect(container.textContent).toBe('prev:y next:y')
     rerender(<Probe keys={[5, 9, 2]} current={5} select={select} />)
-    expect(container.textContent).toBe('1/3 prev:n next:y')
+    expect(container.textContent).toBe('prev:n next:y')
     rerender(<Probe keys={[5, 9, 2]} current={2} select={select} />)
-    expect(container.textContent).toBe('3/3 prev:y next:n')
+    expect(container.textContent).toBe('prev:y next:n')
   })
   it('offers nothing when the open record is not among the rows', () => {
     const { container } = render(<Probe keys={[1, 2]} current={7} select={() => {}} />)

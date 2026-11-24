@@ -1,19 +1,13 @@
-import { createContext, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
+import { useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from 'lucide-react'
 import { useSpacedT } from '@/i18n/spacing'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
+import { DialogFooterSlot } from '@/components/ui/dialog-footer-slot'
 import { Dialog, DialogDescription, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { TOUCH_TARGET } from '@/components/common/touchTarget'
-
-/**
- * Where a SaveBar inside the dialog goes: the footer element, once it is mounted. The bar keeps its place in the
- * form's React tree (so FormValidityProvider and its state are untouched) and is drawn into the footer through a
- * portal, fixed below the scrolling body instead of floating over the fields. Null outside a DetailDialog.
- */
-export const DialogFooterSlot = createContext<HTMLElement | null>(null)
 
 export type DetailDialogSize = 'sm' | 'md' | 'lg' | 'xl'
 
@@ -28,13 +22,13 @@ const WIDTH: Record<DetailDialogSize, string> = {
 
 /**
  * Previous / next for a dialog that shows one record of a list: the rows the list has loaded, in the
- * order it shows them. A missing handler means "at that end" and disables the button. `position` is the
- * 1-based place of this record, shown as "3 of 20".
+ * order it shows them. A missing handler means "at that end" and disables the button.
+ * No "3 of 20" is shown: a list that is paged by the server only knows the rows of this page, and a count of those
+ * would read as the number of records.
  */
 export interface DetailNav {
   onPrev?: () => void
   onNext?: () => void
-  position?: { current: number; total: number }
 }
 
 export interface DetailDialogProps {
@@ -115,7 +109,6 @@ export function DetailDialog({ open, onClose, title, status, description, action
             <div className="flex flex-shrink-0 items-center gap-0.5">
               {nav && (
                 <>
-                  {nav.position && <span className="px-1 text-xs tabular-nums text-muted-foreground">{t('ui.data.detail_position', nav.position)}</span>}
                   <Button type="button" variant="ghost" size="icon-sm" className={TOUCH_TARGET} disabled={!nav.onPrev} onClick={nav.onPrev} aria-label={t('ui.data.detail_prev')} title={t('ui.data.detail_prev')}><ChevronUpIcon /></Button>
                   <Button type="button" variant="ghost" size="icon-sm" className={TOUCH_TARGET} disabled={!nav.onNext} onClick={nav.onNext} aria-label={t('ui.data.detail_next')} title={t('ui.data.detail_next')}><ChevronDownIcon /></Button>
                 </>

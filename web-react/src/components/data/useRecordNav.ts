@@ -15,7 +15,6 @@ export function useRecordNav<K extends string | number>(keys: readonly K[], curr
     return {
       onPrev: i > 0 ? () => select(keys[i - 1]) : undefined,
       onNext: i < keys.length - 1 ? () => select(keys[i + 1]) : undefined,
-      position: { current: i + 1, total: keys.length },
     }
   }, [keys, current, select])
 }

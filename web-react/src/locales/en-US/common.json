@@ -119,8 +119,7 @@
       "clear_all": "Clear all filters",
       "detail_close": "Close details",
       "detail_prev": "Previous record",
-      "detail_next": "Next record",
-      "detail_position": "{{current}} of {{total}}"
+      "detail_next": "Next record"
     },
     "form": {
       "unsaved": "You have unsaved changes",
