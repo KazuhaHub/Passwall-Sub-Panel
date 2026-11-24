@@ -35,4 +35,13 @@ describe('PageHeader', () => {
     mount(<PageHeader title="日志" />)
     expect(document.querySelector('[data-slot="page-header-actions"]')).toBeNull()
   })
+
+  it('lets the actions wrap inside the header width instead of overflowing it', () => {
+    mount(<PageHeader title="用户" primary={<button>新建用户</button>} secondary={<><button>导出</button><button>导入</button></>}
+      more={[{ id: 'x', label: '清空', onSelect: () => {} }]} />)
+    const group = document.querySelector('[data-slot="page-header-actions"]') as HTMLElement
+    // jsdom has no layout, so the guard is on the classes that make the browser wrap: a capped width and wrapping.
+    expect(group.className).toMatch(/\bmax-w-full\b/)
+    expect(group.className).toMatch(/\bflex-wrap\b/)
+  })
 })
