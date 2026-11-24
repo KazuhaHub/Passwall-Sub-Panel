@@ -6,6 +6,9 @@ import { afterEach, beforeEach, vi } from 'vitest'
 import ConfirmHost from '@/components/ConfirmHost'
 import { useAuthStore } from '@/stores/auth'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
+import ServerCreateRoute from './ServerCreateRoute'
+import ServerInstallRoute from './ServerInstallRoute'
+import ServerRoute from './ServerRoute'
 
 // Shared set-up of the servers page tests (the page, its sheets and its dialogs). The request client is mocked,
 // toasts are recorded as (message, severity), and a translation returns its own key prefixed with the namespace, so a
@@ -73,10 +76,16 @@ afterEach(cleanup)
 
 /**
  * Renders `page` at `entry` in a data router with the confirm host, in StrictMode (the install-command tests rely on its
- * double mount), with a query client of its own so no cached rows leak between tests.
+ * double mount), with a query client of its own so no cached rows leak between tests. The server pages the list leads to
+ * (a server, a new one, an installation) are routed at their real addresses, so a test can follow the list into them.
  */
 export function mount(page: ReactElement, entry = '/admin/servers') {
-  const router = createMemoryRouter([{ path: '*', element: page }], { initialEntries: [entry] })
+  const router = createMemoryRouter([
+    { path: '/admin/servers/new', element: <ServerCreateRoute /> },
+    { path: '/admin/servers/:id', element: <ServerRoute /> },
+    { path: '/admin/servers/:id/install', element: <ServerInstallRoute /> },
+    { path: '*', element: page },
+  ], { initialEntries: [entry] })
   const client = makeTestQueryClient()
   const view = render(
     <StrictMode>

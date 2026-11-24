@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { releaseCatalog, nativeServer, provisioning, waiting, selectVersion, mountExpanded } from './install/installationHarness'
 import { api } from './testHarness'
-import { NativeInstallationSheet } from './install/NativeInstallationSheet'
+import { NativeInstallationPage } from './install/NativeInstallationPage'
 import { isNodeReleaseVersion } from './install/installModel'
 import { hostFromURL, serverHost } from '../nodes/inbound/inboundModel'
 
@@ -73,8 +73,8 @@ describe('Passwall Node in-place upgrade', () => {
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
 
     const installed = { ...nativeServer, panel_version: '4.0.0 (abcdef1)' }
-    mountExpanded(<NativeInstallationSheet server={installed}
-      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationPage server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
 
     // The switch is off and the panel says what that means here.
@@ -93,8 +93,8 @@ describe('Passwall Node in-place upgrade', () => {
       ? { data: provisioning }
       : { data: waiting }))
     const installed = { ...nativeServer, panel_version: '4.1.0 (abcdef1)' }
-    mountExpanded(<NativeInstallationSheet server={installed}
-      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationPage server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onRotate={vi.fn()} />)
     await selectVersion('4.1.0')
     expect(screen.queryByText('admin:servers.native.upgrade_in_place_needed')).toBeNull()
   })})
@@ -111,8 +111,8 @@ describe('Passwall Node identity replacement', () => {
     api.post.mockResolvedValue({ data: { server_id: 7, command: 'curl -fsSL https://panel.test/private-once | sudo bash',
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } })
     const installed = { ...nativeServer, panel_version: panelVersion }
-    mountExpanded(<NativeInstallationSheet server={installed}
-      initialProvisioning={{ ...provisioning, server: installed }} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationPage server={installed}
+      initialProvisioning={{ ...provisioning, server: installed }} onRotate={vi.fn()} />)
   }
 
   it('sends the replace mode, with its consequences, and only once asked', async () => {
