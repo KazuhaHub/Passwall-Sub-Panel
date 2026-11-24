@@ -100,6 +100,14 @@ describe('the rule-set page', () => {
     expect(screen.queryByRole('region', { name: /unsaved/i })).toBeNull()
   })
 
+  it('says how to leave the code editor with the keyboard, in the text view', async () => {
+    reads()
+    mountRuleSets(PAGE)
+    await group(/Proxy/)
+    fireEvent.click(screen.getByRole('radio', { name: 'Text' }))
+    expect(await screen.findByText(/press Escape and then Tab/)).toBeTruthy()
+  })
+
   it('pastes a list into a group after a check that names the duplicates', async () => {
     reads()
     mountRuleSets(PAGE)
