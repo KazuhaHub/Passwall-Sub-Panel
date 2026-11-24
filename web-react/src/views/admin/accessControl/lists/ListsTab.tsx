@@ -21,10 +21,10 @@ import { useDeleteDestList, useDestLists, useDestPolicies, useGeositeStatus, use
 import { useQueryScope } from '@/query/useQueryScope'
 import { budgetLevel } from '@/utils/accessControl'
 import { parseListKindFilter, parseListStateFilter, type AccessNavState, type SettingsFocus } from '../accessParams'
+import { accessReturnState, listPath, newListPath } from '../accessRoutes'
 import { deleteListConfirm } from '../confirmCopy'
 import { destErrorText, reportDestError } from '../destErrors'
 import { ListCard, listColumns, type ListColumnCtx } from './listColumns'
-import ListSheet from './ListSheet'
 import { listStatus } from './listStatus'
 
 const L = 'admin:access_control.lists.'
@@ -62,19 +62,21 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
   const stateFilter = parseListStateFilter(params.get('lst_state'))
   const kindFilter = parseListKindFilter(params.get('lst_kind'))
   const [sorting, setSorting] = useState<SortingState>([{ id: 'name', desc: false }])
-  const [dialog, setDialog] = useState<{ open: boolean; editId: number | null; kind: DestListKind }>({ open: false, editId: null, kind: 'custom' })
   const [inUse, setInUse] = useState<{ name: string; usedBy: DestPolicyRef[] } | null>(null)
 
-  // Another part of the page asked for the editor on arrival (state, never the URL): do it once, clear it.
-  // Keyed by the history entry, so a second request (a new entry) is handled too.
+  /** The editor and the create form are pages; they carry this tab's place so their back link returns to it. */
+  const openPage = (to: string, replace = false) => void navigate(to, { replace, state: accessReturnState(location.pathname, location.search) })
+
+  // Another part of the page asked for the editor on arrival (state, never the URL): it is a page now, so go there,
+  // replacing this entry so Back does not return to the redirect. Keyed by the history entry, so a second request is handled too.
   const handled = useRef<string | null>(null)
   useEffect(() => {
     const want = (location.state as AccessNavState | null)?.openList
     if (want === undefined || handled.current === location.key) return
     handled.current = location.key
-    if (typeof want === 'number') setDialog({ open: true, editId: want, kind: 'custom' })
-    else setDialog({ open: true, editId: null, kind: want.replace('new_', '') as DestListKind })
-    void navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
+    void navigate(typeof want === 'number' ? listPath(want) : newListPath(want.replace('new_', '') as DestListKind), {
+      replace: true, state: accessReturnState(location.pathname, location.search),
+    })
   }, [location, navigate])
 
   const enabledIds = useMemo(
@@ -117,13 +119,13 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
 
   // The columns are one stable array (DataTable memoises its rows on them); the handlers they call are read
   // through a ref, so the latest render's closures run without rebuilding the columns.
-  const h = useRef({ onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh })
-  h.current = { onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh }
+  const h = useRef({ onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh, openPage })
+  h.current = { onOpenEntries, onOpenPolicy, onOpenAllowlist, doDelete, doRefresh, openPage }
   const ctx = useMemo<ListColumnCtx>(() => ({
     t, lang: i18n.language,
     usedEnabled: l => l.used_by.some(u => u.kind === 'policy' && enabledIds.has(u.id)),
     onOpenEntries: id => h.current.onOpenEntries(id),
-    onEdit: id => setDialog({ open: true, editId: id, kind: 'custom' }),
+    onEdit: id => h.current.openPage(listPath(id)),
     onRefresh: l => void h.current.doRefresh(l),
     onDelete: l => void h.current.doDelete(l),
     onOpenPolicy: id => h.current.onOpenPolicy(id),
@@ -146,7 +148,7 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
       <DropdownMenuTrigger render={<Button />}><IconAdd />{t(`${L}new`)}<IconChevronDown /></DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {(['custom', 'remote', 'geosite'] as const).map(k => (
-          <DropdownMenuItem key={k} onClick={() => setDialog({ open: true, editId: null, kind: k })}>{t(`${L}kind.${k}`)}</DropdownMenuItem>
+          <DropdownMenuItem key={k} onClick={() => openPage(newListPath(k))}>{t(`${L}kind.${k}`)}</DropdownMenuItem>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -214,8 +216,6 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
         </LevelAlert>
       )}
       {body}
-      <ListSheet open={dialog.open} editId={dialog.editId} initialKind={dialog.kind} onClose={() => setDialog(d => ({ ...d, open: false }))}
-        onSaved={onOpenEntries} />
       <Dialog open={inUse !== null} onOpenChange={o => { if (!o) setInUse(null) }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>

@@ -3,8 +3,9 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
-import { confirmMock, renderAccess, snack } from '@/test/accessControlHarness'
-import ListSheet from './ListSheet'
+import { confirmMock, renderAccess, snack, whereIs } from '@/test/accessControlHarness'
+import ListEditor from './ListEditor'
+import { ListCreateRoute, ListDetailRoute } from './ListRoutes'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -19,9 +20,12 @@ const report = (o: Partial<api.DestParseReport> = {}): api.DestParseReport => ({
 const budget = { rules: { used: 0, limit: 1 }, domains: { used: 0, limit: 1 }, regexps: { used: 0, limit: 1 }, cidrs: { used: 0, limit: 1 }, source_cidrs: { used: 0, limit: 1 }, subjects: { used: 0, limit: 1 }, bytes: { used: 0, limit: 1 } }
 const written = (id = 7): api.DestListWrite => ({ list: { id, name: 'Risky', kind: 'custom', side: 'dest', entry_count: 1, regexp_count: 0, state: 'ready', empty: false, last_fetched_at: 1, last_error: '', owner_group_id: 0, updated_at: 2, used_by: [] }, report: null })
 
-const onClose = vi.fn()
-const onSaved = vi.fn()
-const dialog = (p: Partial<React.ComponentProps<typeof ListSheet>> = {}) => <ListSheet open editId={null} onClose={onClose} onSaved={onSaved} {...p} />
+const onCreated = vi.fn()
+const dialog = (p: Partial<React.ComponentProps<typeof ListEditor>> = {}) => (
+  <ListEditor editId={null} back={{ to: '/admin/access-control', label: '访问控制' }} onCreated={onCreated} {...p} />
+)
+/** The Save button is aria-disabled (not disabled) while the bar names what to fix. */
+const saveOff = () => screen.getByRole('button', { name: '保存' }).getAttribute('aria-disabled') === 'true'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -33,7 +37,7 @@ beforeEach(() => {
 // A required field's label carries a star, so match the start of it.
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(new RegExp(`^${label}`)), { target: { value } })
 
-describe('the list sheet', () => {
+describe('the list editor page', () => {
   it('previews a custom list as typing pauses (not on every key) and shows what was understood', async () => {
     vi.mocked(api.previewDestList).mockResolvedValue({ report: report(), entries: [], entry_count: 1, regexp_count: 0 })
     renderAccess(dialog())
@@ -59,8 +63,7 @@ describe('the list sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.createDestList).toHaveBeenCalledWith({ kind: 'custom', side: 'dest', name: 'Risky', text: 'a.com' }))
     expect(snack).toHaveBeenCalledWith('已保存「Risky」', 'success')
-    expect(onSaved).toHaveBeenCalledWith(7)
-    expect(onClose).toHaveBeenCalled()
+    expect(onCreated).toHaveBeenCalledWith(7)
   })
 
   it('lists the lines a 400 refuses, by number, and a name clash lands on the name field', async () => {
@@ -69,7 +72,7 @@ describe('the list sheet', () => {
     fireEvent.change(await screen.findByLabelText('code'), { target: { value: 'x\nregexp:(' } })
     expect(await screen.findByText('有无法保存的行')).toBeTruthy()
     expect(screen.getByText('第 2 行')).toBeTruthy()
-    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(saveOff()).toBe(true)
   })
 
   it('maps a name clash to the name field', async () => {
@@ -115,7 +118,7 @@ describe('the list sheet', () => {
     await waitFor(() => expect(input.disabled).toBe(false))
     fireEvent.mouseDown(input)
     fireEvent.click(await screen.findByRole('option', { name: 'cn · 5 条' }))
-    await waitFor(() => expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect(saveOff()).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.createDestList).toHaveBeenCalledWith({ kind: 'geosite', geosite_category: 'cn', geosite_attrs: [] }))
   })
@@ -133,7 +136,7 @@ describe('the list sheet', () => {
     await screen.findByTestId('parse-report')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(vi.mocked(api.updateDestList).mock.calls[0][1]).toMatchObject({ updated_at: 2, text: 'b.com' }))
-    expect(await screen.findByText('这个列表刚被其他人修改过')).toBeTruthy()
+    expect((await screen.findAllByText('这个列表刚被其他人修改过')).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: '载入最新' })).toBeTruthy()
   })
 
@@ -145,16 +148,37 @@ describe('the list sheet', () => {
     expect(await screen.findByLabelText(/^地址/)).toBeTruthy()
   })
 
-  it('closing with unsaved input asks first; closing a clean dialog does not', async () => {
-    renderAccess(dialog())
-    fireEvent.click(await screen.findByTitle('关闭详情'))
+  it('leaving with unsaved input asks first, with Cancel focused; a clean page leaves without asking', async () => {
+    const view = renderAccess(dialog())
+    await screen.findByLabelText('code')
+    await view.router.navigate('/admin/dashboard')
     expect(confirmMock).not.toHaveBeenCalled()
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(view.router.state.location.pathname).toBe('/admin/dashboard')
+  })
+
+  it('leaving a page with typed input is held until the prompt is answered', async () => {
+    const view = renderAccess(dialog())
     type('名称', 'x')
     confirmMock.mockResolvedValueOnce(false)
-    fireEvent.click(screen.getByTitle('关闭详情'))
-    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '放弃未保存的修改？' })))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    await view.router.navigate('/admin/dashboard')
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '放弃未保存的修改？', initialFocus: 'cancel' })))
+    expect(view.router.state.location.pathname).not.toBe('/admin/dashboard')
+  })
+
+  it('a second Save while one is running does not write twice', async () => {
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0, http_status: 200, bytes: 10 })
+    let release: (w: api.DestListWrite) => void = () => undefined
+    vi.mocked(api.createDestList).mockReturnValue(new Promise(r => { release = r }))
+    renderAccess(dialog({ initialKind: 'remote' }))
+    type('名称', 'Feed')
+    type('地址', 'https://example.org/list.txt')
+    const save = screen.getByRole('button', { name: '保存' })
+    fireEvent.click(save)
+    fireEvent.click(save)
+    fireEvent.submit(save.closest('form')!)
+    release(written(8))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(8))
+    expect(api.createDestList).toHaveBeenCalledTimes(1)
   })
 
   it('a community category with no data downloaded says so and offers the download', async () => {
@@ -185,5 +209,30 @@ describe('the list sheet', () => {
     expect(screen.queryByText('名称必填')).toBeNull()
     fireEvent.blur(screen.getByLabelText(/^名称/))
     expect(await screen.findByText('名称必填')).toBeTruthy()
+  })
+})
+
+describe('the list routes', () => {
+  it('a malformed id is "not found" in the page frame and asks for nothing', async () => {
+    renderAccess(<ListDetailRoute />, { route: '/admin/access-control/lists/0', path: '/admin/access-control/lists/:id' })
+    expect(await screen.findByText('没有找到这个列表，可能已被删除')).toBeTruthy()
+    expect(api.getDestList).not.toHaveBeenCalled()
+  })
+
+  it('a 404 read is "not found" too', async () => {
+    vi.mocked(api.getDestList).mockRejectedValue(axiosErr(404, { code: 'dest_bad_id' }))
+    renderAccess(<ListDetailRoute />, { route: '/admin/access-control/lists/9', path: '/admin/access-control/lists/:id' })
+    expect(await screen.findByText('没有找到这个列表，可能已被删除')).toBeTruthy()
+  })
+
+  it('a create lands on the new list\'s page, replacing the form, and a clean page then leaves without asking', async () => {
+    vi.mocked(api.createDestList).mockResolvedValue(written(8))
+    vi.mocked(api.previewDestList).mockResolvedValue({ report: report({ samples: [], warnings: [] }), entries: [], entry_count: 1, regexp_count: 0, http_status: 200, bytes: 10 })
+    const view = renderAccess(<ListCreateRoute />, { route: '/admin/access-control/lists/new?kind=remote', path: '/admin/access-control/lists/new' })
+    type('名称', 'Feed')
+    type('地址', 'https://example.org/list.txt')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(whereIs(view.router)).toBe('/admin/access-control/lists/8'))
+    expect(confirmMock).not.toHaveBeenCalled()
   })
 })
