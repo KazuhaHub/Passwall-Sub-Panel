@@ -26,12 +26,12 @@ import { CountsColumn, StatusColumn, VersionColumn, ActionsColumn, serverColumns
 import { CoreDialog } from './dialogs/CoreDialog'
 import { LineMultipliersDialog } from './dialogs/LineMultipliersDialog'
 import { NativeAgentUpgradeDialog } from './dialogs/NativeAgentUpgradeDialog'
-import NodeDiagnosticsSheet from './dialogs/NodeDiagnosticsSheet'
+import NodeDiagnosticsDialog from './dialogs/NodeDiagnosticsDialog'
 import { NodeMigrationPreviewDialog } from './dialogs/NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './dialogs/ReinstallBackendDialog'
 import RetiredRouteCleanupDialog from './dialogs/RetiredRouteCleanupDialog'
 import ServerAccessDialog from './dialogs/ServerAccessDialog'
-import NodeMetricsSheet from './metrics/NodeMetricsSheet'
+import NodeMetricsDialog from './metrics/NodeMetricsDialog'
 import { DEFAULT_INSTALLATION } from './install/installModel'
 import { NativeInstallationSheet } from './install/NativeInstallationSheet'
 import { ServersContext, type ServersCtx } from './serversContext'
@@ -278,8 +278,8 @@ export default function ServersPage() {
           initialSelection={install.creating ? installChoice : DEFAULT_INSTALLATION} onClose={closeInstallation}
           onRotate={s => void rotateCredential(s)} rotating={rotatingId === install.server.id} />
       )}
-      <NodeMetricsSheet server={metricsTarget} open={metricsTarget !== null} onClose={() => setMetricsTarget(null)} />
-      <NodeDiagnosticsSheet server={diagnosticsTarget} open={diagnosticsTarget !== null} onClose={() => setDiagnosticsTarget(null)} />
+      <NodeMetricsDialog server={metricsTarget} open={metricsTarget !== null} onClose={() => setMetricsTarget(null)} />
+      <NodeDiagnosticsDialog server={diagnosticsTarget} open={diagnosticsTarget !== null} onClose={() => setDiagnosticsTarget(null)} />
       {accessNode && <ServerAccessDialog node={accessNode.node} serverName={accessNode.name} onClose={() => setAccessNode(null)} />}
       <NativeAgentUpgradeDialog server={upgradeTarget} onClose={() => { setUpgradeTarget(null); refresh() }} />
       {coreTarget && (

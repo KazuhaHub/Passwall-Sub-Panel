@@ -26,7 +26,7 @@ import { reportDestError } from '../destErrors'
 import EvalTrace, { terminatingStep, VerdictLine } from './EvalTrace'
 import { normalizeTarget, parseResolvedIps, resolvedIpsPayload, validIp, validPort } from './testInput'
 
-export interface TestSheetProps {
+export interface TestDialogProps {
   open: boolean
   onClose: () => void
   /** From history state: a destination, a port, an account. Never from the URL. */
@@ -38,7 +38,7 @@ export interface TestSheetProps {
 const T = 'admin:access_control.test.'
 
 /** S13: what the published policy does with one connection, step by step. Nothing typed here reaches the URL. */
-export default function TestSheet({ open, onClose, prefill, onOpenPolicy }: TestSheetProps) {
+export default function TestDialog({ open, onClose, prefill, onOpenPolicy }: TestDialogProps) {
   const { t } = useTranslation(['admin'])
   return (
     <DetailDialog open={open} onClose={onClose} size="lg" title={t(`${T}title`)}>

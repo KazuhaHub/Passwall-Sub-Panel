@@ -22,7 +22,7 @@ interface Pair { k: string; v: string }
  * does not know) takes free KEY / VALUE pairs. Values are write-only: the server returns only the key names,
  * so on an existing credential every box starts empty and an empty box keeps the stored value.
  */
-export function CredFormSheet({ cred, data, onClose }: { cred: DNSCredential | null; data: CertData; onClose: () => void }) {
+export function CredFormDialog({ cred, data, onClose }: { cred: DNSCredential | null; data: CertData; onClose: () => void }) {
   const t = useCertsT()
   const c = useCommonT()
   const queryClient = useQueryClient()

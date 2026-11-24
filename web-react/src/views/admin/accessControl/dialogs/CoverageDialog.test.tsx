@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { renderAccess, snack, whereIs } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
-import CoverageSheet from './CoverageSheet'
+import CoverageDialog from './CoverageDialog'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -34,9 +34,9 @@ beforeEach(() => {
   ]))
 })
 
-describe('CoverageSheet', () => {
+describe('CoverageDialog', () => {
   it('counts the five chips, shows every node and the apply window from the settings', async () => {
-    renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
+    renderAccess(<CoverageDialog open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
     expect(await screen.findByText('节点覆盖 · 5 台')).toBeTruthy()
     expect(screen.getAllByTestId('node-policy-row')).toHaveLength(5)
     expect(await screen.findByText(/最后一次修改后等 45 秒再下发/)).toBeTruthy()
@@ -45,7 +45,7 @@ describe('CoverageSheet', () => {
 
   it('a chip filters, is aria-pressed, and pressing it again clears', async () => {
     const onFilterChange = vi.fn()
-    const { rerender: _r } = renderAccess(<CoverageSheet open onClose={() => {}} filter="problem" onFilterChange={onFilterChange} onOpenSettings={() => {}} />)
+    const { rerender: _r } = renderAccess(<CoverageDialog open onClose={() => {}} filter="problem" onFilterChange={onFilterChange} onOpenSettings={() => {}} />)
     await screen.findByText('节点覆盖 · 5 台')
     expect(screen.getAllByTestId('node-policy-row')).toHaveLength(1)
     const chip = screen.getByRole('button', { name: /有问题/ })
@@ -57,7 +57,7 @@ describe('CoverageSheet', () => {
   it('an empty filter says so and offers to clear it', async () => {
     const onFilterChange = vi.fn()
     vi.mocked(api.getDestStatus).mockResolvedValue(status([node({})]))
-    renderAccess(<CoverageSheet open onClose={() => {}} filter="upgrade" onFilterChange={onFilterChange} onOpenSettings={() => {}} />)
+    renderAccess(<CoverageDialog open onClose={() => {}} filter="upgrade" onFilterChange={onFilterChange} onOpenSettings={() => {}} />)
     expect(await screen.findByText('没有符合的节点')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
     expect(onFilterChange).toHaveBeenCalledWith(null)
@@ -66,7 +66,7 @@ describe('CoverageSheet', () => {
   it('Apply again retries the agent; the edit link opens the settings on the apply window', async () => {
     vi.mocked(api.retryDestAgent).mockResolvedValue({ retried: true })
     const onOpenSettings = vi.fn()
-    renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={onOpenSettings} />)
+    renderAccess(<CoverageDialog open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={onOpenSettings} />)
     fireEvent.click(await screen.findByRole('button', { name: '重新下发' }))
     await waitFor(() => expect(api.retryDestAgent).toHaveBeenCalledWith('a2'))
     fireEvent.click(screen.getByRole('button', { name: '修改' }))
@@ -75,13 +75,13 @@ describe('CoverageSheet', () => {
 
   it('a retry with nothing to retry is not announced as a success', async () => {
     vi.mocked(api.retryDestAgent).mockResolvedValue({ retried: false })
-    renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
+    renderAccess(<CoverageDialog open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
     fireEvent.click(await screen.findByRole('button', { name: '重新下发' }))
     await waitFor(() => expect(snack).toHaveBeenCalledWith('这台节点没有被拒绝的策略，无需重新下发', 'info'))
   })
 
   it('Upgrade goes to the servers page for that node', async () => {
-    const { router } = renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
+    const { router } = renderAccess(<CoverageDialog open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
     const row = (await screen.findAllByTestId('node-policy-row')).find(r => within(r).queryByText('Osaka'))!
     fireEvent.click(within(row).getByRole('button', { name: '升级' }))
     await waitFor(() => expect(whereIs(router)).toBe('/admin/servers?q=Osaka'))
@@ -92,7 +92,7 @@ describe('recording (2c)', () => {
   const rec = (over: Partial<api.DestNodeStatus> = {}) => node({
     supports: { policy: true, hits: true, usage: false }, collect: 'hits', collect_effective: 'hits', collecting: true, hits_24h: 1204, last_report_at: Date.now() - 30_000, ...over,
   })
-  const sheet = () => renderAccess(<CoverageSheet open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
+  const sheet = () => renderAccess(<CoverageDialog open onClose={() => {}} filter={null} onFilterChange={() => {}} onOpenSettings={() => {}} />)
 
   it('says what is recorded, over the retention that is set, and that the raw log stays on the node', async () => {
     vi.mocked(api.getDestStatus).mockResolvedValue(status([rec(), rec({ panel_id: 2, agent_id: 'a2', panel_name: 'Osaka', collecting: true }), node({ panel_id: 3, agent_id: 'a3', panel_name: 'Seoul' })]))

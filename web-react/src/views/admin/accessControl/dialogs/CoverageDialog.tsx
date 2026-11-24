@@ -20,7 +20,7 @@ import { isNativeKind, NODE_FILTERS, NODE_STATE_FILTER, nodeStateKey } from '@/u
 import { reportDestError, reportRetry } from '../destErrors'
 import type { NodeFilter } from '../accessParams'
 
-export interface CoverageSheetProps {
+export interface CoverageDialogProps {
   open: boolean
   onClose: () => void
   /** The `node_state` filter, from the URL. */
@@ -38,7 +38,7 @@ const C = 'admin:access_control.coverage.'
  * treat host names in DestResolveDialog (both shared with the servers page)
  * from a row's menu.
  */
-export default function CoverageSheet({ open, onClose, filter, onFilterChange, onOpenSettings }: CoverageSheetProps) {
+export default function CoverageDialog({ open, onClose, filter, onFilterChange, onOpenSettings }: CoverageDialogProps) {
   const { t } = useTranslation(['admin'])
   const navigate = useNavigate()
   const scope = useQueryScope()

@@ -30,12 +30,12 @@ import { pauseConfirm, resumeConfirm } from './confirmCopy'
 import { reportDestError } from './destErrors'
 import AllowlistTab from './allowlist/AllowlistTab'
 import ListsTab from './lists/ListsTab'
-import ListEntriesSheet from './lists/ListEntriesSheet'
+import ListEntriesDialog from './lists/ListEntriesDialog'
 import PoliciesTab from './policies/PoliciesTab'
 import RecordsTab from './records/RecordsTab'
-import CoverageSheet from './sheets/CoverageSheet'
-import ExemptionsSheet from './sheets/ExemptionsSheet'
-import TestSheet from './sheets/TestSheet'
+import CoverageDialog from './dialogs/CoverageDialog'
+import ExemptionsDialog from './dialogs/ExemptionsDialog'
+import TestDialog from './dialogs/TestDialog'
 import VerdictBar from './VerdictBar'
 
 const HELP_KEY: Record<AccessTab, string> = {
@@ -238,12 +238,12 @@ export default function AccessControlView() {
           </>
         )}
 
-      <TestSheet open={sheet.value === 'test'} onClose={sheet.close} prefill={prefill} onOpenPolicy={openPolicy} />
-      <CoverageSheet open={sheet.value === 'nodes'} onClose={sheet.close} filter={nodeFilter}
+      <TestDialog open={sheet.value === 'test'} onClose={sheet.close} prefill={prefill} onOpenPolicy={openPolicy} />
+      <CoverageDialog open={sheet.value === 'nodes'} onClose={sheet.close} filter={nodeFilter}
         onFilterChange={setNodeFilter} onOpenSettings={openSettings} />
-      <ExemptionsSheet open={sheet.value === 'exemptions'} onClose={sheet.close}
+      <ExemptionsDialog open={sheet.value === 'exemptions'} onClose={sheet.close}
         onOpenUser={id => account.open(id, { replace: true })} />
-      <ListEntriesSheet listId={openListId} nav={listNav} onClose={sheet.close}
+      <ListEntriesDialog listId={openListId} nav={listNav} onClose={sheet.close}
         onEdit={id => {
           // A sheet that was PUSHED is closed by going Back, so history keeps one
           // page entry; the dialog is opened once that navigation has landed.

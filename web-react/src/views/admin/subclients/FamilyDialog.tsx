@@ -19,7 +19,7 @@ const FORMATS: SubRenderFormat[] = ['mihomo', 'sing-box', 'uri-list']
  * second draft with an Apply button): the page's save bar and leave guard already cover every change, so a
  * second layer of "unsaved" would only add a step. Closing the dialog loses nothing.
  */
-export function FamilySheet({ families, index, onChange, onClose }: {
+export function FamilyDialog({ families, index, onChange, onClose }: {
   families: SubClientFamily[]
   /** The family being edited; null: closed. */
   index: number | null

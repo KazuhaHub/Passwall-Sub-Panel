@@ -30,9 +30,9 @@ import type { PathLabels } from '../shared/pathOf'
 import { useNodesT } from '../shared/useNodesT'
 import { BulkNodeActions } from './BulkNodeActions'
 import { LineCard } from './LineCard'
-import { LineSheet } from './LineSheet'
+import { LineDialog } from './LineDialog'
 import { MoveToDialog } from './MoveToDialog'
-import { SeparatorSheet } from './SeparatorSheet'
+import { SeparatorDialog } from './SeparatorDialog'
 import { StaleOrderDialog } from './StaleOrderDialog'
 import { SeparatorRowCell } from './cells'
 import { orderColumns, rowStateOf, treeColumns } from './columns'
@@ -323,7 +323,7 @@ export default function LinesTab() {
         />
       )}
 
-      <LineSheet
+      <LineDialog
         item={open} newLine={editing && addingTo !== null ? { nodeName: nodeMap.get(addingTo)?.display_name ?? '' } : null}
         nav={nav}
         editor={editing ? <LineEditor nodeId={addingTo ?? open?.row.node_id ?? 0} lineId={addingTo !== null ? null : open?.row.line_id ?? null} onDirtyChange={guard.setDirty} onSaved={onEditorSaved} /> : undefined}
@@ -333,7 +333,7 @@ export default function LinesTab() {
         onSelect={id => lineSel.select(id, { replace: true })} onClose={closeSheet}
       />
       {actions.dialogs}
-      <SeparatorSheet
+      <SeparatorDialog
         separatorId={!admin || !sepSel.selected ? null : sepSel.selected === 'new' ? 'new' : Number(sepSel.selected)}
         separators={separators.data ?? []}
         nodes={items.filter(i => i.row.kind === 'line' && i.row.line_id === 'direct').map(i => ({ id: i.row.node_id ?? 0, name: i.row.landing?.name ?? i.row.name }))}

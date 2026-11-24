@@ -17,7 +17,7 @@ import { listStatus } from './listStatus'
 
 const L = 'admin:access_control.lists.'
 
-export interface ListEntriesSheetProps {
+export interface ListEntriesDialogProps {
   /** The list the URL names, or null (closed). */
   listId: number | null
   onClose: () => void
@@ -34,7 +34,7 @@ export interface ListEntriesSheetProps {
  * returned them. The search is the component's own state and never reaches the URL (R12); it covers the
  * 200 shown, not the whole list.
  */
-export default function ListEntriesSheet({ listId, onClose, onEdit, onTest, nav }: ListEntriesSheetProps) {
+export default function ListEntriesDialog({ listId, onClose, onEdit, onTest, nav }: ListEntriesDialogProps) {
   const { t, i18n } = useTranslation(['admin'])
   const scope = useQueryScope()
   const open = listId !== null

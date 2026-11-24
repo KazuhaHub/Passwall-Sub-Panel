@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '@/api/accessControl'
 import { renderAccess } from '@/test/accessControlHarness'
-import ListEntriesSheet from './ListEntriesSheet'
+import ListEntriesDialog from './ListEntriesDialog'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -27,7 +27,7 @@ beforeEach(() => {
 
 describe('the entries sheet', () => {
   it('shows the figures and the first 200, searches only those in component state, and tests an entry', async () => {
-    const { router } = renderAccess(<ListEntriesSheet listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
+    const { router } = renderAccess(<ListEntriesDialog listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
     expect(await screen.findByText('Scam list')).toBeTruthy()
     expect(screen.getByText('条目 8,012 · 正则 3')).toBeTruthy()
     expect(screen.getByText('共 8,012 条，这里只显示前 200 条（搜索只在这 200 条里进行）')).toBeTruthy()
@@ -43,21 +43,21 @@ describe('the entries sheet', () => {
 
   it('offers refresh for a remote list only and starts it', async () => {
     vi.mocked(api.refreshDestList).mockResolvedValue()
-    renderAccess(<ListEntriesSheet listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
+    renderAccess(<ListEntriesDialog listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
     fireEvent.click(await screen.findByRole('button', { name: '立即刷新' }))
     await waitFor(() => expect(api.refreshDestList).toHaveBeenCalledWith(2))
   })
 
   it('a geosite list has neither edit nor refresh', async () => {
     vi.mocked(api.getDestList).mockResolvedValue({ list: list({ kind: 'geosite', geosite_category: 'cryptocurrency' }), samples: [] })
-    renderAccess(<ListEntriesSheet listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
+    renderAccess(<ListEntriesDialog listId={2} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
     expect(await screen.findByText('没有条目')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
     expect(screen.queryByRole('button', { name: '立即刷新' })).toBeNull()
   })
 
   it('is closed with no list and asks nothing', () => {
-    renderAccess(<ListEntriesSheet listId={null} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
+    renderAccess(<ListEntriesDialog listId={null} onClose={onClose} onEdit={onEdit} onTest={onTest} />)
     expect(api.getDestList).not.toHaveBeenCalled()
   })
 })

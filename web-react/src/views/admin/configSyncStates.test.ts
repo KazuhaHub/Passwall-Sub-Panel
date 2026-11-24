@@ -6,7 +6,7 @@ import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, humanizeSince } from './configSync
 /**
  * Every config_sync_state the Go side can write must have its own wording here.
  *
- * The label falls back to "never captured" for anything LineSheet does not
+ * The label falls back to "never captured" for anything LineDialog does not
  * recognise — so a state added on the backend without copy here does not render
  * as an obvious gap. It renders as
  * "未捕获本地配置（渲染时回源）", a DIFFERENT and wrong claim about the node.

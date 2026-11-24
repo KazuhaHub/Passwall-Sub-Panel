@@ -27,7 +27,7 @@ function configState(raw: string | undefined): ConfigSyncState {
   return (CONFIG_SYNC_STATES as readonly string[]).includes(v) ? (v as ConfigSyncState) : ''
 }
 
-export function LineSheet({ item, newLine, editor, nav, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onBack, onSelect, onClose }: {
+export function LineDialog({ item, newLine, editor, nav, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onBack, onSelect, onClose }: {
   item: ListRow | null
   /** A line being added to this node: the sheet opens on the editor alone. */
   newLine?: { nodeName: string } | null

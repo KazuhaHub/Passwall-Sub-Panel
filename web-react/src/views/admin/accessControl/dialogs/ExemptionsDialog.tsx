@@ -21,7 +21,7 @@ import { removeExemptionConfirm } from '../confirmCopy'
 import { reportDestError } from '../destErrors'
 import AddExemptionDialog from './AddExemptionDialog'
 
-export interface ExemptionsSheetProps {
+export interface ExemptionsDialogProps {
   open: boolean
   onClose: () => void
   /** Hands over to the account drawer: replaces `sheet=exemptions` with `user=<id>`. */
@@ -32,7 +32,7 @@ const X = 'admin:access_control.exemptions.'
 const HOUR = 3_600_000
 
 /** S5: every exemption in one place, each with who added it, why and when it ends. */
-export default function ExemptionsSheet({ open, onClose, onOpenUser }: ExemptionsSheetProps) {
+export default function ExemptionsDialog({ open, onClose, onOpenUser }: ExemptionsDialogProps) {
   const { t } = useTranslation(['admin'])
   const scope = useQueryScope()
   const q = useDestExemptions(scope, { enabled: open })

@@ -21,7 +21,7 @@ interface Draft { name: string; email: string; directory: string; keyType: strin
  * A CA account: who the certificates are issued as. The EAB HMAC key is a secret: the server never sends
  * it back, so on an existing account the box is empty, says it is set, and leaving it empty keeps it.
  */
-export function AccountFormSheet({ account, data, onClose }: { account: ACMEAccount | null; data: CertData; onClose: () => void }) {
+export function AccountFormDialog({ account, data, onClose }: { account: ACMEAccount | null; data: CertData; onClose: () => void }) {
   const t = useCertsT()
   const c = useCommonT()
   const queryClient = useQueryClient()

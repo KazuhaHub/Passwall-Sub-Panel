@@ -12,7 +12,7 @@ import { DataTable } from '@/components/data/DataTable'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Button } from '@/components/ui/button'
 import { RowCard } from '../subscription/RowCard'
-import { FamilySheet } from './FamilySheet'
+import { FamilyDialog } from './FamilyDialog'
 import type { useRegistryActions } from './useRegistryActions'
 
 export { CLIENT_PRESETS, PLATFORM_OPTIONS, clonePreset, normalizeRegistry } from './presets'
@@ -90,7 +90,7 @@ export default function ClientRegistry({ families, onChange, actions }: {
         }}
         empty={<EmptyState compact title={t('settings.subscription.no_rules')} action={<Button onClick={addFamily}><IconAdd />{t('settings.subscription.add_family')}</Button>} />}
       />
-      <FamilySheet families={families} index={open} onChange={onChange} onClose={() => setOpen(null)} />
+      <FamilyDialog families={families} index={open} onChange={onChange} onClose={() => setOpen(null)} />
     </>
   )
 }

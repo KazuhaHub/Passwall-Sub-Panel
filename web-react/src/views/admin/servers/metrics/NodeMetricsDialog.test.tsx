@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { installReads, mount } from '../testHarness'
 import { formatBits, formatBytes, formatValue } from './NodeMetricsChart'
-import NodeMetricsSheet from './NodeMetricsSheet'
+import NodeMetricsDialog from './NodeMetricsDialog'
 import type { NodeMetricsCurrent } from '@/api/nodeMetrics'
 import type { Server } from '@/api/servers'
 
@@ -62,13 +62,13 @@ describe('node metric units', () => {
   })
 })
 
-describe('NodeMetricsSheet', () => {
+describe('NodeMetricsDialog', () => {
   it('says the node is unsupported rather than drawing an empty chart', async () => {
     installReads({
       '/admin/servers/7/node-metrics/current': currentBody({ available: false, freshness: 'unsupported' }),
       '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('admin:nodeMetrics.unsupported')).toBeTruthy())
   })
 
@@ -80,7 +80,7 @@ describe('NodeMetricsSheet', () => {
       }),
       '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     // The chip renders the label and the value as one string, so this matches on
     // the key rather than on the whole text.
     await waitFor(() => expect(
@@ -96,7 +96,7 @@ describe('NodeMetricsSheet', () => {
       '/admin/servers/7/node-metrics/current': currentBody({ summary: summary() }),
       '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getAllByText('—').length).toBeGreaterThan(0))
     // Never a zero standing in for an unreadable metric.
     expect(screen.queryByText(/^0\.0%$/)).toBeNull()
@@ -107,7 +107,7 @@ describe('NodeMetricsSheet', () => {
       '/admin/servers/7/node-metrics/current': currentBody({}),
       '/admin/servers/7/node-metrics/history': { resolution: 'hour', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('admin:nodeMetrics.tabPerformance')).toBeTruthy())
   })
 })
@@ -119,7 +119,7 @@ describe('metrics navigation and evidence', () => {
       '/admin/servers/7/node-metrics/current': currentBody({}),
       '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await screen.findByText('admin:nodeMetrics.measurementScope')
     expect(screen.queryByRole('radio', { name: '1h' })).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabPerformance' }))
@@ -142,7 +142,7 @@ describe('metrics navigation and evidence', () => {
       }),
       '/admin/servers/7/node-metrics/history': { resolution: 'minute', from: '', to: '', series: [] },
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await screen.findByText('admin:nodeMetrics.finding.node_core_restart_loop')
     expect(screen.getByText(/admin:nodeMetrics.observedValue/)).toBeTruthy()
     expect(screen.getByText(/admin:nodeMetrics.threshold/)).toBeTruthy()

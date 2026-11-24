@@ -20,7 +20,7 @@ import type { Server } from '@/api/servers'
 import { useSiteStore } from '@/stores/site'
 import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../../useAdminT'
-import NodeDiagnosticsSheet from '../dialogs/NodeDiagnosticsSheet'
+import NodeDiagnosticsDialog from '../dialogs/NodeDiagnosticsDialog'
 import NodeMetricsChart, { formatBits, formatBytes, formatValue, metricsTimeFormatter, type MetricsSeries } from './NodeMetricsChart'
 
 const RANGES: { key: string; hours: number; resolution: HistoryResolution }[] = [
@@ -53,7 +53,7 @@ const HEALTH_TONE: Record<string, Tone> = {
  * current readings every 2 seconds for up to 30 seconds and reloads everything when a newer sample
  * arrives.
  */
-export default function NodeMetricsSheet({ server, open, onClose }: {
+export default function NodeMetricsDialog({ server, open, onClose }: {
   server: Server | null; open: boolean; onClose: () => void
 }) {
   const t = useAdminT()
@@ -284,7 +284,7 @@ export default function NodeMetricsSheet({ server, open, onClose }: {
           )}
         </Tabs>
         {/* Inside the dialog, so the two nest: the upper one is centred, traps focus and closes alone on Esc. */}
-        {diagnostics && <NodeDiagnosticsSheet server={server} open={open} onClose={() => setDiagnostics(false)} />}
+        {diagnostics && <NodeDiagnosticsDialog server={server} open={open} onClose={() => setDiagnostics(false)} />}
       </DetailDialog>
     </>
   )

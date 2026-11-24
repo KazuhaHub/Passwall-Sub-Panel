@@ -13,7 +13,7 @@ import { useAdminT } from '../useAdminT'
  * Every version of one document, newest first. Text is not shown: a version is immutable and the list is
  * for telling which were material changes (the ones that asked users to accept again).
  */
-export default function LegalHistorySheet({ kind, onClose }: { kind: LegalKind; onClose: () => void }) {
+export default function LegalHistoryDialog({ kind, onClose }: { kind: LegalKind; onClose: () => void }) {
   const t = useAdminT()
   const { i18n } = useTranslation()
   const scope = useQueryScope()

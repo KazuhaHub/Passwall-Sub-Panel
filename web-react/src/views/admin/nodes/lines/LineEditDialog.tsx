@@ -8,7 +8,7 @@ import { useGuardedEditor } from './useGuardedEditor'
  * view and the editor in place). Closing it with unsaved edits asks first; so does leaving the page.
  * `param` is the address parameter that names the open line.
  */
-export function LineEditSheet({ nodeId, lineId, title, param, onClose, onSaved }: {
+export function LineEditDialog({ nodeId, lineId, title, param, onClose, onSaved }: {
   nodeId: number
   /** The line's id, 'direct', or null for a new line. */
   lineId: string | null

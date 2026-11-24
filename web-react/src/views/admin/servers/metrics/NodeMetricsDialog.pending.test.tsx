@@ -3,7 +3,7 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads } from '../testHarness'
-import NodeMetricsSheet from './NodeMetricsSheet'
+import NodeMetricsDialog from './NodeMetricsDialog'
 import type { NodeMetricsCurrent } from '@/api/nodeMetrics'
 import type { Server } from '@/api/servers'
 
@@ -54,7 +54,7 @@ function currentBody(overrides: Partial<NodeMetricsCurrent> = {}): NodeMetricsCu
 
 const emptyHistory = { resolution: 'minute', from: '', to: '', series: [] }
 
-describe('NodeMetricsSheet range switch', () => {
+describe('NodeMetricsDialog range switch', () => {
   it('keeps the stale chart visible and shows progress instead of going silent while a new range loads', async () => {
     let currentCalls = 0
     const gate = deferred<{ data: NodeMetricsCurrent }>()
@@ -66,7 +66,7 @@ describe('NodeMetricsSheet range switch', () => {
       if (url === '/admin/servers/7/node-metrics/history') return Promise.resolve({ data: emptyHistory })
       throw new Error(`Unexpected GET ${url}`)
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
 
     // First load settles: the CPU figure from the initial fetch is on screen.
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
@@ -91,13 +91,13 @@ describe('NodeMetricsSheet range switch', () => {
   })
 })
 
-describe('NodeMetricsSheet Diagnostics tab', () => {
+describe('NodeMetricsDialog Diagnostics tab', () => {
   it('uses the same health snapshot as the overview and explains missing exit telemetry', async () => {
     installReads({
       '/admin/servers/7/node-metrics/current': currentBody({ health: { status: 'healthy', findings: [] } }),
       '/admin/servers/7/node-metrics/history': emptyHistory,
     })
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
     fireEvent.click(screen.getByRole('tab', { name: 'admin:nodeMetrics.tabDiagnostics' }))
     expect(screen.getByText('admin:nodeMetrics.restartReasonUnavailable')).toBeTruthy()
@@ -106,7 +106,7 @@ describe('NodeMetricsSheet Diagnostics tab', () => {
   })
 })
 
-describe('NodeMetricsSheet manual refresh', () => {
+describe('NodeMetricsDialog manual refresh', () => {
   it('shows a spinner on Refresh now for the whole request and ignores a second click', async () => {
     installReads({
       '/admin/servers/7/node-metrics/current': currentBody(),
@@ -114,7 +114,7 @@ describe('NodeMetricsSheet manual refresh', () => {
     })
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NodeMetricsSheet server={server} open onClose={() => {}} />)
+    mount(<NodeMetricsDialog server={server} open onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('41.2%')).toBeTruthy())
 
     const refreshButton = screen.getByRole('button', { name: 'admin:nodeMetrics.refresh' })

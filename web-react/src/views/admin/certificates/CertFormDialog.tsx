@@ -29,7 +29,7 @@ interface Draft {
  * credential proves the domains, and whether it renews itself. Issuing and re-issuing go to the CA, which
  * rate-limits them, so the form says what a save will do before it does it.
  */
-export function CertFormSheet({ cert, data, onClose }: { cert: Cert | null; data: CertData; onClose: () => void }) {
+export function CertFormDialog({ cert, data, onClose }: { cert: Cert | null; data: CertData; onClose: () => void }) {
   const t = useCertsT()
   const c = useCommonT()
   const queryClient = useQueryClient()

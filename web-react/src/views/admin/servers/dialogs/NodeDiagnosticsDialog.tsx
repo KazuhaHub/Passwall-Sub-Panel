@@ -33,7 +33,7 @@ const SEVERITY_TONE: Record<Severity, Tone> = { info: 'neutral', warning: 'warni
 const CHECK_TONE: Record<string, Tone> = { ok: 'success', warning: 'warning', failed: 'danger', unavailable: 'neutral' }
 const STATUS_TONE: Record<string, Tone> = { succeeded: 'success', failed: 'danger', indeterminate: 'warning' }
 
-export default function NodeDiagnosticsSheet({ server, open, onClose }: {
+export default function NodeDiagnosticsDialog({ server, open, onClose }: {
   server: Server | null
   open: boolean
   onClose: () => void

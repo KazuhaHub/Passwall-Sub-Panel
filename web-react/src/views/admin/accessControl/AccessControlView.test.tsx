@@ -27,10 +27,10 @@ vi.mock('./records/RecordsTab', () => ({
     </div>
   ),
 }))
-vi.mock('./sheets/TestSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="test-sheet" /> : null }))
-vi.mock('./sheets/CoverageSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="coverage-sheet" /> : null }))
-vi.mock('./sheets/ExemptionsSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="exemptions-sheet" /> : null }))
-vi.mock('./lists/ListEntriesSheet', () => ({ default: ({ listId, onEdit }: { listId: number | null; onEdit: (id: number) => void }) => listId ? <button data-testid="entries-sheet" onClick={() => onEdit(listId)}>{listId}</button> : null }))
+vi.mock('./dialogs/TestDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="test-sheet" /> : null }))
+vi.mock('./dialogs/CoverageDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="coverage-sheet" /> : null }))
+vi.mock('./dialogs/ExemptionsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="exemptions-sheet" /> : null }))
+vi.mock('./lists/ListEntriesDialog', () => ({ default: ({ listId, onEdit }: { listId: number | null; onEdit: (id: number) => void }) => listId ? <button data-testid="entries-sheet" onClick={() => onEdit(listId)}>{listId}</button> : null }))
 vi.mock('./AccessSettingsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="settings-dialog" /> : null }))
 vi.mock('./AccountDrawerHost', () => ({ default: ({ userId }: { userId: number | null }) => userId ? <p data-testid="account-drawer">{userId}</p> : null }))
 vi.mock('@/components/UserAutocomplete', () => ({ default: ({ fullWidth }: { fullWidth?: boolean }) => <input aria-label="pick" data-fullwidth={String(!!fullWidth)} /> }))

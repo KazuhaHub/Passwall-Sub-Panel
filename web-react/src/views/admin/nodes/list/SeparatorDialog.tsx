@@ -23,7 +23,7 @@ interface Draft { name: string; enabled: boolean; mode: SeparatorMode; nodes: No
  * dialog, in a dialog so the list stays in view. A new separator is created at the END of the order (the form has
  * no position, as before); the caller highlights it so it is found and moved with drag or Move to….
  */
-export function SeparatorSheet({ separatorId, separators, nodes, onClose, onSaved }: {
+export function SeparatorDialog({ separatorId, separators, nodes, onClose, onSaved }: {
   /** 'new', or the id being edited; null closed. */
   separatorId: number | 'new' | null
   separators: readonly Separator[]

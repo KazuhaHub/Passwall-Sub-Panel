@@ -15,7 +15,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
 import LegalEditorSheet from './LegalEditorSheet'
-import LegalHistorySheet from './LegalHistorySheet'
+import LegalHistoryDialog from './LegalHistoryDialog'
 
 interface Props {
   /** The settings draft's switches: this tab shows and edits them, the page's
@@ -85,7 +85,7 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
       )}
 
       {editing && <LegalEditorSheet kind={editing} discloseUsage={discloseUsage} onClose={() => setEditing(null)} />}
-      {history && <LegalHistorySheet kind={history} onClose={() => setHistory(null)} />}
+      {history && <LegalHistoryDialog kind={history} onClose={() => setHistory(null)} />}
     </div>
   )
 }

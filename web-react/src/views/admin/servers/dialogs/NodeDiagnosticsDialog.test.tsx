@@ -2,7 +2,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads, mount } from '../testHarness'
-import NodeDiagnosticsSheet from './NodeDiagnosticsSheet'
+import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import type { Server } from '@/api/servers'
 
 /**
@@ -42,11 +42,11 @@ function diagnostic(overrides: Record<string, unknown> = {}) {
 async function openAndCollect(body: unknown) {
   api.post.mockResolvedValue({ data: body })
   installReads({})
-  mount(<NodeDiagnosticsSheet server={server} open onClose={() => {}} />)
+  mount(<NodeDiagnosticsDialog server={server} open onClose={() => {}} />)
   fireEvent.click(screen.getByText('admin:nodeDiagnostics.collect'))
 }
 
-describe('NodeDiagnosticsSheet', () => {
+describe('NodeDiagnosticsDialog', () => {
   it('shows the lifecycle and no result while the node has not answered', async () => {
     await openAndCollect(diagnostic({ status: 'offered', result: undefined }))
     await waitFor(() => expect(screen.getByText('admin:nodeDiagnostics.status.offered')).toBeTruthy())
@@ -110,7 +110,7 @@ describe('NodeDiagnosticsSheet', () => {
   })
 })
 
-describe('NodeDiagnosticsSheet request', () => {
+describe('NodeDiagnosticsDialog request', () => {
   it('posts the ticked sections, and lets them be changed again once a result is in', async () => {
     await openAndCollect(diagnostic())
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))

@@ -12,12 +12,12 @@ import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
 import { IconRefresh } from '@/lib/icons'
 import { certKeys } from '@/query/keys'
-import { AccountFormSheet } from './certificates/AccountFormSheet'
+import { AccountFormDialog } from './certificates/AccountFormDialog'
 import { AccountsTab } from './certificates/AccountsTab'
 import { CertDetailDialog } from './certificates/CertDetail'
-import { CertFormSheet } from './certificates/CertFormSheet'
+import { CertFormDialog } from './certificates/CertFormDialog'
 import { CertsTab, type CertActions } from './certificates/CertsTab'
-import { CredFormSheet } from './certificates/CredFormSheet'
+import { CredFormDialog } from './certificates/CredFormDialog'
 import { CredsTab } from './certificates/CredsTab'
 import { DeleteDialog } from './certificates/DeleteDialog'
 import { RenewalSettings } from './certificates/RenewalSettings'
@@ -171,9 +171,9 @@ export default function CertificatesView() {
 
       {shown && !editor && <CertDetailDialog cert={shown} data={data} act={certActions} nav={nav} onClose={sel.clear} />}
 
-      {editor?.kind === 'cert' && <CertFormSheet cert={editor.item} data={data} onClose={() => setEditor(null)} />}
-      {editor?.kind === 'account' && <AccountFormSheet account={editor.item} data={data} onClose={() => setEditor(null)} />}
-      {editor?.kind === 'cred' && <CredFormSheet cred={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'cert' && <CertFormDialog cert={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'account' && <AccountFormDialog account={editor.item} data={data} onClose={() => setEditor(null)} />}
+      {editor?.kind === 'cred' && <CredFormDialog cred={editor.item} data={data} onClose={() => setEditor(null)} />}
 
       {removal?.kind === 'cert' && (() => {
         const nodes = nodesOf(removal.item)

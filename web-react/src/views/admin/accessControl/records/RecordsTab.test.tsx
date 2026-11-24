@@ -25,7 +25,7 @@ vi.mock('@/components/UserAutocomplete', () => ({
     <button aria-label="pick-user" data-value={String(value)} onClick={() => onChange(value ? null : 7)}>pick</button>
   ),
 }))
-vi.mock('../sheets/AddExemptionDialog', () => ({
+vi.mock('../dialogs/AddExemptionDialog', () => ({
   default: ({ open, lockedUserId }: { open: boolean; lockedUserId?: number }) => open ? <p data-testid="exemption-dialog">{lockedUserId}</p> : null,
 }))
 
