@@ -149,8 +149,8 @@ function SmallNode({ node, end }: { node: PathNode; end: boolean }) {
       {!iconOnly && (
         <>
           <span className="min-w-0 max-w-[16rem] truncate font-medium text-foreground">{label}</span>
-          {/* The small server label is the first thing to go when the cell is narrow: names matter more. It stays in the title of the cell. */}
-          {node.sublabel && <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground @[30rem]:inline">{node.sublabel}</span>}
+          {/* A secondary server label (not a port) is the first thing to go when the cell is narrow: names matter more. It stays in the title of the cell. */}
+          {node.sublabel && <span className={cn('shrink-0 font-mono text-[10px] text-muted-foreground', node.sublabelOptional && 'hidden @[30rem]:inline')}>{node.sublabel}</span>}
         </>
       )}
       {node.status && <StatusDot tone={node.status} />}

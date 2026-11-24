@@ -47,7 +47,7 @@ export function pathOf(row: OrderRow, { colors, labels, exit, ends = false, node
 
   const landing: PathNode = {
     id: `landing-${landingId}`, kind: 'landing', label: row.landing?.name ?? row.name, landingColor: colors.get(String(landingId)),
-    sublabel: direct ? port : row.landing?.panel_name, status: whole,
+    sublabel: direct ? port : row.landing?.panel_name, sublabelOptional: !direct, status: whole,
   }
   const user: PathNode = { id: 'user', kind: 'user' }
   const internet: PathNode = { id: 'internet', kind: 'internet' }

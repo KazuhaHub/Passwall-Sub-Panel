@@ -115,7 +115,8 @@ export default function LinesTab() {
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
   const menuOf = useCallback((item: ListRow, opts?: { parent?: boolean }) => menuFor(item, opts), [menuFor])
 
-  const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
+  const hasFactor = items.some(i => i.row.traffic_factor_milli !== undefined && i.row.traffic_factor_milli !== 1000)
+  const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf, hasFactor }), [t, colors, labels, tz, admin, menuOf, hasFactor]) // eslint-disable-line react-hooks/exhaustive-deps
   const treeCols = useMemo(() => treeColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const tree = useMemo<TreeItem[]>(() => {
