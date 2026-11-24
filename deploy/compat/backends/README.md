@@ -17,7 +17,7 @@ Measured on `ghcr.io/mhsanaei/3x-ui:3.8.5` (Xray 26.9.9) and
 
 The current S-UI review is **1.6.7**. It used an upstream source build because no
 local container runtime was available; the Linux/amd64 image pinned in CI carries
-the same release tag and is exercised by `third-party-isolated`. See
+the same release tag and is exercised by the weekly `third-party` job. See
 [S-UI 1.6.7 evidence](../../../docs/compat/evidence/s-ui-1.6.7.json).
 
 `env` prints `export` statements, because the documented way to consume it is
@@ -114,13 +114,14 @@ broken adapter rather than a missing setup step.
 - The panels are pinned by the caller through `PSP_LIVE_3XUI_IMAGE` /
   `PSP_LIVE_SUI_IMAGE`. Nothing here chooses a version, and nothing writes to
   `docs/compat/3x-ui-v4.json` — that file is a record of what a human verified.
-  In CI the caller is `third-party-isolated` in `.github/workflows/test.yml`,
+  In CI the caller is `.github/workflows/third-party.yml`, run weekly by
+  `watch.yml` and before every release tag by `release.yml` (not on a push),
   which defaults both to the recorded ceilings (`max_tested_xui`,
   `max_tested_sui`) as `tag@sha256:digest` and writes what actually ran to
   `evidence/images.txt`. Raising a ceiling means moving its image in the same
   change; `deploy/test_workflow_test.mjs` fails when the two disagree. Whether
-  upstream has shipped past the ceiling is `compat-watch.yml`'s question, not
-  this job's.
+  upstream has shipped past the ceiling is the `compat` job's question
+  in `watch.yml`, not this job's.
 - `down` removes this case's containers only. It never prunes globally.
 - The runtime is discovered (`docker`, `nerdctl`, `podman`) with `sudo` added only
   when the runtime cannot be reached without it.
