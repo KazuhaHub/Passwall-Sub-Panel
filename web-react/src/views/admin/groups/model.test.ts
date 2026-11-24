@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Group } from '@/api/types'
-import { buildTagConditions, createRequest, EMPTY_FORM, formOf, parseTagConditions, sameForm, tagFilterOf, updateRequest } from './model'
+import { buildTagConditions, createRequest, dirtyFormTabs, EMPTY_FORM, formOf, parseTagConditions, sameForm, tagFilterOf, updateRequest } from './model'
 
 const group = (over: Partial<Group> = {}): Group => ({
   id: 1, slug: 'g', name: 'G', tag_filter: { all: false, mode: 'all', tags: [] },
@@ -50,5 +50,17 @@ describe('reading a group into the form', () => {
   it('compares forms by content', () => {
     expect(sameForm(formOf(group()), formOf(group()))).toBe(true)
     expect(sameForm(formOf(group()), { ...formOf(group()), remark: 'x' })).toBe(false)
+  })
+})
+
+describe('which tabs of a group hold unsaved edits', () => {
+  const saved = EMPTY_FORM
+  it('names the tab each field belongs to, in the tabs\' own order', () => {
+    expect(dirtyFormTabs(saved, saved)).toEqual([])
+    expect(dirtyFormTabs({ ...saved, name: 'x' }, saved)).toEqual(['general'])
+    expect(dirtyFormTabs({ ...saved, require_2fa: true, remark: 'r' }, saved)).toEqual(['general'])
+    expect(dirtyFormTabs({ ...saved, mode: 'any', regions: ['HK'] }, saved)).toEqual(['nodes'])
+    expect(dirtyFormTabs({ ...saved, ip_limit: 0 }, saved)).toEqual(['limits'])
+    expect(dirtyFormTabs({ ...saved, ip_limit: 0, all: true, name: 'x' }, saved)).toEqual(['general', 'nodes', 'limits'])
   })
 })

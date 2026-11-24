@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ReadOptions } from './requestOptions'
 import type { Group, Layout, ListResponse, TagFilter } from './types'
 
 export interface GroupListParams {
@@ -38,8 +39,12 @@ export async function listAllGroups(signal?: AbortSignal) {
   return items
 }
 
-export async function getGroup(id: number) {
-  const { data } = await client.get<Group>(`/admin/groups/${id}`)
+/** One group, with its member count. `silent` for the group page, which answers a failure in its own frame. */
+export async function getGroup(id: number, opts: ReadOptions = {}) {
+  const { data } = await client.get<Group>(`/admin/groups/${id}`, {
+    signal: opts.signal,
+    ...(opts.silent ? { _skipErrorToast: true } : {}),
+  })
   return data
 }
 

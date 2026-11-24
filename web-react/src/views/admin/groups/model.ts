@@ -112,6 +112,20 @@ export function formOf(g: Group): GroupForm {
 
 export const sameForm = (a: GroupForm, b: GroupForm) => JSON.stringify(a) === JSON.stringify(b)
 
+/** The tabs of the group page that edit the form (the other two edit the group's overrides). */
+export type FormTab = 'general' | 'nodes' | 'limits'
+
+const FIELDS_OF: Record<FormTab, readonly (keyof GroupForm)[]> = {
+  general: ['slug', 'name', 'remark', 'require_2fa'],
+  nodes: ['all', 'mode', 'regions', 'tags', 'servers', 'custom_text'],
+  limits: ['traffic_limit_gb', 'ip_limit', 'device_limit'],
+}
+
+/** Which form tabs differ from the saved form, in the tabs' own order: what the unsaved dot and the leave prompt name. */
+export function dirtyFormTabs(form: GroupForm, saved: GroupForm): FormTab[] {
+  return (Object.keys(FIELDS_OF) as FormTab[]).filter(tab => FIELDS_OF[tab].some(k => JSON.stringify(form[k]) !== JSON.stringify(saved[k])))
+}
+
 type LimitKey = 'traffic_limit_gb' | 'ip_limit' | 'device_limit'
 type ClearKey = 'clear_traffic_limit' | 'clear_ip_limit' | 'clear_device_limit'
 

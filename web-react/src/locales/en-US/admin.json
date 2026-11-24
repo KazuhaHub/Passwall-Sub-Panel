@@ -3624,6 +3624,13 @@
     "retry": "Retry",
     "create": "New group",
     "edit_title": "Edit group",
+    "detail": {
+      "not_found": "This group no longer exists",
+      "forbidden": "You cannot open this group",
+      "staff_only": "Only administrators can edit groups",
+      "unsaved_in": "Unsaved changes in: {{tabs}}",
+      "tab_separator": ", "
+    },
     "search_placeholder": "Search name / slug",
     "no_match": "No groups match the search",
     "batch_delete": "Delete selected",
@@ -3725,7 +3732,8 @@
       "nodes": "Nodes and lines",
       "layout": "Layout",
       "limits": "Limits",
-      "overrides": "Overrides"
+      "overrides": "Overrides",
+      "unsaved": "Unsaved changes"
     },
     "members": {
       "count": "Members in this group: {{count}}",

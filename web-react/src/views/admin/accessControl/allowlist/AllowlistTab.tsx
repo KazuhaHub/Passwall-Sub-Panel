@@ -79,7 +79,7 @@ export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSetting
     else setParams(allowlistSearch(params, { group: null, report: false, days: null }), { replace: true })
   }
   const viewDenied = (id: number) => void navigate({ pathname: location.pathname, search: recordsHref({ source: `g${id}`, action: 'block', since: '24h' }) }, { replace: true })
-  const openGroup = (id: number) => void navigate(`/admin/groups?edit=${id}&dtab=destination`)
+  const openGroup = (id: number) => void navigate(`/admin/groups/${id}?tab=destination`)
 
   /** A write of one group's state, from the card. The lists are kept; the updated_at is the one the card was read at. */
   const write = async (g: DestGroup, state: DestState) => {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { deleteGroup } from '@/api/groups'
@@ -16,7 +16,7 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushToast } from '@/components/feedback/toasts'
 import { Button } from '@/components/ui/button'
-import { useUrlSelection } from '@/hooks/useUrlSelection'
+import { useObjectLink } from '@/components/common/objectReturn'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
 import { IconDelete, IconUsers } from '@/lib/icons'
 import { useGroupsList } from '@/query/groups'
@@ -27,35 +27,41 @@ import { allSettledLimited } from '@/utils/promises'
 import { RowActions } from '../subscription/RowActions'
 import { RowCard } from '../subscription/RowCard'
 import { groupColumns, quotaSummary } from './columns'
-import { GroupSheet, type GroupTarget } from './GroupSheet'
+import { confirmDeleteGroup } from './groupActions'
+import { groupPath, legacyGroupTarget, NEW_GROUP_PATH } from './groupRoutes'
 import { useGroupsT } from './useGroupsT'
 
 const NONE: Group[] = []
 
 /**
  * Groups: what a group's users get. The list shows what an admin scans for (members, the nodes and lines the filter
- * reaches, default limits, whether two-step verification is required, how many settings are overridden). One group
- * is edited in a wide sheet (GroupSheet), opened from the address (`?edit=<id>` or `?edit=new`) so it can be linked,
- * reloaded and closed with Back; the access-control page links to it with `&dtab=destination`.
+ * reaches, default limits, whether two-step verification is required, how many settings are overridden). A group is
+ * NOT opened here: the row and its edit button go to the group's own page (`/admin/groups/:id`, tabs in `?tab=`),
+ * carrying this list's place so its back link returns to the same search. `?edit=<id>` / `?edit=new` (`&dtab=`) are
+ * the addresses the old side sheet used; an administrator is sent on to the new routes (bookmarks and the
+ * access-control page still carried them). An operator, who was never shown the sheet, just sees the list.
  *
  * Only an administrator edits (config.write); an operator reads the list, without the two columns whose reads are
  * admin-only on the server.
  */
 export default function GroupsPage() {
+  const canConfig = useCan('config.write')
+  const legacy = legacyGroupTarget(useLocation().search)
+  return legacy && canConfig ? <Navigate to={legacy} replace /> : <GroupsList />
+}
+
+function GroupsList() {
   const t = useGroupsT()
+  const link = useObjectLink()
   const { t: tr } = useTranslation(['admin', 'common'])
   const navigate = useNavigate()
   const canConfig = useCan('config.write')
-  const canAccess = useCan('access.view')
   const qScope = useQueryScope()
   const queryClient = useQueryClient()
   const groupsQuery = useGroupsList(qScope)
   const items = groupsQuery.data?.items ?? NONE
   const [q, setQ] = useUrlState('q', urlCodecs.string())
-  const edit = useUrlSelection('edit')
-  // The sheet's tab is in the address too (`dtab`); closing the sheet takes it away with `edit`.
-  const [, setTab] = useUrlState('dtab', urlCodecs.string())
-  const closeSheet = () => { edit.clear(); setTab('') }
+  const open = (g: Group) => { const l = link(groupPath(g.id)); void navigate(l.to, { state: l.state }) }
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -76,30 +82,8 @@ export default function GroupsPage() {
     }
   }
 
-  /**
-   * The server refuses to delete a group that still has members (409), so asking is pointless for those: say how many
-   * users are in it and what to do (move them on the Users page), with a button that goes there. An empty group
-   * confirms with what goes with it.
-   */
   async function confirmDelete(g: Group) {
-    if (g.members > 0) {
-      const toUsers = await confirm({
-        title: t('admin:groups.delete.blocked_title', { name: g.name }),
-        message: t('admin:groups.delete.blocked_message', { count: g.members }),
-        confirmText: t('admin:groups.delete.blocked_action'),
-        cancelText: tr('common:actions.close'),
-      })
-      if (toUsers) void navigate('/admin/users')
-      return
-    }
-    const ok = await confirm({
-      title: t('admin:groups.delete.title', { name: g.name }),
-      message: t('admin:groups.delete.message'),
-      confirmText: tr('common:actions.delete'),
-      destructive: true,
-      initialFocus: 'cancel',
-    })
-    if (!ok) return
+    if (!(await confirmDeleteGroup(g, tr, navigate))) return
     await withBusy(g.id, async () => {
       await deleteGroup(g.id)
       pushToast({ message: t('admin:groups.toast.deleted'), severity: 'success' })
@@ -140,7 +124,7 @@ export default function GroupsPage() {
   }
 
   const columns = useMemo(() => groupColumns({
-    t, canConfig, busy, onEdit: g => edit.select(String(g.id)), menuOf,
+    t, canConfig, busy, onEdit: open, menuOf,
   // The row handlers close over the list they read; they are rebuilt with the columns when it changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [t, canConfig, busy, items])
@@ -148,14 +132,6 @@ export default function GroupsPage() {
   // Free-text filter on name / slug (the two identifiers). Remark is left out: a human-readable note, not something to match on.
   const shown = useMemo(() => filterRows(items, g => `${g.name} ${g.slug}`, q), [items, q])
   const filtered = q.trim() !== ''
-
-  // What the sheet shows, from the address: an existing group's id, or `new`.
-  const target: GroupTarget | null = useMemo(() => {
-    if (!canConfig || !edit.selected) return null
-    if (edit.selected === 'new') return { kind: 'new' }
-    const found = items.find(g => String(g.id) === edit.selected)
-    return found ? { kind: 'edit', group: found } : null
-  }, [canConfig, edit.selected, items])
 
   if (groupsQuery.isError) {
     return (
@@ -173,7 +149,7 @@ export default function GroupsPage() {
         title={t('admin:groups.title')}
         count={loading ? undefined : items.length}
         description={t('admin:groups.subtitle')}
-        primary={canConfig && <Button onClick={() => edit.select('new')}>{t('admin:groups.create')}</Button>}
+        primary={canConfig && <Button render={<Link {...link(NEW_GROUP_PATH)} />}>{t('admin:groups.create')}</Button>}
       />
       <DataTable<Group>
         aria-label={t('admin:groups.title')}
@@ -185,8 +161,7 @@ export default function GroupsPage() {
         selectable={canConfig}
         selection={checked}
         onSelectionChange={setChecked}
-        onRowOpen={canConfig ? g => edit.select(String(g.id)) : undefined}
-        activeRowId={edit.selected && edit.selected !== 'new' ? edit.selected : null}
+        onRowOpen={canConfig ? open : undefined}
         // Only a group with no members can be deleted, so only those can be ticked.
         rowOptions={g => ({ selectable: g.members === 0, state: busy.has(g.id) ? 'pending' : undefined })}
         renderCard={(g, ctx) => (
@@ -197,7 +172,7 @@ export default function GroupsPage() {
               g.tag_filter.all ? t('admin:groups.tag.all') : (g.tag_filter.tags ?? []).join(' · '),
               quotaSummary(t, g),
             ].filter(Boolean).join(' · ')}
-            actions={canConfig ? <RowActions name={g.name} editLabel={t('admin:groups.edit_title')} menuLabel={t('admin:groups.row_menu', { name: g.name })} busy={busy.has(g.id)} onEdit={() => edit.select(String(g.id))} menu={menuOf(g)} /> : undefined} />
+            actions={canConfig ? <RowActions name={g.name} editLabel={t('admin:groups.edit_title')} menuLabel={t('admin:groups.row_menu', { name: g.name })} busy={busy.has(g.id)} onEdit={() => open(g)} menu={menuOf(g)} /> : undefined} />
         )}
         toolbar={(
           <FilterBar
@@ -207,7 +182,7 @@ export default function GroupsPage() {
         )}
         empty={filtered
           ? <EmptyState compact title={t('admin:groups.no_match')} action={<Button variant="outline" onClick={() => setQ('')}>{t('admin:groups.clear_search')}</Button>} />
-          : <EmptyState compact title={t('admin:groups.empty')} description={t('admin:groups.empty_hint')} action={canConfig ? <Button onClick={() => edit.select('new')}>{t('admin:groups.create')}</Button> : undefined} />}
+          : <EmptyState compact title={t('admin:groups.empty')} description={t('admin:groups.empty_hint')} action={canConfig ? <Button render={<Link {...link(NEW_GROUP_PATH)} />}>{t('admin:groups.create')}</Button> : undefined} />}
         bulkActions={canConfig ? (ctx => {
           const rows = items.filter(i => ctx.ids.includes(String(i.id)))
           return (
@@ -216,16 +191,6 @@ export default function GroupsPage() {
             </Button>
           )
         }) : undefined}
-      />
-      <GroupSheet
-        target={target}
-        canAccess={canAccess}
-        onClose={closeSheet}
-        onSaved={(saved, wasEdit, closes) => {
-          if (wasEdit && saved) mutateItems(prev => prev.map(item => (item.id === saved.id ? saved : item)))
-          else void load().catch(() => {})
-          if (closes) closeSheet()
-        }}
       />
     </div>
   )
