@@ -11,12 +11,14 @@ import { DetailDialog, type DetailDialogSize } from './DetailDialog'
  * refused submit moves focus to the first field that names a problem. Cancel and the submit button are the
  * footer, so they stay in view while a long body scrolls.
  */
-export function FormDialog({ title, description, dirty, pending, submitLabel, onSubmit, onClose, size = 'md', children }: {
+export function FormDialog({ title, description, dirty, pending, submitLabel, submitDisabled, onSubmit, onClose, size = 'md', children }: {
   title: ReactNode
   description?: ReactNode
   dirty: boolean
   pending: boolean
   submitLabel: string
+  /** The task cannot be confirmed yet (the dialog says why in its body): the submit button is off, and Enter does nothing. */
+  submitDisabled?: boolean
   onSubmit: () => void
   onClose: () => void
   size?: DetailDialogSize
@@ -42,11 +44,11 @@ export function FormDialog({ title, description, dirty, pending, submitLabel, on
       title={title}
       description={description}
       onClose={() => { if (!pending) guard(onClose) }}
-      onSubmit={e => { e.preventDefault(); if (!pending) { submitRef.current(); focusFirstProblem() } }}
+      onSubmit={e => { e.preventDefault(); if (!pending && !submitDisabled) { submitRef.current(); focusFirstProblem() } }}
       footer={
         <>
           <Button type="button" variant="outline" disabled={pending} onClick={() => guard(onClose)}>{c('actions.cancel')}</Button>
-          <AsyncButton type="submit" pending={pending}>{submitLabel}</AsyncButton>
+          <AsyncButton type="submit" pending={pending} disabled={submitDisabled}>{submitLabel}</AsyncButton>
         </>
       }
     >

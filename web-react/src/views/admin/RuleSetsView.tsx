@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteRuleSet, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, resetRuleSet, saveRuleSet, type RuleSet } from '@/api/rules'
 import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
+import { useObjectLink } from '@/components/common/objectReturn'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { PageHeader } from '@/components/common/PageHeader'
 import { DataTable } from '@/components/data/DataTable'
@@ -14,44 +16,55 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushToast } from '@/components/feedback/toasts'
 import { Button } from '@/components/ui/button'
-import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
 import { IconDelete } from '@/lib/icons'
-import { useAllGroups } from '@/query/groups'
 import { ruleKeys } from '@/query/keys'
 import { useRuleSets, useTemplates } from '@/query/rules'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
+import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './rulesets/actions'
 import { ruleSetColumns } from './rulesets/columns'
-import { countLines, duplicateOf } from './rulesets/model'
+import { countLines } from './rulesets/model'
 import { RowActions } from './subscription/RowActions'
 import { RowCard } from './subscription/RowCard'
 import { StatusDot } from '@/components/common/StatusDot'
-import { RuleSetSheet, type SheetTarget } from './rulesets/RuleSetSheet'
+import { isReservedSlug, legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
 
 const NONE: never[] = []
 
 /**
  * Rule sets: reusable snippets of routing rules that only take part in a subscription when a template binds them.
- * The list is here; one is edited in a wide sheet (rulesets/RuleSetSheet), opened from the address (`?edit=<slug>`,
- * `?edit=new`, or `?edit=new&copy=<slug>` for a duplicate) so it can be linked, reloaded and closed with Back.
+ * The list is here; a rule set is NOT opened here: the row, the edit button and "New rule set" go to the rule set's own
+ * page (rulesets/RuleSetRoute). `?edit=<slug>` / `?edit=new[&copy=<slug>]` are the addresses the old side sheet used; they
+ * are sent on to the new routes (see `legacyRuleSetTarget`) because bookmarks still carry them. An operator can open a
+ * rule set (the server lets staff read them) and sees it without the means to change it.
  */
 export default function RuleSetsView() {
+  const legacy = legacyRuleSetTarget(useLocation().search)
+  return legacy ? <Navigate to={legacy} replace /> : <RuleSetsList />
+}
+
+function RuleSetsList() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
   const scope = useQueryScope()
   const queryClient = useQueryClient()
   const rulesQuery = useRuleSets(scope)
   const templatesQuery = useTemplates(scope)
-  const groupsQuery = useAllGroups(scope)
   const items = rulesQuery.data?.items ?? NONE
   const templates = templatesQuery.data?.items ?? NONE
-  const groups = groupsQuery.data ?? NONE
-  const failed = rulesQuery.isError || templatesQuery.isError || groupsQuery.isError
+  const failed = rulesQuery.isError || templatesQuery.isError
   const [q, setQ] = useUrlState('q', urlCodecs.string())
-  const edit = useUrlSelection('edit')
-  const copy = useUrlSelection('copy')
+  const navigate = useNavigate()
+  const link = useObjectLink()
+  // The page opened carries this list's place (search), so its back link returns to the list the way it was left.
+  const open = (to: string) => { const l = link(to); void navigate(l.to, { state: l.state }) }
+  // A rule set whose slug is `new` (in any case) cannot have a page: its address is the create page's. It stays in the list, and can be deleted from it.
+  const openRuleSet = (rs: RuleSet) => {
+    if (isReservedSlug(rs.slug)) { pushToast({ message: t('admin:rules.slug_unreachable', { slug: rs.slug }), severity: 'warning' }); return }
+    open(ruleSetPath(rs.slug))
+  }
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -63,10 +76,10 @@ export default function RuleSetsView() {
   // Reload after a write. Clearing the selection is deliberate (the rows it referred to may be gone).
   function load() {
     setChecked({})
-    return Promise.all([rulesQuery.refetch(), templatesQuery.refetch(), groupsQuery.refetch()])
+    return Promise.all([rulesQuery.refetch(), templatesQuery.refetch()])
   }
   const usedBy = (rs: RuleSet) => templates.filter(tpl => (tpl.rule_sets || []).includes(rs.slug)).map(x => x.name || x.slug)
-  const seeded = (rs: RuleSet) => SEEDED_RULESET_SLUGS.includes(rs.slug)
+  const seeded = isSeeded
   const withBusy = async (slug: string, run: () => Promise<void>) => {
     setBusy(prev => new Set(prev).add(slug))
     try { await run() } catch { /* The request layer already surfaced the failure. */ } finally {
@@ -75,16 +88,7 @@ export default function RuleSetsView() {
   }
 
   async function confirmDelete(rs: RuleSet) {
-    const used = usedBy(rs)
-    const usage = used.length > 0 ? t('admin:rules.confirm.delete_used_suffix', { names: used.join('、') }) : ''
-    const ok = await confirm({
-      title: t('admin:rules.confirm.delete_title'),
-      message: t('admin:rules.confirm.delete_message', { slug: rs.slug, usage }),
-      confirmText: t('common:actions.delete'),
-      destructive: true,
-      initialFocus: 'cancel',
-    })
-    if (!ok) return
+    if (!await askDeleteRuleSet(t, rs.slug, usedBy(rs))) return
     await withBusy(rs.slug, async () => {
       await deleteRuleSet(rs.slug)
       pushToast({ message: t('admin:rules.toast.deleted'), severity: 'success' })
@@ -93,14 +97,7 @@ export default function RuleSetsView() {
   }
 
   async function confirmReset(rs: RuleSet) {
-    const ok = await confirm({
-      title: t('admin:rules.confirm.reset_title'),
-      message: t('admin:rules.confirm.reset_message', { slug: rs.slug }),
-      confirmText: t('admin:rules.reset_to_default'),
-      destructive: true,
-      initialFocus: 'cancel',
-    })
-    if (!ok) return
+    if (!await askResetRuleSet(t, rs.slug)) return
     await withBusy(rs.slug, async () => {
       await resetRuleSet(rs.slug)
       pushToast({ message: t('admin:rules.toast.reset'), severity: 'success' })
@@ -110,7 +107,7 @@ export default function RuleSetsView() {
 
   function menuOf(rs: RuleSet): MoreMenuItem[] {
     const wait = busy.has(rs.slug)
-    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:rules.duplicate'), disabled: wait, onSelect: () => { copy.select(rs.slug); edit.select('new') } }]
+    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:rules.duplicate'), disabled: wait, onSelect: () => open(newRuleSetPath(rs.slug)) }]
     if (seeded(rs)) menu.push({ id: 'reset', label: t('admin:rules.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(rs) })
     // A seeded rule set cannot be deleted; the item stays, off, and says why instead of vanishing.
     menu.push(seeded(rs)
@@ -154,7 +151,7 @@ export default function RuleSetsView() {
   }
 
   const columns = useMemo(() => ruleSetColumns({
-    t, usedBy, canConfig, busy, onEdit: rs => edit.select(rs.slug),
+    t, usedBy, canConfig, busy, onEdit: openRuleSet,
     menuOf,
   // The row handlers close over the lists they read; they are rebuilt with the columns when those change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,24 +160,11 @@ export default function RuleSetsView() {
   const shown = useMemo(() => filterRows(items, r => `${r.slug} ${r.name}`, q), [items, q])
   const filtered = q.trim() !== ''
 
-  // What the sheet shows, from the address: an existing slug, `new`, or `new` with `copy=<slug>`.
-  const target: SheetTarget | null = useMemo(() => {
-    if (!canConfig || !edit.selected) return null
-    if (edit.selected === 'new') {
-      const source = copy.selected ? items.find(r => r.slug === copy.selected) : undefined
-      return source ? { kind: 'copy', draft: duplicateOf(source), source } : { kind: 'new' }
-    }
-    const found = items.find(r => r.slug === edit.selected)
-    return found ? { kind: 'edit', ruleSet: found } : null
-  }, [canConfig, edit.selected, copy.selected, items])
-
-  const closeSheet = () => { copy.clear(); edit.clear() }
-
   if (failed) {
     return (
       <div className="p-4 sm:p-6">
         <PageHeader title={t('admin:rules.title')} description={t('admin:rules.subtitle')} />
-        <ErrorState title={t('admin:rules.load_failed')} reason={rulesQuery.error ?? templatesQuery.error ?? groupsQuery.error} retry={() => load()} />
+        <ErrorState title={t('admin:rules.load_failed')} reason={rulesQuery.error ?? templatesQuery.error} retry={() => load()} />
       </div>
     )
   }
@@ -192,7 +176,7 @@ export default function RuleSetsView() {
         title={t('admin:rules.title')}
         count={loading ? undefined : items.length}
         description={t('admin:rules.subtitle')}
-        primary={canConfig && <Button onClick={() => { copy.clear(); edit.select('new') }}>{t('admin:rules.create')}</Button>}
+        primary={canConfig && <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button>}
       />
       <DataTable<RuleSet>
         aria-label={t('admin:rules.title')}
@@ -204,14 +188,13 @@ export default function RuleSetsView() {
         selectable={canConfig}
         selection={checked}
         onSelectionChange={setChecked}
-        onRowOpen={canConfig ? rs => edit.select(rs.slug) : undefined}
-        activeRowId={edit.selected && edit.selected !== 'new' ? edit.selected : null}
+        onRowOpen={openRuleSet}
         rowOptions={r => ({ selectable: !seeded(r), state: busy.has(r.slug) ? 'pending' : r.enabled ? undefined : 'dimmed' })}
         renderCard={(r, ctx) => (
           <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
             status={<StatusDot tone={r.enabled ? 'success' : 'neutral'} label={t(r.enabled ? 'admin:rules.status.enabled' : 'admin:rules.status.disabled')} />}
             detail={`${t('admin:rules.table.lines')}: ${countLines(r.content)} · ${usedBy(r).join('、') || t('admin:rules.status.no_usage')}`}
-            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => edit.select(r.slug)} menu={menuOf(r)} /> : undefined} />
+            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => openRuleSet(r)} menu={menuOf(r)} /> : undefined} />
         )}
         toolbar={(
           <FilterBar
@@ -221,7 +204,7 @@ export default function RuleSetsView() {
         )}
         empty={filtered
           ? <EmptyState compact title={t('admin:rules.no_match')} action={<Button variant="outline" onClick={() => setQ('')}>{t('admin:rules.clear_search')}</Button>} />
-          : <EmptyState compact title={t('admin:rules.empty')} description={t('admin:rules.empty_hint')} action={canConfig ? <Button onClick={() => edit.select('new')}>{t('admin:rules.create')}</Button> : undefined} />}
+          : <EmptyState compact title={t('admin:rules.empty')} description={t('admin:rules.empty_hint')} action={canConfig ? <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button> : undefined} />}
         bulkActions={canConfig ? (ctx => {
           const rows = items.filter(i => ctx.ids.includes(i.slug))
           return (
@@ -234,17 +217,6 @@ export default function RuleSetsView() {
             </>
           )
         }) : undefined}
-      />
-      <RuleSetSheet
-        target={target}
-        existingSlugs={items.map(r => r.slug)}
-        groups={groups}
-        onClose={closeSheet}
-        onSaved={(saved, wasEdit) => {
-          if (wasEdit) mutateItems(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
-          closeSheet()
-          if (!wasEdit) void load().catch(() => {})
-        }}
       />
     </div>
   )

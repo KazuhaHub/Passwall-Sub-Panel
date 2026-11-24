@@ -40,6 +40,8 @@ const NodesPage = lazy(viewLoaders['/admin/nodes'])
 const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
 const RuleSetsView = lazy(viewLoaders['/admin/rules'])
+const RuleSetRoute = lazy(() => import('@/views/admin/rulesets/RuleSetRoute'))
+const RuleSetCreateRoute = lazy(() => import('@/views/admin/rulesets/RuleSetRoute').then(m => ({ default: m.RuleSetCreateRoute })))
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
 const TemplateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute'))
 const TemplateCreateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute').then(m => ({ default: m.TemplateCreateRoute })))
@@ -145,6 +147,9 @@ export const router = createBrowserRouter([
           { path: 'nodes/new', element: <NodeCreateRoute /> },
           { path: 'nodes/:id', element: <NodeDetailRoute /> },
           { path: 'rules', element: <RuleSetsView /> },
+          // A rule set is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
+          { path: 'rules/new', element: <RuleSetCreateRoute /> },
+          { path: 'rules/:slug', element: <RuleSetRoute /> },
           { path: 'templates', element: <TemplatesView /> },
           // A template is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
           { path: 'templates/new', element: <TemplateCreateRoute /> },
