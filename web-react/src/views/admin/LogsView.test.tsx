@@ -87,12 +87,12 @@ describe('LogsView', () => {
     expect(dialog.textContent).toContain('2 of 3')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }))
     await waitFor(() => expect(here(m)).toBe('/admin/logs?row=3'))
-    expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
     await waitFor(() => expect(here(m)).toBe('/admin/logs?row=2'))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
     await waitFor(() => expect(here(m)).toBe('/admin/logs?row=1'))
-    expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true))
   })
 
   it('a tab switch leaves the page, keyword and record behind', async () => {
