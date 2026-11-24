@@ -999,11 +999,13 @@
       "missing_targets": "规则目标未在模板代理组中找到：{{names}}",
       "groups_ok": "已识别 {{n}} 个代理组，规则目标匹配正常。",
       "no_binding": "当前未绑定规则集，只会渲染节点、代理组和个人规则。",
-      "incomplete": "模板内容尚未完整，请继续编辑。"
+      "incomplete": "模板内容尚未完整，请继续编辑。",
+      "propagation": "修改最长需要一分钟才会反映到订阅。"
     },
     "validate": {
       "slug_name_required": "slug 和 name 必填",
-      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug"
+      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug",
+      "slug_reserved": "保留的 slug“{{slug}}”不能使用，请换一个"
     },
     "toast": {
       "saved": "已保存",
@@ -1032,7 +1034,13 @@
     "empty": "还没有配置方案",
     "empty_hint": "订阅渲染需要为每种客户端类型至少配置一个方案。",
     "cannot_delete_default": "默认配置方案不可删除，请先把其他方案设为默认",
-    "no_rule_sets": "没有规则集"
+    "no_rule_sets": "没有规则集",
+    "readonly_note": "你可以查看此方案，但不能修改。",
+    "detail": {
+      "not_found": "未找到此配置方案",
+      "forbidden": "你无权打开此配置方案",
+      "forbidden_create": "你无权新增配置方案"
+    }
   },
   "sync_tasks": {
     "title": "同步任务",

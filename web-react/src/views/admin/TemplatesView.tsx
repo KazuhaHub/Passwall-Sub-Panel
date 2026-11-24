@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { RuleSet } from '@/api/rules'
-import { deleteTemplate, resetTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
+import { deleteTemplate, resetTemplate, type Template } from '@/api/templates'
 import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
+import { useObjectLink } from '@/components/common/objectReturn'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { PageHeader } from '@/components/common/PageHeader'
 import { DataTable } from '@/components/data/DataTable'
@@ -15,7 +17,6 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { pushToast } from '@/components/feedback/toasts'
 import { Button } from '@/components/ui/button'
-import { useUrlSelection } from '@/hooks/useUrlSelection'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
 import { IconDelete } from '@/lib/icons'
 import { templateKeys } from '@/query/keys'
@@ -27,16 +28,23 @@ import { RowActions } from './subscription/RowActions'
 import { RowCard } from './subscription/RowCard'
 import { Badge } from '@/components/ui/badge'
 import { templateColumns } from './templates/columns'
-import { duplicateOf, TemplateSheet, type TemplateTarget } from './templates/TemplateSheet'
+import { askDeleteTemplate, askResetTemplate, isProtected as protectedRow, isSeeded as seeded } from './templates/actions'
+import { legacyTemplateTarget, newTemplatePath, templatePath } from './templates/templateRoutes'
 
 const NONE: never[] = []
 
 /**
  * Templates: a client format plus the rule sets bound to it; subscription rendering uses the bindings set here.
- * The list is here; one is edited in a wide sheet (templates/TemplateSheet), opened from the address
- * (`?edit=<slug>`, `?edit=new`, or `?edit=new&copy=<slug>` for a duplicate).
+ * The list is here; a template is NOT opened here: the row, the edit button and "New template" go to the template's own
+ * page (templates/TemplateRoute). `?edit=<slug>` / `?edit=new[&copy=<slug>]` are the addresses the old side sheet used;
+ * they are sent on to the new routes (see `legacyTemplateTarget`) because bookmarks still carry them.
  */
 export default function TemplatesView() {
+  const legacy = legacyTemplateTarget(useLocation().search)
+  return legacy ? <Navigate to={legacy} replace /> : <TemplatesList />
+}
+
+function TemplatesList() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
   const scope = useQueryScope()
@@ -47,8 +55,10 @@ export default function TemplatesView() {
   const ruleSets = ruleSetsQuery.data?.items ?? NONE
   const failed = templatesQuery.isError || ruleSetsQuery.isError
   const [q, setQ] = useUrlState('q', urlCodecs.string())
-  const edit = useUrlSelection('edit')
-  const copy = useUrlSelection('copy')
+  const navigate = useNavigate()
+  const link = useObjectLink()
+  // The page opened carries this list's place (search), so its back link returns to the list the way it was left.
+  const open = (to: string) => { const l = link(to); void navigate(l.to, { state: l.state }) }
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -63,9 +73,6 @@ export default function TemplatesView() {
     setChecked({})
     return Promise.all([templatesQuery.refetch(), ruleSetsQuery.refetch()])
   }
-  const seeded = (tpl: Template) => SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)
-  /** The default template and the seeded ones cannot be deleted (nor selected for a bulk delete). */
-  const protectedRow = (tpl: Template) => tpl.is_default || seeded(tpl)
   const withBusy = async (slug: string, run: () => Promise<void>) => {
     setBusy(prev => new Set(prev).add(slug))
     try { await run() } catch { /* The request layer already surfaced the failure. */ } finally {
@@ -74,14 +81,7 @@ export default function TemplatesView() {
   }
 
   async function confirmDelete(tpl: Template) {
-    const ok = await confirm({
-      title: t('admin:templates.confirm.delete_title'),
-      message: t('admin:templates.confirm.delete_message', { slug: tpl.slug }),
-      confirmText: t('common:actions.delete'),
-      destructive: true,
-      initialFocus: 'cancel',
-    })
-    if (!ok) return
+    if (!await askDeleteTemplate(t, tpl.slug)) return
     await withBusy(tpl.slug, async () => {
       await deleteTemplate(tpl.slug)
       pushToast({ message: t('admin:templates.toast.deleted'), severity: 'success' })
@@ -90,14 +90,7 @@ export default function TemplatesView() {
   }
 
   async function confirmReset(tpl: Template) {
-    const ok = await confirm({
-      title: t('admin:templates.confirm.reset_title'),
-      message: t('admin:templates.confirm.reset_message', { slug: tpl.slug }),
-      confirmText: t('admin:templates.reset_to_default'),
-      destructive: true,
-      initialFocus: 'cancel',
-    })
-    if (!ok) return
+    if (!await askResetTemplate(t, tpl.slug)) return
     await withBusy(tpl.slug, async () => {
       await resetTemplate(tpl.slug)
       pushToast({ message: t('admin:templates.toast.reset'), severity: 'success' })
@@ -107,7 +100,7 @@ export default function TemplatesView() {
 
   function menuOf(tpl: Template): MoreMenuItem[] {
     const wait = busy.has(tpl.slug)
-    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:templates.duplicate'), disabled: wait, onSelect: () => { copy.select(tpl.slug); edit.select('new') } }]
+    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:templates.duplicate'), disabled: wait, onSelect: () => open(newTemplatePath(tpl.slug)) }]
     if (seeded(tpl)) menu.push({ id: 'reset', label: t('admin:templates.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(tpl) })
     // A protected template keeps its Delete item, off, saying why, instead of silently having none.
     menu.push(protectedRow(tpl)
@@ -139,25 +132,13 @@ export default function TemplatesView() {
   }
 
   const columns = useMemo(() => templateColumns({
-    t, ruleSets: ruleSetMap, canConfig, busy, onEdit: tpl => edit.select(tpl.slug), menuOf,
+    t, ruleSets: ruleSetMap, canConfig, busy, onEdit: tpl => open(templatePath(tpl.slug)), menuOf,
   // The row handlers close over the lists they read; they are rebuilt with the columns when those change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [t, ruleSetMap, canConfig, busy, items])
 
   const shown = useMemo(() => filterRows(items, r => `${r.slug} ${r.name} ${r.client_type}`, q), [items, q])
   const filtered = q.trim() !== ''
-
-  const target: TemplateTarget | null = useMemo(() => {
-    if (!canConfig || !edit.selected) return null
-    if (edit.selected === 'new') {
-      const source = copy.selected ? items.find(r => r.slug === copy.selected) : undefined
-      return source ? { kind: 'copy', draft: duplicateOf(source) } : { kind: 'new' }
-    }
-    const found = items.find(r => r.slug === edit.selected)
-    return found ? { kind: 'edit', template: found } : null
-  }, [canConfig, edit.selected, copy.selected, items])
-
-  const closeSheet = () => { copy.clear(); edit.clear() }
 
   if (failed) {
     return (
@@ -175,7 +156,7 @@ export default function TemplatesView() {
         title={t('admin:templates.title')}
         count={loading ? undefined : items.length}
         description={t('admin:templates.subtitle')}
-        primary={canConfig && <Button onClick={() => { copy.clear(); edit.select('new') }}>{t('admin:templates.create')}</Button>}
+        primary={canConfig && <Button onClick={() => open(newTemplatePath())}>{t('admin:templates.create')}</Button>}
       />
       <DataTable<Template>
         aria-label={t('admin:templates.title')}
@@ -187,14 +168,13 @@ export default function TemplatesView() {
         selectable={canConfig}
         selection={checked}
         onSelectionChange={setChecked}
-        onRowOpen={canConfig ? tpl => edit.select(tpl.slug) : undefined}
-        activeRowId={edit.selected && edit.selected !== 'new' ? edit.selected : null}
+        onRowOpen={canConfig ? tpl => open(templatePath(tpl.slug)) : undefined}
         rowOptions={r => ({ selectable: !protectedRow(r), state: busy.has(r.slug) ? 'pending' : undefined })}
         renderCard={(r, ctx) => (
           <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
             status={r.is_default ? <Badge variant="secondary">{t('admin:templates.status.default')}</Badge> : undefined}
             detail={`${r.client_type} · ${r.rule_sets?.length ? r.rule_sets.map(s => ruleSetMap.get(s)?.name || s).join('、') : t('admin:templates.status.no_binding')}`}
-            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:templates.edit_title')} menuLabel={t('admin:templates.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => edit.select(r.slug)} menu={menuOf(r)} /> : undefined} />
+            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:templates.edit_title')} menuLabel={t('admin:templates.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => open(templatePath(r.slug))} menu={menuOf(r)} /> : undefined} />
         )}
         toolbar={(
           <FilterBar
@@ -204,7 +184,7 @@ export default function TemplatesView() {
         )}
         empty={filtered
           ? <EmptyState compact title={t('admin:templates.no_match')} action={<Button variant="outline" onClick={() => setQ('')}>{t('admin:templates.clear_search')}</Button>} />
-          : <EmptyState compact title={t('admin:templates.empty')} description={t('admin:templates.empty_hint')} action={canConfig ? <Button onClick={() => edit.select('new')}>{t('admin:templates.create')}</Button> : undefined} />}
+          : <EmptyState compact title={t('admin:templates.empty')} description={t('admin:templates.empty_hint')} action={canConfig ? <Button onClick={() => open(newTemplatePath())}>{t('admin:templates.create')}</Button> : undefined} />}
         bulkActions={canConfig ? (ctx => {
           const rows = items.filter(i => ctx.ids.includes(i.slug))
           return (
@@ -213,17 +193,6 @@ export default function TemplatesView() {
             </Button>
           )
         }) : undefined}
-      />
-      <TemplateSheet
-        target={target}
-        existingSlugs={items.map(r => r.slug)}
-        ruleSets={ruleSets}
-        onClose={closeSheet}
-        onSaved={(saved, wasEdit) => {
-          if (wasEdit) mutateItems(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
-          closeSheet()
-          if (!wasEdit) void load().catch(() => {})
-        }}
       />
     </div>
   )

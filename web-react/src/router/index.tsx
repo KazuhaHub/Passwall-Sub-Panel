@@ -35,6 +35,8 @@ const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute')
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
 const RuleSetsView = lazy(viewLoaders['/admin/rules'])
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
+const TemplateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute'))
+const TemplateCreateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute').then(m => ({ default: m.TemplateCreateRoute })))
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
@@ -126,6 +128,9 @@ export const router = createBrowserRouter([
           { path: 'nodes/:id', element: <NodeDetailRoute /> },
           { path: 'rules', element: <RuleSetsView /> },
           { path: 'templates', element: <TemplatesView /> },
+          // A template is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
+          { path: 'templates/new', element: <TemplateCreateRoute /> },
+          { path: 'templates/:slug', element: <TemplateRoute /> },
           { path: 'sub-clients', element: <SubClientsView /> },
           // LogsRoute sends an admin's old ?tab=geo|risk links on to the risk
           // center, where those two tabs now live.
