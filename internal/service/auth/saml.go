@@ -693,7 +693,7 @@ var errSAMLParsePanic = errors.New("SAML response verification panicked")
 
 // verifyResponse runs crewjam's verification and turns a panic into an error.
 //
-// GO-2026-6909 (crewjam/saml ≤ v0.5.1, no patched release) includes a nil
+// GO-2026-6909 (crewjam/saml ≤ v0.5.1, fixed in v0.5.2) includes a nil
 // dereference of an assertion's Subject AFTER the signature check. samlguard
 // refuses that shape in a plaintext assertion, but it reads raw XML and cannot see
 // inside an EncryptedAssertion, and validateAssertion makes the same unchecked
