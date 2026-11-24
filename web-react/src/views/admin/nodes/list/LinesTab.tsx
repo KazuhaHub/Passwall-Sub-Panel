@@ -10,6 +10,7 @@ import { DataTable } from '@/components/data/DataTable'
 import type { DataTableHandle } from '@/components/data/dataTableTypes'
 import { FacetFilter } from '@/components/data/FacetFilter'
 import { FilterBar } from '@/components/data/FilterBar'
+import { useRecordNav } from '@/components/data/useRecordNav'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { TableSkeleton } from '@/components/feedback/LoadingState'
@@ -151,6 +152,11 @@ export default function LinesTab() {
   const open = lineSel.selected && addingTo === null ? items.find(i => i.id === lineSel.selected) ?? null : null
   const editing = admin && url.edit && (open !== null || addingTo !== null)
   const siblings = useMemo(() => (open ? items.filter(i => i.row.kind === 'line' && i.row.node_id === open.row.node_id && i.id !== open.id) : []), [items, open])
+  // Previous / next walk the lines the list shows, in the order of the view that is on (the tree reads group by group).
+  const navIds = useMemo(() => (url.view === 'node'
+    ? tree.flatMap(g => [g.list, ...(g.children ?? []).map(c => c.list)]).flatMap(l => (l ? [l.id] : []))
+    : shown.filter(s => s.row.kind === 'line').map(s => s.id)), [url.view, tree, shown])
+  const nav = useRecordNav(navIds, open ? open.id : null, id => lineSel.select(id, { replace: true }))
   // A link to a line that no longer exists closes itself once the list has loaded.
   useEffect(() => { if (lineSel.selected && addingTo === null && order.data && !open) lineSel.clear() }, [lineSel, order.data, open, addingTo])
   const closeSheet = () => guard.close(() => { lineSel.clear(); setUrl({ edit: false }) })
@@ -319,6 +325,7 @@ export default function LinesTab() {
 
       <LineSheet
         item={open} newLine={editing && addingTo !== null ? { nodeName: nodeMap.get(addingTo)?.display_name ?? '' } : null}
+        nav={nav}
         editor={editing ? <LineEditor nodeId={addingTo ?? open?.row.node_id ?? 0} lineId={addingTo !== null ? null : open?.row.line_id ?? null} onDirtyChange={guard.setDirty} onSaved={onEditorSaved} /> : undefined}
         siblings={siblings} colors={colors} labels={labels} tz={tz}
         menu={open ? menuFor(open) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}

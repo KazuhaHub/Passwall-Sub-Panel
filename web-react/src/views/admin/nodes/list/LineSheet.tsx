@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { CopyText } from '@/components/common/CopyButton'
 import { MoreMenu, type MoreMenuItem } from '@/components/common/MoreMenu'
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog, type DetailNav } from '@/components/data/DetailDialog'
 import { PathDiagram } from '@/components/diagram/PathDiagram'
 import type { LandingColor } from '@/components/diagram/landingColor'
 import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, type ConfigSyncState } from '../../configSync'
@@ -15,10 +15,10 @@ import { StatusCell } from './cells'
 import type { ListRow } from './types'
 
 /**
- * The right-hand sheet of a line (design 2.6). In VIEW mode: the path, the state in words and the facts; editing
+ * The dialog of a line (design 2.6). In VIEW mode: the path, the state in words and the facts; editing
  * is a separate action, never an editable form behind a click that only meant to look. In EDIT mode the same
- * sheet shows the line editor (`editor`) in place of the facts, so there is no dialog on a sheet and the list stays
- * where it was; a NEW line has no view, only the editor. It shows the node-level facts a relay row does not repeat (config push, observed listener), so nothing is hidden,
+ * dialog shows the line editor (`editor`) in place of the facts, so there is no dialog on a dialog and the list stays
+ * where it was; a NEW line has no view, only the editor. Previous / next (`nav`) walk the lines the list shows, in view mode only: stepping away from an editor would drop its edits. It shows the node-level facts a relay row does not repeat (config push, observed listener), so nothing is hidden,
  * only not repeated on every row.
  */
 /** The stored state when it is one the page knows, else "never captured" (an absent field is that too). */
@@ -27,12 +27,14 @@ function configState(raw: string | undefined): ConfigSyncState {
   return (CONFIG_SYNC_STATES as readonly string[]).includes(v) ? (v as ConfigSyncState) : ''
 }
 
-export function LineSheet({ item, newLine, editor, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onBack, onSelect, onClose }: {
+export function LineSheet({ item, newLine, editor, nav, siblings, colors, labels, tz, menu, canEdit, nodeHref, onEdit, onBack, onSelect, onClose }: {
   item: ListRow | null
   /** A line being added to this node: the sheet opens on the editor alone. */
   newLine?: { nodeName: string } | null
   /** The editor, when the sheet is in edit mode (or adding). */
   editor?: ReactNode
+  /** Previous / next over the lines the list shows. */
+  nav?: DetailNav
   /** The node's other lines, in list order. */
   siblings: readonly ListRow[]
   colors: Map<string, LandingColor>
@@ -63,8 +65,10 @@ export function LineSheet({ item, newLine, editor, siblings, colors, labels, tz,
   const observed = node && (node.observed_protocol || (node.observed_port ?? 0) > 0)
 
   return (
-    <DetailSheet
+    <DetailDialog
       open={item !== null || !!newLine}
+      size="lg"
+      nav={editor ? undefined : nav}
       onClose={onClose}
       title={newLine ? t('nodes.action.add_line') : editor ? (direct ? t('nodes.action.edit_direct') : t('nodes.line.edit_title', { name: row?.name ?? '' })) : row?.name ?? ''}
       description={newLine ? newLine.nodeName : undefined}
@@ -128,6 +132,6 @@ export function LineSheet({ item, newLine, editor, siblings, colors, labels, tz,
           </section>
         </div>
       )}
-    </DetailSheet>
+    </DetailDialog>
   )
 }

@@ -1,10 +1,10 @@
-import { DetailSheet } from '@/components/data/DetailSheet'
+import { DetailDialog } from '@/components/data/DetailDialog'
 import { useNodesT } from '../shared/useNodesT'
 import { LineEditor } from './LineEditor'
 import { useGuardedEditor } from './useGuardedEditor'
 
 /**
- * The line editor in a sheet of its own, for the node page (the list has its own sheet, which switches between the
+ * The line editor in a dialog of its own, for the node page (the list has its own dialog, which switches between the
  * view and the editor in place). Closing it with unsaved edits asks first; so does leaving the page.
  * `param` is the address parameter that names the open line.
  */
@@ -20,8 +20,8 @@ export function LineEditSheet({ nodeId, lineId, title, param, onClose, onSaved }
   const t = useNodesT()
   const guard = useGuardedEditor(param)
   return (
-    <DetailSheet open onClose={() => guard.close(onClose)} title={lineId === null ? t('nodes.action.add_line') : title}>
+    <DetailDialog open size="lg" onClose={() => guard.close(onClose)} title={lineId === null ? t('nodes.action.add_line') : title}>
       <LineEditor nodeId={nodeId} lineId={lineId} onDirtyChange={guard.setDirty} onSaved={r => guard.leave(() => onSaved(r))} />
-    </DetailSheet>
+    </DetailDialog>
   )
 }
