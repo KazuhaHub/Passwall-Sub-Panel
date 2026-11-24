@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from 'react'
-import { Fragment } from 'react'
+import { Fragment, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { IconMore } from '@/lib/icons'
@@ -22,6 +22,12 @@ export interface MoreMenuItem {
   /** Opens a route instead (a real link, so it can open in a new tab). */
   to?: string
   disabled?: boolean
+  /**
+   * Why a disabled item cannot be used. Shown as smaller text under the label and exposed as the item's
+   * description, so the reason is read with the item rather than hidden in a tooltip. Only meaningful with
+   * `disabled`; an enabled item ignores it.
+   */
+  disabledReason?: string
   /** A destructive item: drawn in the danger colour and set apart below a divider. */
   destructive?: boolean
 }
@@ -41,15 +47,28 @@ export function MoreMenu({ items, label, size = 'icon-sm', align = 'end', childr
   children?: ReactNode
 }) {
   const { t } = useTranslation('common')
+  const uid = useId()
   const normal = items.filter(i => !i.destructive)
   const danger = items.filter(i => i.destructive)
   const row = (i: MoreMenuItem) => {
     const Icon = i.icon
-    const inner = <>{Icon && <Icon />}{i.label}</>
+    const reason = i.disabled ? i.disabledReason : undefined
+    const reasonId = `${uid}-${i.id}-why`
+    const inner = reason ? (
+      <>
+        {Icon && <Icon />}
+        <span className="flex min-w-0 flex-col">
+          <span>{i.label}</span>
+          <span id={reasonId} className="text-xs font-normal text-muted-foreground">{reason}</span>
+        </span>
+      </>
+    ) : <>{Icon && <Icon />}{i.label}</>
+    // The name stays the label alone; the reason is the description (a name built from both would read as one long label).
+    const a11y = reason ? { 'aria-label': i.label, 'aria-describedby': reasonId } : {}
     return i.to ? (
-      <DropdownMenuItem key={i.id} disabled={i.disabled} render={<Link to={i.to} />}>{inner}</DropdownMenuItem>
+      <DropdownMenuItem key={i.id} disabled={i.disabled} render={<Link to={i.to} />} {...a11y}>{inner}</DropdownMenuItem>
     ) : (
-      <DropdownMenuItem key={i.id} disabled={i.disabled} variant={i.destructive ? 'destructive' : 'default'} onClick={i.onSelect}>{inner}</DropdownMenuItem>
+      <DropdownMenuItem key={i.id} disabled={i.disabled} variant={i.destructive ? 'destructive' : 'default'} onClick={i.onSelect} {...a11y}>{inner}</DropdownMenuItem>
     )
   }
   return (

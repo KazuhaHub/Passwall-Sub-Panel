@@ -55,4 +55,31 @@ describe('MoreMenu', () => {
     const item = await screen.findByRole('menuitem', { name: '打开日志' })
     expect(item.getAttribute('href')).toBe('/admin/logs')
   })
+
+  it('shows why an item is disabled, describes it by the reason, and never runs it', async () => {
+    const onSelect = vi.fn()
+    const other = vi.fn()
+    render(<MemoryRouter><MoreMenu items={[
+      { id: 'other', label: '编辑', onSelect: other },
+      { id: 'del', label: '删除', disabled: true, disabledReason: '仍在使用中', onSelect },
+    ]} /></MemoryRouter>)
+    open()
+    const item = await screen.findByRole('menuitem', { name: '删除' })
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('仍在使用中')).toBeTruthy()
+    const describedBy = item.getAttribute('aria-describedby')!
+    expect(document.getElementById(describedBy)?.textContent).toBe('仍在使用中')
+    fireEvent.click(item)
+    // Keyboard: Enter on whichever item has focus must not reach the disabled one.
+    fireEvent.keyDown(item, { key: 'Enter' })
+    fireEvent.keyDown(item, { key: ' ' })
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('ignores a reason on an item that is not disabled', async () => {
+    render(<MemoryRouter><MoreMenu items={[{ id: 'a', label: '编辑', disabledReason: '不会显示', onSelect: () => {} }]} /></MemoryRouter>)
+    open()
+    await screen.findByRole('menuitem', { name: '编辑' })
+    expect(screen.queryByText('不会显示')).toBeNull()
+  })
 })
