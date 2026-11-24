@@ -117,6 +117,8 @@ export const groupKeys = {
   list: (s: QueryScope, params: GroupListParams) => [...groupKeys.lists(s), params] as const,
   /** Every group, every page (listAllGroups): for a picker, not a table. */
   catalogue: (s: QueryScope) => [...groupKeys.all(s), 'catalogue'] as const,
+  /** One group, by id (the group's own page). */
+  detail: (s: QueryScope, id: number) => [...groupKeys.all(s), 'detail', id] as const,
 }
 
 /**

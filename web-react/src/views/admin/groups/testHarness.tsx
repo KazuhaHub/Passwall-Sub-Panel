@@ -9,13 +9,20 @@ import ConfirmHost from '@/components/ConfirmHost'
 import { makeTestQueryClient } from '@/test/queryTestUtils'
 import { api, installReads, list, mountPage, toast } from '../subscription/testHarness'
 import { SCOPE_KEYS } from '@/components/scope/scopeOverrides'
+import GroupCreatePage from './GroupCreatePage'
+import GroupDetailRoute from './GroupDetailRoute'
 
 export { api, installReads, list, mountPage, toast }
 
-/** mountPage with the places this page links to (Users, the Nodes page, access control) as routes, so a click on a link can be followed. */
+/**
+ * The list `page` at its path, a group's page and the create page beside it, and the places these link to (Users, the
+ * Nodes page, access control) as routes, so a click on a link can be followed. `entry` may be any of them.
+ */
 export function mountWithLinks(page: ReactElement, entry: string) {
   const router = createMemoryRouter([
     { path: PATH, element: page },
+    { path: `${PATH}/new`, element: <GroupCreatePage /> },
+    { path: `${PATH}/:id`, element: <GroupDetailRoute /> },
     { path: '/admin/users', element: <div>users page</div> },
     { path: '/admin/nodes', element: <div>nodes page</div> },
     { path: '/admin/risk', element: <div>risk page</div> },
@@ -52,6 +59,8 @@ export const previewOf = (over: Record<string, unknown> = {}) => ({
 export function reads(groups: unknown[] = [team, empty], extra: Record<string, unknown> = {}) {
   installReads({
     '/admin/groups': list(groups),
+    // A group's own page reads it by id.
+    ...Object.fromEntries(groups.map(g => [`/admin/groups/${(g as { id: number }).id}`, g])),
     '/admin/nodes': list([nodeRow]),
     '/admin/groups/5/scope-settings': scopeReply({ 'notify.expire_before_days': '7' }),
     '/admin/groups/6/scope-settings': scopeReply(),

@@ -752,22 +752,21 @@
         "insert": "插入「我们收集什么」",
         "bytes": "{{used}} / {{max}} 字节",
         "publish": "发布…",
-        "close": "关闭",
         "tab_edit": "编辑",
         "tab_preview": "预览",
-        "preview_title": "预览",
         "preview_failed": "预览渲染失败",
         "no_marker_summary": "正文里没有「我们收集什么」，建议插入",
         "no_marker_detail": "「我们收集什么」由当前实际设置自动生成，设置变了它会跟着变。不插入的话，用户看不到本服务实际记录了哪些数据、保留多久。",
         "discard_title": "放弃未保存的修改？",
-        "discard_message": "关闭后，这份草稿会丢失。",
+        "discard_message": "离开此页后，这份草稿会丢失。",
         "discard_confirm": "放弃",
         "switch_title": "切换语言？",
         "switch_message": "当前语言有未保存的修改，切换后会丢失。",
         "usage_missing_summary": "预览里没有按网站用量",
         "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。",
         "unpublished": "此文本尚未发布",
-        "empty": "文本为空，无法发布"
+        "empty": "文本为空，无法发布",
+        "not_found": "找不到这份文档"
       },
       "publish": {
         "title": "发布{{doc}}（{{locale}}）第 {{version}} 版？",
@@ -999,11 +998,13 @@
       "missing_targets": "规则目标未在模板代理组中找到：{{names}}",
       "groups_ok": "已识别 {{n}} 个代理组，规则目标匹配正常。",
       "no_binding": "当前未绑定规则集，只会渲染节点、代理组和个人规则。",
-      "incomplete": "模板内容尚未完整，请继续编辑。"
+      "incomplete": "模板内容尚未完整，请继续编辑。",
+      "propagation": "修改最长需要一分钟才会反映到订阅。"
     },
     "validate": {
       "slug_name_required": "slug 和 name 必填",
-      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug"
+      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug",
+      "slug_reserved": "保留的 slug“{{slug}}”不能使用，请换一个"
     },
     "toast": {
       "saved": "已保存",
@@ -1032,7 +1033,13 @@
     "empty": "还没有配置方案",
     "empty_hint": "订阅渲染需要为每种客户端类型至少配置一个方案。",
     "cannot_delete_default": "默认配置方案不可删除，请先把其他方案设为默认",
-    "no_rule_sets": "没有规则集"
+    "no_rule_sets": "没有规则集",
+    "readonly_note": "你可以查看此方案，但不能修改。",
+    "detail": {
+      "not_found": "未找到此配置方案",
+      "forbidden": "你无权打开此配置方案",
+      "forbidden_create": "你无权新增配置方案"
+    }
   },
   "sync_tasks": {
     "title": "同步任务",
@@ -3596,6 +3603,13 @@
     "retry": "重试",
     "create": "新增分组",
     "edit_title": "编辑分组",
+    "detail": {
+      "not_found": "这个分组不存在或已被删除",
+      "forbidden": "你没有权限打开这个分组",
+      "staff_only": "只有管理员可以编辑分组",
+      "unsaved_in": "以下标签页有未保存的修改：{{tabs}}",
+      "tab_separator": "、"
+    },
     "search_placeholder": "搜索名称 / slug",
     "no_match": "没有匹配的分组",
     "batch_delete": "批量删除",
@@ -3697,7 +3711,8 @@
       "nodes": "节点和线路",
       "layout": "布局",
       "limits": "限额",
-      "overrides": "覆盖项"
+      "overrides": "覆盖项",
+      "unsaved": "有未保存的修改"
     },
     "members": {
       "count": "本组共有 {{count}} 名成员",

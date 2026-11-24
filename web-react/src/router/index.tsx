@@ -28,13 +28,18 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
+const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRoute'))
+const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
 const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
 const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
+const LegalEditorRoute = lazy(() => import('@/views/admin/legal/LegalEditorRoute'))
 const NodesPage = lazy(viewLoaders['/admin/nodes'])
 const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
 const RuleSetsView = lazy(viewLoaders['/admin/rules'])
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
+const TemplateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute'))
+const TemplateCreateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute').then(m => ({ default: m.TemplateCreateRoute })))
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
@@ -121,6 +126,9 @@ export const router = createBrowserRouter([
           { path: 'servers', element: <ServersView /> },
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
+          // A group is a page of its own; `?edit=<id>` on the list (the old side sheet's address) is sent on to these.
+          { path: 'groups/new', element: <GroupCreatePage /> },
+          { path: 'groups/:id', element: <GroupDetailRoute /> },
           { path: 'users', element: <UsersView /> },
           // A user is a page of its own; `?user=<id>` on the list (the old side sheet's address) is sent on to these.
           { path: 'users/new', element: <UserCreatePage /> },
@@ -131,6 +139,9 @@ export const router = createBrowserRouter([
           { path: 'nodes/:id', element: <NodeDetailRoute /> },
           { path: 'rules', element: <RuleSetsView /> },
           { path: 'templates', element: <TemplatesView /> },
+          // A template is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
+          { path: 'templates/new', element: <TemplateCreateRoute /> },
+          { path: 'templates/:slug', element: <TemplateRoute /> },
           { path: 'sub-clients', element: <SubClientsView /> },
           // LogsRoute sends an admin's old ?tab=geo|risk links on to the risk
           // center, where those two tabs now live.
@@ -146,6 +157,8 @@ export const router = createBrowserRouter([
           { path: 'diagnostics', element: <DiagnosticsView /> },
           { path: 'traffic', element: <TrafficView /> },
           { path: 'settings', element: <SettingsView /> },
+          // A legal document's editor is a page under Settings (terms | privacy), so the sidebar keeps Settings lit.
+          { path: 'settings/legal/:kind', element: <LegalEditorRoute /> },
           { path: 'language-packs', element: <LanguagePacksView /> },
           ...PLACEHOLDER_PATHS.map(p => ({ path: p, element: <PlaceholderView /> })),
           // An unknown /admin/... address: a not-found page in the shell, not a silent bounce to the dashboard.
