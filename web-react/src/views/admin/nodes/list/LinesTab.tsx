@@ -110,10 +110,10 @@ export default function LinesTab() {
   // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
   const deletion = useNodeDeletion({ rows, serverMap })
   const handlers = useRowHandlers({ lines: lineHandlers, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
-  const menuFor = useCallback((item: ListRow, inSheet = false): MoreMenuItem[] =>
-    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, inSheet, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
+  const menuFor = useCallback((item: ListRow, opts?: { parent?: boolean }): MoreMenuItem[] =>
+    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, canMove: !moves.saving, withAddLine: opts?.parent }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
-  const menuOf = useCallback((item: ListRow) => menuFor(item), [menuFor])
+  const menuOf = useCallback((item: ListRow, opts?: { parent?: boolean }) => menuFor(item, opts), [menuFor])
 
   const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
   const treeCols = useMemo(() => treeColumns({ t, colors, labels, tz, nodeHref, menuOf }), [t, colors, labels, tz, admin, menuOf]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -311,7 +311,7 @@ export default function LinesTab() {
           activeRowId={lineSel.selected && open?.row.line_id === 'direct' ? `landing:${open.row.node_id}` : lineSel.selected}
           rowOptions={r => ({ openable: !!r.list, state: r.list ? rowStateOf(r.list) : undefined })}
           renderCard={(r, ctx) => (r.list
-            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list)} open={ctx.open} />
+            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list, { parent: true })} open={ctx.open} />
             : <span className="text-sm font-medium">{r.group.name}</span>)}
         />
       )}
@@ -320,7 +320,7 @@ export default function LinesTab() {
         item={open} newLine={editing && addingTo !== null ? { nodeName: nodeMap.get(addingTo)?.display_name ?? '' } : null}
         editor={editing ? <LineEditor nodeId={addingTo ?? open?.row.node_id ?? 0} lineId={addingTo !== null ? null : open?.row.line_id ?? null} onDirtyChange={guard.setDirty} onSaved={onEditorSaved} /> : undefined}
         siblings={siblings} colors={colors} labels={labels} tz={tz}
-        menu={open ? menuFor(open, true) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}
+        menu={open ? menuFor(open) : []} canEdit={admin} nodeHref={open && nodeHref ? nodeHref(open.row.node_id ?? 0) : undefined}
         onEdit={() => setUrl({ edit: true })} onBack={() => guard.close(() => setUrl({ edit: false }))}
         onSelect={id => lineSel.select(id, { replace: true })} onClose={closeSheet}
       />

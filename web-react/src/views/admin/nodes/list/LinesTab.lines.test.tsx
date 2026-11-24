@@ -107,6 +107,18 @@ describe('editing a line from the list', () => {
   })
 })
 
+describe('the row menu of a line', () => {
+  it('lists the line items, then Open node, then Delete line, in that order; a direct row has no line enable and no delete', async () => {
+    mountPage(<NodesPage />)
+    await menuOf('Node1 · GZ')
+    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit line', 'Move to…', 'Disable line', 'Open node', 'Delete line'])
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    await menuOf('Node1')
+    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit direct line', 'Move to…', 'Open node'])
+  })
+})
+
 describe('enabling, disabling and deleting a line', () => {
   it('Disable line writes the node\'s lines once with only that flag changed, and offers Undo', async () => {
     mountPage(<NodesPage />)

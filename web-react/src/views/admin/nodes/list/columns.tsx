@@ -17,7 +17,8 @@ export interface ColumnCtx {
   tz: string
   /** An administrator's link to a node; undefined for an operator, who has no detail page. */
   nodeHref?: (nodeId: number) => string
-  menuOf: (item: ListRow) => MoreMenuItem[]
+  /** `parent` is a landing's parent row in the by-node view, whose menu also offers Add line (the landing is what it adds to). */
+  menuOf: (item: ListRow, opts?: { parent?: boolean }) => MoreMenuItem[]
 }
 
 // The default columns share the frame in percentages (max-w-0 lets a cell shrink below its content) and clip with an
@@ -86,7 +87,7 @@ export function treeColumns(c: ColumnCtx): ColumnDef<TreeItem, any>[] {
     { id: 'status', header: t('nodes.col.status'), ...sortless, meta: { label: t('nodes.col.status') },
       cell: ctx => ctx.row.original.list && <StatusCell item={ctx.row.original.list} /> },
     { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: t('nodes.col.actions') },
-      cell: ctx => ctx.row.original.list && <RowMenu items={c.menuOf(ctx.row.original.list)} name={ctx.row.original.list.row.name} /> },
+      cell: ctx => ctx.row.original.list && <RowMenu items={c.menuOf(ctx.row.original.list, { parent: true })} name={ctx.row.original.list.row.name} /> },
   ]
 }
 

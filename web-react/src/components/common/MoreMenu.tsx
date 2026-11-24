@@ -28,6 +28,8 @@ export interface MoreMenuItem {
    * `disabled`; an enabled item ignores it.
    */
   disabledReason?: string
+  /** Draws a divider above this item: a group of related items set apart from the one before it. */
+  separatorBefore?: boolean
   /** A destructive item: drawn in the danger colour and set apart below a divider. */
   destructive?: boolean
 }
@@ -65,11 +67,12 @@ export function MoreMenu({ items, label, size = 'icon-sm', align = 'end', childr
     ) : <>{Icon && <Icon />}{i.label}</>
     // The name stays the label alone; the reason is the description (a name built from both would read as one long label).
     const a11y = reason ? { 'aria-label': i.label, 'aria-describedby': reasonId } : {}
-    return i.to ? (
+    const item = i.to ? (
       <DropdownMenuItem key={i.id} disabled={i.disabled} render={<Link to={i.to} />} {...a11y}>{inner}</DropdownMenuItem>
     ) : (
       <DropdownMenuItem key={i.id} disabled={i.disabled} variant={i.destructive ? 'destructive' : 'default'} onClick={i.onSelect} {...a11y}>{inner}</DropdownMenuItem>
     )
+    return i.separatorBefore ? <Fragment key={i.id}><DropdownMenuSeparator />{item}</Fragment> : item
   }
   return (
     <DropdownMenu>
