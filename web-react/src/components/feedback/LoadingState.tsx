@@ -38,10 +38,24 @@ export function PageSkeleton({ className, framed = true }: { className?: string;
           <div className="flex h-(--row-h) items-center gap-4 border-b bg-muted/50 px-3">
             {Array.from({ length: 5 }, (_, c) => <Skeleton key={c} className={cn('h-3.5', c === 0 ? 'w-1/4' : 'flex-1')} />)}
           </div>
-          <TableSkeleton rows={6} cols={5} />
+          <TableRows rows={6} cols={5} />
         </div>
       </div>
     </Region>
+  )
+}
+
+function TableRows({ rows, cols }: { rows: number; cols: number }) {
+  return (
+    <div className="space-y-px">
+      {Array.from({ length: rows }, (_, r) => (
+        <div key={r} className="flex h-(--row-h) items-center gap-4 border-b px-3">
+          {Array.from({ length: cols }, (_, c) => (
+            <Skeleton key={c} className={cn('h-3.5', c === 0 ? 'w-1/4' : 'flex-1')} />
+          ))}
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -49,15 +63,7 @@ export function PageSkeleton({ className, framed = true }: { className?: string;
 export function TableSkeleton({ rows = 6, cols = 5, className }: { rows?: number; cols?: number; className?: string }) {
   return (
     <Region className={className}>
-      <div className="space-y-px">
-        {Array.from({ length: rows }, (_, r) => (
-          <div key={r} className="flex h-(--row-h) items-center gap-4 border-b px-3">
-            {Array.from({ length: cols }, (_, c) => (
-              <Skeleton key={c} className={cn('h-3.5', c === 0 ? 'w-1/4' : 'flex-1')} />
-            ))}
-          </div>
-        ))}
-      </div>
+      <TableRows rows={rows} cols={cols} />
     </Region>
   )
 }
