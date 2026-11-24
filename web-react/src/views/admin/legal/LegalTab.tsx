@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 
 import type { AdminLegal, LegalKind } from '@/api/legal'
+import { useObjectLink } from '@/components/common/objectReturn'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import DataCollectionCard from '@/components/DataCollectionCard'
 import { ErrorState } from '@/components/feedback/ErrorState'
@@ -14,8 +16,8 @@ import { useAdminLegal } from '@/query/legal'
 import { useQueryScope } from '@/query/useQueryScope'
 import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
-import LegalEditorSheet from './LegalEditorSheet'
 import LegalHistoryDialog from './LegalHistoryDialog'
+import { legalEditorPath } from './legalRoutes'
 
 interface Props {
   /** The settings draft's switches: this tab shows and edits them, the page's
@@ -34,7 +36,8 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
   const scope = useQueryScope()
   const terms = useAdminLegal(scope, 'terms')
   const privacy = useAdminLegal(scope, 'privacy')
-  const [editing, setEditing] = useState<LegalKind | null>(null)
+  // The editor is a page: the link carries this tab's address so its back link returns here.
+  const link = useObjectLink()
   const [history, setHistory] = useState<LegalKind | null>(null)
 
   const failed = (terms.isError || privacy.isError) && !(terms.data && privacy.data)
@@ -67,14 +70,14 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
       )}
 
       {enabled && nothingPublished && (
-        <Notice action={<Button variant="outline" size="sm" onClick={() => setEditing('privacy')}>{t('admin:settings.legal.go_edit')}</Button>}>
+        <Notice action={<Button variant="outline" size="sm" render={<Link {...link(legalEditorPath('privacy'))} />}>{t('admin:settings.legal.go_edit')}</Button>}>
           {t('admin:settings.legal.empty_alert')}
         </Notice>
       )}
 
       {!failed && (['terms', 'privacy'] as const).map(kind => (
         <DocumentCard key={kind} kind={kind} data={(kind === 'terms' ? terms : privacy).data}
-          onEdit={() => setEditing(kind)} onHistory={() => setHistory(kind)} />
+          editTo={link(legalEditorPath(kind))} onHistory={() => setHistory(kind)} />
       ))}
 
       {!failed && (
@@ -84,13 +87,12 @@ export default function LegalTab({ enabled, onEnabledChange, discloseUsage, onDi
         </div>
       )}
 
-      {editing && <LegalEditorSheet kind={editing} discloseUsage={discloseUsage} onClose={() => setEditing(null)} />}
       {history && <LegalHistoryDialog kind={history} onClose={() => setHistory(null)} />}
     </div>
   )
 }
 
-function DocumentCard({ kind, data, onEdit, onHistory }: { kind: LegalKind; data: AdminLegal | undefined; onEdit: () => void; onHistory: () => void }) {
+function DocumentCard({ kind, data, editTo, onHistory }: { kind: LegalKind; data: AdminLegal | undefined; editTo: ReturnType<ReturnType<typeof useObjectLink>>; onHistory: () => void }) {
   const t = useAdminT()
   const { i18n } = useTranslation()
   const name = t(`auth:legal.kind.${kind}`)
@@ -106,7 +108,7 @@ function DocumentCard({ kind, data, onEdit, onHistory }: { kind: LegalKind; data
       <CardHeader className="flex flex-row flex-wrap items-center gap-2">
         <h3 className="flex-1 text-base leading-snug font-medium">{name}</h3>
         <Button variant="outline" size="sm" onClick={onHistory}>{t('admin:settings.legal.history')}</Button>
-        <Button variant="outline" size="sm" onClick={onEdit}>{t('admin:settings.legal.edit')}</Button>
+        <Button variant="outline" size="sm" render={<Link {...editTo} />}>{t('admin:settings.legal.edit')}</Button>
       </CardHeader>
       <CardContent>
         {!data ? <Skeleton className="h-5 w-3/5" /> : (

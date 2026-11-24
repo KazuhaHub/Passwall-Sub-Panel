@@ -752,22 +752,21 @@
         "insert": "插入「我们收集什么」",
         "bytes": "{{used}} / {{max}} 字节",
         "publish": "发布…",
-        "close": "关闭",
         "tab_edit": "编辑",
         "tab_preview": "预览",
-        "preview_title": "预览",
         "preview_failed": "预览渲染失败",
         "no_marker_summary": "正文里没有「我们收集什么」，建议插入",
         "no_marker_detail": "「我们收集什么」由当前实际设置自动生成，设置变了它会跟着变。不插入的话，用户看不到本服务实际记录了哪些数据、保留多久。",
         "discard_title": "放弃未保存的修改？",
-        "discard_message": "关闭后，这份草稿会丢失。",
+        "discard_message": "离开此页后，这份草稿会丢失。",
         "discard_confirm": "放弃",
         "switch_title": "切换语言？",
         "switch_message": "当前语言有未保存的修改，切换后会丢失。",
         "usage_missing_summary": "预览里没有按网站用量",
         "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。",
         "unpublished": "此文本尚未发布",
-        "empty": "文本为空，无法发布"
+        "empty": "文本为空，无法发布",
+        "not_found": "找不到这份文档"
       },
       "publish": {
         "title": "发布{{doc}}（{{locale}}）第 {{version}} 版？",
@@ -4435,7 +4434,12 @@
     "test_all": "测试全部",
     "search_placeholder": "搜索名称 / URL",
     "no_match": "没有匹配的服务器",
-    "edit_title": "编辑 {{name}}",
+    "detail": {
+      "not_found": "没有此服务器，它可能已被删除。",
+      "forbidden": "你无权访问此服务器。",
+      "install_not_found": "没有此 Passwall Node 服务器，它可能已被删除，或不是 Passwall Node。",
+      "create_forbidden": "仅全局管理员可添加服务器。"
+    },
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
     "batch_upgrade_xray": "批量升级 Xray",
@@ -5114,7 +5118,6 @@
       "group_basics": "基本信息",
       "group_node": "Passwall Node",
       "group_connection": "连接",
-      "group_test": "连接测试",
       "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
     },
     "resource_state": "资源：{{state}}"
@@ -6603,7 +6606,7 @@
       "dialog": {
         "title_new": "新建列表",
         "type": "列表类型",
-        "title_edit": "编辑列表「{{name}}」",
+        "not_found": "没有找到这个列表，可能已被删除",
         "name": "名称",
         "name_required": "名称必填",
         "text": "列表内容",
@@ -6615,6 +6618,7 @@
         "refresh_follows": "刷新：跟随全局设置（每 {{hours}} 小时）",
         "category": "分类",
         "category_option": "{{name}} · {{entries}} 条",
+        "category_required": "请选择分类",
         "attrs": "属性",
         "geosite_note": "数据来自 v2fly domain-list-community。",
         "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
@@ -6623,8 +6627,6 @@
         "footer_nodes_unknown": "运行它的节点",
         "footer_unchanged": "内容未变化，不会触发重启",
         "footer_unused": "这个列表没有被使用，保存不会影响节点",
-        "save": "保存",
-        "cancel": "取消",
         "stale": "这个列表刚被其他人修改过",
         "load_latest": "载入最新",
         "preview_failed": "无法解析：{{error}}",
@@ -7041,11 +7043,8 @@
         "blank": "新建空白策略"
       },
       "editor": {
-        "close": "关闭",
-        "cancel": "取消",
-        "save": "保存",
         "title_new": "新建策略",
-        "title_edit": "编辑策略「{{name}}」",
+        "not_found": "没有找到这条策略，可能已被删除",
         "reload": "载入最新",
         "stale": "这条策略刚被其他人修改过",
         "name": "名称",

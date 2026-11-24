@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { confirmMock, renderAccess } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
-import PolicyEditorSheet from './PolicyEditorSheet'
+import PolicyEditor from './PolicyEditor'
 import { emptyForm } from './policyForm'
 
 vi.mock('@/api/accessControl', async importOriginal => {
@@ -37,7 +37,7 @@ beforeEach(() => {
 })
 
 const mount = (policy: DestPolicy | null, initial = emptyForm()) =>
-  renderAccess(<PolicyEditorSheet open policy={policy} initial={initial} onClose={vi.fn()} onSaved={vi.fn()} />)
+  renderAccess(<PolicyEditor policy={policy} initial={initial} back={{ to: '/admin/access-control', label: '访问控制' }} onCreated={vi.fn()} />)
 
 describe('what the editor sends', () => {
   it('a new policy is created with exactly the body the form describes, the order of its lists kept', async () => {

@@ -28,10 +28,14 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
+const ServerCreateRoute = lazy(() => import('@/views/admin/servers/ServerCreateRoute'))
+const ServerRoute = lazy(() => import('@/views/admin/servers/ServerRoute'))
+const ServerInstallRoute = lazy(() => import('@/views/admin/servers/ServerInstallRoute'))
 const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRoute'))
 const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
 const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
 const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
+const LegalEditorRoute = lazy(() => import('@/views/admin/legal/LegalEditorRoute'))
 const NodesPage = lazy(viewLoaders['/admin/nodes'])
 const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
 const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
@@ -45,6 +49,11 @@ const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
 const AccessControlView = lazy(viewLoaders['/admin/access-control'])
+// A policy and a list are pages of their own under the access-control page; their create forms sit beside them.
+const PolicyDetailRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyDetailRoute })))
+const PolicyCreateRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyCreateRoute })))
+const ListDetailRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListDetailRoute })))
+const ListCreateRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListCreateRoute })))
 const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
 const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
 const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
@@ -120,6 +129,10 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="dashboard" replace /> },
           { path: 'dashboard', element: <DashboardView /> },
           { path: 'servers', element: <ServersView /> },
+          // A server, its creation and a Passwall Node's installation are pages of their own (they were side sheets over the list).
+          { path: 'servers/new', element: <ServerCreateRoute /> },
+          { path: 'servers/:id', element: <ServerRoute /> },
+          { path: 'servers/:id/install', element: <ServerInstallRoute /> },
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
           // A group is a page of its own; `?edit=<id>` on the list (the old side sheet's address) is sent on to these.
@@ -147,11 +160,17 @@ export const router = createBrowserRouter([
           { path: 'logs', element: <LogsRoute><LogsView /></LogsRoute> },
           { path: 'risk', element: <RiskCenterView /> },
           { path: 'access-control', element: <AccessControlView /> },
+          { path: 'access-control/policies/new', element: <PolicyCreateRoute /> },
+          { path: 'access-control/policies/:id', element: <PolicyDetailRoute /> },
+          { path: 'access-control/lists/new', element: <ListCreateRoute /> },
+          { path: 'access-control/lists/:id', element: <ListDetailRoute /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
           { path: 'node-issues', element: <NodeIssuesView /> },
           { path: 'diagnostics', element: <DiagnosticsView /> },
           { path: 'traffic', element: <TrafficView /> },
           { path: 'settings', element: <SettingsView /> },
+          // A legal document's editor is a page under Settings (terms | privacy), so the sidebar keeps Settings lit.
+          { path: 'settings/legal/:kind', element: <LegalEditorRoute /> },
           { path: 'language-packs', element: <LanguagePacksView /> },
           ...PLACEHOLDER_PATHS.map(p => ({ path: p, element: <PlaceholderView /> })),
           // An unknown /admin/... address: a not-found page in the shell, not a silent bounce to the dashboard.
