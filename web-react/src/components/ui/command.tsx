@@ -49,7 +49,9 @@ function CommandDialog({
     <Dialog {...props}>
       <DialogContent
         className={cn(
-          "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          // Upper fifth of the VIEWPORT (the dialog is fixed to the window, not to the content area), never taller than what is
+          // left below it, so a long list scrolls instead of running off the screen.
+          "top-[15vh] max-h-[calc(100dvh-15vh-1.5rem)] translate-y-0 overflow-hidden rounded-xl! p-0",
           className
         )}
         showCloseButton={showCloseButton}
@@ -95,7 +97,7 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "no-scrollbar max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        "no-scrollbar max-h-[min(24rem,calc(100dvh-15vh-6rem))] scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className
       )}
       {...props}
