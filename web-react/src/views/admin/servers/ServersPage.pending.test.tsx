@@ -5,7 +5,7 @@ import { api, installReads, list, mount, server, snack } from './testHarness'
 import { pickRowAction } from './install/installationHarness'
 import { nativeServer, provisioning, waiting } from './install/installationHarness'
 import ServersPage from './ServersPage'
-import { NativeInstallationSheet } from './install/NativeInstallationSheet'
+import { NativeInstallationPage } from './install/NativeInstallationPage'
 
 /**
  * SLOW-NETWORK FEEDBACK: on a 3-10s link, a row action that only disables its
@@ -58,7 +58,7 @@ describe('ServersPage native installation credential import', () => {
     })
     const gate = deferred<{ data: unknown }>()
     api.post.mockImplementation(() => gate.promise)
-    mount(<NativeInstallationSheet server={nativeServer} initialProvisioning={null} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mount(<NativeInstallationPage server={nativeServer} initialProvisioning={null} onRotate={vi.fn()} />)
 
     await screen.findByText('admin:servers.native.legacy_credential_hint')
     fireEvent.change(screen.getByLabelText('admin:servers.native.old_credential'), { target: { value: provisioning.credential } })

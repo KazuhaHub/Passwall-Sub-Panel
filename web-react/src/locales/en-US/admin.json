@@ -4233,7 +4233,12 @@
     "test_all": "Test all",
     "search_placeholder": "Search name / URL",
     "no_match": "No servers match the search",
-    "edit_title": "Edit {{name}}",
+    "detail": {
+      "not_found": "No such server. It may have been deleted.",
+      "forbidden": "You do not have access to this server.",
+      "install_not_found": "No such Passwall Node server. It may have been deleted, or it is not a Passwall Node.",
+      "create_forbidden": "Only a Global Administrator can add servers."
+    },
     "batch_test": "Test selected",
     "batch_delete": "Delete selected",
     "batch_upgrade_xray": "Upgrade Xray on selected",
@@ -4918,7 +4923,6 @@
       "group_basics": "Basics",
       "group_node": "Passwall Node",
       "group_connection": "Connection",
-      "group_test": "Connection test",
       "test_hint": "The test reaches the server with the saved settings and records its version. Save your changes first."
     },
     "resource_state": "Resources: {{state}}"

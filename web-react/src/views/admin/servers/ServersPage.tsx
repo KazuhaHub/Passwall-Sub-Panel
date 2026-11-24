@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { SortingState } from '@tanstack/react-table'
 import type { DestNodeStatus } from '@/api/accessControl'
-import { rotateNativeCredential, type NativeInstallationSelection, type NativeServerProvisioning, type Server, type ServerListParams } from '@/api/servers'
+import type { Server, ServerListParams } from '@/api/servers'
 import { PageHeader } from '@/components/common/PageHeader'
-import { confirm } from '@/components/ConfirmHost'
+import { useObjectLink } from '@/components/common/objectReturn'
 import { DataTable } from '@/components/data/DataTable'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
@@ -32,13 +33,13 @@ import { ReinstallBackendDialog } from './dialogs/ReinstallBackendDialog'
 import RetiredRouteCleanupDialog from './dialogs/RetiredRouteCleanupDialog'
 import ServerAccessDialog from './dialogs/ServerAccessDialog'
 import NodeMetricsDialog from './metrics/NodeMetricsDialog'
-import { DEFAULT_INSTALLATION } from './install/installModel'
-import { NativeInstallationSheet } from './install/NativeInstallationSheet'
+import { leaveInstallation } from './install/installHandoff'
+import { rotateWithConfirm } from './install/rotateCredential'
 import { ServersContext, type ServersCtx } from './serversContext'
 import { hasCapability } from './serverModel'
 import { NameCell, TypeCell } from './cells'
 import { rowMenu } from './rowMenu'
-import { ServerFormSheet } from './ServerFormSheet'
+import { NEW_SERVER_PATH, serverInstallPath, serverPath } from './serverRoutes'
 import { ServersBanners } from './ServersBanners'
 import { useReleaseInfo } from './useReleaseInfo'
 import { useServerProbes } from './useServerProbes'
@@ -56,8 +57,9 @@ function parseSort(raw: string): { by: string; dir: 'asc' | 'desc' } {
 /**
  * The upstream servers PSP manages (3X-UI, S-UI, Passwall Node). One row per server: is it reachable, is its version
  * supported, does anything need attention, how many nodes and lines it carries. One visible action (test the
- * connection) and everything else in the More menu; the long tasks (add / edit, installation, metrics, diagnostics,
- * shared ports) open in sheets over the list so the list is never lost.
+ * connection) and everything else in the More menu. A server (add / edit) and a Passwall Node's installation are pages
+ * of their own, reached from here and returning here; the short tasks (metrics, diagnostics, shared ports, core) are
+ * dialogs over the list.
  *
  * The list is a plain database read, never polled, and the connection probe is a separate concern: refreshing the list
  * must never imply a request to an upstream server (see useServerProbes).
@@ -118,8 +120,6 @@ export default function ServersPage() {
   const up = useServerUpgrades({ probeServer: s => probes.probeServer(s), refresh, clearSelection: () => setSelection({}) })
 
   // ---- what is open over the list ----
-  const [form, setForm] = useState<{ editing: Server | null } | null>(null)
-  const [installChoice, setInstallChoice] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
   const [deleteTarget, setDeleteTarget] = useState<Server | null>(null)
   const [coreTarget, setCoreTarget] = useState<Server | null>(null)
   const [metricsTarget, setMetricsTarget] = useState<Server | null>(null)
@@ -131,44 +131,28 @@ export default function ServersPage() {
   const [sharedPortsTarget, setSharedPortsTarget] = useState<Server | null>(null)
   const [retiredTarget, setRetiredTarget] = useState<Server | null>(null)
   const [accessNode, setAccessNode] = useState<{ node: DestNodeStatus; name: string } | null>(null)
-  const [install, setInstall] = useState<{ server: Server; provisioning: NativeServerProvisioning | null; creating: boolean } | null>(null)
   const [rotatingId, setRotatingId] = useState<number | null>(null)
   const [coreBusyId, setCoreBusyId] = useState<number | null>(null)
-  // Bumped on every open and close of the installation, so a rotation that completes after the administrator moved on
-  // does not reopen a flow they closed or overwrite the one they switched to.
-  const installIntent = useRef(0)
-
-  function openInstallation(server: Server, provisioning: NativeServerProvisioning | null = null, creating = false) {
-    installIntent.current += 1
-    setInstall({ server, provisioning, creating })
-  }
-  function closeInstallation() {
-    installIntent.current += 1
-    setInstall(null)
-  }
-  function openCreate() { closeInstallation(); setInstallChoice(DEFAULT_INSTALLATION); setForm({ editing: null }) }
-  function openEdit(s: Server) { closeInstallation(); setForm({ editing: s }) }
+  // A server's page and its installation page are pages of their own: they carry this list's place (page, search, order),
+  // so their back link returns to the list the way it was left.
+  const link = useObjectLink()
+  const navigate = useNavigate()
+  const openEdit = (s: Server) => void navigate(...pageArgs(serverPath(s.id)))
+  const openInstallation = (s: Server) => void navigate(...pageArgs(serverInstallPath(s.id)))
+  function pageArgs(to: string): [string, { state: unknown }] { const l = link(to); return [l.to, { state: l.state }] }
+  // A rotation that finishes after the administrator moved on must not pull them to the installation page.
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   async function rotateCredential(s: Server) {
-    const intent = installIntent.current
-    const accepted = await confirm({
-      title: t('admin:servers.native.rotate_title'),
-      message: t('admin:servers.native.rotate_warning', { name: s.name }),
-      destructive: true,
-      confirmText: t('admin:servers.native.rotate_confirm'),
-      initialFocus: 'cancel',
-    })
-    if (!accepted) return
     setRotatingId(s.id)
     try {
-      const provisioned = await rotateNativeCredential(s.id)
-      // The server may have committed this rotation after the administrator closed or switched installation flows. Keep
-      // that newer intent; the credential can be retrieved later by explicitly reopening the node.
-      if (intent === installIntent.current) openInstallation(provisioned.server, provisioned, install?.creating ?? false)
-      pushSnack(t('admin:servers.native.rotated'), 'success')
-    } catch (err) {
-      pushSnack((err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
-        ?? (err as { message?: string }).message ?? 'unknown', 'error')
+      const provisioned = await rotateWithConfirm(t, s)
+      // The credential is shown once: it travels in memory to the installation page, never in the address or history.
+      if (provisioned && mounted.current) {
+        leaveInstallation({ server: provisioned.server, provisioning: provisioned, creating: false })
+        void navigate(...pageArgs(serverInstallPath(provisioned.server.id)))
+      }
     } finally { setRotatingId(null) }
   }
 
@@ -206,7 +190,7 @@ export default function ServersPage() {
             {t('admin:servers.test_all')}
           </Button>
         )}
-        primary={admin && <Button onClick={openCreate}>{t('admin:servers.create')}</Button>}
+        primary={admin && <Button render={<Link {...link(NEW_SERVER_PATH)} />}>{t('admin:servers.create')}</Button>}
         more={[{ id: 'refresh', label: t('admin:servers.action.refresh'), onSelect: load }]}
       />
       <ServersBanners items={items} compat={releases.compatStatus} />
@@ -243,7 +227,7 @@ export default function ServersPage() {
         empty={filtered
           ? <EmptyState compact title={t('admin:servers.no_match')} action={<Button variant="outline" size="sm" onClick={() => setUrl({ q: '', page: 1 })}>{t('admin:servers.clear_search')}</Button>} />
           : <EmptyState compact title={t('admin:servers.empty.title')} description={t('admin:servers.empty.description')}
-              action={admin ? <Button onClick={openCreate}>{t('admin:servers.create')}</Button> : undefined} />}
+              action={admin ? <Button render={<Link {...link(NEW_SERVER_PATH)} />}>{t('admin:servers.create')}</Button> : undefined} />}
         bulkActions={ctxBulk => {
           const rows = ctxBulk.loadedRows
           const core = rows.filter(s => s.panel_type !== 'psp' && hasCapability(s, 'core.upgrade'))
@@ -260,24 +244,6 @@ export default function ServersPage() {
         }}
       />
 
-      {form && (
-        <ServerFormSheet key={form.editing?.id ?? 'new'} editing={form.editing}
-          install={installChoice} onInstallChange={setInstallChoice}
-          probe={form.editing ? probes.stateFor(items.find(s => s.id === form.editing!.id) ?? form.editing) : undefined}
-          onTest={form.editing ? () => probes.runTest(items.find(s => s.id === form.editing!.id) ?? form.editing!) : undefined}
-          onClose={() => setForm(null)}
-          onUpdated={saved => mutateItems(prev => prev.map(s => (s.id === saved.id ? saved : s)))}
-          onCreated={(server, provisioning) => {
-            refresh()
-            // A Passwall Node continues into its installation; the form has done its job.
-            if (server && provisioning) { setForm(null); openInstallation(server, provisioning, true) }
-          }} />
-      )}
-      {install && (
-        <NativeInstallationSheet server={install.server} initialProvisioning={install.provisioning} newServer={install.creating}
-          initialSelection={install.creating ? installChoice : DEFAULT_INSTALLATION} onClose={closeInstallation}
-          onRotate={s => void rotateCredential(s)} rotating={rotatingId === install.server.id} />
-      )}
       <NodeMetricsDialog server={metricsTarget} open={metricsTarget !== null} onClose={() => setMetricsTarget(null)} />
       <NodeDiagnosticsDialog server={diagnosticsTarget} open={diagnosticsTarget !== null} onClose={() => setDiagnosticsTarget(null)} />
       {accessNode && <ServerAccessDialog node={accessNode.node} serverName={accessNode.name} onClose={() => setAccessNode(null)} />}
@@ -308,7 +274,7 @@ export default function ServersPage() {
   )
 }
 
-/** A server at phone width: name and type, the state, the version, and the same menu. The card opens the edit sheet. */
+/** A server at phone width: name and type, the state, the version, and the same menu. The card opens the server's page. */
 function ServerCard({ s, open }: { s: Server; open?: () => void }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, screen, waitFor } from '@testing-library/react'
-import { expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { expect, it, vi } from 'vitest'
 import { api, installReads, list, mountWithClient, mount, server } from './testHarness'
 import { useAuthStore } from '@/stores/auth'
 import { openMenuOf } from './install/installationHarness'
@@ -40,4 +40,45 @@ it('shows the diagnostics and install entries to an administrator only', async (
     expect(screen.getByRole('menuitem', { name: 'admin:servers.action.edit' })).toBeTruthy()
     unmount()
   }
+})
+
+const probesOf = () => api.post.mock.calls.filter(c => c[0] === '/admin/servers/probe')
+
+it('shows the previous result when the list is shown again within the window, and sends no second probe', async () => {
+  installReads({ '/admin/servers': list([server]) })
+  const first = mountWithClient(<ServersPage />)
+  await screen.findByText('server')
+  await waitFor(() => expect(probesOf()).toHaveLength(1))
+  first.unmount()
+  mountWithClient(<ServersPage />, '/admin/servers', first.client)
+  await screen.findByText('server')
+  await act(async () => {})
+  expect(probesOf()).toHaveLength(1)
+})
+
+it('probes again once the result is older than the window', async () => {
+  installReads({ '/admin/servers': list([server]) })
+  const first = mountWithClient(<ServersPage />)
+  await waitFor(() => expect(probesOf()).toHaveLength(1))
+  first.unmount()
+  const before = probesOf().length
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(Date.now() + 61_000)
+  mountWithClient(<ServersPage />, '/admin/servers', first.client)
+  await waitFor(() => expect(probesOf().length).toBeGreaterThan(before))
+  vi.useRealTimers()
+})
+
+it('forgets a server\'s result when it is saved', async () => {
+  installReads({ '/admin/servers': list([server]) })
+  api.put.mockResolvedValue({ data: server })
+  const first = mountWithClient(<ServersPage />)
+  await waitFor(() => expect(probesOf()).toHaveLength(1))
+  first.router.navigate('/admin/servers/1')
+  fireEvent.change(await screen.findByRole('textbox', { name: /admin:servers.field.name/ }), { target: { value: 'renamed' } })
+  fireEvent.click(screen.getByRole('button', { name: 'common:actions.save' }))
+  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+  const before = probesOf().length
+  first.router.navigate('/admin/servers')
+  await waitFor(() => expect(probesOf().length).toBeGreaterThan(before))
 })

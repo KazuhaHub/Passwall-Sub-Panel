@@ -59,6 +59,8 @@ const servers = [
   xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? '4.0.0 (fixture)' : '',
   compat_status: 'supported', ...server }));
 const credential = 'fixture-fixed-node-credential-not-production';
+// A server's page saves only what was changed, so the manual-configuration step types this note to have something to save.
+const manualNote = 'fixture manual configuration note';
 const version = '4.0.1';
 const fingerprint = 'a'.repeat(64);
 const requests = [];
@@ -195,7 +197,7 @@ async function fixture(request, response, url) {
     const id = Number(pathname.split('/').at(-1));
     const original = servers.find(record => record.id === id);
     assert.deepEqual(body, { panel_type: original.panel_type, url: original.url, name: original.name,
-      username: '', remark: '', auth_method: 'token', insecure_https: false });
+      username: '', remark: manualNote, auth_method: 'token', insecure_https: false });
     return reply(response, original);
   }
   if (method === 'PUT' && pathname === '/api/admin/servers/7') {
@@ -212,7 +214,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname.startsWith('/api/')) return await fixture(request, response, url);
-    if (url.pathname === '/admin/servers' || url.pathname === '/') {
+    if (url.pathname === '/admin/servers' || url.pathname.startsWith('/admin/servers/') || url.pathname === '/') {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       const currentIndex = previewOnly ? await readFile(join(dist, 'index.html'), 'utf8') : indexHTML;
       let html = currentIndex.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">');
@@ -283,9 +285,15 @@ try {
     await expect(dialog.getByText(text('admin:servers.install_reinstall.original', { id: record.id, backend: labels[record.panel_type] }), { exact: true })).toBeVisible();
     return dialog;
   }
-  // In a dialog the footer's Close comes before the corner X; a sheet's X is "Close details", so first() is the footer in both.
-  // A dialog or sheet that has just been left is still animating out: wait until it is gone before the next opens.
+  // In a dialog the footer's Close comes before the corner X, so first() is the footer.
+  // A dialog that has just been left is still animating out: wait until it is gone before the next opens.
   const gone = () => expect(page.getByRole('dialog')).toHaveCount(0);
+  // A server's page and its installation page are pages of their own: the back link (the same on every object page)
+  // returns to the list, and the list is back once its heading is.
+  const toList = async () => {
+    await page.locator('[data-slot="object-back"]').click();
+    await expect(page.getByRole('heading', { name: s('title'), exact: true })).toBeVisible();
+  };
   const close = dialog => dialog.getByRole('button', { name: closeName, exact: true }).first();
   async function selectReviewedRelease(dialog) {
     await expect(dialog.getByText(s('native.release_no_stable'), { exact: true })).toBeVisible();
@@ -334,13 +342,19 @@ try {
     await expect(optionsOf(dialog.getByRole('combobox', { name: s('install_reinstall.method'), exact: true }))
       .filter({ hasText: s('install_reinstall.automatic_unavailable') })).toBeDisabled();
     await dialog.getByRole('button', { name: s('install_reinstall.configure_original'), exact: true }).click();
-    const edit = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: text('admin:servers.edit_title', { name: record.name }), exact: true }) });
-    await expect(edit).toBeVisible();
-    await expect(edit.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toBeDisabled();
-    await expect(edit.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveCount(0);
-    await expect(edit.getByLabel(s('field.url'), { exact: false })).toHaveValue(record.url);
-    await edit.getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
+    // The server's own page opens (its name is the page's heading) and the chooser has gone.
+    await expect(page.getByRole('heading', { level: 1, name: record.name, exact: true })).toBeVisible();
     await gone();
+    await expect(page.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveCount(0);
+    await expect(page.getByLabel(s('field.url'), { exact: false })).toHaveValue(record.url);
+    // Nothing is offered to save until something changes; the manual step records a note on the original ID.
+    await expect(page.getByRole('button', { name: text('common:actions.save'), exact: true })).toHaveCount(0);
+    await page.getByRole('textbox', { name: s('field.remark'), exact: true }).fill(manualNote);
+    await page.getByRole('button', { name: text('common:actions.save'), exact: true }).click();
+    await expect.poll(() => count('PUT', `/api/admin/servers/${record.id}`)).toBe(1);
+    await expect(page.getByRole('button', { name: text('common:actions.save'), exact: true })).toHaveCount(0);
+    await toList();
     assert.equal(count('PUT', `/api/admin/servers/${record.id}`), 1, 'Manual configuration must address the original ID.');
   }
   assert.equal(requests.some(request => /node-(migration|installation)|rotate-node/.test(request.pathname)), false,
@@ -350,29 +364,29 @@ try {
   await expect(optionsOf(backendOf(pn))).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
   await backendOf(pn).selectOption('psp');
   await pn.getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
-  // The chooser hands over to the installation sheet: wait for the sheet's own controls, then it is the only dialog.
+  // The chooser hands over to the installation page: wait for the page's own controls, then no dialog is open.
   await expect(page.getByRole('combobox', { name: s('native.method_label'), exact: true })).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(1);
-  let dialog = page.getByRole('dialog');
+  await gone();
+  // The page is the scope the installation's helpers search.
+  let dialog = page;
   await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
   await selectReviewedRelease(dialog);
   await dialog.getByRole('button', { name: s('native.generate_command'), exact: true }).click();
   await copyAndCheck(dialog, commandFor(7));
-  await close(dialog).click();
-  await gone();
+  await toList();
   await moreOf(servers[0]).click();
   await page.getByRole('menuitem', { name: s('action.edit'), exact: true }).click();
-  dialog = page.getByRole('dialog');
+  await expect(page.getByRole('heading', { level: 1, name: servers[0].name, exact: true })).toBeVisible();
   await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveValue('stable');
   await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).selectOption('beta');
-  await dialog.getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
-  await gone();
+  await dialog.getByRole('button', { name: text('common:actions.save'), exact: true }).click();
+  await expect.poll(() => count('PUT', '/api/admin/servers/7')).toBe(1);
   assert.equal(count('PUT', '/api/admin/servers/7'), 1, 'The saved update preference must address the original PN ID.');
+  await toList();
   await (await openChooser(servers[0])).getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
   await expect(page.getByRole('combobox', { name: s('native.method_label'), exact: true })).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(1);
-  dialog = page.getByRole('dialog');
+  await gone();
   await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveValue('beta');
   await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toHaveValue(version);
@@ -380,8 +394,7 @@ try {
   // A temporary override must not save a second preference or replace identity.
   await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).selectOption('stable');
   assert.equal(count('PUT', '/api/admin/servers/7'), 1);
-  await close(dialog).click();
-  await gone();
+  await toList();
   await moreOf(servers[0]).click();
   await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
   dialog = page.getByRole('dialog');
@@ -425,13 +438,16 @@ try {
   await gone();
 
   await page.getByRole('button', { name: s('create'), exact: true }).click();
-  dialog = page.getByRole('dialog');
+  // Adding a server is a page of its own; it is the scope the following checks search.
+  await expect(page.getByRole('heading', { level: 1, name: s('create'), exact: true })).toBeVisible();
+  dialog = page;
   await expect(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveValue('psp');
   await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveValue('stable');
   await expect(optionsOf(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }))).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
   await dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }).selectOption('psp');
-  await dialog.getByRole('button', { name: text('common:actions.cancel'), exact: true }).click();
-  await gone();
+  // Re-selecting the type already chosen changes nothing, so the page is left without a question.
+  await toList();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
   assert.equal(count('POST', '/api/admin/servers'), 0, 'Reinstallation must not create a server record.');
   assert(count('GET', '/api/admin/servers/sui-release') > 0, 'The visible S-UI server must request read-only release metadata.');
@@ -441,8 +457,13 @@ try {
   assert.equal(requests.some(request => ['PATCH', 'DELETE'].includes(request.method)), false, 'No record deletion or arbitrary patch is allowed.');
   assert.equal(count('POST', '/api/admin/servers/7/node-install-command'), 1);
   assert.equal(count('POST', '/api/admin/servers/17/node-migration-command'), 1);
-  assert.deepEqual(requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe')
-    .map(request => request.body.id).sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  // A result is kept for 60 s across the trip to a server's page and back, and dropped when that server is saved, so an ID
+  // is probed again only after its own save: the first load, plus one more after each of 17, 27 and 7 was saved. Every
+  // original server is probed and no other ID ever is. The ceiling is deliberately loose (a slow runner can outlive the
+  // 60 s window and probe again on a return to the list); it is there to catch a probe loop, not to count round trips.
+  const probed = requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe').map(request => request.body.id);
+  assert.deepEqual([...new Set(probed)].sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  for (const id of [7, 17, 27]) assert(probed.filter(probe => probe === id).length <= 8, `Server ${id} was probed in a loop.`);
   await context.close();
   assert.deepEqual(failures, [], 'Browser/fixture errors are acceptance failures.');
   console.log('PASS: real Linux Chromium built-SPA acceptance: original backends, PN defaults/full name, truthful manual recovery, fixed identity, reviewed-release consent and node-host command/copy.');

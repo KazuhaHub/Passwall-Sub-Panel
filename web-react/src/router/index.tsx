@@ -28,6 +28,9 @@ const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
+const ServerCreateRoute = lazy(() => import('@/views/admin/servers/ServerCreateRoute'))
+const ServerRoute = lazy(() => import('@/views/admin/servers/ServerRoute'))
+const ServerInstallRoute = lazy(() => import('@/views/admin/servers/ServerInstallRoute'))
 const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRoute'))
 const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
 const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
@@ -124,6 +127,10 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="dashboard" replace /> },
           { path: 'dashboard', element: <DashboardView /> },
           { path: 'servers', element: <ServersView /> },
+          // A server, its creation and a Passwall Node's installation are pages of their own (they were side sheets over the list).
+          { path: 'servers/new', element: <ServerCreateRoute /> },
+          { path: 'servers/:id', element: <ServerRoute /> },
+          { path: 'servers/:id/install', element: <ServerInstallRoute /> },
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
           // A group is a page of its own; `?edit=<id>` on the list (the old side sheet's address) is sent on to these.
