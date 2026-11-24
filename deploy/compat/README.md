@@ -132,13 +132,14 @@ in the wrong package, a skip, a skipped subtest under a passing parent, a
 failure that later reports success, a truncated stream, a non-JSON line, a test
 with no terminal state, and a pass with a non-zero Go exit code.
 
-Both suites are wired into the `container` job of `test.yml`, which already runs
-the other `deploy/*_test.mjs` guards.
+Both suites are wired into the `go (static checks)` job of `test.yml`, which
+already runs the other `deploy/*_test.mjs` guards on every event.
 
 ## `check-case-set.mjs`
 
-Runs in the `compatibility` summary job of both workflows, over the artifacts
-the per-case jobs uploaded.
+Runs in the `compatibility` summary job of `release.yml`, over the artifacts
+the per-case jobs uploaded, and as the last step of the `node wire` job of
+`test.yml`, over the evidence that job wrote itself.
 
 ```bash
 node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
@@ -162,11 +163,11 @@ after its directory, so the layout `actions/download-artifact` produces
 
 Evidence for cases nobody expected is recorded in `unexpected` rather than
 rejected: a name that drifted between the matrix and the profiles shows up there
-first. `pinned-source` — the `node-contract` job's evidence — appears there by
+first. `pinned-source` — the pinned-source step of the `node wire` job — appears there by
 design, since it exercises the revision `contract_source` in
 `docs/compat/verification-v1.json` names, and is therefore not one of the
 per-version cases the panel promises. When that revision IS one of the planned
-cases, `node-compatibility` has already run the wire suite against it in the same
-run, so `node-contract` skips its own wire run, records the covering case as
+cases, the released-range step has already run the wire suite against it in the same
+job, so the pinned-source step skips its own wire run, records the covering case as
 `wire_covered_by` in `environment.json`, and uploads no `result.json`; its three
 cross-repository package tests run either way.

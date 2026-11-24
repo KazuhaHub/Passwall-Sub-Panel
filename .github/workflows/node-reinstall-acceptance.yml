@@ -81,6 +81,11 @@ jobs:
     name: Ubuntu 24.04 / published Node beta4
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # The runners share the anonymous GitHub API quota (403 when it is spent), so
+      # every live test in this job reads the run's own read-only token. The test
+      # helper scopes it to api.github.com.
+      PSP_LIVE_NODE_GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -115,8 +120,6 @@ jobs:
       # which release is under test. A pattern that stops matching fails here rather
       # than silently checking nothing.
       - name: The pinned release publishes what the panel reads
-        env:
-          PSP_LIVE_NODE_GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           pinned=$(grep -oE 'nodeVersion += "[0-9][0-9.]*"' tests/acceptance/node-reinstall-systemd/acceptance_linux_test.go | head -1 | cut -d'"' -f2)

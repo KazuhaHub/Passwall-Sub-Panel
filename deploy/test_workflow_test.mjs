@@ -16,13 +16,21 @@ import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-function job(name) {
+// The real third-party panels are a called workflow (release.yml runs it before it
+// tags, watch.yml weekly); it is not in test.yml, and their guards read it.
+const thirdPartyWorkflow = readFileSync(new URL('../.github/workflows/third-party.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+function jobIn(text, name) {
   const marker = `  ${name}:\n`
-  const start = workflow.indexOf(marker)
+  const start = text.indexOf(marker)
   assert(start >= 0, `missing ${name} job`)
-  const tail = workflow.slice(start + marker.length)
+  const tail = text.slice(start + marker.length)
   const next = /^  [a-z][a-z0-9_-]*:\n/m.exec(tail)
   return tail.slice(0, next?.index ?? tail.length)
+}
+
+function job(name) {
+  return jobIn(workflow, name)
 }
 
 // Every `run: |` block, with the indentation the block scalar leaves behind
@@ -58,30 +66,46 @@ test('every run script in test.yml parses as shell', () => {
   assert.deepEqual(failures, [], 'a run script does not parse; the job would fail before doing anything')
 })
 
-// THE SUMMARY GATE MUST EXIST AND MUST NOT BE SKIPPABLE. A job with `needs` and
-// no `if: always()` simply does not run when a dependency fails, and a check
-// that never runs reads as absent rather than as failed.
-test('the compatibility gate is unconditional and covers both Node jobs', () => {
-  const gate = job('compatibility')
-  assert(gate.includes('if: always()'), 'the gate must run even when a leg failed or was cancelled')
-  assert(/needs: \[[^\]]*node-compatibility[^\]]*\]/.test(gate), 'the gate must summarise the released-range job')
-  assert(/needs: \[[^\]]*node-contract[^\]]*\]/.test(gate), 'the gate must summarise the pinned-source job')
-  assert(gate.includes('deploy/compat/check-case-set.mjs'), 'the gate must check the expected case set')
-  assert(gate.includes('actions/download-artifact'), 'the gate must read the uploaded evidence')
-  // AND IT MUST SAY WHICH ARTIFACTS. An unscoped download reads whatever the run
-  // happens to contain, so any artifact a job adds — a build cache, a debug dump —
-  // becomes a way for this gate to fail while its own evidence is intact.
+// THE MERGE GATE MUST EXIST, MUST NOT BE SKIPPABLE, AND MUST NAME EVERY JOB. A job
+// with `needs` and no `if: always()` simply does not run when a dependency fails,
+// and a check that never runs reads as absent rather than as failed. Branch
+// protection requires only this job, so a job it does not need is a job that can
+// fail without blocking a merge.
+test('the required gate is unconditional and needs every other job', () => {
+  const gate = job('required')
+  assert(/^    name: required$/m.test(gate), 'the gate must be named exactly "required": that is the one context branch protection asks for')
+  assert(/^    if: always\(\)$/m.test(gate), 'the gate must run even when a job failed or was cancelled')
+  const needed = needsOf(gate).sort()
+  const others = [...jobs().keys()].filter((name) => name !== 'required').sort()
+  assert.deepEqual(needed, others, 'the gate must need every other job in the workflow, and nothing else')
+  // Only success passes. Nothing here is skipped on purpose, so a skipped job means an
+  // upstream one failed, and letting it through would turn that into a green merge.
+  assert(gate.includes('select(.value.result != "success")'), 'the gate must fail on every result but success')
+  assert(!gate.includes('skipped'), 'no job in this workflow is skipped on purpose, so the gate must not accept a skip')
+})
+
+// THE NODE WIRE JOB CARRIES BOTH KINDS OF EVIDENCE AND CHECKS THE CASE SET.
+test('the node wire job runs the released range and the pinned source, then the case-set check', () => {
+  const wire = job('node-wire')
+  assert(/^    name: node wire \(pinned \+ released range\)$/m.test(wire), 'the job name is the one the docs and the ruleset history refer to')
+  assert(wire.includes('name: Exercise every supported wire contract'), 'the job must exercise the released range')
+  assert(wire.includes('name: real Node sync, durable result receipt and task expiry'), 'the job must exercise the pinned source')
+  const check = step(wire, 'every expected case reported a pass')
+  assert(check.includes('deploy/compat/check-case-set.mjs --reports evidence'), 'the job must check the expected case set against its own evidence')
+  assert(check.includes('if: ${{ !cancelled() }}'), 'the case-set check must run when an earlier step failed, so the failure is named')
   assert(
-    /pattern: 'node-\*-evidence'/.test(gate),
-    'the gate must download only its own evidence: an unscoped download depends on every artifact in the run being extractable',
+    wire.indexOf('name: real Node sync') < wire.indexOf('name: every expected case reported a pass'),
+    'the case-set check must come after both kinds of evidence are written',
   )
 })
 
-// The suite that protects the gate has to run somewhere. This asserts the
-// checker tests are wired into the job that already runs the deploy guards, so a
+// The suite that protects the gate has to run somewhere, and it must not be a
+// path-conditional job: these guards read workflows and the compat manifest, so an
+// edit to either has to reach them. This asserts the checker tests are wired into
+// the static job, which runs on every event, so a
 // renamed or dropped file cannot quietly stop being executed.
-test('the deploy guard suites are all executed by the container job', () => {
-  const container = job('container')
+test('the deploy guard suites are all executed by go_static', () => {
+  const container = job('go_static')
   for (const suite of [
     'deploy/check_image_test.mjs',
     'deploy/check_build_test.mjs',
@@ -126,7 +150,7 @@ test('the container job boots the source image and fetches the SPA it embeds', (
 
 // THE REAL PANELS ARE THE CEILINGS A HUMAN REVIEWED, AND THEY MOVE TOGETHER.
 //
-// third-party-isolated floated on :latest while the launcher and its README said
+// the third-party job floated on :latest while the launcher and its README said
 // the caller pins, so a red run on main could mean a broken adapter or an upstream
 // release, and its evidence could not say which. It runs the reviewed ceilings now,
 // by tag and digest. Raising max_tested_xui or max_tested_sui without the image
@@ -158,10 +182,10 @@ test('the isolated third-party panels are pinned to the recorded ceilings', () =
   // Every metacharacter, backslash included: the repo and version come from files, and a
   // pattern built from them must match them literally or it proves nothing.
   const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const isolated = job('third-party-isolated')
+  const isolated = jobIn(thirdPartyWorkflow, 'third-party')
   for (const [name, { repo, version }] of Object.entries(ceilings)) {
     const pinned = new RegExp(`^      ${name}: \\$\\{\\{ vars\\.${name} \\|\\| '([^']+)' \\}\\}$`, 'm').exec(isolated)
-    assert(pinned, `third-party-isolated must set ${name} once, at job level, with a pinned default`)
+    assert(pinned, `the third-party job must set ${name} once, at job level, with a pinned default`)
     assert.match(
       pinned[1],
       new RegExp(`^${escapeRegExp(repo)}:v${escapeRegExp(version)}@sha256:[0-9a-f]{64}$`),
@@ -251,10 +275,10 @@ test('every build-tagged Go file is type-checked by go_static', () => {
 // The traffic rollup chose its upsert by `Dialector.Name()`, and for as long as its
 // tests ran on SQLite only, the MySQL branch was proven by a DryRun of its text —
 // the same branch whose empty ON DUPLICATE KEY UPDATE had already failed in
-// production. The postgres and mysql lanes run it now. This keeps that true for the
+// production. The sql job runs it against both servers now. This keeps that true for the
 // next package that asks which database it is on: any Go file outside sqlstore that
 // reads the dialect must be in a package both lanes test.
-test('every package that branches on the SQL dialect is tested by both dialect lanes', () => {
+test('every package that branches on the SQL dialect is tested against both dialects', () => {
   const root = fileURLToPath(new URL('../', import.meta.url))
   const branching = execFileSync('git', ['ls-files', '-z', '--', '*.go'], { cwd: root, encoding: 'utf8' })
     .split('\0')
@@ -266,18 +290,24 @@ test('every package that branches on the SQL dialect is tested by both dialect l
     branching.includes('internal/service/rollup'),
     'the rollup no longer reads the dialect, so this guard checked nothing: drop it from the lanes and from here together',
   )
-  for (const lane of ['postgres', 'mysql']) {
-    const command = /go test -count=1 -timeout=\S+ ((?:\.\/\S+ )+)2>&1/.exec(job(lane))
-    assert(command, `the ${lane} lane must run go test over named packages`)
+  const sql = job('sql')
+  for (const kind of ['postgres', 'mysql']) {
+    const lane = step(sql, `test (${kind})`)
+    assert(lane.includes(`PSP_TEST_DB_KIND: ${kind}`), `the sql job must run a step against ${kind}`)
+    const command = /go test -count=1 -timeout=\S+ ((?:\.\/\S+ )+)2>&1/.exec(lane)
+    assert(command, `the ${kind} step must run go test over named packages`)
     const patterns = command[1].trim().split(/\s+/)
-    assert(patterns.includes('./internal/adapters/sqlstore/...'), `the ${lane} lane must still test sqlstore`)
+    assert(patterns.includes('./internal/adapters/sqlstore/...'), `the ${kind} step must still test sqlstore`)
     for (const dir of new Set(branching)) {
       assert(
         patterns.some((pattern) => packagePatternCovers(pattern, dir)),
-        `${dir} branches on the SQL dialect and the ${lane} lane does not test it, so only SQLite ever executes that branch`,
+        `${dir} branches on the SQL dialect and the ${kind} step does not test it, so only SQLite ever executes that branch`,
       )
     }
   }
+  // One job definition, one leg per dialect, and a failing leg must not hide the other.
+  assert(/matrix:\n\s+kind: \[postgres, mysql\]/.test(sql), 'the sql job must be a postgres/mysql matrix')
+  assert(/fail-fast: false/.test(sql), 'one dialect failing must not cancel the other leg')
 })
 
 // Every job in this file, by name, as its raw block — the same helpers the
@@ -381,7 +411,7 @@ test('go_static\'s build cache key names every tool the job compiles, at its pin
   assert.equal(keys.length, 2, 'go_static restores one build cache and saves it')
   assert.equal(keys[0], keys[1], 'go_static must save under the key it restores, or no run ever hits it')
   const tools = [...steps.matchAll(/\bgo (?:run|install) \S*\/([a-z0-9-]+)@(v\d+\.\d+\.\d+)/g)]
-  assert(tools.length >= 3, `go_static compiles actionlint, staticcheck and govulncheck at pinned versions; found ${tools.length}`)
+  assert(tools.length >= 2, `go_static compiles actionlint and staticcheck at pinned versions; found ${tools.length}`)
   for (const [, tool, version] of tools) {
     assert(
       keys[0].includes(`-${tool}-${version}-`) || keys[0].endsWith(`-${tool}-${version}`),
@@ -492,7 +522,7 @@ test('caches are restored on every event and saved only from the default branch'
     )
   }
   assert(
-    restores >= 9,
+    restores >= 6,
     `every job that compiles Go, plus the browser download, restores a cache — found ${restores}`,
   )
 
@@ -528,9 +558,9 @@ test('caches are restored on every event and saved only from the default branch'
 // sat outside the rule above: a PR that changed go.sum wrote ~400 MB into its own scope,
 // and the frozen GOCACHE was extracted over each job's own build cache. It is `false` in
 // every job, written out because the action's default is true. The module cache is one
-// key restored everywhere, and only go_static writes it, after govulncheck has loaded the
+// key restored everywhere, and only go_static writes it, after the tools have loaded the
 // widest module set any job needs.
-test('setup-go caches nothing, and only go_static saves the module cache, after govulncheck', () => {
+test('setup-go caches nothing, and only go_static saves the module cache, after its tools', () => {
   const modKey = "go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}"
   const savers = []
   let setups = 0
@@ -561,13 +591,13 @@ test('setup-go caches nothing, and only go_static saves the module cache, after 
       )
     }
   }
-  assert(setups >= 9, `every Go job in this file sets up Go; found ${setups} setup-go steps`)
+  assert(setups >= 6, `every Go job in this file sets up Go; found ${setups} setup-go steps`)
   assert.deepEqual(savers, ['go_static'], 'the module cache must have exactly one writer, go_static: a key cannot be written twice, so a second writer races it and freezes whichever subset lands first')
   const staticJob = job('go_static')
   assert(
     // Its restore comes first, so the last mention of the path is the save.
-    staticJob.lastIndexOf('path: ~/go/pkg/mod') > staticJob.indexOf('name: Reachable vulnerability check'),
-    'go_static must save the module cache after govulncheck, or the saved set lacks the modules the scans load',
+    staticJob.lastIndexOf('path: ~/go/pkg/mod') > staticJob.indexOf('name: staticcheck'),
+    'go_static must save the module cache after staticcheck, or the saved set lacks the modules its tools load',
   )
 })
 
@@ -666,7 +696,7 @@ test('the web job lints the React hook rules, with rules-of-hooks as an error', 
 // the test would have gone with the dependency rather than outliving it. The
 // revision is named in docs/compat/verification-v1.json instead.
 test('the contract job takes its Node revision from the manifest, not from go.mod', () => {
-  const contract = job('node-contract')
+  const contract = job('node-wire')
   assert(
     contract.includes('deploy/compat/contract-source.mjs'),
     'the contract job must read its pinned source from the manifest',
@@ -683,7 +713,7 @@ test('the contract job takes its Node revision from the manifest, not from go.mo
 
 // THE CONTRACT JOB DOES NOT RE-RUN THE MATRIX, AND IT DOES NOT LOSE ITS OWN WORK.
 //
-// When contract_source is one of the planned cases, node-compatibility has already run
+// When contract_source is one of the planned cases, node-wire's released-range step has already run
 // the same four wire tests against the same commit in the same run, and the gate
 // requires that job. So the wire suite is skipped there, and only there: matched by
 // commit, the identity both jobs verify. The three cross-repository packages are this
@@ -692,7 +722,7 @@ test('the contract job takes its Node revision from the manifest, not from go.mo
 // only time anyone reads the evidence. The match itself is run, not read: the program
 // is lifted out of the workflow and fed the real plan.
 test('the contract job skips only a wire run the matrix already made, and always runs its own contracts', () => {
-  const contract = step(job('node-contract'), 'real Node sync, durable result receipt and task expiry')
+  const contract = step(job('node-wire'), 'real Node sync, durable result receipt and task expiry')
   const identity = contract.indexOf('> "$evidence/environment.json"')
   const firstTest = contract.indexOf('go test')
   assert(identity >= 0 && identity < firstTest, 'environment.json must be written before any test can fail the step')
@@ -731,7 +761,7 @@ test('the contract job skips only a wire run the matrix already made, and always
 // profiles.json is expanded into a case per supported version by the gate, and a
 // policy case at the floor would be reported missing forever.
 test('the contract job runs the policy round trip against its own profile and collects the verdict', () => {
-  const contract = step(job('node-contract'), 'real Node sync, durable result receipt and task expiry')
+  const contract = step(job('node-wire'), 'real Node sync, durable result receipt and task expiry')
   const run = contract.indexOf("-run '^TestLive_RealNodePolicyContract$'")
   const drift = contract.indexOf('./internal/version/ ./internal/pkg/nodebootstrap/ ./internal/adapters/corecatalogdoc/')
   assert(run > drift, 'the policy round trip runs after, and regardless of, the covered-by branch')
@@ -764,7 +794,7 @@ test('every job in test.yml sets its own timeout', () => {
 // ended by the runner, without go test's goroutine dump and before the validator can
 // name it.
 test('the real-panel suites\' go test budgets fit inside their job timeout', () => {
-  const isolated = job('third-party-isolated')
+  const isolated = jobIn(thirdPartyWorkflow, 'third-party')
   const jobMinutes = Number(/^    timeout-minutes: (\d+)$/m.exec(isolated)[1])
   const budget = Number(/go test -json -count=1 -timeout=(\d+)m "\$pkg"/.exec(isolated)?.[1])
   const suites = (isolated.match(/^\s*run_suite third-party-/gm) ?? []).length

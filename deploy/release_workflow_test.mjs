@@ -458,6 +458,14 @@ test('no job is skipped by its own condition while the release depends on it', (
 // started meanwhile silently replaces the second: a pushed tag left without a release.
 test('every job in release.yml sets its own timeout', () => {
   for (const [name, raw] of jobs()) {
+    // A job that calls a workflow cannot carry the key; the callee's job does, and the
+    // call is held to that.
+    const called = /^    uses: \.\/(\.github\/workflows\/\S+)$/m.exec(raw)
+    if (called) {
+      const callee = readFileSync(new URL(`../${called[1]}`, import.meta.url), 'utf8')
+      assert(/^    timeout-minutes: \d+$/m.test(callee), `${name} calls ${called[1]}, whose job sets no timeout-minutes`)
+      continue
+    }
     assert(/^    timeout-minutes: \d+$/m.test(raw), `${name} has no timeout-minutes, so a hang holds the release group for GitHub's 360-minute default`)
   }
 })
@@ -1159,4 +1167,18 @@ test('the compat matrix addresses the node case by its tag', () => {
     /ref:\s*\$\{\{\s*matrix\.node_case\.version\s*\}\}/,
     'the compat matrix checks the node case out by its VERSION, which is not a git ref',
   )
+})
+
+// NOTHING IS TAGGED ON A RED SCAN OR A RED REAL-PANEL RUN. A permanent tag cannot be
+// taken back, so both checks sit ahead of the step that creates one: the vulnerability
+// scan inside the tag job, the real third-party panels as a job the tag job needs.
+test('the tag is cut only after govulncheck and the real third-party panels pass', () => {
+  const tag = job('tag')
+  const scan = tag.indexOf('name: Reachable vulnerability check')
+  const allocate = tag.indexOf('name: Allocate the next number on the line and create the tag')
+  assert(scan >= 0 && allocate >= 0, 'the tag job must hold the vulnerability scan and the tagging step')
+  assert(scan < allocate, 'the scan must run before the tag is created, or a finding leaves a tag behind')
+  assert(!/^ +if: /m.test(tag.slice(scan, tag.indexOf('run:', scan))), 'the scan must run on every path, including a pushed tag')
+  assert(/^    needs: third-party$/m.test(tag), 'the tag job must wait for the real third-party panels')
+  assert(job('third-party').includes('uses: ./.github/workflows/third-party.yml'), 'the panels run through the shared third-party workflow, so release and watch use one set of pins')
 })
