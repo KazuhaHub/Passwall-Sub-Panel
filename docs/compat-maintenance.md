@@ -6,7 +6,7 @@
 
 ## 1. 发现上游有新版本
 
-`compat-watch.yml` 每周一跑 `cmd/compatwatch`，报两类事情：上游面板超出已测上限（`docs/compat/3x-ui-v4.json` 的 `max_tested` 侧），以及我们自己发布的 Node release 有没有既没被 review、也没被显式排除的。
+`watch.yml` 的 `compat` 作业每周一跑 `cmd/compatwatch`，报两类事情：上游面板超出已测上限（`docs/compat/3x-ui-v4.json` 的 `max_tested` 侧），以及我们自己发布的 Node release 有没有既没被 review、也没被显式排除的。
 
 **监测不是认证，也不是失败。** 下面四件事必须分开报告，不能合并成"有事发生"：
 
@@ -88,7 +88,7 @@
 - 通过与失败注入的证据
 - 已知限制
 - 运行时界面／API 示例
-- 发布 needs 图（`compatibility gate` 是所有发布动作的唯一入口）
+- 发布 needs 图（`release.yml` 里的 `compatibility gate` 是所有发布动作的唯一入口）
 
 ### 发布路径：已完整执行（2026-09-19）
 
@@ -98,7 +98,22 @@
 
 ### 分支保护现状
 
-`main` 由 ruleset `main protection`（id `23046834`，`enforcement: active`，范围 `refs/heads/main`）约束，规则为 `deletion` / `non_fast_forward` / `pull_request` / `required_status_checks`。要求的检查是九个：
+`main` 由 ruleset `main protection`（id `23046834`，`enforcement: active`，范围 `refs/heads/main`）约束，规则为 `deletion` / `non_fast_forward` / `pull_request` / `required_status_checks`。
+
+**随本次 CI 精简要做的 ruleset 修改**（与合并该 PR 同时进行，**尚未生效**，生效前 ruleset 仍是下面的九个）：把要求的检查改成只有一个，**`required`**。它是 `test.yml` 末尾的汇总作业（`if: always()`，`needs` 其余全部作业，只有每个都 `success` 才通过，跳过也算失败）。之后增删、改名、拆分 `test.yml` 里的作业不再需要同步改 ruleset。
+
+顺序很要紧：先让 `required` 在 PR 上跑出一次（它是新的检查名，ruleset 里选不到未出现过的上下文），再改 ruleset，再合并；反过来合并会让每个 PR 都等一个永远不出现的检查。`sql dialect (…)` 现在是 postgres／mysql 两条并行腿，`Docker source and release runtime baselines` 与其余作业一样每个 PR 都跑，没有路径过滤。
+
+真实第三方面板（`third-party.yml`）和 govulncheck **不在** PR 套件里：前者每周（`watch.yml`）和每次打 tag 之前（`release.yml` 的 `third-party` 作业，`tag` 作业 `needs` 它）跑，后者每周跑，并在 `release.yml` 的 `tag` 作业里先于分配和创建 tag 的步骤。两者失败都不会留下新 tag：空 tag 的手动 dispatch 在打 tag 之前就停下；手工推送的 tag 本来就已存在，这时 release 运行失败、什么都不发布，需要新的提交和新的 tag 才能继续。
+
+核对的命令：
+
+```bash
+gh api repos/KazuhaHub/Passwall-Sub-Panel/rulesets/23046834 \
+  -q '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context'
+```
+
+**改前原值**（R03 第 4 条要求记录，否则改名后无从回退；改回去只需把这九个重新填上）——九个检查：
 
 ```
 go (static checks)                         node contract (pinned published source)
@@ -108,19 +123,9 @@ postgres (sqlstore dialect)                build (cross-compile release targets)
 compatibility gate
 ```
 
-核对的命令与**改前原值**（R03 第 4 条要求记录，否则改名后无从回退）：
+经典的 branch protection 子资源（`/branches/main/protection/required_status_checks`）在这台仓库上是空的 —— 检查来自 ruleset，不是 classic protection。改错那一侧会看起来毫无效果。
 
-```bash
-gh api repos/KazuhaHub/Passwall-Sub-Panel/rulesets/23046834 \
-  -q '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context'
-
-# 改前（2026-09-19 加 `compatibility gate` 之前的原值）：上面除最后一行外的八个。
-# 经典的 branch protection 子资源（/branches/main/protection/required_status_checks）
-# 在这台仓库上是空的 —— 检查来自 ruleset，不是 classic protection。改错那一侧会看起来
-# 毫无效果。
-```
-
-再强调一次：**检查名必须与作业实际产出的名字一致**。`compatibility gate` 之所以能要求，是因为它在 `test.yml` 里且跑在 `pull_request` 上（`if: always()`）；只改 YAML 而不看 ruleset，等于没接。
+再强调一次：**检查名必须与作业实际产出的名字一致**。`required` 之所以能要求，是因为它在 `test.yml` 里且跑在 `pull_request` 上（`if: always()`）；只改 YAML 而不看 ruleset，等于没接。
 
 ## 7. 还没做完的部分
 

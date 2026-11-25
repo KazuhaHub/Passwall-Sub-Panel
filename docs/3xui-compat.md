@@ -38,7 +38,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
 - "已实测通过" = 适配器已验证的接口上限，具体构建、测试及功能边界见对应验证记录；不代表完整代理流量或已有数据库升级验证
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
-- 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/test.yml` 中 `third-party-isolated` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
+- 抬高 `max_tested_xui` / `max_tested_sui` 时，**同一个改动**里把 `.github/workflows/third-party.yml` 中 `third-party` 的 `PSP_LIVE_3XUI_IMAGE` / `PSP_LIVE_SUI_IMAGE` 默认镜像改成新上限的 `tag@sha256:digest`；CI 跑的就是评审过的上限，`deploy/test_workflow_test.mjs` 会拒绝两者不一致
 
 ## 历史兼容性事件
 
@@ -60,7 +60,7 @@ profile 记 N/A。另做了两项补充探测：3.10.0 引入的 SS-2022 校验�
 
 **本次验证有一处环境限制需要说明**：Xray 26.10.21 没有 darwin 构建，内核在本地
 跑不起来（`xrayState=error`）。所有测试都不依赖内核，因此兼容结论只覆盖适配器接口
-这一层；CI 的 `third-party-isolated` job 用固定 digest 的 linux/amd64 镜像补上真实
+这一层；每周 CI 的 `third-party` job 用固定 digest 的 linux/amd64 镜像补上真实
 内核路径。证据见 [3x-ui-3.11.0.json](compat/evidence/3x-ui-3.11.0.json)。
 
 **升级提醒（写进 advisory）**：新建数据库的首个面板用户改为随机账号密码、只打印
@@ -212,7 +212,7 @@ CI 固定到 `ghcr.io/mhsanaei/3x-ui:v3.10.2@sha256:6c7e73c5bc4b6d7d70866616f78d
 
 只更新 `docs/compat/3x-ui-v4.json` 的上限、revision、签发/到期时间与 3.10.0 advisory；
 最低版本仍为 3.4.2，V3 与历史 beta 的既有认证范围不变。
-CI `third-party-isolated` 同步固定为
+每周 CI `third-party` 同步固定为
 `ghcr.io/mhsanaei/3x-ui:v3.10.0@sha256:ef90d07ea00cf3b76bcd37e7c5025d73788dc188894c6a741c22776a83c2c556`。
 本次在本地 Lima VM 用仓库自己的隔离启动脚本实跑了该 Linux 容器（含 24443-24450
 节点端口段），验证只覆盖当前源码适配器与全新面板；未运行 PSP 历史发布二进制、
@@ -256,10 +256,10 @@ GitHub 更新信息和 Xray 版本列表均实际返回成功，远端 REALITY �
 
 只更新 `docs/compat/3x-ui-v4.json` 的上限、revision、签发/到期时间与 3.9.0 advisory；
 最低版本仍为 3.4.2，V3 与历史 beta 的既有认证范围不变。
-CI `third-party-isolated` 同步固定为
+每周 CI `third-party` 同步固定为
 `ghcr.io/mhsanaei/3x-ui:v3.9.0@sha256:93a7a68e3d0a65be1b02d2bfc1f3ca02d0e800516a403e103cea2d7c7090855d`，
 摘要从 GHCR OCI index 读取。本地没有容器运行时，因此 **Linux 容器验证仍由 CI 执行**。
-该 job 不在 `pull_request` 上运行；合并前手动触发候选分支的 Test workflow 验证。
+该 job 不在 `pull_request` 上运行；合并前手动触发候选分支的 Test workflow 验证。（现在：真实面板由 `third-party.yml` 运行，不在 Test workflow 里；合并前要验证请手动 dispatch `watch.yml`，它每周也会跑，`release.yml` 在打 tag 前也会跑。）
 本次只验证当前源码适配器与全新面板；未运行 PSP 历史发布二进制、已有面板数据库升级、
 完整代理流量、完整 PSP traffic/reconcile 链路，或面板/内核自升级操作。
 
@@ -688,7 +688,7 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 超出已测上限的面板升级（`version.MaxTestedXUI`），所以**管理员被挡住了，而能改这个
 文件的人什么都不知道**，有时要过好几个月。
 
-`.github/workflows/compat-watch.yml` 每周一跑 `cmd/compatwatch`，把两个上游的
+`.github/workflows/watch.yml` 的 `compat` 作业每周一跑 `cmd/compatwatch`，把两个上游的
 `/releases/latest` 跟这个文件里**最新那条 entry**（`psp_max` 最大的，与
 `TestMinXUIConstMatchesCompatJSON` 同一条选择规则）的上限比一次。
 
