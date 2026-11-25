@@ -432,6 +432,17 @@ GET                 /api/admin/sync-tasks
 | 加密 | AES-GCM (敏感字段)、bcrypt (密码) |
 | 集成 | 3X-UI Bearer token 优先，username/password cookie 兜底 |
 
+## 开发测试
+
+```bash
+cd web-react
+npm ci
+npm run test
+```
+
+本地和 CI 使用这个入口运行全量前端单测。每个测试文件保持隔离，
+最多同时运行四个 worker。
+
 ## 文档
 
 - [架构设计](docs/ARCHITECTURE.md) — 核心概念、数据模型、模块交互
