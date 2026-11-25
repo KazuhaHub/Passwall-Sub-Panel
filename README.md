@@ -432,6 +432,29 @@ GET                 /api/admin/sync-tasks
 | 加密 | AES-GCM (敏感字段)、bcrypt (密码) |
 | 集成 | 3X-UI Bearer token 优先，username/password cookie 兜底 |
 
+## 开发测试
+
+从仓库根目录运行 Go 测试，与 CI 的 SQLite 分片使用相同的 race 和数据库选项。
+
+```bash
+GOWORK=off GORACE=atexit_sleep_ms=100 PSP_TEST_DB_REUSE_SCHEMA=true \
+  go test -race -count=1 ./...
+```
+
+Node 同步服务的测试为每个用例打开独立的 SQLite 文件，初始内容来自一次真实迁移。
+数据库迁移测试和真实 Node 验收仍各自建立数据库。
+
+前端单测从仓库根目录执行以下命令。
+
+```bash
+cd web-react
+npm ci
+npm run test
+```
+
+本地和 CI 使用这个入口运行全量前端单测。每个测试文件保持隔离，
+最多同时运行四个 worker。
+
 ## 文档
 
 - [架构设计](docs/ARCHITECTURE.md) — 核心概念、数据模型、模块交互
