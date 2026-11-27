@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteRuleSet, resetRuleSet, saveRuleSet, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, resetRuleSet, ruleSetFailureOf, saveRuleSet, type RuleSet } from '@/api/rules'
 import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { useObjectLink } from '@/components/common/objectReturn'
@@ -120,10 +120,15 @@ function RuleSetsList() {
     if (!rows.length) return
     setBatchBusy(true)
     try {
-      const results = await allSettledLimited(rows, r => saveRuleSet({ ...r, enabled }))
-      const fail = results.filter(r => r.status === 'rejected').length
+      // Each rule set is saved against the revision the list holds for it, so one that someone saved since is refused, not overwritten.
+      const results = await allSettledLimited(rows, r => saveRuleSet({ ...r, enabled }, r.revision))
+      const failures = results.flatMap(r => (r.status === 'rejected' ? [ruleSetFailureOf(r.reason)] : []))
+      const fail = failures.length
+      const stale = failures.filter(f => f.kind === 'stale').length
       if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: rows.length - fail, fail }), severity: 'warning' })
       else pushToast({ message: t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), severity: 'success' })
+      // A refusal for a stale revision is not retried: the list is reloaded below and the person decides again from what is there.
+      if (stale > 0) pushToast({ message: t('admin:rules.toast.batch_stale', { count: stale }), severity: 'warning' })
       await load()
     } finally { setBatchBusy(false) }
   }

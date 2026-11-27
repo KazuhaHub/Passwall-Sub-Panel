@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { inspectProxyGroups, type MihomoRematchOutbound, type MihomoSubRule, type ProxyGroupInspection, type ProxyGroupMember, type ProxyGroupOptions, type RuleSet } from '@/api/rules'
+import { useTranslation } from 'react-i18next'
+import { pushToast } from '@/components/feedback/toasts'
+import { inspectProxyGroups, ruleSetFailureOf, type MihomoRematchOutbound, type MihomoSubRule, type ProxyGroupInspection, type ProxyGroupMember, type ProxyGroupOptions, type RuleSet } from '@/api/rules'
+import { tooLargeText } from './saveFailures'
 
 interface Asked { content: string; small: string }
 const sameAs = (a: Asked | null | undefined, b: Asked) => !!a && a.content === b.content && a.small === b.small
@@ -24,7 +27,8 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
     [draft.proxy_group_members, draft.proxy_group_options, draft.mihomo_sub_rules, draft.mihomo_rematch_outbounds],
   )
   const [done, setDone] = useState<(Asked & { data: ProxyGroupInspection }) | null>(null)
-  const [failed, setFailed] = useState<Asked | null>(null)
+  const { t } = useTranslation(['admin'])
+  const [failed, setFailed] = useState<(Asked & { message?: string }) | null>(null)
   const [loading, setLoading] = useState(false)
   const inflight = useRef<(Asked & { controller: AbortController }) | null>(null)
   const current: Asked = { content, small }
@@ -45,15 +49,22 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
         proxy_group_options: members[1] || {},
         mihomo_sub_rules: members[2] || [],
         mihomo_rematch_outbounds: members[3] || [],
-      }, controller.signal).then(data => {
+      }, controller.signal, true).then(data => {
         if (controller.signal.aborted) return
         inflight.current = null
         setDone({ ...asked, data })
         setLoading(false)
-      }).catch(() => {
+      }).catch(err => {
         if (controller.signal.aborted) return
         inflight.current = null
-        setFailed(asked)
+        // A 413 is the one failure the request layer leaves to be worded here (the others toasted already).
+        const failure = ruleSetFailureOf(err)
+        let message: string | undefined
+        if (failure.kind === 'too_large') {
+          message = tooLargeText(t, failure.limitBytes, new TextEncoder().encode(JSON.stringify({ content: asked.content, small: asked.small })).length)
+          pushToast({ message, severity: 'warning' })
+        }
+        setFailed({ ...asked, message })
         setLoading(false)
       })
     }, 1000)
@@ -73,6 +84,8 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
     loading: needed && !fresh && !sameAs(failed, current),
     /** The last request for this draft failed. */
     failed: sameAs(failed, current),
+    /** Why it failed, when that is something to say (the draft was refused as too large). */
+    failedMessage: sameAs(failed, current) ? failed?.message : undefined,
     retry,
     // A request is running even if the draft has moved on since.
     busy: loading,

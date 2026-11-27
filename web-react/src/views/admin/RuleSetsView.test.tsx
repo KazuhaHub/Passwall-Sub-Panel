@@ -181,6 +181,25 @@ describe('bulk actions', () => {
     mountPage(<RuleSetsView />, PATH)
     fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
     fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...base, enabled: false }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...base, enabled: false }, expect.anything()))
+  })
+
+  it('bulk disable saves against the revision the list holds, and on a stale refusal says so and reloads instead of retrying', async () => {
+    reads([{ ...base, revision: 'r1' }, { ...base, slug: 'other', name: 'Other', revision: 'o1' }])
+    api.put.mockImplementation(async (url: string) => {
+      if (url === '/admin/rules/other') throw Object.assign(new Error('409'), { response: { status: 409, data: { code: 'ruleset_stale', current: { ...base, slug: 'other', revision: 'o2' } } } })
+      return { data: { ...base, enabled: false, revision: 'r2' } }
+    })
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(within(await rowOf('Other')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...base, enabled: false, base_revision: 'r1' }, expect.anything())
+    expect(api.put).toHaveBeenCalledWith('/admin/rules/other', expect.objectContaining({ base_revision: 'o1' }), expect.anything())
+    await waitFor(() => expect(toast.mock.calls.map(c => String(c[0]?.message ?? c[0])).some(m => /changed by someone else.*Reload the page/.test(m))).toBe(true))
+    // No second attempt, and the list was read again.
+    expect(api.put).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(api.get.mock.calls.filter(c => c[0] === '/admin/rules').length).toBeGreaterThan(1))
   })
 })

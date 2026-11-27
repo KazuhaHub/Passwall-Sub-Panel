@@ -60,7 +60,7 @@ describe('the rule-set page', () => {
       proxy_group_options: { A: { type: 'select' } },
       mihomo_sub_rules: [{ name: 'ai', content: '- MATCH,DIRECT' }],
       mihomo_rematch_outbounds: [{ name: 'R', target_rematch_name: 'x', target_sub_rule: 'ai' }],
-    })
+    }, expect.anything())
     // The server was asked to inspect the same draft first.
     expect(api.post).toHaveBeenCalledWith('/admin/rules/inspect-proxy-groups', expect.objectContaining({ content: '- DOMAIN,b.example,A\n- MATCH,B', mihomo_sub_rules: rich.mihomo_sub_rules }), expect.anything())
     // Stays on the page, now clean.
@@ -196,7 +196,7 @@ describe('creating', () => {
     expect(api.put).toHaveBeenCalledWith('/admin/rules/fresh', {
       slug: 'fresh', name: 'Dup', sort: 100, enabled: true, direct_subscription_domain: false,
       proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [], content: '',
-    })
+    }, expect.anything())
     await waitFor(() => expect(where()).toBe('/admin/rules/fresh'))
   })
 
@@ -258,17 +258,6 @@ describe('saving', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Rules' }).getAttribute('aria-selected')).toBe('true'))
     expect(await screen.findByText('The rule is not a valid YAML rule list')).toBeTruthy()
-    expect(api.put).not.toHaveBeenCalled()
-  })
-
-  it('refuses to send a body the server would refuse, and says so before any request', async () => {
-    reads([{ ...base, content: '- DOMAIN-SUFFIX,x.example,P\n'.repeat(40_000) }])
-    mountRuleSets(PAGE)
-    fireEvent.click(await tab('General'))
-    fireEvent.change(await label(/^Name/), { target: { value: 'N' } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('too large'), severity: 'warning' }))
-    expect(api.post).not.toHaveBeenCalled()
     expect(api.put).not.toHaveBeenCalled()
   })
 

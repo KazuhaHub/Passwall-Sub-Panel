@@ -2170,6 +2170,7 @@
       "batch_enabled": "Enabled {{count}} rule sets",
       "batch_disabled": "Disabled {{count}} rule sets",
       "batch_deleted": "Deleted {{count}} rule sets",
+      "batch_stale": "{{count}} rule sets were changed by someone else and were not updated. Reload the page, then try again.",
       "batch_partial": "{{ok}} done, {{fail}} failed"
     },
     "confirm": {
@@ -2218,6 +2219,41 @@
     "undo": "Undo",
     "redo": "Redo",
     "too_large": "The rule set is too large ({{size}}); the limit is {{limit}}",
+    "too_large_proxy": "The server refused the rule set as too large ({{size}}). A reverse proxy in front of the panel may allow less than the panel does; for nginx, raise client_max_body_size.",
+    "stale_title": "The rule set has changed",
+    "stale_body": "Someone saved this rule set while you were editing. Your changes are still here and have not been saved.",
+    "stale_gone": "This rule set was changed or removed while you were editing, and the current version could not be read. Your changes are still here and have not been saved.",
+    "stale_review": "Review their changes",
+    "stale_overwrite": "Overwrite with my version",
+    "stale_discard": "Discard mine and load theirs",
+    "stale_overwrite_title": "Overwrite their version?",
+    "stale_overwrite_message": "Your version replaces the one that was just saved. Their changes are lost unless you have copied them.",
+    "stale_overwrite_action": "Overwrite",
+    "stale_discard_title": "Discard your changes?",
+    "stale_discard_message": "Your unsaved changes are dropped and the page shows the version that was just saved.",
+    "stale_discard_action": "Discard mine",
+    "conflict": {
+      "description": "Each side is compared with the version your draft started from.",
+      "theirs": "Their changes",
+      "mine": "Your changes",
+      "fields": "Other fields changed: {{fields}}",
+      "both": "Changed by both, with different results: {{fields}}",
+      "none_both": "Nothing was changed by both.",
+      "no_changes": "No changes on this side.",
+      "content_same": "The rules text is unchanged.",
+      "field": {
+        "content": "Rules",
+        "name": "Name",
+        "sort": "Sort order",
+        "enabled": "Enabled",
+        "direct_subscription_domain": "DIRECT subscription domain",
+        "proxy_group_order": "Proxy group order",
+        "proxy_group_members": "Proxy group members",
+        "proxy_group_options": "Proxy group settings",
+        "mihomo_sub_rules": "Sub-rules",
+        "mihomo_rematch_outbounds": "Rematch outbounds"
+      }
+    },
     "text": {
       "mobile_hint": "On a phone, the group view is easier to edit with"
     },
