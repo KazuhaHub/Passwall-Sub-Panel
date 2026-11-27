@@ -278,9 +278,8 @@ func attachEgressState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) e
 	if len(pairs) == 0 {
 		return nil
 	}
-	var rows []transitLinkRow
-	if err := db.Select("entry_panel_id", "exit_panel_id", "in_sent", "in_applied", "out_sent", "out_applied", "out_sent_bound", "in_sent_port", "out_sent_port").
-		Find(&rows).Error; err != nil {
+	rows, err := findLinksOfPairs(ctx, db, pairs, "entry_panel_id", "exit_panel_id", "in_sent", "in_applied", "out_sent", "out_applied", "out_sent_bound", "in_sent_port", "out_sent_port")
+	if err != nil {
 		return fmt.Errorf("load egress state: %w", err)
 	}
 	byPair := make(map[[2]int64]transitLinkRow, len(rows))
@@ -298,4 +297,32 @@ func attachEgressState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) e
 			slices.Contains([]string(row.OutSentBound), "lst_"+fmt.Sprint(node.ID))
 	}
 	return nil
+}
+
+// findLinksOfPairs reads the links of the given (entry, exit) panel pairs, the
+// listed columns only. The query is "entry in the pairs' entries AND exit in
+// the pairs' exits", which can return a pair nobody asked for (the cross
+// product of the two sides), so a caller still matches rows to pairs exactly;
+// what it never gets is the whole table. Chunked under the dialects' parameter
+// limits: each (entry chunk, exit chunk) is a different slice of the product, so
+// a link is returned once.
+func findLinksOfPairs(ctx context.Context, db *gorm.DB, pairs [][2]int64, columns ...string) ([]transitLinkRow, error) {
+	entries := make([]int64, 0, len(pairs))
+	exits := make([]int64, 0, len(pairs))
+	for _, pair := range pairs {
+		entries = append(entries, pair[0])
+		exits = append(exits, pair[1])
+	}
+	var rows []transitLinkRow
+	exitChunks := idChunks(exits)
+	for _, entry := range idChunks(entries) {
+		for _, exit := range exitChunks {
+			var part []transitLinkRow
+			if err := db.WithContext(ctx).Select(columns).Where("entry_panel_id IN ? AND exit_panel_id IN ?", entry, exit).Find(&part).Error; err != nil {
+				return nil, err
+			}
+			rows = append(rows, part...)
+		}
+	}
+	return rows, nil
 }

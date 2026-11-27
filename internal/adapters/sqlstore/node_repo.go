@@ -433,6 +433,20 @@ func (r *nodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inbound
 	return r.withTransit(ctx, node, err)
 }
 
+// GetByPanelInboundBare is GetByPanelInbound without attachNodeState: the node
+// row alone (ports.NodeBareReader). Its routes, readiness, probe and position
+// fields are zero, so only a caller that reads the node's own columns may use it.
+func (r *nodeRepo) GetByPanelInboundBare(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error) {
+	var row nodeRow
+	err := r.db.WithContext(ctx).
+		Where("panel_id = ? AND inbound_id = ?", panelID, inboundID).
+		First(&row).Error
+	if err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return row.toDomain()
+}
+
 func (r *nodeRepo) UpdateCertBinding(ctx context.Context, nodeID int64, source domain.CertSource, certID int64) error {
 	if nodeID == 0 {
 		return fmt.Errorf("UpdateCertBinding requires a non-zero node ID")

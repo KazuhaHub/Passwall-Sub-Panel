@@ -324,9 +324,23 @@ func attachRouteState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) er
 	if len(nodes) == 0 {
 		return nil
 	}
+	// Only the rows of the nodes being attached: a read of one node used to
+	// load, and hold, every node's routes (a Body of thousands of entries each).
+	// The row's key is the node id, so the match below is exact whatever else the
+	// IN lists return; chunked under the dialects' parameter limits.
+	ids := make([]int64, 0, len(nodes))
+	for _, node := range nodes {
+		if node != nil {
+			ids = append(ids, node.ID)
+		}
+	}
 	var rows []transitRouteRow
-	if err := db.WithContext(ctx).Find(&rows).Error; err != nil {
-		return fmt.Errorf("load routes: %w", err)
+	for _, chunk := range idChunks(ids) {
+		var part []transitRouteRow
+		if err := db.WithContext(ctx).Where("node_id IN ?", chunk).Find(&part).Error; err != nil {
+			return fmt.Errorf("load routes: %w", err)
+		}
+		rows = append(rows, part...)
 	}
 	if len(rows) == 0 {
 		return nil

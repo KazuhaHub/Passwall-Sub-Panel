@@ -216,10 +216,31 @@ func attachProbeState(ctx context.Context, db *gorm.DB, nodes []*domain.Node, fo
 	if len(wantLinks) == 0 && !wantForwards {
 		return nil
 	}
+	// A row belongs to the server that ran the probe: the node's own server for
+	// its tunnel link, a managed line's entry server for its forward. Nothing
+	// else is looked up below, so nothing else is read.
+	servers := make([]int64, 0, len(wantLinks))
+	for pair := range wantLinks {
+		servers = append(servers, pair.entry)
+	}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		for _, relay := range node.Relays {
+			if relay.Managed() {
+				servers = append(servers, relay.EntryPanelID)
+			}
+		}
+	}
 	var rows []transitProbeRow
 	db = db.WithContext(ctx)
-	if err := db.Find(&rows).Error; err != nil {
-		return fmt.Errorf("load probe state: %w", err)
+	for _, chunk := range idChunks(servers) {
+		var part []transitProbeRow
+		if err := db.Where("panel_id IN ?", chunk).Find(&part).Error; err != nil {
+			return fmt.Errorf("load probe state: %w", err)
+		}
+		rows = append(rows, part...)
 	}
 	if len(rows) == 0 {
 		return nil
@@ -246,8 +267,12 @@ func attachProbeState(ctx context.Context, db *gorm.DB, nodes []*domain.Node, fo
 		byObject[id] = append(byObject[id], row.toDomain())
 	}
 	if len(wantLinks) > 0 {
-		var links []transitLinkRow
-		if err := db.Select("id", "entry_panel_id", "exit_panel_id").Find(&links).Error; err != nil {
+		pairs := make([][2]int64, 0, len(wantLinks))
+		for pair := range wantLinks {
+			pairs = append(pairs, [2]int64{pair.entry, pair.exit})
+		}
+		links, err := findLinksOfPairs(ctx, db, pairs, "id", "entry_panel_id", "exit_panel_id")
+		if err != nil {
 			return fmt.Errorf("load probe links: %w", err)
 		}
 		linkKeys := map[linkPair]string{}
