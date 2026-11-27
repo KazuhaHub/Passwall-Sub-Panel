@@ -24,7 +24,7 @@ export interface UserAutocompleteProps {
   onChange: (userId: number | null) => void
   label?: string
   width?: number
-  /** Fill the parent's width instead of a fixed one (a phone's single column). */
+  /** Fill the parent's width with no ceiling (a phone's single column). */
   fullWidth?: boolean
 }
 
@@ -68,7 +68,10 @@ export default function UserAutocomplete({ value, onChange, label, width = 280, 
   const name = label ?? t('admin:risk_center.pick_user')
 
   return (
-    <div className={cn('max-w-full', fullWidth && 'w-full')} style={fullWidth ? undefined : { width }}>
+    // `width` is a ceiling, not a size: a fixed width wider than its container (a grid column that
+    // fits the container) spilled over the next field. `max-w-full` alone does not stop that inside
+    // a grid item whose track sizes itself to this box.
+    <div className={cn('w-full', fullWidth && 'max-w-full')} style={fullWidth ? undefined : { width: '100%', maxWidth: width }}>
       <Combobox
         items={all}
         value={selected}

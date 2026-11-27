@@ -129,7 +129,7 @@ export function RecordsFilters({
         <div className="grid min-w-0 gap-1">
           <span className="text-xs text-muted-foreground">{t(`${R}filters.user`)}</span>
           <UserAutocomplete value={filter.user_id ?? null} onChange={id => patch({ user_id: id ?? undefined })}
-            label={t(`${R}filters.user`)} width={240} fullWidth={phone} />
+            label={t(`${R}filters.user`)} fullWidth />
         </div>
         <FilterField label={t(`${R}filters.range`)} htmlFor="rec-range">
           <NativeSelect id="rec-range" value={rangeValue} onChange={e => setRange(e.target.value)}>

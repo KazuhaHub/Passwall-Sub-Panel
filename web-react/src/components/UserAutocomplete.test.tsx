@@ -56,6 +56,18 @@ describe('UserAutocomplete', () => {
     expect(req?.[1]).toMatchObject({ params: { page: 1, page_size: 50, keyword: 'ali' } })
   })
 
+  // A fixed width wider than the container used to spill over the next field (the access-control
+  // records filters, where the grid column was narrower than 240px). The width is a ceiling now.
+  it('never grows wider than its container', () => {
+    const { container } = render(
+      <UserAutocomplete value={null} onChange={vi.fn()} label="user" width={240} />,
+      { wrapper: queryWrapper(makeTestQueryClient()) },
+    )
+    const box = container.firstElementChild as HTMLElement
+    expect(box.style.width).toBe('100%')
+    expect(box.style.maxWidth).toBe('240px')
+  })
+
   it('picks a user by id', async () => {
     const onChange = vi.fn()
     render(
