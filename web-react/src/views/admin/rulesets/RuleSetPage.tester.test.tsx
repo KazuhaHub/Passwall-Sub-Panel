@@ -124,13 +124,14 @@ describe('the problems panel', () => {
     const button = await screen.findByRole('button', { name: 'Issues and findings' })
     fireEvent.click(button)
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByText('Never applies: matched first by an earlier rule with a different target')).toBeTruthy()
-    expect(within(dialog).getByText('Line 1 matches first (Proxy); this line never applies')).toBeTruthy()
+    expect(await within(dialog).findByText('Doesn\'t apply (TCP): matched first by an earlier rule with a different target')).toBeTruthy()
+    expect(within(dialog).getByText('Line 1 matches first (Proxy); over TCP this line doesn\'t apply')).toBeTruthy()
     // Folded groups open on click; the harmless ones are named as such.
+    expect(within(dialog).getByText(/These findings assume a TCP connection/)).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: /Redundant/ }))
     expect(await within(dialog).findByText('Line 1 matches first with the same target; this line is redundant')).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('button', { name: /Never matches/ }))
-    expect(await within(dialog).findByText('Comes after the fallback rule (line 7) and never matches')).toBeTruthy()
+    fireEvent.click(within(dialog).getByRole('button', { name: /Doesn't match \(TCP\)/ }))
+    expect(await within(dialog).findByText('Comes after the fallback rule (line 7); over TCP it doesn\'t match')).toBeTruthy()
     // Nothing in it edits the rules.
     expect(within(dialog).queryByRole('button', { name: /remove|delete/i })).toBeNull()
     fireEvent.click(within(dialog).getAllByRole('button', { name: /^Go to line/ })[0])
