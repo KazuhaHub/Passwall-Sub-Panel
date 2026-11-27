@@ -28,12 +28,17 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * `findings` is null while the analysis for the current text is still running (it runs when the browser is idle).
  */
-export function IssuesPanel({ doc, findings, textOnly, needsGroups, onJump, onClose }: {
+export function IssuesPanel({ doc, findings, textOnly, status, onRetry, onJump, onClose }: {
   doc: Doc
   findings: readonly Finding[] | null
   textOnly: boolean
-  /** The members of the groups are not available (an operator cannot read them), so nothing can be said about which rule covers which. */
-  needsGroups: boolean
+  /**
+   * The state of the proxy-group members the findings rest on: `ready` (all findings), `computing` (the request for them is
+   * pending or running), `failed` (it failed: the findings that do not need them are shown, with a way to ask again) and
+   * `unavailable` (they cannot be read, as by an operator: the same partial findings).
+   */
+  status: 'ready' | 'computing' | 'failed' | 'unavailable'
+  onRetry: () => void
   onJump?: (line: number) => void
   onClose: () => void
 }) {
@@ -51,9 +56,12 @@ export function IssuesPanel({ doc, findings, textOnly, needsGroups, onJump, onCl
   return (
     <DetailDialog open onClose={onClose} size="lg" title={t('admin:rules.issues.title')} description={t('admin:rules.issues.description')}>
       <div className="flex flex-col gap-3">
+        {status === 'failed' && (
+          <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={onRetry}>{t('admin:rules.retry')}</Button>}>{t('admin:rules.issues.failed')}</Notice>
+        )}
+        {status === 'unavailable' && <Notice tone="info">{t('admin:rules.issues.needs_groups')}</Notice>}
         {textOnly ? <Notice tone="warning">{t('admin:rules.issues.text_only')}</Notice>
-          : needsGroups ? <Notice tone="info">{t('admin:rules.issues.needs_groups')}</Notice>
-          : findings === null ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><IconSpinner aria-hidden className="animate-spin" />{t('admin:rules.issues.computing')}</p>
+          : status === 'computing' || findings === null ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><IconSpinner aria-hidden className="animate-spin" />{t('admin:rules.issues.computing')}</p>
           : findings.length === 0 ? <EmptyState compact title={t('admin:rules.issues.none')} />
           : ORDER.map(({ kind, level, key }) => {
             const list = findings.filter(f => f.kind === kind)

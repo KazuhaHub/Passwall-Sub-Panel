@@ -65,7 +65,11 @@ const swap = (list: readonly ProxyGroupMember[], from: string, to: string): { li
   return { list: out, hits }
 }
 
-export function planRename(rs: RuleSet, from: string, to: string, effective: ReadonlyMap<string, readonly ProxyGroupMember[]>): RenamePlan {
+export function planRename(
+  rs: RuleSet, from: string, to: string, effective: ReadonlyMap<string, readonly ProxyGroupMember[]>,
+  /** Node and subscription-line names the inspection reports: the renderer does not make a group of a name that is one of those (proxyTargetExclusions). */
+  reserved: ReadonlySet<string> = new Set(),
+): RenamePlan {
   if (from === to) return { ok: false, reason: 'same' }
   const main = parseDoc(rs.content)
   if (main.foreign.length > 0) return { ok: false, reason: 'text_only' }
@@ -84,7 +88,7 @@ export function planRename(rs: RuleSet, from: string, to: string, effective: Rea
   // key came first, so the name is not free.
   const explicit = rs.proxy_group_members ?? {}
   const options = rs.proxy_group_options
-  if (Object.prototype.hasOwnProperty.call(explicit, to) || (options && Object.prototype.hasOwnProperty.call(options, to)) || effective.has(to)) return { ok: false, reason: 'taken' }
+  if (Object.prototype.hasOwnProperty.call(explicit, to) || (options && Object.prototype.hasOwnProperty.call(options, to)) || effective.has(to) || reserved.has(to)) return { ok: false, reason: 'taken' }
 
   const patch: Patch = {}
   let rules = 0

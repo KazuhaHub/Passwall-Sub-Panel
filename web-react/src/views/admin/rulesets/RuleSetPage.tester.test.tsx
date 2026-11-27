@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, installReads, list, mountRuleSets } from './testHarness'
 
 // The routing test and the problems panel on the Rules tab (phase 2 of the rule-set editor).
+// The draft's inspection is asked for a second after the draft settles (useDraftInspection), so waits are longer than the default.
+configure({ asyncUtilTimeout: 4000 })
+
 const content = '- GEOSITE,cn,CN\n- DOMAIN-SUFFIX,example.com,Proxy\n# ads\n- DOMAIN,www.example.com,Block\n- DOMAIN-KEYWORD,example,Proxy\n- DOMAIN-SUFFIX,www.example.com,Proxy\n- IP-CIDR,10.0.0.0/8,Direct,no-resolve\n- MATCH,Final\n'
 const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content }
 const PAGE = '/admin/rules/custom'
@@ -117,11 +120,11 @@ describe('the problems panel', () => {
   it('lists the rules an earlier rule covers in three groups, names the rule that wins, and opens the line', async () => {
     reads({ ...base, content: content.replace('- GEOSITE,cn,CN\n', '') + '- DOMAIN,after.example,X\n' })
     mountRuleSets(PAGE)
-    // The analysis runs when the page is idle, a moment after the text is in.
-    const button = await screen.findByRole('button', { name: /^\d+ findings$/ }, { timeout: 3000 })
+    // The draft's groups are asked for once the panel is open, and the analysis runs when the page is idle.
+    const button = await screen.findByRole('button', { name: 'Issues and findings' })
     fireEvent.click(button)
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Never applies: matched first by an earlier rule with a different target')).toBeTruthy()
+    expect(await within(dialog).findByText('Never applies: matched first by an earlier rule with a different target')).toBeTruthy()
     expect(within(dialog).getByText('Line 1 matches first (Proxy); this line never applies')).toBeTruthy()
     // Folded groups open on click; the harmless ones are named as such.
     fireEvent.click(within(dialog).getByRole('button', { name: /Redundant/ }))

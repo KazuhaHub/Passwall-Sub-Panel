@@ -71,7 +71,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   return (
     <section aria-label={t('admin:rules.tester.title')} aria-busy={stale} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-3">
-        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' ? t('admin:rules.tester.problem.address_invalid') : undefined} hint={t('admin:rules.tester.ip_note')}>
+        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' ? t(`admin:rules.tester.problem.${problem}`) : undefined} hint={t('admin:rules.tester.ip_note')}>
           <Input value={input.address} placeholder={t('admin:rules.tester.address_placeholder')} spellCheck={false} autoCapitalize="none" autoCorrect="off" onChange={e => set({ address: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">

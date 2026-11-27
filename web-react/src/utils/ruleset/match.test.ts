@@ -351,3 +351,52 @@ describe('no-resolve after a rule that resolved the name', () => {
     expect(r.certain).toBe(true)
   })
 })
+
+describe('regexes that backtrack, and what regexp2 will not compile (re-review)', () => {
+  it('counts every quantifier that can repeat or be skipped: bounded ones too, and a bound above 64', () => {
+    const bounded = '.{0,60}'.repeat(4) + 'z'
+    const optional = 'a?'.repeat(32) + 'a'.repeat(32)
+    for (const bad of [bounded, optional, 'a{0,100}b', 'a{65}', 'a{1,2}b{1,2}c{1,2}', 'a?b?c?']) expect(safeRegex(bad), bad).toBeNull()
+    for (const good of ['a?b?', 'a{2,4}b', 'a{64}', '^(www\\.)?google\\.(com|cn)$', '^\\w+\\.\\w+$']) expect(safeRegex(good), good).toBeInstanceOf(RegExp)
+  })
+
+  it('the three patterns come back undecided at once, even on a 250-character host', () => {
+    const host = 'a'.repeat(250)
+    for (const pattern of ['.{0,60}'.repeat(4) + 'z', 'a?'.repeat(32) + 'a'.repeat(32), '[a-z.]*'.repeat(8) + '!']) {
+      const t0 = performance.now()
+      expect(ev(`DOMAIN-REGEX,${pattern},X`, { address: host })).toEqual(unknown('regex'))
+      expect(performance.now() - t0).toBeLessThan(50)
+    }
+  })
+
+  it('a class range that starts or ends with an escape class is refused (regexp2 does not compile it)', () => {
+    for (const bad of ['[a-\\d]', '[\\d-z]', '[\\w-a]', '[0-\\s]']) expect(safeRegex(bad), bad).toBeNull()
+    for (const good of ['[a-z\\d-]', '[\\w.-]', '[-a-z]', '[a\\-z]']) expect(safeRegex(good), good).toBeInstanceOf(RegExp)
+  })
+
+  it('a host with a non-ASCII character is not evaluated: the punycode form is asked for', () => {
+    expect(prepareProbe(input({ address: 'bücher.example' }))).toEqual({ ok: false, problem: 'address_idn' })
+    expect(prepareProbe(input({ address: '例え.jp' }))).toEqual({ ok: false, problem: 'address_idn' })
+    expect(prepareProbe(input({ address: 'xn--bcher-kva.example' })).ok).toBe(true)
+  })
+})
+
+describe('UDP over a group with proxies in it (re-review)', () => {
+  const groups = new Map([
+    ['Pool', [{ kind: 'builtin' as const, value: 'DIRECT' }, { kind: 'node_set' as const, value: 'remaining' }]],
+    ['Plain', [{ kind: 'builtin' as const, value: 'DIRECT' }]],
+  ])
+  const real = continuation(groups, [])
+  const doc = parseDoc('- DOMAIN-SUFFIX,a.example,Pool\n- MATCH,Plain\n')
+
+  it('over TCP the group is the last word; over UDP Mihomo skips a chosen proxy that lacks UDP and goes on, so it is not', () => {
+    expect(routeFor(doc, probe({ address: 'a.example', network: 'tcp' }), real).final).toBe(true)
+    const udp = routeFor(doc, probe({ address: 'a.example', network: 'udp' }), real)
+    expect(udp.final).toBe(false)
+    expect(udp.certain).toBe(false)
+  })
+
+  it('a group of built-in outbounds only stays final over UDP', () => {
+    expect(routeFor(parseDoc('- MATCH,Plain\n'), probe({ network: 'udp' }), real).final).toBe(true)
+  })
+})

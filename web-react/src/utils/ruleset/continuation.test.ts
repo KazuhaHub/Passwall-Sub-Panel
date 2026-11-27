@@ -57,3 +57,25 @@ describe('a target that may not be final', () => {
     expect(continuation(new Map([['A', [g('Missing')]]]), []).mayContinue('A')).toBe(true)
   })
 })
+
+
+describe('UDP (re-review): a chosen proxy without UDP makes Mihomo carry on', () => {
+  const node: ProxyGroupMember = { kind: 'node', node_id: 1 }
+  const c = continuation(new Map<string, ProxyGroupMember[]>([
+    ['Pool', [b('DIRECT'), { kind: 'node_set', value: 'remaining' }]],
+    ['Lines', [{ kind: 'line', node_id: 1, line_id: 'x' }]],
+    ['Plain', [b('DIRECT'), b('REJECT')]],
+    ['Via', [g('Pool')]],
+    ['Nodes', [node]],
+  ]), [])
+
+  it('over UDP a group with any node, line or node set may continue, directly or through a member group', () => {
+    for (const name of ['Pool', 'Lines', 'Via', 'Nodes']) expect(c.mayContinue(name, true), name).toBe(true)
+  })
+
+  it('over TCP, and for a group of built-ins, nothing changes', () => {
+    for (const name of ['Pool', 'Lines', 'Via', 'Nodes', 'Plain']) expect(c.mayContinue(name, false), name).toBe(false)
+    expect(c.mayContinue('Plain', true)).toBe(false)
+    expect(c.mayContinue('DIRECT', true)).toBe(false)
+  })
+})

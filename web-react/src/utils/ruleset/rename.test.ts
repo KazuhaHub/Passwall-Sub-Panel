@@ -122,6 +122,15 @@ describe('planRename', () => {
   })
 })
 
+describe('names the renderer would not make a group (re-review)', () => {
+  it('refuses a name a node or subscription line already has, as the inspection reports it', () => {
+    const rs = baseSet()
+    const eff = effectiveOf(rs, { A: [], B: [] })
+    expect(planRename(rs, 'A', 'Tokyo 01', eff, new Set(['Tokyo 01']))).toEqual({ ok: false, reason: 'taken' })
+    expect(planRename(rs, 'A', 'Tokyo 02', eff, new Set(['Tokyo 01'])).ok).toBe(true)
+  })
+})
+
 describe('a rename leaves every group\'s effective members as they were, the name apart (review A)', () => {
   // A seeded-like set: no member entries at all, the members come from the group NAMES (proxyGroupChoices).
   const rs = baseSet({

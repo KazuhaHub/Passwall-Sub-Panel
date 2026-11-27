@@ -2223,7 +2223,6 @@
     },
     "issues": {
       "main_rules": "Main rules",
-      "button": "{{count}} findings",
       "title": "Issues and findings",
       "none": "No issues found",
       "computing": "Checking…",
@@ -2236,7 +2235,8 @@
       },
       "summary": "{{count}} rules never apply",
       "description": "Rules that an earlier rule already covers. This list only reports; nothing is changed.",
-      "needs_groups": "Checking which rule covers which needs the members of the proxy groups, which only administrators can read."
+      "needs_groups": "Most of this check needs the members of the proxy groups, which only administrators can read. Only the findings that do not depend on them are shown: identical rules, and rules covered by a DIRECT or REJECT rule.",
+      "failed": "The proxy group members for this draft couldn't be read, so only the findings that do not depend on them are shown: identical rules, and rules covered by a DIRECT or REJECT rule. The rest need them."
     },
     "blocks": {
       "title": "Rule groups",
@@ -2457,7 +2457,9 @@
         "unused": "No rule uses this proxy group; it is only named in member lists, so there is nothing to rename."
       },
       "not_reached": "Not changed by this rename: other rule sets, the template's own proxy group order and users' personal rules that still use the old name. In the templates this rule set is used by ({{templates}}), they keep the old group next to the renamed one.",
-      "not_reached_unbound": "Not changed by this rename: other rule sets and users' personal rules that still use the old name. No template uses this rule set at the moment."
+      "not_reached_unbound": "Not changed by this rename: other rule sets and users' personal rules that still use the old name. No template uses this rule set at the moment.",
+      "name_note": "A name that matches a subscription line or a proxy group of the template's own rules is not made a group: it routes to that line or group instead.",
+      "precedence": "The member lists written out here belong to this rule set. In a template, the first rule set that has a list for a group decides it, so they take precedence over the same group's list in rule sets placed after this one."
     },
     "targetview": {
       "label": "Show",
@@ -2512,7 +2514,8 @@
         "address_invalid": "Enter a domain or an IP address, without a URL, port or spaces",
         "port_invalid": "The port must be a number from 0 to 65535",
         "resolved_invalid": "The resolved IP isn't a valid address",
-        "src_invalid": "The source port or source IP isn't valid"
+        "src_invalid": "The source port or source IP isn't valid",
+        "address_idn": "Enter the punycode (xn--) form of the name; names with non-ASCII letters aren't evaluated here"
       },
       "more_count": "{{count}} more",
       "go_to_line": "Go to line {{line}}",

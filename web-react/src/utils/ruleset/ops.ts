@@ -1,6 +1,6 @@
 import type { Block } from './blocks'
 import { canWriteField } from './scalar'
-import { normalizeTarget, quoteLike } from './target'
+import { isGoSpace, normalizeTarget, quoteLike } from './target'
 import { listIndent, makeDoc, scanRule, targetIndex, type Doc, type Line, type Span } from './parse'
 
 /**
@@ -56,8 +56,8 @@ function splice(doc: Doc, start: number, remove: number, insert: readonly Raw[])
 const trimmed = (raw: string, s: Span): Span => {
   let a = s.start
   let b = s.end
-  while (a < b && /\s/.test(raw[a])) a++
-  while (b > a && /\s/.test(raw[b - 1])) b--
+  while (a < b && isGoSpace(raw[a])) a++
+  while (b > a && isGoSpace(raw[b - 1])) b--
   return { start: a, end: b }
 }
 

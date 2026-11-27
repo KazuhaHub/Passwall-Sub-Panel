@@ -15,11 +15,13 @@ import { newGroupNameProblem } from './targets'
  *
  * The rewrite itself is `planRename`: a pure function of the draft. The dialog hands the plan to the page, which applies it.
  */
-export function RenameGroupDialog({ draft, from, effective, templates, rematchNames, onApply, onClose }: {
+export function RenameGroupDialog({ draft, from, effective, reserved, templates, rematchNames, onApply, onClose }: {
   draft: RuleSet
   from: string
   /** The backend's effective members of every proxy group of this draft (defaults included): what the rename keeps as it is. */
   effective: ReadonlyMap<string, readonly ProxyGroupMember[]>
+  /** Node and subscription-line names the inspection reports: not made into groups by the renderer, so not usable as a group's name. */
+  reserved: ReadonlySet<string>
   /** The templates this rule set is bound to: where the old name lives on in other rule sets. */
   templates: readonly string[]
   rematchNames: readonly string[]
@@ -31,7 +33,7 @@ export function RenameGroupDialog({ draft, from, effective, templates, rematchNa
   const [attempted, setAttempted] = useState(false)
   const to = name.trim()
   const problem = to === from ? null : newGroupNameProblem(to, { groups: [...effective.keys()], rematch: [...rematchNames] })
-  const plan = useMemo(() => (to === from || problem ? null : planRename(draft, from, to, effective)), [draft, from, to, problem, effective])
+  const plan = useMemo(() => (to === from || problem ? null : planRename(draft, from, to, effective, reserved)), [draft, from, to, problem, effective, reserved])
   const refused = plan && !plan.ok ? plan.reason : null
   const unchanged = to === from
   const ready = plan !== null && plan.ok
@@ -58,6 +60,8 @@ export function RenameGroupDialog({ draft, from, effective, templates, rematchNa
         <div role="status" className="flex flex-col gap-2 text-sm">
           <p>{t('admin:rules.rename.confirm', { rules: plan.rules.toLocaleString(), refs: plan.refs.toLocaleString(), lists: plan.materialised.toLocaleString() })}</p>
           {/* What it does not reach (render.go: the template's own proxy_group_order, other rule sets and personal rules are all read by name). */}
+          {plan.materialised > 0 && <p className="text-muted-foreground">{t('admin:rules.rename.precedence')}</p>}
+          <p className="text-muted-foreground">{t('admin:rules.rename.name_note')}</p>
           <p className="text-muted-foreground">{templates.length > 0 ? t('admin:rules.rename.not_reached', { templates: templates.join('、') }) : t('admin:rules.rename.not_reached_unbound')}</p>
         </div>
       )}

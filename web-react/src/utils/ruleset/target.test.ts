@@ -73,3 +73,15 @@ describe('rewriting a target keeps the line\'s quote style', () => {
     expect(serializeDoc(retargetLines(d, [0, 1], 'Other'))).toBe("- DOMAIN,b.com,'Other'\n- DOMAIN,c.com,'Other'\n")
   })
 })
+
+
+describe('the trim is Go\'s strings.TrimSpace, not JavaScript\'s', () => {
+  it('trims U+0085 and the no-break spaces; leaves U+FEFF, which Go does not call white space', () => {
+    expect(normalizeTarget('\u0085Proxy\u0085')).toBe('Proxy')
+    expect(normalizeTarget(' Proxy　')).toBe('Proxy')
+    expect(normalizeTarget(' Proxy ')).toBe('Proxy')
+    expect(normalizeTarget('﻿Proxy')).toBe('﻿Proxy')
+    expect(normalizeTarget("\u0085'Proxy'\u0085")).toBe('Proxy')
+    expect(normalizeTarget("﻿'Proxy'")).toBe("﻿'Proxy'")
+  })
+})

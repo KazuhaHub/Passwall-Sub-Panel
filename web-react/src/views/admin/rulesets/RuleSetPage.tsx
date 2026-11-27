@@ -115,8 +115,15 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const textOnly = useMemo(() => parseDoc(form.content).foreign.length > 0, [form.content])
   // What the backend says every proxy group of THIS draft is (members included); null until that answer is in for the draft as it
   // is now. The routing test, the covered-rule findings and the rename rest on it, and none of them works the members out itself.
-  const { inspection, fresh } = useDraftInspection(form, !readOnly && (tab === 'rules' || tab === 'members'))
+  // Asked only while something on screen uses it: the Proxy groups tab, the rename dialog, or the routing test / problems panel of
+  // the Rules tab or of a sub-rule (their editors say so through `groups.needed`).
+  const [needsMain, setNeedsMain] = useState(false)
+  const [needsSub, setNeedsSub] = useState(false)
+  const needed = !readOnly && (tab === 'members' || (tab === 'rules' && needsMain) || (tab === 'sub_rules' && needsSub) || renaming !== null)
+  const { inspection, fresh, loading: groupsLoading, failed: groupsFailed, retry: retryGroups } = useDraftInspection(form, needed)
   const effective = useMemo(() => (fresh && inspection ? new Map(inspection.groups.map(g => [g.name, g.members] as const)) : null), [fresh, inspection])
+  // Names the renderer does not turn into a group (a node or line of the subscription is one already): proxyTargetExclusions.
+  const reserved = useMemo(() => new Set((inspection?.nodes ?? []).map(n => n.display_name).concat((inspection?.lines ?? []).flatMap(l => [l.name, l.display_name]))), [inspection])
   const rematchNames = useMemo(() => (form.mihomo_rematch_outbounds || []).map(o => o.name), [form.mihomo_rematch_outbounds])
   const cont = useMemo(() => continuation(effective, rematchNames), [effective, rematchNames])
   const renameBlocked = textOnly ? t('admin:rules.rename.unavailable.text_only') : effective === null ? t('admin:rules.rename.unavailable.not_ready') : undefined
@@ -339,7 +346,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
-                showTarget={showTarget} cont={cont} groupsKnown={effective !== null} groupsUnavailable={readOnly} />
+                showTarget={showTarget} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor
@@ -368,7 +375,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               <MihomoAdvancedRulesEditor part="sub_rules" value={form} onChange={setForm}
                 renderContent={({ index, generation, value, onChange, ariaLabel }) => (
                   <RulesTab key={`${rev}:${index}:${generation}`} content={value} setContent={onChange} readOnly={readOnly || pending} ariaLabel={ariaLabel}
-                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} cont={cont} groupsKnown={effective !== null} groupsUnavailable={readOnly} />
+                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, unavailable: readOnly, retry: retryGroups, needed: setNeedsSub }} />
                 )} />
             </TabsContent>
             <TabsContent value="rematches" keepMounted={false}>
@@ -386,7 +393,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         </form>
       </FormValidityProvider>
       {renaming && effective && (
-        <RenameGroupDialog draft={form} from={renaming.name} effective={effective} templates={usedBy} rematchNames={rematchNames}
+        <RenameGroupDialog draft={form} from={renaming.name} effective={effective} reserved={reserved} templates={usedBy} rematchNames={rematchNames}
           onApply={applyRename} onClose={() => setRenaming(null)} />
       )}
       {changes && <ChangesDialog saved={baseline.content} draft={form.content} onClose={() => setChanges(false)} />}

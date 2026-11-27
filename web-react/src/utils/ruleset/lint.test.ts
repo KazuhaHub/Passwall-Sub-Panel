@@ -171,3 +171,18 @@ describe('the seeded default rule set', () => {
     expect(performance.now() - t0).toBeLessThan(1000)
   })
 })
+
+
+describe('an identical rule with the same target is redundant even where the target may go on (re-review)', () => {
+  const real = continuation(new Map([['Udp', [{ kind: 'builtin' as const, value: 'DIRECT' }, { kind: 'builtin' as const, value: 'PASS' }]]]), [])
+  it('the same rule again, aimed at the same group that may pass: the second can add nothing', () => {
+    expect(brief(find('- DOMAIN,a.com,Udp\n- DOMAIN,a.com,Udp\n', real))).toEqual([[1, 0, 'same']])
+  })
+  it('aimed at another target it can still apply, so it is not reported', () => {
+    expect(find('- DOMAIN,a.com,Udp\n- DOMAIN,a.com,YT\n', real)).toEqual([])
+  })
+  it('without any group data the findings that do not depend on it remain: a duplicate, and coverage by a built-in outbound', () => {
+    const none = continuation(null, [])
+    expect(brief(find('- DOMAIN,a.com,G\n- DOMAIN,a.com,G\n- DOMAIN-SUFFIX,b.com,DIRECT\n- DOMAIN,www.b.com,REJECT\n- DOMAIN,c.com,G\n- DOMAIN,c.com,H\n', none))).toEqual([[1, 0, 'same'], [3, 2, 'other']])
+  })
+})

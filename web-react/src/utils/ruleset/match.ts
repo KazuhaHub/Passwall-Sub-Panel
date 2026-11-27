@@ -47,7 +47,7 @@ export interface Probe {
   resolvedEarlier?: boolean
 }
 
-export type ProbeProblem = 'address_empty' | 'address_invalid' | 'port_invalid' | 'resolved_invalid' | 'src_invalid'
+export type ProbeProblem = 'address_empty' | 'address_idn' | 'address_invalid' | 'port_invalid' | 'resolved_invalid' | 'src_invalid'
 
 export function parseIp(text: string): Ip | null {
   const s = text.trim()
@@ -88,6 +88,8 @@ const portOf = (s: string): number | null => (/^\d{1,5}$/.test(s.trim()) && Numb
 export function prepareProbe(input: ProbeInput): { ok: true; probe: Probe } | { ok: false; problem: ProbeProblem } {
   let host = input.address.trim().toLowerCase()
   if (host === '') return { ok: false, problem: 'address_empty' }
+  // Not converted (no punycode here): a name with non-ASCII letters is not evaluated, and the form says to enter the xn-- form.
+  if (/[^\u0000-\u007f]/.test(host)) return { ok: false, problem: 'address_idn' }
   if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
   if (host.endsWith('.') && !host.includes(':')) host = host.slice(0, -1)
   // A domain name is at most 253 characters, which also bounds what a regular expression is ever run against.
@@ -131,7 +133,8 @@ const of = (b: boolean): Verdict => (b ? YES : NO)
  * "undecided" instead of a wrong "no".
  *
  * Nor is a pattern run when it could hang the page: nothing quantified that holds a quantifier or an alternation (nested
- * quantifiers), and at most two unbounded quantifiers (`*`, `+`, `{n,}`), which also keeps polynomial blow-up out. A browser
+ * quantifiers), at most two quantifiers of any kind that can repeat or be skipped (`*`, `+`, `?`, `{n,m}`, `{n,}`; bounded
+ * ones backtrack too, `a?` x 32 is exponential), and no bound above 64, which keeps polynomial and exponential blow-up out. A browser
  * cannot interrupt a regular expression that is already running, so refusing before it starts is the only guard there is; the
  * test input is a host name of at most 253 characters.
  */
@@ -142,7 +145,7 @@ export function safeRegex(src: string): RegExp | null {
   const n = src.length
   // For each open group: whether it holds a quantifier or an alternation.
   const stack: boolean[] = []
-  let unbounded = 0
+  let quantifiers = 0
   // The previous token can take a quantifier (an atom or a closed group); a second one in a row would be lazy, possessive or invalid.
   let atom = false
   const mark = () => { if (stack.length > 0) stack[stack.length - 1] = true }
@@ -156,9 +159,14 @@ export function safeRegex(src: string): RegExp | null {
       i++
       if (src[i] === '^') i++
       let members = 0
+      // A range whose start or end is an escape class (`[a-\\d]`, `[\\d-z]`) does not compile in regexp2.
+      let prevClass = false
       while (i < n && src[i] !== ']') {
         if (src[i] === '[') return null
-        if (src[i] === '\\') { if (!escapeOk(src[i + 1])) return null; i += 2 } else i++
+        if (src[i] === '-' && members > 0 && src[i + 1] !== ']') {
+          if (prevClass || (src[i + 1] === '\\' && 'dwsDWS'.includes(src[i + 2] ?? ''))) return null
+        }
+        if (src[i] === '\\') { if (!escapeOk(src[i + 1])) return null; prevClass = 'dwsDWS'.includes(src[i + 1]); i += 2 } else { prevClass = false; i++ }
         members++
       }
       if (i >= n || members === 0) return null
@@ -179,21 +187,23 @@ export function safeRegex(src: string): RegExp | null {
     if (ch === '|') { mark(); i++; atom = false; continue }
     if (ch === '*' || ch === '+' || ch === '?') {
       if (!atom) return null
-      if (ch !== '?') unbounded++
+      quantifiers++
       mark(); i++; atom = false; continue
     }
     if (ch === '{') {
       const m = /^\{(\d{1,4})(,(\d{0,4}))?\}/.exec(src.slice(i))
       if (!m || !atom) return null
-      if (m[2] !== undefined && m[3] === '') unbounded++
-      else if (m[3] !== undefined && m[3] !== '' && Number(m[3]) < Number(m[1])) return null
+      if (Number(m[1]) > 64 || Number(m[3] ?? 0) > 64) return null
+      if (m[3] !== undefined && m[3] !== '' && Number(m[3]) < Number(m[1])) return null
+      // `{n}` repeats exactly and cannot be skipped; every other form can.
+      if (m[2] !== undefined) quantifiers++
       mark(); i += m[0].length; atom = false; continue
     }
     if (ch === '}') return null
     if (ch === '^' || ch === '$') { i++; atom = false; continue }
     i++; atom = true
   }
-  if (stack.length > 0 || unbounded > 2) return null
+  if (stack.length > 0 || quantifiers > 2) return null
   try { return new RegExp(src, 'i') } catch { return null }
 }
 
@@ -381,7 +391,7 @@ export function routeFor(doc: Doc, probe: Probe, cont: Continuation): RouteResul
     if (out.first === null) {
       if (rule.target.toUpperCase() === 'PASS') { out.passed.push(hit); continue }
       out.first = hit
-      out.final = !cont.mayContinue(rule.target)
+      out.final = !cont.mayContinue(rule.target, p.network === 'udp')
     } else {
       out.laterTotal++
       if (out.later.length < CAP) out.later.push(hit)

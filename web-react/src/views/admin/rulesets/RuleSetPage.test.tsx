@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useAuthStore } from '@/stores/auth'
 import { defaultRulesContent } from '@/utils/ruleset/defaultRules.fixture'
 import { api, installReads, list, mountRuleSets, toast, where } from './testHarness'
+
+// The draft's inspection is asked for a second after the draft settles (useDraftInspection), so waits are longer than the default.
+configure({ asyncUtilTimeout: 4000 })
 
 const content = '- DOMAIN,a.example,Proxy\n- DOMAIN-SUFFIX,b.example,Proxy\n# ads\n- DOMAIN-KEYWORD,adx,Block\n- IP-CIDR,10.0.0.0/8,Block,no-resolve\n'
 const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content }

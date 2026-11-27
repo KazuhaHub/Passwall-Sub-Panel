@@ -59,7 +59,8 @@ export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
   const exactDomain = new Map<string, number>()
   const suffix = node()
   const keywords: { k: string; idx: number }[] = []
-  const seen = new Map<string, number>()
+  // Every rule once, by what it matches: the first line, its target, and whether it is the last word where it matches.
+  const seen = new Map<string, { idx: number; target: string; last: boolean }>()
   const ranges: Ranges = { resolving: [new Map(), new Map()], literal: [new Map(), new Map()] }
 
   doc.lines.forEach((line, i) => {
@@ -82,7 +83,10 @@ export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
       if (by < 0 || idx < by) { by = idx; duplicate = dup } else if (idx === by && dup) duplicate = true
     }
 
-    consider(seen.get(key), true)
+    // The same rule again covers this one if the earlier is the last word, or if both lead to the same target (whatever that does
+    // next, it does it again): so a duplicate aimed at one group that may pass is still redundant, one aimed elsewhere is not.
+    const earlier = seen.get(key)
+    if (earlier && (earlier.last || earlier.target === rule.target)) consider(earlier.idx, true)
     if (type === 'DOMAIN') {
       consider(exactDomain.get(value))
       walk(suffix, value, n => consider(n.first))
@@ -111,9 +115,10 @@ export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
       out.push({ line: i, by, kind: covering.target === rule.target ? 'same' : 'other', duplicate })
       return
     }
+    const known = seen.get(key)
+    if (!known || (!known.last && !passes)) seen.set(key, { idx: i, target: rule.target, last: !passes })
     if (passes) return
     // Not covered: it can cover later rules.
-    seen.set(key, i)
     if (type === 'DOMAIN') exactDomain.set(value, exactDomain.get(value) ?? i)
     else if (type === 'DOMAIN-SUFFIX') {
       const n = labels(value).reduce((cur, label) => { let next = cur.kids.get(label); if (!next) { next = node(); cur.kids.set(label, next) } return next }, suffix)

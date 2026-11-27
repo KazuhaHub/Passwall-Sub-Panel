@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, installReads, list, mountRuleSets } from './testHarness'
 
 // The proxy-group rename, the "view by target" list and the phone tab menu (phase 1 leftovers of the rule-set editor).
+// The draft's inspection is asked for a second after the draft settles (useDraftInspection), so waits are longer than the default.
+configure({ asyncUtilTimeout: 4000 })
+
 const content = '- DOMAIN,a.example,Proxy\n- DOMAIN-SUFFIX,b.example,Proxy\n# ads\n- DOMAIN-KEYWORD,adx,Block\n- IP-CIDR,10.0.0.0/8,Block,no-resolve\n# again\n- DOMAIN,c.example,Proxy\n'
 const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: ['Proxy', 'Block'] as string[], content }
 const grp = (name: string) => ({ name, configured: false, options: { type: 'select' }, default_members: [{ kind: 'builtin', value: 'DIRECT' }], members: [{ kind: 'builtin', value: 'DIRECT' }] })

@@ -1,4 +1,4 @@
-import { normalizeTarget } from './target'
+import { goTrim, normalizeTarget } from './target'
 import { KNOWN_TYPES, RULE_OPTIONS, SIMPLE_TYPES } from './types'
 
 /**
@@ -91,7 +91,7 @@ export function fieldSpans(text: string): Span[] {
 }
 
 export function splitFields(text: string): string[] {
-  return fieldSpans(text).map(s => text.slice(s.start, s.end).trim())
+  return fieldSpans(text).map(s => goTrim(text.slice(s.start, s.end)))
 }
 
 /**
@@ -136,7 +136,7 @@ export function scanRule(raw: string): RuleScan | null {
   const bodyStart = m[1].length + 1 + m[2].length
   const bodyEnd = bodyStart + m[3].length
   const spans = fieldSpans(m[3]).map(s => ({ start: s.start + bodyStart, end: s.end + bodyStart }))
-  return { indent: m[1], bodyStart, bodyEnd, spans, fields: spans.map(s => raw.slice(s.start, s.end).trim()) }
+  return { indent: m[1], bodyStart, bodyEnd, spans, fields: spans.map(s => goTrim(raw.slice(s.start, s.end))) }
 }
 
 function ruleOf(scan: RuleScan): RuleInfo {

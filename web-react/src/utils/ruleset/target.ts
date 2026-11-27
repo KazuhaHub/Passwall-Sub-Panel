@@ -1,4 +1,13 @@
 /**
+ * strings.TrimSpace as Go does it: the Unicode White_Space set. That is NOT what JavaScript's trim() removes: Go also trims
+ * U+0085 and keeps U+FEFF (a byte order mark, not white space there), JavaScript the other way round.
+ */
+const GO_SPACE = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
+const GO_TRIM = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, 'g')
+export const goTrim = (s: string): string => s.replace(GO_TRIM, '')
+export const isGoSpace = (ch: string): boolean => new RegExp(`^[${GO_SPACE}]$`).test(ch)
+
+/**
  * What the backend reads a part of a rule line as: `normalizeRulePart` (internal/service/render/proxy_groups.go), kept in
  * step on purpose. The part is trimmed; if it starts and ends with the same quote it is unwrapped: a `"` part as one CSV
  * field (a stray quote inside, or more than one field, is an error there and leaves the part as it was), a `'` part with
@@ -7,7 +16,7 @@
  * `"Proxy"` are one group.
  */
 export function normalizeTarget(raw: string): string {
-  const s = raw.trim()
+  const s = goTrim(raw)
   if (s.length >= 2 && s[0] === s[s.length - 1]) {
     const inner = s.slice(1, -1)
     if (s[0] === '"') {

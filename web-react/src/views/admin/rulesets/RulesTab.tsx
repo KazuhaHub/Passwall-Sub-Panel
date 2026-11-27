@@ -21,7 +21,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
-import type { Continuation } from '@/utils/ruleset/continuation'
+import { continuation, type Continuation } from '@/utils/ruleset/continuation'
 import type { ProbeInput } from '@/utils/ruleset/match'
 import {
   deleteBlock, deleteLines, editRule, insertRules, mergeBlocks, mergePreview, moveBlock, moveLinesToBlock, moveLinesToNewBlock, newBlock, replaceRange,
@@ -82,7 +82,7 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
  * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groupsKnown, groupsUnavailable }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groups }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -103,10 +103,13 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   ariaLabel?: string
   /** Which targets end the matching (see utils/ruleset/continuation): from the backend's reading of the draft's groups. */
   cont: Continuation
-  /** `cont` rests on the backend's members for this very draft; until it does, no rule is said to cover another. */
-  groupsKnown: boolean
-  /** The members cannot be read at all (an operator), as opposed to not being in yet. */
-  groupsUnavailable: boolean
+  /**
+   * Where the backend's members for this draft stand: `known` (they answer for this very draft), `loading` (a request is
+   * pending or running), `failed` (the last one failed), `unavailable` (they cannot be read at all: an operator). `needed`
+   * is called with whether anything here is on screen that uses them (the routing test, the problems panel), so the page asks
+   * only then; `retry` asks again after a failure.
+   */
+  groups: { known: boolean; loading: boolean; failed: boolean; unavailable: boolean; retry: () => void; needed: (need: boolean) => void }
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
@@ -143,7 +146,15 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   useEffect(() => {
     if (showTarget) { setTargetFilter(showTarget.name); setTargetMode('merged'); setOpened(false) }
   }, [showTarget])
-  const findings = useShadowFindings(doc, groupsKnown ? cont : null)
+  const groupsKnown = groups.known
+  // The findings are worked out only while the panel is open. With the members they are all of them; without (failed, or an
+  // operator) those that do not depend on them: an identical rule, a rule covered by a DIRECT or REJECT rule.
+  const partialCont = useMemo(() => continuation(null, rematchNames), [rematchNames])
+  const findings = useShadowFindings(doc, issuesOpen && groupsKnown ? cont : null)
+  const partialFindings = useShadowFindings(doc, issuesOpen && !groupsKnown ? partialCont : null)
+  const needs = (testerOpen && !subRule) || issuesOpen
+  const reportNeed = groups.needed
+  useEffect(() => { reportNeed(needs); return () => reportNeed(false) }, [needs, reportNeed])
   const choices = useMemo(() => {
     const own = targetChoices(blocks, order, rematchNames)
     if (!subRule) return own
@@ -485,7 +496,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         <span className="ml-auto flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setIssuesOpen(true)}>
             <IconWarning />
-            {findings !== null && findings.length > 0 ? t('admin:rules.issues.button', { count: findings.length.toLocaleString() }) : t('admin:rules.issues.title')}
+            {t('admin:rules.issues.title')}
           </Button>
           {!subRule && <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={() => setTesterOpen(o => !o)}>{t('admin:rules.tester.title')}</Button>}
         </span>
@@ -561,7 +572,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
         </DetailDialog>
       )}
-      {issuesOpen && <IssuesPanel doc={doc} findings={findings} textOnly={textOnly} needsGroups={groupsUnavailable && !groupsKnown} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
+      {issuesOpen && <IssuesPanel doc={doc} textOnly={textOnly}
+        status={groupsKnown ? 'ready' : groups.unavailable ? 'unavailable' : groups.failed ? 'failed' : 'computing'}
+        findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }
