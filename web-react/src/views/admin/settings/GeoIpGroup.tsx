@@ -5,8 +5,7 @@ import { pushSnack } from '@/components/feedback/toasts'
 import { Field } from '@/components/form/Field'
 import { SecretField } from '@/components/form/SecretField'
 import { useAdminT } from '../useAdminT'
-import type { KeysOf } from './model'
-import { settingId } from './model'
+import { settingId, type SubKeys } from './model'
 import { Group, Hint, NumField, Pair, SelectRow, SwitchField, TextRow, useSaveGuard } from './parts'
 import type { UiSection } from './useUiSection'
 
@@ -17,7 +16,7 @@ type Source = NonNullable<UISettings['geo_ip_update_source']>
  * The database list and the update progress are not part of the settings record; they come from the status
  * endpoint, which this polls while an update downloads.
  */
-export function GeoIpGroup({ form }: { form: UiSection<KeysOf<'general'>> }) {
+export function GeoIpGroup({ form }: { form: UiSection<SubKeys<'general', 'network'>> }) {
   const t = useAdminT()
   const { value: v, patch, saved } = form
   const [status, setStatus] = useState<GeoIPStatus | null>(null)

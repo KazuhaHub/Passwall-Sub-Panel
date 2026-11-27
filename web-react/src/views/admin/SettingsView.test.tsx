@@ -23,10 +23,12 @@ const saveBar = () => screen.queryByRole('region', { name: 'You have unsaved cha
 const saveButton = () => within(screen.getByRole('region', { name: 'You have unsaved changes' })).getByRole('button', { name: 'Save' })
 const save = () => fireEvent.click(saveButton())
 
-async function mountSettings(settings: Partial<UISettings> = {}, route = '/admin/settings') {
+// The lifecycle policy lives on General > Data retention.
+const RETENTION = '/admin/settings?tab=general&sub=retention'
+async function mountSettings(settings: Partial<UISettings> = {}, route = RETENTION, ready: () => Promise<unknown> = () => screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })) {
   reads({}, settings)
   const view = mountAdmin(<SettingsView />, route)
-  await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
+  await ready()
   return view
 }
 
@@ -69,7 +71,7 @@ describe('native-task lifecycle settings', () => {
   it('uses defaults only for keys omitted by an older server, and keeps an explicit zero as it is, flagged', async () => {
     const stored: Partial<UISettings> = { node_task_offline_reconcile_days: 0 }
     reads({ '/admin/settings/ui': (() => { const s = uiSettings(stored) as Partial<UISettings>; delete s.node_task_backup_restore_days; delete s.node_task_result_retention_days; return s })() })
-    mountAdmin(<SettingsView />, '/admin/settings')
+    mountAdmin(<SettingsView />, RETENTION)
     await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
 
     expect(input('node_task_offline_reconcile_days').value).toBe('0')
@@ -77,8 +79,8 @@ describe('native-task lifecycle settings', () => {
     expect(input('node_task_result_retention_days').value).toBe('90')
     // The zero is shown, not replaced, and it is what the form reports as wrong.
     expect(input('node_task_offline_reconcile_days').getAttribute('aria-invalid')).toBe('true')
-    // Any other edit then cannot be saved until it is fixed.
-    fireEvent.change(box('Reconcile interval'), { target: { value: '9' } })
+    // Any other edit in this form then cannot be saved until it is fixed (another sub-tab's form is not held up by it).
+    fireEvent.change(box('Audit log retention'), { target: { value: '9' } })
     save()
     expect(api.put).not.toHaveBeenCalled()
   })
@@ -134,7 +136,7 @@ describe('native-task lifecycle settings', () => {
 // discarded, so the page keeps none, only the way there.
 describe('the risk policy lives in the risk center', () => {
   it('shows no detector section in General, only a pointer to the policy tab', async () => {
-    await mountSettings()
+    await mountSettings({}, '/admin/settings?tab=general&sub=network', () => screen.findByText('Open policy'))
 
     for (const section of ['Concurrent-location detection', 'Risk signals', 'Risk center']) {
       expect(screen.queryByText(section), section).toBeNull()
@@ -150,7 +152,7 @@ describe('the risk policy lives in the risk center', () => {
         overridable: ['notify.expire_before_days', 'security.emergency_access_enabled', 'geo_anomaly.max_places', 'geo_anomaly.ban_enabled', 'risk.min_days', 'risk.usage_ratio'],
       },
     })
-    mountAdmin(<SettingsView />, '/admin/settings')
+    mountAdmin(<SettingsView />, '/admin/settings?tab=general&sub=reminders')
     const audience = await screen.findByRole('combobox', { name: 'Audience' })
     await screen.findByRole('option', { name: group.name })
     fireEvent.change(audience, { target: { value: String(group.id) } })
@@ -168,7 +170,7 @@ describe('the audience rail', () => {
 
   it('lists All users first, then each group with a quiet count of its overrides, and the selected entry is marked', async () => {
     reads(scopeRead)
-    mountAdmin(<SettingsView />, '/admin/settings')
+    mountAdmin(<SettingsView />, '/admin/settings?tab=general&sub=reminders')
     const rail = (await screen.findByRole('heading', { name: 'Audience' })).closest('section')!
     const entry = await within(rail).findByRole('button', { name: new RegExp(`^${group.name}`) })
     await waitFor(() => expect(entry.textContent).toContain('1'))
@@ -212,7 +214,7 @@ describe('read failure', () => {
 
 describe('Cloudflare auto-fetch setting', () => {
   it('reads as on when the server does not say, and sends the switch the admin sets', async () => {
-    await mountSettings()
+    await mountSettings({}, '/admin/settings?tab=general&sub=network', () => screen.findByRole('switch', { name: 'Fetch Cloudflare address ranges automatically' }))
     const toggle = screen.getByRole('switch', { name: 'Fetch Cloudflare address ranges automatically' })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     echoPut()
@@ -225,14 +227,14 @@ describe('Cloudflare auto-fetch setting', () => {
 
 describe('the page frame', () => {
   it('keeps the section in ?tab= and the old values still open their sections', async () => {
-    for (const [tab, heading] of [['security', 'Account lockout'], ['brand', 'Site text'], ['subscription', 'Abuse protection'], ['portal', 'Quick links']] as const) {
+    for (const [tab, heading] of [['security', 'Sessions'], ['brand', 'Site text'], ['subscription', 'Basic'], ['portal', 'Add link']] as const) {
       const { unmount } = await (async () => { reads(); const v = mountAdmin(<SettingsView />, `/admin/settings?tab=${tab}`); await screen.findByText(heading); return v })()
       unmount()
     }
   })
 
   it('shows the sections in the order of the navigation', async () => {
-    reads(); mountAdmin(<SettingsView />, '/admin/settings')
+    reads(); mountAdmin(<SettingsView />, RETENTION)
     await screen.findByRole('textbox', { name: labelOf('node_task_offline_reconcile_days') })
     const names = within(screen.getByRole('navigation', { name: 'Settings sections' })).getAllByRole('button').map(b => b.textContent)
     expect(names).toEqual(['General', 'Login & Security', 'Brand', 'Subscription', 'User portal', 'Mail', 'SSO', 'Privacy and terms'])
@@ -246,6 +248,6 @@ describe('the page frame', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Site title' }), { target: { value: 'New' } })
     void router.navigate('/elsewhere')
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog.textContent).toContain('General, Brand')
+    expect(dialog.textContent).toContain('General · Data retention, Brand · Name and appearance')
   })
 })

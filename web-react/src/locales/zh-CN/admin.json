@@ -145,7 +145,40 @@
       "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
       "overrides_count_other": "{{count}} 项覆盖",
       "filter": "筛选分组",
-      "global_only": "这些设置对所有用户生效，不能按分组设置。"
+      "global_only": "这些设置对所有用户生效，不能按分组设置。",
+      "mixed_hint": "本页其余设置对所有用户生效，不能按分组设置；要修改请切换到「所有用户」。"
+    },
+    "sub": {
+      "general": {
+        "runtime": "运行",
+        "retention": "数据保留",
+        "reminders": "提醒与紧急访问",
+        "network": "IP 与地区",
+        "probe": "链路探测"
+      },
+      "security": {
+        "signin": "登录与会话",
+        "account": "注册与找回",
+        "twofa": "两步验证",
+        "protection": "防护与限速"
+      },
+      "brand": {
+        "identity": "名称与外观",
+        "addresses": "地址与域名"
+      },
+      "subscription": {
+        "link": "链接与日志",
+        "content": "订阅内容",
+        "protection": "异常保护"
+      },
+      "portal": {
+        "links": "快捷链接",
+        "announcement": "全站公告"
+      },
+      "mail": {
+        "smtp": "发信服务",
+        "templates": "邮件模板"
+      }
     },
     "feature_pending": "该 tab 正在迁移到 React + MUI（下个版本）。当前请使用 Vue 版本管理这些字段。",
     "general": {
@@ -270,7 +303,8 @@
       "section_lockout": "失败锁定",
       "section_recovery": "找回密码",
       "section_registration": "自助注册",
-      "section_sessions": "会话与速率限制",
+      "section_sessions": "会话",
+      "section_rate_limits": "请求速率限制",
       "jwt_issuer_hint": "修改后所有已登录的会话立即失效，包括你自己的。",
       "jwt_ttl_hint": "新的有效期只对此后签发的令牌生效。"
     },
@@ -641,6 +675,7 @@
     },
     "subscription": {
       "section_basic": "基本",
+      "section_content": "订阅内容",
       "section_protection": "异常保护",
       "section_clients": "客户端",
       "section_detection": "客户端检测与过滤",
@@ -834,6 +869,7 @@
     "unsaved_short": "未保存",
     "nav_label": "设置分类",
     "section_label": "设置分类",
+    "sub_label": "本类设置分组",
     "section_separator": "、",
     "dirty_sections": "以下分类有未保存的修改：{{sections}}。仍要离开吗？",
     "search": {

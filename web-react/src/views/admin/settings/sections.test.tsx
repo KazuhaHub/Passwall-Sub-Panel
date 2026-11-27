@@ -22,34 +22,43 @@ const sent = () => api.put.mock.calls[0][1]
 const confirmDialog = () => screen.findByRole('alertdialog')
 
 describe('General', () => {
-  it('sends the whole record with only the edited key changed, and a typed token', async () => {
+  it('sends the whole record with only the edited key changed', async () => {
     reads({}, { geo_ip_update_source: 'maxmind' })
-    await open('general', 'Runtime tunables')
+    await open('general&sub=runtime', 'Runtime tunables')
     echoPut()
     type('Traffic poll interval', '7')
-    fireEvent.change(document.getElementById('setting-geo_ip_update_token')!, { target: { value: 'license-key' } })
     save()
     await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     expect(api.put.mock.calls[0][0]).toBe('/admin/settings/ui')
-    expect(sent()).toEqual({ ...uiSettings({ geo_ip_update_source: 'maxmind' }), cron_traffic_pull_minutes: 7, geo_ip_update_token: 'license-key' })
+    expect(sent()).toEqual({ ...uiSettings({ geo_ip_update_source: 'maxmind' }), cron_traffic_pull_minutes: 7 })
   })
 
-  it('stops every save path at a number the form refuses, the GeoIP update included', async () => {
+  it('sends a typed GeoIP token from its own sub-tab', async () => {
     reads({}, { geo_ip_update_source: 'maxmind' })
-    await open('general', 'Runtime tunables')
-    type('Native-node sync heartbeat', '4000')
+    await open('general&sub=network', 'Source guard')
+    echoPut()
+    fireEvent.change(document.getElementById('setting-geo_ip_update_token')!, { target: { value: 'license-key' } })
+    save()
+    await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
+    expect(sent()).toEqual({ ...uiSettings({ geo_ip_update_source: 'maxmind' }), geo_ip_update_token: 'license-key' })
+  })
+
+  it('stops every save path of a form at a number it refuses, the GeoIP update included', async () => {
+    reads({}, { geo_ip_update_source: 'maxmind', geo_ip_auto_update: true })
+    await open('general&sub=network', 'Source guard')
+    type('Auto-update interval', '0')
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     await new Promise(r => setTimeout(r, 50))
     expect(api.put).not.toHaveBeenCalled()
     expect(api.post).not.toHaveBeenCalled()
-    expect(document.activeElement?.id).toBe('setting-node_poll_seconds')
+    expect(document.activeElement?.id).toBe('setting-geo_ip_update_interval_hours')
   })
 
   it('leaves a secret out of the request while nothing is typed in it', async () => {
     reads({}, { geo_ip_update_source: 'maxmind', has_geo_ip_update_token: true })
-    await open('general', 'Runtime tunables')
+    await open('general&sub=network', 'Source guard')
     echoPut()
-    type('Traffic poll interval', '7')
+    fireEvent.click(screen.getByRole('switch', { name: 'Fetch Cloudflare address ranges automatically' }))
     save()
     await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     expect(sent()).not.toHaveProperty('geo_ip_update_token')
@@ -59,7 +68,7 @@ describe('General', () => {
 describe('Login and security', () => {
   it('sends the one edited key, and a typed captcha secret only when typed', async () => {
     reads({}, { captcha_enabled: true, captcha_provider: 'turnstile', has_captcha_secret_key: true })
-    await open('security', 'Account lockout')
+    await open('security&sub=protection', 'Account lockout')
     echoPut()
     type('Login rate limit per IP', '20')
     save()
@@ -69,7 +78,7 @@ describe('Login and security', () => {
 
   it('asks before forcing SSO, says SSO is off, and writes nothing when the answer is no', async () => {
     reads()
-    await open('security', 'Account lockout')
+    await open('security&sub=signin', 'Sessions')
     fireEvent.change(screen.getByRole('combobox', { name: 'Login mode' }), { target: { value: 'sso_redirect' } })
     save()
     const dialog = await confirmDialog()
@@ -82,7 +91,7 @@ describe('Login and security', () => {
 
   it('writes after the confirmation, and a change of the JWT issuer says it ends every session', async () => {
     reads()
-    await open('security', 'Account lockout')
+    await open('security&sub=signin', 'Sessions')
     echoPut()
     type('JWT issuer', 'other')
     save()
@@ -95,7 +104,7 @@ describe('Login and security', () => {
 
   it('asks for nothing when the change is toward the safe side', async () => {
     reads({}, { require_2fa_for_staff: true, totp_enabled: true, lockout_enabled: true })
-    await open('security', 'Account lockout')
+    await open('security&sub=twofa', 'Two-factor authentication (2FA)')
     echoPut()
     toggle('Require two-factor for all admins/operators')
     save()
@@ -118,7 +127,7 @@ describe('Brand', () => {
 
   it('does not save a base URL that is not a URL', async () => {
     reads()
-    await open('brand', 'Site text')
+    await open('brand&sub=addresses', 'Addresses')
     type(/Subscription base URL/, 'not a url')
     save()
     expect(api.put).not.toHaveBeenCalled()
@@ -127,7 +136,7 @@ describe('Brand', () => {
 
   it('says where the page goes before changing the panel path', async () => {
     reads()
-    await open('brand', 'Site text')
+    await open('brand&sub=addresses', 'Addresses')
     type('Panel path prefix', '/panel')
     save()
     const dialog = await confirmDialog()
@@ -139,10 +148,14 @@ describe('Brand', () => {
 
   it('names the other sections whose unsaved changes the reload would drop, and does not ask for a spelling of the same path', async () => {
     reads({}, { panel_path: '/panel' })
-    await open('general', 'Runtime tunables')
+    await open('general&sub=runtime', 'Runtime tunables')
     type('Traffic poll interval', '7')
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: /^Brand/ }))
     await screen.findByText('Site text')
+    // An unsaved edit on this section's other sub-tab is dropped by the reload as well.
+    type('Site title', 'Unsaved')
+    fireEvent.click(screen.getByRole('tab', { name: /Addresses and domains/ }))
+    await screen.findByText('Addresses')
     echoPut()
     type('Panel path prefix', ' /panel ')
     save()
@@ -152,7 +165,7 @@ describe('Brand', () => {
     type('Panel path prefix', '/other')
     save()
     const dialog = await confirmDialog()
-    expect(dialog.textContent).toContain('unsaved changes in these sections are lost: General')
+    expect(dialog.textContent).toContain('unsaved changes in these sections are lost: General · Runtime, Brand · Name and appearance')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
   })
 })
@@ -160,7 +173,7 @@ describe('Brand', () => {
 describe('Subscription', () => {
   it('asks before changing the path every link carries, then sends it without the leading slash', async () => {
     reads()
-    await open('subscription', 'Abuse protection')
+    await open('subscription', 'Basic')
     echoPut()
     type(/Subscription URL path segment/, '/feed')
     save()
@@ -175,7 +188,7 @@ describe('Subscription', () => {
 describe('User portal', () => {
   it('sends a new quick link, and holds back an enabled one with no label or URL', async () => {
     reads()
-    await open('portal', 'Quick links')
+    await open('portal', 'Add link')
     echoPut()
     fireEvent.click(screen.getByRole('button', { name: 'Add link' }))
     save()
@@ -210,14 +223,21 @@ describe('Mail', () => {
 
   it('saves one template on its own and tells the result of a test send in words next to it', async () => {
     reads({ '/admin/settings/mail': { settings: mail, templates: [{ kind: 'expire_before', subject: 'S', body: 'B', enabled: true }] } })
-    await open('mail', 'Email templates')
+    await open('mail&sub=templates', 'Email templates')
     echoPut()
     type('Subject', 'New subject')
     fireEvent.click(screen.getByRole('button', { name: 'Save template' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledOnce())
     expect(api.put.mock.calls[0][0]).toBe('/admin/settings/mail/templates/expire_before')
     expect(sent()).toEqual({ kind: 'expire_before', subject: 'New subject', body: 'B', enabled: true })
+  })
+})
 
+describe('Mail test send', () => {
+  const mail = { enabled: true, smtp_host: 'smtp.example.test', smtp_port: 587, smtp_username: 'u', has_smtp_password: true, from_email: 'a@example.test', from_name: 'A', encryption: 'starttls' }
+  it('tells the result of a test send in words next to it', async () => {
+    reads({ '/admin/settings/mail': { settings: mail, templates: [] } })
+    await open('mail', 'SMTP server')
     api.post.mockResolvedValue({ data: { sent: true } })
     type('Test recipient', 'me@example.test')
     fireEvent.click(screen.getByRole('button', { name: 'Send test' }))
@@ -281,13 +301,36 @@ describe('Sections save on their own', () => {
 describe('Search', () => {
   it('finds a setting by its label or its key and takes the admin to it', async () => {
     reads()
-    mountAdmin(<SettingsView />, '/admin/settings')
+    const { router } = mountAdmin(<SettingsView />, '/admin/settings')
     await screen.findByText('Runtime tunables')
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search settings' }), { target: { value: 'lockout_threshold' } })
-    fireEvent.click(await screen.findByRole('button', { name: /Lockout threshold/ }))
+    // The result says where it lives: the section and the sub-tab.
+    const result = await screen.findByRole('button', { name: /Lockout threshold/ })
+    expect(result.textContent).toContain('Login & Security · Protection and rate limits')
+    fireEvent.click(result)
     await screen.findByText('Account lockout')
+    expect(router.state.location.search).toBe('?tab=security&sub=protection')
     // The threshold sits behind the lockout switch, which is off: the jump lands on that switch.
     await waitFor(() => expect(document.activeElement?.getAttribute('role')).toBe('switch'))
     expect(document.activeElement?.closest('[data-slot="field"]')?.textContent).toContain('Enable failure lockout')
+  })
+})
+
+describe('Search across sub-tabs', () => {
+  it('leaves the sub-tab out of the address for a setting on the first one, and opens a later one for the others', async () => {
+    reads()
+    const { router } = mountAdmin(<SettingsView />, '/admin/settings?tab=brand&sub=addresses')
+    await screen.findByText('Addresses')
+    const search = screen.getByRole('searchbox', { name: 'Search settings' })
+    fireEvent.change(search, { target: { value: 'timezone' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Panel timezone/ }))
+    await waitFor(() => expect(router.state.location.search).toBe(''))
+    await waitFor(() => expect(document.activeElement?.id).toBe('setting-timezone'))
+    fireEvent.change(search, { target: { value: 'tutorial' } })
+    fireEvent.click(await screen.findByRole('button', { name: /tutorial/i }))
+    await waitFor(() => expect(router.state.location.search).toBe('?tab=subscription'))
+    fireEvent.change(search, { target: { value: 'sub_block_auto_disable_count' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Consecutive failures/ }))
+    await waitFor(() => expect(router.state.location.search).toBe('?tab=subscription&sub=protection'))
   })
 })

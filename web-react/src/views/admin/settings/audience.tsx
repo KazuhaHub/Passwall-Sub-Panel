@@ -30,7 +30,7 @@ interface AudienceValue {
   /** Switch audience; asks first when the group editor on screen holds unsaved overrides. Resolves to whether it switched. */
   choose: (next: number) => Promise<boolean>
   /** The group editor reports whether it holds unsaved overrides. */
-  setEditorDirty: (dirty: boolean) => void
+  setEditorDirty: (editor: string, dirty: boolean) => void
 }
 
 const AudienceContext = createContext<AudienceValue>({ groupId: 0, groups: [], groupsLoaded: false, choose: async () => false, setEditorDirty: () => {} })
@@ -48,12 +48,13 @@ export function AudienceProvider({ children }: { children: ReactNode }) {
   const wanted = Number(params.get(AUDIENCE_PARAM)) || 0
   // A group that no longer exists (or that has not loaded yet) reads as the global audience, never as an empty editor.
   const groupId = wanted > 0 && list.some(g => g.id === wanted) ? wanted : 0
-  const editorDirty = useRef(false)
-  const setEditorDirty = useCallback((dirty: boolean) => { editorDirty.current = dirty }, [])
+  // Every tab that can override holds its own editor and keeps it built while hidden, so this is the set of those with edits.
+  const editorDirty = useRef<Set<string>>(new Set())
+  const setEditorDirty = useCallback((editor: string, dirty: boolean) => { if (dirty) editorDirty.current.add(editor); else editorDirty.current.delete(editor) }, [])
   const choose = useCallback(async (next: number) => {
     if (next === groupId) return false
     // Leaving a group's editor drops what was typed in it: ask first, the same as leaving the page.
-    if (groupId !== 0 && editorDirty.current && !(await confirm({ ...discardChangesConfirm(t), destructive: true, initialFocus: 'cancel' }))) return false
+    if (groupId !== 0 && editorDirty.current.size > 0 && !(await confirm({ ...discardChangesConfirm(t), destructive: true, initialFocus: 'cancel' }))) return false
     setParams(prev => {
       const out = new URLSearchParams(prev)
       if (next === 0) out.delete(AUDIENCE_PARAM); else out.set(AUDIENCE_PARAM, String(next))

@@ -1,6 +1,6 @@
 import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../useAdminT'
-import type { KeysOf } from './model'
+import type { SubKeys } from './model'
 import { Group, Nested, NumField, SwitchField } from './parts'
 import type { UiSection } from './useUiSection'
 
@@ -9,7 +9,7 @@ import type { UiSection } from './useUiSection'
  * methods under it, and "require it for staff" is the enrollment policy, kept apart from the methods. The email code
  * and the policy only make sense once a real factor (TOTP or a passkey) can be enrolled, so they appear then.
  */
-export function TwoFactorGroup({ form }: { form: UiSection<KeysOf<'security'>> }) {
+export function TwoFactorGroup({ form }: { form: UiSection<SubKeys<'security', 'twofa'>> }) {
   const t = useAdminT()
   const { value: v, patch } = form
   const factor = v.totp_enabled || v.passkey_enabled

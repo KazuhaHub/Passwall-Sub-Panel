@@ -1,4 +1,5 @@
 import { settingId, type SectionKey } from './model'
+import { subOf } from './tree'
 
 export interface SearchEntry {
   section: SectionKey
@@ -10,19 +11,19 @@ export interface SearchEntry {
   id: string
   /** The control that shows this one (a switch it depends on), for when this one is not on the page. */
   via?: string
-  /** SSO only: which provider's tab. */
-  sub?: 'saml' | 'oidc'
+  /** The sub-tab that holds it (from the tree, tree.ts: it is not written here, so the two cannot disagree). */
+  sub: string
 }
 
-type Opts = { id?: string; via?: string; sub?: 'saml' | 'oidc' }
+type Opts = { id?: string; via?: string }
 const e = (section: SectionKey, key: string, label: string, o: Opts = {}): SearchEntry =>
-  ({ section, key, label, id: o.id ?? settingId(key), via: o.via, sub: o.sub })
+  ({ section, key, label, id: o.id ?? settingId(key), via: o.via, sub: subOf(section, key) })
 const g = (key: string, label = `settings.general.${key}`, o?: Opts) => e('general', key, label, o)
 const s = (key: string, label = `settings.general.${key}`, o?: Opts) => e('security', key, label, o)
 const b = (key: string, o?: Opts) => e('brand', key, `settings.brand.${key}`, o)
 const u = (key: string, o?: Opts) => e('subscription', key, `settings.subscription.${key}`, o)
 const m = (key: string, label: string, id = settingId(`mail_${key}`)) => e('mail', key, label, { id })
-const sso = (sub: 'saml' | 'oidc', key: string, label: string, o: Opts = {}) => e('sso', `${sub}.${key}`, label, { ...o, sub, id: o.id ?? `setting-${sub}_${key}` })
+const sso = (sub: 'saml' | 'oidc', key: string, label: string, o: Opts = {}) => e('sso', `${sub}.${key}`, label, { ...o, id: o.id ?? `setting-${sub}_${key}` })
 
 /**
  * Every setting the page edits, for the search box: by the label it shows or the key it is stored under. It lists
@@ -91,8 +92,8 @@ export const SEARCH_INDEX: readonly SearchEntry[] = [
   e('legal', 'legal_enabled', 'settings.legal.enabled', { id: 'settings-section-legal' }), e('legal', 'legal_disclose_usage', 'settings.legal.disclose_usage', { id: 'settings-section-legal' }),
 ]
 
-/** The entries that match what was typed: the label as shown, the key, or the section's name, all case-insensitively. Best matches first. */
-export function searchSettings(query: string, label: (e: SearchEntry) => string, sectionName: (s: SectionKey) => string, limit = 8): SearchEntry[] {
+/** The entries that match what was typed: the label as shown, the key, or where it lives (section and sub-tab), all case-insensitively. Best matches first. */
+export function searchSettings(query: string, label: (e: SearchEntry) => string, whereIs: (e: SearchEntry) => string, limit = 8): SearchEntry[] {
   const q = query.trim().toLowerCase()
   if (!q) return []
   const scored: { entry: SearchEntry; score: number }[] = []
@@ -103,7 +104,7 @@ export function searchSettings(query: string, label: (e: SearchEntry) => string,
     if (text.startsWith(q) || key === q) score = 3
     else if (text.includes(q)) score = 2
     else if (key.includes(q)) score = 1
-    else if (sectionName(entry.section).toLowerCase().includes(q)) score = 0.5
+    else if (whereIs(entry).toLowerCase().includes(q)) score = 0.5
     if (score > 0) scored.push({ entry, score })
   }
   return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(x => x.entry)
