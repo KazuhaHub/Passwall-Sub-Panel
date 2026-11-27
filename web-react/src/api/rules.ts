@@ -13,6 +13,11 @@ export interface RuleSet {
   mihomo_sub_rules?: MihomoSubRule[]
   mihomo_rematch_outbounds?: MihomoRematchOutbound[]
   content: string
+  /**
+   * What the stored file hashed to when this copy was read (read-only: responses only). A save carries it back as
+   * `base_revision` so the server can refuse to overwrite a newer one.
+   */
+  revision?: string
 }
 
 export interface MihomoSubRule {
@@ -115,19 +120,63 @@ export async function getRuleSet(slug: string) {
   return data
 }
 
-export async function saveRuleSet(rs: RuleSet) {
-  const { data } = await client.put<RuleSet>(`/admin/rules/${rs.slug}`, rs)
+/**
+ * The body limit of the rule-set endpoints (router.go ruleSetBodyLimit): 8 MiB of JSON for the PUT and the two draft
+ * compilers. The editor measures the bytes it is about to send against this before it sends anything.
+ */
+export const RULESET_BODY_LIMIT = 8 << 20
+
+// The editor words a 413 and a stale save itself; every other failure of these requests still gets the usual toast.
+const OWN_FAILURES = { _skipErrorToastFor: [413, 'ruleset_stale'] }
+
+/** Why a rule-set request was refused, for the two refusals the editor words itself. */
+export type RuleSetFailure =
+  | { kind: 'too_large'; limitBytes?: number }
+  | { kind: 'stale'; current?: RuleSet }
+  | { kind: 'other' }
+
+/**
+ * Reads a failed rule-set request. ANY 413 is "too large": the panel's own is JSON with `limit_bytes`, but a reverse
+ * proxy in front answers with an HTML page (nginx) and no limit, which the caller then says it does not know.
+ * `stale` is the 409 `ruleset_stale`, which carries the server's current version when it could still be read.
+ */
+export function ruleSetFailureOf(err: unknown): RuleSetFailure {
+  const res = (err as { response?: { status?: number; data?: unknown } } | null)?.response
+  if (res?.status === 413) {
+    const limit = (res.data as { limit_bytes?: unknown } | null | undefined)?.limit_bytes
+    return { kind: 'too_large', limitBytes: typeof limit === 'number' && limit > 0 ? limit : undefined }
+  }
+  const data = res?.data as { code?: unknown; current?: unknown } | null | undefined
+  if (res?.status === 409 && data?.code === 'ruleset_stale') {
+    const cur = data.current
+    return { kind: 'stale', current: cur && typeof cur === 'object' ? cur as RuleSet : undefined }
+  }
+  return { kind: 'other' }
+}
+
+/**
+ * `baseRevision` is the revision the draft started from; the server answers 409 when the stored file has moved on since.
+ * It is left out for a rule set that does not exist yet. The read-only `revision` never goes back in the body.
+ */
+export function ruleSetRequestBody(rs: RuleSet, baseRevision?: string) {
+  const { revision: _revision, ...rest } = rs
+  return baseRevision ? { ...rest, base_revision: baseRevision } : rest
+}
+
+export async function saveRuleSet(rs: RuleSet, baseRevision?: string) {
+  const { data } = await client.put<RuleSet>(`/admin/rules/${rs.slug}`, ruleSetRequestBody(rs, baseRevision), OWN_FAILURES)
   return data
 }
 
+/** `claimTooLarge`: the caller words a 413 itself (the toast stays for every other failure). */
 export async function inspectProxyGroups(req: {
   content: string
   proxy_group_members: Record<string, ProxyGroupMember[]>
   proxy_group_options: Record<string, ProxyGroupOptions>
   mihomo_sub_rules?: MihomoSubRule[]
   mihomo_rematch_outbounds?: MihomoRematchOutbound[]
-}, signal?: AbortSignal) {
-  const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, { signal })
+}, signal?: AbortSignal, claimTooLarge = false) {
+  const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, claimTooLarge ? { signal, _skipErrorToastFor: [413] } : { signal })
   return data
 }
 
