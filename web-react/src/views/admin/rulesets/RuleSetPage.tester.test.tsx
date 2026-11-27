@@ -8,7 +8,7 @@ import { api, installReads, list, mountRuleSets } from './testHarness'
 configure({ asyncUtilTimeout: 4000 })
 
 const content = '- GEOSITE,cn,CN\n- DOMAIN-SUFFIX,example.com,Proxy\n# ads\n- DOMAIN,www.example.com,Block\n- DOMAIN-KEYWORD,example,Proxy\n- DOMAIN-SUFFIX,www.example.com,Proxy\n- IP-CIDR,10.0.0.0/8,Direct,no-resolve\n- MATCH,Final\n'
-const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content }
+const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content, revision: 'r1' }
 const PAGE = '/admin/rules/custom'
 const inspection = { groups: [], builtins: [], nodes: [], lines: [], regions: [], tags: [], issues: [] }
 

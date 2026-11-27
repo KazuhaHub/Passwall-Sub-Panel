@@ -129,6 +129,19 @@ describe('shared API client interceptors', () => {
     expect(mocks.pushSnack).not.toHaveBeenCalled()
   })
 
+  it('keeps the toast for a failure the caller did not claim, and skips it for a status or code it did', async () => {
+    // Used by the rule-set editor, which words 413 and a stale save itself and leaves every other failure to the toast.
+    const claimed = [413, 'ruleset_stale']
+    const fail = (status: number, data: unknown, own: boolean) => mocks.state.responseError?.({ response: { status, data }, message: 'x', config: own ? { _skipErrorToastFor: claimed } : {} })
+    await expect(fail(413, '<html>413</html>', true)).rejects.toBeTruthy()
+    await expect(fail(409, { code: 'ruleset_stale' }, true)).rejects.toBeTruthy()
+    expect(mocks.pushSnack).not.toHaveBeenCalled()
+    await expect(fail(400, { error: 'bad' }, true)).rejects.toBeTruthy()
+    expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
+    await expect(fail(409, { code: 'something_else', error: 'other conflict' }, true)).rejects.toBeTruthy()
+    expect(mocks.pushSnack).toHaveBeenCalledTimes(2)
+  })
+
   it('single-flights refresh and replays concurrent 401 requests', async () => {
     localStorage.setItem('psp_refresh', 'old-refresh')
     mocks.http.post.mockResolvedValue({

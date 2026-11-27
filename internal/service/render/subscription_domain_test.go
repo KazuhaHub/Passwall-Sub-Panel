@@ -44,7 +44,10 @@ func (r renderRuleSetRepo) GetBySlug(_ context.Context, slug string) (*domain.Ru
 }
 
 func (r renderRuleSetRepo) Save(context.Context, *domain.RuleSet) error { return nil }
-func (r renderRuleSetRepo) Delete(context.Context, string) error        { return nil }
+func (r renderRuleSetRepo) SaveIfRevision(context.Context, *domain.RuleSet, string) error {
+	return nil
+}
+func (r renderRuleSetRepo) Delete(context.Context, string) error { return nil }
 
 func TestResolveRulesCommonPrependsDirectSubscriptionRule(t *testing.T) {
 	s := &Service{repos: ports.Repos{RuleSet: renderRuleSetRepo{items: map[string]*domain.RuleSet{

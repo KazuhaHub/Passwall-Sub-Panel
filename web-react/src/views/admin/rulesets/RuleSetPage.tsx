@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteRuleSet, inspectProxyGroups, resetRuleSet, saveRuleSet, type ProxyGroupIssue, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, getRuleSet, inspectProxyGroups, resetRuleSet, RULESET_BODY_LIMIT, ruleSetFailureOf, ruleSetRequestBody, saveRuleSet, type ProxyGroupIssue, type RuleSet } from '@/api/rules'
 import type { Template } from '@/api/templates'
 import type { Group, ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import { useObjectLeaveGuard } from '@/components/common/ObjectTabs'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { Notice } from '@/components/common/Notice'
 import { StatusDot } from '@/components/common/StatusDot'
 import { pushToast } from '@/components/feedback/toasts'
 import { FormValidityProvider } from '@/components/form/FormValidity'
@@ -36,27 +37,27 @@ import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './actions'
 import { BasicsTab } from './BasicsTab'
 import { ChangesDialog } from './ChangesDialog'
 import { cloneProxyGroupMembers, cloneProxyGroupOptions, cloneRuleSet, EMPTY, sameRuleSet } from './model'
+import { ConflictDialog } from './ConflictDialog'
 import { RenameGroupDialog } from './RenameGroupDialog'
 import { RulesTab } from './RulesTab'
+import { mb, tooLargeText } from './saveFailures'
 import { isReservedSlug, newRuleSetPath, ruleSetPath } from './ruleSetRoutes'
 import { isBuiltinTarget } from './targets'
 import { useDraftInspection } from './useDraftInspection'
-
-/** The request body limit of the rule-set endpoints: 1 MiB for everything the middleware does not name (router.go BodyLimitByPath). */
-export const MAX_BODY_BYTES = 1 << 20
 
 const TABS = ['rules', 'members', 'sub_rules', 'rematches', 'basics'] as const
 type Tab = (typeof TABS)[number]
 
 const bytesOf = (value: unknown) => new Blob([JSON.stringify(value)]).size
-const mb = (n: number) => `${(n / (1 << 20)).toFixed(2)} MB`
 const split = (s: string) => (s === '' ? [] : s.replace(/\n$/, '').split('\n'))
 
 /**
  * One rule set as a page, for an existing one and for the create form (`seed` is then a blank rule set, or a copy).
  * The save is the old sheet's, in the same order: required fields, the slug check for a new set, the server's inspection
  * (with the orphan-group cleanup the admin must confirm), then the PUT itself, with the same body. What is new is a size
- * check before any of that, because the server refuses a body over 1 MiB with an error that says nothing about why.
+ * check before any of that, because the server refuses a body over 8 MiB (RULESET_BODY_LIMIT) with an error that says nothing about why;
+ * a 413 that still comes back (a proxy in front may allow less) is worded the same way. Every save of an existing rule set carries the revision it
+ * started from, and a 409 means someone saved since: the draft is left as it is and the page offers to review, overwrite or discard.
  *
  * Leaving with an edited draft asks once; a finished create and a delete made here leave without asking (`leaving`).
  */
@@ -92,6 +93,9 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [acting, setActing] = useState(false)
   const [ruleIssues, setRuleIssues] = useState<ProxyGroupIssue[]>([])
   const [changes, setChanges] = useState(false)
+  // Set when a save found the stored rule set newer than the one this draft started from; `current` is their version (null when it could not be read).
+  const [conflict, setConflict] = useState<{ current: RuleSet | null } | null>(null)
+  const [reviewing, setReviewing] = useState(false)
   const phone = useIsMobile()
   // The group being renamed (its name and the names a new one may not take), and the group the Proxy groups tab asked the Rules tab to show.
   const [renaming, setRenaming] = useState<{ name: string } | null>(null)
@@ -120,7 +124,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [needsMain, setNeedsMain] = useState(false)
   const [needsSub, setNeedsSub] = useState(false)
   const needed = !readOnly && (tab === 'members' || (tab === 'rules' && needsMain) || (tab === 'sub_rules' && needsSub) || renaming !== null)
-  const { inspection, fresh, loading: groupsLoading, failed: groupsFailed, retry: retryGroups } = useDraftInspection(form, needed)
+  const { inspection, fresh, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, retry: retryGroups } = useDraftInspection(form, needed)
   const effective = useMemo(() => (fresh && inspection ? new Map(inspection.groups.map(g => [g.name, g.members] as const)) : null), [fresh, inspection])
   // Names the renderer does not turn into a group (a node or line of the subscription is one already): proxyTargetExclusions.
   const reserved = useMemo(() => new Set((inspection?.nodes ?? []).map(n => n.display_name).concat((inspection?.lines ?? []).flatMap(l => [l.name, l.display_name]))), [inspection])
@@ -156,7 +160,18 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(scope, {}), prev => (prev ? { ...prev, items: update(prev.items) } : prev))
   }
 
-  async function save() {
+  /** Takes a rule set the server returned as the new saved state: the draft, the baseline (revision included) and the members tab's reference. */
+  function adopt(saved: RuleSet) {
+    patchList(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
+    setForm(cloneRuleSet(saved))
+    setBaseline(cloneRuleSet(saved))
+    setInitialOrder([...(saved.proxy_group_order || [])])
+    setInitialMembers(cloneProxyGroupMembers(saved.proxy_group_members))
+    setInitialOptions(cloneProxyGroupOptions(saved.proxy_group_options))
+  }
+
+  /** `base`: the revision to save against when it is not the baseline's (Overwrite saves against the one the server just reported). */
+  async function save(base?: string) {
     // Save and Enter must not start a second save while one is in flight.
     if (pending || readOnly) return
     if (!form.slug || !form.name) { setAttempted(true); changeTab('basics'); warn(t('admin:rules.validate.slug_name_required')); return }
@@ -165,8 +180,12 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     if (slugTaken) { setAttempted(true); changeTab('basics'); warn(t('admin:rules.validate.slug_exists', { slug: form.slug })); return }
     if (slugReserved) { setAttempted(true); changeTab('basics'); warn(t('admin:rules.validate.slug_reserved', { slug: form.slug })); return }
     // The server refuses a larger body in a middleware, with nothing the person could act on; say it here, before any request.
-    const size = bytesOf(form)
-    if (size > MAX_BODY_BYTES) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(MAX_BODY_BYTES) })); return }
+    // A new rule set (or a copy of one) has no revision to be stale against; an existing one saves against the revision it was read at.
+    const baseRevision = editing ? (base ?? baseline.revision) : undefined
+    // Never fall back to an unconditional overwrite: a rule set read without a revision is not saved until it is read again.
+    if (editing && !baseRevision) { warn(t('admin:rules.revision_missing')); return }
+    const size = bytesOf(ruleSetRequestBody(form, baseRevision))
+    if (size > RULESET_BODY_LIMIT) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(RULESET_BODY_LIMIT) })); return }
     // From here the editor is locked (`pending`) until the answer is in, so nothing typed meanwhile is overwritten by the response or reported as saved.
     setPending(true)
     try {
@@ -177,7 +196,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         proxy_group_options: d.proxy_group_options || {},
         mihomo_sub_rules: d.mihomo_sub_rules || [],
         mihomo_rematch_outbounds: d.mihomo_rematch_outbounds || [],
-      })
+      }, undefined, true)
       let inspection = await inspect(draft)
       const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
       if (cleanup.removedGroups.length > 0) {
@@ -205,15 +224,11 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         warn(sections.length > 0 ? t('admin:rules.validate.rule_extensions') : t('admin:rules.validate.proxy_group_members'))
         return
       }
-      const saved = await saveRuleSet(draft)
+      const saved = await saveRuleSet(draft, baseRevision)
       pushToast({ message: t('admin:rules.toast.saved'), severity: 'success' })
       if (editing) {
-        patchList(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
-        setForm(cloneRuleSet(saved))
-        setBaseline(cloneRuleSet(saved))
-        setInitialOrder([...(saved.proxy_group_order || [])])
-        setInitialMembers(cloneProxyGroupMembers(saved.proxy_group_members))
-        setInitialOptions(cloneProxyGroupOptions(saved.proxy_group_options))
+        adopt(saved)
+        setConflict(null)
       } else {
         leaving.current = true
         patchList(prev => [...prev, saved])
@@ -221,7 +236,54 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         // The new rule set's own page, with the list's place still behind its back link.
         void navigate(ruleSetPath(saved.slug), { replace: true, state: location.state })
       }
-    } catch { /* The request layer already surfaced the failure. */ } finally { setPending(false) }
+    } catch (err) {
+      // Only the two refusals worded here are not toasted by the request layer; every other failure already was.
+      const failure = ruleSetFailureOf(err)
+      if (failure.kind === 'too_large') warn(tooLargeText(t, failure.limitBytes, size))
+      else if (failure.kind === 'stale') await onStale(failure.current)
+    } finally { setPending(false) }
+  }
+
+  /** Someone saved since this draft started. The draft is not touched; their version is kept to compare with and to overwrite against. */
+  async function onStale(current: RuleSet | undefined) {
+    let theirs = current
+    // The refusal leaves their version out when the file vanished between its two reads; ask once more before saying it is gone.
+    if (!theirs) { try { theirs = await getRuleSet(form.slug) } catch { theirs = undefined } }
+    setConflict({ current: theirs ?? null })
+  }
+
+  async function overwrite() {
+    const theirs = conflict?.current
+    if (!theirs?.revision) return
+    const ok = await confirm({
+      title: t('admin:rules.stale_overwrite_title'),
+      message: t('admin:rules.stale_overwrite_message'),
+      confirmText: t('admin:rules.stale_overwrite_action'),
+      destructive: true,
+      initialFocus: 'cancel',
+    })
+    if (!ok) return
+    await save(theirs.revision)
+  }
+
+  async function takeTheirs() {
+    const ok = await confirm({
+      title: t('admin:rules.stale_discard_title'),
+      message: t('admin:rules.stale_discard_message'),
+      confirmText: t('admin:rules.stale_discard_action'),
+      destructive: true,
+      initialFocus: 'cancel',
+    })
+    if (!ok) return
+    const theirs = conflict?.current
+    setConflict(null)
+    // Without their version in hand the page starts again from a fresh read.
+    if (!theirs) { await onReseed(); return }
+    adopt(theirs)
+    setAttempted(false)
+    setRematchSeen(false)
+    setRuleIssues([])
+    setRev(r => r + 1)
   }
 
   async function remove() {
@@ -313,6 +375,18 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       ) : undefined}
       more={more}
     >
+      {conflict && (
+        <Notice tone="warning" className="mb-4" action={
+          <div className="flex flex-wrap gap-2">
+            {conflict.current && <Button variant="outline" size="sm" disabled={pending} onClick={() => setReviewing(true)}>{t('admin:rules.stale_review')}</Button>}
+            {conflict.current?.revision && <Button variant="outline" size="sm" disabled={pending} onClick={() => void overwrite()}>{t('admin:rules.stale_overwrite')}</Button>}
+            <Button variant="outline" size="sm" disabled={pending} onClick={() => void takeTheirs()}>{t('admin:rules.stale_discard')}</Button>
+          </div>
+        }>
+          <p className="font-medium">{t('admin:rules.stale_title')}</p>
+          <p>{conflict.current ? t('admin:rules.stale_body') : t('admin:rules.stale_gone')}</p>
+        </Notice>
+      )}
       {readOnly && <Alert className="mb-4"><AlertDescription>{t('admin:rules.read_only')}</AlertDescription></Alert>}
       <FormValidityProvider>
         {/* A dialog opened from inside the page is portaled out of the DOM but not out of React's tree, so ITS submit
@@ -346,7 +420,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
-                showTarget={showTarget} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
+                showTarget={showTarget} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor
@@ -375,7 +449,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               <MihomoAdvancedRulesEditor part="sub_rules" value={form} onChange={setForm}
                 renderContent={({ index, generation, value, onChange, ariaLabel }) => (
                   <RulesTab key={`${rev}:${index}:${generation}`} content={value} setContent={onChange} readOnly={readOnly || pending} ariaLabel={ariaLabel}
-                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, unavailable: readOnly, retry: retryGroups, needed: setNeedsSub }} />
+                    order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={[]} subRule={{ groups: ruleGroups }} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsSub }} />
                 )} />
             </TabsContent>
             <TabsContent value="rematches" keepMounted={false}>
@@ -396,6 +470,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         <RenameGroupDialog draft={form} from={renaming.name} effective={effective} reserved={reserved} templates={usedBy} rematchNames={rematchNames}
           onApply={applyRename} onClose={() => setRenaming(null)} />
       )}
+      {reviewing && conflict?.current && <ConflictDialog base={baseline} theirs={conflict.current} mine={form} onClose={() => setReviewing(false)} />}
       {changes && <ChangesDialog saved={baseline.content} draft={form.content} onClose={() => setChanges(false)} />}
     </ObjectPage>
   )

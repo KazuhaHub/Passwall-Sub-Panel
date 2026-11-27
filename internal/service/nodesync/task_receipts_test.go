@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,18 +30,7 @@ func (r *receiptAppliedAgentRepo) RecordApplied(ctx context.Context, agentID str
 
 func newReceiptTestRepos(t *testing.T) ports.Repos {
 	t.Helper()
-	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "task-receipts.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := sqlstore.EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := openMigratedTestDB(t)
 	repos := sqlstore.NewRepos(db)
 	if err := repos.NodeAgent.Create(t.Context(), &domain.NodeAgent{
 		AgentID: "agt_receipts", PanelID: 919,

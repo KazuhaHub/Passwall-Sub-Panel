@@ -33,6 +33,10 @@ declare module 'axios' {
     // Skip the global error toast — used when the caller wants to
     // render its own UI affordance (form field error, etc.).
     _skipErrorToast?: boolean
+    // Skip the toast only for a failure with one of these HTTP statuses or
+    // body `code`s: the caller words those itself, and every other failure
+    // of the request still toasts as usual.
+    _skipErrorToastFor?: Array<number | string>
     // Internal: marks a request that has already attempted refresh
     // once, so a subsequent 401 falls through to the logout path.
     _retried?: boolean
@@ -240,7 +244,10 @@ client.interceptors.response.use(
     // admin and sends the request again, so no error toast.
     const isPrompt = err.response?.status === 409
       && (err.response?.data as { code?: string } | undefined)?.code === 'confirm_required'
-    if (!cfg?._skipErrorToast && !isPrompt) {
+    const claimed = cfg?._skipErrorToastFor
+    const errCode = (err.response?.data as { code?: unknown } | undefined)?.code
+    const isClaimed = !!claimed && (claimed.includes(err.response?.status ?? 0) || (typeof errCode === 'string' && claimed.includes(errCode)))
+    if (!cfg?._skipErrorToast && !isPrompt && !isClaimed) {
       const status = err.response?.status ?? 0
       const level: 'error' | 'warning' = status === 429 ? 'warning' : 'error'
       const { key, msg } = categoriseError(err)

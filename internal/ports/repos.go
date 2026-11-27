@@ -1011,7 +1011,14 @@ type RuleSetRepo interface {
 	// name; SortBy recognizes "slug" / "name" / "sort"; default "sort".
 	ListPaged(ctx context.Context, p Pagination) (items []*domain.RuleSet, total int64, err error)
 	GetBySlug(ctx context.Context, slug string) (*domain.RuleSet, error)
+	// Save overwrites unconditionally and sets r.Revision to the new revision.
 	Save(ctx context.Context, r *domain.RuleSet) error
+	// SaveIfRevision is Save guarded by optimistic concurrency: under the same
+	// lock as the write it compares baseRevision with the revision of the
+	// bytes currently stored and returns domain.ErrStaleRevision (writing
+	// nothing) on mismatch. A slug with no stored rule set is
+	// domain.ErrNotFound, like GetBySlug. On success r.Revision is the new one.
+	SaveIfRevision(ctx context.Context, r *domain.RuleSet, baseRevision string) error
 	Delete(ctx context.Context, slug string) error
 }
 

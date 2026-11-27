@@ -28,7 +28,7 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * `findings` is null while the analysis for the current text is still running (it runs when the browser is idle).
  */
-export function IssuesPanel({ doc, findings, textOnly, status, onRetry, onJump, onClose }: {
+export function IssuesPanel({ doc, findings, textOnly, status, failedMessage, onRetry, onJump, onClose }: {
   doc: Doc
   findings: readonly Finding[] | null
   textOnly: boolean
@@ -38,6 +38,8 @@ export function IssuesPanel({ doc, findings, textOnly, status, onRetry, onJump, 
    * `unavailable` (they cannot be read, as by an operator: the same partial findings).
    */
   status: 'ready' | 'computing' | 'failed' | 'unavailable'
+  /** What to say instead of the usual line when the request failed for a reason worth naming (the draft is too large to inspect). */
+  failedMessage?: string
   onRetry: () => void
   onJump?: (line: number) => void
   onClose: () => void
@@ -58,7 +60,7 @@ export function IssuesPanel({ doc, findings, textOnly, status, onRetry, onJump, 
       <div className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">{t('admin:rules.issues.tcp_note')}</p>
         {status === 'failed' && (
-          <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={onRetry}>{t('admin:rules.retry')}</Button>}>{t('admin:rules.issues.failed')}</Notice>
+          <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={onRetry}>{t('admin:rules.retry')}</Button>}>{failedMessage ?? t('admin:rules.issues.failed')}</Notice>
         )}
         {status === 'unavailable' && <Notice tone="info">{t('admin:rules.issues.needs_groups')}</Notice>}
         {textOnly ? <Notice tone="warning">{t('admin:rules.issues.text_only')}</Notice>

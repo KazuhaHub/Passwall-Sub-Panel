@@ -1,0 +1,137 @@
+name: Third-party adapters
+
+# The adapters driven against REAL 3X-UI and S-UI containers, at the ceilings in
+# docs/compat. The test suite checks the panel against fixtures; this is the only
+# evidence of its type in the repository. Called, never triggered on its own:
+# release.yml runs it before it cuts a tag (a failure means no tag), and watch.yml
+# runs it weekly. It is not part of the PR suite or of a push to main: it pulls two
+# third-party images and has the longest timeout in the repository.
+#
+# Built with go.mod's exact compiler in test.yml's shape; the build-baseline guard
+# holds this file there like every workflow that sets up Go.
+
+on:
+  workflow_call:
+
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+permissions:
+  contents: read
+
+jobs:
+  # A red run is the signal, not a broken build.
+  third-party:
+    name: third-party adapters (isolated real panels)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # THE PANELS ARE THE REVIEWED CEILINGS, BY TAG AND DIGEST. They floated on
+    # :latest, which the launcher and its README both said the caller never does,
+    # and which made a red run mean either "an adapter broke" or "upstream shipped
+    # something" with nothing in the evidence to say which. The second question is
+    # the `compat` job's, which watch.yml asks against the same ceilings. So the
+    # defaults are max_tested_xui and max_tested_sui from
+    # docs/compat, a guard in deploy/test_workflow_test.mjs fails when a ceiling
+    # moves without its image, and Dependabot does not read these strings. The
+    # repository variables still override both, and the drive step records the
+    # digest that actually ran, so an override is never anonymous.
+    env:
+      PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:v3.11.0@sha256:1628adbd9bed680d25d6f714bef4a20f132105f4612ea294952f6665dad32e5b' }}
+      PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:v1.6.7@sha256:c262ebd5cd53fd098d3080089af46220473bacbaf1a113e767aa9aadd2eed36d' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      # The compiler gate must sit IMMEDIATELY after setup-go: the baseline guard
+      # reads job steps positionally, so anything between them, including the Node
+      # setup this job also needs, is a failure rather than a style choice.
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: start the isolated panels
+        run: deploy/compat/backends/third-party.sh up
+      - name: drive every adapter surface
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          # WHICH PANELS THE VERDICT IS ABOUT, written before anything can fail. The
+          # reference names the version, the repo digest names the image.
+          for image in "$PSP_LIVE_3XUI_IMAGE" "$PSP_LIVE_SUI_IMAGE"; do
+            printf '%s %s\n' "$image" "$(docker image inspect --format '{{json .RepoDigests}}' "$image")"
+          done > evidence/images.txt
+          cat evidence/images.txt
+          # Each suite gets its own log and its own validator run: they are
+          # different packages with different profiles, and a single combined
+          # verdict could not say which of them measured less than it claims.
+          # FAIL LOUDLY IF THE ENVIRONMENT IS EMPTY. An `env` that quietly
+          # produces nothing leaves the tests to SKIP, and a skip is not a pass —
+          # the validator below reports it as one of those, naming the profile
+          # rather than the launcher that never gave it anything to run with.
+          service_env=$(deploy/compat/backends/third-party.sh env)
+          test -n "$service_env"
+          # sed, not ${var//}: it redacts the rest of EVERY line after TOKEN=, which a
+          # parameter expansion over the whole multi-line value cannot express.
+          # shellcheck disable=SC2001
+          echo "$service_env" | sed 's/\(TOKEN=\).*/\1<redacted>/'
+          eval "$service_env"
+          # READ THROUGH A CHILD PROCESS. `printenv` is an external command, so
+          # it sees the EXPORTED environment and nothing else -- which is the
+          # whole question, because `go test` below is a child too. Reading
+          # `$name` here instead would have passed while the launcher printed
+          # bare assignments: eval set a shell variable, every test skipped for
+          # want of an environment, and this loop reported the environment fine.
+          for name in PSP_LIVE_XUI_URL PSP_LIVE_XUI_TOKEN PSP_LIVE_XUI_DB PSP_LIVE_SUI_URL PSP_LIVE_SUI_TOKEN; do
+            value=$(printenv "$name" || true)
+            test -n "$value" || { echo "::error::$name is not exported to child processes; the launcher did not publish it for go test"; exit 1; }
+          done
+          # The floor matrix WRITES the panel's SQLite, and the write needs the
+          # DIRECTORY, not the file: SQLite creates its journal beside it. Checked
+          # here so a permission problem names itself, rather than surfacing as
+          # `seed usage: unable to open database file: out of memory (14)` inside
+          # a test log, which reads like a corrupt database.
+          xui_db_dir=$(dirname "$PSP_LIVE_XUI_DB")
+          test -w "$xui_db_dir" || { echo "::error::$xui_db_dir is not writable by $(id -un); TestLive_XUITrafficFloorMatrix seeds usage straight into it"; exit 1; }
+          # TEN MINUTES A SUITE, SO A HANG IS KILLED BY GO TEST, NOT BY THE RUNNER. Two
+          # suites of 20m ran one after the other inside this job's 30, so a hang in the
+          # first met the job's limit before the validator could name it, and the second
+          # never ran. The whole drive takes about two minutes; 10m each plus the panels'
+          # start leaves the job's limit last.
+          run_suite() {
+            profile="$1"; pkg="$2"; out="$3"
+            code=0
+            go test -json -count=1 -timeout=10m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
+            node deploy/compat/check-go-results.mjs --profile "$profile" \
+              --profiles deploy/compat/profiles-third-party.json \
+              --input "evidence/$out.jsonl" --go-exit-code "$code" \
+              --output "evidence/$out.json"
+          }
+          failed=0
+          run_suite third-party-3xui-live ./internal/adapters/xui 3xui || failed=1
+          run_suite third-party-sui-live ./internal/adapters/sui sui || failed=1
+          exit "$failed"
+      - name: upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: third-party-adapter-evidence
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: stop the panels
+        if: always()
+        run: deploy/compat/backends/third-party.sh down

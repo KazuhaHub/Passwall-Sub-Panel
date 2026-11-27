@@ -48,6 +48,15 @@ func AuditWrites(auditSvc *audit.Service, dispatch AsyncDispatch) gin.HandlerFun
 		}
 		start := time.Now()
 		reqBody := captureRequestBody(c)
+		// The audit read is the first read of the body, so it is where the
+		// size cap trips. Swallowing that error left the handler an empty body
+		// and a misleading 400 "EOF"; answer 413 here instead. This covers
+		// every audited write, so any admin/self-service body over its cap now
+		// gets 413 (previously 400 EOF). The attempt is still recorded below.
+		if readErr, ok := c.Get(auditBodyReadErrKey); ok {
+			err, _ := readErr.(error)
+			AbortBodyTooLarge(c, err) // the refused attempt is still audited below
+		}
 		c.Next()
 		// A route marked read-only (AuditReadOnly) is a preview that carries a
 		// body: it computes and writes nothing, so nothing is recorded.
@@ -171,6 +180,10 @@ func resolveAuditActor(c *gin.Context, path string, body any) string {
 	return "anonymous"
 }
 
+// auditBodyReadErrKey carries a failed body read from captureRequestBody to
+// AuditWrites, whose return value is the (redacted) body for the audit row.
+const auditBodyReadErrKey = "psp.audit.body_read_err"
+
 func captureRequestBody(c *gin.Context) any {
 	if c.Request.Body == nil {
 		return nil
@@ -178,6 +191,7 @@ func captureRequestBody(c *gin.Context) any {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.Request.Body = io.NopCloser(bytes.NewReader(nil))
+		c.Set(auditBodyReadErrKey, err)
 		return map[string]any{"read_error": err.Error()}
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))

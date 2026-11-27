@@ -335,3 +335,105 @@ func performRuleSave(t *testing.T, h *AdminRuleSetsHandler, body ruleSetDTO) *ht
 	c.Writer.WriteHeaderNow()
 	return w
 }
+
+func ruleRevisionHandler(t *testing.T) (*AdminRuleSetsHandler, ruleSetDTO) {
+	t.Helper()
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, t.TempDir())
+	w := performRuleSave(t, h, ruleSetDTO{Slug: "rev", Name: "Rev", Enabled: true, Content: "- MATCH,DIRECT"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("seed save: %d %s", w.Code, w.Body.String())
+	}
+	var seeded ruleSetDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &seeded); err != nil {
+		t.Fatal(err)
+	}
+	return h, seeded
+}
+
+func TestAdminRuleSetsSaveWithoutBaseRevisionStillOverwrites(t *testing.T) {
+	h, first := ruleRevisionHandler(t)
+	if len(first.Revision) != 16 {
+		t.Fatalf("save response lacks revision: %q", first.Revision)
+	}
+	w := performRuleSave(t, h, ruleSetDTO{Slug: "rev", Name: "Again", Enabled: true, Content: "- MATCH,REJECT"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminRuleSetsSaveMatchingBaseRevisionReturnsNewRevision(t *testing.T) {
+	h, first := ruleRevisionHandler(t)
+	w := performRuleSave(t, h, ruleSetDTO{Slug: "rev", Name: "Next", Enabled: true, Content: "- MATCH,REJECT", BaseRevision: first.Revision})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var out ruleSetDTO
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out.Revision == "" || out.Revision == first.Revision {
+		t.Fatalf("new revision not returned: %q (was %q)", out.Revision, first.Revision)
+	}
+}
+
+func TestAdminRuleSetsSaveStaleBaseRevisionIs409AndWritesNothing(t *testing.T) {
+	h, first := ruleRevisionHandler(t)
+	// Someone else saves first.
+	if w := performRuleSave(t, h, ruleSetDTO{Slug: "rev", Name: "Theirs", Enabled: true, Content: "- MATCH,REJECT", BaseRevision: first.Revision}); w.Code != http.StatusOK {
+		t.Fatalf("first writer: %d", w.Code)
+	}
+	w := performRuleSave(t, h, ruleSetDTO{Slug: "rev", Name: "Mine", Enabled: true, Content: "- MATCH,DIRECT", BaseRevision: first.Revision})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code    string     `json:"code"`
+		Current ruleSetDTO `json:"current"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "ruleset_stale" || body.Current.Name != "Theirs" || body.Current.Revision == "" || body.Current.Revision == first.Revision {
+		t.Fatalf("unexpected 409 body: %s", w.Body.String())
+	}
+	got := getRuleSet(t, h, "rev")
+	if got.Name != "Theirs" || got.Revision != body.Current.Revision {
+		t.Fatalf("stale save changed the file: %#v", got)
+	}
+}
+
+func TestAdminRuleSetsGetAndListIncludeRevision(t *testing.T) {
+	h, first := ruleRevisionHandler(t)
+	if got := getRuleSet(t, h, "rev"); got.Revision != first.Revision {
+		t.Fatalf("get revision %q want %q", got.Revision, first.Revision)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/rules", nil)
+	h.List(c)
+	var env struct {
+		Items []ruleSetDTO `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Items) != 1 || env.Items[0].Revision != first.Revision {
+		t.Fatalf("list body: %s", w.Body.String())
+	}
+}
+
+func getRuleSet(t *testing.T, h *AdminRuleSetsHandler, slug string) ruleSetDTO {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/rules/"+slug, nil)
+	c.Params = gin.Params{{Key: "slug", Value: slug}}
+	h.Get(c)
+	var out ruleSetDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("%v: %s", err, w.Body.String())
+	}
+	return out
+}

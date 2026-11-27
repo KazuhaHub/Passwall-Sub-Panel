@@ -2160,6 +2160,7 @@
       "batch_enabled": "已启用 {{count}} 个规则集",
       "batch_disabled": "已停用 {{count}} 个规则集",
       "batch_deleted": "已删除 {{count}} 个规则集",
+      "batch_stale": "有 {{count}} 个规则集在列表载入后已被修改，未更新。列表现已显示它们的当前版本。",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
     },
     "confirm": {
@@ -2208,6 +2209,42 @@
     "undo": "撤销",
     "redo": "重做",
     "too_large": "规则集过大（{{size}}），超过可保存的上限 {{limit}}",
+    "too_large_proxy": "服务器拒绝了过大的规则集（{{size}}）。面板前面的反向代理允许的大小可能比面板更小；使用 nginx 时，请调大 client_max_body_size。",
+    "stale_title": "规则集已被修改",
+    "stale_body": "在你编辑期间，这个规则集被他人保存、恢复为默认、在磁盘上被修改，或在你的另一个标签页中保存。你的修改仍在这里，尚未保存。",
+    "revision_missing": "这个规则集载入时没有版本号，无法安全保存。请刷新页面后重试。",
+    "stale_gone": "在你编辑期间，这个规则集被修改或删除，无法读取当前版本。你的修改仍在这里，尚未保存。",
+    "stale_review": "查看对方的更改",
+    "stale_overwrite": "以我的版本覆盖",
+    "stale_discard": "放弃我的修改并载入对方的版本",
+    "stale_overwrite_title": "覆盖对方的版本？",
+    "stale_overwrite_message": "你的版本将替换刚刚保存的版本。除非你已另行复制，对方的更改会丢失。",
+    "stale_overwrite_action": "覆盖",
+    "stale_discard_title": "放弃你的修改？",
+    "stale_discard_message": "未保存的修改将被丢弃，页面显示刚刚保存的版本。",
+    "stale_discard_action": "放弃我的修改",
+    "conflict": {
+      "description": "两边都与你开始编辑时的版本比较。",
+      "theirs": "对方的更改",
+      "mine": "你的更改",
+      "fields": "其它改动的字段：{{fields}}",
+      "both": "双方都改了且结果不同：{{fields}}",
+      "none_both": "没有双方都改动的内容。",
+      "no_changes": "这一方没有更改。",
+      "content_same": "规则文本没有变化。",
+      "field": {
+        "content": "规则",
+        "name": "名称",
+        "sort": "排序",
+        "enabled": "启用",
+        "direct_subscription_domain": "DIRECT 订阅域名",
+        "proxy_group_order": "代理组顺序",
+        "proxy_group_members": "代理组成员",
+        "proxy_group_options": "代理组设置",
+        "mihomo_sub_rules": "子规则",
+        "mihomo_rematch_outbounds": "Rematch 出站"
+      }
+    },
     "text": {
       "mobile_hint": "手机上建议使用分组视图编辑"
     },

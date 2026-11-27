@@ -104,7 +104,10 @@ describe('resource API contracts', () => {
     expect(http.get).toHaveBeenCalledWith('/admin/groups', {
       params: { page: 1, page_size: 10 }, signal,
     })
-    expect(http.put).toHaveBeenCalledWith('/admin/rules/r', rule)
+    expect(http.put).toHaveBeenCalledWith('/admin/rules/r', rule, expect.anything())
+    http.put.mockResolvedValueOnce({ data: rule })
+    await rules.saveRuleSet({ ...rule, revision: 'r1' }, 'r1')
+    expect(http.put).toHaveBeenLastCalledWith('/admin/rules/r', { ...rule, base_revision: 'r1' }, expect.anything())
     expect(http.post).toHaveBeenCalledWith('/admin/templates/t/reset')
     expect(http.post).toHaveBeenCalledWith('/admin/sync-tasks/5/retry')
     expect(http.post).toHaveBeenCalledWith('/admin/node-issues/9/acknowledge')

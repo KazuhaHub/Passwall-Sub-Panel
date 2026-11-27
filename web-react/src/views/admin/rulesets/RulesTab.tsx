@@ -109,7 +109,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
    * is called with whether anything here is on screen that uses them (the routing test, the problems panel), so the page asks
    * only then; `retry` asks again after a failure.
    */
-  groups: { known: boolean; loading: boolean; failed: boolean; unavailable: boolean; retry: () => void; needed: (need: boolean) => void }
+  groups: { known: boolean; loading: boolean; failed: boolean; failedMessage?: string; unavailable: boolean; retry: () => void; needed: (need: boolean) => void }
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
@@ -574,7 +574,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       )}
       {issuesOpen && <IssuesPanel doc={doc} textOnly={textOnly}
         status={groupsKnown ? 'ready' : groups.unavailable ? 'unavailable' : groups.failed ? 'failed' : 'computing'}
-        findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
+        failedMessage={groups.failedMessage} findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }

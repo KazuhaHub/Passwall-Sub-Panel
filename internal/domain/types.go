@@ -1294,10 +1294,15 @@ type SyncTask struct {
 
 // RuleSet is one rules shard stored in the DB.
 type RuleSet struct {
-	Slug    string
-	Name    string
-	Sort    int
-	Enabled bool
+	Slug string
+	// Revision is read-only: the first 16 hex chars of the SHA-256 of the
+	// rule set's file bytes as stored on disk. The YAML adapter fills it on
+	// read and after a save; it is never written into the file, so a hand
+	// edit on disk changes it too. Used for optimistic-concurrency saves.
+	Revision string `yaml:"-" json:"-"`
+	Name     string
+	Sort     int
+	Enabled  bool
 	// DirectSubscriptionDomain prepends a rule for the hostname in
 	// UISettings.SubBaseURL so clients fetch their next subscription directly.
 	// The hostname is resolved at render time so changing the public URL does
