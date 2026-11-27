@@ -112,6 +112,18 @@ describe('rule fields', () => {
   })
 })
 
+describe('a payload that holds commas', () => {
+  it('DOMAIN-REGEX is one payload up to the target, as Mihomo joins it', () => {
+    const rule = parseLine('- DOMAIN-REGEX,^c{1,3}laude\\.ai$,Proxy').rule!
+    expect(rule.value).toBe('^c{1,3}laude\\.ai$')
+    expect(rule.target).toBe('Proxy')
+    expect(rule.options).toEqual([])
+    expect(rule.structured).toBe(false)
+    // Nothing to join in the ordinary case.
+    expect(parseLine('- DOMAIN-REGEX,^a$,Proxy').rule!.value).toBe('^a$')
+  })
+})
+
 describe('size', () => {
   // Design 3.14: a 50,000-line rule set is read in well under a second (the budget is 50 ms; this only guards a
   // collapse into something quadratic, so it is generous).

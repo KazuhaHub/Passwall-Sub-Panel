@@ -1,6 +1,6 @@
 import type { Continuation } from './continuation'
 import type { Doc } from './parse'
-import { parseIp } from './match'
+import { cidrOf } from './match'
 
 /**
  * Rules that can never apply because an earlier rule already catches everything they would (design 3.13). The first rule that
@@ -48,8 +48,9 @@ interface Ranges {
 const DOMAIN_KINDS = new Set(['DOMAIN', 'DOMAIN-SUFFIX', 'DOMAIN-KEYWORD'])
 const ADDRESS_KINDS = new Set(['IP-CIDR', 'IP-CIDR6'])
 
-const lower = (o: readonly string[]) => o.map(x => x.toLowerCase())
-const has = (o: readonly string[], name: string) => lower(o).includes(name)
+// Options are exact (Mihomo's ParseParams uses slices.Contains): `NO-RESOLVE` is not `no-resolve`, so it neither makes a rule literal-only
+// nor makes two rules the same.
+const has = (o: readonly string[], name: string) => o.includes(name)
 
 export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
   // A line the editor cannot place in the list makes every statement about order unreliable.
@@ -74,7 +75,7 @@ export function findShadowed(doc: Doc, cont: Continuation): Finding[] {
     if (type === 'MATCH') { if (!passes) terminal = i; return }
 
     const value = DOMAIN_KINDS.has(type) ? rule.value.toLowerCase() : rule.value
-    const options = lower(rule.options).sort()
+    const options = [...rule.options].sort()
     const key = `${type}\u0000${value}\u0000${options.join(',')}`
     let by = -1
     let duplicate = false
@@ -152,15 +153,6 @@ function walk(root: TrieNode, name: string, visit: (n: TrieNode) => void) {
     cur = next
     if (cur.first >= 0) visit(cur)
   }
-}
-
-function cidrOf(text: string): { v: 4 | 6; n: bigint; len: number } | null {
-  const m = /^([^/]+)\/(\d{1,3})$/.exec(text.trim())
-  if (!m) return null
-  const ip = parseIp(m[1])
-  const len = Number(m[2])
-  if (!ip || len > (ip.v === 4 ? 32 : 128)) return null
-  return { v: ip.v, n: ip.n, len }
 }
 
 export interface ShadowSummary { same: number; other: number; afterMatch: number; total: number }

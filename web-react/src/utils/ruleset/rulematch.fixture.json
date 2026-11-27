@@ -1,6 +1,6 @@
 {
  "version": 1,
- "description": "One rule line, one connection, the expected verdict (yes / no / unknown plus the reason). Read by internal/pkg/rulematch/fixture_test.go and by the SPA matcher test; both must agree. Rule lines are the text after '- '. A port of 0/absent means 'not given'. A case with browser_differs: true is one where the SPA matcher (match.ts on the UI branch) gave a different answer when this fixture was written; the expected value is what Mihomo does, see the case's 'mihomo' source reference.",
+ "description": "One rule line, one connection, the expected verdict (yes / no / unknown plus the reason). Read by internal/pkg/rulematch/fixture_test.go and by the SPA matcher test; both must agree. Rule lines are the text after '- '. A port of 0/absent means 'not given'. The expected value is what Mihomo does; see the 'mihomo' source reference of a case that says so.",
  "probes": {
   "web": {
    "host": "claude.ai",
@@ -224,8 +224,7 @@
    "probe": "web",
    "expect": "yes",
    "note": "a comma inside a DOMAIN-REGEX payload is part of the payload",
-   "mihomo": "rules/common/base.go ParseRulePayload: DOMAIN-REGEX payload = item[1:len-1] joined with commas, target = last item",
-   "browser_differs": true
+   "mihomo": "rules/common/base.go ParseRulePayload: DOMAIN-REGEX payload = item[1:len-1] joined with commas, target = last item"
   },
   {
    "rule": "IP-CIDR,8.8.8.0/24,Proxy",
@@ -266,8 +265,7 @@
    "expect": "unknown",
    "note": "no-resolve, and no address was supplied: Mihomo may still hold one (a connection that arrived by IP with a sniffed or mapped host), so this is not a certain no",
    "reason": "input",
-   "mihomo": "rules/common/ipcidr.go Match tests metadata.DstIP whenever it is valid; no-resolve only stops the rule from resolving it",
-   "browser_differs": true
+   "mihomo": "rules/common/ipcidr.go Match tests metadata.DstIP whenever it is valid; no-resolve only stops the rule from resolving it"
   },
   {
    "rule": "IP-CIDR,1.2.3.0/24,Proxy,no-resolve",
@@ -350,8 +348,7 @@
    "expect": "unknown",
    "reason": "resolve",
    "note": "options are compared exactly: NO-RESOLVE is not no-resolve, so the name is resolved",
-   "mihomo": "rules/common/base.go ParseParams uses slices.Contains(params, \"no-resolve\"), a case-sensitive comparison",
-   "browser_differs": true
+   "mihomo": "rules/common/base.go ParseParams uses slices.Contains(params, \"no-resolve\"), a case-sensitive comparison"
   },
   {
    "rule": "IP-CIDR,08.8.8.0/24,Proxy",
@@ -359,8 +356,7 @@
    "expect": "unknown",
    "reason": "unsupported",
    "note": "leading zeros: netip.ParsePrefix refuses the prefix, so Mihomo refuses the line",
-   "mihomo": "rules/common/ipcidr.go NewIPCIDR uses netip.ParsePrefix",
-   "browser_differs": true
+   "mihomo": "rules/common/ipcidr.go NewIPCIDR uses netip.ParsePrefix"
   },
   {
    "rule": "DST-PORT,443,Proxy",
@@ -382,16 +378,14 @@
    "probe": "web",
    "expect": "yes",
    "note": "a reversed range is swapped",
-   "mihomo": "common/utils/range.go NewRange swaps start and end when start > end",
-   "browser_differs": true
+   "mihomo": "common/utils/range.go NewRange swaps start and end when start > end"
   },
   {
    "rule": "DST-PORT,80/443,Proxy",
    "probe": "web",
    "expect": "yes",
    "note": "'/'-separated list",
-   "mihomo": "common/utils/ranges.go newIntRanges splits on '/' (and ',')",
-   "browser_differs": true
+   "mihomo": "common/utils/ranges.go newIntRanges splits on '/' (and ',')"
   },
   {
    "rule": "DST-PORT,443,Proxy",
@@ -453,8 +447,7 @@
    "probe": "proc",
    "expect": "yes",
    "note": "compared case-insensitively",
-   "mihomo": "rules/common/process.go Match: strings.EqualFold(target, ps.pattern)",
-   "browser_differs": true
+   "mihomo": "rules/common/process.go Match: strings.EqualFold(target, ps.pattern)"
   },
   {
    "rule": "PROCESS-NAME,firefox,Proxy",
@@ -574,8 +567,7 @@
    "probe": "web",
    "expect": "yes",
    "note": "a comma inside a regex in a logic condition",
-   "mihomo": "rules/logic/logic.go payloadToRule: ParseRulePayload(needTarget=false) joins item[1:] for DOMAIN-REGEX",
-   "browser_differs": true
+   "mihomo": "rules/logic/logic.go payloadToRule: ParseRulePayload(needTarget=false) joins item[1:] for DOMAIN-REGEX"
   },
   {
    "rule": "MATCH,Proxy",
@@ -637,6 +629,37 @@
    "expect": "unknown",
    "reason": "unsupported",
    "note": "not evaluated"
+  },
+  {
+   "rule": "AND,((MATCH),(NETWORK,TCP)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "Mihomo refuses MATCH inside a logic rule, so the whole rule does not load",
+   "mihomo": "rules/logic/logic.go payloadToRule"
+  },
+  {
+   "rule": "DST-PORT,[80]-[443],Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "brackets and spaces around a number are ignored",
+   "mihomo": "common/utils/range.go newIntRange strings.Trim(\"[ ]\")"
+  },
+  {
+   "rule": "DST-PORT,80-90-100,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "more than two bounds",
+   "mihomo": "common/utils/range.go newIntRange"
+  },
+  {
+   "rule": "IP-CIDR,1.0.0.0/08,Proxy",
+   "probe": "ip4",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "leading zero in the prefix length",
+   "mihomo": "netip.ParsePrefix"
   }
  ]
 }

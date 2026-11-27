@@ -91,8 +91,20 @@ describe('address rules', () => {
     expect(ev('IP-CIDR,1.2.3.4/32,X', { address: '1.2.3.4' })).toEqual(yes)
   })
 
-  it('a domain against a rule with no-resolve is not checked: no resolution is made for it', () => {
-    expect(ev('IP-CIDR,10.0.0.0/8,X,no-resolve')).toEqual(no)
+  it('a domain against a rule with no-resolve is not resolved for it; with no address entered the rule is not decided (Mihomo tests any address the connection already holds)', () => {
+    expect(ev('IP-CIDR,10.0.0.0/8,X,no-resolve')).toEqual(unknown('input'))
+  })
+
+  it('options are compared exactly, as Mihomo does: NO-RESOLVE and SRC are not no-resolve and src', () => {
+    expect(ev('IP-CIDR,10.0.0.0/8,X,NO-RESOLVE')).toEqual(unknown('resolve'))
+    expect(ev('IP-CIDR,10.0.0.0/8,X,NO-RESOLVE', { resolvedIp: '10.1.1.1' })).toEqual(yes)
+    expect(ev('IP-CIDR,10.0.0.0/8,X,SRC', { srcIp: '11.1.1.1', resolvedIp: '10.1.1.1' })).toEqual(yes)
+  })
+
+  it('a prefix with a leading zero is refused, as netip.ParsePrefix refuses it', () => {
+    expect(ev('IP-CIDR,08.8.8.0/24,X', { address: '8.8.8.8' })).toEqual(unknown('unsupported'))
+    expect(ev('IP-CIDR,8.8.8.0/024,X', { address: '8.8.8.8' })).toEqual(unknown('unsupported'))
+    expect(parseIp('01.2.3.4')).toBeNull()
   })
 
   it('a domain against a rule without no-resolve: Mihomo resolves it there, so the answer needs the resolved address', () => {
@@ -138,10 +150,10 @@ describe('port, network, process', () => {
     expect(ev('NETWORK,UDP,X', { network: 'udp' })).toEqual(yes)
     expect(ev('NETWORK,udp,X', { network: 'tcp' })).toEqual(no)
   })
-  it('PROCESS-NAME needs a process name; a name that differs only in case is not decided', () => {
+  it('PROCESS-NAME needs a process name and compares it without regard to case (strings.EqualFold)', () => {
     expect(ev('PROCESS-NAME,curl,X', { process: 'curl' })).toEqual(yes)
     expect(ev('PROCESS-NAME,curl,X', { process: 'wget' })).toEqual(no)
-    expect(ev('PROCESS-NAME,curl,X', { process: 'CURL' })).toEqual(unknown('input'))
+    expect(ev('PROCESS-NAME,curl,X', { process: 'CURL' })).toEqual(yes)
     expect(ev('PROCESS-NAME,curl,X')).toEqual(unknown('input'))
   })
   it('MATCH always matches', () => expect(ev('MATCH,Final')).toEqual(yes))
@@ -223,8 +235,15 @@ describe('the route through a rule list', () => {
     const r = routeFor(doc, probe({ address: 'copilot.microsoft.com' }), FINALS)
     expect(r.first).toEqual({ line: 1784, target: 'Ⓜ️ 微软Bing' })
     expect(r.later.map(l => [l.line + 1, l.target])).toEqual([[1803, 'Ⓜ️ 微软服务'], [1947, '💬 Ai平台'], [2235, '🌍 国外媒体'], [6242, '🚀 节点选择'], [9491, '🐟 漏网之鱼']])
-    // Two lines are not decidable in a browser (GEOSITE, GEOIP) and both come after, so the answer stands.
-    expect(r.certain).toBe(true)
+    // The private-range rules at the top say no-resolve, and with no address entered they are not decided (the connection may already
+    // hold one); nothing else above the match is undecided.
+    expect(r.certain).toBe(false)
+    expect(r.maybe.length).toBeGreaterThan(0)
+    expect(new Set(r.maybe.map(m => m.reason))).toEqual(new Set(['input']))
+    // Two lines are not decidable in a browser (GEOSITE, GEOIP) and both come after; with an address entered the answer stands.
+    const withIp = routeFor(doc, probe({ address: 'copilot.microsoft.com', resolvedIp: '203.0.113.9' }), FINALS)
+    expect(withIp.first).toEqual({ line: 1784, target: 'Ⓜ️ 微软Bing' })
+    expect(withIp.certain).toBe(true)
   })
 
   it('the seeded rule set: 1.1.1.1 over UDP 443 meets the QUIC rule, 1.1.1.1 over TCP 443 falls to something later', () => {
@@ -339,8 +358,15 @@ describe('no-resolve after a rule that resolved the name', () => {
     expect(r.maybe.map(m => [m.line, m.reason])).toEqual([[0, 'resolve'], [1, 'resolve']])
   })
 
-  it('stays a plain miss when no earlier rule resolves', () => {
+  it('with no address entered and no earlier rule resolving, it is not decided (the connection may already hold an address)', () => {
     const r = routeFor(parseDoc('- IP-CIDR,10.0.0.0/8,Y,no-resolve\n- MATCH,F\n'), probe(), FINALS)
+    expect(r.maybe.map(m => [m.line, m.reason])).toEqual([[0, 'input']])
+    expect(r.first).toEqual({ line: 1, target: 'F' })
+    expect(r.certain).toBe(false)
+  })
+
+  it('stays a plain miss when an address was entered that the rule does not cover and no earlier rule resolves', () => {
+    const r = routeFor(parseDoc('- IP-CIDR,10.0.0.0/8,Y,no-resolve\n- MATCH,F\n'), probe({ resolvedIp: '11.1.1.1' }), FINALS)
     expect(r.maybe).toEqual([])
     expect(r.first).toEqual({ line: 1, target: 'F' })
   })

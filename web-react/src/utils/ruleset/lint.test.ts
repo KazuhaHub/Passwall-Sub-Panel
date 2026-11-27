@@ -55,6 +55,20 @@ describe('rules an earlier rule already covers', () => {
     expect(find('- IP-CIDR,10.0.0.0/8,X,no-resolve\n- IP-CIDR,10.1.0.0/16,X,no-resolve,src\n')).toEqual([])
   })
 
+  it('options are exact, as in Mihomo: NO-RESOLVE is not no-resolve, and SRC is not src', () => {
+    // The wide rule resolves (its option is not recognised), so it covers the narrow no-resolve one; the reverse does not hold.
+    expect(brief(find('- IP-CIDR,10.0.0.0/8,X,NO-RESOLVE\n- IP-CIDR,10.1.0.0/16,X,no-resolve\n'))).toEqual([[1, 0, 'same']])
+    expect(find('- IP-CIDR,10.0.0.0/8,X,no-resolve\n- IP-CIDR,10.1.0.0/16,X,NO-RESOLVE\n')).toEqual([])
+    // `SRC` does not turn the rule into a source rule, so it is a destination range that covers the narrower one.
+    expect(brief(find('- IP-CIDR,10.0.0.0/8,X,SRC\n- IP-CIDR,10.1.0.0/16,Y,SRC\n'))).toEqual([[1, 0, 'other']])
+    // A different spelling of an option is a different rule, not a duplicate.
+    expect(find('- IP-CIDR,10.0.0.0/8,X,no-resolve\n- IP-CIDR,10.0.0.0/8,X,NO-RESOLVE\n')).toEqual([])
+  })
+
+  it('a prefix Mihomo refuses (a leading zero) covers nothing', () => {
+    expect(find('- IP-CIDR,010.0.0.0/8,X\n- IP-CIDR,10.1.0.0/16,X\n')).toEqual([])
+  })
+
   it('other types are only compared for exact duplicates', () => {
     expect(brief(find('- NETWORK,udp,X\n- NETWORK,udp,Y\n- DST-PORT,443,X\n- DST-PORT,80-90,X\n- GEOIP,CN,X\n- GEOIP,CN,X,no-resolve\n- GEOIP,cn,X\n'))).toEqual([[1, 0, 'other']])
     expect(brief(find('- AND,((NETWORK,UDP),(DST-PORT,443)),X\n- AND,((NETWORK,UDP),(DST-PORT,443)),Y\n'))).toEqual([[1, 0, 'other']])
