@@ -137,3 +137,11 @@ func TestSafeRegexSubset(t *testing.T) {
 		}
 	}
 }
+
+func TestWalkNoResolveWithoutAddressIsABranch(t *testing.T) {
+	p := mustProbe(t, ProbeInput{Host: "example.com"})
+	r := Walk([]string{"IP-CIDR,1.2.3.0/24,A,no-resolve", "MATCH,B"}, p, nil)
+	if r.MaybeTotal != 1 || r.Maybe[0].Reason != ReasonInput || r.First == nil || r.First.Index != 1 {
+		t.Fatalf("route = %+v", r)
+	}
+}

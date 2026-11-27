@@ -351,9 +351,13 @@ func addressRule(value string, opts []string, source bool, p *Probe) Result {
 			return unknown(ReasonResolve)
 		}
 		// A rule on its own cannot know whether an earlier one resolved the
-		// name (a hosts entry or fake-IP mapping may have too); if the address
-		// the caller gave would fit, that is undecided rather than a no.
-		if p.Resolved.IsValid() && net.Contains(p.Resolved) {
+		// name, or whether the connection already carries an address (it
+		// arrived by IP with a sniffed or mapped host, or a hosts / fake-IP
+		// entry matched). With no address supplied that is not a certain no.
+		if !p.Resolved.IsValid() {
+			return unknown(ReasonInput)
+		}
+		if net.Contains(p.Resolved) {
 			return unknown(ReasonResolve)
 		}
 		return no

@@ -263,8 +263,11 @@
   {
    "rule": "IP-CIDR,1.2.3.0/24,Proxy,no-resolve",
    "probe": "no_port",
-   "expect": "no",
-   "note": "no-resolve: the name is not resolved for this rule"
+   "expect": "unknown",
+   "note": "no-resolve, and no address was supplied: Mihomo may still hold one (a connection that arrived by IP with a sniffed or mapped host), so this is not a certain no",
+   "reason": "input",
+   "mihomo": "rules/common/ipcidr.go Match tests metadata.DstIP whenever it is valid; no-resolve only stops the rule from resolving it",
+   "browser_differs": true
   },
   {
    "rule": "IP-CIDR,1.2.3.0/24,Proxy,no-resolve",
