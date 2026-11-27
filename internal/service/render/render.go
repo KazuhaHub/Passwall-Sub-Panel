@@ -107,9 +107,10 @@ type previewContext struct {
 	// explain brackets every rule source (personal rules and each shared
 	// segment) with marker rules so ExplainRoute can tell, in the finished
 	// document, which source every rule came from. See explain.go.
-	explain  bool
-	nonce    string        // names this call's marker rules
-	segments []ruleSegment // filled by renderForContext when explain is set
+	explain     bool
+	nonce       string        // names this call's marker rules
+	unconfirmed int           // filled by renderForContext when explain is set
+	segments    []ruleSegment // filled by renderForContext when explain is set
 }
 
 func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domain.ClientType, preview *previewContext) (*Output, error) {
@@ -213,6 +214,9 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	items = internalItems
 	if ct == domain.ClientSingBox {
 		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)
+	}
+	if preview != nil && preview.explain {
+		preview.unconfirmed = s.explainUnconfirmedLines(ctx, u, items)
 	}
 	proxies := s.buildProxiesForContext(ctx, u, items, st, preview != nil, applied)
 	generatedLines := emittedProxyNames(proxies, "name")
@@ -441,6 +445,8 @@ func (s *Service) buildProxiesForContext(ctx context.Context, u *domain.User, it
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
+		// A preview skips this gate; ExplainRoute reports the difference as the
+		// unconfirmed_lines warning (explainUnconfirmedLines).
 		if _, native := nativePanels[it.listener().PanelID]; native && !preview {
 			if _, applied := credentialFor(appliedCredentials, it); !applied {
 				log.Warn("render: skip native node until client credentials are confirmed applied",

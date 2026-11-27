@@ -364,11 +364,18 @@ func (s *Service) ExplainRoute(ctx context.Context, req ExplainRequest) (*Explai
 		resp.DraftApplied = inTemplate
 		if !inTemplate {
 			resp.Warnings = append(resp.Warnings, "draft_not_in_template")
+		} else if !req.Draft.Enabled {
+			// A disabled rule set is skipped by the render, so it is not walked.
+			// An "enabled" field left out of the request body decodes to false.
+			resp.Warnings = append(resp.Warnings, "draft_disabled")
 		}
 	}
 	output, err := s.renderForContext(ctx, &user, domain.ClientMihomo, pc)
 	if err != nil {
 		return nil, err
+	}
+	if pc.unconfirmed > 0 {
+		resp.Warnings = append(resp.Warnings, "unconfirmed_lines")
 	}
 	var doc explainDocument
 	if err := yaml.Unmarshal(output.Body, &doc); err != nil {
@@ -521,4 +528,35 @@ func (s *Service) ExplainRoute(ctx context.Context, req ExplainRequest) (*Explai
 		res.Certain = true
 	}
 	return resp, nil
+}
+
+// explainUnconfirmedLines counts the lines of a native (Passwall Node) panel
+// whose client credentials the user's roster has not confirmed yet. The real
+// subscription omits those lines (buildProxiesForContext, "skip native node
+// until client credentials are confirmed applied"); a preview render does not
+// apply that gate, so explain walks a document that still lists them. Targets
+// that name such a line therefore resolve here but would not in /sub, and the
+// response warns instead of hiding the difference.
+func (s *Service) explainUnconfirmedLines(ctx context.Context, u *domain.User, items []renderItem) int {
+	if u == nil || u.ID <= 0 {
+		return 0
+	}
+	native := s.nativePanelIDs(ctx, items)
+	if len(native) == 0 {
+		return 0
+	}
+	applied := s.appliedClientCredentialsByNode(ctx, u)
+	n := 0
+	for _, it := range items {
+		if it.isSeparator || it.node == nil {
+			continue
+		}
+		if _, ok := native[it.listener().PanelID]; !ok {
+			continue
+		}
+		if _, ok := credentialFor(applied, it); !ok {
+			n++
+		}
+	}
+	return n
 }

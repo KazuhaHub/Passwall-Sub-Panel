@@ -340,3 +340,51 @@ func TestExplainWalksExactlyTheRealSubscriptionRules(t *testing.T) {
 		t.Fatalf("real rules %q", doc.Rules)
 	}
 }
+
+func TestExplainWarnsWhenTheDraftDropsOutOfTheWalk(t *testing.T) {
+	stored := ruleSet("common", "- DOMAIN,claude.ai,Old", direct("Old"))
+	s, _ := explainFixture(t, stored)
+	draft := ruleSet("common", "- DOMAIN,claude.ai,New", direct("New"))
+	draft.Enabled = false // also what an absent "enabled" field decodes to
+
+	got := explain(t, s, ExplainRequest{Draft: draft})
+	if !got.DraftApplied || len(got.Warnings) != 1 || got.Warnings[0] != "draft_disabled" || got.Result.State != ExplainNoMatch {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Explain, like the other previews, does not apply the credential gate the real
+// subscription does: lines whose credentials are not confirmed yet are walked.
+// The response says so instead of silently differing from /sub.
+func TestExplainWarnsAboutLinesTheRealSubscriptionOmits(t *testing.T) {
+	rs := ruleSet("common", "- DOMAIN,claude.ai,A B\n- MATCH,DIRECT", nil)
+	s, u := explainFixture(t, rs)
+	s.repos.XUIPanel = renderPanelRepo{kind: domain.PanelKindPSP}
+	s.repos.PSPClient = lineCredentialRepo{} // nothing confirmed for any line
+
+	got := explain(t, s, ExplainRequest{UserID: u.ID})
+	if !hasWarning(got.Warnings, "unconfirmed_lines") {
+		t.Fatalf("warnings %v", got.Warnings)
+	}
+	// With the credentials confirmed the warning goes away.
+	s, u = explainFixture(t, rs)
+	s.repos.XUIPanel = renderPanelRepo{kind: domain.PanelKindPSP}
+	got = explain(t, s, ExplainRequest{UserID: u.ID})
+	if hasWarning(got.Warnings, "unconfirmed_lines") {
+		t.Fatalf("warnings %v", got.Warnings)
+	}
+	// Without a user there are no credentials to confirm.
+	got = explain(t, s, ExplainRequest{})
+	if hasWarning(got.Warnings, "unconfirmed_lines") {
+		t.Fatalf("warnings %v", got.Warnings)
+	}
+}
+
+func hasWarning(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
