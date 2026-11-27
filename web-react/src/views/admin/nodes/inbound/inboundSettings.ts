@@ -386,7 +386,7 @@ export function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormS
   // Map 3X-UI's wire-level protocol name back onto our CreateProtocol enum.
   // Only the three allowlisted SS-2022 methods reach this structured parser;
   // legacy Shadowsocks must never be silently mapped onto VLESS.
-  let protocol: CreateProtocol = 'vless'
+  let protocol: CreateProtocol
   switch (ib.protocol) {
     case 'vmess': protocol = 'vmess'; break
     case 'trojan': protocol = 'trojan'; break

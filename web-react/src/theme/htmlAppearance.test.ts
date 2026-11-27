@@ -118,7 +118,7 @@ describe('stylesheet', () => {
 describe('stylesheet brand variables', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
   const declared = (selector: string): Record<string, string> => {
-    const escaped = selector.replace(/[.[\]"]/g, '\\$&')
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const m = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)
     if (!m) throw new Error(`no rule for ${selector}`)
     return Object.fromEntries(

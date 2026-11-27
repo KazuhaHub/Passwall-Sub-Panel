@@ -50,7 +50,7 @@ function chunkFor(pkg: string): string | undefined {
 
 function packageOf(id: string): string | undefined {
   const m = /.*node_modules[\\/](@[^\\/]+[\\/][^\\/]+|[^\\/]+)[\\/]/.exec(id)
-  return m?.[1].replace('\\', '/')
+  return m?.[1].replace(/\\/g, '/')
 }
 
 // Fails the build when a new-stack package ends up outside its vendor chunk (for

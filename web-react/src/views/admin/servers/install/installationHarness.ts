@@ -70,7 +70,7 @@ export async function selectVersion(version: string, publishedAs?: NodeReleaseCh
   fireEvent.change(channelSelect, { target: { value: channel } })
   const versionSelect = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }) as HTMLSelectElement
   await waitFor(() => expect(versionSelect.disabled).toBe(false))
-  await waitFor(() => expect(within(versionSelect).queryByRole('option', { name: new RegExp(`^${version.replace(/[.+]/g, '\\$&')}`) })).not.toBeNull())
+  await waitFor(() => expect(within(versionSelect).queryByRole('option', { name: new RegExp(`^${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) })).not.toBeNull())
   fireEvent.change(versionSelect, { target: { value: version } })
 }
 

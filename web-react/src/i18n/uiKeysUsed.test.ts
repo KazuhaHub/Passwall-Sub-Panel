@@ -45,7 +45,7 @@ describe('common:ui.data / ui.form / ui.diagram keys', () => {
 
   it('keeps the list of run-time keys honest: they all exist, and the source really builds them', () => {
     for (const [prefix, vs] of Object.entries(DYNAMIC)) {
-      expect(new RegExp(`${prefix.replace(/\./g, '\\.')}(\\$\\{|' ?\\+)`).test(all) || all.includes(`${prefix}\${`), `${prefix}\${...} is not built anywhere`).toBe(true)
+      expect(new RegExp(`${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\$\\{|' ?\\+)`).test(all) || all.includes(`${prefix}\${`), `${prefix}\${...} is not built anywhere`).toBe(true)
       for (const v of vs) {
         expect([...enKeys].map(base)).toContain(`${prefix}${v}`)
         expect([...zhKeys].map(base)).toContain(`${prefix}${v}`)

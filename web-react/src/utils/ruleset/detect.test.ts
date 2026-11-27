@@ -92,3 +92,17 @@ describe('reviewing a paste against the document', () => {
     expect(reviewPaste(entries, doc, blocks, { kind: 'new', before: 2 }).earlier).toEqual([{ value: 'c.example', block: 1 }])
   })
 })
+
+describe('reading a bare domain', () => {
+  it('answers at once for a long run of `!.` (no catastrophic backtracking)', () => {
+    const started = performance.now()
+    const scan = scanPaste('a' + '!.'.repeat(120) + ' ')
+    expect(performance.now() - started).toBeLessThan(100)
+    expect(scan.entries).toHaveLength(0)
+  })
+
+  it('still reads ordinary domains and refuses an empty label', () => {
+    expect(scanPaste('example.com\nsub.example.co.uk').entries.map(e => e.value)).toEqual(['example.com', 'sub.example.co.uk'])
+    expect(scanPaste('a..b.com').entries).toHaveLength(0)
+  })
+})

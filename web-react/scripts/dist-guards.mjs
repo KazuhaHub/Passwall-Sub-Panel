@@ -14,9 +14,9 @@ const NEW_STACK_CHUNK = /^vendor-(?:base-ui|ui)(?![a-z])/
 // whatever the attribute order.
 export function preloadedAssets(indexHtml) {
   const out = []
-  for (const tag of indexHtml.match(/<(?:link|script)\b[^>]*>/g) ?? []) {
-    const attr = name => new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`).exec(tag)?.[1]
-    const url = tag.startsWith('<script') ? attr('src') : /modulepreload/.test(attr('rel') ?? '') ? attr('href') : undefined
+  for (const tag of indexHtml.match(/<(?:link|script)\b[^>]*>/gi) ?? []) {
+    const attr = name => new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, 'i').exec(tag)?.[1]
+    const url = /^<script/i.test(tag) ? attr('src') : /modulepreload/.test(attr('rel') ?? '') ? attr('href') : undefined
     const m = url && /^\.\/(assets\/.+)$/.exec(url)
     if (m) out.push(m[1])
   }
@@ -33,7 +33,7 @@ const STATIC_IMPORT = /\b(?:from|import)\s*["']\.\/([^"']+\.js)["']/g
 
 function entryImports(indexHtml, files) {
   const names = new Set()
-  const entry = (indexHtml.match(/<script\b[^>]*>/g) ?? []).map(t => /\bsrc\s*=\s*"\.\/assets\/([^"]+)"/.exec(t)?.[1]).find(Boolean)
+  const entry = (indexHtml.match(/<script\b[^>]*>/gi) ?? []).map(t => /\bsrc\s*=\s*"\.\/assets\/([^"]+)"/i.exec(t)?.[1]).find(Boolean)
   const queue = entry && files?.[entry] !== undefined ? [entry] : []
   const seen = new Set(queue)
   while (queue.length) {

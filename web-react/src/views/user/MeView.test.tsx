@@ -143,7 +143,7 @@ describe('status card: the service axis in words', () => {
     serve({}, { expire_at: soon })
     mountMe(<MeView />)
     await screen.findByText('Expiring soon')
-    expect(status().getByText(new RegExp(`in 3 day\\(s\\) \\(${new Date(soon).toLocaleDateString().replace(/[/.]/g, '\\$&')}\\)`))).toBeTruthy()
+    expect(status().getByText(new RegExp(`in 3 day\\(s\\) \\(${new Date(soon).toLocaleDateString().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`))).toBeTruthy()
   })
 
   it('warns when most of the traffic is used', async () => {

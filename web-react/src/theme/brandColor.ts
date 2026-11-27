@@ -69,7 +69,7 @@ export function oklchToHex(L: number, C: number, hueRad: number): string {
     for (let i = 0; i < 24; i++) {
       const mid = (lo + hi) / 2
       const cand = oklabToLinear([L, mid * Math.cos(hueRad), mid * Math.sin(hueRad)])
-      if (inGamut(cand)) { lo = mid; rgb = cand } else hi = mid
+      if (inGamut(cand)) lo = mid; else hi = mid
     }
     rgb = oklabToLinear([L, lo * Math.cos(hueRad), lo * Math.sin(hueRad)])
   }

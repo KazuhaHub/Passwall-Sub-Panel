@@ -33,7 +33,9 @@ export interface PasteScan {
   rejected: { line: number; text: string; reason: FieldProblem }[]
 }
 
-const DOMAIN_RE = /^(?=.{1,253}$)[^\s,/:#\\|^*+@?[\]()'"<>]+(\.[^\s,/:#\\|^*+@?[\]()'"<>]+)+$/u
+// Labels exclude the dot, so a label and the repeated `.label` group cannot both claim the
+// same characters (that overlap backtracked exponentially on inputs like `a!.!.!.…`).
+const DOMAIN_RE = /^(?=.{1,253}$)[^\s,/:#\\|^*+@?[\]()'"<>.]+(\.[^\s,/:#\\|^*+@?[\]()'"<>.]+)+$/u
 
 function entry(type: string, value: string, options: string[], line: number, note?: PasteEntry['note']): PasteEntry {
   return note ? { type, value, options, note, line } : { type, value, options, line }

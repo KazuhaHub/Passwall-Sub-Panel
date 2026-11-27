@@ -133,7 +133,6 @@ describe('the sentence matrix', () => {
       nodes = [user, mark({ id: 'x', kind: 'external', label: 'External entry', sublabel: ':8443' }), mark(landing)]
       edges = [solid, e({ style: 'solid', name: '', label: '210 ms' })]
     }
-    nodes = nodes
     if (withExit) {
       nodes = [...nodes, mark(exit), internet]
       edges = [...edges, e({ style: 'solid', name: '' }), solid]

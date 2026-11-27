@@ -71,7 +71,7 @@ describe('brandTones', () => {
 describe('calibration against the stylesheet presets', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/styles/ui.css'), 'utf8')
   const declared = (selector: string): string => {
-    const escaped = selector.replace(/[.[\]"]/g, '\\$&')
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const m = new RegExp(`${escaped}\\s*\\{[^}]*--brand:\\s*(#[0-9a-fA-F]{6})`).exec(css)
     if (!m) throw new Error(`no rule for ${selector}`)
     return m[1].toLowerCase()
