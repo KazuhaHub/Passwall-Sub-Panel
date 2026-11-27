@@ -82,6 +82,7 @@ function SettingsPageInner() {
   // Another section starts at its first sub-tab: `sub` belongs to the section it was set in. One update, because two
   // successive ones would each start from the same address and the second would undo the first.
   const select = (s: SectionKey) => {
+    if (s === tab) return // the section already open keeps its sub-tab
     setVisited(v => (v.has(s) ? v : new Set(v).add(s)))
     setParams(prev => {
       const out = new URLSearchParams(prev)

@@ -155,3 +155,39 @@ describe('every setting is on the page exactly once', () => {
     }
   }, 60_000)
 })
+
+describe('saves from different sub-tabs', () => {
+  it("run one after the other, so the second one's request carries the first one's new values", async () => {
+    reads()
+    // A server that keeps what it is sent, and an answer to the first write that the test holds back.
+    let server = uiSettings()
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/settings/ui') return { data: server }
+      if (url === '/admin/groups') return { data: { items: [], total: 0, page: 1, page_size: 200 } }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    let release: () => void = () => {}
+    const held = new Promise<void>(r => { release = r })
+    api.put.mockImplementation(async (_url: string, data: unknown) => {
+      if (api.put.mock.calls.length === 1) await held
+      server = data as typeof server
+      return { data }
+    })
+    mountAdmin(<SettingsView />, '/admin/settings?tab=brand')
+    await screen.findByText('Site text')
+    type('Site title', 'Hub A')
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    // A's request is still out: B is edited and saved now.
+    goTo('Addresses and domains')
+    type(/Subscription base URL/, 'https://other.example.test')
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.put).toHaveBeenCalledTimes(1)
+    release()
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    const second = api.put.mock.calls[1][1] as Record<string, unknown>
+    expect(second.site_title).toBe('Hub A')
+    expect(second.sub_base_url).toBe('https://other.example.test')
+  })
+})
