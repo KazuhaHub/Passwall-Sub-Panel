@@ -20,6 +20,9 @@ type fakeUserRepo struct {
 	// traffic state ONCE per cycle instead of N times. Inline UpdateTrafficState
 	// calls don't bump this — that's the whole point.
 	batchTrafficStateCalls int
+	// lastOnlineRowsWritten counts the per-user last_online_at UPDATEs the
+	// poll asked for (production issues one statement per map entry).
+	lastOnlineRowsWritten int
 }
 
 func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
@@ -195,6 +198,7 @@ func (r *fakeUserRepo) BatchUpdateTrafficState(ctx context.Context, users []*dom
 
 func (r *fakeUserRepo) BatchUpdateLastOnline(ctx context.Context, lastOnline map[int64]time.Time) error {
 	for uid, ts := range lastOnline {
+		r.lastOnlineRowsWritten++
 		if cur, ok := r.users[uid]; ok {
 			t := ts
 			cur.LastOnlineAt = &t
@@ -358,6 +362,11 @@ type fakeTrafficRepo struct {
 	// latestForUsersCalls counts the batched pre-fetch so the perf-behavior
 	// test can assert PollOnce now reads via the batch path (ONCE per cycle).
 	latestForUsersCalls int
+	// latestForUsersIDs accumulates every id handed to the batched read and
+	// latestForUserCalls counts the per-user fallback reads, so a cost test
+	// can prove who the poll actually fetched snapshots for.
+	latestForUsersIDs  []int64
+	latestForUserCalls int
 }
 
 func (r *fakeTrafficRepo) Insert(ctx context.Context, s *domain.TrafficSnapshot) error {
@@ -366,6 +375,7 @@ func (r *fakeTrafficRepo) Insert(ctx context.Context, s *domain.TrafficSnapshot)
 }
 
 func (r *fakeTrafficRepo) LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error) {
+	r.latestForUserCalls++
 	var latest *domain.TrafficSnapshot
 	for _, s := range r.snapshots {
 		if s.UserID != userID {
@@ -386,9 +396,11 @@ func (r *fakeTrafficRepo) LatestForUser(ctx context.Context, userID int64) (*dom
 // the single-user logic so its semantics stay in lockstep.
 func (r *fakeTrafficRepo) LatestForUsers(ctx context.Context, userIDs []int64) (map[int64]*domain.TrafficSnapshot, error) {
 	r.latestForUsersCalls++
+	r.latestForUsersIDs = append(r.latestForUsersIDs, userIDs...)
 	out := make(map[int64]*domain.TrafficSnapshot, len(userIDs))
 	for _, id := range userIDs {
 		s, err := r.LatestForUser(ctx, id)
+		r.latestForUserCalls-- // the batched path is not a per-user read
 		if err != nil {
 			// ErrNotFound — omit from the map (caller treats absence as "no prev").
 			continue

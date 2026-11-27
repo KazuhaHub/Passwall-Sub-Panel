@@ -469,12 +469,9 @@ func (r *userRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.
 // BatchUpdateLastOnline writes per-user last_online_at via a single
 // transaction with N column-scoped UPDATEs — same batching rationale as
 // BatchUpdateTrafficState. Each entry overwrites the row's last_online_at
-// unconditionally; on a transient panel outage where the new max may be
-// older than what we previously stored, this can produce a brief backward
-// step until the next poll cycle re-reads the missing panel. Acceptable
-// for an advisory "last seen" display at self-hosted scale; if the value
-// ever drives policy (auto-disable on inactivity etc.) revisit and add a
-// "WHERE last_online_at IS NULL OR last_online_at < ?" guard.
+// unconditionally; the traffic poll is the caller and only passes users
+// whose reading is a real advance over the value it loaded (nil or older),
+// so the repo itself stays a plain overwrite.
 func (r *userRepo) BatchUpdateLastOnline(ctx context.Context, lastOnline map[int64]time.Time) error {
 	if len(lastOnline) == 0 {
 		return nil

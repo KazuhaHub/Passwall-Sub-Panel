@@ -420,22 +420,41 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		userCutoff:         make(map[int64]*time.Time, len(users)),
 	}
 
-	// Pre-fetch every user's latest snapshot in ONE batched read. Replaces
-	// what used to be a per-user LatestForUser SELECT inside
-	// recordAndEnforceWith — at N users that's N round-trips reduced to 1.
-	// Absence in the returned map means "no prior snapshot", matching
-	// LatestForUser's ErrNotFound semantics so the caller can map-index it
-	// without a nil-or-err two-arm guard.
+	// Pre-fetch the latest snapshot ONLY for users that can still need it.
+	// recordAndEnforceWith reads `prev` in exactly two one-time branches:
+	// the bootstrap cutoff when LifetimeBaselineAt is nil, and the
+	// aggregate-snapshot migration seed when LifetimeTotalBytes is 0. Once a
+	// user has both a baseline and a non-zero lifetime neither branch can
+	// fire, so scanning ~2k retained snapshots per user every tick (the
+	// GROUP BY MAX(id) behind LatestForUsers) was pure waste: the steady
+	// state set is empty and no query is issued at all.
+	//
+	// The map handed to the sink must stay NON-nil even when empty: a nil
+	// map is the signal for "pre-fetch failed, read per user", and an empty
+	// one lets every settled user skip the read. Absence in the returned map
+	// means "no prior snapshot", matching LatestForUser's ErrNotFound
+	// semantics so the caller can map-index it without a two-arm guard.
+	// Neither field is touched between here and recordAndEnforceWith (they
+	// are only written at the end of that function), so the predicate
+	// evaluated now equals the one the consumer would see.
 	allUserIDs := make([]int64, 0, len(users))
+	needLatestIDs := make([]int64, 0)
 	for _, u := range users {
 		allUserIDs = append(allUserIDs, u.ID)
+		if u.LifetimeBaselineAt == nil || u.LifetimeTotalBytes == 0 {
+			needLatestIDs = append(needLatestIDs, u.ID)
+		}
 	}
-	latestByUser, lerr := s.traffic.LatestForUsers(ctx, allUserIDs)
-	if lerr != nil {
-		// Non-fatal: fall back to per-user fetch inside recordAndEnforceWith.
-		// One bad batched SELECT shouldn't kill the whole cycle.
-		log.Warn("traffic poll latest pre-fetch failed; falling back to per-user", "users", len(allUserIDs), "err", lerr)
-		latestByUser = nil
+	latestByUser := map[int64]*domain.TrafficSnapshot{}
+	if len(needLatestIDs) > 0 {
+		var lerr error
+		latestByUser, lerr = s.traffic.LatestForUsers(ctx, needLatestIDs)
+		if lerr != nil {
+			// Non-fatal: fall back to per-user fetch inside recordAndEnforceWith.
+			// One bad batched SELECT shouldn't kill the whole cycle.
+			log.Warn("traffic poll latest pre-fetch failed; falling back to per-user", "users", len(needLatestIDs), "err", lerr)
+			latestByUser = nil
+		}
 	}
 	sink.latestByUser = latestByUser
 	mark("latest_prefetch", "LatestForUsers batched read")
@@ -1053,12 +1072,29 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// the per-cycle behaviour stays orthogonal: a panel running pre-3.1.0
 	// 3X-UI reports 0 lastOnline for everyone → sink.lastOnlineMs stays
 	// empty → no UPDATE issued → existing last_online_at survives.
+	//
+	// Only a real advance is written. The stored value rode in on the user
+	// row loaded at the top of the poll, so an unchanged reading (the usual
+	// case: an idle client reports the same instant every tick) costs no
+	// statement, and a lower reading from a panel that briefly dropped out no
+	// longer steps the column backwards. Compared in milliseconds: the column
+	// round-trips at least ms precision on all three dialects (SQLite text,
+	// MySQL datetime(3), Postgres timestamptz), so an equal reading never
+	// looks like an advance and a sub-second advance is never skipped.
 	if len(sink.lastOnlineMs) > 0 {
+		stored := make(map[int64]*time.Time, len(users))
+		for _, u := range users {
+			stored[u.ID] = u.LastOnlineAt
+		}
 		toWrite := make(map[int64]time.Time, len(sink.lastOnlineMs))
 		for uid, ms := range sink.lastOnlineMs {
-			if ms > 0 {
-				toWrite[uid] = time.UnixMilli(ms)
+			if ms <= 0 {
+				continue
 			}
+			if cur := stored[uid]; cur != nil && ms <= cur.UnixMilli() {
+				continue
+			}
+			toWrite[uid] = time.UnixMilli(ms)
 		}
 		if len(toWrite) > 0 {
 			if err := s.users.BatchUpdateLastOnline(ctx, toWrite); err != nil {
@@ -1239,11 +1275,15 @@ type pollSink struct {
 	// synchronously, then deletes itself from this map, because the
 	// immediately-following re-enable does a stale-sensitive GetByID.
 	userUpdates map[int64]*domain.User
-	// latestByUser is the per-cycle pre-fetched latest snapshot per user,
-	// loaded ONCE via TrafficRepo.LatestForUsers at the top of PollOnce.
-	// recordAndEnforceWith reads this map instead of issuing a per-user
-	// LatestForUser SELECT. Absence means "no prior snapshot" (same
-	// semantics as LatestForUser returning ErrNotFound).
+	// latestByUser is the per-cycle pre-fetched latest snapshot, loaded ONCE
+	// via TrafficRepo.LatestForUsers at the top of PollOnce — but only for
+	// users that can still hit a bootstrap branch (no LifetimeBaselineAt, or
+	// LifetimeTotalBytes == 0); settled users are deliberately absent and
+	// never read it. recordAndEnforceWith reads this map instead of issuing
+	// a per-user LatestForUser SELECT. Absence means "no prior snapshot"
+	// (same semantics as LatestForUser returning ErrNotFound). NIL (as
+	// opposed to empty) means the pre-fetch failed and the per-user read
+	// is the fallback.
 	latestByUser map[int64]*domain.TrafficSnapshot
 	// lastOnlineMs holds the per-user max(clientStats.lastOnline) across
 	// every owned client seen this cycle, in 3X-UI's unit (unix ms).
