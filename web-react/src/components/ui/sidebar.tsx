@@ -400,13 +400,45 @@ function SidebarSeparator({
   )
 }
 
-function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * The scrolling list between the header and the footer. An item that is scrolled partly out of
+ * view used to be sliced off flat against the header's border, which read as a half-cut row under
+ * the logo. The list now fades out over its first and last 14px, but only on a side that still has
+ * content past it, so at rest (scrolled to the top, say) the first item is drawn in full.
+ */
+function SidebarContent({ className, onScroll, ...props }: React.ComponentProps<"div">) {
+  const ref = React.useRef<HTMLDivElement | null>(null)
+  const [edges, setEdges] = React.useState({ top: false, bottom: false })
+  const measure = React.useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const top = el.scrollTop > 0
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+    setEdges(prev => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }))
+  }, [])
+  React.useEffect(() => {
+    measure()
+    const el = ref.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    // The list's own box changes with the window and with the rail collapsing; its content
+    // changes with the role's items, so both are watched.
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    for (const child of Array.from(el.children)) ro.observe(child)
+    return () => ro.disconnect()
+  }, [measure])
   return (
     <div
+      ref={ref}
       data-slot="sidebar-content"
       data-sidebar="content"
+      data-fade-top={edges.top || undefined}
+      data-fade-bottom={edges.bottom || undefined}
+      onScroll={(e) => { measure(); onScroll?.(e) }}
       className={cn(
         "no-scrollbar flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        "[--fade-t:0px] [--fade-b:0px] data-fade-top:[--fade-t:14px] data-fade-bottom:[--fade-b:14px]",
+        "[mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-t),#000_calc(100%-var(--fade-b)),transparent_100%)]",
         className
       )}
       {...props}
