@@ -437,21 +437,16 @@ func (s *Service) ExplainRoute(ctx context.Context, req ExplainRequest) (*Explai
 			}
 		}
 	}
-	// Rules the template itself carries: find them in its text.
-	if tplLines := strings.Split(tpl.Content, "\n"); len(tplLines) > 0 {
-		used := map[int]bool{}
-		for i := range entries {
-			if entries[i].source != ruleSourceTemplate {
-				continue
-			}
-			for ln, raw := range tplLines {
-				t := strings.TrimSpace(raw)
-				if !used[ln] && (t == "- "+entries[i].text || t == "- '"+entries[i].text+"'" || t == "- \""+entries[i].text+"\"") {
-					used[ln] = true
-					entries[i].line = ln + 1
-					break
-				}
-			}
+	// Rules the template itself carries: find them in its text, taking the
+	// earliest unused line that reads as the same rule.
+	tplLines := templateRuleLines(tpl.Content)
+	for i := range entries {
+		if entries[i].source != ruleSourceTemplate {
+			continue
+		}
+		if lns := tplLines[entries[i].text]; len(lns) > 0 {
+			entries[i].line = lns[0]
+			tplLines[entries[i].text] = lns[1:]
 		}
 	}
 
@@ -559,4 +554,27 @@ func (s *Service) explainUnconfirmedLines(ctx context.Context, u *domain.User, i
 		}
 	}
 	return n
+}
+
+// templateRuleLines maps each rule a template's text carries as a `- ` list
+// item to the 1-based lines it appears on, in order. Each item is read the way
+// YAML reads it (plain, 'single' or "double" quoted, escapes included), so the
+// lookup compares the rule itself rather than re-quoting the rule text, which
+// a rule containing a quote would defeat. Lines that are not a single string
+// item (keys, placeholders, flow lists) are skipped; their rules then carry
+// line 0, as the response documents.
+func templateRuleLines(content string) map[string][]int {
+	out := map[string][]int{}
+	for ln, raw := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if !strings.HasPrefix(t, "- ") {
+			continue
+		}
+		var item []string
+		if err := yaml.Unmarshal([]byte(t), &item); err != nil || len(item) != 1 {
+			continue
+		}
+		out[item[0]] = append(out[item[0]], ln+1)
+	}
+	return out
 }

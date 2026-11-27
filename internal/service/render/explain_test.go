@@ -388,3 +388,35 @@ func hasWarning(list []string, want string) bool {
 	}
 	return false
 }
+
+// templateRuleLines finds a template rule's line by the scalar YAML would read
+// from each `- ` item, never by gluing quote characters onto the rule text: a
+// rule containing a quote must not match a different line.
+func TestTemplateRuleLinesReadEachItemAsYAML(t *testing.T) {
+	tpl := strings.Join([]string{
+		"rules:",
+		"  - DOMAIN,plain.example,DIRECT",
+		"  - 'DOMAIN,single.example,DIRECT'",
+		`  - "DOMAIN,double.example,DIRECT"`,
+		`  - "PROCESS-NAME,it's,DIRECT"`,
+		"  - 'PROCESS-NAME,it''s,REJECT'",
+		"  - {{ PERSONAL_RULES }}",
+	}, "\n")
+	lines := templateRuleLines(tpl)
+	cases := map[string]int{
+		"DOMAIN,plain.example,DIRECT":  2,
+		"DOMAIN,single.example,DIRECT": 3,
+		"DOMAIN,double.example,DIRECT": 4,
+		"PROCESS-NAME,it's,DIRECT":     5,
+		"PROCESS-NAME,it's,REJECT":     6,
+	}
+	for text, want := range cases {
+		got := lines[text]
+		if len(got) == 0 || got[0] != want {
+			t.Errorf("%q: lines %v, want first %d", text, got, want)
+		}
+	}
+	if got := lines["PROCESS-NAME,it"]; len(got) != 0 {
+		t.Errorf("a prefix of a quoted rule matched lines %v", got)
+	}
+}
