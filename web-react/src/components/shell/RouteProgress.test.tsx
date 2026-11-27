@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen } from '@testing-library/react'
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, type ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('react-i18next', async () => (await import('@/test/i18nMock')).reactI18nextMock())
@@ -29,8 +29,8 @@ describe('the route progress bar', () => {
   })
 
   it('is mounted by a suspended route and gone once the chunk resolves', async () => {
-    let resolve!: (m: { default: () => JSX.Element }) => void
-    const Page = lazy(() => new Promise<{ default: () => JSX.Element }>(r => { resolve = r }))
+    let resolve!: (m: { default: () => ReactElement }) => void
+    const Page = lazy(() => new Promise<{ default: () => ReactElement }>(r => { resolve = r }))
     render(<Suspense fallback={<RouteFallback />}><Page /></Suspense>)
     expect(screen.getByRole('status')).toBeTruthy() // the page skeleton shows at once
     act(() => { vi.advanceTimersByTime(ROUTE_PROGRESS_DELAY_MS) })

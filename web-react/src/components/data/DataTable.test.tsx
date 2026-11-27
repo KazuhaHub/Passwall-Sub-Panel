@@ -380,6 +380,73 @@ describe('reordering', () => {
     expect(onReorder).toHaveBeenCalledWith({ movedId: 'a', beforeId: 'd' })
   })
 
+  // THE PHYSICAL FEEL: jsdom has no layout, so each body row is given a 40px box, as above.
+  const boxRows = () => {
+    const trs = screen.getAllByRole('row').slice(1)
+    trs.forEach((tr, i) => {
+      tr.getBoundingClientRect = () => ({ top: i * 40, bottom: i * 40 + 40, height: 40, left: 0, right: 100, width: 100, x: 0, y: i * 40, toJSON() {} }) as DOMRect
+    })
+    frame().getBoundingClientRect = () => ({ top: 0, bottom: 160, height: 160, left: 0, right: 400, width: 400, x: 0, y: 0, toJSON() {} }) as DOMRect
+    return trs
+  }
+  const shiftsOf = (trs: HTMLElement[]) => trs.map(tr => tr.style.transform)
+  const reduceMotion = (on: boolean) => {
+    window.matchMedia = vi.fn().mockImplementation((q: string) => ({
+      matches: on && q.includes('reduce'), media: q, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })) as never
+  }
+  const realMatchMedia = window.matchMedia
+  afterEach(() => { window.matchMedia = realMatchMedia })
+
+  it('slides the rows a keyboard carry passes out of the way, and the carried row steps a slot at a time', () => {
+    reduceMotion(false)
+    mount()
+    const trs = boxRows()
+    const h = handle('A')
+    h.focus()
+    fireEvent.keyDown(h, { key: ' ' })
+    expect(shiftsOf(trs)).toEqual(['translateY(0px)', 'translateY(0px)', 'translateY(0px)', 'translateY(0px)'])
+    fireEvent.keyDown(h, { key: 'ArrowDown' })
+    fireEvent.keyDown(h, { key: 'ArrowDown' })
+    // A is over slot 2: B and C slid up one row, A moved down two, D is untouched
+    expect(shiftsOf(trs)).toEqual(['translateY(80px)', 'translateY(-40px)', 'translateY(-40px)', 'translateY(0px)'])
+    expect(trs[1].className).toContain('transition-transform')
+    expect(trs[0].getAttribute('data-moving')).toBe('true')
+    fireEvent.keyDown(h, { key: 'Escape' })
+    expect(shiftsOf(trs)).toEqual(['', '', '', ''])
+  })
+
+  it('makes the dragged row follow the pointer while the others open a gap', () => {
+    reduceMotion(false)
+    mount()
+    const trs = boxRows()
+    const h = handle('A')
+    act(() => { h.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientY: 20 })) })
+    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 125 })) })
+    // the row is drawn 105px below where it was picked up, and has crossed B and C
+    expect(trs[0].style.transform).toBe('translateY(105px)')
+    expect(trs[1].style.transform).toBe('translateY(-40px)')
+    expect(trs[2].style.transform).toBe('translateY(-40px)')
+    expect(trs[3].style.transform).toBe('translateY(0px)')
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(shiftsOf(trs)).toEqual(['', '', '', ''])
+  })
+
+  it('under reduced motion nothing moves: only the slot line and the dimmed row show', () => {
+    reduceMotion(true)
+    const onReorder = mount()
+    const trs = boxRows()
+    const h = handle('A')
+    act(() => { h.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientY: 20 })) })
+    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 125 })) })
+    expect(shiftsOf(trs)).toEqual(['', '', '', ''])
+    expect(trs[3].getAttribute('data-drop')).toBe('before')
+    expect(trs[3].className).toContain('inset_0_2px_0_0')
+    expect(trs[0].className).toContain('opacity-50')
+    act(() => { window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 125 })) })
+    expect(onReorder).toHaveBeenCalledWith({ movedId: 'a', beforeId: 'd' })
+  })
+
   it('a pointer drag that ends where it began sends nothing, and Escape cancels one in flight', () => {
     const onReorder = mount()
     const trs = screen.getAllByRole('row').slice(1)
