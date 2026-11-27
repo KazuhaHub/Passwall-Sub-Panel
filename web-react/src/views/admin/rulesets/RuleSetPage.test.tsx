@@ -9,7 +9,7 @@ import { api, installReads, list, mountRuleSets, toast, where } from './testHarn
 configure({ asyncUtilTimeout: 4000 })
 
 const content = '- DOMAIN,a.example,Proxy\n- DOMAIN-SUFFIX,b.example,Proxy\n# ads\n- DOMAIN-KEYWORD,adx,Block\n- IP-CIDR,10.0.0.0/8,Block,no-resolve\n'
-const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content }
+const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content, revision: 'r1' }
 const seeded = { ...base, slug: 'default_rules', name: 'Seeded rules', sort: 1 }
 const template = { slug: 't1', name: 'Mihomo main', client_type: 'mihomo', is_default: false, rule_sets: ['custom'], content: '' }
 const inspection = (extra: Record<string, unknown> = {}) => ({ groups: [], builtins: [], nodes: [], lines: [], regions: [], tags: [], issues: [], ...extra })
@@ -53,7 +53,7 @@ describe('the rule-set page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
     expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', {
-      slug: 'custom', name: 'Renamed', sort: 7, enabled: true, direct_subscription_domain: false,
+      slug: 'custom', name: 'Renamed', sort: 7, enabled: true, direct_subscription_domain: false, base_revision: 'r1',
       content: '- DOMAIN,b.example,A\n- MATCH,B',
       proxy_group_order: ['B', 'A'],
       proxy_group_members: { A: [{ kind: 'builtin', value: 'DIRECT' }] },

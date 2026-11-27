@@ -7,11 +7,19 @@ export const CONFLICT_FIELDS = [
 export type ConflictField = (typeof CONFLICT_FIELDS)[number] | 'content'
 
 // An absent list and an empty one are the same thing to the server, so neither side "changed" it by being read back one way or the other.
-const norm = (v: unknown) => {
-  const j = JSON.stringify(v ?? null)
-  return j === '[]' || j === '{}' ? 'null' : j
+const blank = (v: unknown) => v == null || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)
+
+/** Deep equality that ignores object key order (members and options are maps; the server may order their keys differently). */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => deepEqual(x, b[i]))
+  const ka = Object.keys(a).filter(k => (a as Record<string, unknown>)[k] !== undefined)
+  const kb = Object.keys(b).filter(k => (b as Record<string, unknown>)[k] !== undefined)
+  return ka.length === kb.length && ka.every(k => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
 }
-const same = (a: RuleSet, b: RuleSet, f: ConflictField) => (f === 'content' ? a.content === b.content : norm(a[f]) === norm(b[f]))
+const same = (a: RuleSet, b: RuleSet, f: ConflictField) => (f === 'content' ? a.content === b.content : (blank(a[f]) && blank(b[f])) || deepEqual(a[f], b[f]))
 
 /** What differs between two versions: `content` first (compared as the strings they are), then the other fields. */
 export function changedFields(from: RuleSet, to: RuleSet): ConflictField[] {

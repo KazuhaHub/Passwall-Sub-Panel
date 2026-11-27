@@ -98,7 +98,7 @@ describe('a template page', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^More/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     const ask = await screen.findByRole('alertdialog')
-    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' })))
     fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/templates/custom-tpl'))
     await waitFor(() => expect(where()).toBe('/admin/templates'))

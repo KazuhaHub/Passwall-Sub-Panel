@@ -9,6 +9,7 @@ import { api, installReads, list, mountRuleSets } from './testHarness'
 configure({ asyncUtilTimeout: 4000 })
 
 const base = {
+  revision: 'r1',
   slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[],
   content: '- DOMAIN,a.example,Proxy\n- DOMAIN,a.example,Proxy\n- DOMAIN-SUFFIX,b.example,DIRECT\n- DOMAIN,www.b.example,REJECT\n- DOMAIN,c.example,Other\n',
   mihomo_sub_rules: [{ name: 'sub', content: '- DOMAIN,x.example,Proxy\n- DOMAIN,x.example,Proxy\n- MATCH,DIRECT\n' }],

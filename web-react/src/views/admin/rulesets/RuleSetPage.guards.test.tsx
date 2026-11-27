@@ -112,6 +112,19 @@ describe('the revision', () => {
   })
 })
 
+describe('a rule set read without a revision', () => {
+  it('is not saved: no unconditional overwrite, the person is asked to reload', async () => {
+    const { revision: _r, ...bare } = base
+    reads([bare])
+    mountRuleSets(PAGE)
+    await rename('Mine')
+    await save()
+    await waitFor(() => expect(messages().some(m => /without a revision/.test(m))).toBe(true))
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+})
+
 describe('a stale save (409 ruleset_stale)', () => {
   const theirs = { ...base, name: 'Theirs', content: '- DOMAIN,a.example,Proxy\n- DOMAIN,c.example,Proxy\n- MATCH,Proxy\n', revision: 'r9' }
   const stale = () => http(409, { error: 'Rule set changed since it was loaded', code: 'ruleset_stale', current: theirs })

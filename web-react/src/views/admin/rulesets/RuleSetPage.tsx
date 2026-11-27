@@ -182,6 +182,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     // The server refuses a larger body in a middleware, with nothing the person could act on; say it here, before any request.
     // A new rule set (or a copy of one) has no revision to be stale against; an existing one saves against the revision it was read at.
     const baseRevision = editing ? (base ?? baseline.revision) : undefined
+    // Never fall back to an unconditional overwrite: a rule set read without a revision is not saved until it is read again.
+    if (editing && !baseRevision) { warn(t('admin:rules.revision_missing')); return }
     const size = bytesOf(ruleSetRequestBody(form, baseRevision))
     if (size > RULESET_BODY_LIMIT) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(RULESET_BODY_LIMIT) })); return }
     // From here the editor is locked (`pending`) until the answer is in, so nothing typed meanwhile is overwritten by the response or reported as saved.

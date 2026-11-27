@@ -2170,7 +2170,7 @@
       "batch_enabled": "Enabled {{count}} rule sets",
       "batch_disabled": "Disabled {{count}} rule sets",
       "batch_deleted": "Deleted {{count}} rule sets",
-      "batch_stale": "{{count}} rule sets were changed by someone else and were not updated. Reload the page, then try again.",
+      "batch_stale": "{{count}} rule sets were changed since the list was loaded and were not updated. The list now shows their current versions.",
       "batch_partial": "{{ok}} done, {{fail}} failed"
     },
     "confirm": {
@@ -2221,7 +2221,8 @@
     "too_large": "The rule set is too large ({{size}}); the limit is {{limit}}",
     "too_large_proxy": "The server refused the rule set as too large ({{size}}). A reverse proxy in front of the panel may allow less than the panel does; for nginx, raise client_max_body_size.",
     "stale_title": "The rule set has changed",
-    "stale_body": "Someone saved this rule set while you were editing. Your changes are still here and have not been saved.",
+    "stale_body": "This rule set was saved by someone else, restored to default, edited on disk or saved in another tab while you were editing. Your changes are still here and have not been saved.",
+    "revision_missing": "This rule set was loaded without a revision, so it cannot be saved safely. Reload the page and try again.",
     "stale_gone": "This rule set was changed or removed while you were editing, and the current version could not be read. Your changes are still here and have not been saved.",
     "stale_review": "Review their changes",
     "stale_overwrite": "Overwrite with my version",

@@ -30,6 +30,7 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
   const { t } = useTranslation(['admin'])
   const [failed, setFailed] = useState<(Asked & { message?: string }) | null>(null)
   const [loading, setLoading] = useState(false)
+  const toasted = useRef(false)
   const inflight = useRef<(Asked & { controller: AbortController }) | null>(null)
   const current: Asked = { content, small }
 
@@ -43,13 +44,14 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
       inflight.current = { ...asked, controller }
       setLoading(true)
       const members = JSON.parse(asked.small) as [Record<string, ProxyGroupMember[]> | null, Record<string, ProxyGroupOptions> | null, MihomoSubRule[] | null, MihomoRematchOutbound[] | null]
-      void inspectProxyGroups({
+      const request = {
         content: asked.content,
         proxy_group_members: members[0] || {},
         proxy_group_options: members[1] || {},
         mihomo_sub_rules: members[2] || [],
         mihomo_rematch_outbounds: members[3] || [],
-      }, controller.signal, true).then(data => {
+      }
+      void inspectProxyGroups(request, controller.signal, true).then(data => {
         if (controller.signal.aborted) return
         inflight.current = null
         setDone({ ...asked, data })
@@ -61,8 +63,9 @@ export function useDraftInspection(draft: Pick<RuleSet, 'content' | 'proxy_group
         const failure = ruleSetFailureOf(err)
         let message: string | undefined
         if (failure.kind === 'too_large') {
-          message = tooLargeText(t, failure.limitBytes, new TextEncoder().encode(JSON.stringify({ content: asked.content, small: asked.small })).length)
-          pushToast({ message, severity: 'warning' })
+          message = tooLargeText(t, failure.limitBytes, new TextEncoder().encode(JSON.stringify(request)).length)
+          // The problems panel shows the failed state; the toast is for the Proxy groups tab, which has none, and once per visit is enough.
+          if (!toasted.current) { toasted.current = true; pushToast({ message, severity: 'warning' }) }
         }
         setFailed({ ...asked, message })
         setLoading(false)

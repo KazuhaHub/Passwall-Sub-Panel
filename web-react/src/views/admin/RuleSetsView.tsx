@@ -32,6 +32,7 @@ import { StatusDot } from '@/components/common/StatusDot'
 import { isReservedSlug, legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
 
 const NONE: never[] = []
+class MissingRevision extends Error {}
 
 /**
  * Rule sets: reusable snippets of routing rules that only take part in a subscription when a template binds them.
@@ -121,12 +122,13 @@ function RuleSetsList() {
     setBatchBusy(true)
     try {
       // Each rule set is saved against the revision the list holds for it, so one that someone saved since is refused, not overwritten.
-      const results = await allSettledLimited(rows, r => saveRuleSet({ ...r, enabled }, r.revision))
-      const failures = results.flatMap(r => (r.status === 'rejected' ? [ruleSetFailureOf(r.reason)] : []))
-      const fail = failures.length
+      // A row without a revision is not sent at all (that would be an unconditional overwrite) and is counted with the stale ones.
+      const results = await allSettledLimited(rows, r => (r.revision ? saveRuleSet({ ...r, enabled }, r.revision) : Promise.reject(new MissingRevision())))
+      const failures = results.flatMap(r => (r.status === 'rejected' ? [r.reason instanceof MissingRevision ? { kind: 'stale' as const } : ruleSetFailureOf(r.reason)] : []))
       const stale = failures.filter(f => f.kind === 'stale').length
-      if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: rows.length - fail, fail }), severity: 'warning' })
-      else pushToast({ message: t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), severity: 'success' })
+      const fail = failures.length - stale
+      if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: rows.length - fail - stale, fail }), severity: 'warning' })
+      else if (stale === 0) pushToast({ message: t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), severity: 'success' })
       // A refusal for a stale revision is not retried: the list is reloaded below and the person decides again from what is there.
       if (stale > 0) pushToast({ message: t('admin:rules.toast.batch_stale', { count: stale }), severity: 'warning' })
       await load()

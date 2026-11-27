@@ -6,7 +6,8 @@ import { mountRuleSets, where } from './rulesets/testHarness'
 import RuleSetsView from './RuleSetsView'
 
 const PATH = '/admin/rules'
-const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content: '- DOMAIN,a.example,DIRECT' }
+const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content: '- DOMAIN,a.example,DIRECT', revision: 'r1' }
+const { revision: _rev, ...sent } = base
 const seeded = { ...base, slug: 'default_rules', name: 'Seeded rules', sort: 1 }
 const template = { slug: 't1', name: 'Mihomo main', client_type: 'mihomo', is_default: false, rule_sets: ['custom'], content: '' }
 const inspection = (extra: Record<string, unknown> = {}) => ({ groups: [], builtins: [], nodes: [], lines: [], regions: [], tags: [], issues: [], ...extra })
@@ -159,6 +160,16 @@ describe('opening a rule set', () => {
 })
 
 describe('bulk actions', () => {
+  it('sends nothing for a row that has no revision', async () => {
+    const { revision: _r, ...bare } = base
+    reads([bare])
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(toast.mock.calls.some(c => /changed since the list was loaded/.test(String(c[0]?.message)))).toBe(true))
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
   it('leaves seeded rule sets out of the selection and confirms a bulk delete with the count', async () => {
     reads([base, { ...base, slug: 'other', name: 'Other' }, seeded])
     api.delete.mockResolvedValue({})
@@ -181,7 +192,7 @@ describe('bulk actions', () => {
     mountPage(<RuleSetsView />, PATH)
     fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
     fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...base, enabled: false }, expect.anything()))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...sent, enabled: false, base_revision: 'r1' }, expect.anything()))
   })
 
   it('bulk disable saves against the revision the list holds, and on a stale refusal says so and reloads instead of retrying', async () => {
@@ -195,9 +206,13 @@ describe('bulk actions', () => {
     fireEvent.click(within(await rowOf('Other')).getByRole('checkbox'))
     fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
-    expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...base, enabled: false, base_revision: 'r1' }, expect.anything())
+    expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...sent, enabled: false, base_revision: 'r1' }, expect.anything())
     expect(api.put).toHaveBeenCalledWith('/admin/rules/other', expect.objectContaining({ base_revision: 'o1' }), expect.anything())
-    await waitFor(() => expect(toast.mock.calls.map(c => String(c[0]?.message ?? c[0])).some(m => /changed by someone else.*Reload the page/.test(m))).toBe(true))
+    await waitFor(() => expect(toast.mock.calls.map(c => String(c[0]?.message ?? c[0])).some(m => /changed since the list was loaded/.test(m))).toBe(true))
+    // Only the stale line is shown for that row (it is not also counted as failed), and the success line is not.
+    const said = toast.mock.calls.map(c => String(c[0]?.message ?? c[0]))
+    expect(said.some(m => /1 rule sets were changed since the list was loaded/.test(m))).toBe(true)
+    expect(said.some(m => /failed/.test(m))).toBe(false)
     // No second attempt, and the list was read again.
     expect(api.put).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(api.get.mock.calls.filter(c => c[0] === '/admin/rules').length).toBeGreaterThan(1))

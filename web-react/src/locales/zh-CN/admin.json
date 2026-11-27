@@ -2160,7 +2160,7 @@
       "batch_enabled": "已启用 {{count}} 个规则集",
       "batch_disabled": "已停用 {{count}} 个规则集",
       "batch_deleted": "已删除 {{count}} 个规则集",
-      "batch_stale": "有 {{count}} 个规则集已被其他人修改，未更新。请刷新页面后重试。",
+      "batch_stale": "有 {{count}} 个规则集在列表载入后已被修改，未更新。列表现已显示它们的当前版本。",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
     },
     "confirm": {
@@ -2211,7 +2211,8 @@
     "too_large": "规则集过大（{{size}}），超过可保存的上限 {{limit}}",
     "too_large_proxy": "服务器拒绝了过大的规则集（{{size}}）。面板前面的反向代理允许的大小可能比面板更小；使用 nginx 时，请调大 client_max_body_size。",
     "stale_title": "规则集已被修改",
-    "stale_body": "在你编辑期间，有人保存了这个规则集。你的修改仍在这里，尚未保存。",
+    "stale_body": "在你编辑期间，这个规则集被他人保存、恢复为默认、在磁盘上被修改，或在你的另一个标签页中保存。你的修改仍在这里，尚未保存。",
+    "revision_missing": "这个规则集载入时没有版本号，无法安全保存。请刷新页面后重试。",
     "stale_gone": "在你编辑期间，这个规则集被修改或删除，无法读取当前版本。你的修改仍在这里，尚未保存。",
     "stale_review": "查看对方的更改",
     "stale_overwrite": "以我的版本覆盖",
