@@ -259,8 +259,16 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// SAMLResponse (which is ~80 KiB); the node sync protocol has its own shared
 	// 16 MiB limit for full fleet reports. Audit middleware later does
 	// io.ReadAll(body) — without these caps that's a memory-exhaustion vector.
-	g.Use(middleware.BodyLimitByPath(1<<20, map[string]int64{
+	//
+	// The rule-set admin family gets 8 MiB: a rule set is one YAML string inside
+	// a JSON body, and large community lists (tens of thousands of lines) pass
+	// 1 MiB. Rule sets are saved under /rules/:slug, so this is a prefix match.
+	// The engine sits behind panelDispatch, which has already stripped a custom
+	// panel_path, so the prefix needs no panel-path variant. Nothing else widens.
+	g.Use(middleware.BodyLimitByPathPrefix(1<<20, map[string]int64{
 		"/v1/node/sync": nodeprotocol.MaxSyncBodyBytes,
+	}, map[string]int64{
+		"/api/admin/rules/": ruleSetBodyLimit,
 	}))
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
@@ -1046,6 +1054,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 	return panelDispatch(paths, g)
 }
+
+// ruleSetBodyLimit caps PUT /api/admin/rules/:slug and the two draft-compile
+// POSTs (inspect-proxy-groups, preview-proxy-groups) at 8 MiB.
+const ruleSetBodyLimit = 8 << 20
 
 // trustedProxies resolves the SetTrustedProxies argument from the
 // http.trusted_proxies config value (or PSP_TRUSTED_PROXIES env
