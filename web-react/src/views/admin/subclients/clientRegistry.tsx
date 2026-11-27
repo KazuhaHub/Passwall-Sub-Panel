@@ -18,12 +18,24 @@ import type { useRegistryActions } from './useRegistryActions'
 export { CLIENT_PRESETS, PLATFORM_OPTIONS, clonePreset, normalizeRegistry } from './presets'
 
 interface Row { f: SubClientFamily; i: number }
+
+// A family has no id of its own, and its position is not one: a reorder would give every row a different
+// identity, and the table's drop animation (which follows rows by id) would draw them through each other's
+// places. The object itself is what stays the same across a reorder (it is only moved), so it is what carries
+// the id. An edit replaces the object and so gives a new row, which is right: it is a different value.
+const familyIds = new WeakMap<SubClientFamily, string>()
+let familySeq = 0
+const familyId = (f: SubClientFamily) => {
+  let id = familyIds.get(f)
+  if (id === undefined) { id = `family-${++familySeq}`; familyIds.set(f, id) }
+  return id
+}
 const sortless = { enableSorting: false } as const
 const FIT = 'max-w-0 overflow-hidden text-ellipsis'
 
 /**
- * The families in the order they are matched. Rows are identified by their position (a family has no id), which
- * is also why a reorder or a delete closes the sheet: it would otherwise point at a different family.
+ * The families in the order they are matched. The open sheet is tracked by position, which is why a reorder or a
+ * delete closes it: it would otherwise point at a different family. Row ids are not positions (see familyId).
  */
 export default function ClientRegistry({ families, onChange, actions }: {
   families: SubClientFamily[]
@@ -64,13 +76,13 @@ export default function ClientRegistry({ families, onChange, actions }: {
         tableId="admin.subClients"
         data={rows}
         columns={columns}
-        getRowId={r => String(r.i)}
+        getRowId={r => familyId(r.f)}
         aria-label={t('settings.subscription.section_clients')}
         rowLabel={r => r.f.name || t('settings.subscription.unnamed_family')}
         pagination={false}
         columnMenu={false}
         onRowOpen={r => setOpen(r.i)}
-        activeRowId={open === null ? null : String(open)}
+        activeRowId={open === null || !families[open] ? null : familyId(families[open])}
         rowOptions={r => ({ state: r.f.enabled ? undefined : 'dimmed' })}
         renderCard={(r, ctx) => {
           const name = r.f.name.trim() || t('settings.subscription.unnamed_family')
@@ -87,7 +99,7 @@ export default function ClientRegistry({ families, onChange, actions }: {
         onReorder={call => {
           // Only the order changes; every family keeps its content. The sheet closes because positions moved.
           setOpen(null)
-          onChange(applyReorder(rows, r => String(r.i), call).map(r => r.f))
+          onChange(applyReorder(rows, r => familyId(r.f), call).map(r => r.f))
         }}
         empty={<EmptyState compact title={t('settings.subscription.no_rules')} action={<Button onClick={addFamily}><IconAdd />{t('settings.subscription.add_family')}</Button>} />}
       />

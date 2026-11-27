@@ -610,6 +610,8 @@ export function DataTable<T>(props: DataTableProps<T>) {
           dropBefore={reorder.insertion === index}
           dropAfter={reorder.insertion === rows.length && index === rows.length - 1}
           moving={reorder.movingId === row.id}
+          motion={reorder.motion}
+          shift={reorder.shiftOf(row.id, index)}
           ariaRowIndex={windowed ? index + 2 : undefined}
         />
       )
@@ -909,6 +911,10 @@ interface DataRowProps<T> {
   dropBefore: boolean
   dropAfter: boolean
   moving: boolean
+  /** The rows physically move (lift, slide, settle); with reduced motion only the drop line cues. */
+  motion: boolean
+  /** Vertical offset in px while a reorder is in progress; undefined when none is (see useRowReorder.shiftOf). */
+  shift: number | undefined
   /** 1-based position in the whole list, header included; set only when the table is windowed. */
   ariaRowIndex: number | undefined
 }
@@ -930,6 +936,8 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       data-highlight={p.highlighted ? 'true' : undefined}
       data-related={p.related ? 'true' : undefined}
       data-drop={p.dropBefore ? 'before' : p.dropAfter ? 'after' : undefined}
+      data-moving={p.moving ? 'true' : undefined}
+      style={p.shift === undefined ? undefined : { transform: `translateY(${p.shift}px)` }}
       aria-rowindex={p.ariaRowIndex}
       {...p.dataAttrs}
       tabIndex={ctx.interactive ? (p.tabStop ? 0 : -1) : undefined}
@@ -944,9 +952,14 @@ function DataRowInner<T>(p: DataRowProps<T>) {
       className={cn(
         'group/row outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
         p.canOpen && 'cursor-pointer',
-        p.moving && 'opacity-50',
-        p.dropBefore && '[&>td]:shadow-[inset_0_2px_0_0_var(--brand)]',
-        p.dropAfter && '[&>td]:shadow-[inset_0_-2px_0_0_var(--brand)]',
+        // Carried: lifted above the rows it passes, with a soft shadow (a filter, because a table
+        // row does not paint box-shadow in every browser). Reduced motion keeps the old dimming.
+        p.moving && (p.motion ? 'relative z-[3] [filter:drop-shadow(0_6px_10px_rgb(0_0_0/0.22))]' : 'opacity-50'),
+        // The others slide on a transition, except the row the pointer is dragging (it follows it).
+        p.motion && p.shift !== undefined && 'transition-transform duration-150 ease-out',
+        // The slot line is the only cue without motion; with it the gap itself is the cue.
+        !p.motion && p.dropBefore && '[&>td]:shadow-[inset_0_2px_0_0_var(--brand)]',
+        !p.motion && p.dropAfter && '[&>td]:shadow-[inset_0_-2px_0_0_var(--brand)]',
         // Dimmed is colour, not opacity: opacity takes muted text to about 2:1. A page adds
         // its own cue (a tag) in the cells; the row only softens its background and text.
         ROW_BG,

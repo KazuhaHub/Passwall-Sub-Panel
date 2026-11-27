@@ -119,7 +119,10 @@ export function AudienceRail() {
         {groups.length > FILTER_FROM && (
           <Input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('settings.scope.filter')} aria-label={t('settings.scope.filter')} className="mb-1" />
         )}
-        <ul className="grid max-h-56 gap-0.5 overflow-y-auto">
+        {/* The active item draws a ring and a shadow outside its box, and the focus ring is 3px: an
+            overflow container clips them at its padding edge, which cut the highlight flat on three
+            sides. 4px of padding (cancelled by the negative margin) leaves room for all of it. */}
+        <ul className="-m-1 grid max-h-56 gap-0.5 overflow-y-auto p-1">
           {item(0, t('settings.scope.all_users'))}
           {shown.map(g => item(g.id, g.name))}
         </ul>
