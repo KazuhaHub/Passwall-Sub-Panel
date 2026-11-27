@@ -186,6 +186,7 @@ function RuleSetsList() {
         primary={canConfig && <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button>}
       />
       <DataTable<RuleSet>
+        tableId="admin.ruleSets"
         aria-label={t('admin:rules.title')}
         data={shown}
         columns={columns}

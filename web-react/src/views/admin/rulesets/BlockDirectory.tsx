@@ -93,6 +93,6 @@ export function BlockDirectory({ doc, blocks, shown, hits, selected, onSelect, r
     maxHeight: COLUMN_HEIGHT,
   }
   return readOnly
-    ? <DataTable<Block> {...common} pagination={false} />
-    : <DataTable<Block> {...common} pagination={false} onReorder={onReorder} reorderBlockedReason={reorderBlockedReason} />
+    ? <DataTable<Block> tableId="admin.ruleSets.blocks" {...common} pagination={false} />
+    : <DataTable<Block> tableId="admin.ruleSets.blocks" {...common} pagination={false} onReorder={onReorder} reorderBlockedReason={reorderBlockedReason} />
 }

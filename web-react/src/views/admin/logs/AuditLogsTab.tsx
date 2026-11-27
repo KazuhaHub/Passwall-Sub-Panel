@@ -23,11 +23,11 @@ export default function AuditLogsTab() {
       cell: c => <TimeCell value={c.row.original.at} /> },
     { id: 'actor', header: t('logs.audit_table.actor'), meta: { label: t('logs.audit_table.actor'), className: `${FIT} w-[16%] font-medium` },
       cell: c => <span title={c.row.original.actor}>{c.row.original.actor}</span> },
-    { id: 'action', header: t('logs.audit_table.action'), meta: { label: t('logs.audit_table.action'), className: `${FIT} w-[26%] font-mono text-[0.8125rem]` },
-      cell: c => <span title={c.row.original.action}>{c.row.original.action}</span> },
+    { id: 'action', header: t('logs.audit_table.action'), meta: { label: t('logs.audit_table.action'), className: 'font-mono text-[0.8125rem] whitespace-nowrap' },
+      cell: c => <span title={c.row.original.action} className="inline-block max-w-96 truncate align-bottom">{c.row.original.action}</span> },
     { id: 'target', header: t('logs.audit_table.target'), meta: { label: t('logs.audit_table.target'), className: `${FIT} w-[26%]` },
       cell: c => <span title={c.row.original.target}>{c.row.original.target}</span> },
-    { id: 'ip', header: t('logs.audit_table.ip'), meta: { label: t('logs.audit_table.ip'), className: `${FIT} w-[16%]` },
+    { id: 'ip', header: t('logs.audit_table.ip'), meta: { label: t('logs.audit_table.ip'), className: 'whitespace-nowrap' },
       cell: c => <IpCell ip={c.row.original.ip} region={c.row.original.region} /> },
     { id: 'id', header: t('logs.audit_table.id'), meta: { label: t('logs.audit_table.id'), defaultHidden: true, className: 'font-mono text-muted-foreground' },
       cell: c => String(c.row.original.id) },
@@ -35,6 +35,7 @@ export default function AuditLogsTab() {
 
   return (
     <LogList<AuditEntry>
+      tableId="admin.logs.audit"
       label={t('logs.tab_audit')}
       view={view}
       query={query}

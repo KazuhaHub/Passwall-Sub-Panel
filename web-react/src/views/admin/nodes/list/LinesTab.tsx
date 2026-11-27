@@ -288,6 +288,7 @@ export default function LinesTab() {
         />
       ) : url.view === 'order' ? (
         <DataTable<ListRow>
+          tableId="admin.nodes.lines"
           {...common}
           aria-label={t('nodes.tabs.lines')}
           handleRef={tableRef}
@@ -306,6 +307,7 @@ export default function LinesTab() {
         />
       ) : (
         <DataTable<TreeItem>
+          tableId="admin.nodes.linesTree"
           {...common}
           aria-label={t('nodes.view.node')}
           data={tree}

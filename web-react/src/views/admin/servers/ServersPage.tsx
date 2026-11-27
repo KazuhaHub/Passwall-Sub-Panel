@@ -195,6 +195,7 @@ export default function ServersPage() {
       />
       <ServersBanners items={items} compat={releases.compatStatus} />
       <DataTable<Server>
+        tableId="admin.servers"
         aria-label={t('admin:servers.title')}
         mode="server"
         data={items}

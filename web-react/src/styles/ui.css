@@ -122,10 +122,10 @@
     --chart-3: var(--series-3);
     --chart-4: var(--series-4);
     --chart-5: var(--series-5);
-    /* Tabs and segmented switches share one look: a tinted track and a clearly raised active item (own surface, border, shadow). */
+    /* Tabs and segmented switches share one look: a tinted track and a clearly raised active item (own surface, border, shadow). Light border 0.6: 3.1:1 against the track, 3.9:1 against white (0.72 gave 1.9:1). */
     --segment-track: oklch(0.915 0.004 264);
     --segment-active: oklch(1 0 0);
-    --segment-border: oklch(0.72 0.01 264);
+    --segment-border: oklch(0.6 0.01 264);
     --radius: 0.625rem;
     --brand: oklch(0.5 0.2 264);
     --brand-foreground: oklch(0.985 0 0);

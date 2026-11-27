@@ -198,6 +198,7 @@ export default function RecordsTab({ onOpenUser }: RecordsTabProps) {
   return (
     <div className="flex flex-col gap-3">
       <DataTable<FlagRecord>
+        tableId="admin.risk.records"
         aria-label={t('admin:risk_center.tab_records')}
         mode="server"
         data={rows ?? []}

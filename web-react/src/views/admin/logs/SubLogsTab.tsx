@@ -52,6 +52,7 @@ export default function SubLogsTab({ user }: { user: UserFilter }) {
 
   return (
     <LogList<SubLog>
+      tableId="admin.logs.sub"
       label={t('logs.tab_sub')}
       view={view}
       query={query}

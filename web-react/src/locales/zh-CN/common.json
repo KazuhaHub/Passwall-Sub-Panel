@@ -83,6 +83,9 @@
     "data": {
       "columns": "列",
       "columns_menu": "显示的列",
+      "resize_column": "调整{{name}}列宽",
+      "reset_widths": "重置列宽",
+      "resize_hint": "使用左右方向键调整列宽，按 Home 键恢复为自适应宽度。",
       "sort_by": "按{{column}}排序",
       "select_all": "选择本页全部行",
       "select_row": "选择第{{n}}行",

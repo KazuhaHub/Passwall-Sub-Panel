@@ -1,7 +1,7 @@
 import { memo, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import {
   flexRender, getCoreRowModel, getExpandedRowModel, getPaginationRowModel, getSortedRowModel, useReactTable,
-  type ColumnDef, type ExpandedState, type Row, type SortingState, type VisibilityState,
+  type ColumnDef, type ColumnSizingState, type ExpandedState, type Row, type SortingState, type VisibilityState,
 } from '@tanstack/react-table'
 import {
   ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, ChevronRightIcon, GripVerticalIcon, SearchXIcon,
@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils'
 import { BulkActionBar } from './BulkActionBar'
 import { ColumnMenu, columnLabel } from './ColumnMenu'
 import { DataTablePagination } from './DataTablePagination'
+import { MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, loadColumnWidths, saveColumnWidths, type ColumnWidths } from './columnWidths'
+import { ResizeHandle } from './ResizeHandle'
 import { DEFAULT_PAGE_SIZE, clampPage, compareCells, makeCollator } from './dataTableLogic'
 import type { BulkContext, DataTableProps, PageChangeReason, RowOptions } from './dataTableTypes'
 import { IconButton } from '@/components/common/IconButton'
@@ -107,6 +109,31 @@ function columnIdOf<T>(def: ColumnDef<T, never>): string | undefined {
  * find-in-page cannot see rows that are not drawn (offer your own search and
  * `handleRef.scrollToRow`), and the phone card layout is not windowed.
  *
+ * COLUMN WIDTHS. By default the browser fits every column to its content (auto table layout), so
+ * nothing short is cut off. A column that holds free text (a name, a path, a URL) may carry
+ * `meta.className` classes that let it truncate with an ellipsis (the full text goes in `title`);
+ * short labels, statuses, numbers and dates never should. An admin can resize any column that has a
+ * header by dragging the right edge of its header, or with the arrow keys on the focused edge (16px,
+ * Shift 64px); a double click or Home gives it back its fitted width, and "Reset column widths" in the
+ * Columns menu clears the table (a table with `columnMenu={false}` has only the handle). Widths are kept in
+ * localStorage under `psp.colWidths.v1.<tableId>` (give every call site a stable `tableId`; without one the
+ * widths last for the visit).
+ *
+ * Once any width is set the table switches to FIXED layout with a <colgroup>: the other columns are held at the
+ * width they were fitted to at the last measurement (the header cells while the rows are drawn, planned with the
+ * frame's clientWidth, the room without its own scrollbar). One column takes the leftover room, so every real
+ * column can be made narrower and stays that width: the actions column (no header text, right-aligned) when it is
+ * last, and otherwise an empty trailing column (a <col> plus a real, empty, aria-hidden cell in the header and in
+ * every row, so backgrounds paint across it). The table is as wide as its frame and never narrower than its
+ * columns (min-width); past that the frame scrolls sideways. It measures again when the visible columns change,
+ * when the frame's border box changes width (a scrollbar appearing is not that; a frame that was hidden and gets a
+ * width is), and when the rows change: for a normal table whenever `data` is a new array (a refetch can make a cell
+ * longer), for a windowed one only when the row count or the first or last id changes (never on scroll, and a poll
+ * that edits an off-screen row does not refit it to whatever rows are drawn). A windowed list has always been frozen
+ * this way (see above); the resizing just feeds it. A table clipped sideways (windowed, page scroll) cannot scroll
+ * to a column that does not fit: a column cannot be dragged wider than the room left, and saved widths that no
+ * longer fit are scaled down to fit when drawn (the stored values are kept).
+ *
  * ROW OVERRIDES (rowOptions): a row can render as a full-width separator, be
  * excluded from selection or opening, and carry a dimmed / pending state, a class
  * and attributes. onRowHover and highlightedIds let a page light up related rows.
@@ -116,7 +143,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     data, columns, getRowId, mode = 'client', total: serverTotal, pagination = true, pageSizeOptions,
     columnMenu = true, selectable, rowLabel, bulkActions, onRowOpen, activeRowId, rowClassName, toolbar,
     loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className,
-    rowOptions, onRowHover, highlightedIds, relatedIds,
+    rowOptions, onRowHover, highlightedIds, relatedIds, tableId,
   } = props
   const { t, i18n } = useSpacedT()
   const server = mode === 'server'
@@ -169,6 +196,23 @@ export function DataTable<T>(props: DataTableProps<T>) {
     () => ({ pageIndex: Math.max(effectivePage, 1) - 1, pageSize: pagination ? pageSize : Math.max(data.length, 1) }),
     [effectivePage, pageSize, pagination, data.length],
   )
+  // Widths the admin chose, per column id. Reloaded when the table id changes (one component instance can
+  // show two tables, RankTab does), by the "adjust state while rendering" pattern.
+  const [widthState, setWidthState] = useState(() => ({ id: tableId, w: loadColumnWidths(tableId) }))
+  let userWidths: ColumnWidths = widthState.w
+  if (widthState.id !== tableId) {
+    userWidths = loadColumnWidths(tableId)
+    setWidthState({ id: tableId, w: userWidths })
+  }
+  const widthsRef = useRef(userWidths)
+  widthsRef.current = userWidths
+  const updateWidths = (updater: (prev: ColumnWidths) => ColumnWidths, commit: boolean) => {
+    const next = updater(widthsRef.current)
+    widthsRef.current = next
+    setWidthState({ id: tableId, w: next })
+    if (commit) saveColumnWidths(tableId, next)
+  }
+
   const table = useReactTable<T>({
     data: data as T[],
     columns,
@@ -179,8 +223,14 @@ export function DataTable<T>(props: DataTableProps<T>) {
       rowSelection: selection,
       expanded,
       pagination: paginationState,
+      columnSizing: userWidths as ColumnSizingState,
     },
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+    onColumnSizingChange: u => updateWidths(prev => (typeof u === 'function' ? u(prev as ColumnSizingState) : u) as ColumnWidths, true),
     defaultColumn: {
+      minSize: MIN_COLUMN_WIDTH,
+      maxSize: MAX_COLUMN_WIDTH,
       // false: undefined is an ordinary value to compareCells, not tanstack's flip-with-direction default.
       sortUndefined: false,
       sortingFn: (a, b, id) => compareCells(a.getValue(id), b.getValue(id), sortingRef.current.find(x => x.id === id)?.desc === true, collator),
@@ -272,6 +322,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }))
 
   // ---- reorder ----
+  const headId = useId()
   const hintId = `${useId()}-reorder-hint`
   const reasonId = `${useId()}-reorder-reason`
   const reorderCol = onReorder !== undefined
@@ -418,25 +469,71 @@ export function DataTable<T>(props: DataTableProps<T>) {
     hovering: onRowHover !== undefined,
     clickable: onRowOpen !== undefined,
   }
-  const rowCtx = useMemo<RowCtx>(() => ({
-    columns, visibility, tree, selectable: selectable === true, reorderCol, interactive,
-    blockedText, hintId, reasonId, leadWidth,
-  }), [columns, visibility, tree, selectable, reorderCol, interactive, blockedText, hintId, reasonId, leadWidth])
-
-  // Windowed column widths: measured once from the header while the first rows are drawn,
-  // then frozen into a <colgroup> with a fixed table layout, so the widths cannot change as
-  // other rows scroll in. A different set of columns, or a different table width, measures again.
+  // Fixed column widths. Measured from the header while the rows are drawn, then frozen into a <colgroup> with a
+  // fixed table layout, so the widths cannot change as other rows scroll in. That is needed when the list is
+  // windowed, and whenever the admin has set a width (a resized column needs the others to hold still). It measures
+  // again for a different set of columns, a different frame width (also a frame that had none, because it was hidden),
+  // and whenever `data` is a new array (a refetch may have made a cell longer: a status from "Active" to a longer
+  // label would otherwise be clipped). Scrolling never changes `data`, so it never measures.
+  const hasUserWidths = visibleColumns.some(c => userWidths[c.id] !== undefined)
+  const fixedMode = !cards && !showError && (windowed || hasUserWidths)
+  const leadCols = (reorderCol ? 1 : 0) + (selectable === true ? 1 : 0)
   const freezeKey = `${visibleColumns.map(c => c.id).join('|')}:${reorderCol}:${selectable === true}`
-  const [frozen, setFrozen] = useState<{ key: string; widths: number[]; frameW: number } | null>(null)
-  const frozenWidths = windowed && frozen?.key === freezeKey ? frozen.widths : null
+  const [frozen, setFrozen] = useState<{ key: string; data: readonly T[]; rowsKey: string; widths: number[]; frameW: number; frameOff: number } | null>(null)
+  const [frameTick, setFrameTick] = useState(0)
+  // The rows on screen, cheaply (count, first and last id). A windowed list uses only this, not the array's identity: a
+  // poll that changes an off-screen row must not refit the table to whatever rows happen to be drawn at this scroll position.
+  const rowsKey = `${rows.length}:${rows[0]?.id ?? ''}:${rows[rows.length - 1]?.id ?? ''}`
+  const fresh = frozen !== null && frozen.key === freezeKey && (windowed ? frozen.rowsKey === rowsKey : frozen.data === data)
+  const frozenWidths = fixedMode && fresh ? frozen.widths : null
   useLayoutEffect(() => {
-    if (!windowed) { setFrozen(prev => (prev ? null : prev)); return }
+    if (!fixedMode) { setFrozen(prev => (prev ? null : prev)); return }
     if (frozenWidths) return
     const cells = headRowRef.current?.children
     if (!cells || cells.length !== colSpan) return
     const widths = [...cells].map(c => c.getBoundingClientRect().width)
-    if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, widths, frameW: frameRef.current?.getBoundingClientRect().width ?? 0 })
-  }, [windowed, frozenWidths, freezeKey, colSpan])
+    // Nothing to freeze while hidden (every width is 0): the frame observer asks again once it has a width.
+    if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, data, rowsKey, widths, frameW: frameRef.current?.clientWidth ?? 0, frameOff: frameRef.current?.offsetWidth ?? 0 })
+  }, [fixedMode, frozenWidths, freezeKey, data, rowsKey, windowed, colSpan, frameTick])
+  // What the table is drawn with: the admin's width where there is one, the fitted width otherwise.
+  const isResizable = (c: (typeof visibleColumns)[number]) => c.getCanResize() && c.columnDef.header !== undefined && c.columnDef.header !== ''
+  const baseWidths = frozenWidths?.map((w, i) => (i >= leadCols ? userWidths[visibleColumns[i - leadCols]?.id] ?? w : w)) ?? null
+  // A table clipped sideways (the page scrolls, see "KNOWN LIMIT") cannot scroll to a column that does not fit. If the
+  // saved widths no longer fit this frame (a narrower window), the saved ones are scaled down together, never below
+  // the minimum, so every column stays reachable. The stored values are untouched: a wider window gets them back.
+  const clipped = windowed && !ownScroller
+  const frameW = frozen?.frameW ?? 0
+  if (clipped && hasUserWidths && baseWidths && frameW > 0) {
+    const set = baseWidths.map((_, i) => i).filter(i => i >= leadCols && userWidths[visibleColumns[i - leadCols]?.id] !== undefined)
+    const room = set.reduce((a, i) => a + Math.max(0, baseWidths[i] - MIN_COLUMN_WIDTH), 0)
+    const cut = Math.min(baseWidths.reduce((a, b) => a + b, 0) - frameW, room)
+    if (cut > 0) for (const i of set) baseWidths[i] -= cut * Math.max(0, baseWidths[i] - MIN_COLUMN_WIDTH) / room
+  }
+  const shownWidths = baseWidths
+  // Once a width is set, one column has NO width in the colgroup and takes what the frame has left, so every real
+  // column (the last one too) can be made narrower and then stays that width. That is the last column when it is the
+  // actions column (no header text, right-aligned: it stays at the right edge); otherwise an empty trailing <col> with
+  // no cells behind it. The table is as wide as its frame, and never narrower than all its columns (min-width), so the
+  // absorbing column is never squeezed below the width it was fitted to; past that the frame scrolls.
+  const lastColumn = visibleColumns[visibleColumns.length - 1]
+  const absorberAt = hasUserWidths && lastColumn && !isResizable(lastColumn) ? leadCols + visibleColumns.length - 1 : -1
+  const filler = hasUserWidths && absorberAt < 0
+  // The empty trailing column must be a real cell in the header and in every row (a <col> alone paints nothing, and the
+  // header band and the row backgrounds would stop short). Only while frozen: the measuring pass has none.
+  const fillerCell = filler && frozenWidths !== null
+  const spanAll = colSpan + (fillerCell ? 1 : 0)
+  const rowCtx = useMemo<RowCtx>(() => ({
+    columns, visibility, tree, selectable: selectable === true, reorderCol, interactive,
+    blockedText, hintId, reasonId, leadWidth, filler: fillerCell,
+  }), [columns, visibility, tree, selectable, reorderCol, interactive, blockedText, hintId, reasonId, leadWidth, fillerCell])
+  const tableMinWidth = hasUserWidths && shownWidths ? shownWidths.reduce((a, b) => a + b, 0) : null
+  // A column may not grow past what its frame has room for when the table cannot scroll sideways.
+  const maxWidthOf = (i: number): number => {
+    if (!clipped || frameW <= 0 || !shownWidths) return MAX_COLUMN_WIDTH
+    return frameW - (shownWidths.reduce((a, b) => a + b, 0) - shownWidths[i])
+  }
+  const canResetWidths = Object.keys(userWidths).length > 0
+  const resetWidths = () => { updateWidths(() => ({}), true) }
   // The pinned columns get their separator only once the table is scrolled sideways (data-hscrolled on the frame).
   useEffect(() => {
     const frame = frameRef.current
@@ -448,23 +545,30 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }, [cards])
   useLayoutEffect(() => {
     const frame = frameRef.current
-    if (!windowed || !frame || typeof ResizeObserver === 'undefined') return
+    if (!fixedMode || !frame || typeof ResizeObserver === 'undefined') return
+    // Whether the frame was resized is decided by its border box (offsetWidth): its own scrollbar appearing or leaving
+    // changes clientWidth but not that, and treating it as a resize could feed back (fit -> scrollbar -> fit ...).
+    // The fitting itself uses clientWidth, the room the columns really have.
+    let last = frame.offsetWidth
     const ro = new ResizeObserver(() => {
-      const w = frame.getBoundingClientRect().width
-      setFrozen(prev => (prev && Math.abs(prev.frameW - w) > 1 ? null : prev))
+      const w = frame.offsetWidth
+      if (Math.abs(w - last) <= 1) return
+      last = w
+      setFrozen(prev => (prev && Math.abs(prev.frameOff - w) > 1 ? null : prev))
+      setFrameTick(n => n + 1)
     })
     ro.observe(frame)
     return () => ro.disconnect()
-  }, [windowed])
+  }, [fixedMode])
 
   const bodyContent = (): ReactNode => {
     if (showError) {
-      return <TableRow className="hover:bg-transparent"><TableCell colSpan={colSpan} className="whitespace-normal"><ErrorState compact reason={error} retry={onRetry} /></TableCell></TableRow>
+      return <TableRow className="hover:bg-transparent"><TableCell colSpan={spanAll} className="whitespace-normal"><ErrorState compact reason={error} retry={onRetry} /></TableCell></TableRow>
     }
     if (skeleton) {
       return Array.from({ length: 6 }, (_, i) => (
         <TableRow key={i} data-skeleton-row="" className="hover:bg-transparent">
-          {Array.from({ length: colSpan }, (_, j) => (
+          {Array.from({ length: spanAll }, (_, j) => (
             <TableCell key={j}><Skeleton className={cn('h-4', j === 0 ? 'w-32' : 'w-20')} /></TableCell>
           ))}
         </TableRow>
@@ -473,7 +577,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     if (isEmpty) {
       return (
         <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={colSpan} className="h-32 whitespace-normal text-center text-muted-foreground">
+          <TableCell colSpan={spanAll} className="h-32 whitespace-normal text-center text-muted-foreground">
             {empty ?? <EmptyState compact icon={<SearchXIcon />} title={t('empty')} />}
           </TableCell>
         </TableRow>
@@ -516,7 +620,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     const plan = renderPlan(rows.length, win.range.start, win.range.end, pinned)
     const gap = (key: string, n: number) => (
       <tr key={key} data-spacer="" aria-hidden="true" style={{ height: n * win.rowH }}>
-        <td colSpan={colSpan} style={{ padding: 0, border: 0, height: n * win.rowH }} />
+        <td colSpan={spanAll} style={{ padding: 0, border: 0, height: n * win.rowH }} />
       </tr>
     )
     const out: ReactNode[] = []
@@ -533,7 +637,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
       {(toolbar || columnMenu) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">{toolbar}</div>
-          {columnMenu && !cards && <ColumnMenu table={table} />}
+          {columnMenu && !cards && <ColumnMenu table={table} onResetWidths={resetWidths} canResetWidths={canResetWidths} />}
         </div>
       )}
 
@@ -577,10 +681,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
               aria-label={props['aria-label']}
               aria-busy={loading || undefined}
               aria-rowcount={windowed ? rows.length + 1 : undefined}
-              className={cn('w-full caption-bottom text-sm', frozenWidths && '[&_td]:overflow-hidden [&_td]:text-ellipsis')}
-              style={frozenWidths ? { tableLayout: 'fixed' } : undefined}
+              // Fixed layout clips: a cell wider than its column ends in an ellipsis (a child capped by its own max-width is held to the cell).
+              className={cn('w-full caption-bottom text-sm', frozenWidths && '[&_td]:overflow-hidden [&_td]:text-ellipsis [&_td>*]:max-w-full [&_th]:overflow-hidden')}
+              style={frozenWidths ? { tableLayout: 'fixed', ...(tableMinWidth !== null ? { minWidth: `${tableMinWidth}px` } : null) } : undefined}
             >
-              {frozenWidths && <colgroup>{frozenWidths.map((w, i) => <col key={i} style={{ width: `${w}px` }} />)}</colgroup>}
+              {shownWidths && <colgroup>{shownWidths.map((w, i) => <col key={i} style={i === absorberAt ? undefined : { width: `${w}px` }} />)}{filler && <col />}</colgroup>}
               <TableHeader
                 ref={headRef}
                 className={cn('sticky top-0 z-10 shadow-[0_1px_0_0_var(--border)] [&_tr]:border-b-0', HEAD_BG)}
@@ -607,22 +712,29 @@ export function DataTable<T>(props: DataTableProps<T>) {
                     const p = pin(hi === 0)
                     const headerDef = col.columnDef.header
                     // An empty header (a row-actions column) is still a column header: name it for readers.
-                    const label = headerDef === undefined || headerDef === ''
+                    const unnamed = headerDef === undefined || headerDef === ''
+                    const label = unnamed
                       ? <span className="sr-only">{meta?.label ?? t('ui.data.actions_column')}</span>
                       : flexRender(headerDef, header.getContext())
+                    // A column with no header text is an actions column: it keeps the width its buttons need.
+                    const resizable = !unnamed && !header.isPlaceholder && isResizable(col) && !cards
+                    const cellIndex = leadCols + hi
                     return (
                       <TableHead
                         key={header.id}
                         scope="col"
+                        // Named by its label alone: the resize handle inside is a control, not part of the column's name.
+                        aria-labelledby={resizable ? `${headId}-${hi}` : undefined}
                         aria-sort={canSort ? (sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none') : undefined}
                         style={p.style}
                         className={cn(
-                          p.className && `${p.className} z-20 ${HEAD_BG}`,
+                          p.className ? `${p.className} z-20 ${HEAD_BG}` : resizable && 'relative',
                           meta?.align === 'right' && 'text-right',
                           meta?.align === 'center' && 'text-center',
                           meta?.headerClassName,
                         )}
                       >
+                        <span id={resizable ? `${headId}-${hi}` : undefined} className="contents">
                         {header.isPlaceholder ? null : canSort ? (
                           <button
                             type="button"
@@ -640,9 +752,24 @@ export function DataTable<T>(props: DataTableProps<T>) {
                                 : <ArrowUpDownIcon className="size-3.5 opacity-40" aria-hidden="true" />}
                           </button>
                         ) : label}
+                        </span>
+                        {resizable && (
+                          <ResizeHandle
+                            name={columnLabel(col)}
+                            width={shownWidths?.[cellIndex]}
+                            // The width the column SHOWS (a saved width scaled down to fit differs from the stored one); a change made since the last render wins.
+                            getWidth={() => (widthsRef.current[col.id] !== userWidths[col.id] ? widthsRef.current[col.id] : undefined) ?? shownWidths?.[cellIndex] ?? headRowRef.current?.children[cellIndex]?.getBoundingClientRect().width ?? 0}
+                            getMax={() => maxWidthOf(cellIndex)}
+                            canGrow={maxWidthOf(cellIndex) > (shownWidths?.[cellIndex] ?? 0) + 0.5}
+                            onResize={w => updateWidths(prev => ({ ...prev, [col.id]: w }), false)}
+                            onCommit={() => saveColumnWidths(tableId, widthsRef.current)}
+                            onReset={() => updateWidths(prev => { const { [col.id]: _drop, ...rest } = prev; return rest }, true)}
+                          />
+                        )}
                       </TableHead>
                     )
                   })}
+                  {fillerCell && <TableHead aria-hidden="true" className="p-0" />}
                 </tr>
               </TableHeader>
               <TableBody
@@ -755,6 +882,8 @@ interface RowCtx {
   hintId: string
   reasonId: string
   leadWidth: number
+  /** An empty trailing cell, so backgrounds paint across the leftover width of a table that has a filler column. */
+  filler: boolean
 }
 
 interface DataRowProps<T> {
@@ -847,7 +976,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
         </TableCell>
       )}
       {p.fullWidth !== undefined ? (
-        <TableCell colSpan={row.getVisibleCells().length} className="whitespace-normal">{p.fullWidth}</TableCell>
+        <TableCell colSpan={row.getVisibleCells().length + (ctx.filler ? 1 : 0)} className="whitespace-normal">{p.fullWidth}</TableCell>
       ) : row.getVisibleCells().map((cell, ci) => {
         const meta = cell.column.columnDef.meta
         const first = ci === 0
@@ -882,6 +1011,7 @@ function DataRowInner<T>(p: DataRowProps<T>) {
           </TableCell>
         )
       })}
+      {ctx.filler && p.fullWidth === undefined && <TableCell aria-hidden="true" className="p-0" />}
     </TableRow>
   )
 }

@@ -81,6 +81,7 @@ export default function UnmanagedTab({ onImported }: { onImported: () => void })
         <EmptyState title={t('nodes.unmanaged.pick_server')} />
       ) : (
         <DataTable<UnmanagedInbound>
+          tableId="admin.nodes.unmanaged"
           aria-label={t('nodes.tabs.unmanaged')}
           data={rows}
           columns={columns}

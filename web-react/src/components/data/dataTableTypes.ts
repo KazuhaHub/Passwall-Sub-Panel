@@ -106,6 +106,12 @@ interface DataTableBase<T> {
   total?: number
   /** Accessible name for the table. */
   'aria-label'?: string
+  /**
+   * A stable id for this table ("admin.users"), under which the widths an admin dragged the columns to are kept in
+   * the browser (`psp.colWidths.v1.<tableId>`). Give every table one; two tables must not share one. Left out, a
+   * resize lasts for the visit only.
+   */
+  tableId?: string
 
   /** false hides the footer and shows every row (a short list, a reorderable list). */
   pagination?: boolean

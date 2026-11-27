@@ -14,19 +14,24 @@ const HEAD = 40
 const BODY_TOP = 200
 const VIEWPORT = 800
 let scrollY = 0
+let thW = 120
 
 const box = (top: number, height: number, width = 600) => ({ top, bottom: top + height, height, left: 0, right: width, width, x: 0, y: top, toJSON() {} }) as DOMRect
 
 beforeEach(() => {
   scrollY = 0
+  thW = 120
   vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT })
   Object.defineProperty(window, 'scrollY', { configurable: true, get: () => scrollY })
   window.scrollTo = ((_x: number, y: number) => { scrollY = y }) as typeof window.scrollTo
+  // The bounding box (375) includes a scrollbar; the width to plan with is clientWidth (360).
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('group/frame') ? 360 : 0 })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.tagName === 'TBODY') return box(BODY_TOP - scrollY, 0)
     if (this.tagName === 'THEAD') return box(0, HEAD)
-    if (this.tagName === 'TH') return box(0, HEAD, 120)
+    if (this.tagName === 'TH') return box(0, HEAD, thW)
+    if (this.classList.contains('group/frame')) return box(0, 0, 375)
     if (this.tagName === 'TR' && this.hasAttribute('data-row')) {
       const i = Number(this.getAttribute('aria-rowindex')) - 2
       return box(BODY_TOP - scrollY + i * ROW, ROW)
@@ -49,7 +54,7 @@ const drawn = () => [...document.querySelectorAll<HTMLElement>('tr[data-row]')]
 const drawnIds = () => drawn().map(r => r.getAttribute('data-id'))
 const spacerPx = () => [...document.querySelectorAll<HTMLElement>('tr[data-spacer]')].reduce((s, r) => s + parseFloat(r.style.height), 0)
 
-interface Extra { maxHeight?: string | null; onRowOpen?: (r: Row) => void; selectable?: boolean; handleRef?: React.Ref<DataTableHandle> }
+interface Extra { tableId?: string; maxHeight?: string | null; onRowOpen?: (r: Row) => void; selectable?: boolean; handleRef?: React.Ref<DataTableHandle> }
 function mount(extra: Extra = {}, data: Row[] = BIG) {
   const onReorder = vi.fn()
   const utils = render(
@@ -366,5 +371,73 @@ describe('keyboard carrying: Home, End, PageUp, PageDown', () => {
     expect(status()).toContain('position 40 of 40')
     fireEvent.keyDown(h, { key: 'Enter' })
     expect(onReorder).toHaveBeenCalledWith({ movedId: 'r2', beforeId: null })
+  })
+})
+
+describe('windowed column widths', () => {
+  const widths = () => [...document.querySelectorAll<HTMLElement>('col')].map(c => c.style.width)
+  const resize = (name: string, from: number, to: number) => {
+    const h = screen.getByRole('separator', { name: `Resize column ${name}` })
+    fireEvent.pointerDown(h, { clientX: from, button: 0, pointerId: 1 })
+    act(() => { window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: to })) })
+    act(() => { window.dispatchEvent(Object.assign(new Event('pointerup'), { clientX: to })) })
+  }
+
+  it('measures once and holds the same widths while the rows scroll in and out', () => {
+    mount({ tableId: 'win' })
+    const first = widths()
+    expect(first.length).toBeGreaterThan(0)
+    for (const y of [5000, 40000, 120000, 0]) {
+      scrollPageTo(y)
+      expect(widths()).toEqual(first)
+    }
+  })
+
+  it('keeps an admin-set width, and the fitted width of the others, across scrolling', () => {
+    mount({ tableId: 'win' })
+    resize('Name', 100, 60)
+    const set = widths()
+    // columns: drag handle, Name, Id. The frame is 360 wide, and Id (the last, elastic one) takes the 40px Name gave up.
+    expect(set).toEqual(['120px', '80px', '120px', ''])
+    scrollPageTo(60000)
+    expect(widths()).toEqual(set)
+    scrollPageTo(0)
+    expect(widths()).toEqual(set)
+  })
+
+  it('is held inside its frame: a clipped table cannot be dragged wider than the page it is on', () => {
+    mount({ tableId: 'win' })
+    // The frame is 360 wide, the drag handle column takes 120 and the elastic Id column is not squeezed below its 120: Name stays at 120.
+    resize('Name', 100, 2000)
+    expect(widths()).toEqual(['120px', '120px', '120px', ''])
+  })
+
+  it('scales saved widths down to fit a clipped table, so nothing is out of reach, and leaves the saved values alone', () => {
+    localStorage.setItem('psp.colWidths.v1.win', JSON.stringify({ v: 1, w: { name: 300 } }))
+    mount({ tableId: 'win' })
+    // 120 + 300 + 120 = 540 in a 360 frame: the saved width gives up the 180px that do not fit.
+    expect(widths()).toEqual(['120px', '120px', '120px', ''])
+    expect(JSON.parse(localStorage.getItem('psp.colWidths.v1.win')!)).toEqual({ v: 1, w: { name: 300 } })
+  })
+
+  it('shows and starts from the SHOWN width when saved widths were scaled down, and never writes the scaled value back unasked', () => {
+    localStorage.setItem('psp.colWidths.v1.win', JSON.stringify({ v: 1, w: { name: 300 } }))
+    mount({ tableId: 'win' })
+    const h = screen.getByRole('separator', { name: 'Resize column Name' })
+    expect(h.getAttribute('aria-valuenow')).toBe('120')
+    expect(JSON.parse(localStorage.getItem('psp.colWidths.v1.win')!).w.name).toBe(300)
+    fireEvent.keyDown(h, { key: 'ArrowLeft' })
+    expect(widths()[1]).toBe('104px')
+  })
+
+  it('a poll that changes an off-screen row does not refit the windowed table, but a different set of rows does', () => {
+    const el = (data: Row[]) => <DataTable data={data} columns={columns} getRowId={r => r.id} aria-label="Lines" pagination={false} columnMenu={false} tableId="win" />
+    const { rerender } = render(el(BIG))
+    const first = widths()
+    thW = 200
+    rerender(el(BIG.map((r, i) => (i === 3000 ? { ...r, name: 'changed' } : { ...r }))))
+    expect(widths()).toEqual(first)
+    rerender(el(BIG.slice(0, 4000)))
+    expect(widths()).not.toEqual(first)
   })
 })

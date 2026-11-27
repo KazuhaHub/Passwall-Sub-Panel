@@ -213,6 +213,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
           </div>
 
           <DataTable<Row>
+            tableId="admin.ruleSets.matchers"
             aria-label={t('admin:rules.blocks.matchers', { target: heading })}
             data={shown}
             columns={columns}

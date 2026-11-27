@@ -47,6 +47,7 @@ export function AccountsTab({ data, act }: { data: CertData; act: AccountActions
 
   return (
     <DataTable<ACMEAccount>
+      tableId="admin.certs.accounts"
       aria-label={t('certs.acct_title')}
       data={data.accounts.data ?? []}
       columns={columns}

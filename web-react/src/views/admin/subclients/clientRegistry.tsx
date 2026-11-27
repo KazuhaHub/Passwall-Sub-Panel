@@ -61,6 +61,7 @@ export default function ClientRegistry({ families, onChange, actions }: {
   return (
     <>
       <DataTable<Row>
+        tableId="admin.subClients"
         data={rows}
         columns={columns}
         getRowId={r => String(r.i)}

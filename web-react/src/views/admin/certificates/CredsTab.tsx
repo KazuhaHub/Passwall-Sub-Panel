@@ -29,8 +29,8 @@ export function CredsTab({ data, act }: { data: CertData; act: CredActions }) {
   const columns = useMemo<ColumnDef<DNSCredential, any>[]>(() => plainColumns<DNSCredential>([
     { id: 'name', header: t('certs.col_name'), meta: { label: t('certs.col_name'), hideable: false, className: `${FIT} w-[24%] font-medium` },
       cell: c => <span title={c.row.original.name}>{c.row.original.name}</span> },
-    { id: 'provider', header: t('certs.cred_provider'), meta: { label: t('certs.cred_provider'), className: `${FIT} w-[22%]` },
-      cell: c => { const p = c.row.original.provider; const l = label.get(p); return <span title={p}>{l ? `${l} (${p})` : p}</span> } },
+    { id: 'provider', header: t('certs.cred_provider'), meta: { label: t('certs.cred_provider'), className: 'whitespace-nowrap' },
+      cell: c => { const p = c.row.original.provider; const l = label.get(p); return <span title={p} className="inline-block max-w-64 truncate align-bottom">{l ? `${l} (${p})` : p}</span> } },
     { id: 'keys', header: t('certs.cred_keys'), meta: { label: t('certs.cred_keys'), className: `${FIT} w-[28%] font-mono text-xs` },
       cell: c => <span title={c.row.original.keys.join(', ')}>{c.row.original.keys.join(', ') || '—'}</span> },
     { id: 'used', header: t('certs.acct_used_by'), meta: { label: t('certs.acct_used_by'), align: 'right', className: 'w-[12%] tabular-nums' },
@@ -42,6 +42,7 @@ export function CredsTab({ data, act }: { data: CertData; act: CredActions }) {
 
   return (
     <DataTable<DNSCredential>
+      tableId="admin.certs.creds"
       aria-label={t('certs.cred_title')}
       data={data.creds.data ?? []}
       columns={columns}

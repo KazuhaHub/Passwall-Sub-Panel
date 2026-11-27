@@ -172,6 +172,7 @@ export default function ListsTab({ onOpenEntries, onOpenSettings, onOpenPolicy, 
   } else {
     body = (
       <DataTable<DestList>
+        tableId="admin.accessControl.lists"
         aria-label={t('admin:access_control.tab_lists')}
         data={visible} columns={columns} getRowId={l => String(l.id)} rowLabel={l => l.name}
         pagination={false} columnMenu={false}

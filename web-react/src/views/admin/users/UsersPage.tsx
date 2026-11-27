@@ -136,6 +136,7 @@ function UsersList() {
           <Alert variant="destructive" className="mb-3"><AlertDescription>{t('users.refresh_failed')}</AlertDescription></Alert>
         )}
         <DataTable<User>
+          tableId="admin.users"
           aria-label={t('users.title')}
           mode="server"
           data={rows}
