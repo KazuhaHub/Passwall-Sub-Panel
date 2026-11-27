@@ -75,6 +75,12 @@ function chrome(p: EditorPalette) {
   }, { dark: p.dark })
 }
 
+/** A disabled editor drops every token colour for one grey (not opacity, which would sink the lighter token colours under 3:1). */
+export function vscodeDisabledText(dark: boolean): Extension {
+  const p = dark ? DARK_PLUS : LIGHT_PLUS
+  return EditorView.theme({ '.cm-content, .cm-content span': { color: p.disabledText }, '.cm-gutters': { color: p.disabledText } }, { dark: p.dark })
+}
+
 const cache = new Map<boolean, Extension>()
 
 /** VS Code Dark+ (dark) or Light+ (light): colours, gutter, selection and the token highlighter. */

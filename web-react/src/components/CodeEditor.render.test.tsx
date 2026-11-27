@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { forceParsing } from '@codemirror/language'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
@@ -133,5 +133,47 @@ describe('the component', () => {
   it('shows the placeholder, keeping its line breaks, while the text is empty', () => {
     const { container } = render(<CodeEditor value="" onChange={() => {}} language="plain" placeholder={'domain:a\nfull:b'} />)
     expect(container.querySelector('.cm-placeholder')?.textContent).toBe('domain:a\nfull:b')
+  })
+})
+
+describe('external value changes and states (real editor)', () => {
+  const content = (c: HTMLElement) => c.querySelector<HTMLElement>('.cm-content')!
+  const view = (c: HTMLElement) => (content(c) as unknown as { cmTile: { view: EditorView } }).cmTile.view
+
+  it('does not let Ctrl+Z bring back the text a value swap replaced, and fires no onChange for it', async () => {
+    const { undo } = await import('@codemirror/commands')
+    const seen: string[] = []
+    const { container, rerender } = render(<CodeEditor value="first" onChange={v => seen.push(v)} language="plain" />)
+    rerender(<CodeEditor value="second" onChange={v => seen.push(v)} language="plain" />)
+    expect(view(container).state.doc.toString()).toBe('second')
+    seen.length = 0
+    undo(view(container))
+    expect(view(container).state.doc.toString()).toBe('second')
+    expect(seen).toEqual([])
+  })
+
+  it('still undoes what the person typed', async () => {
+    const { undo } = await import('@codemirror/commands')
+    const { container } = render(<CodeEditor value="abc" onChange={() => {}} language="plain" />)
+    const v = view(container)
+    v.dispatch({ changes: { from: 3, insert: 'd' }, userEvent: 'input.type' })
+    undo(v)
+    expect(v.state.doc.toString()).toBe('abc')
+  })
+
+  it('makes a disabled editor neither editable nor focusable, and a read-only one copyable without the keyboard', () => {
+    const { container, rerender } = render(<CodeEditor value="a" onChange={() => {}} language="plain" disabled />)
+    expect(content(container).getAttribute('contenteditable')).toBe('false')
+    expect(content(container).getAttribute('tabindex')).toBe('-1')
+    expect(content(container).getAttribute('aria-disabled')).toBe('true')
+    rerender(<CodeEditor value="a" onChange={() => {}} language="plain" readOnly />)
+    expect(content(container).getAttribute('inputmode')).toBe('none')
+    expect(content(container).getAttribute('tabindex')).toBeNull()
+  })
+
+  it('focuses the editor when its label is clicked', () => {
+    const { container } = render(<><label id="l" htmlFor="ed">Name</label><CodeEditor id="ed" value="a" onChange={() => {}} language="plain" /></>)
+    fireEvent.click(screen.getByText('Name'))
+    expect(document.activeElement).toBe(content(container))
   })
 })

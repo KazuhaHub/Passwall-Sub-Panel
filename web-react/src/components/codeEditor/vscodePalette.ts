@@ -27,6 +27,8 @@ export interface EditorPalette {
   lineNumberActive: string
   matchingBracket: string
   placeholderText: string
+  /** All text of a disabled editor. */
+  disabledText: string
   // Token roles.
   comment: string
   keyword: string
@@ -69,6 +71,7 @@ export const DARK_PLUS: EditorPalette = {
   lineNumberActive: '#c6c6c6',
   matchingBracket: '#0064001a',
   placeholderText: '#858585',
+  disabledText: '#9d9d9d',
   comment: '#6a9955',
   keyword: '#569cd6',
   controlKeyword: '#c586c0',
@@ -103,7 +106,8 @@ export const LIGHT_PLUS: EditorPalette = {
   lineNumber: '#237893',
   lineNumberActive: '#0b216f',
   matchingBracket: '#0064001a',
-  placeholderText: '#8a8a8a',
+  placeholderText: '#6e6e6e',
+  disabledText: '#6e6e6e',
   comment: '#008000',
   keyword: '#0000ff',
   controlKeyword: '#af00db',

@@ -1,12 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import CodeMirror from '@uiw/react-codemirror'
+import CodeMirror, { ExternalChange } from '@uiw/react-codemirror'
+import { EditorState, Transaction } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { cn } from '@/lib/utils'
 import { resolveEffectiveMode, useAppearanceStore } from '@/stores/appearance'
 import { languageExtensions, type EditorLanguage } from './codeEditor/languages'
 import { templatePlaceholders } from './codeEditor/placeholders'
-import { vscodeTheme } from './codeEditor/theme'
+import { vscodeDisabledText, vscodeTheme } from './codeEditor/theme'
 
 export type { EditorLanguage } from './codeEditor/languages'
 
@@ -22,6 +23,15 @@ export interface CodeEditorHandle {
 // One CodeMirror line at the 13px font: the height `minRows` is worth.
 const ROW_PX = 20
 const CHROME_PX = 8
+
+// The wrapper applies a changed `value` prop to the document as a transaction of its own. That must not be undoable: Ctrl+Z
+// after a page loads or swaps the text (another template, another rule) would bring the PREVIOUS text back, fire onChange with
+// it and make the page dirty with something the person never typed. Marking those transactions keeps them out of the history
+// for every call site at once.
+const externalValueNotUndoable = EditorState.transactionFilter.of(tr =>
+  tr.docChanged && tr.annotation(ExternalChange)
+    ? [{ changes: tr.changes, selection: tr.selection, effects: tr.effects, scrollIntoView: tr.scrollIntoView, annotations: [ExternalChange.of(true), Transaction.addToHistory.of(false)] }]
+    : tr)
 
 export interface CodeEditorProps {
   value: string
@@ -93,7 +103,11 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
     if (!id || labelledBy || ariaLabel) { setLabelFor(undefined); return }
     const label = document.querySelector<HTMLElement>(`label[for="${CSS.escape(id)}"]`)
     setLabelFor(label?.id || undefined)
-  }, [id, labelledBy, ariaLabel])
+    // A click on the label focuses an input; a contenteditable is not labelable, so do it by hand.
+    const focus = () => { if (!disabled) document.getElementById(id)?.focus() }
+    label?.addEventListener('click', focus)
+    return () => label?.removeEventListener('click', focus)
+  }, [id, labelledBy, ariaLabel, disabled])
   useImperativeHandle(ref, () => ({
     revealLine(n: number) {
       const v = view.current
@@ -123,7 +137,9 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
   const extensions = useMemo(() => [
     ...languageExtensions(language),
     templatePlaceholders,
+    externalValueNotUndoable,
     ...(wrap ? [EditorView.lineWrapping] : []),
+    ...(disabled ? [EditorView.editable.of(false), vscodeDisabledText(isDark)] : []),
     EditorView.contentAttributes.of({
       ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
       ...(labelledBy ?? labelFor ? { 'aria-labelledby': labelledBy ?? labelFor } : {}),
@@ -131,11 +147,13 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
       ...(describedBy ? { 'aria-describedby': describedBy } : {}),
       ...(invalid && invalid !== 'false' ? { 'aria-invalid': 'true' } : {}),
       ...(required && required !== 'false' ? { 'aria-required': 'true' } : {}),
-      ...(disabled ? { 'aria-disabled': 'true' } : {}),
+      ...(disabled ? { 'aria-disabled': 'true', tabindex: '-1' } : {}),
+      // Read-only stays focusable and selectable for copying, but must not raise the on-screen keyboard.
+      ...(readOnly && !disabled ? { inputmode: 'none' } : {}),
       spellcheck: 'false',
       autocapitalize: 'off',
     }),
-  ], [language, wrap, disabled, ariaLabel, labelledBy, labelFor, id, describedBy, invalid, required])
+  ], [language, wrap, disabled, readOnly, isDark, ariaLabel, labelledBy, labelFor, id, describedBy, invalid, required])
 
   return (
     <CodeMirror
@@ -163,7 +181,6 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
       }}
       className={cn(
         'overflow-hidden rounded-lg border border-input transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
-        disabled && 'opacity-60',
         invalid && invalid !== 'false' && 'border-destructive focus-within:border-destructive focus-within:ring-destructive/30',
         className,
       )}

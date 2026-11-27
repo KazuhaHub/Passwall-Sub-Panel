@@ -236,7 +236,7 @@ export default function SourceRulesSection({ nodeId, dirtyRef, onDirtyChange }: 
         )}
       </Field>
       <Field label={t(`${S}cidrs`)} hint={t(`${S}cidrs_hint`)} error={cidrError} errorBlocksSave={false}>
-        <LazyCodeEditor language="plain" tabMovesFocus minRows={3} maxRows={12} value={cidrText} disabled={put.isPending}
+        <LazyCodeEditor key={seedKey} language="plain" tabMovesFocus minRows={3} maxRows={12} value={cidrText} disabled={put.isPending}
           placeholder="203.0.113.0/24" onChange={setCidrText} />
       </Field>
       {dirty && <div className="text-sm"><FieldHint summary={t(`${S}unsaved.summary`)} detail={t(`${S}unsaved.detail`)} /></div>}
