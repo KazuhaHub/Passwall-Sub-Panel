@@ -148,7 +148,7 @@ describe('enabling, disabling and deleting a line', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete line' }))
     const dialog = await screen.findByRole('dialog', { name: 'Delete line "Node1 · GZ"?' })
     expect(within(dialog).getByRole('img')).toBeTruthy()
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete line' }))
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect((puts()[0][1] as { relays: { id: string }[] }).relays.map(r => r.id)).toEqual(['T1'])

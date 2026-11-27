@@ -1,18 +1,27 @@
-import { useDeferredValue, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useDeferredValue, useId, useMemo, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 
+import type { ExplainRequest, RuleSet } from '@/api/rules'
+import type { Template } from '@/api/templates'
+import UserAutocomplete from '@/components/UserAutocomplete'
 import { Notice } from '@/components/common/Notice'
 import { Disclosure } from '@/components/common/Disclosure'
 import { Field } from '@/components/form/Field'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { IconSpinner } from '@/lib/icons'
+import { useCan } from '@/utils/permissions'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Continuation } from '@/utils/ruleset/continuation'
-import { prepareProbe, routeFor, type MaybeHit, type ProbeInput, type RouteHit, type UnknownReason } from '@/utils/ruleset/match'
+import { prepareProbe, routeFor, type MaybeHit, type ProbeInput, type ProbeProblem, type RouteHit, type UnknownReason } from '@/utils/ruleset/match'
 import type { Doc } from '@/utils/ruleset/parse'
+import { ExplainResultView } from './ExplainResultView'
+import { tooLargeText } from './saveFailures'
 import { isBuiltinTarget } from './targets'
+import type { RouteExplain } from './useRouteExplain'
 
 export const EMPTY_PROBE: ProbeInput = { address: '', port: '443', network: 'tcp', resolvedIp: '', process: '', srcPort: '', srcIp: '' }
 
@@ -31,7 +40,7 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * The answer is worked out from a deferred copy of what is typed, so typing in the box is never held up by a pass over the rules.
  */
-export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, groupsKnown, onJump }: {
+export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, groupsKnown, onJump, server }: {
   doc: Doc
   blocks: readonly Block[]
   input: ProbeInput
@@ -44,15 +53,73 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   groupsKnown: boolean
   /** Opens a line in the group it is in; absent when that is not possible (text view). */
   onJump?: (line: number) => void
+  /**
+   * What the server mode needs (design 4.2 B4): the whole draft to send, the templates to choose from and the state that outlives
+   * this panel. Absent for a sub-rule's editor, which has no routing test at all; the mode is also hidden from an operator.
+   */
+  server?: { draft: RuleSet; templates: readonly Template[]; explain: RouteExplain }
 }) {
   const { t } = useTranslation(['admin', 'common'])
-  const set = (patch: Partial<ProbeInput>) => setInput(p => ({ ...p, ...patch }))
+  const admin = useCan('config.write')
+  const scopeId = useId()
+  const explain = server?.explain
+  // The server can walk a Mihomo rule list only (its sing-box answer would be a different computation), so only the Mihomo
+  // templates this rule set is in are offered, and the sing-box ones are mentioned so that nobody looks for them.
+  const bound = useMemo(() => (server ? server.templates.filter(x => (x.rule_sets || []).includes(server.draft.slug)) : []), [server])
+  const mihomo = useMemo(() => bound.filter(x => x.client_type === 'mihomo'), [bound])
+  const singboxBound = bound.length - mihomo.length
+  const chosen = mihomo.find(x => x.slug === explain?.templateSlug) ?? mihomo[0]
+  const serverAvailable = !!server && admin && mihomo.length > 0
+  const serverMode = serverAvailable && explain!.scope === 'template' && !!chosen
+  const [attempted, setAttempted] = useState(false)
+  const set = (patch: Partial<ProbeInput>) => { explain?.clearFailure(); setInput(p => ({ ...p, ...patch })) }
   const [moreOpen, setMoreOpen] = useState(() => input.resolvedIp !== '' || input.process !== '' || input.srcPort !== '' || input.srcIp !== '')
   const deferred = useDeferredValue(input)
   const prepared = useMemo(() => (deferred.address.trim() === '' ? null : prepareProbe(deferred)), [deferred])
-  const result = useMemo(() => (!textOnly && prepared?.ok ? routeFor(doc, prepared.probe, cont) : null), [doc, prepared, textOnly, cont])
-  const problem = prepared && !prepared.ok ? prepared.problem : null
+  const result = useMemo(() => (!serverMode && !textOnly && prepared?.ok ? routeFor(doc, prepared.probe, cont) : null), [doc, prepared, textOnly, cont, serverMode])
+  const problem: ProbeProblem | null = prepared && !prepared.ok ? prepared.problem : attempted && input.address.trim() === '' ? 'address_empty' : null
   const stale = deferred !== input
+
+  // ---- the server mode: asked for by the Test button or Enter, never by typing --------------------------------------------------
+  const outcome = explain?.outcome
+  const failure = outcome?.status === 'failed' ? outcome.failure : null
+  const probeKey = JSON.stringify(input)
+  const outOfDate = !!outcome && outcome.status !== 'idle' && !!server && (outcome.asked.draft !== server.draft || outcome.asked.templateSlug !== chosen?.slug || outcome.asked.userId !== explain!.userId || outcome.asked.probe !== probeKey)
+  const pending = outcome?.status === 'pending'
+  const test = () => {
+    if (!serverMode || !server || !explain || !chosen || pending) return
+    setAttempted(true)
+    const prepared = prepareProbe(input)
+    if (!prepared.ok) return
+    const p = prepared.probe
+    const request: ExplainRequest = {
+      template_slug: chosen.slug,
+      draft: server.draft,
+      ...(explain.userId ? { user_id: explain.userId } : {}),
+      // A port that is 0 or absent is "not given" to the server; what was left blank is left out.
+      probe: {
+        host: p.host, network: p.network,
+        ...(p.port !== null ? { port: p.port } : {}),
+        ...(input.resolvedIp.trim() !== '' ? { ip: input.resolvedIp.trim() } : {}),
+        ...(p.process !== '' ? { process: p.process } : {}),
+        ...(input.srcIp.trim() !== '' ? { src_ip: input.srcIp.trim() } : {}),
+        ...(p.srcPort !== null ? { src_port: p.srcPort } : {}),
+      },
+    }
+    explain.run(request, { draft: server.draft, templateSlug: chosen.slug, userId: explain.userId, probe: probeKey, request })
+  }
+  // Enter in a field of this panel never saves the page it sits in (the column is inside the page's form); with the server mode on it asks.
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Enter' || !(e.target instanceof HTMLInputElement)) return
+    e.preventDefault()
+    // Enter that commits an input-method candidate is not a request to test.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
+    if (serverMode) test()
+  }
+  const fieldFailure = failure?.kind === 'field' ? failure.field : null
+  // An error inside "More conditions" must not hide in the closed section.
+  const hiddenProblem = problem === 'resolved_invalid' || problem === 'src_invalid' || fieldFailure === 'resolved' || fieldFailure === 'src'
+  const failureText = (field: 'address' | 'port' | 'resolved' | 'src') => (fieldFailure === field && failure?.kind === 'field' ? t(`admin:rules.tester.problem.${failure.code.replace(/^explain_/, '')}`) : undefined)
 
   const groupOf = (line: number) => blockAt(blocks, line)?.index ?? 0
   const lineLink = (line: number) => {
@@ -69,13 +136,43 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   )
 
   return (
-    <section aria-label={t('admin:rules.tester.title')} aria-busy={stale} className="flex min-w-0 flex-col gap-3">
+    <section aria-label={t('admin:rules.tester.title')} aria-busy={stale || pending} className="flex min-w-0 flex-col gap-3" onKeyDown={onKeyDown}>
+      {server && (
+        !admin ? <p className="text-xs text-muted-foreground">{t('admin:rules.tester.server.admin_only')}</p>
+        : mihomo.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t(singboxBound > 0 ? 'admin:rules.tester.server.only_singbox' : 'admin:rules.tester.server.no_template')}</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span id={scopeId} className="text-sm font-medium">{t('admin:rules.tester.server.scope')}</span>
+              <SegmentedControl<'draft' | 'template'> aria-labelledby={scopeId} value={explain!.scope}
+                onChange={next => { explain!.setScope(next); if (next === 'template' && !explain!.templateSlug) explain!.setTemplateSlug(mihomo[0].slug) }}
+                options={[{ value: 'draft', label: t('admin:rules.tester.server.scope_draft') }, { value: 'template', label: t('admin:rules.tester.template') }]} />
+            </div>
+            {serverMode && (
+              <>
+                <Field label={t('admin:rules.tester.server.template_field')} error={failure?.kind === 'not_found' ? t('admin:rules.tester.server.error.not_found') : failure?.kind === 'unsupported_client' ? t('admin:rules.tester.server.error.unsupported_client') : undefined}
+                  hint={singboxBound > 0 ? t('admin:rules.tester.server.singbox_note') : undefined}>
+                  <NativeSelect value={chosen!.slug} onChange={e => { explain!.clearFailure(); explain!.setTemplateSlug(e.target.value) }}>
+                    {mihomo.map(x => <option key={x.slug} value={x.slug}>{x.name || x.slug}</option>)}
+                  </NativeSelect>
+                </Field>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">{t('admin:rules.tester.user')}</span>
+                  <UserAutocomplete value={explain!.userId} onChange={id => { explain!.clearFailure(); explain!.setUserId(id) }} label={t('admin:rules.tester.user')} fullWidth />
+                  <span className="text-xs text-muted-foreground">{t('admin:rules.tester.server.user_hint')}</span>
+                </div>
+              </>
+            )}
+          </div>
+        )
+      )}
       <div className="flex flex-col gap-3">
-        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' ? t(`admin:rules.tester.problem.${problem}`) : undefined} hint={t('admin:rules.tester.ip_note')}>
+        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' || problem === 'address_empty' ? t(`admin:rules.tester.problem.${problem}`) : failureText('address')} hint={<>{t('admin:rules.tester.ip_note')} {t('admin:rules.tester.address_assumption')}</>}>
           <Input value={input.address} placeholder={t('admin:rules.tester.address_placeholder')} spellCheck={false} autoCapitalize="none" autoCorrect="off" onChange={e => set({ address: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label={t('admin:rules.tester.port')} error={problem === 'port_invalid' ? t('admin:rules.tester.problem.port_invalid') : undefined}>
+          <Field label={t('admin:rules.tester.port')} error={problem === 'port_invalid' ? t('admin:rules.tester.problem.port_invalid') : failureText('port')}>
             <Input value={input.port} inputMode="numeric" onChange={e => set({ port: e.target.value })} />
           </Field>
           <div className="flex flex-col gap-1.5">
@@ -84,15 +181,15 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
               options={[{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }]} />
           </div>
         </div>
-        <Disclosure open={moreOpen} onToggle={() => setMoreOpen(o => !o)} summary={<span className="text-sm font-medium">{t('admin:rules.tester.more')}</span>} bodyClassName="mt-2 flex flex-col gap-3">
-          <Field label={t('admin:rules.tester.resolved_ip')} error={problem === 'resolved_invalid' ? t('admin:rules.tester.problem.resolved_invalid') : undefined}>
+        <Disclosure open={moreOpen || hiddenProblem} onToggle={() => setMoreOpen(o => !o)} summary={<span className="text-sm font-medium">{t('admin:rules.tester.more')}</span>} bodyClassName="mt-2 flex flex-col gap-3">
+          <Field label={t('admin:rules.tester.resolved_ip')} error={problem === 'resolved_invalid' ? t('admin:rules.tester.problem.resolved_invalid') : failureText('resolved')}>
             <Input value={input.resolvedIp} spellCheck={false} onChange={e => set({ resolvedIp: e.target.value })} />
           </Field>
           <Field label={t('admin:rules.tester.process')}>
             <Input value={input.process} spellCheck={false} onChange={e => set({ process: e.target.value })} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label={t('admin:rules.tester.src_port')} error={problem === 'src_invalid' ? t('admin:rules.tester.problem.src_invalid') : undefined}>
+            <Field label={t('admin:rules.tester.src_port')} error={problem === 'src_invalid' ? t('admin:rules.tester.problem.src_invalid') : failureText('src')}>
               <Input value={input.srcPort} inputMode="numeric" onChange={e => set({ srcPort: e.target.value })} />
             </Field>
             <Field label={t('admin:rules.tester.src_ip')}>
@@ -100,19 +197,41 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
             </Field>
           </div>
         </Disclosure>
+        {serverMode && (
+          <div>
+            <Button type="button" disabled={pending} onClick={test}>
+              {pending && <IconSpinner aria-hidden className="animate-spin" />}
+              {t(pending ? 'admin:rules.tester.server.running' : 'admin:rules.tester.server.run')}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div role="status" aria-live="polite" className="flex min-w-0 flex-col gap-3 text-sm">
-        {textOnly ? (
+        {serverMode ? (
+          <>
+            {outcome && outcome.status === 'done' && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.server.answer_server', { template: mihomo.find(x => x.slug === outcome.response.template_slug)?.name || outcome.response.template_slug })}</p>}
+            {outcome && outcome.status === 'done' && server && (
+              <ExplainResultView t={t} response={outcome.response} draftSlug={server.draft.slug} draftName={server.draft.name} stale={outOfDate} onJump={onJump && !textOnly && !outOfDate ? onJump : undefined} />
+            )}
+            {failure?.kind === 'too_large' && outcome?.status === 'failed' && <Notice tone="danger">{tooLargeText(t, failure.limitBytes, new TextEncoder().encode(JSON.stringify(outcome.asked.request)).length)}</Notice>}
+            {failure?.kind === 'forbidden' && <Notice tone="danger">{t('admin:rules.tester.server.admin_only')}</Notice>}
+            {failure?.kind === 'other' && <Notice tone="danger">{t(failure.code === 'explain_no_group' ? 'admin:rules.tester.server.error.explain_no_group' : 'admin:rules.tester.server.error.other')}</Notice>}
+            {(!outcome || outcome.status === 'idle') && <p className="text-muted-foreground">{t('admin:rules.tester.server.empty')}</p>}
+          </>
+        ) : textOnly ? (
           <Notice tone="warning">{t('admin:rules.tester.text_only')}</Notice>
         ) : prepared === null ? (
           <p className="text-muted-foreground">{t('admin:rules.tester.empty')}</p>
         ) : result ? (
-          <Result t={t} doc={doc} result={result} udp={deferred.network === 'udp'} resolvedEntered={deferred.resolvedIp.trim() !== ''} groupsKnown={groupsKnown} groupOf={groupOf} lineLink={lineLink} hitRow={hitRow} />
+          <>
+            {serverAvailable && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.server.answer_local')}</p>}
+            <Result t={t} doc={doc} result={result} udp={deferred.network === 'udp'} resolvedEntered={deferred.resolvedIp.trim() !== ''} groupsKnown={groupsKnown} groupOf={groupOf} lineLink={lineLink} hitRow={hitRow} />
+          </>
         ) : null}
       </div>
 
-      <p className="text-xs text-muted-foreground">{t('admin:rules.tester.mihomo_only')} {t('admin:rules.tester.scope')}</p>
+      <p className="text-xs text-muted-foreground">{serverMode ? t('admin:rules.tester.server.scope_note') : `${t('admin:rules.tester.mihomo_only')} ${t('admin:rules.tester.scope')}`}</p>
     </section>
   )
 }

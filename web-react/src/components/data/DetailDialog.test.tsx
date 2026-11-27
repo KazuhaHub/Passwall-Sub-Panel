@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@/test/initI18n'
 import { useState } from 'react'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { renderInRouter } from '@/test/routerHarness'
 import { useUrlSelection } from '@/hooks/useUrlSelection'
@@ -165,7 +165,7 @@ describe('stacked dialogs', () => {
     expect(screen.queryByRole('dialog', { name: 'Upper' })).toBeNull()
     expect(onLowerClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog', { name: 'Lower' })).toBeTruthy()
-    expect(document.activeElement).toBe(opener)
+    await waitFor(() => expect(document.activeElement).toBe(opener))
   })
 })
 

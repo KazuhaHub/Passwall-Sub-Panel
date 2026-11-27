@@ -1,5 +1,5 @@
 import type { Continuation } from './continuation'
-import { splitFields, type Doc, type RuleInfo } from './parse'
+import { PAYLOAD_SPANS_COMMAS, splitFields, type Doc, type RuleInfo } from './parse'
 
 /**
  * "Test routing" (design 3.9): which rule of the DRAFT a connection meets first. A browser can decide some rule types and not
@@ -52,7 +52,10 @@ export type ProbeProblem = 'address_empty' | 'address_idn' | 'address_invalid' |
 export function parseIp(text: string): Ip | null {
   const s = text.trim()
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) {
-    const parts = s.split('.').map(Number)
+    const octets = s.split('.')
+    // netip.ParseAddr (Mihomo's parser for the rule's prefix and the Go matcher's for the probe) refuses an octet with a leading zero.
+    if (octets.some(o => o.length > 1 && o[0] === '0')) return null
+    const parts = octets.map(Number)
     if (parts.some(p => p > 255)) return null
     return { v: 4, n: BigInt(((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3]) }
   }
@@ -218,14 +221,15 @@ function regexFor(src: string): RegExp | null {
 
 // ---- address ranges --------------------------------------------------------------------------------------------------
 
-interface Cidr { v: 4 | 6; n: bigint; len: number }
+export interface Cidr { v: 4 | 6; n: bigint; len: number }
 const cidrCache = new Map<string, Cidr | null>()
-function cidrOf(text: string): Cidr | null {
+export function cidrOf(text: string): Cidr | null {
   const hit = cidrCache.get(text)
   if (hit !== undefined) return hit
   if (cidrCache.size > 20000) cidrCache.clear()
   let out: Cidr | null = null
-  const m = /^([^/]+)\/(\d{1,3})$/.exec(text.trim())
+  // The prefix length has no leading zero either (netip.ParsePrefix).
+  const m = /^([^/]+)\/(0|[1-9]\d{0,2})$/.exec(text.trim())
   if (m) {
     const ip = parseIp(m[1])
     const len = Number(m[2])
@@ -243,14 +247,38 @@ const inCidr = (c: Cidr, ip: Ip) => {
 // ---- one rule --------------------------------------------------------------------------------------------------------------
 
 const GEO_DATA = new Set(['GEOIP', 'GEOSITE', 'RULE-SET', 'IP-ASN', 'SRC-GEOIP', 'SRC-IP-ASN'])
-const hasOption = (options: readonly string[], name: string) => options.some(o => o.toLowerCase() === name)
+/**
+ * Options are compared exactly, as Mihomo does (common.ParseParams: slices.Contains(params, "no-resolve")): `NO-RESOLVE` is not the
+ * option, so such a rule still resolves the name. (Which field is the target is a separate question, answered positionally in
+ * parse.ts; only the options after it are read here.)
+ */
+const hasOption = (options: readonly string[], name: string) => options.includes(name)
 
-function portRange(value: string): [number, number] | null {
-  const m = /^(\d{1,5})(?:-(\d{1,5}))?$/.exec(value.trim())
-  if (!m) return null
-  const a = Number(m[1])
-  const b = m[2] === undefined ? a : Number(m[2])
-  return a <= 65535 && b <= 65535 && a <= b ? [a, b] : null
+/**
+ * Mihomo's port syntax (common/utils/ranges.go and range.go): entries separated by `/` (or `,`, which a rule line has already split
+ * on, so only a quoted one reaches here), each a port or `lo-hi`; a reversed range is swapped; `[`, `]` and spaces around a number
+ * are ignored; at most 28 entries. null when a rule would not load (a bad number, more than two bounds, nothing at all).
+ */
+function portRanges(value: string): [number, number][] | null {
+  const text = value.trim().replace(/,/g, '/')
+  if (text === '' || text === '*') return null
+  const list = text.split('/')
+  if (list.length > 28) return null
+  const out: [number, number][] = []
+  for (const raw of list) {
+    const seg = raw.trim()
+    if (seg === '') continue
+    const bounds = seg.split('-')
+    if (bounds.length > 2) return null
+    const n: number[] = []
+    for (const b of bounds) {
+      const digits = b.replace(/^[[\] ]+|[[\] ]+$/g, '')
+      if (!/^\d+$/.test(digits) || Number(digits) > 65535) return null
+      n.push(Number(digits))
+    }
+    out.push(n.length === 1 ? [n[0], n[0]] : [Math.min(n[0], n[1]), Math.max(n[0], n[1])])
+  }
+  return out.length > 0 ? out : null
 }
 
 function addressRule(value: string, options: readonly string[], source: boolean, p: Probe): Verdict {
@@ -262,8 +290,11 @@ function addressRule(value: string, options: readonly string[], source: boolean,
   if (hasOption(options, 'no-resolve')) {
     // Skipped without resolving, unless an earlier rule already resolved the name: then Mihomo has the address and uses it.
     if (p.resolvedEarlier) return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')
-    // On its own a rule cannot know whether an earlier one resolved it; if the resolved address would fit, that decides.
-    return p.resolved && inCidr(net, p.resolved) ? unknown('resolve') : NO
+    // On its own a rule cannot know whether an earlier one resolved the name. With no address entered the probe assumes the client
+    // connected by name, so no destination IP is known and the rule cannot match (the tester says so next to the address field);
+    // with one entered, a fit depends on whether the name was already resolved.
+    if (!p.resolved) return NO
+    return inCidr(net, p.resolved) ? unknown('resolve') : NO
   }
   return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')
 }
@@ -279,7 +310,14 @@ function logical(type: string, value: string, p: Probe, depth: number): Verdict 
     if (!part.startsWith('(') || !part.endsWith(')')) return unknown('unsupported')
     const fields = splitFields(part.slice(1, -1))
     if (fields.length < 2 || fields[0] === '') return unknown('unsupported')
-    subs.push(evalAtom(fields[0], fields[1], fields.slice(2), p, depth + 1))
+    const subType = fields[0].toUpperCase()
+    // Mihomo refuses MATCH and SUB-RULE inside a logic rule, so the whole rule does not load.
+    if (subType === 'MATCH' || subType === 'SUB-RULE') return unknown('unsupported')
+    // A payload that holds commas (a regular expression, a nested logic rule) is everything after the type
+    // (rules/logic payloadToRule: ParseRulePayload with no target joins item[1:]); the others read one field and take options.
+    subs.push(PAYLOAD_SPANS_COMMAS.has(subType)
+      ? evalAtom(fields[0], fields.slice(1).join(','), [], p, depth + 1)
+      : evalAtom(fields[0], fields[1], fields.slice(2), p, depth + 1))
   }
   if (subs.length === 0) return unknown('unsupported')
   const firstUnknown = subs.find(s => s.verdict === 'unknown')
@@ -315,17 +353,16 @@ function evalAtom(type: string, value: string, options: readonly string[], p: Pr
     case 'IP-CIDR': case 'IP-CIDR6': return addressRule(v, options, hasOption(options, 'src'), p)
     case 'SRC-IP-CIDR': return addressRule(v, options, true, p)
     case 'DST-PORT': case 'SRC-PORT': {
-      const range = portRange(v)
-      if (!range) return unknown('unsupported')
+      const ranges = portRanges(v)
+      if (!ranges) return unknown('unsupported')
       const have = t === 'DST-PORT' ? p.port : p.srcPort
-      return have === null ? unknown('input') : of(have >= range[0] && have <= range[1])
+      return have === null ? unknown('input') : of(ranges.some(r => have >= r[0] && have <= r[1]))
     }
     case 'NETWORK': return /^(tcp|udp)$/i.test(v) ? of(v.toLowerCase() === p.network) : unknown('unsupported')
     case 'PROCESS-NAME': {
       if (p.process === '') return unknown('input')
-      if (p.process === v) return YES
-      // Whether the client compares the name case-sensitively is not stated, so a name that differs only in case is not decided.
-      return p.process.toLowerCase() === v.toLowerCase() ? unknown('input') : NO
+      // rules/common/process.go: strings.EqualFold(target, pattern).
+      return of(p.process.toLowerCase() === v.toLowerCase())
     }
     case 'AND': case 'OR': case 'NOT': return logical(t, value, p, depth)
     case 'SUB-RULE': case 'REMATCH-NAME': return unknown('sub_rule')

@@ -661,9 +661,14 @@ func parseClashRuleLine(rawLine string) (kind, value, target string, ok bool) {
 	target = normalizeRulePart(parts[index])
 	// Options sit after the target. `src` flips the rule to match the SOURCE
 	// address (Mihomo's common.ParseParams -> WithIPCIDRSourceIP), i.e. the
-	// SRC-* rule type; it is ignored by rule types that do not read it.
+	// SRC-* rule type; it is ignored by rule types that do not read it. Mihomo
+	// compares options exactly (ParseParams: slices.Contains(params, "src")),
+	// so `SRC` is not `src` there and must not be one here. Target selection
+	// above still skips options case-insensitively, which does not change which
+	// field is the target for any line whose options follow it (Mihomo reads
+	// the target positionally, as the field after the value).
 	for _, option := range parts[index+1:] {
-		if !strings.EqualFold(normalizeRulePart(option), "src") {
+		if normalizeRulePart(option) != "src" {
 			continue
 		}
 		switch kind {

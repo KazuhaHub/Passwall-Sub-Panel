@@ -120,7 +120,7 @@ describe('SubClientsView', () => {
     const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText('Reset one-click import clients?')).toBeTruthy()
     // Cancel is where focus starts: an Enter typed too early cannot confirm it.
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Reset' }))
     await waitFor(() => expect(screen.queryByText('Alpha')).toBeNull())
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))

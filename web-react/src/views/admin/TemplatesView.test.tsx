@@ -67,7 +67,7 @@ describe('deleting and restoring', () => {
     fireEvent.click(await menuItem('Delete'))
     const ask = await screen.findByRole('alertdialog')
     expect(within(ask).getByText('Delete template custom-tpl?')).toBeTruthy()
-    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' })))
     expect(api.delete).not.toHaveBeenCalled()
     fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/templates/custom-tpl'))

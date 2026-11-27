@@ -77,7 +77,7 @@ describe('deleting and restoring', () => {
     const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText(/Delete rule set custom\?/)).toBeTruthy()
     expect(within(dialog).getByText(/referenced by Mihomo main/)).toBeTruthy()
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
     expect(api.delete).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/rules/custom'))

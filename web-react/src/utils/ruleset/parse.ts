@@ -139,6 +139,12 @@ export function scanRule(raw: string): RuleScan | null {
   return { indent: m[1], bodyStart, bodyEnd, spans, fields: spans.map(s => goTrim(raw.slice(s.start, s.end))) }
 }
 
+/**
+ * Rule types whose payload may hold commas and which take no options: Mihomo reads everything between the type and the LAST
+ * field as the payload (rules/common/base.go ParseRulePayload: `item[1:len-1]` joined with commas, the target at the end).
+ */
+export const PAYLOAD_SPANS_COMMAS: ReadonlySet<string> = new Set(['NOT', 'OR', 'AND', 'SUB-RULE', 'DOMAIN-REGEX', 'PROCESS-NAME-REGEX', 'PROCESS-PATH-REGEX'])
+
 function ruleOf(scan: RuleScan): RuleInfo {
   const { fields } = scan
   const type = fields[0]
@@ -150,7 +156,9 @@ function ruleOf(scan: RuleScan): RuleInfo {
   const quoted = fields.some(f => f[0] === '"' || f[0] === "'")
   const structured = SIMPLE_TYPES.has(upper) && !quoted && fields.length >= 3 && index === 2 && fields[1] !== ''
     && fields.slice(3).every(f => RULE_OPTIONS.has(f.toLowerCase()))
-  return { type, value: fields[1] ?? '', target, targetRaw, options, fields, known: KNOWN_TYPES.has(upper), structured }
+  // `^c{1,3}laude\.ai$` is one payload although the splitter cuts it at its comma: the fields up to the target are joined back.
+  const value = PAYLOAD_SPANS_COMMAS.has(upper) && index > 2 ? fields.slice(1, index).join(',') : (fields[1] ?? '')
+  return { type, value, target, targetRaw, options, fields, known: KNOWN_TYPES.has(upper), structured }
 }
 
 let nextId = 1

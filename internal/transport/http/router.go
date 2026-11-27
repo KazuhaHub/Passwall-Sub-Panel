@@ -710,9 +710,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Render.InvalidateAll, d.Cfg.ConfigDir, d.Repos.Template).WithGroupPreview(d.Render, d.Repos.User)
 		staffGroup.GET("/rules", rules.List)
-		// Both carry the editor's draft in a POST and write nothing: see previewPOST.
+		// All carry the editor's draft in a POST and write nothing: see previewPOST.
 		previewPOST(adminGroup, "/rules/inspect-proxy-groups", rules.InspectProxyGroups)
 		previewPOST(adminGroup, "/rules/preview-proxy-groups", rules.PreviewProxyGroups)
+		previewPOST(adminGroup, "/rules/explain", handler.NewAdminRuleExplainHandler(d.Render).Explain)
 		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)

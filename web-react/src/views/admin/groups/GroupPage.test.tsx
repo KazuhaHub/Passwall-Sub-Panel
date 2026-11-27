@@ -326,7 +326,7 @@ describe('the header', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     const ask = await screen.findByRole('alertdialog')
     expect(within(ask).getByText('Delete group Spare?')).toBeTruthy()
-    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Cancel' })))
     expect(api.delete).not.toHaveBeenCalled()
     fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/groups/6'))
