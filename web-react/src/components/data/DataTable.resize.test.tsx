@@ -7,16 +7,24 @@ import { DataTable } from './DataTable'
 import { columnWidthsKey } from './columnWidths'
 
 // jsdom has no layout: every header cell is 200px wide (the "fitted" width), the frame is 700px.
-const FITTED = 200
+let FITTED = 200
 const FRAME = 800
+// The frame's clientWidth excludes a vertical scrollbar, the bounding box does not: they differ by 15 here.
+let FRAME_CLIENT = FRAME - 15
+let resizeCallbacks: (() => void)[] = []
 beforeEach(() => {
   localStorage.clear()
+  FITTED = 200
+  FRAME_CLIENT = FRAME - 15
+  resizeCallbacks = []
+  vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { resizeCallbacks.push(cb) } observe() {} disconnect() {} unobserve() {} })
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('group/frame') ? FRAME_CLIENT : 0 })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const w = this.tagName === 'TH' ? FITTED : this.hasAttribute('data-slot') && this.getAttribute('data-slot') === 'data-table' ? FRAME : this.classList.contains('group/frame') ? FRAME : 0
     return { top: 0, left: 0, right: w, bottom: 0, width: w, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect
   })
 })
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 interface Row { id: string; name: string; status: string; note: string }
 const rows: Row[] = Array.from({ length: 4 }, (_, i) => ({ id: `r${i}`, name: `Row ${i}`, status: 'Proxy service', note: 'n' }))
@@ -26,8 +34,8 @@ const columns: ColumnDef<Row>[] = [
   { accessorKey: 'note', header: 'Note' },
   { id: 'actions', header: '', enableSorting: false, cell: () => 'x', meta: { hideable: false, label: 'Actions' } },
 ]
-const mount = (props: { tableId?: string; columnMenu?: boolean } = {}) =>
-  render(<DataTable<Row> tableId={props.tableId ?? ('tableId' in props ? undefined : 't1')} columnMenu={props.columnMenu} data={rows} columns={columns} getRowId={r => r.id} aria-label="T" />)
+const mount = (props: { tableId?: string; columnMenu?: boolean; cols?: ColumnDef<Row>[]; data?: Row[] } = {}) =>
+  render(<DataTable<Row> tableId={props.tableId ?? ('tableId' in props ? undefined : 't1')} columnMenu={props.columnMenu} data={props.data ?? rows} columns={props.cols ?? columns} getRowId={r => r.id} aria-label="T" />)
 
 const handle = (name: string) => screen.getByRole('separator', { name: `Resize column ${name}` })
 const colWidths = () => [...document.querySelectorAll<HTMLElement>('col')].map(c => c.style.width)
@@ -60,9 +68,10 @@ describe('column resizing', () => {
     mount()
     drag(handle('Status'), 400, 460)
     // Nothing is squeezed: the table grows past the frame (the frame scrolls) rather than cutting the others short.
-    expect(colWidths().slice(0, 3)).toEqual(['200px', '260px', '200px'])
+    // The actions column (last, no header text) is the one left without a width: it takes what the frame has left, at the right edge.
+    expect(colWidths()).toEqual(['200px', '260px', '200px', ''])
     expect(screen.getByRole('table').style.tableLayout).toBe('fixed')
-    expect(screen.getByRole('table').style.width).toBe('860px')
+    expect(screen.getByRole('table').style.minWidth).toBe('860px')
   })
 
   it('never goes below the minimum width', () => {
@@ -165,12 +174,19 @@ describe('column resizing', () => {
     expect(localStorage.length).toBe(0)
   })
 
-  it('shrinking a column hands the room to the last one, so the table still fills its frame', () => {
+  it('lets the last real column be made narrower, and it stays that width', () => {
     mount()
-    drag(handle('User'), 200, 140)
-    // 800 frame: User 140 + Status 200 + (elastic) Note + actions 200 -> Note takes the 60px freed
-    expect(colWidths()).toEqual(['140px', '200px', '260px', '200px'])
-    expect(screen.getByRole('table').style.width).toBe('800px')
+    drag(handle('Note'), 600, 560)
+    expect(colWidths()).toEqual(['200px', '200px', '160px', ''])
+    expect(screen.getByRole('table').style.minWidth).toBe('760px')
+  })
+
+  it('adds an empty trailing filler column when there is no actions column to take the leftover', () => {
+    mount({ cols: columns.slice(0, 3) })
+    drag(handle('Note'), 600, 560)
+    expect(colWidths()).toEqual(['200px', '200px', '160px', ''])
+    expect(document.querySelectorAll('thead th')).toHaveLength(3)
+    expect(screen.getByRole('table').className).toContain('w-full')
   })
 
   it('sizes the header cell and the body cells together (one colgroup drives both)', () => {
@@ -179,5 +195,79 @@ describe('column resizing', () => {
     const first = screen.getAllByRole('row')[1]
     expect(within(first).getAllByRole('cell')).toHaveLength(4)
     expect(document.querySelectorAll('col')).toHaveLength(4)
+  })
+
+  it('Home on the handle resets that column, like a double click, and the handle says so', () => {
+    mount()
+    drag(handle('Status'), 400, 450)
+    const h = handle('Status')
+    const desc = document.getElementById(h.getAttribute('aria-describedby') ?? '')
+    expect(desc?.textContent).toMatch(/Home/)
+    fireEvent.keyDown(h, { key: 'Home' })
+    expect(stored()).toBeNull()
+  })
+
+  it('reads the frame by clientWidth: a scrollbar must not count as room', () => {
+    // bounding 800, client 785: a restore that scaled to the bounding width would leave the last column 15px out of reach
+    localStorage.setItem(columnWidthsKey('t1'), JSON.stringify({ v: 1, w: { status: 250 } }))
+    mount()
+    expect(screen.getByRole('table').style.minWidth).toBe('850px')
+  })
+
+  it('measures again when the rows are replaced by a refetch (content may have grown)', () => {
+    const { rerender } = mount()
+    drag(handle('Status'), 400, 450)
+    expect(colWidths()).toEqual(['200px', '250px', '200px', ''])
+    FITTED = 260
+    rerender(<DataTable<Row> tableId="t1" data={rows.map(r => ({ ...r }))} columns={columns} getRowId={r => r.id} aria-label="T" />)
+    expect(colWidths()).toEqual(['260px', '250px', '260px', ''])
+  })
+
+  it('does not measure again for a re-render with the same rows', () => {
+    const { rerender } = mount()
+    drag(handle('Status'), 400, 450)
+    FITTED = 260
+    rerender(<DataTable<Row> tableId="t1" data={rows} columns={columns} getRowId={r => r.id} aria-label="T" />)
+    expect(colWidths()).toEqual(['200px', '250px', '200px', ''])
+  })
+
+  it('applies saved widths once a table that was hidden when it first drew gets a width', () => {
+    localStorage.setItem(columnWidthsKey('t1'), JSON.stringify({ v: 1, w: { status: 250 } }))
+    FITTED = 0
+    FRAME_CLIENT = 0
+    mount()
+    expect(document.querySelector('col')).toBeNull()
+    FITTED = 200
+    FRAME_CLIENT = 800
+    act(() => { resizeCallbacks.forEach(cb => cb()) })
+    expect(colWidths()).toEqual(['200px', '250px', '200px', ''])
+  })
+})
+
+describe('the Columns button', () => {
+  const noHide: ColumnDef<Row>[] = [
+    { accessorKey: 'name', header: 'User', meta: { hideable: false } },
+    { accessorKey: 'status', header: 'Status', meta: { hideable: false } },
+  ]
+  it('is not shown when there is nothing to hide and nothing to reset', () => {
+    mount({ cols: noHide })
+    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
+  })
+  it('appears with only the reset item once a width is set, on a table that has no column list', () => {
+    mount({ cols: noHide })
+    drag(handle('Status'), 400, 450)
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reset column widths' }))
+    expect(stored()).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
+  })
+  it('does the same when the page switched the column list off (columnMenu false)', () => {
+    mount({ columnMenu: false })
+    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
+    drag(handle('Status'), 400, 450)
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Reset column widths' })).toBeTruthy()
   })
 })

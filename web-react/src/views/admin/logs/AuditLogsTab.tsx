@@ -24,7 +24,7 @@ export default function AuditLogsTab() {
     { id: 'actor', header: t('logs.audit_table.actor'), meta: { label: t('logs.audit_table.actor'), className: `${FIT} w-[16%] font-medium` },
       cell: c => <span title={c.row.original.actor}>{c.row.original.actor}</span> },
     { id: 'action', header: t('logs.audit_table.action'), meta: { label: t('logs.audit_table.action'), className: 'font-mono text-[0.8125rem] whitespace-nowrap' },
-      cell: c => <span title={c.row.original.action}>{c.row.original.action}</span> },
+      cell: c => <span title={c.row.original.action} className="inline-block max-w-96 truncate align-bottom">{c.row.original.action}</span> },
     { id: 'target', header: t('logs.audit_table.target'), meta: { label: t('logs.audit_table.target'), className: `${FIT} w-[26%]` },
       cell: c => <span title={c.row.original.target}>{c.row.original.target}</span> },
     { id: 'ip', header: t('logs.audit_table.ip'), meta: { label: t('logs.audit_table.ip'), className: 'whitespace-nowrap' },

@@ -85,6 +85,7 @@
       "columns_menu": "Visible columns",
       "resize_column": "Resize column {{name}}",
       "reset_widths": "Reset column widths",
+      "resize_hint": "Left and right arrow keys resize this column; Home returns it to its fitted width.",
       "sort_by": "Sort by {{column}}",
       "select_all": "Select all rows on this page",
       "select_row": "Select row {{n}}",

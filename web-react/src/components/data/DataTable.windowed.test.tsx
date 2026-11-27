@@ -23,11 +23,13 @@ beforeEach(() => {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT })
   Object.defineProperty(window, 'scrollY', { configurable: true, get: () => scrollY })
   window.scrollTo = ((_x: number, y: number) => { scrollY = y }) as typeof window.scrollTo
+  // The bounding box (375) includes a scrollbar; the width to plan with is clientWidth (360).
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('group/frame') ? 360 : 0 })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.tagName === 'TBODY') return box(BODY_TOP - scrollY, 0)
     if (this.tagName === 'THEAD') return box(0, HEAD)
     if (this.tagName === 'TH') return box(0, HEAD, 120)
-    if (this.classList.contains('group/frame')) return box(0, 0, 360)
+    if (this.classList.contains('group/frame')) return box(0, 0, 375)
     if (this.tagName === 'TR' && this.hasAttribute('data-row')) {
       const i = Number(this.getAttribute('aria-rowindex')) - 2
       return box(BODY_TOP - scrollY + i * ROW, ROW)
@@ -394,7 +396,7 @@ describe('windowed column widths', () => {
     resize('Name', 100, 60)
     const set = widths()
     // columns: drag handle, Name, Id. The frame is 360 wide, and Id (the last, elastic one) takes the 40px Name gave up.
-    expect(set).toEqual(['120px', '80px', '160px'])
+    expect(set).toEqual(['120px', '80px', '120px', ''])
     scrollPageTo(60000)
     expect(widths()).toEqual(set)
     scrollPageTo(0)
@@ -405,6 +407,14 @@ describe('windowed column widths', () => {
     mount({ tableId: 'win' })
     // The frame is 360 wide, the drag handle column takes 120 and the elastic Id column is not squeezed below its 120: Name stays at 120.
     resize('Name', 100, 2000)
-    expect(widths()).toEqual(['120px', '120px', '120px'])
+    expect(widths()).toEqual(['120px', '120px', '120px', ''])
+  })
+
+  it('scales saved widths down to fit a clipped table, so nothing is out of reach, and leaves the saved values alone', () => {
+    localStorage.setItem('psp.colWidths.v1.win', JSON.stringify({ v: 1, w: { name: 300 } }))
+    mount({ tableId: 'win' })
+    // 120 + 300 + 120 = 540 in a 360 frame: the saved width gives up the 180px that do not fit.
+    expect(widths()).toEqual(['120px', '120px', '120px', ''])
+    expect(JSON.parse(localStorage.getItem('psp.colWidths.v1.win')!)).toEqual({ v: 1, w: { name: 300 } })
   })
 })

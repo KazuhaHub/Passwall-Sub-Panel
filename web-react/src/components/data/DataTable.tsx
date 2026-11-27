@@ -467,51 +467,57 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   // Fixed column widths. Measured from the header while the rows are drawn, then frozen into a <colgroup> with a
   // fixed table layout, so the widths cannot change as other rows scroll in. That is needed when the list is
-  // windowed, and whenever the admin has set a width (a resized column needs the others to hold still). A different
-  // set of columns, a different table width or a different set of rows measures again.
+  // windowed, and whenever the admin has set a width (a resized column needs the others to hold still). It measures
+  // again for a different set of columns, a different frame width (also a frame that had none, because it was hidden),
+  // and whenever `data` is a new array (a refetch may have made a cell longer: a status from "Active" to a longer
+  // label would otherwise be clipped). Scrolling never changes `data`, so it never measures.
   const hasUserWidths = visibleColumns.some(c => userWidths[c.id] !== undefined)
   const fixedMode = !cards && !showError && (windowed || hasUserWidths)
   const leadCols = (reorderCol ? 1 : 0) + (selectable === true ? 1 : 0)
   const freezeKey = `${visibleColumns.map(c => c.id).join('|')}:${reorderCol}:${selectable === true}`
-  // The rows on screen, cheaply: a new page, a filter, a sort or an insert changes it; a scroll or a poll that returns the same rows does not.
-  const rowsKey = `${rows.length}:${rows[0]?.id ?? ''}:${rows[rows.length - 1]?.id ?? ''}`
-  const [frozen, setFrozen] = useState<{ key: string; rowsKey: string; widths: number[]; frameW: number } | null>(null)
-  const frozenWidths = fixedMode && frozen?.key === freezeKey && frozen.rowsKey === rowsKey ? frozen.widths : null
+  const [frozen, setFrozen] = useState<{ key: string; data: readonly T[]; widths: number[]; frameW: number } | null>(null)
+  const [frameTick, setFrameTick] = useState(0)
+  const frozenWidths = fixedMode && frozen?.key === freezeKey && frozen.data === data ? frozen.widths : null
   useLayoutEffect(() => {
     if (!fixedMode) { setFrozen(prev => (prev ? null : prev)); return }
     if (frozenWidths) return
     const cells = headRowRef.current?.children
     if (!cells || cells.length !== colSpan) return
     const widths = [...cells].map(c => c.getBoundingClientRect().width)
-    if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, rowsKey, widths, frameW: frameRef.current?.getBoundingClientRect().width ?? 0 })
-  }, [fixedMode, frozenWidths, freezeKey, rowsKey, colSpan])
-  // What the table is drawn with: the admin's width where there is one, the fitted width otherwise. Once any width is
-  // set, the LAST resizable column is elastic: it takes whatever the frame has left, never less than it was fitted to
-  // (or than the admin set it), so shrinking a column never leaves a blank strip at the right edge, and widening one
-  // never squeezes a short column of its neighbours until it is cut off: the table grows (and scrolls) instead.
+    // Nothing to freeze while hidden (every width is 0): the frame observer asks again once it has a width.
+    if (widths.every(w => w > 0)) setFrozen({ key: freezeKey, data, widths, frameW: frameRef.current?.clientWidth ?? 0 })
+  }, [fixedMode, frozenWidths, freezeKey, data, colSpan, frameTick])
+  // What the table is drawn with: the admin's width where there is one, the fitted width otherwise.
   const isResizable = (c: (typeof visibleColumns)[number]) => c.getCanResize() && c.columnDef.header !== undefined && c.columnDef.header !== ''
-  const lastResizable = visibleColumns.map(isResizable).lastIndexOf(true)
-  const elasticAt = lastResizable < 0 ? -1 : lastResizable + leadCols
-  // The floor is the width it was fitted to (or the admin's own): someone else's resize never squeezes it below that.
-  const elasticFloor = elasticAt < 0 ? 0 : userWidths[visibleColumns[elasticAt - leadCols].id] ?? frozenWidths?.[elasticAt] ?? MIN_COLUMN_WIDTH
   const baseWidths = frozenWidths?.map((w, i) => (i >= leadCols ? userWidths[visibleColumns[i - leadCols]?.id] ?? w : w)) ?? null
-  let shownWidths = baseWidths
-  if (hasUserWidths && baseWidths && frozen && elasticAt >= 0 && frozen.frameW > 0) {
-    shownWidths = baseWidths.slice()
-    shownWidths[elasticAt] = Math.max(elasticFloor, frozen.frameW - (baseWidths.reduce((a, b) => a + b, 0) - baseWidths[elasticAt]))
-  }
-  const tableWidth = hasUserWidths && shownWidths ? shownWidths.reduce((a, b) => a + b, 0) : null
-  // A table clipped sideways (the page scrolls, see "KNOWN LIMIT") cannot grow past its frame: the column gets what the others leave,
-  // and the elastic column counts at its floor, because it is what gives way.
+  // A table clipped sideways (the page scrolls, see "KNOWN LIMIT") cannot scroll to a column that does not fit. If the
+  // saved widths no longer fit this frame (a narrower window), the saved ones are scaled down together, never below
+  // the minimum, so every column stays reachable. The stored values are untouched: a wider window gets them back.
   const clipped = windowed && !ownScroller
-  const maxWidthOf = (i: number): number => {
-    if (!clipped || !frozen || frozen.frameW <= 0 || !shownWidths) return MAX_COLUMN_WIDTH
-    const others = shownWidths.reduce((a, b) => a + b, 0) - shownWidths[i]
-    const slack = i === elasticAt || elasticAt < 0 ? 0 : shownWidths[elasticAt] - elasticFloor
-    return frozen.frameW - (others - slack)
+  const frameW = frozen?.frameW ?? 0
+  if (clipped && hasUserWidths && baseWidths && frameW > 0) {
+    const set = baseWidths.map((_, i) => i).filter(i => i >= leadCols && userWidths[visibleColumns[i - leadCols]?.id] !== undefined)
+    const room = set.reduce((a, i) => a + Math.max(0, baseWidths[i] - MIN_COLUMN_WIDTH), 0)
+    const cut = Math.min(baseWidths.reduce((a, b) => a + b, 0) - frameW, room)
+    if (cut > 0) for (const i of set) baseWidths[i] -= cut * Math.max(0, baseWidths[i] - MIN_COLUMN_WIDTH) / room
   }
-  const resetWidths = () => { updateWidths(() => ({}), true) }
+  const shownWidths = baseWidths
+  // Once a width is set, one column has NO width in the colgroup and takes what the frame has left, so every real
+  // column (the last one too) can be made narrower and then stays that width. That is the last column when it is the
+  // actions column (no header text, right-aligned: it stays at the right edge); otherwise an empty trailing <col> with
+  // no cells behind it. The table is as wide as its frame, and never narrower than all its columns (min-width), so the
+  // absorbing column is never squeezed below the width it was fitted to; past that the frame scrolls.
+  const lastColumn = visibleColumns[visibleColumns.length - 1]
+  const absorberAt = hasUserWidths && lastColumn && !isResizable(lastColumn) ? leadCols + visibleColumns.length - 1 : -1
+  const filler = hasUserWidths && absorberAt < 0
+  const tableMinWidth = hasUserWidths && shownWidths ? shownWidths.reduce((a, b) => a + b, 0) : null
+  // A column may not grow past what its frame has room for when the table cannot scroll sideways.
+  const maxWidthOf = (i: number): number => {
+    if (!clipped || frameW <= 0 || !shownWidths) return MAX_COLUMN_WIDTH
+    return frameW - (shownWidths.reduce((a, b) => a + b, 0) - shownWidths[i])
+  }
   const canResetWidths = Object.keys(userWidths).length > 0
+  const resetWidths = () => { updateWidths(() => ({}), true) }
   // The pinned columns get their separator only once the table is scrolled sideways (data-hscrolled on the frame).
   useEffect(() => {
     const frame = frameRef.current
@@ -524,9 +530,14 @@ export function DataTable<T>(props: DataTableProps<T>) {
   useLayoutEffect(() => {
     const frame = frameRef.current
     if (!fixedMode || !frame || typeof ResizeObserver === 'undefined') return
+    // clientWidth, not the bounding box: the frame's own vertical scrollbar is not room the columns can use.
+    let last = frame.clientWidth
     const ro = new ResizeObserver(() => {
-      const w = frame.getBoundingClientRect().width
+      const w = frame.clientWidth
+      if (Math.abs(w - last) <= 1) return
+      last = w
       setFrozen(prev => (prev && Math.abs(prev.frameW - w) > 1 ? null : prev))
+      setFrameTick(n => n + 1)
     })
     ro.observe(frame)
     return () => ro.disconnect()
@@ -605,10 +616,10 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   return (
     <div data-slot="data-table" className={cn('flex min-w-0 flex-col', className)}>
-      {(toolbar || columnMenu) && (
+      {(toolbar || columnMenu || canResetWidths) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">{toolbar}</div>
-          {columnMenu && !cards && <ColumnMenu table={table} onResetWidths={resetWidths} canResetWidths={canResetWidths} />}
+          {(columnMenu || canResetWidths) && !cards && <ColumnMenu table={table} listColumns={columnMenu} onResetWidths={resetWidths} canResetWidths={canResetWidths} />}
         </div>
       )}
 
@@ -653,10 +664,10 @@ export function DataTable<T>(props: DataTableProps<T>) {
               aria-busy={loading || undefined}
               aria-rowcount={windowed ? rows.length + 1 : undefined}
               // Fixed layout clips: a cell wider than its column ends in an ellipsis (a child capped by its own max-width is held to the cell).
-              className={cn('caption-bottom text-sm', tableWidth === null && 'w-full', frozenWidths && '[&_td]:overflow-hidden [&_td]:text-ellipsis [&_td>*]:max-w-full [&_th]:overflow-hidden')}
-              style={frozenWidths ? { tableLayout: 'fixed', ...(tableWidth !== null ? { width: `${tableWidth}px` } : null) } : undefined}
+              className={cn('w-full caption-bottom text-sm', frozenWidths && '[&_td]:overflow-hidden [&_td]:text-ellipsis [&_td>*]:max-w-full [&_th]:overflow-hidden')}
+              style={frozenWidths ? { tableLayout: 'fixed', ...(tableMinWidth !== null ? { minWidth: `${tableMinWidth}px` } : null) } : undefined}
             >
-              {shownWidths && <colgroup>{shownWidths.map((w, i) => <col key={i} style={{ width: `${w}px` }} />)}</colgroup>}
+              {shownWidths && <colgroup>{shownWidths.map((w, i) => <col key={i} style={i === absorberAt ? undefined : { width: `${w}px` }} />)}{filler && <col />}</colgroup>}
               <TableHeader
                 ref={headRef}
                 className={cn('sticky top-0 z-10 shadow-[0_1px_0_0_var(--border)] [&_tr]:border-b-0', HEAD_BG)}
@@ -730,6 +741,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                             width={shownWidths?.[cellIndex]}
                             getWidth={() => widthsRef.current[col.id] ?? shownWidths?.[cellIndex] ?? headRowRef.current?.children[cellIndex]?.getBoundingClientRect().width ?? 0}
                             getMax={() => maxWidthOf(cellIndex)}
+                            canGrow={maxWidthOf(cellIndex) > (shownWidths?.[cellIndex] ?? 0) + 0.5}
                             onResize={w => updateWidths(prev => ({ ...prev, [col.id]: w }), false)}
                             onCommit={() => saveColumnWidths(tableId, widthsRef.current)}
                             onReset={() => updateWidths(prev => { const { [col.id]: _drop, ...rest } = prev; return rest }, true)}

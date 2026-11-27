@@ -95,7 +95,7 @@ export function groupColumns(c: GroupColumnCtx): ColumnDef<Group, any>[] {
         )
       } },
     { id: 'slug', header: t('admin:groups.table.slug'), accessorFn: r => r.slug, meta: { label: t('admin:groups.table.slug'), className: 'font-mono text-xs whitespace-nowrap text-muted-foreground' },
-      cell: ctx => <span title={ctx.row.original.slug}>{ctx.row.original.slug}</span> },
+      cell: ctx => <span title={ctx.row.original.slug} className="inline-block max-w-56 truncate align-bottom">{ctx.row.original.slug}</span> },
     { id: 'tag_filter', header: t('admin:groups.table.tag_filter'), enableSorting: false, meta: { label: t('admin:groups.table.tag_filter'), className: `${FIT} w-[20%]` },
       cell: ctx => <Conditions g={ctx.row.original} t={t} /> },
   ]

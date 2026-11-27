@@ -48,7 +48,7 @@ export function CertsTab({ data, sel, act }: { data: CertData; sel: UrlSelection
   ctx.current = { act, open: id => sel.select(id) }
 
   const columns = useMemo<ColumnDef<Cert, any>[]>(() => plainColumns<Cert>([
-    { id: 'status', header: t('certs.col_status'), meta: { label: t('certs.col_status'), hideable: false, className: 'whitespace-nowrap' },
+    { id: 'status', header: t('certs.col_status'), meta: { label: t('certs.col_status'), hideable: false, className: `${FIT} w-[27%]` },
       cell: c => <HealthCell cert={c.row.original} health={certHealth(c.row.original, now, renewBeforeDays)} /> },
     { id: 'name', header: t('certs.col_name'), meta: { label: t('certs.col_name'), hideable: false, className: `${FIT} w-[13%] font-medium` },
       cell: c => <span title={c.row.original.name}>{c.row.original.name}</span> },
