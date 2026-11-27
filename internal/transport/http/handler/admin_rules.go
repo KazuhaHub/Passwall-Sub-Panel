@@ -12,6 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
@@ -106,6 +107,11 @@ func (h *AdminRuleSetsHandler) Get(c *gin.Context) {
 func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 	var req ruleSetDTO
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// The cap lives in middleware; a body past it must read as 413, not as
+		// a malformed-JSON 400, so the editor can say "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -228,6 +234,11 @@ type inspectProxyGroupsRequest struct {
 func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 	var req inspectProxyGroupsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// The cap lives in middleware; a body past it must read as 413, not as
+		// a malformed-JSON 400, so the editor can say "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

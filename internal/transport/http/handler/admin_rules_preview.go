@@ -26,6 +26,11 @@ func (h *AdminRuleSetsHandler) PreviewProxyGroups(c *gin.Context) {
 		Draft   ruleSetDTO `json:"draft"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// The cap lives in middleware; a body past it must read as 413, not as
+		// a malformed-JSON 400, so the editor can say "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
