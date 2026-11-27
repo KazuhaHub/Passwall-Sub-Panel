@@ -320,3 +320,55 @@ func TestRenderForUserCached_InvalidateDuringRender(t *testing.T) {
 		t.Fatalf("stale render was cached over the fresh one: %s", o3.Body)
 	}
 }
+
+// A render waiting on an upstream panel must not hold a render slot: the slots
+// bound CPU and memory, and with every slot parked on a dead panel's 30 s
+// timeout every other subscriber's cold render would queue behind them.
+func TestRenderForUserCached_UpstreamWaitYieldsItsSlot(t *testing.T) {
+	s := &Service{cache: newRenderCache(time.Minute), renderSem: make(chan struct{}, 2)}
+	s.now = time.Now
+	release := make(chan struct{})
+	parked := make(chan struct{}, 2)
+	s.renderFn = func(ctx context.Context, u *domain.User, _ domain.ClientType) (*Output, error) {
+		if u.ID <= 2 { // these two wait on "the panel"
+			withoutRenderSlot(ctx, func() {
+				parked <- struct{}{}
+				<-release
+			})
+		}
+		return &Output{Body: []byte("ok")}, nil
+	}
+	var wg sync.WaitGroup
+	for id := int64(1); id <= 2; id++ {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			if _, err := s.RenderForUserCached(context.Background(), &domain.User{ID: id}, domain.ClientMihomo); err != nil {
+				t.Errorf("user %d: %v", id, err)
+			}
+		}(id)
+	}
+	<-parked
+	<-parked // both slots' holders are now waiting upstream
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.RenderForUserCached(ctx, &domain.User{ID: 3}, domain.ClientMihomo); err != nil {
+		t.Fatalf("a third user's render queued behind renders that are only waiting on a panel: %v", err)
+	}
+	close(release)
+	wg.Wait()
+	if n := len(s.renderSem); n != 0 {
+		t.Fatalf("%d slot(s) still held after every render finished", n)
+	}
+}
+
+// Yielding outside a capped render (a preview, a test fixture) is a no-op, and
+// a slot is never released twice.
+func TestWithoutRenderSlot_NoSlotIsANoOp(t *testing.T) {
+	ran := false
+	withoutRenderSlot(context.Background(), func() { ran = true })
+	if !ran {
+		t.Fatal("fn did not run")
+	}
+}

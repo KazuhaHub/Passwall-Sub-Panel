@@ -182,6 +182,54 @@ const renderFlightTimeout = 2 * time.Minute
 // never blocks all others on a single-core host.
 func renderSlots() int { return max(2, runtime.GOMAXPROCS(0)) }
 
+// renderSlot is one render's hold on the global semaphore. It is touched only
+// by the goroutine running that render, so `held` needs no lock.
+type renderSlot struct {
+	sem  chan struct{}
+	held bool
+}
+
+type renderSlotKey struct{}
+
+func (r *renderSlot) acquire(ctx context.Context) error {
+	select {
+	case r.sem <- struct{}{}:
+		r.held = true
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// release is idempotent: the flight's deferred release must not free a slot
+// the render already gave up and could not take back.
+func (r *renderSlot) release() {
+	if r.held {
+		r.held = false
+		<-r.sem
+	}
+}
+
+// withoutRenderSlot runs fn with the calling render's slot given up, and takes
+// the slot back before returning. The slots exist to bound the CPU and memory
+// of rendering; a render that is only waiting on a panel (the inbound prefetch
+// for a node with no local snapshot, up to the adapter's 30 s timeout when that
+// panel is down) uses neither, and holding a slot through that wait let two
+// such renders stall every other subscriber's cold render on a small host.
+// When the context ends before a slot frees up the render carries on without
+// one: it is about to fail on that context anyway, and release() stays a no-op.
+// Outside a capped render (previews, fixtures) there is no slot and fn just runs.
+func withoutRenderSlot(ctx context.Context, fn func()) {
+	slot, _ := ctx.Value(renderSlotKey{}).(*renderSlot)
+	if slot == nil || !slot.held {
+		fn()
+		return
+	}
+	slot.release()
+	defer func() { _ = slot.acquire(ctx) }()
+	fn()
+}
+
 // RenderForUserCached is the /sub entry point: it returns a cached render for
 // (user, clientType) within subRenderCacheTTL and otherwise renders fresh via
 // RenderForUser and caches the result. Concurrent misses for the same key (and
@@ -228,12 +276,14 @@ func (s *Service) RenderForUserCached(ctx context.Context, u *domain.User, ct do
 		// A Service built without New (test fixtures) has no semaphore and
 		// renders uncapped; production always goes through New.
 		if s.renderSem != nil {
-			select {
-			case s.renderSem <- struct{}{}:
-			case <-rctx.Done():
-				return nil, rctx.Err()
+			slot := &renderSlot{sem: s.renderSem}
+			if err := slot.acquire(rctx); err != nil {
+				return nil, err
 			}
-			defer func() { <-s.renderSem }()
+			defer slot.release()
+			// The render reaches the slot through its context so it can give
+			// it up while it only waits on a panel (see withoutRenderSlot).
+			rctx = context.WithValue(rctx, renderSlotKey{}, slot)
 		}
 		render := s.renderFn
 		if render == nil {
@@ -246,7 +296,11 @@ func (s *Service) RenderForUserCached(ctx context.Context, u *domain.User, ct do
 		if out.ETag == "" {
 			out.ETag = ComputeWeakETag(out.Body)
 		}
-		s.cache.putIfVersion(key, out, now, version)
+		// The entry's lifetime starts when the render finished, not when the
+		// first caller arrived: the render may have queued for a slot, and an
+		// expiry measured from before that wait could store an entry that is
+		// already stale and out of order in the eviction list.
+		s.cache.putIfVersion(key, out, s.now(), version)
 		return out, nil
 	})
 	select {

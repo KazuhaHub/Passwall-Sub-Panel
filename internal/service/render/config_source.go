@@ -50,7 +50,13 @@ func (s *Service) resolveInbounds(ctx context.Context, items []renderItem, st po
 		}
 	}
 	if len(fallback) > 0 {
-		for id, inb := range s.prefetchInboundsForRender(ctx, fallback, st) {
+		// Network wait, not render work: give the render slot up for its
+		// duration so a dead panel cannot park the slots (withoutRenderSlot).
+		var fetched map[int64]*ports.Inbound
+		withoutRenderSlot(ctx, func() {
+			fetched = s.prefetchInboundsForRender(ctx, fallback, st)
+		})
+		for id, inb := range fetched {
 			out[id] = inb
 		}
 	}
