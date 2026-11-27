@@ -7,6 +7,7 @@ import { DetailDialog } from '@/components/data/DetailDialog'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Button } from '@/components/ui/button'
 import { IconInfo, IconSpinner, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import type { Finding, ShadowKind } from '@/utils/ruleset/lint'
 import type { Doc } from '@/utils/ruleset/parse'
 
@@ -28,10 +29,12 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * `findings` is null while the analysis for the current text is still running (it runs when the browser is idle).
  */
-export function IssuesPanel({ doc, findings, textOnly, status, failedMessage, onRetry, onJump, onClose }: {
+export function IssuesPanel({ doc, findings, textOnly, updating = false, status, failedMessage, onRetry, onJump, onClose }: {
   doc: Doc
   findings: readonly Finding[] | null
   textOnly: boolean
+  /** The text is being typed into and `doc` is still the one read before the latest typing: the findings are the old ones, and say so. */
+  updating?: boolean
   /**
    * The state of the proxy-group members the findings rest on: `ready` (all findings), `computing` (the request for them is
    * pending or running), `failed` (it failed: the findings that do not need them are shown, with a way to ask again) and
@@ -57,7 +60,8 @@ export function IssuesPanel({ doc, findings, textOnly, status, failedMessage, on
 
   return (
     <DetailDialog open onClose={onClose} size="lg" title={t('admin:rules.issues.title')} description={t('admin:rules.issues.description')}>
-      <div className="flex flex-col gap-3">
+      <div className={cn('flex flex-col gap-3 transition-opacity', updating && 'opacity-60')} aria-busy={updating || undefined}>
+        {updating && <p role="status" className="text-xs text-muted-foreground">{t('admin:rules.updating')}</p>}
         <p className="text-xs text-muted-foreground">{t('admin:rules.issues.tcp_note')}</p>
         {status === 'failed' && (
           <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={onRetry}>{t('admin:rules.retry')}</Button>}>{failedMessage ?? t('admin:rules.issues.failed')}</Notice>
@@ -88,7 +92,7 @@ export function IssuesPanel({ doc, findings, textOnly, status, failedMessage, on
                     <li key={f.line} className="flex min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1.5">
                       <code className="font-mono text-xs break-all">{ruleText(doc, f.line)}</code>
                       <span className="text-xs text-muted-foreground">{message(f)}</span>
-                      {onJump && (
+                      {onJump && !updating && (
                         <span><Button variant="ghost" size="xs" onClick={() => { onJump(f.line); onClose() }}>{t('admin:rules.tester.go_to_line', { line: (f.line + 1).toLocaleString() })}</Button></span>
                       )}
                     </li>

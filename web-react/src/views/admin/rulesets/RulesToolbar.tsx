@@ -108,7 +108,7 @@ export function RulesToolbar({ tier, view, textOnly, readOnly, query, onQuery, o
               {t('admin:rules.issues.title')}
             </Button>
           )}
-          {!subRule && <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={onToggleTester}>{t('admin:rules.tester.title')}</Button>}
+          {!subRule && <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} data-tester-toggle onClick={onToggleTester}>{t('admin:rules.tester.title')}</Button>}
           {more.length > 0 && <MoreMenu items={more} />}
         </div>
       </div>

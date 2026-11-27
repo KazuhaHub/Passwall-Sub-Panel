@@ -15,7 +15,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { IconAdd, IconArrowLeft, IconCopy, IconDelete, IconReset, IconSpinner } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/utils/clipboard'
-import { blockAt, type Block } from '@/utils/ruleset/blocks'
+import { blockAt, buildBlocks, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
 import { continuation, type Continuation } from '@/utils/ruleset/continuation'
@@ -30,6 +30,7 @@ import { BlockDirectory } from './BlockDirectory'
 import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
+import { readDoc } from './docCache'
 import { testerPlacement, toolbarTier } from './layout'
 import { RulesToolbar } from './RulesToolbar'
 import { TesterPanel } from './TesterPanel'
@@ -143,6 +144,8 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(OPEN_QUERY).matches)
   // Focus goes to the test's first field only when the person opened it, not when the page starts with it open.
   const testerAsked = useRef(false)
+  // Closing the test hands focus back to the button that opened it.
+  const closeTester = () => { setTesterOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tester-toggle]')?.focus()) }
   const [probe, setProbe] = useState<ProbeInput>(EMPTY_PROBE)
   const routeExplain = useRouteExplain()
   const placement = testerPlacement({ open: testerOpen, width, phone, subRule: !!subRule })
@@ -226,12 +229,17 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   /** Opens a line (from the routing test or the problems panel) in its group, with anything that would hide it cleared. */
   const jumpToLine = (line: number) => {
-    const b = blockAt(blocks, line)
-    if (!b || textOnly) return
+    // Resolved against the text as it is NOW: in the Text view the kept document can be up to a pause behind it. (A line number taken from an
+    // answer worked out on the older text is marked as updating and not offered as a link, so this is the guard for a click that got through.)
+    const d = readDoc(content)
+    const bl = d === doc ? blocks : buildBlocks(d)
+    const b = blockAt(bl, line)
+    if (!b || d.foreign.length > 0) return
+    history.settle()
     setQuery(''); setTargetFilter(''); setTargetMode('runs')
     if (shownView === 'text') setView('blocks')
     setSelected(b.index); setOpened(true)
-    setFocusRow({ id: doc.lines[line].id, token: Date.now() })
+    setFocusRow({ id: d.lines[line].id, token: Date.now() })
     // The narrower layouts show the test over the page; the page is what the jump is for.
     if (placement !== 'dock') setTesterOpen(false)
   }
@@ -450,7 +458,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const showDetail = !phone || opened || merged
   const docked = placement === 'dock'
 
-  const tester = <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine}
+  const tester = <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} updating={history.behind}
     server={explain ? { draft: explain.draft, templates: explain.templates, explain: routeExplain } : undefined} />
 
   // On a phone the test is a screen of its own, in place of the rules.
@@ -561,16 +569,16 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </div>
       )}
       </div>
-      {docked && <TesterPanel placement="dock" focus={testerAsked.current} onClose={() => setTesterOpen(false)}>{tester}</TesterPanel>}
+      {docked && <TesterPanel placement="dock" asked={testerAsked} onClose={closeTester}>{tester}</TesterPanel>}
       </div>
-      {placement === 'overlay' && <TesterPanel placement="overlay" focus={testerAsked.current} onClose={() => setTesterOpen(false)}>{tester}</TesterPanel>}
+      {placement === 'overlay' && <TesterPanel placement="overlay" asked={testerAsked} onClose={closeTester}>{tester}</TesterPanel>}
       </div>
       <input ref={fileInput} type="file" accept=".txt,.list,.yaml,.yml,.conf,text/plain" hidden aria-hidden tabIndex={-1}
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void readFile(f) }} />
       {renderDialog()}
       {issuesOpen && <IssuesPanel doc={doc} textOnly={textOnly}
         status={groupsKnown ? 'ready' : groups.unavailable ? 'unavailable' : groups.failed ? 'failed' : 'computing'}
-        failedMessage={groups.failedMessage} findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
+        failedMessage={groups.failedMessage} updating={history.behind} findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }

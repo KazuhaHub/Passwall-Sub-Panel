@@ -59,6 +59,50 @@ describe('where the routing test is drawn', () => {
   })
 })
 
+describe('the routing test beside the page', () => {
+  it('closes with Escape from anywhere while it is over the page, and hands focus back to its button', async () => {
+    box.width = 976
+    mountRuleSets(PAGE)
+    await openTester()
+    await screen.findByRole('dialog', { name: 'Test routing' })
+    // Focus is on the page, not inside the panel.
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Test routing' })).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Test routing' })))
+  })
+
+  it('takes focus to the address only for the open its button asked for', async () => {
+    box.width = 976
+    mountRuleSets(PAGE)
+    await openTester()
+    const panel = await screen.findByRole('dialog', { name: 'Test routing' })
+    await waitFor(() => expect(document.activeElement).toBe(within(panel).getByLabelText('Address')))
+  })
+
+  it('says its answer is updating while the text is being typed into, and keeps its links off until it has caught up', async () => {
+    box.width = 976
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('radio', { name: 'Text' }))
+    await openTester()
+    const panel = await screen.findByRole('dialog', { name: 'Test routing' })
+    fireEvent.change(within(panel).getByLabelText('Address'), { target: { value: 'a.example' } })
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Main rules' }), { target: { value: '- DOMAIN,a.example,Block\n' + content } })
+    expect(within(panel).getByText('Updating…')).toBeTruthy()
+    expect(within(panel).queryByRole('button', { name: /Go to line/ })).toBeNull()
+    await waitFor(() => expect(within(panel).queryByText('Updating…')).toBeNull())
+  })
+
+  it('leaves room under the panel for the Save bar while the bar is shown', async () => {
+    box.width = 976
+    mountRuleSets(PAGE)
+    const host = (await screen.findByRole('tablist')).closest('[data-slot="tabs"]') as HTMLElement
+    expect(host.style.getPropertyValue('--rs-bottom')).toBe('0px')
+    fireEvent.click(await screen.findByRole('radio', { name: 'Text' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Main rules' }), { target: { value: content + '- DOMAIN,c.example,Proxy\n' } })
+    await waitFor(() => expect(host.style.getPropertyValue('--rs-bottom')).toBe('5.5rem'))
+  })
+})
+
 describe('what the toolbar keeps in view', () => {
   it('says the counts itself when it has the room, and groups find, view and filter on the left', async () => {
     box.width = 1000

@@ -22,7 +22,7 @@ export type ToolbarTier = 'full' | 'compact' | 'narrow'
 export function testerPlacement({ open, width, phone, subRule }: { open: boolean; width: number | null; phone: boolean; subRule: boolean }): TesterPlacement {
   if (!open || subRule) return 'closed'
   if (phone) return 'screen'
-  return width !== null && width >= DOCK_MIN ? 'dock' : 'overlay'
+  return width !== null && width > 0 && width >= DOCK_MIN ? 'dock' : 'overlay'
 }
 
 /** What the toolbar shows at a width. An unknown width (not measured yet) is the full toolbar, so nothing flickers on the first render. */

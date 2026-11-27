@@ -2241,6 +2241,7 @@
     },
     "stats": "{{rules}} 条规则 · {{blocks}} 个分组",
     "read_only": "只有管理员可以修改规则集",
+    "updating": "更新中…",
     "toolbar": "规则工具",
     "undo": "撤销",
     "redo": "重做",

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { IconSpinner } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { useCan } from '@/utils/permissions'
 import { blockAt, type Block } from '@/utils/ruleset/blocks'
 import type { Continuation } from '@/utils/ruleset/continuation'
@@ -40,7 +41,7 @@ const ruleText = (doc: Doc, line: number) => doc.lines[line].raw.replace(/\r$/, 
  *
  * The answer is worked out from a deferred copy of what is typed, so typing in the box is never held up by a pass over the rules.
  */
-export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, groupsKnown, onJump, server }: {
+export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, groupsKnown, onJump, updating = false, server }: {
   doc: Doc
   blocks: readonly Block[]
   input: ProbeInput
@@ -53,6 +54,8 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   groupsKnown: boolean
   /** Opens a line in the group it is in; absent when that is not possible (text view). */
   onJump?: (line: number) => void
+  /** The text is being typed into and `doc` is still the one read before the latest typing: the local answer is the old one, and says so. */
+  updating?: boolean
   /**
    * What the server mode needs (design 4.2 B4): the whole draft to send, the templates to choose from and the state that outlives
    * this panel. Absent for a sub-rule's editor, which has no routing test at all; the mode is also hidden from an operator.
@@ -124,7 +127,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   const groupOf = (line: number) => blockAt(blocks, line)?.index ?? 0
   const lineLink = (line: number) => {
     const label = t('admin:rules.blocks.line_single', { line: (line + 1).toLocaleString() })
-    return onJump && !textOnly
+    return onJump && !textOnly && !updating
       ? <button type="button" className="font-medium underline underline-offset-4" aria-label={t('admin:rules.tester.go_to_line', { line: (line + 1).toLocaleString() })} onClick={() => onJump(line)}>{label}</button>
       : <span className="font-medium">{label}</span>
   }
@@ -207,7 +210,8 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
         )}
       </div>
 
-      <div role="status" aria-live="polite" className="flex min-w-0 flex-col gap-3 text-sm">
+      <div role="status" aria-live="polite" aria-busy={updating || undefined} className={cn('flex min-w-0 flex-col gap-3 text-sm transition-opacity', updating && !serverMode && 'opacity-60')}>
+        {updating && !serverMode && <p className="text-xs text-muted-foreground">{t('admin:rules.updating')}</p>}
         {serverMode ? (
           <>
             {outcome && outcome.status === 'done' && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.server.answer_server', { template: mihomo.find(x => x.slug === outcome.response.template_slug)?.name || outcome.response.template_slug })}</p>}

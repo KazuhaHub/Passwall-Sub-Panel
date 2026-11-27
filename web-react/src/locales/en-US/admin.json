@@ -2251,6 +2251,7 @@
     },
     "stats": "{{rules}} rules · {{blocks}} groups",
     "read_only": "Only administrators can change rule sets",
+    "updating": "Updating…",
     "toolbar": "Rule tools",
     "undo": "Undo",
     "redo": "Redo",

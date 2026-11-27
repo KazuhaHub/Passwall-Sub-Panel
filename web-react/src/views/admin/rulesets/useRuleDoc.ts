@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { buildBlocks, type Block } from '@/utils/ruleset/blocks'
 import { serializeDoc, type Doc } from '@/utils/ruleset/parse'
-import { readDoc, SETTLE_MS, useSettled } from './docCache'
+import { readDoc, SETTLE_MS, useSettledFlush } from './docCache'
 
 const HISTORY = 60
 
@@ -23,7 +23,7 @@ const HISTORY = 60
  * the latest text at once.
  */
 export function useRuleDoc(content: string, setContent: (next: string) => void, typing = false) {
-  const source = useSettled(content, typing ? SETTLE_MS : 0)
+  const { value: source, flush } = useSettledFlush(content, typing ? SETTLE_MS : 0)
   const latest = useRef(content)
   latest.current = content
   const kept = useRef<{ content: string; doc: Doc } | null>(null)
@@ -82,5 +82,7 @@ export function useRuleDoc(content: string, setContent: (next: string) => void, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return { doc, blocks, apply, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0, beginText, endText }
+  /** The document is still the one read before the latest typing: what is derived from it is about to change. */
+  const behind = source !== content
+  return { doc, blocks, behind, settle: flush, apply, undo, redo, canUndo: past.current.length > 0, canRedo: future.current.length > 0, beginText, endText }
 }

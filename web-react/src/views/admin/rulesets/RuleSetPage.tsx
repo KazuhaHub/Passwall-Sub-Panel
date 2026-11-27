@@ -122,6 +122,9 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [rev, setRev] = useState(0)
 
   const dirty = !readOnly && !sameRuleSet(form, baseline)
+  // The floating Save bar takes this much of the window's bottom while it is shown (it is a bar of 3.5rem and a margin of 1rem on each side).
+  const barShown = !readOnly && (dirty || pending)
+  useLayoutEffect(() => { strip.current?.parentElement?.style.setProperty('--rs-bottom', barShown ? '5.5rem' : '0px') }, [barShown])
   useObjectLeaveGuard({ dirty, copy: discardChangesConfirm(t), bypass: leaving })
 
   // Slugs are file names, and the file system may fold case: `Custom` would overwrite `custom`.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { parseDoc, type Doc } from '@/utils/ruleset/parse'
 
 const KEEP = 4
@@ -28,7 +28,14 @@ export const SETTLE_MS = 300
  * and the held one follows it, so switching the delay on later does not start from an old value.
  */
 export function useSettled<T>(value: T, ms: number): T {
+  return useSettledFlush(value, ms).value
+}
+
+/** `useSettled` with `flush`, which takes the live value at once (a jump that must resolve against the text as it is now). */
+export function useSettledFlush<T>(value: T, ms: number): { value: T; flush: () => void } {
   const held = useRef(value)
+  const live = useRef(value)
+  live.current = value
   const [, redraw] = useState(0)
   if (ms <= 0) held.current = value
   useEffect(() => {
@@ -36,5 +43,6 @@ export function useSettled<T>(value: T, ms: number): T {
     const id = window.setTimeout(() => { held.current = value; redraw(n => n + 1) }, ms)
     return () => window.clearTimeout(id)
   }, [value, ms])
-  return held.current
+  const flush = useCallback(() => { if (!Object.is(held.current, live.current)) { held.current = live.current; redraw(n => n + 1) } }, [])
+  return { value: held.current, flush }
 }
