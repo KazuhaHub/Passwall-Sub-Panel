@@ -191,6 +191,111 @@ export async function previewProxyGroups(req: { preview_group_id?: number; draft
   return data
 }
 
+/** What an explain request failed on, for the two things the caller words next to a field and the rest. */
+export type ExplainFailure =
+  | { kind: 'field'; field: 'address' | 'port' | 'resolved' | 'src'; code: string }
+  | { kind: 'too_large'; limitBytes?: number }
+  /** 404: the template or the user is gone (the response does not say which). */
+  | { kind: 'not_found' }
+  | { kind: 'unsupported_client' }
+  | { kind: 'forbidden' }
+  | { kind: 'other'; code?: string }
+
+const EXPLAIN_FIELDS: Record<string, 'address' | 'port' | 'resolved' | 'src'> = {
+  explain_address_empty: 'address', explain_address_idn: 'address', explain_address_invalid: 'address',
+  explain_port_invalid: 'port', explain_resolved_invalid: 'resolved', explain_src_invalid: 'src',
+}
+
+export function explainFailureOf(err: unknown): ExplainFailure {
+  const res = (err as { response?: { status?: number; data?: unknown } } | null)?.response
+  const data = res?.data as { code?: unknown; limit_bytes?: unknown } | null | undefined
+  const code = typeof data?.code === 'string' ? data.code : undefined
+  if (res?.status === 413) return { kind: 'too_large', limitBytes: typeof data?.limit_bytes === 'number' && data.limit_bytes > 0 ? data.limit_bytes : undefined }
+  if (res?.status === 404) return { kind: 'not_found' }
+  if (res?.status === 403) return { kind: 'forbidden' }
+  if (res?.status === 422 && code === 'explain_unsupported_client') return { kind: 'unsupported_client' }
+  if (res?.status === 400 && code && EXPLAIN_FIELDS[code]) return { kind: 'field', field: EXPLAIN_FIELDS[code], code }
+  return { kind: 'other', code }
+}
+
+// ---- route explanation (POST /admin/rules/explain) --------------------------------------------------------------------------
+
+/** Where a rule of the assembled subscription came from. */
+export type ExplainSource = 'personal' | 'subscription_domain' | 'rule_set' | 'template'
+/** Why a line cannot be decided on the server either (the same reasons the browser matcher gives). */
+export type ExplainReason = 'client_data' | 'resolve' | 'input' | 'regex' | 'sub_rule' | 'unsupported'
+
+export interface ExplainRuleRef {
+  source: ExplainSource
+  /** The slug, for `source: 'rule_set'`. */
+  rule_set?: string
+  /** 1-based, within the source; 0 when it could not be located. */
+  line: number
+  rule: string
+  target: string
+  reason?: ExplainReason
+  /** Below the first match: `unreachable` (the first match is final and nothing undecided stands above it) or `possible`. */
+  status?: 'unreachable' | 'possible'
+}
+
+export interface ExplainResult extends Partial<ExplainRuleRef> {
+  state: 'matched' | 'continues' | 'undecided' | 'no_match'
+  certain: boolean
+  group_type?: string
+  group_default?: string
+  group_members?: string[]
+  continues_via?: 'pass' | 'rematch' | 'udp_unsupported_proxy' | 'unknown_target'
+}
+
+export type ExplainWarning = 'draft_not_in_template' | 'draft_disabled' | 'unconfirmed_lines'
+
+export interface ExplainResponse {
+  client_type: string
+  template_slug: string
+  group_id: number
+  user_id?: number
+  personal_rules: 'included' | 'no_user' | 'not_in_template'
+  draft_applied: boolean
+  warnings?: ExplainWarning[]
+  total_rules: number
+  default_outbound: string
+  result: ExplainResult
+  branches: ExplainRuleRef[]
+  branches_total: number
+  also_matching: ExplainRuleRef[]
+  also_matching_total: number
+  pass_skipped?: ExplainRuleRef[]
+}
+
+/** The connection as the server reads it; a port of 0 means "not given". */
+export interface ExplainProbe {
+  host: string
+  ip?: string
+  port?: number
+  network: 'tcp' | 'udp'
+  process?: string
+  src_ip?: string
+  src_port?: number
+}
+
+export interface ExplainRequest {
+  template_slug: string
+  draft: RuleSet
+  user_id?: number
+  probe: ExplainProbe
+}
+
+/**
+ * Walks the subscription a Mihomo client of the template gets, with `draft` in place of the stored rule set of its slug. It is
+ * a read (the route is registered as a preview, so it writes no audit row) but every call renders the template, so callers ask
+ * on demand only. Every failure is worded by the caller, next to the field it concerns: no toast.
+ */
+export async function explainRoute(req: ExplainRequest, signal?: AbortSignal) {
+  const { revision: _revision, ...draft } = req.draft
+  const { data } = await client.post<ExplainResponse>('/admin/rules/explain', { ...req, draft }, { signal, _skipErrorToast: true })
+  return data
+}
+
 export async function deleteRuleSet(slug: string) {
   await client.delete(`/admin/rules/${slug}`)
 }

@@ -2553,6 +2553,7 @@
         "port_invalid": "The port must be a number from 0 to 65535",
         "resolved_invalid": "The resolved IP isn't a valid address",
         "src_invalid": "The source port or source IP isn't valid",
+        "address_empty": "Enter a domain or an IP address",
         "address_idn": "Enter the punycode (xn--) form of the name; names with non-ASCII letters aren't evaluated here"
       },
       "more_count": "{{count}} more",
@@ -2565,7 +2566,66 @@
       "continues_body": "{{target}} may send matching on to the rules below (its current choice can be PASS, or it is a Rematch outbound). The rules below may apply.",
       "also_may_apply": "{{count}} more rules also match and may apply:",
       "udp_note": "Mihomo skips a proxy that doesn't support UDP and tries the next rule; that isn't modeled here.",
-      "no_groups": "The members of the proxy groups aren't available for this draft, so a rule that sends traffic to a group is treated as one that may continue."
+      "no_groups": "The members of the proxy groups aren't available for this draft, so a rule that sends traffic to a group is treated as one that may continue.",
+      "template": "By template",
+      "user": "Include a user's personal rules",
+      "source": {
+        "personal": "Personal rules",
+        "subscription_domain": "Direct subscription domain rule",
+        "rule_set": "Rule set {{name}}",
+        "template": "The template"
+      },
+      "branch_input_ip": "Line {{line}} {{rule}} is a no-resolve IP rule. It can still match if the connection already carries an address; enter the resolved IP under More conditions to check it.",
+      "server": {
+        "scope": "Test against",
+        "scope_draft": "This rule set only",
+        "template_field": "Template",
+        "admin_only": "Testing against a template needs an administrator.",
+        "no_template": "This rule set isn't in a Mihomo template, so there is no whole subscription to test it in. Add it to a template to test it there.",
+        "only_singbox": "This rule set is only in sing-box templates, which can't be tested against yet: the server walks a Mihomo rule list, and sing-box compiles its rules into a different form.",
+        "singbox_note": "sing-box templates aren't listed: the server walks a Mihomo rule list, and sing-box compiles its rules into a different form.",
+        "user_hint": "Adds this user's personal rules and uses the lines they can see. Without a user, the default group's lines are used and no personal rules are included.",
+        "run": "Test",
+        "running": "Testing",
+        "empty": "Press Test to run this connection through the template's whole subscription: personal rules, the direct subscription domain rule and the other rule sets, in their order.",
+        "answer_server": "Answer from the server, using template {{template}} and your draft.",
+        "answer_local": "Answer from this rule set's draft only, worked out in your browser.",
+        "scope_note": "Walks the subscription a Mihomo client of this template gets, with your draft in place of the saved rule set. It doesn't look up DNS and doesn't follow a subscriber's own choice in a proxy group.",
+        "stale": "The draft or the values above have changed since this answer. Press Test to run it again.",
+        "goes_group_default": "Traffic goes to proxy group {{target}}. Its default choice is {{default}}; subscribers can change it in their client.",
+        "passed": "{{rule}} ({{where}}) matches, but its target is PASS, so it is skipped and matching continues.",
+        "warning": {
+          "draft_not_in_template": "This rule set isn't in the chosen template, so it is not part of the answer.",
+          "draft_disabled": "The draft is turned off, and a template skips a rule set that is off, so it is not part of the answer.",
+          "unconfirmed_lines": "Some of this user's lines on Passwall Node servers aren't confirmed yet. The real subscription leaves those lines out, so a rule that targets one may behave differently there."
+        },
+        "personal": {
+          "included": "This user's personal rules are included.",
+          "no_user": "No user is chosen, so personal rules aren't included.",
+          "not_in_template": "The template has no place for personal rules, so this user's personal rules are not part of the answer."
+        },
+        "via": {
+          "pass": "{{target}} can send matching on to the rules below (its current choice may be PASS). The rules below may apply.",
+          "rematch": "{{target}} leads to a Rematch outbound, which sends matching back to the rules. The rules below may apply.",
+          "udp_unsupported_proxy": "Over UDP, Mihomo skips a proxy that can't carry UDP and tries the next rule, so the rules below may apply.",
+          "unknown_target": "{{target}} isn't defined in the subscription, so Mihomo skips the rule and carries on. The rules below may apply."
+        },
+        "reason": {
+          "client_data": "Needs data from the client (GeoIP, GeoSite or a rule provider), so it can't be checked here.",
+          "resolve": "An IP rule: Mihomo resolves the domain here. Enter the resolved IP under More conditions for a definite result.",
+          "input": "Needs a condition that wasn't entered (see More conditions).",
+          "input_address": "A no-resolve IP rule. It can still match if the connection already carries an address; enter the resolved IP under More conditions to check it.",
+          "regex": "Has a regular expression that can't be run safely here.",
+          "sub_rule": "Jumps into a sub-rule, which can't be followed here.",
+          "unsupported": "A rule type that can't be evaluated here."
+        },
+        "error": {
+          "not_found": "The template or the user was not found. It may have been deleted; reload the page.",
+          "unsupported_client": "This template isn't a Mihomo template, so it can't be tested.",
+          "explain_no_group": "No group exists to take lines from. Create a group, or choose a user.",
+          "other": "The test could not be run. Try again."
+        }
+      }
     },
     "lint": {
       "shadowed_same": "Line {{line}} matches first with the same target; this line is redundant",

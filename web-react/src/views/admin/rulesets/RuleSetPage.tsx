@@ -420,7 +420,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
-                showTarget={showTarget} cont={cont} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
+                showTarget={showTarget} cont={cont} explain={{ draft: form, templates }} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor

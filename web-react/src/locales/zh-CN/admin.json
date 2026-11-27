@@ -2543,6 +2543,7 @@
         "port_invalid": "端口必须是 0 到 65535 的数字",
         "resolved_invalid": "解析得到的 IP 格式不正确",
         "src_invalid": "来源端口或来源 IP 格式不正确",
+        "address_empty": "请输入域名或 IP",
         "address_idn": "请输入域名的 punycode（xn--）形式，含非 ASCII 字符的域名无法在这里判断"
       },
       "more_count": "还有 {{count}} 条",
@@ -2555,7 +2556,66 @@
       "continues_body": "{{target}} 可能把匹配继续交给下面的规则（它当前的选择可能是 PASS，或者它是 Rematch 出站）。下面的规则也可能生效。",
       "also_may_apply": "另有 {{count}} 条规则也能匹配，可能会生效：",
       "udp_note": "如果选中的代理不支持 UDP，Mihomo 会跳过它并尝试下一条规则；这里没有模拟这种情况。",
-      "no_groups": "当前草稿的代理组成员暂时无法获取，因此把流量交给代理组的规则都按“可能继续匹配”处理。"
+      "no_groups": "当前草稿的代理组成员暂时无法获取，因此把流量交给代理组的规则都按“可能继续匹配”处理。",
+      "template": "按配置方案",
+      "user": "包含用户的个人规则",
+      "source": {
+        "personal": "个人规则",
+        "subscription_domain": "DIRECT 订阅域名规则",
+        "rule_set": "规则集 {{name}}",
+        "template": "配置方案"
+      },
+      "branch_input_ip": "第 {{line}} 行 {{rule}} 是 no-resolve 的 IP 规则。如果连接本身已带有地址，它仍可能命中；在“更多条件”里填写解析得到的 IP 即可检查。",
+      "server": {
+        "scope": "测试范围",
+        "scope_draft": "仅本规则集",
+        "template_field": "配置方案",
+        "admin_only": "按配置方案测试需要管理员权限。",
+        "no_template": "本规则集不在任何 Mihomo 配置方案中，没有完整的订阅可供测试。把它加入配置方案后即可在其中测试。",
+        "only_singbox": "本规则集只在 sing-box 配置方案中，暂不支持按它测试：服务端按 Mihomo 的规则列表逐条判断，而 sing-box 会把规则编译成另一种形式。",
+        "singbox_note": "未列出 sing-box 配置方案：服务端按 Mihomo 的规则列表逐条判断，而 sing-box 会把规则编译成另一种形式。",
+        "user_hint": "加入该用户的个人规则，并使用其可见的线路。不选用户时使用默认分组的线路，且不含个人规则。",
+        "run": "测试",
+        "running": "正在测试",
+        "empty": "点击“测试”，让这条连接走一遍该配置方案的完整订阅：个人规则、DIRECT 订阅域名规则和其他规则集，按各自的顺序。",
+        "answer_server": "来自服务端的结果，使用配置方案 {{template}} 和你的草稿。",
+        "answer_local": "仅按本规则集的草稿在浏览器中得出的结果。",
+        "scope_note": "按该配置方案的 Mihomo 客户端实际得到的订阅逐条判断，并用你的草稿替换已保存的规则集。不查询 DNS，也不模拟订阅用户在代理组中的手动选择。",
+        "stale": "草稿或上面的内容在得出这个结果之后已更改。点击“测试”重新运行。",
+        "goes_group_default": "流量交给代理组 {{target}}；该组默认选择 {{default}}，订阅用户可以在客户端更改。",
+        "passed": "{{rule}}（{{where}}）命中，但目标是 PASS，会被跳过并继续匹配。",
+        "warning": {
+          "draft_not_in_template": "本规则集不在所选配置方案中，因此不参与这个结果。",
+          "draft_disabled": "草稿处于关闭状态，而配置方案会跳过关闭的规则集，因此不参与这个结果。",
+          "unconfirmed_lines": "该用户在 Passwall Node 服务器上的部分线路尚未确认。实际订阅会省略这些线路，所以指向它们的规则在那里的表现可能不同。"
+        },
+        "personal": {
+          "included": "已包含该用户的个人规则。",
+          "no_user": "没有选择用户，因此不含个人规则。",
+          "not_in_template": "该配置方案没有放置个人规则的位置，因此该用户的个人规则不参与这个结果。"
+        },
+        "via": {
+          "pass": "{{target}} 可能把匹配继续交给下面的规则（它当前的选择可能是 PASS）。下面的规则也可能生效。",
+          "rematch": "{{target}} 会走到 Rematch 出站，把匹配交回规则列表。下面的规则也可能生效。",
+          "udp_unsupported_proxy": "走 UDP 时，Mihomo 会跳过不支持 UDP 的代理并尝试下一条规则，所以下面的规则也可能生效。",
+          "unknown_target": "订阅中没有定义 {{target}}，Mihomo 会跳过这条规则继续匹配。下面的规则也可能生效。"
+        },
+        "reason": {
+          "client_data": "需要客户端的数据（GeoIP、GeoSite 或规则提供者），此处无法判断。",
+          "resolve": "IP 规则：Mihomo 会在此处解析域名。在“更多条件”里填写解析得到的 IP 可得到确定结果。",
+          "input": "需要一个没有填写的条件（见“更多条件”）。",
+          "input_address": "no-resolve 的 IP 规则。如果连接本身已带有地址，它仍可能命中；在“更多条件”里填写解析得到的 IP 即可检查。",
+          "regex": "含有无法在此安全运行的正则表达式。",
+          "sub_rule": "会跳转到子规则，此处无法跟进。",
+          "unsupported": "此处无法判断的规则类型。"
+        },
+        "error": {
+          "not_found": "没有找到所选的配置方案或用户，可能已被删除。请刷新页面。",
+          "unsupported_client": "该配置方案不是 Mihomo 配置方案，无法测试。",
+          "explain_no_group": "没有可供取线路的分组。请先创建分组，或选择一个用户。",
+          "other": "无法运行测试，请重试。"
+        }
+      }
     },
     "lint": {
       "shadowed_same": "第 {{line}} 行已先命中，目标相同，这一行是多余的",

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { ProxyGroupIssue } from '@/api/rules'
+import type { ProxyGroupIssue, RuleSet } from '@/api/rules'
+import type { Template } from '@/api/templates'
 import { confirm } from '@/components/ConfirmHost'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import type { ReorderCall } from '@/components/data/dataTableTypes'
@@ -34,6 +35,7 @@ import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
 import { EMPTY_PROBE, RouteTester } from './RouteTester'
+import { useRouteExplain } from './useRouteExplain'
 import { isBuiltinTarget, targetChoices } from './targets'
 import { TargetView } from './TargetView'
 import { TextLinesDialog } from './TextLinesDialog'
@@ -82,7 +84,7 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
  * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groups }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groups, explain }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -101,6 +103,8 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   subRule?: { groups: readonly string[] }
   /** The name of the text editor (the Text view) when it is not "Main rules". */
   ariaLabel?: string
+  /** What the routing test's server mode needs: the whole draft (the tester sends it as it is) and the templates to choose from. Main rules only. */
+  explain?: { draft: RuleSet; templates: readonly Template[] }
   /** Which targets end the matching (see utils/ruleset/continuation): from the backend's reading of the draft's groups. */
   cont: Continuation
   /**
@@ -131,6 +135,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const wide = useMediaQuery(WIDE_QUERY)
   const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(WIDE_QUERY).matches)
   const [probe, setProbe] = useState<ProbeInput>(EMPTY_PROBE)
+  const routeExplain = useRouteExplain()
   const testerColumn = wide && testerOpen && !subRule
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [focusRow, setFocusRow] = useState<{ id: number; token: number } | null>(null)
@@ -430,6 +435,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const showDirectory = !phone || (!opened && !merged)
   const showDetail = !phone || opened || merged
 
+  const tester = <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine}
+    server={explain ? { draft: explain.draft, templates: explain.templates, explain: routeExplain } : undefined} />
+
   // On a phone the test is a screen of its own, in place of the rules.
   if (phone && testerOpen && !subRule) {
     return (
@@ -438,7 +446,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <IconButton label={t('admin:rules.tester.back')} onClick={() => setTesterOpen(false)}><IconArrowLeft /></IconButton>
           <h2 className="text-base font-semibold">{t('admin:rules.tester.title')}</h2>
         </div>
-        <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
+        {tester}
       </div>
     )
   }
@@ -560,7 +568,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
             <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
             <IconButton label={t('admin:rules.tester.hide_tester')} size="icon-xs" onClick={() => setTesterOpen(false)}><IconClose /></IconButton>
           </div>
-          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
+          {tester}
         </aside>
       )}
       </div>
@@ -569,7 +577,7 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
       {renderDialog()}
       {!wide && !phone && testerOpen && !subRule && (
         <DetailDialog open onClose={() => setTesterOpen(false)} size="md" title={t('admin:rules.tester.title')}>
-          <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} />
+          {tester}
         </DetailDialog>
       )}
       {issuesOpen && <IssuesPanel doc={doc} textOnly={textOnly}
