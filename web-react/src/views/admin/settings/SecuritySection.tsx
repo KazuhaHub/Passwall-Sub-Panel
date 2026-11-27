@@ -9,51 +9,60 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { useAdminT } from '../useAdminT'
 import { AccountPolicyGroups } from './AccountPolicyGroups'
 import { loginHazards, type SsoState } from './dangerConfirms'
-import { SECTION_KEYS, settingId, type KeysOf } from './model'
+import { SUB_KEYS, settingId } from './model'
 import { Group, Hint, NumField, Pair, SectionForm, SelectRow, TextRow, SwitchField, Nested } from './parts'
-import { ScopeShell, useScopedDirty } from './ScopeShell'
+import { SubTabs, type SubPanel } from './SubTabs'
 import { TwoFactorGroup } from './TwoFactorGroup'
 import { useUiSection } from './useUiSection'
 
-type K = KeysOf<'security'>
-const keys = SECTION_KEYS.security
 const noProblems = () => ({})
 
-/** Login and security: who can sign in and how, what guards the form, and how long a session lasts. */
-export const SecuritySection = memo(function SecuritySection({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
-  const { setForm, setScope } = useScopedDirty(onDirtyChange)
-  return (
-    <ScopeShell categories={['2fa', 'login']} onScopeDirty={setScope}>
-      <SecurityForm onDirtyChange={setForm} />
-    </ScopeShell>
-  )
+/**
+ * Login and security, one sub-tab per decision: how people sign in and how long a session lasts, how an account is
+ * made or recovered, the second factor, and what guards the sign-in form against abuse. Each saves on its own.
+ */
+const PANELS = { signin: SignInPanel, account: AccountPanel, twofa: TwoFactorPanel, protection: ProtectionPanel } satisfies Record<string, SubPanel>
+
+export const SecuritySection = memo(function SecuritySection({ active }: { active: boolean }) {
+  return <SubTabs section="security" active={active} panels={PANELS} />
 })
 
-function SecurityForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
-  const t = useAdminT()
+type Panel = { onDirtyChange: (dirty: boolean) => void }
+
+/** Whether SAML or OIDC is on matters only to a forced-SSO login mode, so it is asked when that is saved, not on every visit. */
+function useSsoState() {
   const queryClient = useQueryClient()
   const scope = useQueryScope()
-  const form = useUiSection<K>(keys, onDirtyChange, noProblems)
-  const { value: v, patch, saved } = form
-
-  // Whether SAML or OIDC is on matters only to a forced-SSO login mode, so it is asked when that is saved, not on every visit.
-  async function ssoState(): Promise<SsoState> {
+  return async function ssoState(): Promise<SsoState> {
     try {
       const [saml, oidc] = await Promise.all([queryClient.fetchQuery(samlConfigQuery(scope)), queryClient.fetchQuery(oidcConfigQuery(scope))])
       return saml.enabled || oidc.enabled ? 'on' : 'off'
     } catch { return 'unknown' }
   }
+}
+
+/**
+ * Asks, one by one, about the risky edits among this sub-tab's keys. `loginHazards` compares the whole login record,
+ * so it is given the saved record under this sub-tab's draft: only the keys the draft changed can ask.
+ */
+async function confirmHazards(saved: UISettings, draft: Partial<UISettings>, sso: SsoState, t: ReturnType<typeof useAdminT>): Promise<boolean> {
+  for (const opts of loginHazards(saved, { ...saved, ...draft }, sso, t)) if (!(await confirm(opts))) return false
+  return true
+}
+
+function SignInPanel({ onDirtyChange }: Panel) {
+  const t = useAdminT()
+  const ssoState = useSsoState()
+  const form = useUiSection(SUB_KEYS.security.signin, onDirtyChange, noProblems)
+  const { value: v, patch, saved } = form
 
   async function save() {
     const sso = v.login_mode === 'sso_redirect' && saved.login_mode !== 'sso_redirect' ? await ssoState() : 'on'
-    for (const opts of loginHazards(saved, v, sso, t)) if (!(await confirm(opts))) return
+    if (!(await confirmHazards(saved, v, sso, t))) return
     await form.save()
   }
 
   const min = t('settings.unit.minutes')
-  const perMin = t('settings.unit.per_minute')
-  const captchaOn = v.captcha_enabled || v.captcha_register_enabled || v.captcha_forgot_enabled
-  const provider = v.captcha_provider || 'image'
   return (
     <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void save()} onDiscard={form.discard}>
       <Group title={t('settings.general.section_login')}>
@@ -73,6 +82,55 @@ function SecurityForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => vo
           checked={v.allow_user_personal_rules} onChange={c => patch({ allow_user_personal_rules: c })} />
       </Group>
 
+      <Group title={t('settings.general.section_sessions')}>
+        <TextRow name="jwt_issuer" label={t('settings.general.jwt_issuer')} hint={t('settings.general.jwt_issuer_hint')} value={v.jwt_issuer} onChange={i => patch({ jwt_issuer: i })} />
+        <Pair>
+          <NumField name="jwt_access_ttl_minutes" label={t('settings.general.jwt_access_ttl_minutes')} unit={min} value={v.jwt_access_ttl_minutes} onChange={n => patch({ jwt_access_ttl_minutes: n })} />
+          <NumField name="jwt_refresh_ttl_minutes" label={t('settings.general.jwt_refresh_ttl_minutes')} unit={min} value={v.jwt_refresh_ttl_minutes} onChange={n => patch({ jwt_refresh_ttl_minutes: n })} />
+        </Pair>
+        <Hint>{t('settings.general.jwt_ttl_hint')}</Hint>
+      </Group>
+    </SectionForm>
+  )
+}
+
+function TwoFactorPanel({ onDirtyChange }: Panel) {
+  const t = useAdminT()
+  const form = useUiSection(SUB_KEYS.security.twofa, onDirtyChange, noProblems)
+  async function save() {
+    if (!(await confirmHazards(form.saved, form.value, 'on', t))) return
+    await form.save()
+  }
+  return (
+    <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void save()} onDiscard={form.discard}>
+      <TwoFactorGroup form={form} />
+    </SectionForm>
+  )
+}
+
+function AccountPanel({ onDirtyChange }: Panel) {
+  const form = useUiSection(SUB_KEYS.security.account, onDirtyChange, noProblems)
+  return (
+    <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void form.save()} onDiscard={form.discard}>
+      <AccountPolicyGroups form={form} />
+    </SectionForm>
+  )
+}
+
+function ProtectionPanel({ onDirtyChange }: Panel) {
+  const t = useAdminT()
+  const form = useUiSection(SUB_KEYS.security.protection, onDirtyChange, noProblems)
+  const { value: v, patch, saved } = form
+  async function save() {
+    if (!(await confirmHazards(saved, v, 'on', t))) return
+    await form.save()
+  }
+  const min = t('settings.unit.minutes')
+  const perMin = t('settings.unit.per_minute')
+  const captchaOn = v.captcha_enabled || v.captcha_register_enabled || v.captcha_forgot_enabled
+  const provider = v.captcha_provider || 'image'
+  return (
+    <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void save()} onDiscard={form.discard}>
       <Group title={t('settings.general.section_captcha')}>
         <p className="text-sm font-medium">{t('settings.general.captcha_contexts')}</p>
         <SwitchField name="captcha_enabled" label={t('settings.general.captcha_ctx_login')} checked={v.captcha_enabled} onChange={c => patch({ captcha_enabled: c })} />
@@ -137,16 +195,7 @@ function SecurityForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => vo
         )}
       </Group>
 
-      <AccountPolicyGroups form={form} />
-      <TwoFactorGroup form={form} />
-
-      <Group title={t('settings.general.section_sessions')}>
-        <TextRow name="jwt_issuer" label={t('settings.general.jwt_issuer')} hint={t('settings.general.jwt_issuer_hint')} value={v.jwt_issuer} onChange={i => patch({ jwt_issuer: i })} />
-        <Pair>
-          <NumField name="jwt_access_ttl_minutes" label={t('settings.general.jwt_access_ttl_minutes')} unit={min} value={v.jwt_access_ttl_minutes} onChange={n => patch({ jwt_access_ttl_minutes: n })} />
-          <NumField name="jwt_refresh_ttl_minutes" label={t('settings.general.jwt_refresh_ttl_minutes')} unit={min} value={v.jwt_refresh_ttl_minutes} onChange={n => patch({ jwt_refresh_ttl_minutes: n })} />
-        </Pair>
-        <Hint>{t('settings.general.jwt_ttl_hint')}</Hint>
+      <Group title={t('settings.general.section_rate_limits')}>
         <Pair>
           <NumField name="sub_per_ip_per_min" label={t('settings.general.sub_per_ip_per_min')} unit={perMin} value={v.sub_per_ip_per_min} onChange={n => patch({ sub_per_ip_per_min: n })} />
           <NumField name="login_per_ip_per_min" label={t('settings.general.login_per_ip_per_min')} unit={perMin} value={v.login_per_ip_per_min} onChange={n => patch({ login_per_ip_per_min: n })} />

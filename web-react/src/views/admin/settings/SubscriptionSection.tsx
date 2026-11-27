@@ -1,32 +1,32 @@
 import { memo } from 'react'
+import { Field } from '@/components/form/Field'
+import { Input } from '@/components/ui/input'
 import { confirm } from '@/components/ConfirmHost'
 import { useAdminT } from '../useAdminT'
 import { addressHazard, normalizeSubPath } from './dangerConfirms'
-import { SECTION_KEYS, settingId, type KeysOf } from './model'
-import { Group, Nested, NumField, Pair, SectionForm, SwitchField, TextRow } from './parts'
-import { ScopeShell, useScopedDirty } from './ScopeShell'
+import { SUB_KEYS, settingId } from './model'
+import { Group, Nested, NumField, SectionForm, SwitchField, TextRow } from './parts'
+import { SubTabs, type SubPanel } from './SubTabs'
 import { useUiSection } from './useUiSection'
-import { Field } from '@/components/form/Field'
-import { Input } from '@/components/ui/input'
 
-const keys = SECTION_KEYS.subscription
+type Panel = { onDirtyChange: (dirty: boolean) => void }
 const noProblems = () => ({})
-
-/** Subscription: the link every client fetches, what it is called, and what happens to a client that should not be fetching. */
-export const SubscriptionSection = memo(function SubscriptionSection({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
-  const { setForm, setScope } = useScopedDirty(onDirtyChange)
-  return (
-    <ScopeShell categories={['sub']} onScopeDirty={setScope}>
-      <SubscriptionForm onDirtyChange={setForm} />
-    </ScopeShell>
-  )
-})
-
 const slash = (p: string) => '/' + (p || '').replace(/^\/+/, '')
 
-function SubscriptionForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
+const PANELS = { link: LinkPanel, content: ContentPanel, protection: ProtectionPanel } satisfies Record<string, SubPanel>
+
+/**
+ * Subscription: the link every client fetches (global), what the file says and is called (a group can override), and
+ * what happens to a client that should not be fetching (a group can override). One sub-tab each, so what a group's
+ * audience can change is never on the same screen as what it cannot.
+ */
+export const SubscriptionSection = memo(function SubscriptionSection({ active }: { active: boolean }) {
+  return <SubTabs section="subscription" active={active} panels={PANELS} />
+})
+
+function LinkPanel({ onDirtyChange }: Panel) {
   const t = useAdminT()
-  const form = useUiSection<KeysOf<'subscription'>>(keys, onDirtyChange, noProblems)
+  const form = useUiSection(SUB_KEYS.subscription.link, onDirtyChange, noProblems)
   const { value: v, patch, saved } = form
 
   async function save() {
@@ -44,18 +44,41 @@ function SubscriptionForm({ onDirtyChange }: { onDirtyChange: (dirty: boolean) =
         </Field>
         <TextRow name="sub_import_tutorial_url" label={t('settings.subscription.sub_import_tutorial_url')}
           value={v.sub_import_tutorial_url} onChange={s => patch({ sub_import_tutorial_url: s })} />
-        <Pair>
+        <div className="max-w-xs">
           <NumField name="sub_log_retention_days" label={t('settings.subscription.sub_log_retention_days')} unit={t('settings.unit.days')}
             value={v.sub_log_retention_days} onChange={n => patch({ sub_log_retention_days: n })} />
+        </div>
+      </Group>
+    </SectionForm>
+  )
+}
+
+function ContentPanel({ onDirtyChange }: Panel) {
+  const t = useAdminT()
+  const form = useUiSection(SUB_KEYS.subscription.content, onDirtyChange, noProblems)
+  const { value: v, patch } = form
+  return (
+    <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void form.save()} onDiscard={form.discard}>
+      <Group title={t('settings.subscription.section_content')}>
+        <div className="max-w-xs">
           <NumField name="sub_update_interval_hours" label={t('settings.subscription.sub_update_interval_hours')} unit={t('settings.unit.hours')}
             value={v.sub_update_interval_hours} onChange={n => patch({ sub_update_interval_hours: n })} />
-        </Pair>
+        </div>
         <TextRow name="sub_profile_name_template" label={t('settings.subscription.sub_profile_name_template')} placeholder="{{ site_title }} - {{ user }}"
           hint={t('settings.subscription.sub_profile_name_template_hint')} value={v.sub_profile_name_template} onChange={s => patch({ sub_profile_name_template: s })} />
         <SwitchField name="sub_region_flag_prefix" label={t('settings.subscription.sub_region_flag_prefix')} hint={t('settings.subscription.sub_region_flag_prefix_hint')}
           checked={v.sub_region_flag_prefix} onChange={c => patch({ sub_region_flag_prefix: c })} />
       </Group>
+    </SectionForm>
+  )
+}
 
+function ProtectionPanel({ onDirtyChange }: Panel) {
+  const t = useAdminT()
+  const form = useUiSection(SUB_KEYS.subscription.protection, onDirtyChange, noProblems)
+  const { value: v, patch } = form
+  return (
+    <SectionForm dirty={form.dirty} pending={form.pending} onSave={() => void form.save()} onDiscard={form.discard}>
       <Group title={t('settings.subscription.section_protection')}>
         <SwitchField name="sub_block_auto_disable" label={t('settings.subscription.sub_block_auto_disable')}
           checked={v.sub_block_auto_disable} onChange={c => patch({ sub_block_auto_disable: c })} />

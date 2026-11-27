@@ -4,15 +4,14 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { useAllGroups } from '@/query/groups'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useAdminT } from '../useAdminT'
-import type { KeysOf } from './model'
-import { settingId } from './model'
+import { settingId, type SubKeys } from './model'
 import { Group, Nested, NumField, Pair, SelectRow, SwitchField, TextRow } from './parts'
 import type { UiSection } from './useUiSection'
 
 type Delivery = NonNullable<UISettings['password_recovery_delivery']>
 
 /** Password recovery and self-service registration: what an account can do for itself before it can sign in. */
-export function AccountPolicyGroups({ form }: { form: UiSection<KeysOf<'security'>> }) {
+export function AccountPolicyGroups({ form }: { form: UiSection<SubKeys<'security', 'account'>> }) {
   const t = useAdminT()
   const scope = useQueryScope()
   const groups = useAllGroups(scope)

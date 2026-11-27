@@ -22,47 +22,68 @@ export const SECTION_LABEL: Record<SectionKey, string> = {
 type Keys = readonly (keyof UISettings)[]
 
 /**
- * Which keys of the one panel-wide settings record each section edits. The record is written back whole (the server
- * has one endpoint for it), so a section's save sends the latest saved record with ONLY these keys replaced by the
- * section's draft: a section that was never opened, or one with unsaved edits of its own, is never written from here.
+ * Which keys of the one panel-wide settings record each sub-tab edits. The record is written back whole (the server
+ * has one endpoint for it), so a sub-tab's save sends the latest saved record with ONLY these keys replaced by its
+ * draft: a sub-tab that was never opened, or one with unsaved edits of its own, is never written from here. This is
+ * also where a record key is PLACED: `tree.ts` reads it, and a test checks that every key stands in exactly one sub-tab.
  * Mail, SAML and OIDC are not in this record; each has its own endpoint (see MailSection and the sso/ folder).
  */
-export const SECTION_KEYS = {
-  general: [
-    'timezone', 'cron_traffic_pull_minutes', 'cron_reconcile_minutes', 'node_poll_seconds', 'full_report_seconds',
-    'max_panel_concurrency', 'audit_retention_days', 'sync_task_retention_days', 'auth_event_retention_days',
-    'traffic_history_days', 'expire_before_days', 'traffic_remain_percent',
-    'node_task_offline_reconcile_days', 'node_task_backup_restore_days', 'node_task_result_retention_days',
-    'emergency_access_enabled', 'emergency_access_hours', 'emergency_access_max_count', 'emergency_access_quota_gb',
-    'cloudflare_ips_auto_fetch',
-    'geo_ip_enabled', 'geo_ip_db_file', 'geo_ip_auto_update', 'geo_ip_update_interval_hours', 'geo_ip_update_source',
-    'geo_ip_update_edition', 'geo_ip_update_url', 'geo_ip_update_token',
-  ],
-  security: [
-    'login_mode', 'disallow_user_local_login', 'disallow_user_password_change', 'allow_user_personal_rules',
-    'captcha_enabled', 'captcha_register_enabled', 'captcha_forgot_enabled', 'captcha_provider', 'captcha_trigger',
-    'captcha_fail_threshold', 'captcha_site_key', 'captcha_secret_key',
-    'lockout_enabled', 'lockout_threshold', 'lockout_window_minutes', 'lockout_duration_minutes', 'lockout_scope',
-    'password_recovery_enabled', 'password_recovery_delivery',
-    'registration_enabled', 'registration_require_email_verification', 'registration_delivery',
-    'registration_email_domains', 'registration_default_group_id', 'registration_default_traffic_gb',
-    'registration_default_expire_days', 'code_resend_cooldown_sec',
-    'totp_enabled', 'passkey_enabled', 'passkey_passwordless', 'twofa_allow_email', 'twofa_email_resend_cooldown_sec',
-    'require_2fa_for_staff',
-    'jwt_issuer', 'jwt_access_ttl_minutes', 'jwt_refresh_ttl_minutes', 'sub_per_ip_per_min', 'login_per_ip_per_min',
-  ],
-  brand: [
-    'site_title', 'app_title', 'footer_text', 'sub_base_url', 'panel_path', 'icon_url', 'logo_url', 'logo_url_dark',
-    'theme_color', 'email_domain',
-  ],
-  subscription: [
-    'sub_path', 'sub_import_tutorial_url', 'sub_log_retention_days', 'sub_update_interval_hours',
-    'sub_profile_name_template', 'sub_region_flag_prefix', 'sub_block_auto_disable', 'sub_block_auto_disable_count',
-    'sub_block_notify_user', 'sub_block_notify_max_per_day',
-  ],
-  portal: ['quick_links', 'global_announcement'],
-  legal: ['legal_enabled', 'legal_disclose_usage'],
-} as const satisfies Record<string, Keys>
+export const SUB_KEYS = {
+  general: {
+    runtime: ['timezone', 'cron_traffic_pull_minutes', 'cron_reconcile_minutes', 'node_poll_seconds', 'full_report_seconds', 'max_panel_concurrency'],
+    retention: [
+      'audit_retention_days', 'sync_task_retention_days', 'auth_event_retention_days', 'traffic_history_days',
+      'node_task_offline_reconcile_days', 'node_task_backup_restore_days', 'node_task_result_retention_days',
+    ],
+    reminders: [
+      'expire_before_days', 'traffic_remain_percent',
+      'emergency_access_enabled', 'emergency_access_hours', 'emergency_access_max_count', 'emergency_access_quota_gb',
+    ],
+    network: [
+      'cloudflare_ips_auto_fetch',
+      'geo_ip_enabled', 'geo_ip_db_file', 'geo_ip_auto_update', 'geo_ip_update_interval_hours', 'geo_ip_update_source',
+      'geo_ip_update_edition', 'geo_ip_update_url', 'geo_ip_update_token',
+    ],
+  },
+  security: {
+    signin: [
+      'login_mode', 'disallow_user_local_login', 'disallow_user_password_change', 'allow_user_personal_rules',
+      'jwt_issuer', 'jwt_access_ttl_minutes', 'jwt_refresh_ttl_minutes',
+    ],
+    account: [
+      'password_recovery_enabled', 'password_recovery_delivery',
+      'registration_enabled', 'registration_require_email_verification', 'registration_delivery',
+      'registration_email_domains', 'registration_default_group_id', 'registration_default_traffic_gb',
+      'registration_default_expire_days', 'code_resend_cooldown_sec',
+    ],
+    twofa: [
+      'totp_enabled', 'passkey_enabled', 'passkey_passwordless', 'twofa_allow_email', 'twofa_email_resend_cooldown_sec',
+      'require_2fa_for_staff',
+    ],
+    protection: [
+      'captcha_enabled', 'captcha_register_enabled', 'captcha_forgot_enabled', 'captcha_provider', 'captcha_trigger',
+      'captcha_fail_threshold', 'captcha_site_key', 'captcha_secret_key',
+      'lockout_enabled', 'lockout_threshold', 'lockout_window_minutes', 'lockout_duration_minutes', 'lockout_scope',
+      'sub_per_ip_per_min', 'login_per_ip_per_min',
+    ],
+  },
+  brand: {
+    identity: ['site_title', 'app_title', 'footer_text', 'icon_url', 'logo_url', 'logo_url_dark', 'theme_color'],
+    addresses: ['sub_base_url', 'panel_path', 'email_domain'],
+  },
+  subscription: {
+    link: ['sub_path', 'sub_import_tutorial_url', 'sub_log_retention_days'],
+    content: ['sub_update_interval_hours', 'sub_profile_name_template', 'sub_region_flag_prefix'],
+    protection: ['sub_block_auto_disable', 'sub_block_auto_disable_count', 'sub_block_notify_user', 'sub_block_notify_max_per_day'],
+  },
+  portal: {
+    links: ['quick_links'],
+    announcement: ['global_announcement'],
+  },
+  legal: {
+    main: ['legal_enabled', 'legal_disclose_usage'],
+  },
+} as const satisfies Record<string, Record<string, Keys>>
 
 /**
  * Keys the server accepts but never returns (empty on a write means "keep the stored one"). They are left out of a
@@ -98,5 +119,5 @@ export const settingId = (key: string) => `setting-${key}`
 
 export const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
-/** The keys of one section's draft, as a type. */
-export type KeysOf<S extends keyof typeof SECTION_KEYS> = (typeof SECTION_KEYS)[S][number]
+/** The keys of one sub-tab's draft, as a type. */
+export type SubKeys<S extends keyof typeof SUB_KEYS, Sub extends keyof (typeof SUB_KEYS)[S]> = (typeof SUB_KEYS)[S][Sub] extends readonly (infer K)[] ? K : never

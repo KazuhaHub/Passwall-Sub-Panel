@@ -149,7 +149,40 @@
       "overrides_count_one": "{{count}} override",
       "overrides_count_other": "{{count}} overrides",
       "filter": "Filter groups",
-      "global_only": "These settings apply to all users and cannot be set per group."
+      "global_only": "These settings apply to all users and cannot be set per group.",
+      "mixed_hint": "The other settings on this tab apply to all users and cannot be set per group. Choose All users to change them."
+    },
+    "sub": {
+      "general": {
+        "runtime": "Runtime",
+        "retention": "Data retention",
+        "reminders": "Reminders and emergency access",
+        "network": "IP and regions",
+        "probe": "Link probes"
+      },
+      "security": {
+        "signin": "Sign-in and sessions",
+        "account": "Sign-up and recovery",
+        "twofa": "Two-step verification",
+        "protection": "Protection and rate limits"
+      },
+      "brand": {
+        "identity": "Name and appearance",
+        "addresses": "Addresses and domains"
+      },
+      "subscription": {
+        "link": "Link and logs",
+        "content": "Content",
+        "protection": "Abuse protection"
+      },
+      "portal": {
+        "links": "Quick links",
+        "announcement": "Announcement"
+      },
+      "mail": {
+        "smtp": "Sending",
+        "templates": "Templates"
+      }
     },
     "feature_pending": "This tab is being migrated to React + MUI (next iteration). Use the Vue version meanwhile.",
     "general": {
@@ -274,7 +307,8 @@
       "section_lockout": "Account lockout",
       "section_recovery": "Password recovery",
       "section_registration": "Self-service registration",
-      "section_sessions": "Sessions and rate limits",
+      "section_sessions": "Sessions",
+      "section_rate_limits": "Request rate limits",
       "jwt_issuer_hint": "Changing it ends every signed-in session, including yours.",
       "jwt_ttl_hint": "New lifetimes apply to tokens issued from now on."
     },
@@ -645,6 +679,7 @@
     },
     "subscription": {
       "section_basic": "Basic",
+      "section_content": "Subscription content",
       "section_protection": "Abuse protection",
       "section_clients": "Clients",
       "section_detection": "Client detection & filtering",
@@ -839,6 +874,7 @@
     "unsaved_short": "unsaved",
     "nav_label": "Settings sections",
     "section_label": "Section",
+    "sub_label": "Groups in this section",
     "section_separator": ", ",
     "dirty_sections": "These sections have unsaved changes: {{sections}}. Leave anyway?",
     "search": {

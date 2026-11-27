@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { putMailSettings, sendTestMail, type MailSettings, type MailTemplate } from '@/api/settings'
 import { AsyncButton } from '@/components/common/AsyncButton'
@@ -17,33 +17,34 @@ import { useAdminT } from '../useAdminT'
 import { MailTemplates } from './MailTemplates'
 import { settingId } from './model'
 import { Group, Pair, SectionForm, SelectRow, SwitchField, TextRow } from './parts'
+import { SubTabs, type SubPanel } from './SubTabs'
 
 type Saved = { settings: MailSettings; templates: MailTemplate[] }
 
 /**
- * Mail: the SMTP server, the sender, a test send and the reminder templates. It has its own read and its own writes
- * (the settings record does not carry these). The SMTP form saves with this section's Save; each template saves on
- * its own button, because they are separate records on the server.
+ * Mail has its own read and its own writes (the settings record does not carry these), shared by its two sub-tabs.
+ * The SMTP form saves with its own Save; each template saves on its own button, because they are separate records on
+ * the server. The read happens when a sub-tab is first shown, as the old tab's did.
  */
-export const MailSection = memo(function MailSection({ onDirtyChange }: { onDirtyChange: (dirty: boolean) => void }) {
+function MailGate({ children }: { children: (data: Saved) => ReactNode }) {
   const t = useAdminT()
   const scope = useQueryScope()
   const query = useMailSettings(scope)
-  const [tplDirty, setTplDirty] = useState(false)
-  const [smtpDirty, setSmtpDirty] = useState(false)
-  useEffect(() => { onDirtyChange(tplDirty || smtpDirty) }, [tplDirty, smtpDirty, onDirtyChange])
-  useEffect(() => () => onDirtyChange(false), [onDirtyChange])
-  // The read happens when the section is first shown (this component is mounted on first visit), as the old tab's did.
   useEffect(() => { void query.refetch() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (query.isError && !query.data) return <ErrorState title={t('settings.mail_load_failed')} reason={query.error} retry={() => query.refetch()} />
   if (!query.data) return <CardSkeleton lines={6} />
-  return (
-    <div className="flex flex-col gap-5">
-      <SmtpForm data={query.data} onDirtyChange={setSmtpDirty} />
-      <MailTemplates templates={query.data.templates} onDirtyChange={setTplDirty} />
-    </div>
-  )
+  return <>{children(query.data)}</>
+}
+
+const PANELS = {
+  smtp: ({ onDirtyChange }) => <MailGate>{data => <SmtpForm data={data} onDirtyChange={onDirtyChange} />}</MailGate>,
+  templates: ({ onDirtyChange }) => <MailGate>{data => <MailTemplates templates={data.templates} onDirtyChange={onDirtyChange} />}</MailGate>,
+} satisfies Record<string, SubPanel>
+
+/** Mail: the sending server and sender with a test send, and the reminder templates. */
+export const MailSection = memo(function MailSection({ active }: { active: boolean }) {
+  return <SubTabs section="mail" active={active} panels={PANELS} />
 })
 
 type Field = 'smtp_host' | 'smtp_port' | 'from_email'
