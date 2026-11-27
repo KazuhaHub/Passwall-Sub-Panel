@@ -2546,6 +2546,7 @@
       "passed": "Line {{line}} matches, but its target is PASS, so it is skipped and matching continues.",
       "scope": "Tests this rule set's draft only. In a real subscription, the user's personal rules, the direct subscription domain rule and rule sets earlier in the template are matched first.",
       "mihomo_only": "Judged in Mihomo's rule order. sing-box skips some rule types, so its result can differ.",
+      "address_assumption": "Assumes the client connected by name. If it connected to an IP address, enter it.",
       "ip_note": "An IP address is tested as a connection with no domain name.",
       "text_only": "The rules have lines the editor can't read as a list, so routing can't be tested until they are fixed.",
       "problem": {
@@ -2575,7 +2576,6 @@
         "rule_set": "Rule set {{name}}",
         "template": "The template"
       },
-      "branch_input_ip": "Line {{line}} {{rule}} is a no-resolve IP rule. It can still match if the connection already carries an address; enter the resolved IP under More conditions to check it.",
       "server": {
         "scope": "Test against",
         "scope_draft": "This rule set only",
@@ -2614,7 +2614,6 @@
           "client_data": "Needs data from the client (GeoIP, GeoSite or a rule provider), so it can't be checked here.",
           "resolve": "An IP rule: Mihomo resolves the domain here. Enter the resolved IP under More conditions for a definite result.",
           "input": "Needs a condition that wasn't entered (see More conditions).",
-          "input_address": "A no-resolve IP rule. It can still match if the connection already carries an address; enter the resolved IP under More conditions to check it.",
           "regex": "Has a regular expression that can't be run safely here.",
           "sub_rule": "Jumps into a sub-rule, which can't be followed here.",
           "unsupported": "A rule type that can't be evaluated here."

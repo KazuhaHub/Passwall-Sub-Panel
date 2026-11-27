@@ -91,8 +91,8 @@ describe('address rules', () => {
     expect(ev('IP-CIDR,1.2.3.4/32,X', { address: '1.2.3.4' })).toEqual(yes)
   })
 
-  it('a domain against a rule with no-resolve is not resolved for it; with no address entered the rule is not decided (Mihomo tests any address the connection already holds)', () => {
-    expect(ev('IP-CIDR,10.0.0.0/8,X,no-resolve')).toEqual(unknown('input'))
+  it('a domain against a rule with no-resolve is not resolved for it; with no address entered the client is assumed to have connected by name, so it cannot match', () => {
+    expect(ev('IP-CIDR,10.0.0.0/8,X,no-resolve')).toEqual(no)
   })
 
   it('options are compared exactly, as Mihomo does: NO-RESOLVE and SRC are not no-resolve and src', () => {
@@ -235,12 +235,9 @@ describe('the route through a rule list', () => {
     const r = routeFor(doc, probe({ address: 'copilot.microsoft.com' }), FINALS)
     expect(r.first).toEqual({ line: 1784, target: 'Ⓜ️ 微软Bing' })
     expect(r.later.map(l => [l.line + 1, l.target])).toEqual([[1803, 'Ⓜ️ 微软服务'], [1947, '💬 Ai平台'], [2235, '🌍 国外媒体'], [6242, '🚀 节点选择'], [9491, '🐟 漏网之鱼']])
-    // The private-range rules at the top say no-resolve, and with no address entered they are not decided (the connection may already
-    // hold one); nothing else above the match is undecided.
-    expect(r.certain).toBe(false)
-    expect(r.maybe.length).toBeGreaterThan(0)
-    expect(new Set(r.maybe.map(m => m.reason))).toEqual(new Set(['input']))
-    // Two lines are not decidable in a browser (GEOSITE, GEOIP) and both come after; with an address entered the answer stands.
+    // Two lines are not decidable in a browser (GEOSITE, GEOIP) and both come after, so the answer stands: the private-range
+    // no-resolve rules at the top cannot match a connection made by name. With an address entered it stands as well.
+    expect(r.certain).toBe(true)
     const withIp = routeFor(doc, probe({ address: 'copilot.microsoft.com', resolvedIp: '203.0.113.9' }), FINALS)
     expect(withIp.first).toEqual({ line: 1784, target: 'Ⓜ️ 微软Bing' })
     expect(withIp.certain).toBe(true)
@@ -358,11 +355,11 @@ describe('no-resolve after a rule that resolved the name', () => {
     expect(r.maybe.map(m => [m.line, m.reason])).toEqual([[0, 'resolve'], [1, 'resolve']])
   })
 
-  it('with no address entered and no earlier rule resolving, it is not decided (the connection may already hold an address)', () => {
+  it('with no address entered and no earlier rule resolving, it is a plain miss (the client is assumed to have connected by name)', () => {
     const r = routeFor(parseDoc('- IP-CIDR,10.0.0.0/8,Y,no-resolve\n- MATCH,F\n'), probe(), FINALS)
-    expect(r.maybe.map(m => [m.line, m.reason])).toEqual([[0, 'input']])
+    expect(r.maybe).toEqual([])
     expect(r.first).toEqual({ line: 1, target: 'F' })
-    expect(r.certain).toBe(false)
+    expect(r.certain).toBe(true)
   })
 
   it('stays a plain miss when an address was entered that the rule does not cover and no earlier rule resolves', () => {

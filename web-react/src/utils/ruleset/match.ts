@@ -290,10 +290,10 @@ function addressRule(value: string, options: readonly string[], source: boolean,
   if (hasOption(options, 'no-resolve')) {
     // Skipped without resolving, unless an earlier rule already resolved the name: then Mihomo has the address and uses it.
     if (p.resolvedEarlier) return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')
-    // On its own a rule cannot know whether an earlier one resolved the name, or whether the connection already carries an address
-    // (it arrived by IP with a sniffed or mapped host): Mihomo tests whatever address it holds (rules/common/ipcidr.go). With none
-    // supplied that is not a certain no; with one supplied, a fit is reported as resolve-dependent and a miss is a no.
-    if (!p.resolved) return unknown('input')
+    // On its own a rule cannot know whether an earlier one resolved the name. With no address entered the probe assumes the client
+    // connected by name, so no destination IP is known and the rule cannot match (the tester says so next to the address field);
+    // with one entered, a fit depends on whether the name was already resolved.
+    if (!p.resolved) return NO
     return inCidr(net, p.resolved) ? unknown('resolve') : NO
   }
   return p.resolved ? of(inCidr(net, p.resolved)) : unknown('resolve')

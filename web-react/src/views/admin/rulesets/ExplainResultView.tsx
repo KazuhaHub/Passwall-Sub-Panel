@@ -10,9 +10,6 @@ const SHOWN_BRANCHES = 5
 
 const WARNING_TONE: Record<ExplainWarning, 'warning' | 'info'> = { draft_not_in_template: 'warning', draft_disabled: 'warning', unconfirmed_lines: 'info' }
 
-/** An IP rule with no address to test it against: the one `input` case that is about the resolved IP, not a condition left blank. */
-const isAddressRule = (rule: string) => /^(ip-cidr6?)\s*,/i.test(rule.trim()) && !/,\s*src\s*(,|$)/.test(rule)
-
 /**
  * The server's answer to "where does this connection go in the subscription a client of this template gets" (design 4.2 B4),
  * worded: the first rule that matches and where it is (the user's personal rules, the direct subscription domain rule, a rule
@@ -65,7 +62,7 @@ export function ExplainResultView({ t, response, draftSlug, draftName, stale, on
   )
   const reasonText = (r: ExplainRuleRef) => {
     const reason = (r.reason ?? 'unsupported') as ExplainReason
-    return t(`admin:rules.tester.server.reason.${reason === 'input' && isAddressRule(r.rule) ? 'input_address' : reason}`)
+    return t(`admin:rules.tester.server.reason.${reason}`)
   }
 
   const target = result.target ?? ''

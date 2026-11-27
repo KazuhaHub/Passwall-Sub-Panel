@@ -85,17 +85,23 @@ describe('the scope of the routing test', () => {
     expect(explains()).toHaveLength(0)
   })
 
-  it('in the browser, a no-resolve IP rule above the match is listed as undecided until the resolved IP is entered', async () => {
+  it('in both modes the address field says the client is assumed to have connected by name', async () => {
+    reads(); server()
+    mountRuleSets(PAGE)
+    const dialog = await openTester()
+    expect(within(dialog).getByText(/Assumes the client connected by name\. If it connected to an IP address, enter it\./)).toBeTruthy()
+    byTemplate(dialog)
+    expect(within(dialog).getByText(/Assumes the client connected by name\./)).toBeTruthy()
+  })
+
+  it('in the browser, a no-resolve IP rule above the match does not make the answer uncertain when no address was entered', async () => {
     installReads({ '/admin/rules': list([{ ...base, content: '- IP-CIDR,10.0.0.0/8,Direct,no-resolve\n- MATCH,Final\n' }]), '/admin/templates': list([]), '/admin/groups': list([]) })
     server()
     mountRuleSets(PAGE)
     const dialog = await openTester()
     type(dialog, 'host.example')
-    expect(await within(dialog).findByText('This result is not certain')).toBeTruthy()
-    expect(within(dialog).getByText(/is a no-resolve IP rule. It can still match if the connection already carries an address/)).toBeTruthy()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'More conditions' }))
-    fireEvent.change(within(dialog).getByLabelText('Resolved IP'), { target: { value: '11.1.1.1' } })
-    await waitFor(() => expect(within(dialog).queryByText('This result is not certain')).toBeNull())
+    expect(await within(dialog).findByText('Traffic goes to proxy group Final.')).toBeTruthy()
+    expect(within(dialog).queryByText('This result is not certain')).toBeNull()
   })
 
   it('says why there is nothing to test against when the rule set is in no Mihomo template, and when it is only in sing-box ones', async () => {
@@ -262,7 +268,7 @@ describe('the answer', () => {
       result: { state: 'undecided', certain: false, ...own({ line: 3, rule: 'MATCH,Final', target: 'Final' }) },
       branches: [
         { source: 'rule_set', rule_set: 'custom', line: 1, rule: 'GEOSITE,cn,CN', target: 'CN', reason: 'client_data' },
-        { source: 'personal', line: 1, rule: 'IP-CIDR,10.0.0.0/8,Direct,no-resolve', target: 'Direct', reason: 'input' },
+        { source: 'personal', line: 1, rule: 'SRC-PORT,5000,Direct', target: 'Direct', reason: 'input' },
       ], branches_total: 2,
       also_matching: [{ source: 'template', line: 40, rule: 'MATCH,Last', target: 'Last', status: 'possible' }], also_matching_total: 1,
     }))
@@ -270,7 +276,7 @@ describe('the answer', () => {
     const dialog = await run()
     expect(await within(dialog).findByText('This result is not certain')).toBeTruthy()
     expect(within(dialog).getByText(/Needs data from the client/)).toBeTruthy()
-    expect(within(dialog).getByText(/A no-resolve IP rule/)).toBeTruthy()
+    expect(within(dialog).getByText(/Needs a condition that wasn't entered/)).toBeTruthy()
     expect(within(dialog).getByText('If it matches → CN')).toBeTruthy()
     expect(within(dialog).getByText('If none of them match, matching continues:')).toBeTruthy()
     expect(within(dialog).getByText('1 more rules also match and may apply:')).toBeTruthy()

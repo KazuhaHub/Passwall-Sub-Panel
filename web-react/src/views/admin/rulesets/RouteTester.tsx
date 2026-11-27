@@ -166,7 +166,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
         )
       )}
       <div className="flex flex-col gap-3">
-        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' || problem === 'address_empty' ? t(`admin:rules.tester.problem.${problem}`) : failureText('address')} hint={t('admin:rules.tester.ip_note')}>
+        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' || problem === 'address_empty' ? t(`admin:rules.tester.problem.${problem}`) : failureText('address')} hint={<>{t('admin:rules.tester.ip_note')} {t('admin:rules.tester.address_assumption')}</>}>
           <Input value={input.address} placeholder={t('admin:rules.tester.address_placeholder')} spellCheck={false} autoCapitalize="none" autoCorrect="off" onChange={e => set({ address: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -253,7 +253,7 @@ function Result({ t, doc, result, udp, resolvedEntered, groupsKnown, groupOf, li
   }
   const maybeRow = (m: MaybeHit) => (
     <li key={m.line} className="flex min-w-0 flex-col gap-0.5 rounded-md border px-2 py-1.5 text-xs">
-      <span className="break-words">{t(`admin:rules.tester.${m.reason === 'resolve' && resolvedEntered ? 'branch_resolve_entered' : m.reason === 'input' && /^ip-cidr6?$/i.test(doc.lines[m.line].rule?.type ?? '') && !doc.lines[m.line].rule?.options.includes('src') ? 'branch_input_ip' : reasonKey[m.reason]}`, { line: (m.line + 1).toLocaleString(), rule: ruleText(doc, m.line) })}</span>
+      <span className="break-words">{t(`admin:rules.tester.${m.reason === 'resolve' && resolvedEntered ? 'branch_resolve_entered' : reasonKey[m.reason]}`, { line: (m.line + 1).toLocaleString(), rule: ruleText(doc, m.line) })}</span>
       {m.target !== '' && <span className="text-muted-foreground">{t('admin:rules.tester.branch_if_match', { target: m.target })}</span>}
       <span>{lineLink(m.line)}</span>
     </li>
