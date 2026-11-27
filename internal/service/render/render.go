@@ -104,6 +104,11 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 type previewContext struct {
 	ruleSets []*domain.RuleSet
 	template *domain.Template
+	// explain brackets every rule source (personal rules and each shared
+	// segment) with marker rules so ExplainRoute can tell, in the finished
+	// document, which source every rule came from. See explain.go.
+	explain  bool
+	segments []ruleSegment // filled by renderForContext when explain is set
 }
 
 func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domain.ClientType, preview *previewContext) (*Output, error) {
@@ -195,6 +200,13 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	}
 	if len(bundle.ProxyGroupOrder) == 0 {
 		bundle.ProxyGroupOrder = tpl.ProxyGroupOrder
+	}
+	if preview != nil && preview.explain {
+		preview.segments = bundle.Segments
+		bundle.SharedRules = explainMarkSegments(bundle.Segments)
+		marked := *u
+		marked.PersonalRules = explainMarkPersonal(u.PersonalRules)
+		u = &marked
 	}
 	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
 	items = internalItems
@@ -775,6 +787,16 @@ type resolvedRuleBundle struct {
 	ProxyGroupOptions map[string]domain.ProxyGroupOptions
 	SubRules          []domain.MihomoSubRule
 	RematchOutbounds  []domain.MihomoRematchOutbound
+	// Segments lists, in SharedRules order, where each part of it came from.
+	Segments []ruleSegment
+}
+
+// ruleSegment is one contiguous part of the shared rule stream: either the
+// generated subscription-domain rule or the content of one rule set.
+type ruleSegment struct {
+	Kind    string // ruleSourceSubscriptionDomain or ruleSourceRuleSet
+	Slug    string // rule set slug
+	Content string
 }
 
 func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, st ports.UISettings, clientType domain.ClientType, overrides ...*domain.RuleSet) (resolvedRuleBundle, error) {
@@ -784,6 +806,7 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		return resolvedRuleBundle{}, nil
 	}
 	sharedParts := make([]string, 0, len(slugs))
+	segments := make([]ruleSegment, 0, len(slugs))
 	directSubscriptionRule := subscriptionDirectRule(st.SubBaseURL)
 	directSubscriptionRequested := false
 	proxyGroupOrder := []string{}
@@ -824,6 +847,7 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		}
 		if content != "" {
 			sharedParts = append(sharedParts, content)
+			segments = append(segments, ruleSegment{Kind: ruleSourceRuleSet, Slug: slug, Content: rs.Content})
 		}
 		if clientType == domain.ClientMihomo {
 			for _, subRule := range rs.MihomoSubRules {
@@ -873,13 +897,14 @@ func (s *Service) resolveRuleBundle(ctx context.Context, tpl *domain.Template, s
 		// rules still remain ahead of rules_common by template design, while this
 		// rule always wins over a later MATCH or broad catch-all in a ruleset.
 		sharedParts = append([]string{directSubscriptionRule}, sharedParts...)
+		segments = append([]ruleSegment{{Kind: ruleSourceSubscriptionDomain, Content: directSubscriptionRule}}, segments...)
 	}
 	shared := strings.Join(sharedParts, "\n")
 	log.Debug("render: rules_common resolved", "total_length", len(shared), "rule_sets", len(sharedParts))
 	return resolvedRuleBundle{
 		SharedRules:     shared,
 		ProxyGroupOrder: proxyGroupOrder, ProxyGroupMembers: proxyGroupMembers, ProxyGroupOptions: proxyGroupOptions,
-		SubRules: subRules, RematchOutbounds: rematchOutbounds,
+		SubRules: subRules, RematchOutbounds: rematchOutbounds, Segments: segments,
 	}, nil
 }
 

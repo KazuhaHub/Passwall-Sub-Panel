@@ -698,6 +698,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/rules", rules.List)
 		adminGroup.POST("/rules/inspect-proxy-groups", rules.InspectProxyGroups)
 		adminGroup.POST("/rules/preview-proxy-groups", rules.PreviewProxyGroups)
+		previewPOST(adminGroup, "/rules/explain", handler.NewAdminRuleExplainHandler(d.Render).Explain)
 		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)
