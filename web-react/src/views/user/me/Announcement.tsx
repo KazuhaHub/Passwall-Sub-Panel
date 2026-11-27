@@ -19,8 +19,9 @@ const toneOf = (level: string): Tone => TONE_OF[level] ?? 'info'
 export function Banner({ tone, title, children, testId }: { tone: Exclude<Tone, 'neutral'>; title: string; children?: string; testId?: string }) {
   return (
     <div data-testid={testId} data-tone={tone}>
-      <Notice tone={tone}>
-        <p className="font-medium">{title}</p>
+      {/* A polite status for every tone: a banner is already on the page when it loads, so it is read in place and does not interrupt; a heading, so heading navigation finds it. */}
+      <Notice tone={tone} role="status">
+        <h2 className="font-medium">{title}</h2>
         {children && <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{children}</p>}
       </Notice>
     </div>
