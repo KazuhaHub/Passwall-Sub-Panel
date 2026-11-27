@@ -7,7 +7,7 @@ import { Field } from '@/components/form/Field'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { IconArrowDown, IconArrowUp, IconDelete } from '@/lib/icons'
 import { useNodesT } from '../../shared/useNodesT'
 import { RouteLinkStatus } from './RouteLinkStatus'
@@ -70,11 +70,11 @@ export function RouteRow({ index, count, row, info, issues, blocked, dirty, list
         )}
       </Field>
       <Field label={t(`${K}domains`)} hint={t(`${K}domains_hint`)}>
-        <Textarea rows={2} disabled={blocked} value={row.domains} placeholder={'domain:example.com\nfull:www.example.com\nkeyword:ads'} onChange={e => onPatch({ domains: e.target.value })} />
+        <LazyCodeEditor language="plain" tabMovesFocus minRows={3} maxRows={10} disabled={blocked} value={row.domains} placeholder={'domain:example.com\nfull:www.example.com\nkeyword:ads'} onChange={domains => onPatch({ domains })} />
       </Field>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_9rem]">
         <Field label={t(`${K}cidrs`)}>
-          <Textarea rows={2} disabled={blocked} value={row.cidrs} onChange={e => onPatch({ cidrs: e.target.value })} />
+          <LazyCodeEditor language="plain" tabMovesFocus minRows={3} maxRows={10} disabled={blocked} value={row.cidrs} onChange={cidrs => onPatch({ cidrs })} />
         </Field>
         <Field label={t(`${K}ports`)} hint={t(`${K}ports_hint`)}>
           <Input disabled={blocked} value={row.ports} placeholder="25,465,587" onChange={e => onPatch({ ports: e.target.value })} />

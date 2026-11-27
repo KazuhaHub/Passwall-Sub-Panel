@@ -200,7 +200,7 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
         <Alert>
           <AlertDescription>{t('admin:risk_center.queue.geoip_unavailable')}</AlertDescription>
           <AlertAction>
-            <Button variant="outline" size="sm" render={<Link to="/admin/settings?tab=general" />}>
+            <Button variant="outline" size="sm" render={<Link to="/admin/settings?tab=general&sub=network" />}>
               {t('admin:risk_center.queue.geoip_open')}
             </Button>
           </AlertAction>

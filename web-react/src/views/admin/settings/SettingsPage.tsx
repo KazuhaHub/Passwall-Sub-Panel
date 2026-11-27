@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import { useSearchParams } from 'react-router'
-import { Notice } from '@/components/common/Notice'
 import { PageHeader } from '@/components/common/PageHeader'
 import { useLeaveGuard } from '@/hooks/useLeaveGuard'
 import { useTabParam } from '@/hooks/useTabParam'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useDirtyTabs } from '../nodes/detail/useDirtyTabs'
 import { useAdminT } from '../useAdminT'
-import { AudienceProvider, AudienceRail, useAudience } from './audience'
+import { AudienceProvider, AudienceRail } from './audience'
 import { BrandSection } from './BrandSection'
-import { DirtySectionsContext } from './dirtyContext'
+import { SettingsDirtyContext } from './dirtyContext'
 import { GeneralSection } from './GeneralSection'
 import { LegalSection } from './LegalSection'
 import { MailSection } from './MailSection'
-import { SECTIONS, SECTION_LABEL, type SectionKey } from './model'
+import { SECTIONS, type SectionKey } from './model'
 import { PortalSection } from './PortalSection'
 import type { SearchEntry } from './searchIndex'
 import { SecuritySection } from './SecuritySection'
@@ -21,8 +20,10 @@ import { SettingsNav } from './SettingsNav'
 import { SettingsSearch } from './SettingsSearch'
 import { SsoSection } from './SsoSection'
 import { SubscriptionSection } from './SubscriptionSection'
+import { SUB_PARAM } from './SubTabs'
+import { PLACES, firstSub, placeName, sectionOfPlace } from './tree'
 
-type SectionComponent = ComponentType<{ onDirtyChange: (dirty: boolean) => void }>
+type SectionComponent = ComponentType<{ active: boolean }>
 const COMPONENTS: Record<SectionKey, SectionComponent> = {
   general: GeneralSection,
   security: SecuritySection,
@@ -54,7 +55,7 @@ function useJump(entry: SearchEntry | null, done: () => void) {
       target?.scrollIntoView?.({ block: 'center' })
       // A switch keeps its id on a hidden input beside the control that takes focus: look for the control inside the field.
       const scope = target?.closest('[data-slot="field"]') ?? target
-      const control = scope?.querySelector<HTMLElement>('[role="switch"], input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, button')
+      const control = scope?.querySelector<HTMLElement>('[role="switch"], input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, .cm-content, [role="textbox"], button')
       if (control) control.focus()
       done()
     }, 50)
@@ -63,30 +64,40 @@ function useJump(entry: SearchEntry | null, done: () => void) {
 }
 
 /**
- * The settings page: one section at a time, each with its own Save. A section is built the first time it is shown and
- * then kept (hidden while another is open), so what is typed in it survives a look at another one and a switch never
- * asks anything. Leaving the PAGE asks once, and names the sections that have unsaved changes.
+ * The settings page: one section at a time, each split into sub-tabs that each have their own Save. A section is built
+ * the first time it is shown and then kept (hidden while another is open), and so is each of its sub-tabs (SubTabs), so
+ * what is typed survives a look at another one and a switch never asks anything. Leaving the PAGE asks once, and names
+ * the sub-tabs that have unsaved changes.
  */
 export function SettingsPage() {
   return <AudienceProvider><SettingsPageInner /></AudienceProvider>
 }
 
-/** The sections whose settings a group can override (they host a ScopeShell). The rest are global only. */
-const SCOPED: readonly SectionKey[] = ['general', 'security', 'subscription']
-
 function SettingsPageInner() {
   const t = useAdminT()
-  const { groupId } = useAudience()
-  const [tab, setTab] = useTabParam<SectionKey>('tab', 'general', SECTIONS)
+  const [tab] = useTabParam<SectionKey>('tab', 'general', SECTIONS)
   const [, setParams] = useSearchParams()
   const [visited, setVisited] = useState<ReadonlySet<SectionKey>>(new Set([tab]))
   const shown = visited.has(tab) ? visited : new Set(visited).add(tab)
-  const select = (s: SectionKey) => { setVisited(v => (v.has(s) ? v : new Set(v).add(s))); setTab(s) }
+  // Another section starts at its first sub-tab: `sub` belongs to the section it was set in. One update, because two
+  // successive ones would each start from the same address and the second would undo the first.
+  const select = (s: SectionKey) => {
+    if (s === tab) return // the section already open keeps its sub-tab
+    setVisited(v => (v.has(s) ? v : new Set(v).add(s)))
+    setParams(prev => {
+      const out = new URLSearchParams(prev)
+      if (s === 'general') out.delete('tab'); else out.set('tab', s)
+      out.delete(SUB_PARAM)
+      return out
+    }, { replace: true })
+  }
 
-  const { dirty, report } = useDirtyTabs(SECTIONS)
-  const names = dirty.map(s => t(SECTION_LABEL[s])).join(t('settings.section_separator'))
-  useLeaveGuard(dirty.length > 0, { ...discardChangesConfirm(t), destructive: true, initialFocus: 'cancel', message: t('settings.dirty_sections', { sections: names }) },
+  const { dirty: dirtyPlaces, report } = useDirtyTabs(PLACES)
+  const dirtySections = SECTIONS.filter(s => dirtyPlaces.some(p => sectionOfPlace(p) === s))
+  const names = dirtyPlaces.map(p => placeName(p, t)).join(t('settings.section_separator'))
+  useLeaveGuard(dirtyPlaces.length > 0, { ...discardChangesConfirm(t), destructive: true, initialFocus: 'cancel', message: t('settings.dirty_sections', { sections: names }) },
     (next, current) => next.pathname !== current.pathname)
+  const dirtyContext = useMemo(() => ({ dirty: dirtyPlaces, report }), [dirtyPlaces, report])
 
   const [jump, setJump] = useState<SearchEntry | null>(null)
   const done = useCallback(() => setJump(null), [])
@@ -96,7 +107,7 @@ function SettingsPageInner() {
     setParams(prev => {
       const out = new URLSearchParams(prev)
       if (entry.section === 'general') out.delete('tab'); else out.set('tab', entry.section)
-      if (entry.sub && entry.sub !== 'saml') out.set('sub', entry.sub); else out.delete('sub')
+      if (entry.sub !== firstSub(entry.section)) out.set(SUB_PARAM, entry.sub); else out.delete(SUB_PARAM)
       return out
     }, { replace: true })
     setJump(entry)
@@ -109,19 +120,18 @@ function SettingsPageInner() {
           <SettingsSearch onPick={pick} />
           {/* Who before what: the audience, then the sections. Both fit in an 800px-tall window (the audience list scrolls inside 14rem). */}
           <AudienceRail />
-          <SettingsNav active={tab} onSelect={select} dirty={dirty} />
+          <SettingsNav active={tab} onSelect={select} dirty={dirtySections} />
         </aside>
-        <DirtySectionsContext.Provider value={dirty}><div className="min-w-0 max-w-3xl">
+        <SettingsDirtyContext.Provider value={dirtyContext}><div className="min-w-0 max-w-3xl">
           {SECTIONS.map(s => {
             const Section = COMPONENTS[s]
             return shown.has(s) && (
               <div key={s} id={sectionDomId(s)} hidden={tab !== s}>
-                {groupId !== 0 && !SCOPED.includes(s) && <Notice tone="info" className="mb-4">{t('settings.scope.global_only')}</Notice>}
-                <Section onDirtyChange={report[s]} />
+                <Section active={tab === s} />
               </div>
             )
           })}
-        </div></DirtySectionsContext.Provider>
+        </div></SettingsDirtyContext.Provider>
       </div>
     </div>
   )

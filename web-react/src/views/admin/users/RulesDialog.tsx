@@ -3,11 +3,11 @@ import type { User } from '@/api/types'
 import { getUserRules, updateUserRules } from '@/api/users'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { confirm } from '@/components/ConfirmHost'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { pushSnack } from '@/components/feedback/toasts'
 import { LoadingState } from '@/components/feedback/LoadingState'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useAdminT } from './useAdminT'
 
@@ -59,8 +59,8 @@ export function RulesDialog({ user, onClose }: { user: User; onClose: () => void
         </DialogHeader>
         {loading
           ? <LoadingState />
-          : <Textarea rows={12} className="font-mono text-[0.8125rem]" aria-label={t('users.rules.title', { upn: user.upn })} value={text}
-              onChange={e => setText(e.target.value)} placeholder={t('users.rules.placeholder')} />}
+          : <LazyCodeEditor language="plain" tabMovesFocus minRows={12} ariaLabel={t('users.rules.title', { upn: user.upn })} value={text}
+              onChange={setText} placeholder={t('users.rules.placeholder')} />}
         <DialogFooter>
           <Button variant="outline" disabled={loading || saving || !dirty} onClick={() => setText(saved)}>{t('users.rules.reset')}</Button>
           <Button variant="outline" disabled={saving} onClick={() => void close()}>{t('common:actions.cancel')}</Button>

@@ -35,6 +35,16 @@ describe('a template page', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: /unsaved/i })).toBeNull())
   })
 
+  // The document is coloured as what it is: a Clash/Mihomo template is YAML, a sing-box one JSON.
+  it('colours the document as YAML for Mihomo and as JSON for sing-box', async () => {
+    reads()
+    mountTemplates(PAGE)
+    const content = await label('Template content')
+    expect(content.getAttribute('data-language')).toBe('yaml')
+    fireEvent.change(await label('Client type'), { target: { value: 'sing-box' } })
+    await waitFor(() => expect(content.getAttribute('data-language')).toBe('json'))
+  })
+
   it('binds rule sets in the order they are picked, and a disabled one cannot be picked', async () => {
     reads([{ ...custom, rule_sets: [] }])
     mountTemplates(PAGE)

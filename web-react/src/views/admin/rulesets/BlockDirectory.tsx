@@ -87,10 +87,12 @@ export function BlockDirectory({ doc, blocks, shown, hits, selected, onSelect, r
     'aria-label': t('admin:rules.blocks.title'),
     data: shown,
     columns,
-    getRowId: (b: Block) => String(b.index),
+    // A group's id is its first line's id: lines keep their ids when a group is moved, a position would not
+    // (see components/data/useRowReorder: the drop animation follows rows by id).
+    getRowId: (b: Block) => String(doc.lines[b.start].id),
     rowLabel: (b: Block) => (b.kind === 'text' ? t('admin:rules.blocks.text_block', { count: b.count }) : b.kind === 'notarget' ? t('admin:rules.blocks.no_target') : b.target),
     onRowOpen: (b: Block) => onSelect(b.index),
-    activeRowId: String(selected),
+    activeRowId: blocks[selected] ? String(doc.lines[blocks[selected].start].id) : '',
     columnMenu: false,
     maxHeight: COLUMN_HEIGHT,
   }

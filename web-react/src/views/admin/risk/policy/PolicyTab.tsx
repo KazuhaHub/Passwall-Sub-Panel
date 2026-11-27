@@ -233,7 +233,7 @@ function PolicyBody({ loaded }: { loaded: RiskPolicyView }) {
                 <p className={`text-xs ${geoipState === 'geoip_off' ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {t(`${P}geoip_status`, { state: t(`${P}${geoipState}`) })}
                 </p>
-                <Button variant="link" size="sm" render={<Link to="/admin/settings?tab=general" />}>
+                <Button variant="link" size="sm" render={<Link to="/admin/settings?tab=general&sub=network" />}>
                   {t(`${P}geoip_open`)}
                 </Button>
               </div>

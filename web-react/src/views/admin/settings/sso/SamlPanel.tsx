@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { fetchSAMLMetadata, putSAML, type SAMLConfig, type SAMLMetadataSummary } from '@/api/settings'
+import { CodeField } from '@/components/CodeField'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { CopyButton } from '@/components/common/CopyButton'
 import { ErrorState } from '@/components/feedback/ErrorState'
@@ -8,7 +10,6 @@ import { pushSnack } from '@/components/feedback/toasts'
 import { Field } from '@/components/form/Field'
 import { NumberField } from '@/components/form/NumberField'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { useAllGroups } from '@/query/groups'
 import { settingsKeys } from '@/query/keys'
 import { useSamlConfig } from '@/query/settings'
@@ -164,9 +165,8 @@ export function SamlPanel({ onDirtyChange }: { onDirtyChange: (dirty: boolean) =
           <>
             <TextRow name="saml_entity_id" label={t('settings.sso.saml.sp_entity_id')} required={cfg.enabled} value={cfg.sp.entity_id} error={errs.entity_id} onChange={s => patchSp({ entity_id: s })} />
             <TextRow name="saml_acs_url" label={t('settings.sso.saml.sp_acs_url')} required={cfg.enabled} value={cfg.sp.acs_url} error={errs.acs_url} onChange={s => patchSp({ acs_url: s })} />
-            <Field label={t('settings.sso.saml.sp_cert')} required={cfg.enabled} error={errs.cert_pem}>
-              <Textarea id="setting-saml_cert_pem" rows={4} className="font-mono text-xs" value={cfg.sp.cert_pem} onChange={e => patchSp({ cert_pem: e.target.value })} />
-            </Field>
+            <CodeField id="setting-saml_cert_pem" label={t('settings.sso.saml.sp_cert')} required={cfg.enabled} error={errs.cert_pem}
+              language="pem" tabMovesFocus wrap minRows={4} maxRows={12} value={cfg.sp.cert_pem} onChange={cert_pem => patchSp({ cert_pem })} />
             <SecretTextarea id="setting-saml_key_pem" label={t('settings.sso.saml.sp_key')} isSet={cfg.sp.has_key_pem} value={keyPem} onChange={setKeyPem} />
           </>
         )}
@@ -206,7 +206,7 @@ function ReadOnly({ label, value, multiline }: { label: string; value: string; m
     <Field label={label}>
       <div className="flex items-start gap-1.5">
         {multiline
-          ? <Textarea readOnly rows={4} className="font-mono text-xs" value={value} />
+          ? <LazyCodeEditor readOnly ariaLabel={label} language="pem" tabMovesFocus minRows={4} maxRows={12} value={value} onChange={() => {}} className="min-w-0 flex-1" />
           : <Input readOnly value={value} />}
         <CopyButton value={value} name={label} />
       </div>

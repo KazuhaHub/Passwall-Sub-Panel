@@ -42,7 +42,7 @@ export function UiDataProvider({ raw, children }: { raw: UISettings; children: R
   const savedRef = useRef(saved)
   savedRef.current = saved
 
-  const write = useCallback(async (edits: Partial<UISettings>) => {
+  const writeNow = useCallback(async (edits: Partial<UISettings>) => {
     // The record is written whole, so what goes out for the keys this section did NOT edit is whatever the server holds
     // at this moment, read now: another admin's change to another section, or another page's (sub clients), is not
     // written back over. If that read fails the copy already held stands.
@@ -76,6 +76,16 @@ export function UiDataProvider({ raw, children }: { raw: UISettings; children: R
     }
     return answer
   }, [queryClient, scope, site])
+
+  // ONE QUEUE for the whole page: the record is written whole, so two saves from different sub-tabs that overlapped would
+  // each read the record before the other landed, and the later write would put the earlier one's keys back. Each write
+  // waits for the one before it and reads the record only when its turn comes.
+  const queue = useRef<Promise<unknown>>(Promise.resolve())
+  const write = useCallback((edits: Partial<UISettings>) => {
+    const run = queue.current.then(() => writeNow(edits))
+    queue.current = run.catch(() => {})
+    return run
+  }, [writeNow])
 
   const value = useMemo(() => ({ saved, write }), [saved, write])
   return <UiDataContext.Provider value={value}>{children}</UiDataContext.Provider>

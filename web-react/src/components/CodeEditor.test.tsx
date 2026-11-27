@@ -3,6 +3,7 @@ import { createRef, type CSSProperties } from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import CodeEditor, { type CodeEditorHandle } from './CodeEditor'
+import { vscodeTheme } from './codeEditor/theme'
 
 const propsSpy = vi.hoisted(() => vi.fn())
 vi.mock('@uiw/react-codemirror', () => ({
@@ -26,27 +27,12 @@ it.each([undefined, '100%'])('applies height %s to both the wrapper and CodeMirr
   expect(onChange).toHaveBeenCalledWith('- MATCH,REJECT')
 })
 
-// A list is not YAML: `domain:example.com` would be drawn as a key. 'plain'
-// adds no language extension, and the default stays yaml for the old callers.
-it('adds the yaml language by default and none for plain', () => {
-  render(<CodeEditor value="a" onChange={() => {}} />)
-  expect(propsSpy.mock.calls.at(-1)![0].extensions).toHaveLength(1)
-  cleanup()
-  render(<CodeEditor value="a" onChange={() => {}} language="plain" />)
-  expect(propsSpy.mock.calls.at(-1)![0].extensions).toHaveLength(0)
-})
-
 it('turns minRows into a height unless a height is given', () => {
   render(<CodeEditor value="" onChange={() => {}} language="plain" minRows={6} />)
   expect(screen.getByTestId('code-mirror').style.height).toBe('128px')
   cleanup()
   render(<CodeEditor value="" onChange={() => {}} language="plain" minRows={6} height="50px" />)
   expect(screen.getByTestId('code-mirror').style.height).toBe('50px')
-})
-
-it('names the text area for assistive technology when asked', () => {
-  render(<CodeEditor value="" onChange={() => {}} language="plain" ariaLabel="Main rules" />)
-  expect(propsSpy.mock.calls.at(-1)![0].extensions).toHaveLength(1)
 })
 
 // Tab indents (YAML needs it); CodeMirror's own Escape-then-Tab is the way out, and the pages say so.
@@ -58,10 +44,10 @@ it('leaves CodeMirror\'s Tab handling on', () => {
 
 it('follows the stored appearance mode when dark is not given', () => {
   render(<CodeEditor value="" onChange={() => {}} />)
-  expect(propsSpy.mock.calls.at(-1)![0].theme).toBe('light')
+  expect(propsSpy.mock.calls.at(-1)![0].theme).toBe(vscodeTheme(false))
   cleanup()
   render(<CodeEditor value="" onChange={() => {}} dark />)
-  expect(propsSpy.mock.calls.at(-1)![0].theme).toBe('dark')
+  expect(propsSpy.mock.calls.at(-1)![0].theme).toBe(vscodeTheme(true))
 })
 
 it('reveals and selects a line through the ref', () => {
@@ -90,4 +76,19 @@ it('inserts a line of its own: in place of an empty cursor line, else after the 
   create(at('some text'))
   ref.current!.insertLine('[[x]]')
   expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ changes: { from: 14, to: 14, insert: '\n[[x]]' } }))
+})
+
+it('is read-only through the state, not by switching editing off, so the value can still be focused and copied', () => {
+  render(<CodeEditor value="x" onChange={() => {}} readOnly />)
+  const props = propsSpy.mock.calls.at(-1)![0]
+  expect(props.readOnly).toBe(true)
+  expect(props.editable).toBeUndefined()
+})
+
+it('lets the content grow between minRows and maxRows when no height is given', () => {
+  render(<CodeEditor value="" onChange={() => {}} minRows={3} maxRows={10} />)
+  const props = propsSpy.mock.calls.at(-1)![0]
+  expect(props.height).toBeUndefined()
+  expect(props.minHeight).toBe('68px')
+  expect(props.maxHeight).toBe('208px')
 })

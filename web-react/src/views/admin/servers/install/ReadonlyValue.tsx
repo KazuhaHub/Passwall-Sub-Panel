@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
+import { CodeField } from '@/components/CodeField'
 import { CopyButton } from '@/components/common/CopyButton'
 import { Field } from '@/components/form/Field'
 import { SecretField } from '@/components/form/SecretField'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
-import { Textarea } from '@/components/ui/textarea'
 
 /** A value the page shows and the operator copies: the connection endpoint, the agent id. */
 export function ReadonlyValue({ label, value, copy = true }: { label: ReactNode; value: string; copy?: boolean }) {
@@ -27,8 +27,6 @@ export function ReadonlySecret({ label, value }: { label: ReactNode; value: stri
 /** A command or file body to read and copy. `label` names the text for assistive technology. */
 export function ReadonlyText({ label, value, rows = 3, hint }: { label: ReactNode; value: string; rows?: number; hint?: ReactNode }) {
   return (
-    <Field label={label} hint={hint}>
-      <Textarea readOnly rows={rows} value={value} spellCheck={false} className="font-mono text-xs" />
-    </Field>
+    <CodeField label={label} hint={hint} readOnly wrap language="plain" minRows={rows} maxRows={Math.max(rows, 16)} value={value} onChange={() => {}} />
   )
 }

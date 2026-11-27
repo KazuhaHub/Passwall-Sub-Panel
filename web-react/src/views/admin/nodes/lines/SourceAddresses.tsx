@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/form/Field'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { InfoTip } from '@/components/common/HelpTip'
 import type { CloudflareRanges, LineSourceGuard } from '@/api/sourceGuard'
 import type { RelayLine } from '@/api/types'
@@ -38,7 +38,7 @@ export function SourceAddresses({ line, text, onText, guard, canGuard, cannotGua
   return (
     <div data-testid="source-addresses" className="flex flex-col gap-2">
       <Field label={t('nodes.source.title')} hint={hint}>
-        <Textarea value={text} rows={2} spellCheck={false} placeholder={t('nodes.source.placeholder')} className="max-h-48 font-mono text-xs" onChange={e => onText(e.target.value)} />
+        <LazyCodeEditor language="plain" tabMovesFocus minRows={2} maxRows={8} placeholder={t('nodes.source.placeholder')} value={text} onChange={onText} />
       </Field>
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         <span>{t('nodes.source.effective')}</span>

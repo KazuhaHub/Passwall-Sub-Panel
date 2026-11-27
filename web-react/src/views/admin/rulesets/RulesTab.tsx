@@ -237,8 +237,10 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   }
 
   const reorder = ({ movedId, beforeId }: ReorderCall) => {
-    const from = Number(movedId)
-    const before = beforeId === null ? blocks.length : Number(beforeId)
+    // The table reports first-line ids (BlockDirectory.getRowId); the model moves by position.
+    const from = blocks.findIndex(b => String(firstLineId(b)) === movedId)
+    const before = beforeId === null ? blocks.length : blocks.findIndex(b => String(firstLineId(b)) === beforeId)
+    if (from < 0 || before < 0) return
     if (!apply((d, b) => moveBlock(d, b, from, before))) return
     const to = before > from ? before - 1 : before
     setSelected(to)
