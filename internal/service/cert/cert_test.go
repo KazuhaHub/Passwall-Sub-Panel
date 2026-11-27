@@ -3,6 +3,7 @@ package cert
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -234,6 +235,7 @@ func TestSetNodeCertSourceManualClearsAndDoesNotDeploy(t *testing.T) {
 
 type fakeTaskRepo struct {
 	ports.SyncTaskRepo
+	asked     []domain.SyncTaskType // types the last ListDue was asked for
 	created   []*domain.SyncTask
 	due       []*domain.SyncTask
 	succeeded []int64
@@ -249,7 +251,8 @@ func (r *fakeTaskRepo) Create(_ context.Context, t *domain.SyncTask) error {
 	r.created = append(r.created, t)
 	return nil
 }
-func (r *fakeTaskRepo) ListDue(_ context.Context, _ time.Time, _ int) ([]*domain.SyncTask, error) {
+func (r *fakeTaskRepo) ListDue(_ context.Context, _ time.Time, types []domain.SyncTaskType, _ int) ([]*domain.SyncTask, error) {
+	r.asked = types
 	return r.due, nil
 }
 func (r *fakeTaskRepo) MarkRunning(_ context.Context, _ int64) (bool, error) { return true, nil }
@@ -728,5 +731,18 @@ func TestScanDueRenewalsRetriesFailedCerts(t *testing.T) {
 	}
 	if tasks.created[0].Type != domain.SyncTaskCertIssue {
 		t.Fatalf("a failed never-issued cert should re-issue, got %s", tasks.created[0].Type)
+	}
+}
+
+// The processor must ask only for the types it dispatches, so another
+// consumer's burst of due rows cannot fill its ListDue window.
+func TestProcessDueTasksAsksOnlyForCertTypes(t *testing.T) {
+	tasks := &fakeTaskRepo{}
+	s := newTestService(newFakeCertRepo(), &fakeDNSRepo{}, seededAccount(), &fakeIssuer{}, &fakeNodeRepo{}, tasks, &fakePusher{})
+	if err := s.ProcessDueTasks(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(tasks.asked, OwnedTaskTypes()) || len(tasks.asked) != 2 {
+		t.Fatalf("asked %v, want the cert types", tasks.asked)
 	}
 }

@@ -930,10 +930,12 @@ type syncTaskRow struct {
 	Payload    string `gorm:"type:text"`
 	LastError  string `gorm:"type:text"`
 	Attempts   int
-	// idx_task_due_run (status, next_run_at) serves the 30s/hourly ListDue scan
-	// (WHERE status=? AND next_run_at<=? ORDER BY next_run_at): idx_task_due
-	// leads with `type`, which ListDue never predicates, so leftmost-prefix made
-	// it unusable and the query degenerated to a full scan + filesort.
+	// ListDue is `status=? AND next_run_at<=? AND type IN ? ORDER BY next_run_at,
+	// id`. Either index can serve it: idx_task_due (type, status, next_run_at)
+	// for a narrow type set, idx_task_due_run (status, next_run_at) when the
+	// planner prefers walking the due rows in order and filtering type. Before
+	// the type filter existed only idx_task_due_run was usable (idx_task_due
+	// leads with `type`, which the query never predicated).
 	NextRunAt time.Time `gorm:"index:idx_task_due,priority:3;index:idx_task_due_run,priority:2"`
 	CreatedAt time.Time
 	UpdatedAt time.Time

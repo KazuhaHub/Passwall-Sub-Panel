@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -437,17 +438,26 @@ func (s *Service) enqueueCertTask(ctx context.Context, typ domain.SyncTaskType, 
 	})
 }
 
+// certTaskTypes is every task type this service dispatches. See the user
+// service's userTaskTypes for why it is the ListDue filter.
+var certTaskTypes = []domain.SyncTaskType{domain.SyncTaskCertIssue, domain.SyncTaskCertRenew}
+
+// OwnedTaskTypes returns the sync-task types ProcessDueTasks owns.
+func OwnedTaskTypes() []domain.SyncTaskType {
+	return append([]domain.SyncTaskType(nil), certTaskTypes...)
+}
+
 // ProcessDueTasks drives the cert_issue / cert_renew tasks. Mirrors the
 // user/node task processors: claim, run, then succeed / retry (transient) /
 // fail-fast (permanent or attempt cap). Wired into runSyncTaskLoop.
 func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
-	tasks, err := s.tasks.ListDue(ctx, time.Now(), limit)
+	tasks, err := s.tasks.ListDue(ctx, time.Now(), certTaskTypes, limit)
 	if err != nil {
 		return err
 	}
 	for _, task := range tasks {
-		if task.Type != domain.SyncTaskCertIssue && task.Type != domain.SyncTaskCertRenew {
-			continue
+		if !slices.Contains(certTaskTypes, task.Type) {
+			continue // defence in depth; the query already filtered
 		}
 		claimed, err := s.tasks.MarkRunning(ctx, task.ID)
 		if err != nil {

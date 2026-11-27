@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -104,9 +105,11 @@ type dueTasks struct {
 	ports.SyncTaskRepo
 	task      *domain.SyncTask
 	cancelled bool
+	asked     []domain.SyncTaskType
 }
 
-func (d *dueTasks) ListDue(context.Context, time.Time, int) ([]*domain.SyncTask, error) {
+func (d *dueTasks) ListDue(_ context.Context, _ time.Time, types []domain.SyncTaskType, _ int) ([]*domain.SyncTask, error) {
+	d.asked = types
 	return []*domain.SyncTask{d.task}, nil
 }
 func (d *dueTasks) GetByID(context.Context, int64) (*domain.SyncTask, error) {
@@ -145,5 +148,17 @@ func TestProcessDueTasksMovesTheRowOffPendingWhenItGivesUp(t *testing.T) {
 	if node.ConfigSyncState != domain.ConfigSyncFailed {
 		t.Fatalf("state = %q, want %q — the row would keep promising a retry that was cancelled",
 			node.ConfigSyncState, domain.ConfigSyncFailed)
+	}
+}
+
+// The processor must ask only for the types it dispatches, so another
+// consumer's burst of due rows cannot fill its ListDue window.
+func TestProcessDueTasksAsksOnlyForNodeTypes(t *testing.T) {
+	tasks := &dueTasks{task: &domain.SyncTask{ID: 1, Type: domain.SyncTaskNodeUpdate, TargetID: 7, Attempts: maxNodeTaskAttempts - 1}}
+	node := &domain.Node{ID: 7, PanelID: 1, InboundID: 11, ConfigSyncState: domain.ConfigSyncPending}
+	svc := &Service{nodes: &stateRepo{node: node}, tasks: tasks, pool: unreachablePool{}}
+	_ = svc.ProcessDueTasks(context.Background(), 10)
+	if !slices.Equal(tasks.asked, OwnedTaskTypes()) || len(tasks.asked) != 4 {
+		t.Fatalf("asked %v, want the node types", tasks.asked)
 	}
 }

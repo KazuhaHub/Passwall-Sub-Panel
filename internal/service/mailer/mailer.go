@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -96,53 +97,128 @@ func (s *Service) enqueueMailNotify(ctx context.Context, userID int64, kind, rea
 	}
 }
 
-// ProcessDueMailTasks processes pending mail notification tasks.
+// mailTaskTypes is the only task type this service dispatches; it is the
+// ListDue filter (see user.userTaskTypes for the starvation it prevents).
+var mailTaskTypes = []domain.SyncTaskType{domain.SyncTaskMailNotify}
+
+// OwnedTaskTypes returns the sync-task types ProcessDueMailTasks owns.
+func OwnedTaskTypes() []domain.SyncTaskType {
+	return append([]domain.SyncTaskType(nil), mailTaskTypes...)
+}
+
+const (
+	// maxMailTasksPerRun bounds how many due mail tasks one run examines. The
+	// loop runs hourly, so this is also the hard ceiling on SMTP sends it can
+	// cause per hour (one connection per send; the mailer has no other
+	// throttle on this path — sendthrottle guards only the user-initiated
+	// verification/recovery mails). Tasks it does not reach wait for the next
+	// run.
+	maxMailTasksPerRun = 200
+	// mailFailureStreakLimit stops a run after this many consecutive transient
+	// send failures. An SMTP outage fails every send, each after a dial/
+	// conversation timeout of up to 15s/60s; without the stop the run would
+	// burn the whole cap (and a burst of retry attempts) on a relay that is
+	// down. Permanent failures (validation) do not count: they say nothing
+	// about the relay.
+	mailFailureStreakLimit = 3
+)
+
+// ProcessDueMailTasks processes pending mail notification tasks. limit is the
+// batch size per ListDue query; the run keeps taking batches until one comes
+// back short (the queue is drained), maxMailTasksPerRun tasks have been
+// examined, or mailFailureStreakLimit transient failures happen in a row.
+// A failed task is rescheduled into the future by MarkRetry, so it is never
+// re-listed within the same run.
 func (s *Service) ProcessDueMailTasks(ctx context.Context, limit int) error {
 	if s.tasks == nil {
 		return nil
 	}
-	tasks, err := s.tasks.ListDue(ctx, time.Now(), limit)
-	if err != nil {
-		return err
+	if limit <= 0 {
+		limit = 20
 	}
-	for _, task := range tasks {
-		if task.Type != domain.SyncTaskMailNotify {
-			continue
+	examined, streak := 0, 0
+	for examined < maxMailTasksPerRun {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		claimed, err := s.tasks.MarkRunning(ctx, task.ID)
+		batch := limit
+		if rest := maxMailTasksPerRun - examined; batch > rest {
+			batch = rest
+		}
+		tasks, err := s.tasks.ListDue(ctx, time.Now(), mailTaskTypes, batch)
 		if err != nil {
-			log.Warn("mail task mark-running", "task_id", task.ID, "err", err)
-			continue
+			return err
 		}
-		if !claimed {
-			// Canceled (or claimed by another runner) between ListDue and here — skip.
-			continue
-		}
-		if err := s.processMailTask(ctx, task); err != nil {
-			// Terminal failures stop re-running forever (the pre-fix bug: MarkRetry
-			// never set a terminal status, so a broken SMTP relay / bad payload
-			// produced an immortal sync_task re-attempted every hourly loop). Cancel
-			// on a permanent error (bad payload / unknown template kind) or once the
-			// retry cap is hit, mirroring the user/node processors.
-			if errors.Is(err, domain.ErrValidation) || task.Attempts+1 >= maxMailTaskAttempts {
-				log.Warn("mail task gave up",
-					"task_id", task.ID, "attempts", task.Attempts+1, "last_err", err.Error())
-				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
-					log.Warn("mail task cancel", "task_id", task.ID, "err", markErr)
-				}
-				continue
+		for _, task := range tasks {
+			examined++
+			if !slices.Contains(mailTaskTypes, task.Type) {
+				continue // defence in depth; the query already filtered
 			}
-			next := time.Now().Add(mailTaskBackoff(task.Attempts + 1))
-			if markErr := s.tasks.MarkRetry(ctx, task.ID, err.Error(), next); markErr != nil {
-				log.Warn("mail task mark-retry", "task_id", task.ID, "err", markErr)
+			outcome := s.runMailTask(ctx, task)
+			switch outcome {
+			case mailTaskTransientFailure:
+				streak++
+			case mailTaskDone, mailTaskPermanentFailure:
+				streak = 0
 			}
-			continue
+			if streak >= mailFailureStreakLimit {
+				log.Warn("mail tasks: stopping run after consecutive send failures", "streak", streak)
+				return nil
+			}
 		}
-		if err := s.tasks.MarkSucceeded(ctx, task.ID); err != nil {
-			log.Warn("mail task mark-succeeded", "task_id", task.ID, "err", err)
+		if len(tasks) < batch {
+			return nil
 		}
 	}
 	return nil
+}
+
+type mailTaskOutcome int
+
+const (
+	mailTaskSkipped mailTaskOutcome = iota // not claimed / bookkeeping error: says nothing about SMTP
+	mailTaskDone
+	mailTaskPermanentFailure
+	mailTaskTransientFailure
+)
+
+func (s *Service) runMailTask(ctx context.Context, task *domain.SyncTask) mailTaskOutcome {
+	claimed, err := s.tasks.MarkRunning(ctx, task.ID)
+	if err != nil {
+		log.Warn("mail task mark-running", "task_id", task.ID, "err", err)
+		return mailTaskSkipped
+	}
+	if !claimed {
+		// Canceled (or claimed by another runner) between ListDue and here — skip.
+		return mailTaskSkipped
+	}
+	if err := s.processMailTask(ctx, task); err != nil {
+		// Terminal failures stop re-running forever (the pre-fix bug: MarkRetry
+		// never set a terminal status, so a broken SMTP relay / bad payload
+		// produced an immortal sync_task re-attempted every hourly loop). Cancel
+		// on a permanent error (bad payload / unknown template kind) or once the
+		// retry cap is hit, mirroring the user/node processors.
+		if errors.Is(err, domain.ErrValidation) || task.Attempts+1 >= maxMailTaskAttempts {
+			log.Warn("mail task gave up",
+				"task_id", task.ID, "attempts", task.Attempts+1, "last_err", err.Error())
+			if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
+				log.Warn("mail task cancel", "task_id", task.ID, "err", markErr)
+			}
+			if errors.Is(err, domain.ErrValidation) {
+				return mailTaskPermanentFailure
+			}
+			return mailTaskTransientFailure
+		}
+		next := time.Now().Add(mailTaskBackoff(task.Attempts + 1))
+		if markErr := s.tasks.MarkRetry(ctx, task.ID, err.Error(), next); markErr != nil {
+			log.Warn("mail task mark-retry", "task_id", task.ID, "err", markErr)
+		}
+		return mailTaskTransientFailure
+	}
+	if err := s.tasks.MarkSucceeded(ctx, task.ID); err != nil {
+		log.Warn("mail task mark-succeeded", "task_id", task.ID, "err", err)
+	}
+	return mailTaskDone
 }
 
 func (s *Service) processMailTask(ctx context.Context, task *domain.SyncTask) error {

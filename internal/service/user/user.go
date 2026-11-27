@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -3177,6 +3178,22 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	return firstErr
 }
 
+// userTaskTypes is every task type this service dispatches (runUserTask's
+// switch). It is the type filter handed to ListDue and the claim guard below,
+// and OwnedTaskTypes exposes it so the composition root's test can prove every
+// SyncTaskType has exactly one processor.
+var userTaskTypes = []domain.SyncTaskType{
+	domain.SyncTaskUserDelete,
+	domain.SyncTaskUserResync,
+	domain.SyncTaskUserPushConfig,
+	domain.SyncTaskUserMigrate,
+}
+
+// OwnedTaskTypes returns the sync-task types ProcessDueTasks owns.
+func OwnedTaskTypes() []domain.SyncTaskType {
+	return append([]domain.SyncTaskType(nil), userTaskTypes...)
+}
+
 // ProcessDueTasks runs pending user-scoped sync tasks. It is safe to call
 // from a periodic background loop; every failed remote write is persisted
 // with a backoff and retried later.
@@ -3184,16 +3201,15 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 	if s.tasks == nil {
 		return nil
 	}
-	tasks, err := s.tasks.ListDue(ctx, time.Now(), limit)
+	// Ask only for the types this processor runs: an untyped window let 20 due
+	// mail or node rows at the head of the queue hide every user task.
+	tasks, err := s.tasks.ListDue(ctx, time.Now(), userTaskTypes, limit)
 	if err != nil {
 		return err
 	}
 	for _, task := range tasks {
-		if task.Type != domain.SyncTaskUserDelete &&
-			task.Type != domain.SyncTaskUserResync &&
-			task.Type != domain.SyncTaskUserPushConfig &&
-			task.Type != domain.SyncTaskUserMigrate {
-			continue
+		if !slices.Contains(userTaskTypes, task.Type) {
+			continue // defence in depth; the query already filtered
 		}
 		claimed, err := s.tasks.MarkRunning(ctx, task.ID)
 		if err != nil {

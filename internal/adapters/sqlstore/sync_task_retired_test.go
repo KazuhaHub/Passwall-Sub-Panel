@@ -104,7 +104,7 @@ func TestSyncTaskRetiredDoesNotBlockCurrentWork(t *testing.T) {
 	if err != nil || active {
 		t.Fatalf("HasActiveByTargetAny(retired) = %v, %v, want false, nil", active, err)
 	}
-	due, err := repo.ListDue(ctx, time.Now(), 20)
+	due, err := repo.ListDue(ctx, time.Now(), []domain.SyncTaskType{domain.SyncTaskNodeUpdate}, 20)
 	if err != nil || len(due) != 0 {
 		t.Fatalf("ListDue(retired) = %v, %v, want empty", due, err)
 	}

@@ -985,7 +985,13 @@ type SyncTaskRepo interface {
 	// each can be separately capped.
 	ListTerminalByTarget(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64, limit int) ([]*domain.SyncTask, error)
 	List(ctx context.Context, filter SyncTaskFilter) (items []*domain.SyncTask, total int64, err error)
-	ListDue(ctx context.Context, now time.Time, limit int) ([]*domain.SyncTask, error)
+	// ListDue returns up to limit pending tasks whose next_run_at has passed,
+	// earliest first, restricted to the given types. Each background processor
+	// passes exactly the types it dispatches: with one shared untyped window,
+	// 20 due rows of one type (a mail burst, a user-task burst) filled the whole
+	// batch and starved every other processor, each of which skipped the rows it
+	// did not own. An empty types slice owns nothing and returns no rows.
+	ListDue(ctx context.Context, now time.Time, types []domain.SyncTaskType, limit int) ([]*domain.SyncTask, error)
 	// MarkRunning atomically claims a Pending task (Pending -> Running).
 	// claimed is false when no row matched — the task was Canceled by an admin
 	// or already claimed by another runner between ListDue and here — so the

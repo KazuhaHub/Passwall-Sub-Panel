@@ -164,13 +164,20 @@ var syncTaskSortAllowlist = map[string]string{
 	"created_at":  "created_at",
 }
 
-func (r *syncTaskRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*domain.SyncTask, error) {
+func (r *syncTaskRepo) ListDue(ctx context.Context, now time.Time, types []domain.SyncTaskType, limit int) ([]*domain.SyncTask, error) {
+	if len(types) == 0 {
+		return nil, nil // owns nothing; never emit `type IN ()`
+	}
 	if limit <= 0 {
 		limit = 20
 	}
+	names := make([]string, len(types))
+	for i, t := range types {
+		names[i] = string(t)
+	}
 	var rows []syncTaskRow
 	if err := r.db.WithContext(ctx).
-		Where("status = ? AND next_run_at <= ?", string(domain.SyncTaskPending), now).
+		Where("status = ? AND next_run_at <= ? AND type IN ?", string(domain.SyncTaskPending), now, names).
 		Order("next_run_at ASC, id ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
