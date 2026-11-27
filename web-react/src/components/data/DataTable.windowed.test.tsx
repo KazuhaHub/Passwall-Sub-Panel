@@ -14,11 +14,13 @@ const HEAD = 40
 const BODY_TOP = 200
 const VIEWPORT = 800
 let scrollY = 0
+let thW = 120
 
 const box = (top: number, height: number, width = 600) => ({ top, bottom: top + height, height, left: 0, right: width, width, x: 0, y: top, toJSON() {} }) as DOMRect
 
 beforeEach(() => {
   scrollY = 0
+  thW = 120
   vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: VIEWPORT })
   Object.defineProperty(window, 'scrollY', { configurable: true, get: () => scrollY })
@@ -28,7 +30,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.tagName === 'TBODY') return box(BODY_TOP - scrollY, 0)
     if (this.tagName === 'THEAD') return box(0, HEAD)
-    if (this.tagName === 'TH') return box(0, HEAD, 120)
+    if (this.tagName === 'TH') return box(0, HEAD, thW)
     if (this.classList.contains('group/frame')) return box(0, 0, 375)
     if (this.tagName === 'TR' && this.hasAttribute('data-row')) {
       const i = Number(this.getAttribute('aria-rowindex')) - 2
@@ -416,5 +418,26 @@ describe('windowed column widths', () => {
     // 120 + 300 + 120 = 540 in a 360 frame: the saved width gives up the 180px that do not fit.
     expect(widths()).toEqual(['120px', '120px', '120px', ''])
     expect(JSON.parse(localStorage.getItem('psp.colWidths.v1.win')!)).toEqual({ v: 1, w: { name: 300 } })
+  })
+
+  it('shows and starts from the SHOWN width when saved widths were scaled down, and never writes the scaled value back unasked', () => {
+    localStorage.setItem('psp.colWidths.v1.win', JSON.stringify({ v: 1, w: { name: 300 } }))
+    mount({ tableId: 'win' })
+    const h = screen.getByRole('separator', { name: 'Resize column Name' })
+    expect(h.getAttribute('aria-valuenow')).toBe('120')
+    expect(JSON.parse(localStorage.getItem('psp.colWidths.v1.win')!).w.name).toBe(300)
+    fireEvent.keyDown(h, { key: 'ArrowLeft' })
+    expect(widths()[1]).toBe('104px')
+  })
+
+  it('a poll that changes an off-screen row does not refit the windowed table, but a different set of rows does', () => {
+    const el = (data: Row[]) => <DataTable data={data} columns={columns} getRowId={r => r.id} aria-label="Lines" pagination={false} columnMenu={false} tableId="win" />
+    const { rerender } = render(el(BIG))
+    const first = widths()
+    thW = 200
+    rerender(el(BIG.map((r, i) => (i === 3000 ? { ...r, name: 'changed' } : { ...r }))))
+    expect(widths()).toEqual(first)
+    rerender(el(BIG.slice(0, 4000)))
+    expect(widths()).not.toEqual(first)
   })
 })

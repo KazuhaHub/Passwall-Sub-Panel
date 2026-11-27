@@ -13,12 +13,13 @@ export function columnLabel<T>(col: ReturnType<Table<T>['getAllLeafColumns']>[nu
   return typeof col.columnDef.header === 'string' && col.columnDef.header ? col.columnDef.header : col.id
 }
 
-/** The "Columns" button: a checklist of the columns that may be hidden, then "Reset column widths". Renders nothing when there is neither. */
-export function ColumnMenu<T>({ table, onResetWidths, canResetWidths = false, listColumns = true }: { table: Table<T>; onResetWidths?: () => void; canResetWidths?: boolean; listColumns?: boolean }) {
+/** The "Columns" button: a checklist of the columns that may be hidden, then "Reset column widths" (disabled until one was resized: the trigger stays, so choosing it never unmounts what had focus). Renders nothing when no column may be hidden. */
+export function ColumnMenu<T>({ table, onResetWidths, canResetWidths = false }: { table: Table<T>; onResetWidths?: () => void; canResetWidths?: boolean }) {
   const { t } = useSpacedT()
-  const cols = listColumns ? table.getAllLeafColumns().filter(c => c.getCanHide() && c.columnDef.meta?.hideable !== false) : []
-  // Nothing to hide and nothing to reset: no button (an empty menu is noise on every table).
-  if (cols.length === 0 && !(onResetWidths && canResetWidths)) return null
+  const cols = table.getAllLeafColumns().filter(c => c.getCanHide() && c.columnDef.meta?.hideable !== false)
+  // Nothing to hide: no button. Resetting widths is then done from the handle (Home, double click): a button that
+  // appeared only after a drag would add a toolbar row mid-gesture and push the header down.
+  if (cols.length === 0) return null
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<Button variant="outline" size="sm" className={TOUCH_HEIGHT} />}>
@@ -26,7 +27,7 @@ export function ColumnMenu<T>({ table, onResetWidths, canResetWidths = false, li
         {t('ui.data.columns')}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-48">
-        {cols.length > 0 && <DropdownMenuGroup>
+        <DropdownMenuGroup>
           <DropdownMenuLabel>{t('ui.data.columns_menu')}</DropdownMenuLabel>
           {cols.map(c => (
             <DropdownMenuCheckboxItem
@@ -39,10 +40,10 @@ export function ColumnMenu<T>({ table, onResetWidths, canResetWidths = false, li
               {columnLabel(c)}
             </DropdownMenuCheckboxItem>
           ))}
-        </DropdownMenuGroup>}
+        </DropdownMenuGroup>
         {onResetWidths && (
           <>
-            {cols.length > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuSeparator />
             {/* Disabled, not hidden, while nothing was resized: the item is where the person looks for it. */}
             <DropdownMenuItem disabled={!canResetWidths} onClick={onResetWidths} className="whitespace-nowrap">
               <RulerIcon aria-hidden="true" />

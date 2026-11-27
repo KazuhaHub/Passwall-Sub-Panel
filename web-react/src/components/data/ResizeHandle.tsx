@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { useSpacedT } from '@/i18n/spacing'
 import { cn } from '@/lib/utils'
 import { MIN_COLUMN_WIDTH } from './columnWidths'
@@ -37,8 +37,16 @@ export function ResizeHandle({ name, getWidth, getMax, onResize, onCommit, onRes
   const [active, setActive] = useState(false)
   const [measured, setMeasured] = useState<number | undefined>(undefined)
   const stop = useRef<(() => void) | null>(null)
+  const self = useRef<HTMLDivElement>(null)
   // A drag still running when the table goes away must not leave listeners or a text-selection lock behind.
   useEffect(() => () => { stop.current?.() }, [])
+
+  // A focused handle with no known width (a table still in its natural layout, just after a reset) reads it from the layout.
+  useLayoutEffect(() => {
+    if (width !== undefined || self.current !== document.activeElement) return
+    const w = Math.round(getWidth())
+    if (w > 0 && w !== measured) setMeasured(w)
+  }, [width, measured, getWidth])
 
   const clamp = (w: number) => Math.round(Math.min(Math.max(w, MIN_COLUMN_WIDTH), Math.max(getMax(), MIN_COLUMN_WIDTH)))
 
@@ -84,7 +92,7 @@ export function ResizeHandle({ name, getWidth, getMax, onResize, onCommit, onRes
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Home') { e.preventDefault(); e.stopPropagation(); onReset(); setMeasured(undefined); return }
+    if (e.key === 'Home') { e.preventDefault(); e.stopPropagation(); onReset(); return }
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
     e.preventDefault()
     e.stopPropagation()
@@ -100,6 +108,7 @@ export function ResizeHandle({ name, getWidth, getMax, onResize, onCommit, onRes
     <>
     <span id={hintId} className="sr-only">{t('ui.data.resize_hint')}</span>
     <div
+      ref={self}
       role="separator"
       aria-orientation="vertical"
       aria-label={t('ui.data.resize_column', { name })}

@@ -11,14 +11,18 @@ let FITTED = 200
 const FRAME = 800
 // The frame's clientWidth excludes a vertical scrollbar, the bounding box does not: they differ by 15 here.
 let FRAME_CLIENT = FRAME - 15
+// offsetWidth is the border box: a scrollbar appearing or leaving does not change it.
+let FRAME_OFFSET = FRAME
 let resizeCallbacks: (() => void)[] = []
 beforeEach(() => {
   localStorage.clear()
   FITTED = 200
   FRAME_CLIENT = FRAME - 15
+  FRAME_OFFSET = FRAME
   resizeCallbacks = []
   vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { resizeCallbacks.push(cb) } observe() {} disconnect() {} unobserve() {} })
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('group/frame') ? FRAME_CLIENT : 0 })
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('group/frame') ? FRAME_OFFSET : 0 })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const w = this.tagName === 'TH' ? FITTED : this.hasAttribute('data-slot') && this.getAttribute('data-slot') === 'data-table' ? FRAME : this.classList.contains('group/frame') ? FRAME : 0
     return { top: 0, left: 0, right: w, bottom: 0, width: w, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect
@@ -185,8 +189,50 @@ describe('column resizing', () => {
     mount({ cols: columns.slice(0, 3) })
     drag(handle('Note'), 600, 560)
     expect(colWidths()).toEqual(['200px', '200px', '160px', ''])
-    expect(document.querySelectorAll('thead th')).toHaveLength(3)
+    // A real, empty, hidden trailing cell in the header and in every row: a bare <col> paints nothing, so the header band
+    // and the row backgrounds would stop at the last real column.
+    expect(document.querySelectorAll('thead th')).toHaveLength(4)
+    expect(document.querySelector('thead th:last-child')?.getAttribute('aria-hidden')).toBe('true')
+    const bodyRows = [...document.querySelectorAll('tbody tr[data-row]')]
+    expect(bodyRows).toHaveLength(4)
+    for (const r of bodyRows) {
+      expect(r.lastElementChild?.getAttribute('aria-hidden')).toBe('true')
+      expect(r.children).toHaveLength(4)
+    }
+    expect(screen.getAllByRole('columnheader')).toHaveLength(3)
     expect(screen.getByRole('table').className).toContain('w-full')
+  })
+
+  it('has no filler cell before a width is set, nor when the actions column is the one that absorbs', () => {
+    mount({ cols: columns.slice(0, 3) })
+    expect(document.querySelectorAll('thead th')).toHaveLength(3)
+    cleanup()
+    mount()
+    drag(handle('Status'), 400, 450)
+    expect(document.querySelectorAll('thead th')).toHaveLength(4)
+    expect(document.querySelectorAll('thead th[aria-hidden]')).toHaveLength(0)
+  })
+
+  it('a scrollbar appearing (clientWidth changes, the border box does not) is not a resize: nothing is measured again', () => {
+    mount()
+    drag(handle('Status'), 400, 450)
+    FITTED = 260
+    FRAME_CLIENT = FRAME - 30
+    act(() => { resizeCallbacks.forEach(cb => cb()) })
+    expect(colWidths()).toEqual(['200px', '250px', '200px', ''])
+    FRAME_OFFSET = 500
+    act(() => { resizeCallbacks.forEach(cb => cb()) })
+    expect(colWidths()).toEqual(['260px', '250px', '260px', ''])
+  })
+
+  it('reports the fitted width as the handle value right after a Home reset', () => {
+    mount()
+    const h = handle('Status')
+    h.focus()
+    fireEvent.keyDown(h, { key: 'ArrowRight' })
+    expect(h.getAttribute('aria-valuenow')).toBe('216')
+    fireEvent.keyDown(h, { key: 'Home' })
+    expect(h.getAttribute('aria-valuenow')).toBe('200')
   })
 
   it('sizes the header cell and the body cells together (one colgroup drives both)', () => {
@@ -235,10 +281,12 @@ describe('column resizing', () => {
     localStorage.setItem(columnWidthsKey('t1'), JSON.stringify({ v: 1, w: { status: 250 } }))
     FITTED = 0
     FRAME_CLIENT = 0
+    FRAME_OFFSET = 0
     mount()
     expect(document.querySelector('col')).toBeNull()
     FITTED = 200
     FRAME_CLIENT = 800
+    FRAME_OFFSET = 800
     act(() => { resizeCallbacks.forEach(cb => cb()) })
     expect(colWidths()).toEqual(['200px', '250px', '200px', ''])
   })
@@ -253,21 +301,18 @@ describe('the Columns button', () => {
     mount({ cols: noHide })
     expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
   })
-  it('appears with only the reset item once a width is set, on a table that has no column list', () => {
-    mount({ cols: noHide })
-    drag(handle('Status'), 400, 450)
-    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Reset column widths' }))
-    expect(stored()).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
-  })
-  it('does the same when the page switched the column list off (columnMenu false)', () => {
+  it('is not offered on a table that switched the column list off (columnMenu false), even once a width is set: it resets from the handle', () => {
     mount({ columnMenu: false })
+    drag(handle('Status'), 400, 450)
     expect(screen.queryByRole('button', { name: 'Columns' })).toBeNull()
+    fireEvent.keyDown(handle('Status'), { key: 'Home' })
+    expect(stored()).toBeNull()
+  })
+  it('stays on screen while the menu resets the widths, so the focused trigger is never unmounted', () => {
+    mount()
     drag(handle('Status'), 400, 450)
     fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
-    expect(screen.getByRole('menuitem', { name: 'Reset column widths' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reset column widths' }))
+    expect(screen.getByRole('button', { name: 'Columns' })).toBeTruthy()
   })
 })
