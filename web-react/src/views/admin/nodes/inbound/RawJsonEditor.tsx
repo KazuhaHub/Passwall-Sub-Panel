@@ -11,9 +11,9 @@ export function RawJsonEditor({ form, update }: Pick<SectionProps, 'form' | 'upd
   const t = useNodesT()
   return (
     <FormSection title={t('nodes.create_dialog.section_advanced')} description={t('nodes.create_dialog.advanced_hint')}>
-      <AreaField label="settings" rows={6} value={form.raw_settings ?? ''} onChange={v => update('raw_settings', v)} />
-      <AreaField label="streamSettings" rows={6} value={form.raw_stream_settings ?? ''} onChange={v => update('raw_stream_settings', v)} />
-      <AreaField label="sniffing" rows={4} value={form.raw_sniffing ?? ''} onChange={v => update('raw_sniffing', v)} />
+      <AreaField language="json" label="settings" rows={6} value={form.raw_settings ?? ''} onChange={v => update('raw_settings', v)} />
+      <AreaField language="json" label="streamSettings" rows={6} value={form.raw_stream_settings ?? ''} onChange={v => update('raw_stream_settings', v)} />
+      <AreaField language="json" label="sniffing" rows={4} value={form.raw_sniffing ?? ''} onChange={v => update('raw_sniffing', v)} />
     </FormSection>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { previewMailTemplate, putMailTemplate, resetMailTemplate, type MailReminderKind, type MailSettings, type MailTemplate } from '@/api/settings'
+import { CodeField } from '@/components/CodeField'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { pushSnack } from '@/components/feedback/toasts'
 import { Field } from '@/components/form/Field'
@@ -11,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { IconHelp } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { useTabParam } from '@/hooks/useTabParam'
@@ -124,9 +124,8 @@ export function MailTemplates({ templates, onDirtyChange }: { templates: MailTem
           <Field label={t('settings.mail.tpl_subject')}>
             <Input id={settingId(`mail_template_${active}_subject`)} value={current.subject} onChange={e => patch({ subject: e.target.value })} />
           </Field>
-          <Field label={t('settings.mail.tpl_body')}>
-            <Textarea id={settingId(`mail_template_${active}_body`)} rows={12} className="font-mono text-[13px]" value={current.body} onChange={e => patch({ body: e.target.value })} />
-          </Field>
+          <CodeField id={settingId(`mail_template_${active}_body`)} label={t('settings.mail.tpl_body')} language="plain" tabMovesFocus wrap
+            minRows={12} maxRows={30} value={current.body} onChange={body => patch({ body })} />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button type="button" variant="outline" disabled={busy} onClick={() => void reset()}>{t('settings.mail.tpl_reset')}</Button>
             <div className="flex flex-wrap gap-2">

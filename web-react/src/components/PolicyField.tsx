@@ -6,7 +6,7 @@ import { NumberField } from '@/components/form/NumberField'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { spacedT } from '@/i18n/spacing'
 
 /** `t` for the field's words: keys keep their `admin:` prefix, interpolation boundaries get Latin-letter spacing. */
@@ -109,7 +109,7 @@ export default function PolicyField({ spec, value, onChange, defaults, effective
       // may only need to try again.
       <Field label={label} hint={hint || undefined} error={error || undefined} errorBlocksSave={false}>
         {spec.multiline
-          ? <Textarea rows={2} value={text} onChange={e => onChange(e.target.value)} />
+          ? <LazyCodeEditor language="plain" tabMovesFocus minRows={2} maxRows={8} value={text} onChange={onChange} />
           : <Input value={text} onChange={e => onChange(e.target.value)} />}
       </Field>
     )

@@ -17,7 +17,7 @@ import { InheritanceField, type InheritanceLevel } from '@/components/form/Inher
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { goParseFloat } from '@/utils/goParseFloat'
 
 import { SCOPE_CATEGORIES, SCOPE_KEYS, type ScopeKeyMeta, type ScopeState } from './scopeOverrides'
@@ -175,8 +175,8 @@ export default function ScopeOverridesEditor({
           }
           if (k.kind === 'str') {
             return k.multiline
-              ? <Textarea id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
-                  rows={3} className="font-mono text-[13px]" value={p.value} onChange={e => set(e.target.value)} />
+              ? <LazyCodeEditor id={p.id} labelledBy={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
+                  language="plain" tabMovesFocus minRows={3} maxRows={10} value={p.value} onChange={set} />
               : <Input id={p.id} aria-labelledby={p['aria-labelledby']} aria-describedby={p['aria-describedby']}
                   value={p.value} onChange={e => set(e.target.value)} />
           }

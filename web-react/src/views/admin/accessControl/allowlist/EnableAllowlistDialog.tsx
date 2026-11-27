@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { cn } from '@/lib/utils'
 import { useDestGroupPreview, useDestLists, useDestStatus, usePutDestGroup } from '@/query/accessControl'
@@ -231,8 +231,8 @@ export default function EnableAllowlistDialog({ open, groups, initialGroupId, on
                         )}
                         {noTemplateHosts && <FieldHint summary={t(`${E}base_none_summary`)} detail={t(`${E}base_none_detail`)} />}
                         {(editBase || noTemplateHosts) && (
-                          <Textarea id={`${uid}-base`} rows={4} aria-label={t(`${E}base`)} value={baseText ?? hosts.join('\n')}
-                            placeholder={t(`${E}base_placeholder`)} onChange={e => { setBaseText(e.target.value); setTouched(true) }} />
+                          <LazyCodeEditor id={`${uid}-base`} language="plain" tabMovesFocus minRows={4} maxRows={12} ariaLabel={t(`${E}base`)} value={baseText ?? hosts.join('\n')}
+                            placeholder={t(`${E}base_placeholder`)} onChange={v => { setBaseText(v); setTouched(true) }} />
                         )}
                         <p className="text-sm text-muted-foreground">{t(`${E}base_hint`)}</p>
                       </>

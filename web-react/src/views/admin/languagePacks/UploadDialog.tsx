@@ -4,11 +4,10 @@ import { saveLocale, MAX_LOCALE_PACK_BYTES } from '@/api/locales'
 import { AsyncButton } from '@/components/common/AsyncButton'
 import { describeError } from '@/components/feedback/ErrorState'
 import { pushSnack } from '@/components/feedback/toasts'
-import { Field } from '@/components/form/Field'
+import { CodeField } from '@/components/CodeField'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useAdminT } from '../useAdminT'
 import { checkPack } from './packCheck'
@@ -81,11 +80,9 @@ export function UploadDialog({ onClose, onUploaded }: { onClose: () => void; onU
           <span className="text-sm text-muted-foreground">{t('admin:languagePacks.drop_hint')}</span>
           <input ref={input} type="file" accept="application/json,.json" hidden tabIndex={-1} aria-hidden onChange={onPick} data-testid="pack-file" />
         </div>
-        <Field label={t('admin:languagePacks.paste_label')} hint={t('admin:languagePacks.size_hint', { max: Math.round(MAX_LOCALE_PACK_BYTES / 1024) })}>
-          <Textarea spellCheck={false} className="max-h-[40dvh] min-h-44 overflow-auto font-mono text-xs md:text-xs"
-            placeholder={t('admin:languagePacks.paste_placeholder')} value={text}
-            onChange={e => { setText(e.target.value); setServerError('') }} />
-        </Field>
+        <CodeField label={t('admin:languagePacks.paste_label')} hint={t('admin:languagePacks.size_hint', { max: Math.round(MAX_LOCALE_PACK_BYTES / 1024) })}
+          language="json" tabMovesFocus minRows={9} maxRows={20} placeholder={t('admin:languagePacks.paste_placeholder')} value={text}
+          onChange={next => { setText(next); setServerError('') }} />
         {check.pack && check.problems.length === 0 && (
           <p className="text-sm" data-testid="pack-summary">
             {t('admin:languagePacks.summary', { name: check.pack.name, code: check.pack.code, count: Object.keys(check.pack.namespaces).length })}

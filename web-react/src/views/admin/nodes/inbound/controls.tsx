@@ -1,10 +1,11 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import type { PanelType } from '@/api/servers'
+import { CodeField } from '@/components/CodeField'
+import type { EditorLanguage } from '@/components/CodeEditor'
 import { Field } from '@/components/form/Field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { InboundFormState } from './inboundModel'
 
@@ -67,20 +68,21 @@ export function TextField({ label, value, onChange, placeholder, mono, required,
   )
 }
 
-/** A multi-line box in the monospace face (PEM blocks, raw JSON). */
-export function AreaField({ label, value, onChange, placeholder, hint, rows = 4 }: {
+/** A multi-line box for source text: raw JSON, PEM blocks, a padding scheme. It is the code editor, so it is coloured like the rest. */
+export function AreaField({ label, value, onChange, placeholder, hint, rows = 4, language = 'plain' }: {
   label: string
   value: string
   onChange: (value: string) => void
   placeholder?: string
   hint?: ReactNode
   rows?: number
+  language?: EditorLanguage
 }) {
+  // These boxes live in a sheet or dialog, where Escape closes the surface (so "Escape, then Tab" would not work) and the text
+  // is pasted rather than written: Tab moves focus on, as in the text area it replaces.
   return (
-    <Field label={label} hint={hint}>
-      <Textarea rows={rows} value={value} placeholder={placeholder} spellCheck={false} className={cn(MONO, 'max-h-80 text-xs')}
-        onChange={e => onChange(e.target.value)} />
-    </Field>
+    <CodeField label={label} hint={hint} language={language} tabMovesFocus minRows={rows} maxRows={Math.max(rows, 16)}
+      placeholder={placeholder} value={value} onChange={onChange} />
   )
 }
 

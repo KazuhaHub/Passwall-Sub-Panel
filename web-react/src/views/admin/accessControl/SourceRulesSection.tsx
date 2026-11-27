@@ -11,7 +11,7 @@ import { Field } from '@/components/form/Field'
 import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxItem, ComboboxList, ComboboxValue, useComboboxAnchor } from '@/components/ui/combobox'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { useDestPolicies, useDestSourceRule, useDestSourceRules, useDestStatus, usePutSourceRule } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes, enabledPolicies, enforcingNodeCount, needsFirstPublishConfirm } from '@/utils/accessControl'
@@ -236,8 +236,8 @@ export default function SourceRulesSection({ nodeId, dirtyRef, onDirtyChange }: 
         )}
       </Field>
       <Field label={t(`${S}cidrs`)} hint={t(`${S}cidrs_hint`)} error={cidrError} errorBlocksSave={false}>
-        <Textarea rows={3} className="font-mono text-[13px]" value={cidrText} disabled={put.isPending}
-          placeholder="203.0.113.0/24" onChange={e => setCidrText(e.target.value)} />
+        <LazyCodeEditor language="plain" tabMovesFocus minRows={3} maxRows={12} value={cidrText} disabled={put.isPending}
+          placeholder="203.0.113.0/24" onChange={setCidrText} />
       </Field>
       {dirty && <div className="text-sm"><FieldHint summary={t(`${S}unsaved.summary`)} detail={t(`${S}unsaved.detail`)} /></div>}
       <div className="flex flex-wrap items-end gap-3">

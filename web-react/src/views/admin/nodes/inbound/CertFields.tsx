@@ -78,9 +78,9 @@ export function CertFields({ form, setForm, update, certs }: Pick<SectionProps, 
       )}
       {form.tls_cert_mode === 'inline' && (
         <FieldRow>
-          <AreaField label={t('nodes.create_dialog.tls_cert_pem')} value={form.tls_cert_pem} rows={4}
+          <AreaField language="pem" label={t('nodes.create_dialog.tls_cert_pem')} value={form.tls_cert_pem} rows={4}
             placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'} onChange={v => update('tls_cert_pem', v)} />
-          <AreaField label={t('nodes.create_dialog.tls_key_pem')} value={form.tls_key_pem} rows={4}
+          <AreaField language="pem" label={t('nodes.create_dialog.tls_key_pem')} value={form.tls_key_pem} rows={4}
             placeholder={'-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----'} onChange={v => update('tls_key_pem', v)} />
         </FieldRow>
       )}
