@@ -41,16 +41,26 @@ func pathForSafeSlug(dir, slug, kind string) (string, error) {
 
 // writeYAML writes a YAML file atomically: write to .tmp then rename.
 func writeYAML(path string, v any) error {
+	_, err := writeYAMLBytes(path, v)
+	return err
+}
+
+// writeYAMLBytes is writeYAML that also returns the exact bytes written, so a
+// caller can hash what is now on disk without a re-read.
+func writeYAMLBytes(path string, v any) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	tmp := path + ".tmp"
 	b, err := yaml.Marshal(v)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
+		return nil, err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
