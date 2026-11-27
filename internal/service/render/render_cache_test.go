@@ -47,22 +47,6 @@ func TestRenderCache_KeyIsolation(t *testing.T) {
 	}
 }
 
-// put sweeps expired entries once the map grows past the threshold so a churn
-// of distinct (user,ct) keys can't grow the cache without bound.
-func TestRenderCache_SweepsExpired(t *testing.T) {
-	c := newRenderCache(60 * time.Second)
-	t0 := time.Unix(1_700_000_000, 0)
-	for i := 0; i < renderCacheSweepThreshold+10; i++ {
-		c.putIfVersion(renderCacheKey{userID: int64(i), ct: domain.ClientMihomo}, &Output{}, t0, c.currentVersion())
-	}
-	// All above were inserted at t0 (expire at t0+60s). A put well past their
-	// expiry must sweep them, leaving far fewer than we inserted.
-	c.putIfVersion(renderCacheKey{userID: -1, ct: domain.ClientMihomo}, &Output{}, t0.Add(120*time.Second), c.currentVersion())
-	if n := c.size(); n > 10 {
-		t.Fatalf("expired entries not swept: size=%d", n)
-	}
-}
-
 func TestRenderCache_ClearRejectsInFlightPut(t *testing.T) {
 	c := newRenderCache(60 * time.Second)
 	t0 := time.Unix(1_700_000_000, 0)

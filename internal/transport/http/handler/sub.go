@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -223,6 +221,16 @@ func (h *SubHandler) Get(c *gin.Context) {
 	// every fetch.
 	out, err := h.render.RenderForUserCached(c.Request.Context(), u, ct)
 	if err != nil {
+		// A context error means the render queue (or the shared render) did
+		// not finish within this request's life: tell the client to retry
+		// rather than reporting a server fault. Access-control decisions all
+		// happened above, before the render.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.Warn("sub: render not completed in time", "user_id", u.ID, "err", err)
+			c.Header("Retry-After", "5")
+			c.String(http.StatusServiceUnavailable, "busy, retry later")
+			return
+		}
 		log.Warn("sub: render failed", "user_id", u.ID, "err", err)
 		c.String(http.StatusInternalServerError, "internal error")
 		return
@@ -233,7 +241,13 @@ func (h *SubHandler) Get(c *gin.Context) {
 	// user's UUID, etc. all flow through render output. Weak form is used
 	// because future transport-level transforms (gzip etc.) should not break
 	// revalidation: HTTP-semantic equivalence is what we care about.
-	etag := computeWeakETag(out.Body)
+	// The cached Output carries the digest computed once at render time;
+	// hashing the 0.5-2 MB body on every poll was pure waste. Fall back to
+	// hashing for an Output that did not come through the cache.
+	etag := out.ETag
+	if etag == "" {
+		etag = computeWeakETag(out.Body)
+	}
 
 	// Always advertise the ETag + Cache-Control so the client knows it may
 	// revalidate. "no-cache" makes the client always hit us with
@@ -345,14 +359,7 @@ func (h *SubHandler) declaredDevice(c *gin.Context, userID int64, global ports.U
 // chars (8 bytes of SHA-256) is collision-safe enough for revalidation —
 // HTTP caching is best-effort; the worst case of a collision is a stale
 // subscription delivered to one client for one revalidation window.
-func computeWeakETag(body []byte) string {
-	// The rendered subscription can contain proxy credentials, but this digest
-	// is only an HTTP cache validator: it is never stored as, or compared with,
-	// a password verifier. SHA-256 is appropriate for this non-password hash.
-	// codeql[go/weak-sensitive-data-hashing]
-	sum := sha256.Sum256(body)
-	return `W/"` + hex.EncodeToString(sum[:8]) + `"`
-}
+func computeWeakETag(body []byte) string { return render.ComputeWeakETag(body) }
 
 // etagMatches honors the RFC 9110 §13.1.2 rules just enough for our use:
 // a comma-separated list of candidates, plus the "*" wildcard. Weak/strong
