@@ -18,3 +18,9 @@ if (typeof window !== 'undefined') {
     value: storage,
   })
 }
+
+// The code editor is CodeMirror, which has no layout in jsdom, and a page test is about the page's values, not the colours.
+// Every page that edits source text goes through LazyCodeEditor, so it is replaced here by a text area with the same
+// accessibility wiring. The real editor is tested in components/CodeEditor*.test.tsx.
+import { vi } from 'vitest'
+vi.mock('@/components/LazyCodeEditor', async () => (await import('./codeEditorStub')).lazyCodeEditorMock())
