@@ -2235,6 +2235,7 @@
       },
       "summary": "{{count}} rules never apply",
       "description": "Rules that an earlier rule already covers. This list only reports; nothing is changed.",
+      "tcp_note": "These findings assume a TCP connection. For UDP, a rule listed as not applying can still apply when the proxy chosen by the earlier rule's group does not support UDP.",
       "needs_groups": "Most of this check needs the members of the proxy groups, which only administrators can read. Only the findings that do not depend on them are shown: identical rules, and rules covered by a DIRECT or REJECT rule.",
       "failed": "The proxy group members for this draft couldn't be read, so only the findings that do not depend on them are shown: identical rules, and rules covered by a DIRECT or REJECT rule. The rest need them."
     },
@@ -2531,12 +2532,12 @@
     },
     "lint": {
       "shadowed_same": "Line {{line}} matches first with the same target; this line is redundant",
-      "shadowed_other": "Line {{line}} matches first ({{winner}}); this line never applies",
+      "shadowed_other": "Line {{line}} matches first ({{winner}}); over TCP this line doesn't apply",
       "duplicate": "Identical to line {{line}}",
-      "after_match": "Comes after the fallback rule (line {{line}}) and never matches",
-      "group_other": "Never applies: matched first by an earlier rule with a different target",
+      "after_match": "Comes after the fallback rule (line {{line}}); over TCP it doesn't match",
+      "group_other": "Doesn't apply (TCP): matched first by an earlier rule with a different target",
       "group_same": "Redundant: an earlier rule already sends the same traffic to the same target",
-      "group_after": "Never matches: comes after the fallback rule"
+      "group_after": "Doesn't match (TCP): comes after the fallback rule"
     }
   },
   "nodes": {

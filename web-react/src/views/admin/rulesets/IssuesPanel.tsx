@@ -56,6 +56,7 @@ export function IssuesPanel({ doc, findings, textOnly, status, onRetry, onJump, 
   return (
     <DetailDialog open onClose={onClose} size="lg" title={t('admin:rules.issues.title')} description={t('admin:rules.issues.description')}>
       <div className="flex flex-col gap-3">
+        <p className="text-xs text-muted-foreground">{t('admin:rules.issues.tcp_note')}</p>
         {status === 'failed' && (
           <Notice tone="warning" action={<Button variant="outline" size="sm" onClick={onRetry}>{t('admin:rules.retry')}</Button>}>{t('admin:rules.issues.failed')}</Notice>
         )}
