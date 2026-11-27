@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { GlobalAnnouncement } from '@/api/me'
-import { StatusDot } from '@/components/common/StatusDot'
+import { Notice } from '@/components/common/Notice'
 import type { Tone } from '@/components/common/tones'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
-import { TONE_STYLE } from '@/components/common/tones'
 import { useMeT } from './useMeT'
 
 /** The browser-local "do not remind me" stamp. It holds the announcement's updated_at, so editing the announcement re-shows it for everyone. */
@@ -15,17 +12,26 @@ const DISMISS_KEY = 'psp.announce.dismiss'
 const TONE_OF: Record<string, Tone> = { danger: 'danger', warning: 'warning' }
 const toneOf = (level: string): Tone => TONE_OF[level] ?? 'info'
 
+/**
+ * A coloured banner with a bold title and its sentence, at the very top of the page, the way the portal always showed
+ * an announcement and a service hold. The tint is the tone's and the icon carries it too (Notice), so it is never colour alone.
+ */
+export function Banner({ tone, title, children, testId }: { tone: Exclude<Tone, 'neutral'>; title: string; children?: string; testId?: string }) {
+  return (
+    <div data-testid={testId} data-tone={tone}>
+      {/* A polite status for every tone: a banner is already on the page when it loads, so it is read in place and does not interrupt; a heading, so heading navigation finds it. */}
+      <Notice tone={tone} role="status">
+        <h2 className="font-medium">{title}</h2>
+        {children && <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{children}</p>}
+      </Notice>
+    </div>
+  )
+}
+
 /** The admin's announcement, always shown inline while it is on. */
 export function AnnouncementBanner({ announcement }: { announcement: GlobalAnnouncement }) {
   const tone = toneOf(announcement.level)
-  return (
-    <Card data-testid="announcement" className={cn(tone !== 'info' && cn('ring-2', TONE_STYLE[tone].ring))}>
-      <CardContent className="flex flex-col gap-1.5">
-        <h2 className="text-base font-semibold"><StatusDot tone={tone} label={announcement.title} className="text-base" /></h2>
-        {announcement.content && <p className="text-sm whitespace-pre-wrap text-muted-foreground">{announcement.content}</p>}
-      </CardContent>
-    </Card>
-  )
+  return <Banner tone={tone === 'neutral' ? 'info' : tone} title={announcement.title} testId="announcement">{announcement.content}</Banner>
 }
 
 /**

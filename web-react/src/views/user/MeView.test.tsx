@@ -109,14 +109,14 @@ const GEO_AUTO_DETAIL = '检测到账号同时在同一国家的 2 个省或州�
 const GEO_AUTO_BODY = 'Your account was used from several places at the same time, so proxy service is paused for a while and will resume automatically. Contact an administrator if you think this is a mistake.'
 const geoAuto = { service_status: 'manual_suspended', service_disabled_reason: 'geo_auto', service_disable_detail: GEO_AUTO_DETAIL }
 
-describe('status card: the service axis in words', () => {
+describe('service banner: the service axis in words', () => {
   const status = () => within(screen.getByTestId('service-status'))
 
-  it('says the service is working for an ordinary account', async () => {
+  it('draws no banner while the service is on: no all-clear card pushing the page down', async () => {
     serve()
     mountMe(<MeView />)
-    await screen.findByText('Service active')
-    expect(screen.getByTestId('service-status').dataset.tone).toBe('success')
+    await screen.findByText('My usage')
+    expect(screen.queryByTestId('service-status')).toBeNull()
   })
 
   it.each([
@@ -138,28 +138,6 @@ describe('status card: the service axis in words', () => {
     await screen.findByText('Service expired')
   })
 
-  it('warns in words when the account is about to expire, naming the date', async () => {
-    const soon = new Date(Date.now() + 3 * 86400000).toISOString()
-    serve({}, { expire_at: soon })
-    mountMe(<MeView />)
-    await screen.findByText('Expiring soon')
-    expect(status().getByText(new RegExp(`in 3 day\\(s\\) \\(${new Date(soon).toLocaleDateString().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`))).toBeTruthy()
-  })
-
-  it('warns when most of the traffic is used', async () => {
-    serve({ '/user/me/traffic': { ...{ user_id: 1, permanent_total_bytes: 0, today_used_bytes: 0 }, period_used_bytes: 95 * 1024 ** 3 } }, { traffic_limit_bytes: 100 * 1024 ** 3 })
-    mountMe(<MeView />)
-    await screen.findByText('Traffic almost used up')
-    expect(screen.getByText(/95% of this period/)).toBeTruthy()
-  })
-
-  it('says emergency access is on for that service state', async () => {
-    serve({}, { service_status: 'emergency_active' })
-    mountMe(<MeView />)
-    await screen.findByText('Emergency access is on')
-    expect(screen.getByTestId('service-status').dataset.tone).toBe('info')
-  })
-
   it('makes no claim for a service state it does not know', async () => {
     serve({}, { service_status: 'some_future_state' })
     mountMe(<MeView />)
@@ -173,7 +151,7 @@ describe('status card: the service axis in words', () => {
     await screen.findByText('Service expired')
   })
 
-  it('does not carry the all-clear to the other tabs', async () => {
+  it('draws no banner on the other tabs either while the service is on', async () => {
     mountMe(<MeView />, '/?tab=clients')
     await screen.findByRole('tab', { name: 'Clients' })
     expect(screen.queryByTestId('service-status')).toBeNull()
@@ -196,20 +174,7 @@ describe('status card: the service axis in words', () => {
   })
 })
 
-describe('status card while usage is unknown', () => {
-  it('shows no all-clear until the usage read has answered, but a hold at once', async () => {
-    let release!: () => void
-    const gate = new Promise<void>(r => { release = r })
-    serve({}, { traffic_limit_bytes: 100 * 1024 ** 3 })
-    const reads = api.get.getMockImplementation()!
-    api.get.mockImplementation(async (url: string) => { if (url === '/user/me/traffic') await gate; return reads(url) })
-    mountMe(<MeView />)
-    await screen.findByText('My usage')
-    expect(screen.queryByTestId('service-status')).toBeNull()
-    release()
-    await screen.findByText('Service active')
-  })
-
+describe('service banner while usage is unknown', () => {
   it('shows a hold at once, before usage answers', async () => {
     const gate = new Promise<void>(() => {})
     serve({}, { service_status: 'expired', traffic_limit_bytes: 100 * 1024 ** 3 })

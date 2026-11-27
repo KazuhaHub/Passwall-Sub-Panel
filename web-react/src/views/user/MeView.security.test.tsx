@@ -1,54 +1,66 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, mountMe, serve, snack } from './testHarness'
+import { api, chooseSecurity, mountMe, serve, snack } from './testHarness'
 import MeView from './MeView'
 
 const CODES = ['AAAA-1111', 'BBBB-2222']
 
 async function manage(title: string) {
-  const row = (await screen.findByText(title, { selector: 'div' })).closest('li')!
-  fireEvent.click(within(row).getAllByRole('button')[0])
+  await chooseSecurity(title)
   return screen.findByRole('dialog')
 }
 
-describe('which security rows a person gets', () => {
-  it('has no security tab at all for an account with nothing to manage', async () => {
+const openMenu = async () => {
+  const trigger = await screen.findByRole('button', { name: 'Account security' })
+  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+  fireEvent.mouseDown(trigger, { button: 0 })
+  fireEvent.click(trigger)
+  return screen.findAllByRole('menuitem')
+}
+
+describe('which security entries a person gets', () => {
+  it('has no security menu at all for an account with nothing to manage', async () => {
     serve({}, { can_change_password: false })
+    mountMe(<MeView />)
+    await screen.findByText('My usage')
+    expect(screen.queryByRole('button', { name: 'Account security' })).toBeNull()
+  })
+
+  it('has no Security tab: the entries live in the menu beside the name', async () => {
     mountMe(<MeView />)
     await screen.findByText('My usage')
     expect(screen.queryByRole('tab', { name: 'Security' })).toBeNull()
   })
 
-  it('falls back to the overview when ?tab=security is asked for without one', async () => {
-    serve({}, { can_change_password: false })
+  it('falls back to the overview when a retired ?tab=security is asked for', async () => {
     mountMe(<MeView />, '/?tab=security')
     await screen.findByText('My usage')
+    expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  it('offers each row only where its condition holds, and recovery codes after any second factor', async () => {
+  it('offers each entry only where its condition holds, and recovery codes after any second factor', async () => {
     serve({}, { can_change_password: true, totp_available: false, passkey_available: false })
-    mountMe(<MeView />, '/?tab=security')
-    await screen.findByText('Change password')
-    expect(screen.queryByText('Authenticator app (TOTP)')).toBeNull()
-    expect(screen.queryByText('Passkeys')).toBeNull()
-    expect(screen.queryByText('Recovery codes')).toBeNull()
+    mountMe(<MeView />)
+    const items = await openMenu()
+    expect(items.map(i => i.textContent)).toEqual(['Change password'])
   })
 
   it('shows the state of each factor in words', async () => {
     serve({}, { totp_available: true, totp_enabled: true, passkey_available: true, passkey_credentials: [{ id: 1, name: 'a', created_at: '2026-01-01T00:00:00Z' }], recovery_codes_remaining: 4 })
-    mountMe(<MeView />, '/?tab=security')
-    await screen.findByText('Enabled')
-    expect(screen.getByText('1 registered')).toBeTruthy()
-    expect(screen.getByText('4 recovery codes left')).toBeTruthy()
+    mountMe(<MeView />)
+    const text = (await openMenu()).map(i => i.textContent)
+    expect(text).toContain('Authenticator app (TOTP)Enabled')
+    expect(text).toContain('Passkeys1 registered')
+    expect(text).toContain('Recovery codes4 recovery codes left')
   })
 })
 
 describe('change password', () => {
   it('uses the right autocomplete hints and sends the old and new password', async () => {
     serve()
-    mountMe(<MeView />, '/?tab=security')
-    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    mountMe(<MeView />)
+    await chooseSecurity('Change password')
     const dialog = await screen.findByRole('dialog')
     const old = within(dialog).getByLabelText(/Old password/)
     const next = within(dialog).getByLabelText(/^New password/)
@@ -66,8 +78,8 @@ describe('change password', () => {
 
   it('says a mismatch next to the confirm field and sends nothing', async () => {
     serve()
-    mountMe(<MeView />, '/?tab=security')
-    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    mountMe(<MeView />)
+    await chooseSecurity('Change password')
     const dialog = await screen.findByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText(/Old password/), { target: { value: 'o' } })
     fireEvent.change(within(dialog).getByLabelText(/^New password/), { target: { value: 'abc' } })
@@ -90,8 +102,8 @@ describe('turn on the authenticator', () => {
       if (url === '/user/me/2fa/enable') return { data: { recovery_codes: CODES } }
       return { data: {} }
     })
-    mountMe(<MeView />, '/?tab=security')
-    const dialog = await manageButton('Set up')
+    mountMe(<MeView />)
+    const dialog = await manage('Authenticator app')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Get started' }))
     expect((await within(dialog).findByTestId('totp-secret')).textContent).toBe('ABCD EFGH')
     const code = within(dialog).getByLabelText(/Verification code/)
@@ -118,25 +130,20 @@ describe('turn on the authenticator', () => {
       if (url === '/user/me/2fa/begin') return { data: { otpauth_url: 'otpauth://x', secret: 'S' } }
       throw Object.assign(new Error('no'), { response: { status: 401 } })
     })
-    mountMe(<MeView />, '/?tab=security')
-    const dialog = await manageButton('Set up')
+    mountMe(<MeView />)
+    const dialog = await manage('Authenticator app')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Get started' }))
     fireEvent.change(await within(dialog).findByLabelText(/Verification code/), { target: { value: '000000' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Enable' }))
     await within(dialog).findByText('Invalid code. Please try again.')
   })
-
-  async function manageButton(name: string) {
-    fireEvent.click(await screen.findByRole('button', { name }))
-    return screen.findByRole('dialog')
-  }
 })
 
 describe('turn off the authenticator', () => {
   it('needs a code and sends exactly that', async () => {
     serve({}, { totp_available: true, totp_enabled: true })
-    mountMe(<MeView />, '/?tab=security')
-    const dialog = await manage('Authenticator app (TOTP)')
+    mountMe(<MeView />)
+    const dialog = await manage('Authenticator app')
     fireEvent.change(within(dialog).getByLabelText(/Verification code/), { target: { value: '654321' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Turn off authenticator' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/user/me/2fa/disable', { code: '654321' }, { _skipErrorToast: true, _skipRefresh: true }))
@@ -145,8 +152,8 @@ describe('turn off the authenticator', () => {
 
   it('asks for a code instead of sending an empty one', async () => {
     serve({}, { totp_available: true, totp_enabled: true })
-    mountMe(<MeView />, '/?tab=security')
-    const dialog = await manage('Authenticator app (TOTP)')
+    mountMe(<MeView />)
+    const dialog = await manage('Authenticator app')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Turn off authenticator' }))
     await within(dialog).findByText('Please enter a code')
     expect(api.post).not.toHaveBeenCalled()
@@ -157,7 +164,7 @@ describe('regenerate recovery codes', () => {
   it('proves identity with a code, then shows the new set once and holds the dialog open', async () => {
     serve({}, { totp_available: true, totp_enabled: true, recovery_codes_remaining: 2 })
     api.post.mockResolvedValue({ data: { recovery_codes: CODES } })
-    mountMe(<MeView />, '/?tab=security')
+    mountMe(<MeView />)
     const dialog = await manage('Recovery codes')
     expect(within(dialog).getByText('2 recovery codes left')).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Regenerate with a code' }))
@@ -176,7 +183,7 @@ describe('delete a passkey', () => {
   it('names the passkey in the confirmation, starts on Cancel, and deletes only on yes', async () => {
     serve({}, { passkey_available: true, passkey_credentials: [{ id: 7, name: 'My phone', created_at: '2026-01-01T00:00:00Z' }], recovery_codes_remaining: 3 })
     api.delete.mockResolvedValue({ data: {} })
-    mountMe(<MeView />, '/?tab=security')
+    mountMe(<MeView />)
     const dialog = await manage('Passkeys')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     const ask = await screen.findByRole('alertdialog', { name: 'Delete passkey' })
@@ -189,7 +196,7 @@ describe('delete a passkey', () => {
   it('renames with the same request as before', async () => {
     serve({}, { passkey_available: true, passkey_credentials: [{ id: 7, name: 'My phone', created_at: '2026-01-01T00:00:00Z' }], recovery_codes_remaining: 3 })
     api.patch.mockResolvedValue({ data: {} })
-    mountMe(<MeView />, '/?tab=security')
+    mountMe(<MeView />)
     const dialog = await manage('Passkeys')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }))
     const box = within(dialog).getByRole('textbox')
