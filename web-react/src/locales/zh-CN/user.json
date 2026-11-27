@@ -5,8 +5,7 @@
     "overview": "概览",
     "traffic": "流量",
     "clients": "客户端",
-    "server_status": "服务器状态",
-    "security": "安全"
+    "server_status": "服务器状态"
   },
   "status": {
     "title": "服务器状态",
@@ -240,19 +239,9 @@
     "consent_outdated": "条款刚刚又更新了，请重新阅读"
   },
   "summary": {
-    "active_title": "服务正常",
-    "active_body": "订阅和代理服务运行正常。",
-    "expiring_title": "即将到期",
-    "expiring_body": "{{when}}（{{date}}）。到期后订阅和代理服务会暂停。",
-    "near_limit_title": "流量即将用尽",
-    "near_limit_body": "本周期流量已用 {{percent}}%，达到上限后代理服务会暂停。",
-    "emergency_title": "紧急访问已开启",
     "emergency_body": "紧急访问已开启。"
   },
   "security": {
-    "title": "账号安全",
-    "change": "修改",
-    "manage": "管理",
-    "set_up": "设置"
+    "title": "账号安全"
   }
 }

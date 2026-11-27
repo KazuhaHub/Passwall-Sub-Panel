@@ -15,7 +15,7 @@
 // fallback, which the server believes they were shown. Surfacing them is the entire point of returning them once.
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, mountMe, profile, serve, zeroUsage } from './testHarness'
+import { api, chooseSecurity, mountMe, profile, serve, zeroUsage } from './testHarness'
 import MeView from './MeView'
 
 vi.mock('@simplewebauthn/browser', () => ({
@@ -35,9 +35,7 @@ beforeEach(() => {
 })
 
 async function openPasskeys() {
-  fireEvent.click(await screen.findByRole('tab', { name: 'Security' }))
-  const row = (await screen.findByText('Passkeys', { selector: 'div' })).closest('li')!
-  fireEvent.click(within(row).getByRole('button', { name: 'Manage' }))
+  await chooseSecurity('Passkeys')
   return screen.findByRole('dialog')
 }
 

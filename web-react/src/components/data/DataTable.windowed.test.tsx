@@ -251,7 +251,8 @@ describe('windowed reordering', () => {
     pointer('pointerdown', BODY_TOP + 9 * ROW + 20, handle(10))
     scrollPageTo(40000)
     expect(document.querySelector('tr[data-id="r10"]')).not.toBeNull()
-    expect(document.querySelector('tr[data-id="r10"]')?.className).toContain('opacity-50')
+    // carried rows are marked for both motion modes (the look differs: lifted, or dimmed under reduced motion)
+    expect(document.querySelector('tr[data-id="r10"]')?.getAttribute('data-moving')).toBe('true')
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
   })
 

@@ -240,12 +240,40 @@
   }
 }
 
+/*
+ * The chevron of components/ui/native-select, painted by the select itself so it is always inside
+ * the field's own box (see the component). Neutral greys that read on both the light and the dark
+ * field backgrounds; a data URL cannot use currentColor.
+ */
+[data-slot="native-select"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+}
+.dark [data-slot="native-select"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23a3a3a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+/* Forced colours drop background images; give the arrow back to the browser. */
+@media (forced-colors: active) {
+  [data-slot="native-select"] { appearance: auto; background-image: none; }
+}
+
 /* The slide of the indeterminate bar in components/RequestProgressBar. */
 @theme inline {
   --animate-request-progress: request-progress 1.3s ease-in-out infinite;
   @keyframes request-progress {
     from { transform: translateX(-100%); }
     to { transform: translateX(250%); }
+  }
+}
+
+/* The creep of components/shell/RouteProgress: quickly toward most of the width, then a long slow tail. */
+@theme inline {
+  --animate-route-progress: route-progress 8s cubic-bezier(0.1, 0.6, 0.3, 1) forwards;
+  @keyframes route-progress {
+    from { transform: scaleX(0.05); }
+    to { transform: scaleX(0.85); }
   }
 }
 

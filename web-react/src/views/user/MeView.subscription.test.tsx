@@ -13,7 +13,7 @@ describe('the subscription link is a secret', () => {
     await screen.findByText('Subscription URL')
     expect(screen.getByTestId('sub-url').textContent).toBe(masked)
     expect(document.body.textContent).not.toContain('secret-token')
-    // The QR is not drawn at all until revealed, so the link is not in the page.
+    // Only a blurred decoy code is drawn until revealed, so the link is not in the page.
     expect(screen.getByTestId('qr-placeholder')).toBeTruthy()
   })
 

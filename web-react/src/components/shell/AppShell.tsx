@@ -1,4 +1,4 @@
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
@@ -6,7 +6,6 @@ import type { Role } from '@/api/types'
 import type { VersionInfo } from '@/api/version'
 import { IconSearch } from '@/lib/icons'
 import { IconButton } from '@/components/common/IconButton'
-import { PageSkeleton } from '@/components/feedback/LoadingState'
 import { setSyncPendingNavigator } from '@/components/feedback/syncPendingToast'
 import { Button } from '@/components/ui/button'
 import {
@@ -32,9 +31,11 @@ import { BrandIcon, BrandLogo, type Brand } from './BrandMark'
 import { CommandPalette, useCommandPaletteHotkey } from './CommandPalette'
 import { navigationProvider, type CommandProvider } from './commands'
 import { activeItem, isNavActive, visibleSections, type NavSection } from './nav'
+import { RouteFallback, RouteProgressHost } from './RouteProgress'
 import { MAIN_ID, SkipLink } from './SkipLink'
 import { ToastLogButton } from './ToastLogButton'
 import { useLogInMenu } from './ToastLogMenuItem'
+import { usePageTransition } from './usePageTransition'
 import { UserMenu, type ShellUser } from './UserMenu'
 
 export interface AppShellProps {
@@ -95,6 +96,12 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
   const { pathname } = useLocation()
   const sections = useMemo(() => visibleSections(nav, role), [nav, role])
   const current = useMemo(() => activeItem(nav, role, pathname), [nav, role, pathname])
+  const listRef = useRef<HTMLDivElement>(null)
+  // A route change (a click, the palette, a link elsewhere) can light an item that is scrolled out of the
+  // list or sits under a fade: bring it into view, clear of the fade (the list's scroll padding).
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [current?.to])
 
   return (
     <Sidebar
@@ -102,14 +109,18 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
       mobileTitle={t('common:ui.shell.sidebar_title')}
       mobileDescription={t('common:ui.shell.sidebar_description')}
     >
-      <SidebarHeader className="h-14 flex-row items-center gap-2.5 border-b px-3 py-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+      {/* ONE BAND WITH THE TOP BAR. Same height token, same background and the same bottom
+          border, so the line runs unbroken from the sidebar's edge across the page. The
+          sidebar's own right border is a 1px strip outside this box; the negative margin lets
+          the header cover it, so the band has no vertical seam where the two meet. */}
+      <SidebarHeader className="relative h-(--shell-bar-h) shrink-0 flex-row items-center gap-2.5 border-b bg-background px-3 py-0 md:-mr-px group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
         <span className="hidden group-data-[collapsible=icon]:block"><BrandIcon brand={brand} /></span>
         <span className="flex min-w-0 items-center gap-2.5 group-data-[collapsible=icon]:hidden">
           <BrandLogo brand={brand} />
           <span className="truncate text-sm font-semibold">{brand.name}</span>
         </span>
       </SidebarHeader>
-      <SidebarContent aria-label={t('common:ui.shell.main_nav')} role="navigation">
+      <SidebarContent ref={listRef} aria-label={t('common:ui.shell.main_nav')} role="navigation">
         {sections.map((section, i) => (
           <Fragment key={section.labelKey ?? `top-${i}`}>
             {/* A divider opens every group after the first. On the expanded rail a
@@ -188,7 +199,7 @@ function TopBar({ title, onOpenPalette, actions, user }: { title?: string; onOpe
   const { t } = useTranslation('common')
   const logInMenu = useLogInMenu()
   return (
-    <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-1 border-b bg-background/85 px-2 backdrop-blur sm:gap-2 sm:px-4">
+    <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-1 border-b bg-background px-2 sm:gap-2 sm:px-4">
       <SidebarTrigger label={t('ui.shell.toggle_sidebar')} />
       {title && <h2 className="min-w-0 truncate text-sm font-medium md:hidden">{title}</h2>}
       <div className="flex min-w-0 flex-1 items-center md:px-1">
@@ -232,9 +243,12 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
 
   const go = useCallback((to: string) => { void navigate(to) }, [navigate])
   const current = activeItem(nav, role, pathname)
+  const mainRef = useRef<HTMLElement>(null)
+  usePageTransition(mainRef, pathname)
 
   return (
     <TooltipProvider delay={300}>
+      <RouteProgressHost>
       <SidebarProvider>
         <SkipLink />
         <CloseMobileOnNavigate />
@@ -248,17 +262,18 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
             actions={topBarActions}
             user={user}
           />
-          <main id={MAIN_ID} tabIndex={-1} className={cn('mx-auto w-full max-w-[100rem] flex-1 p-4 outline-none sm:p-6', contentClassName)}>
+          <main ref={mainRef} id={MAIN_ID} tabIndex={-1} className={cn('mx-auto w-full max-w-[100rem] flex-1 p-4 outline-none sm:p-6', contentClassName)}>
             {/* Per-route Suspense boundary INSIDE the shell, so switching pages only swaps
                 the content: an outer one would unmount the whole shell (and its
                 mount-time effects) on every cross-section navigation. */}
-            <Suspense fallback={<PageSkeleton />}>
+            <Suspense fallback={<RouteFallback />}>
               {children ?? <Outlet />}
             </Suspense>
           </main>
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} providers={providers} navigate={go} role={role} />
       </SidebarProvider>
+      </RouteProgressHost>
     </TooltipProvider>
   )
 }

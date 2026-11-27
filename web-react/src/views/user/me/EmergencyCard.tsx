@@ -1,7 +1,9 @@
 import type { MeProfile } from '@/api/me'
 import { IconDiagnose, IconTime, IconTicket, IconUsage } from '@/lib/icons'
 import { AsyncButton } from '@/components/common/AsyncButton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { TONE_STYLE } from '@/components/common/tones'
+import { Card, CardContent } from '@/components/ui/card'
+import { cn } from '@/lib/utils'
 import { bytesToHuman } from './format'
 import { Meter } from '@/components/common/Meter'
 import { useMeT } from './useMeT'
@@ -42,14 +44,23 @@ export function EmergencyCard({ emergency, onUse }: {
   const off = emergency.remaining <= 0 || !emergency.available
   const meta = 'inline-flex items-center gap-1 text-xs text-muted-foreground [&_svg]:size-3.5'
   return (
-    <Card data-testid="emergency-access">
-      <CardHeader><CardTitle className="flex items-center gap-2"><IconDiagnose className="size-4" />{t('emergency.title')}</CardTitle></CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <p className="text-sm">{statusText(t, emergency)}</p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          <span className={meta}><IconTime />{t('emergency.meta_duration', { hours: emergency.duration_hours })}</span>
-          {quotaActive && <span className={meta}><IconUsage />{t('emergency.meta_quota', { total: bytesToHuman(emergency.quota_bytes) })}</span>}
-          <span className={meta}><IconTicket />{t('emergency.meta_count', { remaining: emergency.remaining, max: emergency.max_count })}</span>
+    <Card data-testid="emergency-access" className={cn(TONE_STYLE.info.tint, TONE_STYLE.info.ring, 'ring-1')}>
+      <CardContent className="flex flex-col gap-4">
+        {/* The button sits beside the text from sm up; on a phone it goes below, so a long label does not squeeze the sentence into a sliver. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <IconDiagnose className="mt-0.5 size-5 shrink-0 text-info" />
+            <div className="min-w-0 flex-1">
+              <h2 className="font-heading text-base leading-snug font-semibold">{t('emergency.title')}</h2>
+              <p className="mt-1 text-sm">{statusText(t, emergency)}</p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                <span className={meta}><IconTime />{t('emergency.meta_duration', { hours: emergency.duration_hours })}</span>
+                {quotaActive && <span className={meta}><IconUsage />{t('emergency.meta_quota', { total: bytesToHuman(emergency.quota_bytes) })}</span>}
+                <span className={meta}><IconTicket />{t('emergency.meta_count', { remaining: emergency.remaining, max: emergency.max_count })}</span>
+              </div>
+            </div>
+          </div>
+          <AsyncButton className="sm:shrink-0" disabled={off} onClick={onUse}>{t('emergency.use')}</AsyncButton>
         </div>
         {windowActive && quotaActive && (
           <div>
@@ -60,7 +71,6 @@ export function EmergencyCard({ emergency, onUse }: {
             <Meter value={usedPct} tone="info" label={t('emergency.title')} />
           </div>
         )}
-        <AsyncButton variant="outline" className="self-start" disabled={off} onClick={onUse}>{t('emergency.use')}</AsyncButton>
       </CardContent>
     </Card>
   )
