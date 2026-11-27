@@ -85,6 +85,7 @@ export default function FrontList({ fronts, inactive, names, canEdit, editOffRea
 
   return (
     <DataTable<Front>
+      tableId="admin.fronts"
       data={fronts} columns={columns} getRowId={f => String(f.id)} pagination={false} columnMenu={false} maxHeight={null}
       loading={loading} error={error ? (error as Error) : null} onRetry={onRetry} empty={empty}
       onRowOpen={canEdit ? onEdit : undefined}

@@ -71,6 +71,7 @@ export function TargetView({ doc, blocks, target, query, onOpenGroup }: {
     <section className="flex min-w-0 flex-col gap-3" aria-label={t('admin:rules.targetview.table', { target })}>
       <p className="text-sm text-muted-foreground">{t('admin:rules.targetview.note', { target, count: rows.length.toLocaleString(), blocks: runs.length.toLocaleString() })}</p>
       <DataTable<Row>
+        tableId="admin.ruleSets.targets"
         aria-label={t('admin:rules.targetview.table', { target })}
         data={shown}
         columns={columns}

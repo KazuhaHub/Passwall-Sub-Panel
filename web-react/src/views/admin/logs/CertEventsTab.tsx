@@ -46,6 +46,7 @@ export default function CertEventsTab() {
 
   return (
     <LogList<CertEvent>
+      tableId="admin.logs.certEvents"
       label={t('logs.tab_certs')}
       view={view}
       query={query}

@@ -135,6 +135,7 @@ export default function PortUsageTable({ panelId }: { panelId: number }) {
         <InfoTip text={t('admin:servers.fronts.help.ports')} />
       </p>
       <DataTable<Row>
+        tableId="admin.fronts.ports"
         data={rows} columns={columns} getRowId={r => r.key} pagination={false} columnMenu={false} maxHeight={null}
         loading={ports.isPending} error={ports.isError ? (ports.error as Error) : null} onRetry={() => void ports.refetch()}
         aria-label={t('admin:servers.fronts.tab_ports')}

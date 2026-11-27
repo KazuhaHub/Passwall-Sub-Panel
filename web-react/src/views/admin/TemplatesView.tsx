@@ -159,6 +159,7 @@ function TemplatesList() {
         primary={canConfig && <Button onClick={() => open(newTemplatePath())}>{t('admin:templates.create')}</Button>}
       />
       <DataTable<Template>
+        tableId="admin.templates"
         aria-label={t('admin:templates.title')}
         data={shown}
         columns={columns}

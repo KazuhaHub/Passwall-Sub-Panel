@@ -218,6 +218,7 @@ export default function AllowlistReport({ groupId, onBack, onOpenEntries, onTest
                 <HelpTip text={t(`${R}site_help`)} label={t(`${R}site_help_label`)} />
               </p>
               <DataTable<DestGroupReportItem>
+                tableId="admin.accessControl.allowlist"
                 aria-label={t(`${R}crumb_report`)}
                 data={rows}
                 columns={columns}

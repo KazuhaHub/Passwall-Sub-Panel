@@ -17,7 +17,8 @@ export interface UserColumnCtx {
 function GroupCell({ user }: { user: User }) {
   const { groups } = useUsers()
   const n = groups.find(g => g.id === user.group_id)?.name ?? String(user.group_id)
-  return <span title={n}>{n}</span>
+  // A group name is free text, so it may truncate, but only past a generous width: the column otherwise fits it.
+  return <span title={n} className="inline-block max-w-56 truncate align-bottom">{n}</span>
 }
 function TrafficColumnCell({ user }: { user: User }) {
   const { usedBytesOf } = useUsers()
@@ -45,11 +46,11 @@ export function userColumns(c: UserColumnCtx): ColumnDef<User, any>[] {
       cell: x => <UserCell user={x.row.original} /> },
     { id: 'display_name', accessorFn: (r: User) => r.display_name, header: t('users.table.display_name'), meta: { label: t('users.table.display_name'), defaultHidden: true, className: `${FIT} w-[14%]` },
       cell: x => <span title={x.row.original.display_name}>{x.row.original.display_name || '—'}</span> },
-    { id: 'group_id', accessorFn: (r: User) => r.group_id, header: t('users.table.group'), meta: { label: t('users.table.group'), className: `${FIT} w-[9%]` },
+    { id: 'group_id', accessorFn: (r: User) => r.group_id, header: t('users.table.group'), meta: { label: t('users.table.group'), className: 'whitespace-nowrap' },
       cell: x => <GroupCell user={x.row.original} /> },
     { id: 'role', accessorFn: (r: User) => r.role, header: t('users.table.role'), meta: { label: t('users.table.role'), defaultHidden: true },
       cell: x => <RoleBadge role={x.row.original.role} /> },
-    { id: 'enabled', accessorFn: (r: User) => r.enabled, header: t('users.table.status'), meta: { label: t('users.table.status'), className: `${FIT} w-[22%]` },
+    { id: 'enabled', accessorFn: (r: User) => r.enabled, header: t('users.table.status'), meta: { label: t('users.table.status'), className: 'whitespace-nowrap' },
       cell: x => <StatusCell user={x.row.original} /> },
     { id: 'traffic', header: t('users.table.traffic'), enableSorting: false, meta: { label: t('users.table.traffic'), align: 'right', className: 'w-[14%] min-w-28' },
       cell: x => <TrafficColumnCell user={x.row.original} /> },

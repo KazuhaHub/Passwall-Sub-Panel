@@ -220,6 +220,7 @@ export default function NodeIssuesView() {
       )}
       <div className="mt-3">
         <DataTable<NodeIssueGroup>
+          tableId="admin.nodeIssues"
           aria-label={t('node_issues.title')}
           mode="server"
           data={groups}

@@ -24,6 +24,8 @@ export interface ListQuery<T> {
 
 export interface LogListProps<T> {
   label: string
+  /** Where the column widths an admin chose are kept (DataTable.tableId). One per list. */
+  tableId: string
   view: LogView
   query: ListQuery<T>
   /** Must be stable (useMemo): DataTable rebuilds every row when it changes. */
@@ -96,7 +98,7 @@ export function LogList<T>(p: LogListProps<T>) {
           <AlertDescription>{words.refreshFailed}</AlertDescription>
         </Alert>
       )}
-      <DataTable<T>
+      <DataTable<T> tableId={p.tableId}
         aria-label={p.label}
         mode="server"
         data={items ?? []}

@@ -152,6 +152,7 @@ function GroupsList() {
         primary={canConfig && <Button render={<Link {...link(NEW_GROUP_PATH)} />}>{t('admin:groups.create')}</Button>}
       />
       <DataTable<Group>
+        tableId="admin.groups"
         aria-label={t('admin:groups.title')}
         data={shown}
         columns={columns}

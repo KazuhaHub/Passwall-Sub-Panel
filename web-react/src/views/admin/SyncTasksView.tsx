@@ -134,7 +134,7 @@ export default function SyncTasksView() {
   const columns = useMemo<ColumnDef<SyncTask, any>[]>(() => plainColumns<SyncTask>([
     { id: 'status', header: t('sync_tasks.table.status'), meta: { label: t('sync_tasks.table.status'), hideable: false, className: 'w-44' },
       cell: c => <StatusCell task={c.row.original} /> },
-    { id: 'type', header: t('sync_tasks.table.type'), meta: { label: t('sync_tasks.table.type'), className: `${FIT} w-[14%]` },
+    { id: 'type', header: t('sync_tasks.table.type'), meta: { label: t('sync_tasks.table.type'), className: 'whitespace-nowrap' },
       cell: c => { const ty = typeOf(c.row.original); return ty ? t(`sync_tasks.type.${ty}`) : '—' } },
     { id: 'target', header: t('sync_tasks.table.target'), meta: { label: t('sync_tasks.table.target'), className: `${FIT} w-[10%] font-mono text-[0.8125rem]` },
       cell: c => <span title={targetOf(c.row.original)}>{targetOf(c.row.original)}</span> },
@@ -170,6 +170,7 @@ export default function SyncTasksView() {
         more={canConfig ? [{ id: 'purge', label: t('sync_tasks.purge'), icon: IconDelete, destructive: true, onSelect: () => void purge() }] : []}
       />
       <LogList<SyncTask>
+        tableId="admin.syncTasks"
         label={t('sync_tasks.title')}
         view={view}
         query={query}

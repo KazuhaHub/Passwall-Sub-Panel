@@ -27,6 +27,7 @@ beforeEach(() => {
     if (this.tagName === 'TBODY') return box(BODY_TOP - scrollY, 0)
     if (this.tagName === 'THEAD') return box(0, HEAD)
     if (this.tagName === 'TH') return box(0, HEAD, 120)
+    if (this.classList.contains('group/frame')) return box(0, 0, 360)
     if (this.tagName === 'TR' && this.hasAttribute('data-row')) {
       const i = Number(this.getAttribute('aria-rowindex')) - 2
       return box(BODY_TOP - scrollY + i * ROW, ROW)
@@ -49,7 +50,7 @@ const drawn = () => [...document.querySelectorAll<HTMLElement>('tr[data-row]')]
 const drawnIds = () => drawn().map(r => r.getAttribute('data-id'))
 const spacerPx = () => [...document.querySelectorAll<HTMLElement>('tr[data-spacer]')].reduce((s, r) => s + parseFloat(r.style.height), 0)
 
-interface Extra { maxHeight?: string | null; onRowOpen?: (r: Row) => void; selectable?: boolean; handleRef?: React.Ref<DataTableHandle> }
+interface Extra { tableId?: string; maxHeight?: string | null; onRowOpen?: (r: Row) => void; selectable?: boolean; handleRef?: React.Ref<DataTableHandle> }
 function mount(extra: Extra = {}, data: Row[] = BIG) {
   const onReorder = vi.fn()
   const utils = render(
@@ -366,5 +367,44 @@ describe('keyboard carrying: Home, End, PageUp, PageDown', () => {
     expect(status()).toContain('position 40 of 40')
     fireEvent.keyDown(h, { key: 'Enter' })
     expect(onReorder).toHaveBeenCalledWith({ movedId: 'r2', beforeId: null })
+  })
+})
+
+describe('windowed column widths', () => {
+  const widths = () => [...document.querySelectorAll<HTMLElement>('col')].map(c => c.style.width)
+  const resize = (name: string, from: number, to: number) => {
+    const h = screen.getByRole('separator', { name: `Resize column ${name}` })
+    fireEvent.pointerDown(h, { clientX: from, button: 0, pointerId: 1 })
+    act(() => { window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: to })) })
+    act(() => { window.dispatchEvent(Object.assign(new Event('pointerup'), { clientX: to })) })
+  }
+
+  it('measures once and holds the same widths while the rows scroll in and out', () => {
+    mount({ tableId: 'win' })
+    const first = widths()
+    expect(first.length).toBeGreaterThan(0)
+    for (const y of [5000, 40000, 120000, 0]) {
+      scrollPageTo(y)
+      expect(widths()).toEqual(first)
+    }
+  })
+
+  it('keeps an admin-set width, and the fitted width of the others, across scrolling', () => {
+    mount({ tableId: 'win' })
+    resize('Name', 100, 60)
+    const set = widths()
+    // columns: drag handle, Name, Id. The frame is 360 wide, and Id (the last, elastic one) takes the 40px Name gave up.
+    expect(set).toEqual(['120px', '80px', '160px'])
+    scrollPageTo(60000)
+    expect(widths()).toEqual(set)
+    scrollPageTo(0)
+    expect(widths()).toEqual(set)
+  })
+
+  it('is held inside its frame: a clipped table cannot be dragged wider than the page it is on', () => {
+    mount({ tableId: 'win' })
+    // The frame is 360 wide, the drag handle column takes 120 and the elastic Id column is not squeezed below its 120: Name stays at 120.
+    resize('Name', 100, 2000)
+    expect(widths()).toEqual(['120px', '120px', '120px'])
   })
 })

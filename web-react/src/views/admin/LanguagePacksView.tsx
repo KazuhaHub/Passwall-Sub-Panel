@@ -122,6 +122,7 @@ export default function LanguagePacksView() {
         <ErrorState title={t('admin:languagePacks.load_failed')} reason={query.error} retry={() => query.refetch()} />
       ) : (
         <DataTable<Row>
+          tableId="admin.languagePacks"
           data={rows} columns={columns} getRowId={r => r.code} pagination={false} columnMenu={false}
           loading={query.isPending} maxHeight={null}
           rowOptions={r => (deleting === r.code ? { state: 'dimmed' } : undefined)}

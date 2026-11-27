@@ -89,8 +89,8 @@ export function RankTab({ scope, userRows, nodeRows, limit, onLimit, loading, fa
         <p className="min-w-0 basis-60 text-xs text-muted-foreground">{t('traffic.rank_note')}</p>
       </div>
       {scope === 'user'
-        ? <DataTable aria-label={t('traffic.tab_rank')} data={userRows} columns={userColumns} getRowId={r => String(r.user_id)} columnMenu={false} {...common} />
-        : <DataTable aria-label={t('traffic.tab_rank')} data={nodeRows} columns={nodeColumns} getRowId={r => String(r.node_id)} columnMenu={false} {...common} />}
+        ? <DataTable tableId="admin.traffic.rankUsers" aria-label={t('traffic.tab_rank')} data={userRows} columns={userColumns} getRowId={r => String(r.user_id)} columnMenu={false} {...common} />
+        : <DataTable tableId="admin.traffic.rankNodes" aria-label={t('traffic.tab_rank')} data={nodeRows} columns={nodeColumns} getRowId={r => String(r.node_id)} columnMenu={false} {...common} />}
     </div>
   )
 }

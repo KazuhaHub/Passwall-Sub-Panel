@@ -27,7 +27,7 @@ export default function EmailLogsTab() {
       cell: c => <span title={who(c.row.original)}>{who(c.row.original)}</span> },
     { id: 'to', header: t('logs.email_table.to'), meta: { label: t('logs.email_table.to'), className: `${FIT} w-[34%]` },
       cell: c => <span title={c.row.original.to_email}>{c.row.original.to_email}</span> },
-    { id: 'kind', header: t('logs.email_table.kind'), meta: { label: t('logs.email_table.kind'), className: `${FIT} w-[24%]` },
+    { id: 'kind', header: t('logs.email_table.kind'), meta: { label: t('logs.email_table.kind'), className: 'whitespace-nowrap' },
       cell: c => <span title={c.row.original.kind}>{c.row.original.kind}</span> },
     { id: 'id', header: t('logs.email_table.id'), meta: { label: t('logs.email_table.id'), defaultHidden: true, className: 'font-mono text-muted-foreground' },
       cell: c => String(c.row.original.id) },
@@ -35,6 +35,7 @@ export default function EmailLogsTab() {
 
   return (
     <LogList<EmailLog>
+      tableId="admin.logs.email"
       label={t('logs.tab_email')}
       view={view}
       query={query}

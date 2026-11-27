@@ -48,7 +48,7 @@ export function CertsTab({ data, sel, act }: { data: CertData; sel: UrlSelection
   ctx.current = { act, open: id => sel.select(id) }
 
   const columns = useMemo<ColumnDef<Cert, any>[]>(() => plainColumns<Cert>([
-    { id: 'status', header: t('certs.col_status'), meta: { label: t('certs.col_status'), hideable: false, className: 'max-w-0 w-[27%] overflow-hidden' },
+    { id: 'status', header: t('certs.col_status'), meta: { label: t('certs.col_status'), hideable: false, className: 'whitespace-nowrap' },
       cell: c => <HealthCell cert={c.row.original} health={certHealth(c.row.original, now, renewBeforeDays)} /> },
     { id: 'name', header: t('certs.col_name'), meta: { label: t('certs.col_name'), hideable: false, className: `${FIT} w-[13%] font-medium` },
       cell: c => <span title={c.row.original.name}>{c.row.original.name}</span> },
@@ -56,7 +56,7 @@ export function CertsTab({ data, sel, act }: { data: CertData; sel: UrlSelection
       cell: c => <DomainsCell domains={c.row.original.domains} /> },
     { id: 'issuer', header: t('certs.col_issuer'), meta: { label: t('certs.col_issuer'), className: `${FIT} w-[12%]` },
       cell: c => <IssuerCell cert={c.row.original} accountOf={accountOf} credOf={credOf} /> },
-    { id: 'expiry', header: t('certs.col_expiry'), meta: { label: t('certs.col_expiry'), className: `${FIT} w-[14%]` },
+    { id: 'expiry', header: t('certs.col_expiry'), meta: { label: t('certs.col_expiry'), className: 'whitespace-nowrap' },
       cell: c => <ExpiryCell cert={c.row.original} health={certHealth(c.row.original, now, renewBeforeDays)} /> },
     { id: 'used', header: t('certs.col_used_by'), meta: { label: t('certs.col_used_by'), className: `${FIT} w-[14%]` },
       cell: c => <UsedByCell cert={c.row.original} usage={data.usage} known={data.usageKnown} /> },
@@ -76,6 +76,7 @@ export function CertsTab({ data, sel, act }: { data: CertData; sel: UrlSelection
 
   return (
     <DataTable<Cert>
+      tableId="admin.certs"
       aria-label={t('certs.title')}
       data={rows}
       columns={columns}

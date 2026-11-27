@@ -225,6 +225,7 @@ export default function QueueTab({ onOpenUser, onOpenLive, onOpenPolicy }: {
             {q.isFetching && data && <div role="progressbar" aria-label={t('admin:risk_center.queue.reloading')} className="h-full w-1/3 animate-pulse rounded-full bg-primary" />}
           </div>
           <DataTable<QueueRow>
+            tableId="admin.risk.queue"
             aria-label={t('admin:risk_center.queue.title')}
             mode="server"
             data={data?.items ?? []}

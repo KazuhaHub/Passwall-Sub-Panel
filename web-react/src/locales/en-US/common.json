@@ -83,6 +83,8 @@
     "data": {
       "columns": "Columns",
       "columns_menu": "Visible columns",
+      "resize_column": "Resize column {{name}}",
+      "reset_widths": "Reset column widths",
       "sort_by": "Sort by {{column}}",
       "select_all": "Select all rows on this page",
       "select_row": "Select row {{n}}",

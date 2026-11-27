@@ -47,6 +47,7 @@ export function TopTrafficCard({ rows, loading, failed, onRetry }: {
       </CardHeader>
       <CardContent>
         <DataTable
+          tableId="admin.dashboard.topTraffic"
           aria-label={t('dashboard.traffic.title')}
           data={rows}
           columns={columns}

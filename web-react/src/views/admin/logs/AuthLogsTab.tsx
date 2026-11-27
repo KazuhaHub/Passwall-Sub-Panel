@@ -43,7 +43,7 @@ export default function AuthLogsTab({ user }: { user: UserFilter }) {
       cell: c => c.row.original.method },
     { id: 'outcome', header: t('logs.auth_table.outcome'), meta: { label: t('logs.auth_table.outcome'), className: 'w-28' },
       cell: c => <OutcomeBadge outcome={c.row.original.outcome} /> },
-    { id: 'ip', header: t('logs.auth_table.ip'), meta: { label: t('logs.auth_table.ip'), className: `${FIT} w-[22%]` },
+    { id: 'ip', header: t('logs.auth_table.ip'), meta: { label: t('logs.auth_table.ip'), className: 'whitespace-nowrap' },
       cell: c => <IpCell ip={c.row.original.ip} region={c.row.original.region} /> },
     { id: 'reason', header: t('logs.auth_table.reason'), meta: { label: t('logs.auth_table.reason'), className: `${FIT} w-[24%] text-muted-foreground` },
       cell: c => <span title={c.row.original.reason || ''}>{c.row.original.reason || '—'}</span> },
@@ -54,6 +54,7 @@ export default function AuthLogsTab({ user }: { user: UserFilter }) {
 
   return (
     <LogList<AuthEvent>
+      tableId="admin.logs.auth"
       label={t('logs.tab_auth')}
       view={view}
       query={query}

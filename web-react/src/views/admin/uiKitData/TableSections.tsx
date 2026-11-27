@@ -103,6 +103,7 @@ export function NodesTableSection() {
         <KpiTile label="等待生效" value={sc.get('pending') ?? 0} tone="warning" pressed={status.length === 1 && status[0] === 'pending'} onToggle={() => setFacet('status')(status[0] === 'pending' && status.length === 1 ? [] : ['pending'])} />
       </KpiGrid>
       <DataTable
+        tableId="ui-kit.nodes"
         aria-label="节点"
         data={filtered}
         columns={nodeColumns}
@@ -298,6 +299,7 @@ export function LinesViewsSection() {
 
       {url.view === 'flat' && (
         <DataTable
+          tableId="ui-kit.lines"
           aria-label="线路"
           data={visible}
           columns={flatColumns}
@@ -335,6 +337,7 @@ export function LinesViewsSection() {
       )}
       {url.view === 'tree' && (
         <DataTable
+          tableId="ui-kit.landings"
           aria-label="按落地节点"
           data={tree}
           columns={treeColumns}
@@ -422,6 +425,7 @@ export function UsersServerSection() {
         <span className="flex items-center gap-2"><Switch checked={empty} onCheckedChange={setEmpty} id="sim-empty" /><Label htmlFor="sim-empty">模拟空列表</Label></span>
       </div>
       <DataTable
+        tableId="ui-kit.users"
         mode="server"
         aria-label="用户"
         data={state.items}
@@ -490,6 +494,7 @@ export function LongListSection() {
         <span className="text-xs text-muted-foreground" data-testid="long-list-drawn">共 {rows.length} 行</span>
       </div>
       <DataTable
+        tableId="ui-kit.longList"
         aria-label="长列表"
         handleRef={handle}
         data={rows}
