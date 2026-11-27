@@ -2,36 +2,62 @@
   "languagePacks": {
     "title": "语言包",
     "load_failed": "暂时无法加载语言包",
-    "subtitle": "上传自定义界面语言包，上传后重新载入页面即可在语言菜单中选择。",
+    "subtitle": "添加界面语言。上传后重新载入页面，即可在语言菜单中选择。",
     "upload": "上传",
     "upload_title": "上传语言包",
-    "upload_help": "选择或粘贴一个 JSON 语言包文件。可先“导出基准模板”，翻译其中的文本后再上传。",
+    "upload_help": "选择语言包文件、拖放到此处，或粘贴其 JSON。建议先导出基准模板，翻译其中的文本后再上传。",
     "choose_file": "选择文件",
+    "drop_hint": "或把 .json 文件拖放到此处",
+    "paste_label": "语言包 JSON",
     "paste_placeholder": "在此粘贴语言包 JSON…",
     "export_base": "导出基准模板",
-    "empty": "暂无自定义语言包",
     "size_hint": "单个语言包最大 {{max}} KB。",
-    "stale_warning": "该翻译基于 {{base}},当前面板为 {{current}},建议重新导出基准并翻译。",
+    "problems_title_other": "上传前需要修正 {{count}} 个问题",
+    "server_refused": "服务器拒绝了这个语言包",
+    "upload_failed": "无法上传语言包。",
+    "problem": {
+      "too_large": "文件超过 {{max}} KB。",
+      "invalid_json": "文本不是有效的 JSON：{{detail}}",
+      "not_object": "最外层必须是包含语言包字段的 JSON 对象。",
+      "format": "“psp_language_pack” 必须是 {{expected}}（当前为 {{found}}）。",
+      "code_required": "必须填写 “code”。",
+      "code_chars": "“code” {{code}} 只能包含字母、数字、“_” 和 “-”。",
+      "code_builtin": "{{code}} 是内置语言，不能覆盖。请换一个代码。",
+      "name_required": "必须填写 “name”：显示在语言菜单中的名称。",
+      "namespaces_required": "必须提供 “namespaces”，且必须是对象。",
+      "unknown_namespace": "未知的命名空间 “{{ns}}”。可用：{{known}}。",
+      "namespace_shape": "命名空间 “{{ns}}” 必须是翻译对象。",
+      "leaf": "{{path}} 必须是字符串（当前为 {{kind}}）。",
+      "leaf_more_other": "另有 {{count}} 个值不是字符串。"
+    },
+    "source": {
+      "builtin": "内置",
+      "uploaded": "已上传"
+    },
+    "builtin_reason": "内置语言是面板的一部分，不能覆盖或删除。",
+    "stale": "已过期",
+    "stale_warning": "该翻译基于 {{base}}，当前面板为 {{current}}，建议重新导出基准并翻译。",
+    "download": "下载 {{name}}",
     "table": {
       "code": "语言代码",
-      "name": "名称",
+      "name": "语言",
+      "source": "来源",
       "author": "作者",
       "base_version": "基准版本",
       "actions": "操作"
     },
     "confirm": {
-      "delete_title": "删除语言包",
+      "delete_title": "删除语言包 {{name}}？",
       "delete_message": "确定删除语言包 {{name}}（{{code}}）吗？此操作不可撤销。"
     },
     "toast": {
       "saved": "语言包已保存",
       "deleted": "语言包已删除",
       "reload_hint": "重新载入页面后即可在语言菜单中看到该语言。",
-      "invalid_json": "JSON 解析失败，请检查文件内容。",
-      "missing_fields": "语言包缺少必填字段（code / name / namespaces）。",
       "read_failed": "读取文件失败",
-      "too_large": "语言包过大，最大 {{max}} KB。"
-    }
+      "download_failed": "无法下载语言包。"
+    },
+    "summary_other": "可以上传：{{name}}（{{code}}），共 {{count}} 个命名空间。"
   },
   "alerts": {
     "bell_title": "通知",
@@ -60,12 +86,10 @@
     "positive_int": "请填入大于 0 的整数",
     "range": "数值不在允许范围内",
     "too_short": "长度太短",
-    "too_long": "长度超出限制",
-    "form_has_errors": "请先修正表单中标红的字段"
+    "too_long": "长度超出限制"
   },
   "dashboard": {
     "summary_failed": "暂时无法加载概览数据",
-    "retry": "重试",
     "title": "总览",
     "metric": {
       "users": "用户总数",
@@ -95,7 +119,8 @@
         "today_used": "今日已用"
       },
       "empty": "暂无流量数据（采集需等首个 5min 窗口）"
-    }
+    },
+    "attention_title": "需要关注"
   },
   "settings": {
     "title": "系统设置",
@@ -103,7 +128,6 @@
     "mail_load_failed": "暂时无法加载邮件设置",
     "saml_load_failed": "暂时无法加载 SAML 配置",
     "oidc_load_failed": "暂时无法加载 OIDC 配置",
-    "retry": "重试",
     "tab_general": "基本设置",
     "tab_security": "登录与安全",
     "tab_brand": "站点品牌",
@@ -113,20 +137,19 @@
     "tab_sso": "SSO 认证",
     "tab_legal": "隐私与协议",
     "save": "保存",
-    "cancel": "取消",
     "saved": "已保存",
     "panel_path_sso_notice": "面板路径已更新；如启用了 SSO，请同步更新身份提供商中登记的回调地址。",
     "scope": {
-      "audience": "适用对象",
+      "audience": "适用范围",
       "all_users": "所有用户（全局默认）",
       "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
-      "showing_for_label": "当前显示范围："
+      "overrides_count_other": "{{count}} 项覆盖",
+      "filter": "筛选分组",
+      "global_only": "这些设置对所有用户生效，不能按分组设置。"
     },
     "feature_pending": "该 tab 正在迁移到 React + MUI（下个版本）。当前请使用 Vue 版本管理这些字段。",
     "general": {
       "section_login": "登录",
-      "section_login_security": "登录安全",
-      "section_security": "安全",
       "section_runtime": "运行时调度",
       "captcha_enabled": "启用登录验证码",
       "captcha_contexts": "验证码适用范围",
@@ -143,8 +166,8 @@
       "captcha_secret_key": "Secret Key（服务端校验）",
       "lockout_enabled": "启用失败锁定",
       "lockout_threshold": "锁定阈值（失败次数）",
-      "lockout_window_minutes": "统计窗口（分钟）",
-      "lockout_duration_minutes": "锁定时长（分钟）",
+      "lockout_window_minutes": "统计窗口",
+      "lockout_duration_minutes": "锁定时长",
       "lockout_scope": "锁定范围",
       "lockout_scope_ip_upn": "IP + 用户名（推荐）",
       "lockout_scope_ip": "仅 IP",
@@ -166,8 +189,8 @@
       "registration_default_group_missing": "已保存的分组不存在（ID：{{id}}），请选择一个有效分组",
       "registration_default_group_missing_option": "无效分组（ID：{{id}}）",
       "registration_default_group_current_option": "当前设置（ID：{{id}}）",
-      "registration_default_traffic_gb": "默认流量 GB（0=跟随分组）",
-      "registration_default_expire_days": "默认有效期（天，0=不过期）",
+      "registration_default_traffic_gb": "默认流量（0=跟随分组）",
+      "registration_default_expire_days": "默认有效期（0=不过期）",
       "registration_hint": "注册用户以邮箱作为登录名、角色为普通用户，加入默认组并继承上述配额/有效期。开启邮箱验证需先配置 SMTP；链接方式需先配置订阅基础 URL。",
       "twofa_section_title": "两步验证（2FA）",
       "twofa_section_hint": "为本地登录增加第二道验证。可启用下列任意方式（账号在「我的账号」里自助绑定）；登录时验证器代码、一次性备用码、以及账号已绑定的通行密钥都自动可用。",
@@ -175,9 +198,8 @@
       "totp_hint": "允许有本地密码的账号在「我的账号」里用身份验证器 App（TOTP）开启验证。关闭仅阻止新开启，不会移除已启用账号的验证器。SSO 账号不受影响。",
       "twofa_allow_email": "邮箱一次性验证码（较弱，需配置 SMTP）",
       "twofa_allow_email_hint": "与上面并列的一种登录验证方式，需账号已绑定其它因素（TOTP / 通行密钥）后方可启用。它较弱——掌握密码 + 邮箱即可通过，故默认关闭。",
-      "twofa_policy_subheading": "强制策略",
-      "twofa_email_cooldown": "验证码重发冷却（秒）",
-      "code_resend_cooldown": "验证码重发冷却（秒，注册验证 / 找回密码）",
+      "twofa_email_cooldown": "验证码重发冷却",
+      "code_resend_cooldown": "验证码重发冷却（注册验证 / 找回密码）",
       "code_resend_cooldown_hint": "同一账号两次重发验证码的最小间隔，防邮件轰炸（0=默认 60 秒）。与登录两步验证的邮件冷却相互独立。",
       "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
       "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组单独强制。仅本地账号生效。",
@@ -195,37 +217,36 @@
       "allow_user_personal_rules": "允许用户编辑个人规则",
       "allow_user_personal_rules_hint": "关闭后用户仍可在自助页查看个人规则，但无法保存修改。管理端不受影响，可继续手动为指定用户编辑。",
       "jwt_issuer": "JWT Issuer",
-      "jwt_access_ttl_minutes": "Access Token 有效期（分钟）",
-      "jwt_refresh_ttl_minutes": "Refresh Token 有效期（分钟）",
-      "sub_per_ip_per_min": "订阅请求限流（次/分钟/IP）",
-      "login_per_ip_per_min": "登录限流（次/分钟/IP）",
+      "jwt_access_ttl_minutes": "Access Token 有效期",
+      "jwt_refresh_ttl_minutes": "Refresh Token 有效期",
+      "sub_per_ip_per_min": "订阅请求限流（每 IP）",
+      "login_per_ip_per_min": "登录限流（每 IP）",
       "timezone": "面板时区",
       "timezone_placeholder": "例如 America/Los_Angeles（留空使用服务器时区）",
       "timezone_hint": "用于流量重置、用户到期日计算、图表默认时区。订阅页和用户自助页始终使用浏览器时区。",
-      "cron_traffic_pull_minutes": "流量采集间隔（分钟）",
-      "cron_reconcile_minutes": "Reconcile 间隔（分钟）",
-      "node_poll_seconds": "原生节点同步心跳（秒）",
+      "cron_traffic_pull_minutes": "流量采集间隔",
+      "cron_reconcile_minutes": "Reconcile 间隔",
+      "node_poll_seconds": "原生节点同步心跳",
       "node_poll_seconds_hint": "控制配置和任务送达原生节点的速度。0 = 使用默认 30 秒；有排队任务时 PSP 可临时要求更快重试。",
-      "full_report_seconds": "原生节点全量报告周期（秒）",
+      "full_report_seconds": "原生节点全量报告周期",
       "full_report_seconds_hint": "降低此值会增加节点上行带宽，但会缩短全车队流量分子陈旧时间，从而收紧配额可能超用的上界。0 = 每轮同步都发送全量报告。",
       "section_node_task_lifecycle": "原生任务生命周期策略",
       "node_task_lifecycle_hint": "全局策略配置，单位为天，不是任务执行 TTL。默认：离线对账 30 天、备份最大恢复年龄 30 天、完整结果保留 90 天。清理与恢复验收完成前不启用自动清理。",
-      "node_task_offline_reconcile_days": "离线自动对账窗口（天）",
+      "node_task_offline_reconcile_days": "离线自动对账窗口",
       "node_task_offline_reconcile_days_hint": "默认 30；整数 1–3650。超窗需人工核对，不自动重新执行任务。",
-      "node_task_backup_restore_days": "备份最大恢复年龄（天）",
+      "node_task_backup_restore_days": "备份最大恢复年龄",
       "node_task_backup_restore_days_hint": "默认 30；整数 1–3650。更早的备份恢复后需人工核对，不自动重新执行任务。",
-      "node_task_result_retention_days": "完整任务结果保留（天）",
+      "node_task_result_retention_days": "完整任务结果保留",
       "node_task_result_retention_days_hint": "默认 90；整数 1–3650，不能短于离线对账窗口或备份最大恢复年龄。",
-      "node_task_days_range": "必须为 1–3650 天的整数",
       "node_task_retention_minimum": "完整任务结果保留天数不能短于离线对账窗口或备份最大恢复年龄。",
       "node_task_policy_safety_hint": "调小窗口仅影响新任务的策略，不追溯缩短已有任务保护。任务身份记录（tombstone）不会自动删除。",
       "max_panel_concurrency": "面板并发上限（流量采集/Reconcile）",
       "max_panel_concurrency_hint": "并发拉取每个 3X-UI 面板入站数据的上限。0 = 使用默认值 8。单面板部署调高无意义；多面板（5+）且 3X-UI 服务器空闲时可调到 16-32。> 64 会被自动夹回 64。",
-      "audit_retention_days": "审计日志保留（天）",
-      "auth_event_retention_days": "认证日志保留（天）",
+      "audit_retention_days": "审计日志保留",
+      "auth_event_retention_days": "认证日志保留",
       "auth_event_retention_days_hint": "登录日志（含失败）的保留天数。0 = 永不清理。默认 90（合规友好）。",
-      "sync_task_retention_days": "同步任务保留（天）",
-      "traffic_history_days": "流量历史保留（天）",
+      "sync_task_retention_days": "同步任务保留",
+      "traffic_history_days": "流量历史保留",
       "traffic_history_days_hint": "图表能往回看多少天。超过自动清理。raw 5 分钟原始数据固定保留 7 天用于今天实时刷新；这个值控制 hourly 滚动表的保留长度。0 = 永不清理。默认 730（两年，给\"最近一年\"留一倍 buffer）。",
       "expire_before_days": "到期前 N 天发邮件提醒",
       "expire_before_days_hint": "账号到期前多少天向用户发送邮件提醒。",
@@ -236,10 +257,22 @@
       "cloudflare_auto_fetch": "自动拉取 Cloudflare 地址段",
       "cloudflare_auto_fetch_hint": "面板每天下载一次 Cloudflare 公布的地址段（www.cloudflare.com/ips-v4 与 ips-v6，匿名请求，不带任何与本面板有关的信息），用作 CDN 线路的来源。拉取失败时沿用上次的列表；关闭后使用面板内置的快照。",
       "emergency_access_enabled": "允许用户紧急访问",
-      "emergency_access_hours": "紧急访问时长（小时）",
+      "emergency_access_hours": "紧急访问时长",
       "emergency_access_max_count": "紧急访问最大次数",
-      "emergency_access_quota_gb": "紧急访问流量配额（GB）",
-      "emergency_access_quota_gb_hint": "0 表示不限制；超出后将提前结束本次紧急访问并重新自动停用"
+      "emergency_access_quota_gb": "紧急访问流量配额",
+      "emergency_access_quota_gb_hint": "0 表示不限制；超出后将提前结束本次紧急访问并重新自动停用",
+      "section_retention": "数据保留",
+      "section_notify": "提醒阈值",
+      "cron_effect_hint": "修改在当前周期结束后生效，无需重启。填 0 会被忽略，沿用当前周期。",
+      "login_mode_hint": "「强制 SSO」和「仅本地」可能让人无法登录，保存时会先确认。",
+      "section_captcha": "验证码",
+      "captcha_provider_keys_hint": "需要服务商提供的 Site Key 和 Secret Key。密钥错误可能导致用户无法通过验证码。",
+      "section_lockout": "失败锁定",
+      "section_recovery": "找回密码",
+      "section_registration": "自助注册",
+      "section_sessions": "会话与速率限制",
+      "jwt_issuer_hint": "修改后所有已登录的会话立即失效，包括你自己的。",
+      "jwt_ttl_hint": "新的有效期只对此后签发的令牌生效。"
     },
     "geo_anomaly": {
       "scope": "判定粒度",
@@ -355,7 +388,7 @@
       "no_db": "未发现 .mmdb 库——放一个进去，或配置自动更新后点「立即更新」。",
       "built": "构建",
       "auto_update": "自动更新数据库",
-      "update_interval_hours": "自动更新间隔（小时）",
+      "update_interval_hours": "自动更新间隔",
       "update_interval_hint": "最小 1 小时；修改后无需重启即生效。",
       "source": "更新来源",
       "source_maxmind": "MaxMind GeoLite2（城市级，推荐）",
@@ -368,9 +401,6 @@
       "token_maxmind": "MaxMind License Key",
       "token_ipinfo": "IPinfo Token",
       "token_custom": "Token / 凭据（可选）",
-      "token_set": "已设置（留空则保持不变）",
-      "token_kept": "已保存（保持不变）",
-      "token_change": "更改",
       "update_now": "立即更新",
       "update_hint": "「立即更新」会先自动保存设置再下载。MaxMind 库须 30 天内更新一次（EULA），建议开启自动更新。",
       "attribution": "数据来源需在使用处署名：MaxMind（GeoLite2）/ DB-IP / IPinfo —— 视所用库而定。",
@@ -393,11 +423,14 @@
       "email_domain": "默认邮箱域",
       "sub_base_url": "订阅 Base URL（必填）",
       "panel_path": "面板路径前缀",
-      "panel_path_hint": "留空部署在域名根路径；例如 /panel。订阅链接不受此项影响。",
+      "panel_path_hint": "留空部署在域名根路径；例如 /panel。以斜杠开头、不带结尾斜杠，且不能与订阅路径重叠。设置面板路径后，订阅基础 URL 不能再带路径。订阅链接不受其他影响。",
       "asset_hint": "Logo / Icon 留空时使用内置默认。",
       "theme_color": "系统默认主题色（HEX）",
       "theme_color_hint": "用作所有用户的默认主题色；用户仍可在顶栏调色板里覆盖。留空时回退到内置默认色。",
-      "theme_color_clear": "清空"
+      "theme_color_clear": "清空",
+      "section_addresses": "地址",
+      "sub_base_url_hint": "订阅链接、邮件和 SSO 回调地址以此地址生成，其主机名同时是通行密钥所用的域名。",
+      "theme_color_picker": "选择颜色"
     },
     "sso": {
       "tab_saml": "SAML 2.0",
@@ -416,9 +449,7 @@
       "role_rules_keep_hint": "打开后：本条规则没命中、且用户当前正是本规则赋予的角色时，保留该角色。关闭则按规则集结果撤销。",
       "role_rules_note": "备注",
       "role_rules_note_placeholder": "可选：标注此规则用途",
-      "role_rules_drag": "拖拽调整顺序（顺序决定优先级）",
       "role_rules_add": "添加规则",
-      "role_rules_remove": "删除",
       "group_rules_hint": "按 IdP 属性决定新用户进入哪个分组（OU），自上而下取第一条命中的规则。每次登录都会重新判定：被 IdP 移出某个组的人会相应离开对应 OU，而不是永久保留它的配额与节点。没有规则命中时落到下方的「默认分组」。",
       "group_rules_empty": "尚未配置分组规则 —— 所有 SSO 用户都会进入下方的默认分组，且已有用户的分组不会被 IdP 改动。",
       "group_rules_group": "分组（OU）",
@@ -435,11 +466,9 @@
         "sp_acs_url": "ACS URL（回调）",
         "sp_cert": "SP 证书（PEM）",
         "sp_key": "SP 私钥（PEM，留空保持不变）",
-        "sp_key_kept": "SP 私钥已配置（保持不变）",
-        "sp_key_change": "修改私钥",
         "idp_section": "身份提供方（IdP）",
         "idp_metadata_url": "IdP Metadata URL",
-        "idp_refresh_hours": "Metadata 刷新间隔（小时）",
+        "idp_refresh_hours": "Metadata 刷新间隔",
         "attr_section": "属性映射",
         "attr_upn": "UPN 属性名",
         "attr_upn_hint": "填 IdP 发送 UPN 的 attribute Name URN；或填 nameid 直接从 <Subject><NameID> 读（Okta / Google / Keycloak / ADFS 默认走这条）",
@@ -449,8 +478,8 @@
         "admin_groups": "管理员组 ID（逗号分隔）",
         "default_group": "默认分组 slug",
         "new_user_section": "新用户默认",
-        "expire_days": "默认有效期（天，0=永久）",
-        "traffic_limit_gb": "默认流量上限（GB，0=跟随分组）",
+        "expire_days": "默认有效期（0=永久）",
+        "traffic_limit_gb": "默认流量上限（0=跟随分组）",
         "traffic_reset_period": "默认流量重置周期",
         "group_section": "分组解析",
         "fetch_verify": "获取、校验并保存",
@@ -460,16 +489,13 @@
         "fetch_saved": "Metadata 已校验，SAML 设置已保存",
         "sp_auto_hint": "这些字段由面板根据「公网基地址」自动生成（首次保存时生成自签名证书）。请把它们粘贴到 IdP 侧的 Service Provider 配置。",
         "sp_save_first": "保存后将生成 SP 信息",
-        "copied": "已复制",
-        "copy_failed": "复制失败"
+        "fetch_expires": "，{{date}} 到期"
       },
       "oidc": {
         "enabled": "启用 OIDC / OAuth2",
         "issuer_url": "Issuer URL",
         "client_id": "Client ID",
         "client_secret": "Client Secret（留空保持不变）",
-        "client_secret_kept": "Client Secret 已配置（保持不变）",
-        "client_secret_change": "修改",
         "redirect_url": "Redirect URL",
         "scopes": "Scopes（逗号分隔）",
         "attr_section": "属性映射",
@@ -480,10 +506,15 @@
         "admin_groups": "管理员组 ID（逗号分隔）",
         "default_group": "默认分组 slug",
         "new_user_section": "新用户默认",
-        "expire_days": "默认有效期（天，0=永久）",
-        "traffic_limit_gb": "默认流量上限（GB，0=跟随分组）",
+        "expire_days": "默认有效期（0=永久）",
+        "traffic_limit_gb": "默认流量上限（0=跟随分组）",
         "traffic_reset_period": "默认流量重置周期"
-      }
+      },
+      "role_rule_name": "角色规则 {{n}}",
+      "group_rule_name": "分组规则 {{n}}",
+      "default_group_current": "已保存的值：{{slug}}",
+      "default_group_empty": "没有匹配的分组",
+      "default_group_none": "不设默认分组"
     },
     "mail": {
       "section_smtp": "SMTP 服务器",
@@ -505,8 +536,6 @@
       "test_send": "发送测试",
       "test_sent": "已发送",
       "saved": "已保存",
-      "password_kept": "密码已保存（保持不变）",
-      "password_change": "修改",
       "kind": {
         "expire_before": "到期前提醒",
         "expired": "已到期",
@@ -572,7 +601,11 @@
       "preview_title": "预览：{{kind}}",
       "preview_subject": "邮件主题",
       "preview_body": "邮件正文",
-      "preview_close": "关闭"
+      "preview_close": "关闭",
+      "template_kind": "模板",
+      "test_hint": "使用已保存的 SMTP 设置发送；改过设置请先保存。",
+      "test_sent_to": "测试邮件已发送至 {{to}}",
+      "test_failed": "发送失败：{{reason}}"
     },
     "portal": {
       "section_quick_links": "快捷链接",
@@ -603,7 +636,8 @@
         "level_danger": "紧急通知",
         "popup": "以弹窗形式展示（首次进入网站时弹窗）",
         "popup_hint": "用户可点击\"我知道了\"关闭，或勾选\"不再提醒\"。提示状态仅保存在用户浏览器本地；公告内容更新后会再次弹出。"
-      }
+      },
+      "link_name": "快捷链接 {{n}}"
     },
     "subscription": {
       "section_basic": "基本",
@@ -656,8 +690,8 @@
       },
       "sub_path": "订阅 URL 路径段（必填）",
       "sub_import_tutorial_url": "导入教程链接（用户门户「查看教程」按钮指向；留空时按钮隐藏）",
-      "sub_log_retention_days": "订阅日志保留（天）",
-      "sub_update_interval_hours": "订阅自动刷新提示间隔（小时）",
+      "sub_log_retention_days": "订阅日志保留",
+      "sub_update_interval_hours": "订阅自动刷新提示间隔",
       "sub_profile_name_template": "订阅名称模板",
       "sub_profile_name_template_hint": "服务端渲染后用于 Content-Disposition / Profile-Title 响应头，以及一键导入深链的 &name= 参数。可用占位符：{{ site_title }}、{{ app_title }}、{{ display_name }}、{{ upn }}、{{ user }}（display_name，无则回退 UPN）。留空时使用默认值 {{ site_title }} - {{ user }}。",
       "sub_region_flag_prefix": "节点名自动加地区国旗",
@@ -674,14 +708,23 @@
         "name": "名称",
         "keywords": "关键词",
         "format": "渲染格式",
-        "enabled": "启用"
+        "enabled": "启用",
+        "apps": "App 数",
+        "disabled": "已停用",
+        "actions": "操作"
       },
-      "client_table": {
-        "name": "客户端",
-        "platforms": "平台",
-        "format": "格式",
-        "enabled": "启用"
-      }
+      "order_note": "顺序很重要。客户端按从上到下的顺序匹配检测族，命中第一个即停止，因此请把更具体的族放在更通用的族之前（例如 V2rayNG 放在 V2RayN 之前）。拖动行，或用键盘操作行上的拖动手柄，即可调整顺序。",
+      "name_required": "请填写该检测族的名称。",
+      "unnamed_family": "未命名检测族",
+      "edit_family": "编辑检测族",
+      "sheet_done": "完成",
+      "row_menu": "{{name}} 的操作",
+      "remove_app": "移除 App {{name}}",
+      "delete_family_title": "删除 {{name}}？",
+      "delete_family_body": "{{name}} 及其导入 App 将从列表中移除，保存后生效。",
+      "apps_count_other": "{{count}} 个 App",
+      "format_uri_list": "URI 列表（V2rayN / Passwall）",
+      "sub_path_hint": "订阅链接中地址之后、令牌之前的部分。修改后，已发出的订阅链接将失效。"
     },
     "legal": {
       "title": "隐私与协议页",
@@ -709,34 +752,40 @@
         "insert": "插入「我们收集什么」",
         "bytes": "{{used}} / {{max}} 字节",
         "publish": "发布…",
-        "close": "关闭",
         "tab_edit": "编辑",
         "tab_preview": "预览",
-        "preview_title": "预览",
         "preview_failed": "预览渲染失败",
         "no_marker_summary": "正文里没有「我们收集什么」，建议插入",
         "no_marker_detail": "「我们收集什么」由当前实际设置自动生成，设置变了它会跟着变。不插入的话，用户看不到本服务实际记录了哪些数据、保留多久。",
         "discard_title": "放弃未保存的修改？",
-        "discard_message": "关闭后，这份草稿会丢失。",
+        "discard_message": "离开此页后，这份草稿会丢失。",
         "discard_confirm": "放弃",
         "switch_title": "切换语言？",
         "switch_message": "当前语言有未保存的修改，切换后会丢失。",
         "usage_missing_summary": "预览里没有按网站用量",
-        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。"
+        "usage_missing_detail": "「我们收集什么」只在「披露用量」开关已保存、并且至少一台节点在记录用量时才列出按网站用量。预览按已保存的设置生成。",
+        "unpublished": "此文本尚未发布",
+        "empty": "文本为空，无法发布",
+        "not_found": "找不到这份文档"
       },
       "publish": {
         "title": "发布{{doc}}（{{locale}}）第 {{version}} 版？",
         "diff": "比上一版多 {{added}} 字、少 {{removed}} 字",
         "first": "这是该语言的第一个版本。",
         "bump": "重大变更：要求用户重新同意",
-        "bump_hint": "勾选后，约 {{users}} 名普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
-        "bump_hint_loading": "勾选后，普通用户下次打开门户时会看到同意对话框；订阅不会中断。只改错别字时不要勾选。",
+        "bump_hint": "约 {{users}} 名普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
+        "bump_hint_loading": "普通用户下次打开门户时会看到同意对话框。订阅不会中断。",
         "cancel": "取消",
         "confirm": "发布",
         "done": "已发布第 {{version}} 版",
         "conflict": "其他管理员刚发布了新版本，已重新载入",
         "too_large": "正文超过 {{max}} 字节，无法发布",
-        "failed": "发布失败，请重试"
+        "failed": "发布失败，请重试",
+        "kind_label": "变更类型",
+        "minor": "一般修改",
+        "minor_hint": "不会再次询问用户。适用于修正错别字和调整措辞。",
+        "bump_effect": "你将要求所有普通用户重新同意此文档。",
+        "confirm_bump": "发布并要求用户重新同意"
       },
       "history_sheet": {
         "title": "{{doc}}版本历史",
@@ -774,12 +823,77 @@
       "err_url": "请输入以 http:// 或 https:// 开头、端口有效（1 到 65535）的地址",
       "err_server": "{{message}}",
       "info": "说明"
+    },
+    "unit": {
+      "minutes": "分钟",
+      "hours": "小时",
+      "seconds": "秒",
+      "days": "天",
+      "per_minute": "次/分钟"
+    },
+    "unsaved_short": "未保存",
+    "nav_label": "设置分类",
+    "section_label": "设置分类",
+    "section_separator": "、",
+    "dirty_sections": "以下分类有未保存的修改：{{sections}}。仍要离开吗？",
+    "search": {
+      "placeholder": "搜索设置",
+      "label": "搜索设置",
+      "none": "没有与“{{query}}”匹配的设置",
+      "results": "匹配的设置"
+    },
+    "secret_hint": "已保存。留空则保持不变。",
+    "rows": {
+      "move_up": "上移{{name}}",
+      "move_down": "下移{{name}}",
+      "remove": "删除{{name}}"
+    },
+    "danger": {
+      "confirm": "仍要保存",
+      "login_mode_sso_redirect": {
+        "title": "将所有人直接跳转到 SSO？",
+        "message": "登录页会把所有人直接送到身份提供商，不再显示密码登录表单。如果 SSO 出故障，只有管理员还能通过本地登录的直接地址登录。",
+        "sso_off": "目前 SAML 和 OIDC 都未启用，在启用其中之一之前，面板仍只提供本地登录。",
+        "sso_unknown": "无法确认 SAML 或 OIDC 是否已启用。"
+      },
+      "login_mode_local_only": {
+        "title": "关闭 SSO 登录？",
+        "message": "登录页将不再提供 SSO 登录。没有本地密码的账号将无法登录。"
+      },
+      "disallow_user_local_login": {
+        "title": "禁止非管理员使用本地登录？",
+        "message": "除管理员外的所有账号将无法再用密码或通行密钥登录；没有 SSO 身份的账号将无法登录。管理员仍可本地登录。"
+      },
+      "require_2fa_for_staff": {
+        "title": "强制管理员和运营启用两步验证？",
+        "message": "未绑定验证器 App 或通行密钥的管理员和运营，登录时必须先完成绑定才能使用面板。仅在允许验证器 App 或通行密钥时生效。"
+      },
+      "jwt_issuer": {
+        "title": "修改 JWT 签发者？",
+        "message": "所有已登录的会话都会失效，包括你自己的，需要重新登录。"
+      },
+      "jwt_ttl": {
+        "title": "缩短会话有效期？",
+        "message": "此后访问令牌有效 {{access}} 分钟，刷新令牌有效 {{refresh}} 分钟，用户会更早需要重新登录。"
+      },
+      "lockout": {
+        "title": "保存这条锁定规则？",
+        "message": "{{window}} 分钟内失败 {{threshold}} 次将锁定 {{duration}} 分钟。阈值过低可能把管理员也锁在门外。"
+      },
+      "panel_path": {
+        "title": "将面板移到 {{to}}？",
+        "message": "保存后本页将在 {{url}} 重新加载，{{from}} 不再可用。如果启用了 SSO，请同步更新身份提供商中登记的回调地址。",
+        "lost": "保存后页面将跳转，以下分类未保存的修改会丢失：{{sections}}。请先保存它们。"
+      },
+      "sub_path": {
+        "title": "修改订阅路径？",
+        "message": "所有已发出的订阅链接都会失效，用户需要到订阅页面获取新链接。"
+      }
     }
   },
   "traffic": {
     "title": "流量看板",
     "load_failed": "暂时无法加载流量数据",
-    "retry": "重试",
     "poll_now": "立即采集",
     "poll_done": "采集完成",
     "node_tunnel_line": "{{parent}} · 隧道线路 {{line}}",
@@ -827,7 +941,19 @@
       "summary_down": "下行",
       "summary_range": "范围",
       "chart_note": "图表基于累计快照差值生成。",
-      "timezone": "时区"
+      "timezone": "时区",
+      "range": "时间范围",
+      "granularity": "粒度",
+      "no_match": "无匹配项",
+      "timezone_unknown": "未知时区，请使用 Asia/Shanghai 这样的名称。"
+    },
+    "scope_label": "查看维度",
+    "rank_limit": "显示数量",
+    "chart": {
+      "empty": "该时间范围内没有流量",
+      "aria": "{{from}} 至 {{to}} 的流量，合计 {{total}}",
+      "table": "以表格显示",
+      "col_date": "日期"
     }
   },
   "templates": {
@@ -837,7 +963,6 @@
     "subtitle": "一个方案由客户端模板和绑定规则集组成，订阅渲染会以这里的绑定为准。",
     "create": "新增方案",
     "edit_title": "编辑配置方案",
-    "selection_count": "已选 {{count}}",
     "batch_delete": "批量删除",
     "field": {
       "slug": "Slug",
@@ -873,10 +998,13 @@
       "missing_targets": "规则目标未在模板代理组中找到：{{names}}",
       "groups_ok": "已识别 {{n}} 个代理组，规则目标匹配正常。",
       "no_binding": "当前未绑定规则集，只会渲染节点、代理组和个人规则。",
-      "incomplete": "模板内容尚未完整，请继续编辑。"
+      "incomplete": "模板内容尚未完整，请继续编辑。",
+      "propagation": "修改最长需要一分钟才会反映到订阅。"
     },
     "validate": {
-      "slug_name_required": "slug 和 name 必填"
+      "slug_name_required": "slug 和 name 必填",
+      "slug_exists": "已存在 slug 为“{{slug}}”的配置方案 —— 请换一个 slug",
+      "slug_reserved": "保留的 slug“{{slug}}”不能使用，请换一个"
     },
     "toast": {
       "saved": "已保存",
@@ -891,18 +1019,33 @@
       "reset_title": "恢复为内置默认？",
       "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
       "batch_delete_title": "批量删除配置方案",
-      "batch_delete_message": "确定删除 {{count}} 个配置方案？"
+      "batch_delete_message": "确定删除 {{count}} 个配置方案？",
+      "batch_delete_hidden": "其中 {{count}} 个不在当前列表中。"
     },
     "reset_to_default": "恢复内置默认",
     "cannot_delete_seeded": "内置默认配置方案不可删除，使用「恢复内置默认」可还原",
-    "duplicate": "复制为新的配置方案"
+    "duplicate": "复制为新的配置方案",
+    "row_menu": "{{name}} 的更多操作",
+    "row_delete": "删除",
+    "search_placeholder": "按 slug、名称或客户端搜索",
+    "no_match": "没有符合搜索条件的配置方案",
+    "clear_search": "清除搜索",
+    "empty": "还没有配置方案",
+    "empty_hint": "订阅渲染需要为每种客户端类型至少配置一个方案。",
+    "cannot_delete_default": "默认配置方案不可删除，请先把其他方案设为默认",
+    "no_rule_sets": "没有规则集",
+    "readonly_note": "你可以查看此方案，但不能修改。",
+    "detail": {
+      "not_found": "未找到此配置方案",
+      "forbidden": "你无权打开此配置方案",
+      "forbidden_create": "你无权新增配置方案"
+    }
   },
   "sync_tasks": {
     "title": "同步任务",
     "pending_count": "当前列表等待重试：{{count}}",
-    "purge": "一键清空",
+    "purge": "清空已完成的任务",
     "refresh": "刷新",
-    "selection_count": "已选 {{count}}",
     "batch_retry": "批量重试",
     "batch_cancel": "批量中止",
     "filter_status": "状态",
@@ -941,13 +1084,17 @@
     "action": {
       "detail": "详情",
       "retry": "重试",
-      "cancel": "中止"
+      "cancel": "中止",
+      "row_menu": "任务 #{{id}} 的更多操作"
     },
     "confirm": {
       "purge_title": "清空已完成任务",
       "purge_message": "清空所有非进行中（已成功 / 已取消）的同步任务记录？等待中 / 执行中的任务不受影响。",
       "batch_cancel_title": "批量中止任务",
-      "batch_cancel_message": "确定中止选中的 {{count}} 个同步任务？"
+      "batch_cancel_message": "确定中止选中的 {{count}} 个同步任务？",
+      "cancel_title": "中止同步任务",
+      "cancel_message": "确定中止任务 #{{id}}（{{type}}）？中止后不会再重试。",
+      "cancel_confirm": "中止任务"
     },
     "toast": {
       "purged": "已清空 {{count}} 条记录",
@@ -955,7 +1102,22 @@
       "batch_canceled": "已中止 {{count}} 个任务",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
     },
-    "detail_title": "任务详情"
+    "detail_title": "任务详情",
+    "reason": {
+      "waiting_retry_other": "已尝试 {{count}} 次，等待重试",
+      "not_started": "尚未执行"
+    },
+    "empty": "没有同步任务",
+    "empty_hint": "面板把变更推送到服务器失败时，任务会在这里排队重试。队列是空的说明没有待处理的推送。",
+    "empty_filtered": "没有符合筛选条件的任务",
+    "load_failed": "暂时无法加载同步任务",
+    "refresh_failed": "刷新失败，下面显示的是上一次读取到的任务。",
+    "detail": {
+      "created": "创建时间",
+      "updated": "更新时间",
+      "finished": "完成时间",
+      "record": "完整记录"
+    }
   },
   "sync_status": {
     "title": "后台同步任务",
@@ -998,40 +1160,28 @@
       "other": "尚不能识别此类上报；请检查服务器，并展开技术详情排查。"
     },
     "search": "搜索服务器、代码、对象或详情",
-    "search_action": "搜索",
     "refresh": "刷新",
     "empty": "没有匹配的节点问题。",
     "acknowledge": "确认已查看",
     "acknowledged": "已确认查看",
-    "view_details": "详情",
-    "open_details": "查看 {{server}} 的{{problem}}",
-    "clear_search": "清空搜索",
-    "loading": "正在加载节点问题",
     "load_failed": "无法加载记录，请刷新重试；当前显示的记录可能来自上一次查询。",
     "empty_review": "没有待查看的记录。",
-    "page_summary": "本页 {{records}}，归为 {{groups}}",
     "record_count_other": "{{count}} 条记录",
-    "group_count_other": "{{count}} 组问题摘要",
     "review_notice": "已查看不代表已恢复；这些上报记录不是实时健康检查。",
     "detail_scope": "本页共 {{records}}；原始日志在下方折叠保留。已查看不代表已恢复。",
-    "mobile_meta": "{{records}} · 最近出现 {{time}} {{timezone}}",
     "server_id": "服务器 #{{id}}",
     "record_id": "上报记录 #{{id}}",
     "unknown_server": "未关联的节点 Agent",
     "unknown_title": "其他节点问题",
     "reviewed_at": "查看时间",
     "bulk": {
-      "select_page": "全选本页待查看",
-      "select_group": "选择 {{server}} 的{{problem}}在本页的待查看记录",
-      "select_record": "选择上报记录 #{{id}}",
-      "selected": "已选 {{records}}",
-      "clear": "取消选择",
       "acknowledge": "批量确认已查看",
       "confirm_title": "批量确认查看",
       "confirm_message": "将所选的 {{records}} 标记为已查看？仅包含本页记录（含折叠记录），不会删除记录或修复节点。",
       "progress": "已处理 {{done}} / {{total}} 条记录",
       "done": "已将 {{records}} 标记为已查看",
-      "partial": "已确认 {{ok}} 条，{{fail}} 条失败；仍在本页的失败记录保留勾选，可重试。"
+      "partial": "已确认 {{ok}} 条，{{fail}} 条失败；仍在本页的失败记录保留勾选，可重试。",
+      "select_record": "选择上报记录 #{{id}}"
     },
     "code_titles": {
       "core_telemetry_failed": "无法读取内核状态或流量",
@@ -1063,36 +1213,6 @@
       "route_regexp_skipped": "路由跳过了正则条目",
       "route_policy_approximate": "路由上的策略为近似处理"
     },
-    "code_summaries": {
-      "core_telemetry_failed": "节点未能读取内核运行状态或流量计数。",
-      "core_convergence_failed": "内核未能应用所要求的运行配置。",
-      "object_pending_timeout": "配置或客户端对象超过期限后仍等待应用。",
-      "object_rejected_timeout": "被拒绝的对象持续未变更，需要人工查看。",
-      "segment_rejected": "节点拒绝了收到的配置文档。",
-      "roster_ahead_of_config": "客户端列表依赖的配置尚未收到。",
-      "attachment_unknown_listener": "客户端列表引用的入站不在配置中。",
-      "directives_ahead_of_roster": "策略依赖的客户端列表尚未收到。",
-      "directive_unknown_client": "策略引用的客户端不在列表中。",
-      "report_missing_object": "完整节点报告缺少应有的对象。",
-      "destination_policy_report_only_not_deployed": "这台节点没有收到全部仅报告规则（超出规则预算；或在嗅探不足的入站上被限定/去掉）；拦截规则不受影响。",
-      "destination_policy_resolve_not_deployed": "这台节点保持按原样（不解析主机名）：某个入站的嗅探开了 routeOnly:true 或无法解析，会替换被解析的名字；其余策略照常执行。",
-      "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
-      "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
-      "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。",
-      "front_withheld": "一个已保存的 SNI 共用端口没有发给这台服务器（原因见详情），它后面的监听器保持自己的端口。",
-      "tunnel_listener_orphan": "隧道监听器的线路已不存在。请在服务器的端口占用里或它的节点页移除该监听器。",
-      "roster_identity_capacity": "这台服务器至少有 20,000 个客户端身份。同步大小取决于编码后的数据，包括身份关联的监听器。",
-      "cdn_landing_unfit": "节点的传输已无法放在 CDN 后面，它的 CDN 线路不再出现在订阅里（详情里有线路和原因）。请把节点改回去，或删除这条线路。",
-      "cdn_line_client_tls": "CDN 线路不再出现在订阅里：它的客户端 TLS 已关闭，而节点的传输（gRPC 或 Trojan）需要 TLS。请为该线路开启客户端 TLS，或删除它。",
-      "source_guard_withheld": "一条中转线路不出现在订阅里：节点无法把它与直连区分开（倍率不同而服务器无法检查来源），或还不知道它的流量来自哪些地址。线路见详情。",
-      "source_guard_refused": "落地拒绝了某条线路来自一个不在该线路来源地址里的地址的连接。如果这个地址是合法的，请把它加入线路的来源地址。",
-      "tunnel_factor_stale": "隧道监听器保存的线路流量倍率已过期。请重新保存该线路的流量倍率。",
-      "routes_not_sent": "某个节点已保存的按目标分流路由没有发给这台服务器（原因见详情），它的流量走默认出口。",
-      "route_listener_withheld": "某个入站因路由无法下发而不带路由发送（原因见详情），它的流量走默认出口。",
-      "route_skipped": "有一条路由没有可下发的目标，已从配置中省略。",
-      "route_regexp_skipped": "路由跳过了列表中的正则条目：路由不接受正则。",
-      "route_policy_approximate": "在 Xray 上，使用正则或关键字的目标策略规则无法与路由精确组合，已做近似处理。"
-    },
     "filter": {
       "all": "全部查看状态",
       "unacknowledged": "待查看",
@@ -1113,9 +1233,11 @@
       "key": "对象",
       "detail": "详情",
       "first_seen": "首次出现",
-      "last_seen": "最近出现",
-      "actions": "操作"
-    }
+      "last_seen": "最近出现"
+    },
+    "load_failed_title": "暂时无法加载节点问题",
+    "acknowledge_all": "确认全部 {{count}} 条已查看",
+    "acknowledge_selected_other": "确认所选 {{count}} 条已查看"
   },
   "geo_anomalies": {
     "incomplete": "有面板读取失败，这个数字是下限而不是总数。",
@@ -1334,7 +1456,7 @@
     "help": {
       "label": "说明",
       "queue": "每个需要处理的账号一行，最紧急的在前：已标记且被自动暂停、已标记、异地自动暂停、疑似，再按最近变化。通知铃只数需立即处理的账号（已标记或异地自动暂停）。「忽略」让账号离开这里，直到出现新的或更严重的信号；「信任此账号」长期豁免地点类检测。只提示的信号不会改动任何账号；只有开启了自动临时暂停时，系统才会自行暂停账号。",
-      "live": "最近一次流量轮询（或手动刷新）时每块面板上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。",
+      "live": "最近一次流量轮询（或手动刷新）时每台服务器上此刻在连的地址。这是快照，可能过时，时间见上方。立即刷新不计入判定。",
       "records": "每次进入或离开「疑似」「已标记」、每次自动临时暂停的施加与解除，以及管理员的忽略与信任操作。每条都带当时的依据，不含 IP、人名或备注。",
       "policy": "每张卡片是一个检测项：开关、预设、关键阈值，其余在「高级」里。留空即出厂默认。分组例外在页面底部，单独保存。"
     },
@@ -1354,13 +1476,18 @@
       "filter_source": "来源",
       "filter_urgent": "仅需立即处理",
       "search": "搜索用户",
+      "title": "待处理账号",
+      "clear_filters": "清除筛选",
+      "filter_urgent_remove": "移除「仅需立即处理」筛选",
+      "reloading": "正在刷新列表",
+      "row_menu": "{{upn}} 的操作",
+      "col_actions": "操作",
       "col_user": "用户",
       "col_level": "级别",
       "col_sources": "信号",
       "col_reason": "原因",
       "col_changed": "最近变化",
       "col_review": "处理",
-      "row_open": "打开 {{upn}} 的风控详情",
       "places_more": "等 {{count}} 处",
       "headline_no_signal": "当前无信号",
       "empty": "没有需要处理的账号",
@@ -1390,20 +1517,20 @@
       "snapshot_none": "还没有快照：启动后第一次流量轮询完成时出现，也可以立即刷新。",
       "stale": "快照已超过 {{minutes}} 分钟，可能已经过时。",
       "refresh": "立即刷新",
-      "refresh_hint": "向每块面板各请求一次在线地址。不计入异地并发判定，也不写入连接历史或标记记录。",
-      "refreshed": "已刷新：{{panels}} 块面板，{{connections}} 个连接",
+      "refresh_hint": "向每台服务器各请求一次在线地址。不计入异地并发判定，也不写入连接历史或标记记录。",
+      "refreshed": "已刷新：{{panels}} 台服务器，{{connections}} 个连接",
       "just_polled": "刚完成一次轮询，已显示它的快照",
       "cooldown": "刷新过于频繁，请 {{seconds}} 秒后再试",
       "in_progress": "正在刷新，请稍候",
-      "unread": "{{count}} 块面板读取失败，其上的连接未列出：{{names}}",
-      "unsupported": "{{count}} 块面板不提供在线地址（如 S-UI），其上的连接无法列出：{{names}}",
+      "unread": "{{count}} 台服务器读取失败，其上的连接未列出：{{names}}",
+      "unsupported": "{{count}} 台服务器不提供在线地址（如 S-UI），其上的连接无法列出：{{names}}",
       "unreferenced": "有 {{count}} 个节点还没有上一次的参照时间（启动后第一次读取），无法确认它们是否仍在扫描，这次一律当作仍在扫描：已经停止扫描的节点，它最后一次扫描（最多 30 分钟前）看到的地址也会当作在连。",
       "truncated": "有 {{count}} 个连接超出单账号 {{max}} 个的上限，未列出",
       "empty": "此刻没有在连的账号",
       "empty_filtered": "没有符合条件的连接",
-      "empty_unread": "没有列出任何连接，但有 {{count}} 块面板读取失败，那里的连接无从得知",
+      "empty_unread": "没有列出任何连接，但有 {{count}} 台服务器读取失败，那里的连接无从得知",
       "filter_user": "用户",
-      "filter_panel": "面板",
+      "filter_panel": "服务器",
       "filter_sources": "来源",
       "opt_all": "全部",
       "opt_kept": "参与判定",
@@ -1411,7 +1538,7 @@
       "col_user": "用户",
       "col_connections": "连接数",
       "col_ip": "IP",
-      "col_panel": "面板 / 节点",
+      "col_panel": "服务器 / 节点",
       "col_region": "地区",
       "col_status": "判定",
       "col_seen": "仍有连接",
@@ -1425,7 +1552,7 @@
       },
       "source_key": "来源 {{key}}",
       "still_connected": "仍有连接（截至 {{time}}）",
-      "still_connected_hint": "3X-UI 只报告此刻仍有连接的地址；这里是面板扫描的时间，不是这个地址最后一次使用的时间。",
+      "still_connected_hint": "3X-UI 只报告此刻仍有连接的地址；这里是服务器扫描的时间，不是这个地址最后一次使用的时间。",
       "seen_none": "无时间戳",
       "node_hint": "3X-UI 的节点标识，原样显示",
       "device_inferred": "推断",
@@ -1435,7 +1562,7 @@
       "devices_unavailable": "订阅日志暂时读不到，本页没有推断设备",
       "device_fetches": "{{count}} 次拉取，最近 {{time}}",
       "stale_addresses": "上游窗口里另有 {{count}} 个已断开的地址",
-      "incomplete": "有面板读取失败，这个账号的连接可能不全",
+      "incomplete": "有服务器读取失败，这个账号的连接可能不全",
       "show_connections": "查看连接",
       "hide_connections": "收起连接"
     },
@@ -1476,6 +1603,7 @@
         "trusted": "信任",
         "untrusted": "取消信任"
       },
+      "col_actions": "操作",
       "col_at": "时间",
       "col_user": "用户",
       "col_source": "来源",
@@ -1529,8 +1657,9 @@
     "retry": "重试",
     "drawer": {
       "title": "风控详情",
-      "close": "关闭",
       "not_found": "用户不存在或已删除",
+      "axis_account": "账号",
+      "axis_service": "代理服务",
       "tab_overview": "概览",
       "tab_connections": "连接",
       "tab_devices": "设备",
@@ -1570,6 +1699,15 @@
       "trust": "信任此账号",
       "untrust": "取消信任",
       "more": "更多操作",
+      "reversible_pause": "可随时在这里或用户管理中恢复。",
+      "reversible_convert_manual": "可随时恢复代理服务。",
+      "reversible_resume": "之后可再次暂停。",
+      "reversible_resume_trust": "将同时信任该账号，可随时再次暂停代理服务或取消信任。",
+      "reversible_dismiss": "不会改变该用户的代理服务，可随时取消忽略。",
+      "reversible_undismiss": "不会改变该用户的代理服务，可再次忽略。",
+      "reversible_trust": "不会改变该用户当前的代理服务，可随时取消信任。",
+      "reversible_trust_resume": "将同时恢复该用户的代理服务，可随时取消信任。",
+      "reversible_untrust": "不会立即改变该用户的代理服务；下一轮检测起地点类检测重新判定，满足条件时可能再次暂停，可再次信任。",
       "pause_title": "暂停 {{upn}} 的代理服务？",
       "pause_message": "只暂停代理与订阅，不锁面板登录。状态记为「{{state}}」，不会自动恢复。",
       "pause_note": "告知用户的说明（可选）",
@@ -1577,7 +1715,7 @@
       "convert_title": "改为人工暂停 {{upn}}？",
       "convert_message": "自动临时暂停到期后不再自动恢复；状态改记为「异地人工暂停」，直到管理员恢复。",
       "resume_title": "恢复 {{upn}} 的代理服务？",
-      "resume_message": "清除「{{reason}}」暂停并推送到各面板。",
+      "resume_message": "清除「{{reason}}」暂停并推送到各服务器。",
       "resume_geo_auto_warning": "如果仍在多地同时使用，满足暂停条件时会再次自动暂停。确认是误判的，可同时信任此账号。",
       "resume_also_trust": "同时信任此账号",
       "dismiss_title": "忽略 {{upn}} 当前的信号？",
@@ -1604,7 +1742,7 @@
       "reason_changed": "暂停原因已被更改，已刷新",
       "nothing_to_dismiss": "当前没有需要忽略的信号，已刷新",
       "resume_failed": "已信任，但恢复代理服务失败：{{error}}",
-      "resume_warning": "已信任并恢复代理服务，但推送到面板失败且未能排队重试：{{error}}",
+      "resume_warning": "已信任并恢复代理服务，但推送到服务器失败且未能排队重试：{{error}}",
       "note_too_long": "最多 200 字"
     },
     "review": {
@@ -1649,12 +1787,10 @@
       "advanced": "高级",
       "disposal": "处置",
       "default_adornment": "默认",
-      "reset_default": "恢复默认",
       "range_default": "范围 {{min}}–{{max}}，默认 {{d}}",
       "min_default": "不小于 {{min}}，默认 {{d}}",
       "default_only": "默认 {{d}}",
       "out_of_range": "超出允许范围",
-      "invalid": "有 {{count}} 项超出范围，无法保存",
       "save": "保存策略",
       "discard": "放弃修改",
       "saved": "策略已保存",
@@ -1671,6 +1807,8 @@
       "pick_group": "选择分组",
       "group_save": "保存本组例外",
       "group_saved": "分组例外已保存",
+      "group_not_saved": "策略保存失败，分组「{{name}}」的例外尚未保存。",
+      "group_failed_after_policy": "策略已保存，但分组「{{name}}」的例外保存失败。",
       "group_dirty": "本组例外有未保存的修改",
       "no_groups": "还没有分组",
       "hwid_on_devices": "设备数依赖「数据与刷新」中的设备标识采集。",
@@ -1685,8 +1823,6 @@
   "logs": {
     "title": "日志管理",
     "load_failed": "暂时无法加载日志",
-    "cert_load_failed": "暂时无法加载证书日志",
-    "retry": "重试",
     "tab_sub": "订阅日志",
     "tab_audit": "审计日志",
     "tab_auth": "认证日志",
@@ -1707,7 +1843,6 @@
       "ok": "成功",
       "fail": "失败"
     },
-    "auth_filter_all": "全部",
     "auth_outcome": {
       "success": "成功",
       "failure": "失败"
@@ -1726,7 +1861,6 @@
     "retention_hint": "0 = 永不自动清理。当前值会被「清理过期」按钮使用。",
     "clear_all": "清空全部",
     "purge_old": "清理过期",
-    "view_detail": "详情",
     "region_hint": "地区由离线 IP 库估算；城市级仅供参考",
     "sub_table": {
       "id": "ID",
@@ -1751,18 +1885,21 @@
       "user": "用户",
       "to": "收件人",
       "kind": "类型",
-      "at": "发送时间"
+      "at": "发送时间",
+      "window": "通知窗口"
     },
     "filter": {
       "audit_search": "搜索 操作者 / 动作 / 对象",
       "auth_search": "搜索 用户 / IP / 原因",
       "sub_search": "搜索 用户 / IP / UA / 客户端",
       "email_search": "搜索 用户 / 收件人 / 类型",
-      "user_chip": "用户：{{upn}}"
+      "user_chip": "用户：{{upn}}",
+      "user_remove": "清除用户筛选"
     },
     "detail": {
       "before": "操作前",
-      "after": "操作后"
+      "after": "操作后",
+      "region": "地区"
     },
     "confirm": {
       "clear_sub_title": "清空订阅日志",
@@ -1770,11 +1907,35 @@
       "clear_audit_title": "清空审计日志",
       "clear_audit_message": "确定清空所有审计日志？此操作不可恢复。",
       "clear_email_title": "清空邮件日志",
-      "clear_email_message": "确定清空所有邮件日志？此操作不可恢复。"
+      "clear_email_message": "确定清空所有邮件日志？此操作不可恢复。",
+      "purge_sub_title": "清理过期订阅日志",
+      "purge_sub_message": "删除超过保留期限的订阅日志？保留期限可在“保留期限”里查看和修改。此操作不可恢复。",
+      "purge_email_title": "清理过期邮件日志",
+      "purge_email_message": "删除超过保留期限的邮件日志？保留期限可在“保留期限”里查看和修改。此操作不可恢复。"
     },
     "toast": {
       "cleared": "已清空",
       "purged": "已清理 {{count}} 条过期日志"
+    },
+    "result_count_other": "共 {{count}} 条",
+    "empty": "暂时没有日志记录",
+    "empty_sub": "有人拉取订阅后，记录会出现在这里。",
+    "empty_audit": "管理员和操作员做出的变更会记录在这里。",
+    "empty_auth": "成功和失败的登录都会记录在这里。",
+    "empty_email": "面板发出通知邮件后，记录会出现在这里。",
+    "empty_certs": "证书签发或续期后，记录会出现在这里。",
+    "empty_filtered": "没有符合筛选条件的记录",
+    "clear_filters": "清除筛选",
+    "refresh_failed": "刷新失败，下面显示的是上一次读取到的记录。",
+    "maintenance": "清理选项",
+    "retention_open": "保留期限",
+    "retention_unit": "天",
+    "retention_label_email": "邮件日志保留天数",
+    "retention_load_failed": "无法读取当前的保留天数",
+    "auth_method": {
+      "local": "本地",
+      "saml": "SAML",
+      "oidc": "OIDC"
     }
   },
   "rules": {
@@ -1784,7 +1945,6 @@
     "subtitle": "规则集是可复用片段，只有绑定到配置方案后才会参与订阅渲染。",
     "create": "新增规则集",
     "edit_title": "编辑规则集",
-    "selection_count": "已选 {{count}}",
     "batch_enable": "批量启用",
     "batch_disable": "批量禁用",
     "batch_delete": "批量删除",
@@ -1794,22 +1954,21 @@
       "sort": "排序",
       "enabled": "启用",
       "direct_subscription_domain": "DIRECT 订阅域名",
-      "proxy_group_order": "代理组顺序",
       "content": "主规则"
     },
     "placeholder": {
       "slug": "ad_block",
       "name": "广告拦截",
-      "proxy_group_order": "🚀 节点选择\n💬 Ai平台\n🎮 游戏平台",
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个代理组名。未列出的代理组会放在开头，并保持主规则中的首次出现顺序。",
       "direct_subscription_domain": "开启后，会在该规则集前面自动生成 DOMAIN-SUFFIX,<订阅域名>,DIRECT。未配置有效的订阅 Base URL 时不会生成；关闭后订阅更新按其它规则处理。"
     },
     "tabs": {
-      "rules": "主规则",
-      "members": "代理组成员"
+      "rules": "规则",
+      "members": "代理组",
+      "basics": "基本信息",
+      "label": "页面分区"
     },
     "mihomo": {
       "rematches": "Rematch 出站",
@@ -1853,9 +2012,7 @@
       "system_default": "系统默认",
       "unsaved": "有未保存的修改",
       "no_groups": "主规则中尚未识别到代理组",
-      "first_default": "第一项是客户端默认选中的出口",
       "restore_default": "恢复系统默认",
-      "default_badge": "默认",
       "group_type": "代理组类型",
       "type": {
         "select": "手动选择（select）",
@@ -1958,7 +2115,9 @@
         "invalid_strategy": "未知负载均衡策略：{{value}}",
         "insufficient_auto_members": "自动测速或负载均衡通常至少需要两个可用成员",
         "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含内置出站或 Rematch 出站，请按节点或线路选择成员，或引用代理组"
-      }
+      },
+      "kind_label": "成员类型",
+      "no_match": "没有匹配项"
     },
     "table": {
       "slug": "Slug",
@@ -1978,7 +2137,21 @@
       "slug_name_required": "slug 和 name 必填",
       "slug_exists": "已存在 slug 为“{{slug}}”的规则集 —— 请换一个 slug",
       "proxy_group_members": "代理组成员配置存在错误，请先修正",
-      "rule_extensions": "主规则、子规则或 Rematch 出站存在错误，请先修正"
+      "rule_extensions": "主规则、子规则或 Rematch 出站存在错误，请先修正",
+      "slug_reserved": "「{{slug}}」是保留的标识，请换一个。",
+      "value_empty": "请输入规则要匹配的内容",
+      "value_comma": "这里不能包含逗号或换行",
+      "value_space": "域名不能包含空格",
+      "value_cidr": "请输入有效的地址或地址段，例如 10.0.0.0/8",
+      "value_port": "请输入不超过 65535 的端口，或形如 1000-2000 的范围",
+      "value_network": "请填写 tcp 或 udp",
+      "unsafe_comment": "空格加 # 在列表中表示注释，不能出现在匹配内容中",
+      "unsafe_colon": "冒号加空格不能出现在匹配内容中",
+      "unsafe_quote": "匹配内容中不能含有引号",
+      "unsafe_template": "匹配内容中不能含有 {{ }}",
+      "unsafe_indicator": "匹配内容不能以这个字符开头",
+      "unsafe_parens": "括号必须成对",
+      "unsafe_control": "匹配内容中不能含有控制字符"
     },
     "toast": {
       "saved": "已保存",
@@ -1987,6 +2160,7 @@
       "batch_enabled": "已启用 {{count}} 个规则集",
       "batch_disabled": "已停用 {{count}} 个规则集",
       "batch_deleted": "已删除 {{count}} 个规则集",
+      "batch_stale": "有 {{count}} 个规则集在列表载入后已被修改，未更新。列表现已显示它们的当前版本。",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
     },
     "confirm": {
@@ -1998,11 +2172,459 @@
       "cleanup_groups_title": "同时删除代理组配置？",
       "cleanup_groups_message": "当前主规则已不再包含以下代理组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
       "batch_delete_title": "批量删除规则集",
-      "batch_delete_message": "确定删除 {{count}} 个规则集？"
+      "batch_delete_message": "确定删除 {{count}} 个规则集？",
+      "cleanup_groups_action": "删除并保存",
+      "batch_delete_hidden": "其中 {{count}} 个不在当前列表中。"
     },
     "reset_to_default": "恢复内置默认",
     "cannot_delete_seeded": "内置默认规则集不可删除，使用「恢复内置默认」可还原",
-    "duplicate": "复制为新的规则集"
+    "duplicate": "复制为新的规则集",
+    "row_menu": "{{name}} 的更多操作",
+    "row_delete": "删除",
+    "search_placeholder": "按 slug 或名称搜索",
+    "no_match": "没有符合搜索条件的规则集",
+    "clear_search": "清除搜索",
+    "empty": "还没有规则集",
+    "empty_hint": "规则集只有绑定到配置方案后才会参与订阅渲染。",
+    "editor_keyboard_hint": "Tab 键用于缩进。要把焦点移出编辑器，先按 Esc 再按 Tab；Ctrl+M（macOS 为 Shift+Alt+M）可切换 Tab 键是缩进还是移动焦点。",
+    "detail": {
+      "not_found": "未找到这个规则集",
+      "forbidden": "你无权打开这个规则集",
+      "forbidden_create": "你无权新增规则集"
+    },
+    "page": {
+      "breadcrumb": "规则库",
+      "new_title": "新增规则集",
+      "meta": "{{slug}} · {{status}} · 被 {{count}} 个配置方案引用",
+      "meta_unused": "{{slug}} · {{status}} · 未被配置方案引用"
+    },
+    "view": {
+      "blocks": "分组",
+      "text": "文本",
+      "label": "视图"
+    },
+    "stats": "{{rules}} 条规则 · {{blocks}} 个分组",
+    "read_only": "只有管理员可以修改规则集",
+    "toolbar": "规则工具",
+    "undo": "撤销",
+    "redo": "重做",
+    "too_large": "规则集过大（{{size}}），超过可保存的上限 {{limit}}",
+    "too_large_proxy": "服务器拒绝了过大的规则集（{{size}}）。面板前面的反向代理允许的大小可能比面板更小；使用 nginx 时，请调大 client_max_body_size。",
+    "stale_title": "规则集已被修改",
+    "stale_body": "在你编辑期间，这个规则集被他人保存、恢复为默认、在磁盘上被修改，或在你的另一个标签页中保存。你的修改仍在这里，尚未保存。",
+    "revision_missing": "这个规则集载入时没有版本号，无法安全保存。请刷新页面后重试。",
+    "stale_gone": "在你编辑期间，这个规则集被修改或删除，无法读取当前版本。你的修改仍在这里，尚未保存。",
+    "stale_review": "查看对方的更改",
+    "stale_overwrite": "以我的版本覆盖",
+    "stale_discard": "放弃我的修改并载入对方的版本",
+    "stale_overwrite_title": "覆盖对方的版本？",
+    "stale_overwrite_message": "你的版本将替换刚刚保存的版本。除非你已另行复制，对方的更改会丢失。",
+    "stale_overwrite_action": "覆盖",
+    "stale_discard_title": "放弃你的修改？",
+    "stale_discard_message": "未保存的修改将被丢弃，页面显示刚刚保存的版本。",
+    "stale_discard_action": "放弃我的修改",
+    "conflict": {
+      "description": "两边都与你开始编辑时的版本比较。",
+      "theirs": "对方的更改",
+      "mine": "你的更改",
+      "fields": "其它改动的字段：{{fields}}",
+      "both": "双方都改了且结果不同：{{fields}}",
+      "none_both": "没有双方都改动的内容。",
+      "no_changes": "这一方没有更改。",
+      "content_same": "规则文本没有变化。",
+      "field": {
+        "content": "规则",
+        "name": "名称",
+        "sort": "排序",
+        "enabled": "启用",
+        "direct_subscription_domain": "DIRECT 订阅域名",
+        "proxy_group_order": "代理组顺序",
+        "proxy_group_members": "代理组成员",
+        "proxy_group_options": "代理组设置",
+        "mihomo_sub_rules": "子规则",
+        "mihomo_rematch_outbounds": "Rematch 出站"
+      }
+    },
+    "text": {
+      "mobile_hint": "手机上建议使用分组视图编辑"
+    },
+    "issues": {
+      "main_rules": "主规则",
+      "title": "问题与提示",
+      "none": "没有发现问题",
+      "computing": "正在检查…",
+      "text_only": "规则中有无法按列表读取的行，请先在文本视图中修复，才能检查被前面规则覆盖的规则。",
+      "show_more": "再显示 {{count}} 条",
+      "level": {
+        "error": "错误",
+        "warning": "警告",
+        "info": "提示"
+      },
+      "summary": "{{count}} 条规则永远不会生效",
+      "description": "这些规则已被前面的规则完全覆盖。这里只列出情况，不会修改任何内容。",
+      "tcp_note": "这些结果按 TCP 连接判断。对于 UDP，如果前面那条规则所属代理组选中的代理不支持 UDP，列为“不生效”的规则仍可能生效。",
+      "needs_groups": "大部分检查需要代理组的成员信息，只有管理员可以读取。这里只列出不依赖成员信息的结果：完全相同的规则，以及被 DIRECT 或 REJECT 规则覆盖的规则。",
+      "failed": "无法读取当前草稿的代理组成员，因此只显示不依赖成员信息的结果：完全相同的规则，以及被 DIRECT 或 REJECT 规则覆盖的规则。其余检查需要成员信息。"
+    },
+    "blocks": {
+      "title": "规则分组",
+      "order_hint": "按匹配顺序，从上到下第一条命中的规则生效",
+      "heading": "{{index}} · {{target}}",
+      "line_range": "第 {{from}}–{{to}} 行",
+      "line_single": "第 {{line}} 行",
+      "count": "{{count}} 条",
+      "fallback": "兜底",
+      "text_block": "文本行 · {{count}} 行",
+      "note": "说明",
+      "note_placeholder": "写给维护者的说明，保存为规则前的注释行",
+      "note_edit": "编辑说明",
+      "target": "目标",
+      "change_target": "改为 {{target}}（修改 {{count}} 行）",
+      "add_above": "在上方新增分组",
+      "add_below": "在下方新增分组",
+      "add": "新增分组",
+      "delete": "删除分组",
+      "delete_confirm": "删除分组「{{target}}」及其 {{count}} 条规则？可在保存前撤销。",
+      "merge": "合并",
+      "merge_confirm": "合并这两个分组会删除它们之间的注释：",
+      "empty_title": "还没有规则",
+      "empty_body": "新增一个分组，或粘贴现有的规则列表。",
+      "select_hint": "在左侧选择一个分组",
+      "back": "返回分组列表",
+      "matchers": "{{target}} 的规则",
+      "menu": "第 {{index}} 组的操作",
+      "no_target": "没有目标的行"
+    },
+    "target": {
+      "groups": "代理组",
+      "builtins": "内置出口",
+      "rematch": "Rematch 出站",
+      "builtin": {
+        "DIRECT": "直连，不经过代理",
+        "REJECT": "拒绝连接",
+        "REJECT-DROP": "丢弃，不回应",
+        "PASS": "跳过本条，继续匹配（仅 Mihomo）"
+      },
+      "new_group": "新建代理组…",
+      "new_group_name": "代理组名称",
+      "name_taken": "已有同名的代理组、内置出口或 Rematch 出站",
+      "name_invalid": "名称不能为空，也不能包含逗号或换行"
+    },
+    "matchers": {
+      "col_type": "类型",
+      "col_value": "匹配内容",
+      "col_options": "选项",
+      "count_col": "条数",
+      "add": "添加",
+      "add_title": "添加规则到「{{target}}」",
+      "edit_title": "编辑规则",
+      "paste": "粘贴列表",
+      "import_file": "从文件导入",
+      "filter_type": "全部类型",
+      "filter_label": "筛选规则",
+      "search": "在本分组中查找…",
+      "move_to": "移动到…",
+      "delete_named": "删除 {{value}}",
+      "delete_selected": "删除所选 {{count}} 条",
+      "deleted": "已删除 {{count}} 条规则",
+      "edit_named": "编辑 {{value}}",
+      "row_menu": "{{value}} 的更多操作",
+      "selected_count": "已选 {{count}} 条规则",
+      "shown_of": "显示 {{total}} 条中的 {{shown}} 条",
+      "no_resolve": "不解析",
+      "no_resolve_label": "不解析域名（no-resolve）",
+      "no_resolve_hint": "开启后，域名请求不会为了匹配这条 IP 规则而先做 DNS 解析。",
+      "copy_rules": "复制为规则行",
+      "copy_list": "复制为纯列表",
+      "edit_lines_as_text": "以文本编辑",
+      "empty": "这个分组没有规则",
+      "no_match": "没有符合条件的规则",
+      "support_both": "Mihomo 与 sing-box 都支持",
+      "support_mihomo": "仅 Mihomo",
+      "more_types": "更多类型"
+    },
+    "types": {
+      "DOMAIN-SUFFIX": "域名后缀",
+      "DOMAIN": "完整域名",
+      "DOMAIN-KEYWORD": "域名关键字",
+      "DOMAIN-REGEX": "域名正则",
+      "DOMAIN-WILDCARD": "域名通配",
+      "IP-CIDR": "IP 段",
+      "IP-CIDR6": "IPv6 段",
+      "SRC-IP-CIDR": "来源 IP 段",
+      "IP-SUFFIX": "IP 后缀",
+      "SRC-IP-SUFFIX": "来源 IP 后缀",
+      "IP-ASN": "IP 自治域",
+      "SRC-IP-ASN": "来源 IP 自治域",
+      "GEOSITE": "GeoSite 分类",
+      "GEOIP": "GeoIP 国家或地区",
+      "SRC-GEOIP": "来源 GeoIP",
+      "PROCESS-NAME": "进程名",
+      "PROCESS-NAME-REGEX": "进程名正则",
+      "PROCESS-PATH": "进程路径",
+      "PROCESS-PATH-REGEX": "进程路径正则",
+      "DST-PORT": "目标端口",
+      "SRC-PORT": "来源端口",
+      "IN-PORT": "入站端口",
+      "IN-TYPE": "入站类型",
+      "IN-USER": "入站用户",
+      "IN-NAME": "入站名称",
+      "UID": "用户 ID",
+      "DSCP": "DSCP",
+      "NETWORK": "网络协议",
+      "logical": "逻辑规则",
+      "SUB-RULE": "子规则跳转",
+      "MATCH": "兜底",
+      "RULE-SET": "规则提供者",
+      "REMATCH-NAME": "Rematch",
+      "unknown": "未知类型"
+    },
+    "paste": {
+      "title": "粘贴到「{{target}}」",
+      "new_group_title": "新增分组",
+      "placeholder": "每行一条：域名、IP、IP 段或完整的规则行",
+      "list_label": "要粘贴的列表",
+      "bare_domain": "不带类型的域名按",
+      "check": "检查",
+      "summary": "可添加 {{count}} 条",
+      "by_type": "{{type}} {{count}} 条",
+      "skipped_duplicate": "已跳过 {{count}} 条重复",
+      "skipped_comment": "已跳过 {{count}} 行注释或空行",
+      "ignored_target": "{{count}} 行带有其他目标，已改用本分组的目标",
+      "unrecognized": "{{count}} 行无法识别，不会添加",
+      "earlier_block": "{{value}} 已在第 {{index}} 组（{{target}}）中，新条目不会生效",
+      "overrides_later": "这会让第 {{index}} 组（{{target}}）中的 {{count}} 条规则不再生效",
+      "wildcard_as_suffix": "已按域名后缀处理：同时匹配 {{domain}} 本身",
+      "url_host": "已取网址中的主机名 {{host}}",
+      "more": "另有 {{count}} 条",
+      "submit": "添加 {{count}} 条",
+      "added": "已添加 {{count}} 条",
+      "file_too_large": "文件超过 {{size}}，请拆分后导入",
+      "uses_target": "添加到：{{target}}",
+      "needs_target": "请为新分组选择目标。",
+      "rejected": "{{count}} 行无法写成规则，不会添加",
+      "comment_stripped": "{{count}} 行末尾带有注释，已去掉",
+      "reason": {
+        "empty": "为空",
+        "comma": "含有逗号",
+        "newline": "含有换行",
+        "space_edge": "以空格开头或结尾",
+        "comment": "含有注释（\" #\"）",
+        "colon": "含有冒号加空格",
+        "quote": "含有引号",
+        "template": "含有 {{ }}",
+        "indicator": "以有特殊含义的字符开头",
+        "parens": "括号不成对",
+        "control": "含有控制字符"
+      }
+    },
+    "move": {
+      "title": "移动到…",
+      "after": "放在此分组之后",
+      "first": "移到最前",
+      "into": "移入分组",
+      "new_before": "新建分组，放在当前分组之前",
+      "new_after": "新建分组，放在当前分组之后",
+      "changes_target": "这些条目的去向将由 {{from}} 变为 {{to}}",
+      "submit": "移动",
+      "blocked_filter": "查找或筛选时不能拖动，请使用「移动到…」",
+      "announce": "第 {{from}} 组已移到第 {{to}} 位",
+      "no_destination": "没有其他位置可以移动这个分组"
+    },
+    "search": {
+      "placeholder": "查找域名、IP 或规则…",
+      "results": "共 {{count}} 条，分布在 {{blocks}} 个分组",
+      "none": "没有找到 {{query}}",
+      "by_target": "按目标筛选"
+    },
+    "changes": {
+      "button": "查看更改 +{{added}} −{{removed}}",
+      "title": "未保存的更改",
+      "none": "没有未保存的更改",
+      "block": "第 {{index}} 组 {{target}}：+{{added}} −{{removed}}",
+      "hunk": "第 {{line}} 行附近：+{{added}} −{{removed}}",
+      "added_line": "新增：",
+      "removed_line": "删除：",
+      "kept_line": "未更改：",
+      "truncated": "另有 {{count}} 处更改未显示。"
+    },
+    "stale_line": "这一行在你选择之后已经变化，所以没有写入任何内容。请重新选择。",
+    "slug_unreachable": "标识「{{slug}}」是保留的，所以这个规则集没有页面。仍可在此删除。",
+    "problems": {
+      "indent": "分组视图无法安全地表示其中一些行，修正之前只能使用文本视图。请让每条规则单独占一行，以 \"- \" 开头并保持相同缩进。"
+    },
+    "foreign": {
+      "line": "第 {{line}} 行：{{why}}",
+      "continuation": "是上一行的延续，分组视图无法显示",
+      "indent": "缩进与第一个条目不同",
+      "tab": "使用制表符缩进",
+      "key": "不是列表条目",
+      "marker": "是文档分隔符",
+      "block_scalar": "是多行条目的开头",
+      "empty_item": "是空条目",
+      "linebreak": "含有 Unicode 换行符"
+    },
+    "groups": {
+      "used_by": "被 {{blocks}} 个分组、{{rules}} 条规则引用",
+      "not_used": "没有规则引用这个代理组",
+      "show_rules": "在规则页查看"
+    },
+    "rename": {
+      "action": "重命名",
+      "title": "重命名代理组",
+      "new_name": "新名称",
+      "submit": "重命名",
+      "confirm": "将修改 {{rules}} 行规则和 {{refs}} 处成员引用，并把 {{lists}} 个原本跟随名称的成员列表写成明确的列表。",
+      "hint": "会更新本规则集中的规则、成员列表、选项和代理组顺序。保存规则集之前不会生效，选择「放弃」可恢复原名。",
+      "done": "已重命名为 {{name}}，保存规则集后生效。",
+      "unavailable": {
+        "text_only": "规则中有只能按文本显示的行，请先在文本视图中处理。",
+        "unreadable": "有些只能按文本显示的行仍在使用这个代理组，无法安全地重命名。",
+        "not_ready": "尚未读取到当前草稿的代理组设置，或读取失败。请稍候再试，或先处理已显示的错误。",
+        "taken": "已有同名代理组遗留的设置，改名后会被沿用。请换一个名称。",
+        "unused": "没有规则使用这个代理组，它只出现在成员列表中，无法重命名。"
+      },
+      "not_reached": "本次重命名不会修改：仍在使用旧名称的其他规则集、配置方案自己的代理组顺序和用户的个人规则。在使用这个规则集的配置方案（{{templates}}）中，它们会保留旧名称的代理组，与改名后的代理组并存。",
+      "not_reached_unbound": "本次重命名不会修改：仍在使用旧名称的其他规则集和用户的个人规则。目前没有配置方案使用这个规则集。",
+      "name_note": "与订阅线路或配置方案自身规则中的代理组同名的名称不会生成新的代理组，流量会走向那条线路或那个代理组。",
+      "precedence": "这里写出的成员列表属于本规则集。在配置方案中，第一个为某个代理组提供列表的规则集说了算，所以它们会优先于排在本规则集之后的规则集中同一代理组的列表。"
+    },
+    "targetview": {
+      "label": "显示方式",
+      "runs": "按分组",
+      "merged": "合并查看",
+      "note": "所有指向「{{target}}」的规则，共 {{count}} 条，分布在 {{blocks}} 个分组，合在一起方便查看。规则的顺序决定去向，所以不能在这里修改。要修改规则，请打开所属分组。",
+      "col_group": "分组",
+      "col_line": "行",
+      "open": "打开第 {{index}} 组",
+      "table": "指向 {{target}} 的全部规则",
+      "back_to": "按分组编辑"
+    },
+    "tester": {
+      "title": "测试去向",
+      "address": "地址",
+      "address_placeholder": "域名或 IP",
+      "port": "端口",
+      "network": "网络协议",
+      "more": "更多条件",
+      "resolved_ip": "域名解析得到的 IP",
+      "process": "进程名",
+      "src_port": "来源端口",
+      "src_ip": "来源 IP",
+      "empty": "输入一个域名或 IP，查看它命中哪条规则、走哪个代理组。",
+      "matched": "命中第 {{index}} 组（{{group}}）的规则 {{rule}}，第 {{line}} 行。",
+      "goes_group": "流量交给代理组 {{target}}。",
+      "goes_builtin": "流量{{action}}。",
+      "action": {
+        "DIRECT": "直连",
+        "REJECT": "被拒绝",
+        "REJECT-DROP": "被丢弃"
+      },
+      "no_match": "没有规则命中，Mihomo 会直连。",
+      "no_certain": "没有一条规则能确定命中。",
+      "also_matching": "另有 {{count}} 条规则也能匹配，但排在后面不会生效：",
+      "uncertain_title": "结果不确定",
+      "uncertain_body": "下列规则无法在这里判断，其中任何一条都可能先命中：",
+      "branch_client_data": "第 {{line}} 行 {{rule}} 需要客户端的数据，此处无法判断。",
+      "branch_resolve": "第 {{line}} 行 {{rule}} 是 IP 规则，Mihomo 会在此处解析域名。填写解析得到的 IP 可得到确定结果。",
+      "branch_input": "第 {{line}} 行 {{rule}} 需要一个没有填写的条件（见“更多条件”）。",
+      "branch_regex": "第 {{line}} 行 {{rule}} 的正则表达式无法在此安全运行。",
+      "branch_sub_rule": "第 {{line}} 行 {{rule}} 会跳转到子规则，此处无法跟进。",
+      "branch_unsupported": "第 {{line}} 行 {{rule}} 的类型无法在此判断。",
+      "branch_if_match": "若命中 → {{target}}",
+      "branch_else": "若它们都没有命中，继续向下：",
+      "passed": "第 {{line}} 行命中，但目标是 PASS，会被跳过并继续匹配。",
+      "scope": "仅测试本规则集的草稿。实际订阅中，用户的个人规则、DIRECT 订阅域名规则以及配置方案中排在前面的规则集会先于本规则集匹配。",
+      "mihomo_only": "按 Mihomo 的规则顺序判断；sing-box 会跳过部分规则类型，结果可能不同。",
+      "address_assumption": "假定客户端是按域名连接的。如果它连接的是 IP 地址，请直接输入该地址。",
+      "ip_note": "IP 地址按没有域名的连接测试。",
+      "text_only": "规则中有无法按列表读取的行，修复后才能测试去向。",
+      "problem": {
+        "address_invalid": "请输入域名或 IP，不要带网址、端口或空格",
+        "port_invalid": "端口必须是 0 到 65535 的数字",
+        "resolved_invalid": "解析得到的 IP 格式不正确",
+        "src_invalid": "来源端口或来源 IP 格式不正确",
+        "address_empty": "请输入域名或 IP",
+        "address_idn": "请输入域名的 punycode（xn--）形式，含非 ASCII 字符的域名无法在这里判断"
+      },
+      "more_count": "还有 {{count}} 条",
+      "go_to_line": "转到第 {{line}} 行",
+      "back": "返回规则",
+      "show_tester": "显示测试去向",
+      "hide_tester": "隐藏测试去向",
+      "branch_resolve_entered": "第 {{line}} 行 {{rule}} 是 no-resolve 的 IP 规则。你填写的解析 IP 落在它的范围内，但这里无法确定前面的规则是否已经解析过这个域名。",
+      "continues_title": "这条规则可能不是最终结果",
+      "continues_body": "{{target}} 可能把匹配继续交给下面的规则（它当前的选择可能是 PASS，或者它是 Rematch 出站）。下面的规则也可能生效。",
+      "also_may_apply": "另有 {{count}} 条规则也能匹配，可能会生效：",
+      "udp_note": "如果选中的代理不支持 UDP，Mihomo 会跳过它并尝试下一条规则；这里没有模拟这种情况。",
+      "no_groups": "当前草稿的代理组成员暂时无法获取，因此把流量交给代理组的规则都按“可能继续匹配”处理。",
+      "template": "按配置方案",
+      "user": "包含用户的个人规则",
+      "source": {
+        "personal": "个人规则",
+        "subscription_domain": "DIRECT 订阅域名规则",
+        "rule_set": "规则集 {{name}}",
+        "template": "配置方案"
+      },
+      "server": {
+        "scope": "测试范围",
+        "scope_draft": "仅本规则集",
+        "template_field": "配置方案",
+        "admin_only": "按配置方案测试需要管理员权限。",
+        "no_template": "本规则集不在任何 Mihomo 配置方案中，没有完整的订阅可供测试。把它加入配置方案后即可在其中测试。",
+        "only_singbox": "本规则集只在 sing-box 配置方案中，暂不支持按它测试：服务端按 Mihomo 的规则列表逐条判断，而 sing-box 会把规则编译成另一种形式。",
+        "singbox_note": "未列出 sing-box 配置方案：服务端按 Mihomo 的规则列表逐条判断，而 sing-box 会把规则编译成另一种形式。",
+        "user_hint": "加入该用户的个人规则，并使用其可见的线路。不选用户时使用默认分组的线路，且不含个人规则。",
+        "run": "测试",
+        "running": "正在测试",
+        "empty": "点击“测试”，让这条连接走一遍该配置方案的完整订阅：个人规则、DIRECT 订阅域名规则和其他规则集，按各自的顺序。",
+        "answer_server": "来自服务端的结果，使用配置方案 {{template}} 和你的草稿。",
+        "answer_local": "仅按本规则集的草稿在浏览器中得出的结果。",
+        "scope_note": "按该配置方案的 Mihomo 客户端实际得到的订阅逐条判断，并用你的草稿替换已保存的规则集。不查询 DNS，也不模拟订阅用户在代理组中的手动选择。",
+        "stale": "草稿或上面的内容在得出这个结果之后已更改。点击“测试”重新运行。",
+        "goes_group_default": "流量交给代理组 {{target}}；该组默认选择 {{default}}，订阅用户可以在客户端更改。",
+        "passed": "{{rule}}（{{where}}）命中，但目标是 PASS，会被跳过并继续匹配。",
+        "warning": {
+          "draft_not_in_template": "本规则集不在所选配置方案中，因此不参与这个结果。",
+          "draft_disabled": "草稿处于关闭状态，而配置方案会跳过关闭的规则集，因此不参与这个结果。",
+          "unconfirmed_lines": "该用户在 Passwall Node 服务器上的部分线路尚未确认。实际订阅会省略这些线路，所以指向它们的规则在那里的表现可能不同。"
+        },
+        "personal": {
+          "included": "已包含该用户的个人规则。",
+          "no_user": "没有选择用户，因此不含个人规则。",
+          "not_in_template": "该配置方案没有放置个人规则的位置，因此该用户的个人规则不参与这个结果。"
+        },
+        "via": {
+          "pass": "{{target}} 可能把匹配继续交给下面的规则（它当前的选择可能是 PASS）。下面的规则也可能生效。",
+          "rematch": "{{target}} 会走到 Rematch 出站，把匹配交回规则列表。下面的规则也可能生效。",
+          "udp_unsupported_proxy": "走 UDP 时，Mihomo 会跳过不支持 UDP 的代理并尝试下一条规则，所以下面的规则也可能生效。",
+          "unknown_target": "订阅中没有定义 {{target}}，Mihomo 会跳过这条规则继续匹配。下面的规则也可能生效。"
+        },
+        "reason": {
+          "client_data": "需要客户端的数据（GeoIP、GeoSite 或规则提供者），此处无法判断。",
+          "resolve": "IP 规则：Mihomo 会在此处解析域名。在“更多条件”里填写解析得到的 IP 可得到确定结果。",
+          "input": "需要一个没有填写的条件（见“更多条件”）。",
+          "regex": "含有无法在此安全运行的正则表达式。",
+          "sub_rule": "会跳转到子规则，此处无法跟进。",
+          "unsupported": "此处无法判断的规则类型。"
+        },
+        "error": {
+          "not_found": "没有找到所选的配置方案或用户，可能已被删除。请刷新页面。",
+          "unsupported_client": "该配置方案不是 Mihomo 配置方案，无法测试。",
+          "explain_no_group": "没有可供取线路的分组。请先创建分组，或选择一个用户。",
+          "other": "无法运行测试，请重试。"
+        }
+      }
+    },
+    "lint": {
+      "shadowed_same": "第 {{line}} 行已先命中，目标相同，这一行是多余的",
+      "shadowed_other": "第 {{line}} 行已先命中（{{winner}}），TCP 下这一行不会生效",
+      "duplicate": "与第 {{line}} 行完全相同",
+      "after_match": "位于兜底规则（第 {{line}} 行）之后，TCP 下不会命中",
+      "group_other": "TCP 下不会生效：被前面目标不同的规则抢先命中",
+      "group_same": "多余：前面的规则已把同样的流量交给同一个目标",
+      "group_after": "TCP 下不会命中：位于兜底规则之后"
+    }
   },
   "nodes": {
     "setup": {
@@ -2045,24 +2667,11 @@
         "link": "服务器间隧道",
         "external": "外部入口",
         "cdn": "CDN"
-      }
+      },
+      "field_required": "请填写此项",
+      "hop_loopback": "回环 :{{port}}",
+      "paths": "将创建的线路"
     },
-    "lines": {
-      "title": "线路表",
-      "filter": "按名称、服务器或地址筛选",
-      "node": "落地节点",
-      "line": "订阅线路",
-      "entry": "入口",
-      "exit": "默认出口",
-      "status": "状态",
-      "factor": "流量倍率",
-      "published": "已发布",
-      "pending": "等待生效",
-      "issue": "需要检查",
-      "disabled": "已停用",
-      "empty": "没有符合条件的线路。"
-    },
-    "load_failed": "暂时无法加载节点",
     "retry": "重试",
     "cert_source": {
       "from_panel": "从面板获取证书路径",
@@ -2075,27 +2684,8 @@
       "managed_help": "PSP 会把该证书部署到此节点并自动续期。",
       "no_active_certs": "暂无可用证书，请先在「证书」页签发一张。"
     },
-    "title": "节点管理",
-    "subtitle": "管理 3X-UI 入站，订阅生成基于此处的启用状态",
-    "tab_managed": "已管理",
-    "tab_unmanaged": "未管理",
-    "managed_search_placeholder": "搜索显示名 / 服务器 / 地址 / 区域 / 标签 / ID…",
-    "managed_count": "显示 {{shown}} / 共 {{total}} 个",
-    "managed_filter_empty": "没有匹配的节点",
-    "managed_search_disables_drag": "搜索时无法拖拽排序，清空搜索后恢复",
-    "unmanaged_search_placeholder": "搜索协议 / 备注 / 端口 / ID…",
-    "unmanaged_count": "显示 {{shown}} / 共 {{total}} 个",
-    "unmanaged_filter_empty": "没有匹配的结果",
-    "unmanaged_server_label": "服务器",
-    "unmanaged_server_placeholder": "选择服务器…",
-    "unmanaged_pick_server": "选择一个服务器以查看其未托管的 inbound",
-    "unmanaged_load_failed": "加载该服务器的 inbound 失败",
-    "search_group": {
-      "protocol": "协议",
-      "remark": "备注"
-    },
+    "title": "节点",
     "create": "新增节点",
-    "create_separator": "新增分隔标题",
     "edit_title": "编辑节点",
     "relay": {
       "title": "中转线路",
@@ -2123,6 +2713,81 @@
       "managed_ready": "中转服务器已生效，线路已发布",
       "managed_pending": "等待中转服务器生效，生效前不会出现在订阅中",
       "name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为该线路的流量倍率（如 ×1.5）。"
+    },
+    "line": {
+      "choose_type": "选择线路类型",
+      "type_summary": "类型：{{type}}",
+      "change_type": "更改",
+      "card": {
+        "forward": "入口服务器原样转发，加密由落地负责，开销最低",
+        "tunnel": "入口服务器自己接收连接，再经服务器间隧道送到落地",
+        "cdn": "客户端连接 CDN，由 CDN 回源到此节点；PSP 看不到 CDN 这一跳",
+        "external": "转发在面板外配置，这里只登记客户端连接的地址",
+        "no_server": "需要另一台 Passwall Node 服务器作为入口",
+        "not_native_landing": "落地节点需要运行在 Passwall Node 服务器上"
+      },
+      "entry_server": "入口服务器",
+      "entry_pick": "选择入口服务器",
+      "entry_outside": "面板外配置（外部入口）",
+      "entry_address": "入口地址",
+      "entry_port": "入口端口",
+      "entry_port_same": "留空 = 与落地相同",
+      "label_preview": "订阅中显示为：{{label}}",
+      "publish_direct": "发布直连线路",
+      "publish_direct_hint": "关闭后，订阅里只保留此节点的其他线路",
+      "direct_address_hint": "直连线路使用节点的地址和端口，在节点的“基本信息”和“入站”中修改",
+      "listener": "入口监听",
+      "listener_settings": "监听设置",
+      "section_display": "订阅显示",
+      "section_billing": "计费",
+      "edit_title": "编辑线路“{{name}}”",
+      "back_to_view": "返回",
+      "gone": "找不到这条线路，可能已被删除",
+      "err": {
+        "name_long": "名称最多 64 个字符",
+        "entry_required": "选择一台入口服务器",
+        "address_required": "填写入口地址",
+        "port_required": "填写入口端口",
+        "port_range": "端口范围是 1 到 65535",
+        "region_long": "区域最多 64 个字符"
+      },
+      "action": {
+        "save": "保存线路",
+        "to_tunnel": "改为加密隧道",
+        "to_forward": "改为直接转发",
+        "suggest_port": "建议端口"
+      },
+      "toast": {
+        "saved": "线路已保存",
+        "added": "已添加线路“{{name}}”",
+        "enabled": "已启用线路",
+        "disabled": "已停用线路",
+        "deleted": "已删除线路",
+        "batch_enabled": "已启用 {{count}} 条线路",
+        "batch_disabled": "已停用 {{count}} 条线路"
+      },
+      "bulk": {
+        "enable": "启用线路（{{count}}）",
+        "disable": "停用线路（{{count}}）"
+      },
+      "delete": {
+        "title": "删除线路“{{name}}”？",
+        "body": "删除后，订阅者刷新订阅时这条线路会消失",
+        "refs": "规则集中按 ID 引用这条线路的地方会被跳过；重新添加会得到新的 ID",
+        "closes_listener": "将关闭 {{server}} 上的端口 {{port}}（入口监听）",
+        "prefer_disable": "只想停止发布？",
+        "disable_instead": "改为停用线路"
+      },
+      "plan_confirm": "确认",
+      "tabs": {
+        "lines": "线路",
+        "exit": "出口",
+        "inbound": "入站",
+        "general": "基本信息",
+        "lines_question": "用户怎么连进来",
+        "no_lines": "没有可显示的线路"
+      },
+      "published_count": "已发布 {{published}} / {{total}} 条线路"
     },
     "source": {
       "title": "来源地址",
@@ -2244,17 +2909,17 @@
         "switch_mode_title": "切换线路模式？",
         "switch_mode_text": "切换模式会替换这条线路的承载方式。",
         "create_line_title": "新建隧道线路？",
-  "create_line_text": "新建隧道线路；端口已变化，请确认新的端口",
-  "remove_line_title": "删除隧道线路？",
+        "create_line_text": "新建隧道线路；端口已变化，请确认新的端口",
+        "remove_line_title": "删除隧道线路？",
         "remove_line_text": "删除隧道线路会同时删除它的监听器。",
         "delete_node_title": "删除节点及其隧道监听器？",
         "delete_node_text": "删除该节点会同时删除它的隧道线路的监听器。",
         "sync_from_landing_title": "从落地同步设置？",
         "sync_from_landing_text": "监听器的以下设置会改为与落地一致：",
         "creates_item": "将为 {{landing}} 的线路 {{line}} 创建监听器：在 {{entry}} 上开放端口 {{port}}。",
-  "creates_link": "将在 {{exit}} 上开放隧道端口 {{port}}（{{entry}} 与 {{exit}} 之间的新隧道）。",
-  "creates_forward": "将为 {{landing}} 的线路 {{line}} 在 {{entry}} 上开放转发端口 {{port}}。",
-  "server_fallback": "服务器 #{{id}}",
+        "creates_link": "将在 {{exit}} 上开放隧道端口 {{port}}（{{entry}} 与 {{exit}} 之间的新隧道）。",
+        "creates_forward": "将为 {{landing}} 的线路 {{line}} 在 {{entry}} 上开放转发端口 {{port}}。",
+        "server_fallback": "服务器 #{{id}}",
         "removes_item": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}。",
         "removes_item_front": "将删除监听器 {{name}}（线路 {{line}}）：关闭 {{entry}} 上的端口 {{port}}，并离开共用端口 {{front_port}}。",
         "diff_item": "{{field}}：{{from}} → {{to}}",
@@ -2323,7 +2988,8 @@
       "target": {
         "label": "出站位置",
         "local": "本机直出（从本服务器出站）",
-        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站"
+        "local_hint": "无论默认出口是什么，都从本节点所在服务器直接出站",
+        "choose": "选择服务器"
       },
       "entries_other": "已编译 {{count}} 条目标",
       "sent": {
@@ -2418,6 +3084,12 @@
         "exit_no_link_capability": "{{server}} 上的 Node 代理无法承载这条隧道，指向它的目标会连接失败。",
         "redundant_route": "{{route}} 的出站方式与默认出口相同，没有任何效果。",
         "routes_not_sent": "已保存的路由没有发给服务器：{{reason}}"
+      },
+      "path": {
+        "ports": "端口 {{ports}}",
+        "more": "另有 {{count}} 项",
+        "nothing": "还没有匹配条件",
+        "unset": "尚未选择服务器"
       }
     },
     "line_labels": {
@@ -2437,13 +3109,6 @@
     "import": "纳管",
     "imported": "已纳管",
     "import_validate": "请填写连接地址和 Region",
-    "create_separator_dialog": {
-      "title": "新增分隔标题",
-      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。在哪些分组里显示由下方\"显示在所有分组\"开关 + 分组选择决定，跟节点的 tag_filter 无关。"
-    },
-    "edit_separator_dialog": {
-      "title": "编辑分隔标题"
-    },
     "edit_inbound": "编辑 Inbound 配置",
     "edit_inbound_dialog": {
       "title": "编辑 Inbound 配置",
@@ -2587,9 +3252,19 @@
       "validate_reality_target": "Reality dest 和 SNI 必填",
       "validate_ss2022": "SS-2022 method 和服务端 PSK 必填",
       "created": "已创建",
-      "queued": "已加入同步任务"
+      "queued": "已加入同步任务",
+      "anytls_padding": "Padding scheme（每行一条）",
+      "anytls_padding_hint": "留空时使用 S-UI 的 AnyTLS 默认 padding scheme。",
+      "tuic_congestion_control": "Congestion control",
+      "tuic_auth_timeout": "Auth timeout（秒）",
+      "tuic_heartbeat": "Heartbeat（秒）",
+      "tuic_zero_rtt": "Zero-RTT handshake",
+      "naive_network": "Network",
+      "naive_network_default": "TCP + UDP（默认）",
+      "naive_quic_congestion_control": "QUIC congestion control",
+      "naive_quic_off": "不启用 QUIC"
     },
-    "claim": "Claim",
+    "claim": "认领客户端",
     "claim_dialog": {
       "title": "Claim 已存在的 client",
       "subtitle": "把 3X-UI inbound #{{id}} 上已存在的 client（按 email 标识）关联到面板用户。常用于历史 inbound 迁移。",
@@ -2598,7 +3273,8 @@
       "client_uuid": "Client UUID（可选；留空让 panel 沿用 3X-UI 现有值）",
       "submit": "Claim",
       "claimed": "已关联",
-      "validate_required": "请选择用户并填写 client email"
+      "validate_required": "请选择用户并填写 client email",
+      "users_loading": "正在加载用户…"
     },
     "import_dialog": {
       "title": "纳管 inbound",
@@ -2608,34 +3284,12 @@
       "flow": "Flow（可选）",
       "region": "Region",
       "tags": "Tags",
-      "endpoint": "端点（期望 / 实际）",
-      "sort_order": "排序权重",
-      "sort_order_hint": "0 = 自动排到列表末尾"
+      "endpoint": "端点（期望 / 实际）"
     },
     "feature_pending": "功能迁移中（下个版本）",
-    "selection_count": "已选 {{count}}",
-    "batch_enable": "批量启用",
-    "batch_disable": "批量停用",
-    "batch_delete": "批量删除",
     "table": {
-      "id": "ID",
-      "display_name": "显示名",
-      "panel_name": "服务器",
-      "server_address": "连接地址",
-      "region": "Region",
-      "tags": "Tags",
       "inbound": "Inbound",
-      "sort_order": "排序",
-      "health": "状态",
-      "enabled": "启用",
-      "actions": "操作"
-    },
-    "endpoint": {
-      "desired_short": "期",
-      "observed_short": "实",
-      "synced": "实际端点与期望一致",
-      "mismatch": "实际监听端点与期望配置不一致",
-      "unobserved": "尚未收到实际端点上报"
+      "sort_order": "排序"
     },
     "health": {
       "ok": "健康",
@@ -2664,24 +3318,30 @@
       "flow": "Flow（可选）",
       "region": "Region",
       "tags": "Tags",
-      "enabled": "启用",
-      "separator_mode": "可见模式",
-      "separator_mode_global": "全局（所有分组显示）",
-      "separator_mode_node_bound": "按节点关联（节点出现时显示）",
-      "separator_mode_hint_global": "所有分组都显示此分隔符。",
-      "separator_mode_hint_node_bound": "仅当该分组包含下方关联的任意节点时才显示。位置仍由拖拽排序决定。",
-      "separator_node_ids": "关联节点",
-      "separator_node_ids_hint": "订阅渲染时，凡是用户能看到这里任一节点的分组都会显示此分隔符；不填则永远不出现。",
       "display_name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为直连线路的流量倍率（如 ×1.5）。",
       "traffic_factor": "流量倍率",
       "traffic_factor_direct": "直连线路流量倍率"
     },
     "action": {
-      "edit": "编辑",
-      "delete": "删除",
-      "detach": "脱离",
-      "recreate_inbound": "在服务器上重建 inbound",
-      "drag_to_reorder": "拖动排序"
+      "recreate_inbound": "在服务器上重建入站",
+      "edit_line": "编辑线路",
+      "edit_direct": "编辑直连线路",
+      "edit_node": "编辑节点",
+      "add_line": "添加线路",
+      "enable_line": "启用线路",
+      "disable_line": "停用线路",
+      "enable_node": "启用节点",
+      "disable_node": "停用节点",
+      "open_node": "打开节点",
+      "move_to": "移动到…",
+      "delete_line": "删除线路",
+      "delete_node": "删除节点",
+      "remove_from_panel": "仅从面板移除",
+      "edit_separator": "编辑分隔标题",
+      "delete_separator": "删除分隔标题",
+      "create_separator": "新增分隔标题",
+      "refresh": "刷新",
+      "row_menu": "“{{name}}”的操作"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region",
@@ -2690,28 +3350,21 @@
     "toast": {
       "saved": "已保存",
       "deleted": "已删除",
-      "detached": "已脱离",
+      "detached": "已从面板移除",
       "enabled": "已启用",
       "disabled": "已禁用",
       "batch_enabled": "已启用 {{count}} 个节点",
       "batch_disabled": "已停用 {{count}} 个节点",
       "batch_deleted": "已删除 {{count}} 个节点",
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个",
-      "reordered": "排序已更新",
-      "reorder_failed": "排序更新失败",
       "separator_created": "分隔标题已创建",
       "separator_updated": "分隔标题已更新",
-      "recreated_inbound": "inbound 已重建，正在后台下发 client（稍等几秒刷新 3X-UI）"
+      "recreated_inbound": "inbound 已重建，正在后台下发 client（稍等几秒刷新 3X-UI）",
+      "undo": "撤销"
     },
     "confirm": {
-      "delete_title": "删除节点",
-      "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
-      "detach_title": "脱离节点",
-      "detach_message": "确定脱离节点 {{name}}？面板只会删除本地节点记录并清空本地 ownership 白名单，**不会**联系 3X-UI；之前由 Passwall Panel 创建的 client 会留在 3X-UI 上，需要的话请到 3X-UI 自行清理。建议仅在上游服务器已下线 / 面板不可达时使用，否则请用「删除」。",
       "recreate_inbound_title": "在服务器上重建 inbound？",
-      "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。",
-      "batch_delete_title": "批量删除节点",
-      "batch_delete_message": "确定删除 {{count}} 个节点？"
+      "recreate_inbound_message": "用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound，并把节点指向新 inbound，随后把成员的 client 下发上去。适用于把节点迁到全新 / 空的 3X-UI（显示 Connected (0)）之后，无需手动重配节点。可重复点击：若 inbound 已存在则不再重建，只重新下发 client（用来补推没推上去的 client）。"
     },
     "separator_preview": {
       "visible": "会出现在：{{groups}}",
@@ -2736,12 +3389,287 @@
       "tip_measured": "由入口服务器测得的链路质量",
       "tip_unknown": "尚未收到探测结果。暂无数据不会导致撤下。",
       "tip_reported": "上报于 {{time}}"
+    },
+    "list": {
+      "count": "{{count}} 条线路",
+      "count_filtered": "显示 {{shown}} / 共 {{total}} 条",
+      "lines_of_node": "{{count}} 条线路",
+      "scope_note": "这是全部线路的订阅顺序。每位订阅者看到的是其中一部分，顺序不变",
+      "scope_help": "订阅者看到哪些线路，取决于其分组的节点筛选、线路自己的区域和标签、线路是否已发布、按节点关联的分隔标题、分组里的分隔标题，以及订阅格式（Clash 不支持 Naive）。",
+      "scope_help_label": "订阅者看到哪些线路"
+    },
+    "tabs": {
+      "lines": "线路",
+      "unmanaged": "未纳管入站"
+    },
+    "view": {
+      "label": "视图",
+      "order": "订阅顺序",
+      "node": "按节点",
+      "graph": "拓扑"
+    },
+    "search": {
+      "placeholder": "搜索线路、节点、服务器或地址"
+    },
+    "facet": {
+      "type": "类型",
+      "status": "状态",
+      "entry": "入口服务器",
+      "landing_server": "落地服务器"
+    },
+    "col": {
+      "line": "线路",
+      "path": "路径",
+      "address": "地址",
+      "factor": "倍率",
+      "status": "状态",
+      "landing_server": "落地服务器",
+      "region": "区域",
+      "tags": "标签",
+      "id": "ID",
+      "protocol": "协议",
+      "checked_at": "上次健康检查",
+      "actions": "操作"
+    },
+    "kpi": {
+      "lines": "线路",
+      "published": "已发布",
+      "withheld": "未发布",
+      "unreachable": "不可达"
+    },
+    "type": {
+      "direct": "直连",
+      "forward": "直接转发",
+      "tunnel": "加密隧道",
+      "cdn": "CDN",
+      "external": "外部入口",
+      "link": "服务器间隧道"
+    },
+    "separator": {
+      "global": "全局",
+      "node_bound": "按节点关联 · {{count}} 个节点",
+      "disabled": "已停用",
+      "create_title": "新增分隔标题",
+      "edit_title": "编辑分隔标题",
+      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，只用于视觉分组。新的分隔标题排在订阅顺序的末尾，之后可以拖动或用“移动到…”调整。",
+      "name": "名称",
+      "name_required": "请填写名称",
+      "mode": "显示范围",
+      "node_bound_option": "按节点关联",
+      "mode_hint_global": "所有分组都显示此分隔标题",
+      "mode_hint_node_bound": "只有分组能看到下方任一关联节点时才显示",
+      "nodes": "关联节点",
+      "nodes_hint": "不填则永远不出现",
+      "enabled": "启用"
+    },
+    "status": {
+      "ok": "正常",
+      "unchecked": "尚未检查",
+      "published": "已发布",
+      "config_pending": "配置待重试",
+      "config_failed": "配置下发已放弃",
+      "endpoint_drift": "实际监听与配置不一致",
+      "unreachable": "不可达",
+      "server_unreachable": "服务器不可达",
+      "inbound_missing": "入站缺失",
+      "inbound_disabled": "入站已关闭",
+      "inconclusive": "无法判定"
+    },
+    "withheld": {
+      "landing_disabled": "节点已停用",
+      "hidden_direct": "已隐藏直连线路",
+      "disabled": "线路已停用",
+      "waiting_entry": "等待入口服务器生效",
+      "egress": "出口未就绪",
+      "probe": "链路中断，已撤下",
+      "source_guard": "无法按来源区分",
+      "cdn_unfit": "节点无法经 CDN 访问",
+      "entry_missing": "入口服务器已删除",
+      "unpublished": "未发布"
+    },
+    "withheld_detail": {
+      "landing_disabled": "节点停用后，它的所有线路都不会出现在订阅中",
+      "hidden_direct": "直连线路已隐藏，订阅中只保留此节点的其他线路",
+      "disabled": "线路已停用，不会出现在订阅中",
+      "waiting_entry": "入口服务器还没有确认这条线路的转发。确认后线路会自动发布",
+      "egress": "默认出口的隧道尚未在两台服务器上生效，或按目标分流尚未下发。生效后自动发布",
+      "probe": "入口服务器持续探测不到这条链路，已从订阅中撤下。链路恢复后自动回到订阅，不会改用直连",
+      "source_guard": "原因见下方",
+      "cdn_unfit": "此节点的配置无法经过 CDN，原因见下方",
+      "entry_missing": "这条线路的入口服务器已不存在。删除这条线路，或改用其他入口服务器"
+    },
+    "bulk": {
+      "enable_nodes": "启用节点（{{count}}）",
+      "disable_nodes": "停用节点（{{count}}）",
+      "delete_nodes": "删除节点（{{count}}）"
+    },
+    "sheet": {
+      "type": "类型",
+      "entry": "入口服务器",
+      "landing": "落地节点",
+      "quality": "链路质量",
+      "health": "健康检查",
+      "config_sync": "配置同步",
+      "listener": "实际监听",
+      "other_lines": "此节点的其他线路",
+      "region_tags": "区域 / 标签",
+      "node_section": "落地节点"
+    },
+    "order": {
+      "saving": "正在保存顺序",
+      "saved": "已更新顺序",
+      "undone": "已撤销",
+      "failed": "无法保存顺序：{{reason}}。已恢复原来的顺序",
+      "blocked_filter": "清除搜索和筛选后才能拖动；也可以用“移动到…”",
+      "clear_to_drag": "清除筛选以拖动排序",
+      "read_only": "只有管理员可以调整顺序",
+      "too_many": "超过 10000 行，无法在此保存整体顺序",
+      "move_title": "移动“{{name}}”",
+      "move_after": "放在此行之后",
+      "move_top": "移到最前",
+      "move_pick": "选择一行",
+      "move_none": "没有匹配的行",
+      "move_with_lines": "同时移动此节点的其他 {{count}} 条线路，紧跟其后",
+      "move_confirm": "移动",
+      "stale_title": "顺序已被修改",
+      "stale_body": "在你调整顺序时，其他管理员修改了顺序或线路。下面是变化：",
+      "stale_added": "新增：{{name}}",
+      "stale_removed": "删除：{{name}}",
+      "stale_moved": "另有 {{count}} 行位置变化",
+      "stale_reapply": "在最新顺序上重新移动",
+      "stale_keep": "保留最新顺序",
+      "stale_gone": "“{{name}}”已不存在，无法重新移动"
+    },
+    "delete": {
+      "remove_title": "仅从面板移除“{{name}}”？",
+      "remove_body": "面板会删除此节点和它的线路，但不会连接服务器：服务器上的入站和客户端会保留，需要时在服务器上自行清理。仅在服务器已下线或无法连接时使用",
+      "separator_title": "删除分隔标题“{{name}}”？",
+      "separator_body": "订阅者刷新订阅后，这个分隔标题会消失"
+    },
+    "detail": {
+      "back": "节点",
+      "admin_only": "只有管理员可以查看和编辑节点详情",
+      "not_found": "找不到这个节点",
+      "show_lines": "在列表中查看此节点",
+      "dirty_tabs": "{{tabs}}有未保存的修改",
+      "tab_separator": "、",
+      "to_line": "在节点页面编辑这条线路"
+    },
+    "empty": {
+      "title": "还没有节点",
+      "body": "新增一个节点后，它的每条线路都会在这里列出",
+      "no_servers_body": "先添加一台服务器，再新增节点",
+      "no_servers": "先添加服务器",
+      "filtered": "没有符合条件的线路",
+      "clear": "清除筛选",
+      "filtered_unmanaged": "没有符合条件的入站"
+    },
+    "error": {
+      "load": "无法加载线路",
+      "partial": "部分节点信息暂时无法加载"
+    },
+    "impact": {
+      "node_title": "删除节点“{{name}}”？",
+      "loading": "正在查看这次删除会影响什么…",
+      "failed_title": "无法查看这次操作会影响什么",
+      "failed_hint": "可以重试，也可以不核对直接继续。不核对时，这里不会列出会一起删除的线路和入口监听。",
+      "blind_delete": "不核对，直接删除",
+      "blind_remove": "不核对，直接移除",
+      "lines": "将一起删除 {{count}} 条线路：",
+      "lines_remove": "面板会一起删除这 {{count}} 条线路：",
+      "listeners": "将关闭的入口监听：",
+      "listener_item": "{{server}} 的端口 {{port}}（{{line}}）",
+      "listener_front": "共用端口 {{port}}",
+      "body": "服务器上的入站会被删除；订阅者刷新后这些线路都会消失",
+      "prefer_disable": "只想停止发布？",
+      "disable_instead": "改为停用节点",
+      "confirm": "删除节点和 {{count}} 条线路",
+      "remove_confirm": "从面板移除节点和 {{count}} 条线路",
+      "blocked_title": "无法删除节点“{{name}}”",
+      "blocked_body": "服务器的共用端口中还有路由指向此节点。先删除这些路由，再删除节点：",
+      "blocked_fix": "到服务器页面，打开对应服务器的共用端口，删除这些路由后再回来删除节点",
+      "go_servers": "前往服务器",
+      "plan_title": "服务器要求再确认这些变动",
+      "plan_body": "服务器将执行以下变动：",
+      "plan_confirm": "确认并继续",
+      "bulk_title": "删除 {{count}} 个节点？",
+      "bulk_confirm": "删除 {{nodes}} 个节点和 {{lines}} 条线路",
+      "bulk_skipped": "其中 {{count}} 个节点无法删除，已跳过：",
+      "bulk_blocked_item": "{{name}}：共用端口的路由仍指向它",
+      "bulk_unread_item": "{{name}}：无法查看影响（{{reason}}）",
+      "bulk_node_lines": "{{name}} · {{count}} 条线路",
+      "bulk_none": "所选节点都无法删除",
+      "blocked_remove_title": "无法从面板移除节点“{{name}}”"
+    },
+    "graph": {
+      "label": "线路关系图",
+      "too_many": "线路太多，无法清楚地画在一张图里",
+      "too_many_count": "当前有 {{count}} 条连线，超过 {{max}} 条",
+      "too_many_hint": "按入口服务器或落地服务器筛选后再查看",
+      "show_in_list": "在列表中查看经过“{{name}}”的 {{count}} 条线路",
+      "as_list": "以列表查看",
+      "col_entry": "入口",
+      "col_landing": "落地节点",
+      "col_exit": "出口",
+      "box_direct": "直连",
+      "box_cdn": "CDN",
+      "box_external": "外部入口",
+      "box_local": "本服务器",
+      "box_deleted": "{{name}}（已删除）",
+      "hint": "点击一个入口或落地节点，查看经过它的线路。已撤下或有问题的线路用颜色和文字标出，已停用的线路变淡"
+    },
+    "unmanaged": {
+      "server": "服务器",
+      "server_placeholder": "选择服务器",
+      "pick_server": "选择一台服务器，查看它上面未纳管的入站",
+      "load_failed": "无法加载此服务器的入站：{{reason}}",
+      "search_placeholder": "搜索协议、备注、入站 ID 或端口",
+      "none": "这台服务器上没有未纳管的入站",
+      "col_id": "入站 ID",
+      "col_protocol": "协议",
+      "col_port": "端口",
+      "col_remark": "备注",
+      "col_clients": "客户端"
+    },
+    "inbound_form": {
+      "section_protocol": "协议与端口",
+      "section_transport": "传输",
+      "section_security": "安全 (TLS / REALITY)",
+      "section_advanced": "高级",
+      "sui_section": "{{protocol}} · S-UI / sing-box"
+    },
+    "exit": {
+      "default": "默认出口",
+      "local": "从本服务器出网",
+      "remote": "经另一台服务器出网",
+      "server": "出口服务器",
+      "tunnel_settings": "隧道设置",
+      "not_native": "此节点所在服务器不是 Passwall Node，流量只能从本服务器出网",
+      "no_other_server": "需要另一台 Passwall Node 服务器作为出口",
+      "partial_saved": "隧道设置已保存，出口服务器未能保存：{{reason}}",
+      "pick_server": "选择出口服务器",
+      "pick_server_error": "请选择出口服务器，或改为从本服务器出网"
+    },
+    "inbound": {
+      "partial_flow": "入站配置已保存，VLESS flow 未能保存：{{reason}}。",
+      "partial_cert": "入站配置已保存，证书来源未能保存：{{reason}}。",
+      "no_update": "这台服务器不允许修改入站配置。",
+      "mode": "编辑方式",
+      "mode_form": "表单",
+      "mode_json": "JSON"
+    },
+    "create_page": {
+      "steps": "步骤",
+      "step_inbound": "入站",
+      "step_lines": "线路",
+      "step_exit": "出口",
+      "step_review": "核对",
+      "basics": "基本信息"
     }
   },
   "users": {
     "title": "用户管理",
     "create": "新增用户",
-    "edit_title": "编辑用户",
     "edit": {
       "row_changed": "该用户已被其他操作修改。当前编辑内容不会自动更新。",
       "reload_saved": "重新载入已保存值"
@@ -2783,7 +3711,6 @@
     },
     "result_title": "用户已创建",
     "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
-    "filter_group_all": "全部分组",
     "refresh": "刷新",
     "field": {
       "upn": "UPN",
@@ -2794,15 +3721,12 @@
       "group": "分组",
       "role": "角色",
       "expire_days": "有效期（天，0=永久）",
-      "expire_at": "到期时间",
-      "expire_mode_date": "到期时间",
+      "expire_mode_date": "指定日期",
       "expire_mode_permanent": "永久",
       "expire_tz_hint": "日期按面板时区 {{tz}} 计算",
-      "traffic_limit_gb": "流量上限 (GB，0=无限)",
       "period_used_gb": "本周期已用 (GB)",
       "account_enabled": "账户状态",
       "account_self_locked": "不能停用自己的账户",
-      "service_status": "代理服务状态",
       "block_violations": "违规次数：{{count}}",
       "emergency_used_count": "紧急访问已用 {{count}} 次",
       "emergency_window_until": "生效至 {{time}}（剩余 {{hours}} 小时）",
@@ -2812,7 +3736,6 @@
       "ip_limit": "并发 IP 上限",
       "device_limit": "设备数上限",
       "limit_zero_hint": "0 = 不限",
-      "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
       "ip_limit_unenforced": "以下面板会保存该上限但不执行（节点上没有可用的 fail2ban）：{{panels}}",
@@ -2827,7 +3750,11 @@
       "cap_no_clients_short": "暂无处执行",
       "device_limit_inert_short": "当前不生效",
       "limit_unsupported_short": "部分面板不支持",
-      "ip_limit_unenforced_short": "部分面板不执行"
+      "ip_limit_unenforced_short": "部分面板不执行",
+      "expire_mode": "到期",
+      "expire_date": "到期日期",
+      "level_user": "此用户",
+      "traffic_limit": "流量上限"
     },
     "role": {
       "admin": "管理员",
@@ -2853,10 +3780,21 @@
       "unlimited": "不限",
       "lifetime": "Lifetime 总量",
       "view_usage": "查看用量",
-      "created_at": "创建于"
+      "created_at": "创建于",
+      "status": "状态",
+      "validity": "有效期",
+      "subscription": "订阅",
+      "account": "账户信息",
+      "sub_hidden": "管理员和运营人员账户的订阅链接对运营人员隐藏。",
+      "not_found": "该用户已不存在",
+      "forbidden": "你无权打开该用户",
+      "unsaved_in": "{{tabs}}有未保存的修改",
+      "tab_separator": "、"
+    },
+    "header": {
+      "no_totp": "该用户未设置验证器应用"
     },
     "table": {
-      "upn": "UPN",
       "display_name": "显示名",
       "group": "分组",
       "role": "角色",
@@ -2865,7 +3803,8 @@
       "status": "状态",
       "risk": "风控",
       "last_online": "最近活跃",
-      "actions": "操作"
+      "actions": "操作",
+      "user": "用户"
     },
     "relative_time": {
       "just_now": "刚刚",
@@ -2874,7 +3813,6 @@
       "days_ago": "{{count}} 天前"
     },
     "status": {
-      "enabled": "启用",
       "disabled": "禁用",
       "account_active": "账户正常",
       "service_active": "代理服务正常",
@@ -2902,19 +3840,25 @@
       "renew": "续期 30 天",
       "enable": "启用账户",
       "disable": "停用账户",
-      "delete": "删除"
+      "delete": "删除",
+      "row_menu": "{{upn}} 的操作"
     },
     "result": {
       "intro": "用户 {{upn}} 已创建。请记录初始密码 —— 这是唯一一次显示。",
       "password_label": "初始密码",
       "sub_url_label": "订阅 URL",
-      "copy": "复制"
+      "copy": "复制",
+      "reset_title": "密码已重置",
+      "reset_intro": "{{upn}} 的密码已重置。请立即记录，该密码只显示一次。"
     },
     "reason": {
       "enable_title": "启用账户",
       "disable_title": "停用账户",
       "enable_placeholder": "启用原因（可选）",
-      "disable_placeholder": "停用原因（可选）"
+      "disable_placeholder": "停用原因（可选）",
+      "label": "原因（可选）",
+      "disable_hint": "用户将无法登录，订阅也会停用。",
+      "enable_hint": "用户可再次登录，订阅是否可用取决于服务状态。"
     },
     "validate": {
       "upn_required": "请填写 UPN",
@@ -2928,14 +3872,13 @@
       "disabled": "已禁用",
       "renewed": "已续期 {{days}} 天",
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
-      "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
       "service_resumed": "代理服务已恢复",
       "service_suspended": "代理服务已暂停"
     },
     "confirm": {
       "delete_title": "删除用户",
-      "delete_message": "确定删除用户 {{upn}}？该操作将从所有 3X-UI inbound 清除其 client。",
+      "delete_message": "删除 {{upn}}？账户、订阅链接以及它在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "demote_title": "确认降级",
       "reset_credentials_title": "重置凭证",
       "reset_credentials_message": "重置 {{upn}} 的凭证会让旧订阅链接立即失效，现有连接被强制断开。继续？",
@@ -2944,7 +3887,7 @@
       "batch_unlink_sso_title": "批量解除 SSO 绑定",
       "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。",
+      "batch_delete_message": "删除 {{names}}{{suffix}}（共 {{count}} 个用户）？他们的账户、订阅链接以及在所有服务器上的客户端都会被删除，此操作无法撤销。",
       "reset_2fa_title": "重置验证器 App（TOTP）",
       "reset_2fa_message": "将清除 {{upn}} 的验证器 App（TOTP）及其备用码；该用户的通行密钥（若有）不受影响。清除后该用户可仅凭密码登录（若无其它因素），并需要重新绑定。仅在用户丢失验证器且无备用码时使用。"
     },
@@ -2959,7 +3902,6 @@
       "passkeys": "管理通行密钥",
       "resume_service": "恢复代理服务",
       "suspend_service": "暂停代理服务",
-      "account_security": "账号安全",
       "risk_details": "风控详情"
     },
     "security": {
@@ -2978,13 +3920,17 @@
       "regen_recovery_confirm": "重新生成",
       "regen_recovery_title": "重新生成备用码",
       "regen_recovery_message": "将作废 {{upn}} 现有的全部备用码并生成一组新的。请把新备用码通过安全渠道转交给用户——它只会显示这一次。",
-      "regen_recovery_done": "新备用码（只显示一次，请转交用户）："
+      "regen_recovery_done": "新备用码（只显示一次，请转交用户）：",
+      "passkey_count": "已注册 {{count}} 个"
     },
     "reset_password": {
       "title": "重置登录密码",
       "hint": "留空将生成随机密码；也可以点击右侧骰子按钮自动填充后再手动修改。",
       "field": "新密码（留空 = 随机）",
-      "gen": "随机生成"
+      "gen": "随机生成",
+      "confirm": "重置密码",
+      "hide": "隐藏密码",
+      "show": "显示密码"
     },
     "batch": {
       "selected": "已选 {{count}}",
@@ -3014,13 +3960,14 @@
       "placeholder": "每行一条规则，支持 mihomo / sing-box 格式",
       "saved": "个人规则已保存",
       "reset": "撤销修改",
-      "save": "保存"
+      "save": "保存",
+      "hint": "添加到该用户的订阅中，每行一条规则。"
     },
     "reconcile": {
       "trigger": "一键同步 Reconcile",
       "result_title": "巡检结果",
-      "summary_no_fix": "巡检完成！共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
-      "summary_fixed": "巡检完成！共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
+      "summary_no_fix": "巡检完成，共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
+      "summary_fixed": "巡检完成，共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
       "issues_title": "未修复问题",
       "show_details": "显示详情",
       "hide_details": "隐藏详情",
@@ -3028,7 +3975,7 @@
       "unfixed_section": "未能修复"
     },
     "credentials": {
-      "result": "已重置！新 UUID: {{uuid}}",
+      "result": "凭据已重置。新的 UUID：{{uuid}}",
       "emergency_reset": "已重置紧急使用次数",
       "twofa_reset": "已重置两步验证"
     },
@@ -3048,7 +3995,8 @@
       "revoke_all_message": "将吊销 {{upn}} 的全部 {{count}} 个通行密钥。仅在账号丢失全部设备或疑似被盗时使用。",
       "revoked_all": "已吊销 {{count}} 个通行密钥",
       "load_failed": "加载通行密钥失败",
-      "close": "关闭"
+      "close": "关闭",
+      "revoke_named": "吊销通行密钥 {{name}}"
     },
     "risk_lookup": "风控查询",
     "risk_chip_hint": "打开风控详情",
@@ -3056,6 +4004,51 @@
       "change": "改组后新增 {{added}} 个节点（{{added_names}}），移出 {{removed}} 个节点（{{removed_names}}）",
       "same": "改组后可用节点不变",
       "unknown": "改组影响暂时无法计算"
+    },
+    "empty": "还没有用户",
+    "empty_hint": "创建第一个用户后，对方即可获得订阅。",
+    "empty_filtered": "没有符合当前筛选条件的用户",
+    "load_failed": "无法加载用户列表",
+    "refresh_failed": "无法刷新列表，下面显示的是上次成功加载的内容。",
+    "readonly_operator": "运营人员不能修改管理员或运营人员的账户。",
+    "tabs": {
+      "overview": "概览",
+      "settings": "设置",
+      "usage": "用量",
+      "activity": "登录记录",
+      "security": "账户安全",
+      "unsaved": "有未保存的修改"
+    },
+    "axis": {
+      "intro": "账户决定用户能否登录面板，服务决定用户的订阅能否使用。两者相互独立，可以单独关闭。",
+      "account_title": "账户",
+      "account_caption": "登录面板",
+      "service_title": "代理服务",
+      "service_caption": "订阅",
+      "account_active": "用户可以登录面板。",
+      "account_disabled": "用户无法登录，订阅也已停用。",
+      "pending_approval": "等待管理员批准注册。",
+      "pending_email_verify": "等待用户验证邮箱地址。",
+      "pending_delete": "正在删除，其在服务器上的客户端正在清理。",
+      "service_active": "订阅可以正常使用。",
+      "emergency_active": "紧急访问已开启，订阅在限定时间内可用，不受到期或配额限制。",
+      "traffic_exceeded": "本周期的流量配额已用完，订阅已停用，直到下次重置或提高上限。用户仍可登录面板。",
+      "expired": "已过到期日，订阅已停用，续期后恢复。用户仍可登录面板。",
+      "blocked_client": "因使用不被允许的客户端而被暂停。",
+      "suspended_manual": "订阅已被主动暂停，在有人恢复之前保持停用。",
+      "suspended_geo_auto": "因出现异常地点的连接而被自动暂停。",
+      "suspended_geo_manual": "管理员因地点告警而暂停。",
+      "service_unavailable": "账户已停用，订阅随之停用。"
+    },
+    "filter_group_none": "没有匹配的分组",
+    "form": {
+      "identity": "身份",
+      "group": "分组",
+      "quota": "配额与重置",
+      "expiry": "到期",
+      "access": "访问权限",
+      "notes": "备注",
+      "create_limits_note": "保持为“跟随上级”的限额使用分组的值。创建时设定的值必须大于 0；若要让此用户不受分组限制，请在创建后编辑该用户。"
     }
   },
   "groups": {
@@ -3064,9 +4057,15 @@
     "retry": "重试",
     "create": "新增分组",
     "edit_title": "编辑分组",
+    "detail": {
+      "not_found": "这个分组不存在或已被删除",
+      "forbidden": "你没有权限打开这个分组",
+      "staff_only": "只有管理员可以编辑分组",
+      "unsaved_in": "以下标签页有未保存的修改：{{tabs}}",
+      "tab_separator": "、"
+    },
     "search_placeholder": "搜索名称 / slug",
     "no_match": "没有匹配的分组",
-    "selection_count": "已选 {{count}}",
     "batch_delete": "批量删除",
     "field": {
       "slug": "Slug",
@@ -3084,10 +4083,11 @@
       "limits_hint": "留空 = 本组不作规定（不限）；填 0 = 明确不限。成员自己填了值就以成员的为准。",
       "traffic_limit_gb": "流量上限 (GB)",
       "ip_limit": "并发 IP 上限",
-      "device_limit": "设备数上限"
+      "device_limit": "设备数上限",
+      "slug_hint": "创建分组时设定，之后不能修改。",
+      "require_2fa_hint": "使用密码登录且尚未设置两步验证的成员，必须先完成设置才能继续使用面板。"
     },
     "scope": {
-      "title": "按组覆盖（否则继承全局）",
       "cat_2fa": "两步验证 (2FA) 方式",
       "cat_notify": "通知阈值",
       "cat_emergency": "紧急访问（超额救急）",
@@ -3148,28 +4148,33 @@
       "risk_login_warmup_logins": "登录学习次数",
       "risk_login_hold_days": "新国家保持天数",
       "default_suffix": "（默认）",
-      "override": "覆盖",
-      "inherit": "继承",
       "global_prefix": "全局",
       "on": "开",
       "off": "关",
       "save_error": "部分覆盖保存失败，请重新打开核对",
       "create_hint": "保存分组后即可在此设置按组覆盖。",
       "policy_pointer": "异地并发与风险信号的分组例外在「风控中心 › 策略」中设置。",
-      "open_policy": "在新标签页中打开"
+      "open_policy": "打开风险中心",
+      "level_group": "本组",
+      "loading": "正在加载覆盖项",
+      "load_failed": "无法加载本组的覆盖项"
     },
     "tabs": {
-      "node_access": "节点范围",
-      "policies": "策略",
-      "members": "成员",
-      "destination": "目的地"
+      "destination": "目的地",
+      "general": "常规",
+      "nodes": "节点和线路",
+      "layout": "布局",
+      "limits": "限额",
+      "overrides": "覆盖项",
+      "unsaved": "有未保存的修改"
     },
     "members": {
       "count": "本组共有 {{count}} 名成员",
       "hint": "在「用户管理」中按本组筛选可查看与管理成员。"
     },
     "placeholder": {
-      "tags": "从下拉选 region:XX / tag:YY，或自由输入"
+      "tags": "从下拉选 region:XX / tag:YY，或自由输入",
+      "pick": "选择或输入"
     },
     "hint": {
       "mode": "AND = 每条都要满足；OR = 任一满足即可",
@@ -3187,23 +4192,24 @@
       "slug": "Slug",
       "tag_filter": "Tag 条件",
       "members": "成员数",
-      "remark": "备注",
-      "actions": "操作"
+      "actions": "操作",
+      "nodes": "节点和线路",
+      "quota": "默认限额",
+      "two_factor": "两步验证",
+      "overrides": "覆盖项"
     },
     "tag": {
       "all": "所有节点"
     },
     "action": {
-      "edit": "编辑",
-      "delete": "删除"
+      "delete": "删除",
+      "members": "查看成员"
     },
     "validate": {
       "slug_required": "Slug 必填",
       "name_required": "名称必填"
     },
-    "warn": {
-      "has_members": "该组还有 {{count}} 个成员，请先迁出"
-    },
+    "warn": {},
     "toast": {
       "created": "已创建",
       "updated": "已更新",
@@ -3213,18 +4219,30 @@
       "batch_partial": "已删除 {{ok}} 个分组，失败 {{fail}} 个"
     },
     "confirm": {
-      "delete_title": "删除分组",
-      "delete_message": "确定删除分组 {{name}}？",
       "batch_delete_title": "批量删除分组",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？"
+      "batch_delete_message": "确定删除 {{names}}{{suffix}}？",
+      "require_2fa_on": {
+        "title": "要求启用两步验证？",
+        "message": "本组有 {{count}} 名成员。使用密码登录且尚未设置两步验证的成员，必须先完成设置才能继续使用面板。",
+        "action": "要求启用"
+      },
+      "require_2fa_off": {
+        "title": "不再要求启用两步验证？",
+        "message": "本组有 {{count}} 名成员，不再要求他们设置两步验证。已经设置的成员不受影响。",
+        "action": "不再要求"
+      },
+      "batch_delete_hidden": "其中 {{count}} 个不在当前列表中。"
     },
     "preview": {
-      "nodes": "匹配节点（{{count}}）：{{names}}",
-      "more": "{{names}} 等 {{count}} 个",
+      "nodes": "匹配 {{count}} 个节点，它们共有 {{total}} 条线路，本组可见 {{visible}} 条",
       "none": "没有匹配的节点，本组成员的订阅将为空",
       "unknown": "匹配节点暂时无法计算",
       "excluded_allowlist": "条件匹配但因 allowlist 无法执行而排除：{{names}}",
-      "change": "保存后 {{members}} 名成员将新增 {{added}} 个、移出 {{removed}} 个节点，并立即同步到上游面板"
+      "change": "保存后 {{members}} 名成员将新增 {{added}} 个、移出 {{removed}} 个节点，并立即同步到上游面板",
+      "loading": "正在检查匹配的节点",
+      "more_nodes": "另有 {{count}} 个",
+      "node_lines": "{{visible}} / {{total}} 条线路",
+      "none_short": "没有节点"
     },
     "destination": {
       "tab": "目的地",
@@ -3254,21 +4272,160 @@
       "list_separator": "、",
       "not_open_item": "{{name}} · {{reason}}",
       "detail_separator": "；"
+    },
+    "subtitle": "决定分组内用户能用哪些节点和线路、订阅怎样排列，以及他们的限额。",
+    "empty": "还没有分组",
+    "empty_hint": "新建分组，决定其中的用户能用哪些节点。",
+    "clear_search": "清除搜索",
+    "row_menu": "{{name}}的更多操作",
+    "list": {
+      "matches": "{{nodes}} 个节点 · {{lines}} 条线路",
+      "matches_title": "匹配的节点共有 {{total}} 条线路，本组可见 {{visible}} 条",
+      "quota_traffic": "流量 {{value}}",
+      "quota_ip": "并发 IP {{value}}",
+      "quota_devices": "设备 {{value}}",
+      "gb": "{{gb}} GB",
+      "unlimited": "不限",
+      "quota_none": "未设置",
+      "two_factor_required": "必须启用",
+      "conditions_more": "+{{count}}"
+    },
+    "general": {
+      "security_title": "安全"
+    },
+    "nodes": {
+      "intro": "分组内的用户会得到符合这些条件的节点和线路。"
+    },
+    "layout": {
+      "order_note": "节点和线路的顺序在“节点”页面拖动设定，对所有分组生效；分组的排序策略和排序权重只用来排列顺位相同的线路，也就是从未被拖动定位的线路。",
+      "open_nodes": "打开节点页面",
+      "saved_title": "本组已保存的布局",
+      "saved_note": "仅供参考，不在本页修改。",
+      "separators": "分隔标题",
+      "sort_strategy": "排序策略",
+      "sort_weights": "排序权重",
+      "strategy_default": "默认",
+      "none": "无",
+      "flag_title": "地区旗帜",
+      "create_hint": "保存分组后，才能在这里设置地区旗帜。"
+    },
+    "limits": {
+      "empty": "未设置",
+      "zero": "不限"
+    },
+    "overrides": {
+      "intro": "每项设置都会显示本组继承的全局值。在此设置可以只对本组成员生效，选择“跟随上级”则恢复使用全局值。",
+      "count": "已覆盖 {{count}} 项",
+      "none": "全部跟随全局",
+      "risk_other": "风险中心里已覆盖：{{count}} 项。"
+    },
+    "delete": {
+      "title": "删除分组{{name}}？",
+      "message": "本组没有成员。它的设置覆盖项和目的地白名单会一并删除，且无法恢复。",
+      "blocked_title": "分组{{name}}里还有成员",
+      "blocked_message": "本组有 {{count}} 名用户，有成员的分组不能删除。请先到“用户管理”页面（按本组筛选可以找到他们）把他们移到其他分组，再删除本组。",
+      "blocked_action": "前往用户管理"
     }
   },
   "certs": {
-    "tab_certs": "证书",
-    "load_failed": "暂时无法加载证书数据",
-    "retry": "重试",
-    "tab_creds": "DNS 凭据",
-    "tab_acme": "ACME 账号",
     "page_title": "证书",
     "page_subtitle": "通过 ACME DNS-01 签发并自动续期通配符 TLS 证书。",
-    "optional": "可选",
-    "acme_email_hint": "Let's Encrypt 账户联系邮箱（用于到期通知，可留空）",
-    "acme_directory_hint": "默认 LE 生产；测试改 staging 避免限额",
-    "acme_renew_before_days": "到期前 N 天续期",
-    "acme_renew_check_hours": "续期检查间隔（小时）",
+    "title": "证书",
+    "tab_certs": "证书",
+    "tab_acme": "ACME 账号",
+    "tab_creds": "DNS 凭据",
+    "new": "新建证书",
+    "edit": "编辑证书",
+    "refresh": "刷新",
+    "load_failed": "暂时无法加载证书数据",
+    "refresh_failed": "部分证书数据未能刷新",
+    "admin_only_title": "需要管理员权限",
+    "admin_only_hint": "证书由管理员管理，请联系管理员获取权限。",
+    "col_name": "名称",
+    "col_domains": "域名",
+    "col_status": "状态",
+    "col_expiry": "到期",
+    "col_actions": "操作",
+    "col_issuer": "签发机构",
+    "col_used_by": "使用位置",
+    "search_placeholder": "按名称或域名搜索",
+    "clear_filters": "清除筛选",
+    "empty_filtered": "没有符合筛选条件的证书",
+    "empty": "还没有证书",
+    "empty_hint": "签发后可部署到节点并自动续期。",
+    "setup_title": "签发前需要先配置",
+    "need_cred_first": "请先在「DNS 凭据」标签添加一个 DNS 凭据，才能签发证书。",
+    "need_acct_first": "请先在「ACME 账号」标签添加一个 ACME 账号，才能签发证书。",
+    "need_acct_and_cred": "签发证书前，请先在「ACME 账号」标签添加一个账号，并在「DNS 凭据」标签添加一个 DNS 凭据。",
+    "issue_needs_setup": "请先添加 ACME 账号和 DNS 凭据",
+    "health": {
+      "valid": "有效",
+      "expiring": "即将到期",
+      "expired": "已过期",
+      "failed": "申请失败",
+      "issuing": "申请中"
+    },
+    "reason": {
+      "failed_unknown": "没有返回失败详情。",
+      "issuing": "正在向 CA 申请，打开证书可查看尝试次数。",
+      "expired_today": "今天已过期。",
+      "expired_other": "已过期 {{count}} 天。",
+      "expiring_today_auto": "今天到期，将自动续期。",
+      "expiring_today_manual": "今天到期，自动续期已关闭。",
+      "expiring_auto_other": "{{count}} 天后到期，将自动续期。",
+      "expiring_manual_other": "{{count}} 天后到期，自动续期已关闭。"
+    },
+    "in_days_other": "{{count}} 天后",
+    "days_ago_other": "{{count}} 天前",
+    "today": "今天",
+    "on": "开启",
+    "off": "关闭",
+    "dns_via": "DNS：{{provider}}",
+    "not_used": "没有节点使用",
+    "usage_unknown": "无法读取使用它的节点",
+    "used_more": "+{{count}}",
+    "row_menu": "{{name}} 的更多操作",
+    "renew": "立即续期",
+    "renew_busy": "此证书正在申请中",
+    "renew_confirm_title": "续期证书",
+    "renew_confirm_message": "向 {{ca}} 为「{{name}}」申请新证书，并部署到使用它的节点。申请次数计入 CA 的频率限制。如果证书仍有效且有效期还剩三分之二以上，不会联系 CA，只重新部署。",
+    "renew_queued": "已提交续期",
+    "create_queued": "已提交签发，后台处理中",
+    "reissue_title": "重新签发证书",
+    "reissue_message": "修改「{{name}}」的域名会向 CA 申请新证书，申请次数计入 CA 的频率限制。新证书签发之前，现有证书保持不变。",
+    "reissue_confirm": "保存并重新签发",
+    "detail_title": "证书详情",
+    "not_before": "签发于",
+    "fingerprint": "指纹",
+    "failure_reason": "失败原因",
+    "progress": "进度",
+    "progress_task": "任务{{status}} · 第 {{attempts}} 次",
+    "progress_queued": "已排队 — 等待签发后台处理。",
+    "next_retry": "下次尝试",
+    "auto_renew": "自动续期",
+    "material_title": "证书与私钥",
+    "material_hint": "私钥会完整显示和下载，请按机密处理。",
+    "view_pem": "查看证书与私钥",
+    "pem_title": "证书与私钥",
+    "cert_chain_label": "证书链（PEM）",
+    "private_key_label": "私钥（PEM）",
+    "copy_cert": "复制证书",
+    "copy_key": "复制私钥",
+    "download_cert": "下载证书",
+    "download_key": "下载私钥",
+    "delete_title": "删除证书",
+    "deleted": "已删除",
+    "delete": {
+      "question": "删除「{{name}}」？此操作无法撤销。",
+      "blocked": "「{{name}}」仍在使用，无法删除。",
+      "used_by": "使用者",
+      "refused": "删除被拒绝。",
+      "cert_resolve": "请逐个打开上面的节点，修改其证书来源，然后再删除此证书。",
+      "account_resolve": "请先修改这些证书使用的 ACME 账号，再删除此账号。",
+      "cred_consequence": "这些证书在改用其他凭据之前无法签发或续期。",
+      "cred_resolve": "请先修改这些证书使用的 DNS 凭据。",
+      "usage_unknown": "无法确认哪些节点在使用「{{name}}」，暂时不能安全删除。节点加载完成后请重试。"
+    },
     "acct_title": "ACME 账号",
     "acct_subtitle": "管理多个 CA 账号（不同 CA / 联系邮箱 / EAB 凭据），证书签发时各自选用。",
     "acct_new": "新建账号",
@@ -3278,74 +4435,72 @@
     "acct_directory": "CA Directory URL",
     "acct_key_type": "密钥类型",
     "acct_unregistered": "未注册",
+    "acct_used_by": "使用的证书",
     "acct_empty": "还没有 ACME 账号。新建一个后才能签发证书。",
+    "acct_empty_hint": "账号是 CA 识别你证书的身份。",
     "acct_name_ph": "例如：Let's Encrypt — ops@team.com",
     "acct_eab_hint": "外部账号绑定（EAB）—— ZeroSSL、Google Public CA 等需要；Let's Encrypt 留空即可。",
     "acct_eab_kid": "EAB Key ID",
     "acct_eab_hmac": "EAB HMAC Key",
     "acct_delete_title": "删除 ACME 账号",
-    "acct_delete_msg": "确定删除「{{name}}」？仍在使用它的证书需先改用其他账号。",
+    "acme_email_hint": "CA 会把到期通知发到这个邮箱。",
+    "acme_directory_hint": "默认 LE 生产；测试改 staging 避免限额",
     "secret_keep": "已设置 — 留空保持不变",
-    "renew_title": "续期",
-    "renew_subtitle": "自动续期的阈值与检查频率（对所有证书生效）。",
-    "cred_edit_keep_hint": "字段留空表示保留原存储值。",
-    "field_kept": "已保存（保持不变）",
-    "field_change": "更改",
-    "title": "证书",
-    "new": "新建证书",
-    "edit": "编辑证书",
-    "need_cred_first": "请先在下方添加一个 DNS 凭据，才能签发证书。",
-    "need_acct_first": "请先到「ACME 账号」标签建一个 ACME 账号，才能签发证书。",
-    "need_acct_and_cred": "签发证书前，请先到「ACME 账号」标签建一个 CA 账号，并到「DNS 凭据」标签建一个 DNS 凭据。",
-    "col_name": "名称",
-    "col_domains": "域名",
-    "col_status": "状态",
-    "col_expiry": "到期",
-    "col_actions": "操作",
-    "renew": "立即续期",
-    "deleted": "已删除",
-    "delete_title": "删除证书",
-    "delete_confirm": "确定删除证书「{{name}}」？",
-    "validation_required": "请填写必填项",
-    "validation_secret_required": "每个凭据值都必须填写",
-    "create_queued": "已提交签发，后台处理中",
-    "renew_queued": "已提交续期",
-    "domains_help": "每行/逗号分隔一个域名，支持通配符 *.example.com",
-    "auto_renew": "自动续期",
-    "status": {
-      "pending": "申请中",
-      "active": "正常",
-      "failed": "申请失败",
-      "expired": "过期"
-    },
-    "detail_title": "证书详情",
-    "not_before": "签发于",
-    "fingerprint": "指纹",
-    "failure_reason": "失败原因",
-    "progress": "进度",
-    "progress_task": "任务{{status}} · 第 {{attempts}} 次",
-    "progress_queued": "已排队 — 等待签发后台处理。",
-    "next_retry": "下次尝试",
-    "copy_cert": "复制证书",
-    "copy_key": "复制私钥",
-    "view_pem": "查看证书与私钥",
-    "pem_title": "证书与私钥",
-    "cert_chain_label": "证书链（PEM）",
-    "private_key_label": "私钥（PEM）",
-    "download_cert": "下载证书",
-    "download_key": "下载私钥",
     "cred_title": "DNS 凭据",
     "cred_new": "新建凭据",
+    "cred_edit": "编辑凭据",
+    "cred_subtitle": "用于 DNS-01 验证。已保存的值不会再次显示。",
     "cred_provider": "DNS 厂商",
     "cred_keys": "凭据字段",
     "cred_delete_title": "删除凭据",
-    "cred_delete_confirm": "确定删除凭据「{{name}}」？",
+    "cred_empty": "还没有 DNS 凭据",
+    "cred_empty_hint": "凭据让 CA 的 DNS-01 验证能在你的域名下添加验证记录。",
     "provider_help": "选 DNS 厂商（可搜索），如 cloudflare / alidns / dnspod；长尾用 exec / httpreq",
     "cred_kv_help": "按所选厂商的 lego 文档填环境变量，如 Cloudflare：CF_DNS_API_TOKEN",
-    "cred_add_field": "添加字段"
+    "cred_add_field": "添加字段",
+    "cred_remove_field": "移除字段",
+    "cred_edit_keep_hint": "字段留空表示保留原存储值。",
+    "optional": "可选",
+    "validation_secret_required": "每个凭据值都必须填写",
+    "domains_help": "每行/逗号分隔一个域名，支持通配符 *.example.com",
+    "renew_title": "续期",
+    "renew_subtitle": "自动续期的阈值与检查频率（对所有证书生效）。",
+    "acme_renew_before_days": "到期前 N 天续期",
+    "acme_renew_check_hours": "续期检查间隔（小时）",
+    "renew_before_hint": "证书到期前多少天开始续期。",
+    "renew_check_hint": "面板多久检查一次需要续期的证书。",
+    "unit_days": "天",
+    "unit_hours": "小时",
+    "form": {
+      "name_required": "请填写名称",
+      "domains_required": "请至少填写一个域名",
+      "account_required": "请选择 ACME 账号",
+      "cred_required": "请选择 DNS 凭据",
+      "email_required": "请填写联系邮箱",
+      "directory_required": "请填写 CA Directory URL",
+      "directory_url": "必须以 http:// 或 https:// 开头",
+      "eab_kid_missing": "请同时填写 EAB Key ID",
+      "eab_hmac_missing": "请同时填写 EAB HMAC Key",
+      "eab_required_for": "{{ca}} 需要外部账号绑定（EAB）。",
+      "identity_changed_warning": "修改邮箱、CA 或 EAB 凭据会清除此账号在 CA 的注册信息。下次签发时会重新注册，计入 CA 的账号数量限制。",
+      "provider_required": "请选择或输入 DNS 厂商",
+      "value_required": "请填写",
+      "new_description": "保存后通过 ACME DNS-01 签发，在后台进行。",
+      "rate_limit_note": "每次签发都会向 CA 申请，CA 会限制申请频率。测试时请使用 LE Staging 等测试 CA 的账号。",
+      "domains_edit_hint": "修改域名列表会重新签发证书。",
+      "account_edit_hint": "只更换账号不会重新签发，下次续期时使用新账号。",
+      "cred_hint": "用于添加验证所需的 DNS 记录。",
+      "auto_renew_hint": "到期前 {{days}} 天自动续期（见下方「续期」）。",
+      "domains_changed_warning": "域名已修改：保存后将重新签发此证书。",
+      "account_label": "ACME 账号",
+      "cred_label": "DNS 凭据",
+      "acct_name_hint": "可选，用于区分多个账号。"
+    }
   },
   "servers": {
     "retired_routes": {
+      "previewing": "正在读取路由模板…",
+      "cleaning": "正在从模板中移除规则…",
       "upgrade_notice": "如果升级前用过 3X-UI 的 VLESS 路由线路，可在对应服务器上打开清理入口，预览旧功能留下的规则。",
       "open": "清理旧 VLESS 路由",
       "title": "{{server}} 的旧 VLESS 路由",
@@ -3401,6 +4556,7 @@
       "command_next": "执行后刷新此原服务器，并核对 Agent、内核及实际客户端连接。仅生成命令不代表安装成功。",
       "node_command_hint": "请以 root 身份在这台节点机执行一键命令，不是在 PSP 主机上执行。私有脚本领取令牌仅可使用一次、15 分钟后过期。安装成功不等于代理服务已就绪：完成后仍须核对原服务器的 Agent、内核、受管节点及客户端实际连接。",
       "single_instance_confirmation": "我确认此部署仅有一个 PSP 进程使用该数据库；在线转换暂不支持多实例部署。",
+      "generate_summary": "生成命令不会更改 {{name}}。它会签发一条一次性命令，在节点主机上执行后，才会把该服务器转换为 Passwall Node {{version}}。",
       "generate_node_command": "生成节点端更换后端与安装命令",
       "command_failed": "未能生成有效节点端命令，请重新核对预检、核验版本及必要确认；没有完成后端转换。",
       "supported_deployment_hint": "自动节点接管仅支持标准 Linux/systemd 3X-UI（x-ui）部署，或已干净重装操作系统的节点机。旧标准安装会备份、禁用并保留，而非删除。转换前须确认没有面板／内核升级任务或外部自动化能够重启旧服务。自定义目录与第三方面板容器部署须手动处理，此包装器不支持这些形式，也不会恢复非受管配置。",
@@ -3476,6 +4632,7 @@
       "requirements": "需要已启用升级助手的 Linux/systemd，或生成 Docker 文件时已开启“高级”中的远程升级选项。旧版本需先手动维护一次。新进程重新同步并完成配置收敛后才算成功；Docker 失败时会自动恢复保留的旧容器。数据库格式改变时仍需手动迁移。",
       "current": "当前 Passwall Node 版本（最近上报）",
       "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签。比当前版本旧的发行版会被标注出来，但仍可选择——面板不阻止降级，安全性由发行物签名、校验和与节点侧的状态 schema 检查保证。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
+      "summary": "将把 {{name}} 从 {{from}} 升级到 {{to}}，其代理连接会短暂中断。",
       "confirm": "确认并下发升级",
       "retry": "重试同一个升级请求",
       "refresh": "重新查询原任务",
@@ -3504,15 +4661,19 @@
     "test_all": "测试全部",
     "search_placeholder": "搜索名称 / URL",
     "no_match": "没有匹配的服务器",
-    "edit_title": "编辑 {{name}}",
-    "selection_count": "已选 {{count}}",
+    "detail": {
+      "not_found": "没有此服务器，它可能已被删除。",
+      "forbidden": "你无权访问此服务器。",
+      "install_not_found": "没有此 Passwall Node 服务器，它可能已被删除，或不是 Passwall Node。",
+      "create_forbidden": "仅全局管理员可添加服务器。"
+    },
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
       "region": "地区",
-      "tags": "标签（逗号分隔）",
+      "tags": "标签",
       "panel_type": "服务器类型",
       "update_channel": "Passwall Node 更新频道",
       "name": "服务器名称",
@@ -3552,8 +4713,6 @@
       "update_channel": "默认更新通道：stable 只接收正式版，rc 接收候选版与正式版，beta 接收所有阶段。Docker 跟随同名标签，latest 仅指向 stable；testing 兼容 beta。保存不会自动升级。",
       "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
-      "unconfigured": "未配置",
-      "change": "修改",
       "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "native": {
@@ -3571,7 +4730,6 @@
       },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",
-      "metadata_details": "可选备注与技术说明",
       "create_continue": "创建并继续安装",
       "method_label": "选择安装方式",
       "method": {
@@ -3760,8 +4918,10 @@
       "url": "URL",
       "status": "状态",
       "version": "版本",
-      "remark": "备注",
-      "actions": "操作"
+      "actions": "操作",
+      "type": "类型",
+      "counts": "节点 / 线路",
+      "remark": "备注"
     },
     "status": {
       "checking": "检测中",
@@ -3792,7 +4952,6 @@
     },
     "action": {
       "test": "测试连接",
-      "edit": "编辑",
       "delete": "删除",
       "more": "更多操作",
       "upgrade": "升级",
@@ -3802,7 +4961,10 @@
       "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据",
       "line_factors": "线路倍率",
-      "shared_ports": "共用端口（SNI）"
+      "shared_ports": "共用端口（SNI）",
+      "refresh": "刷新",
+      "more_for": "{{name}} 的更多操作",
+      "edit": "编辑"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -3853,12 +5015,6 @@
       "upgrade_unavailable": "此实例当前不能升级该组件（{{reasons}}）。"
     },
     "confirm": {
-      "delete_title": "删除服务器",
-      "delete_message": "删除服务器 {{name}}？该服务器必须没有节点引用才能删除。",
-      "has_nodes_title": "该服务器上还有节点",
-      "has_nodes_text": "请先移除或迁走这些节点。隐藏的隧道监听器要到落地节点上删除对应的线路才会移除。",
-      "has_nodes_item": "{{node}}",
-      "has_nodes_tunnel_item": "{{landing}} 的隧道线路 {{line}}",
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "batch_upgrade_xray_title": "批量升级 Xray",
@@ -3942,7 +5098,6 @@
       "delete_text": "删除后，放在这个端口后面的监听器会回到自己的公网端口，它们的用户会重新连接一次；指向这个端口的中转线路不再下发，直到重新配置。",
       "deleted": "已删除共用端口",
       "saved": "已保存共用端口",
-      "listener_chip": "{{name}} → 127.0.0.1:{{port}}",
       "port": "共用的端口",
       "port_hint": "任意 TCP 端口，默认 443。",
       "listeners": "放在这个端口后面的监听器",
@@ -3971,7 +5126,8 @@
         "listener": "监听器 {{name}}",
         "forward": "中转线路 {{node}} / {{line}}",
         "link": "来自服务器 {{entry}} 的隧道 {{link}}（独立端口 {{port}}）",
-        "forward_short": "中转线路 {{node}} / {{line}}"
+        "forward_short": "中转线路 {{node}} / {{line}}",
+        "link_short": "隧道 {{link}}"
       },
       "refusal": {
         "no_sni": "没有可读的 SNI（如 Shadowsocks / SS-2022），保持自己的端口",
@@ -4114,8 +5270,84 @@
           "contract": "节点协议拒绝了它"
         }
       },
-      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效"
-    }
+      "row_inactive": "共用端口（SNI）：有 {{count}} 个已保存的端口没有生效",
+      "back": "共用端口",
+      "discard_title": "放弃未保存的修改？",
+      "discard_message": "离开后，对这个共用端口所做的修改会丢失。",
+      "discard_confirm": "放弃",
+      "delete_confirm": "删除端口 {{port}}",
+      "plan": {
+        "listeners": "会回到各自公网端口的监听器：",
+        "lines": "会停止下发的中转线路：",
+        "tunnels": "受影响的隧道："
+      },
+      "graph": {
+        "title": "共用端口的分流",
+        "caption": "客户端连接共用端口，由 TLS 握手里的服务器名称（SNI）选择路由，再交给监听器、中转线路或伪装站点。选中一个方框可查看经过它的连接。",
+        "col_port": "客户端连接",
+        "col_sni": "握手里的 SNI",
+        "col_target": "交给",
+        "routes_other": "{{count}} 条路由",
+        "other": "其他或没有 SNI",
+        "loopback": "127.0.0.1:{{port}}",
+        "preview": "此共用端口的预览",
+        "no_default": "还没有伪装站点"
+      },
+      "more_routes_other": "另有 {{count}} 条路由",
+      "status": "状态",
+      "active": "生效中",
+      "actions": "操作",
+      "confirm_needed": "确认端点变更后才能保存",
+      "choose_target": "选择交给谁",
+      "empty_title": "还没有共用端口"
+    },
+    "delete": {
+      "title": "删除服务器“{{name}}”？",
+      "loading": "正在查看这台服务器上还有什么…",
+      "failed_title": "无法查看这台服务器上还有什么",
+      "failed_hint": "重试后才能确认是否可以删除",
+      "blocked_title": "无法删除服务器“{{name}}”：还有 {{count}} 项依赖",
+      "blocked_hint": "先处理下面这些依赖，再回来删除",
+      "nodes": "此服务器上的节点",
+      "lines": "经此服务器进入的线路",
+      "routes": "经此服务器分流的路由",
+      "egress": "以此服务器为出口的节点",
+      "egress_warning": "删除后这些节点的出口将不可用，建议先改为其他出口",
+      "listener_of": "{{landing}} · {{line}}（入口监听）",
+      "listener_fix": "删除这条线路，或改为端口转发",
+      "line_fix": "删除这条线路，或改用其他入口服务器",
+      "pending_landing": "此线路的落地节点正在删除，等待同步任务完成，或仅从面板移除该节点",
+      "node_lines": "{{count}} 条线路",
+      "open_node": "打开节点",
+      "open_line": "查看线路",
+      "open_exit": "查看出口",
+      "sync_tasks": "同步任务",
+      "routes_of": "路由 {{routes}}",
+      "confirm": "删除服务器",
+      "changed": "服务器上的依赖刚刚发生了变化，已重新读取",
+      "blind_delete": "不核对，直接删除"
+    },
+    "count": "{{count}} 台服务器",
+    "counts": {
+      "title": "{{nodes}} 个节点，{{lines}} 条线路"
+    },
+    "menu": {
+      "not_ready": "节点尚未就绪",
+      "not_supported": "{{type}} 不支持"
+    },
+    "empty": {
+      "title": "还没有服务器",
+      "description": "添加 Passwall Node、3X-UI 或 S-UI 服务器后，即可接入节点。"
+    },
+    "clear_search": "清除搜索",
+    "form": {
+      "group_type": "服务器类型",
+      "group_basics": "基本信息",
+      "group_node": "Passwall Node",
+      "group_connection": "连接",
+      "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
+    },
+    "resource_state": "资源：{{state}}"
   },
   "diagnostics": {
     "title": "运行诊断",
@@ -4442,7 +5674,6 @@
       "version": "版本",
       "build": "构建",
       "build_local": "本地构建",
-      "copy_build": "复制构建号",
       "uptime": "面板已运行",
       "since": "统计起点",
       "window": "统计时长",
@@ -4485,7 +5716,6 @@
       "peak_note": "峰值为本统计区间内的最高值。",
       "hist_value": "{{count}} 个样本 · 典型 {{p50}} · 95% 在 {{p95}} 以内",
       "server_help": "服务端说明",
-      "copy_name": "复制指标名",
       "stats": {
         "unit": "单位",
         "count": "样本数",
@@ -5225,6 +6455,9 @@
     }
   },
   "access_control": {
+    "user_picker": {
+      "no_match": "没有匹配的账户"
+    },
     "title": "访问控制",
     "subtitle": "决定用户能通过原生节点访问哪些目的地，并记录规则命中。",
     "retry": "重试",
@@ -5243,7 +6476,6 @@
       "pick_user": "查看账号…"
     },
     "menu": {
-      "label": "更多操作",
       "settings": "数据与下发设置…",
       "pause": "暂停全部执行…",
       "paused_snack": "访问控制已暂停",
@@ -5290,7 +6522,7 @@
       },
       "detail": {
         "countdown_other": "{{count}} 秒后下发",
-        "restart": "每台节点会重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
+        "restart": "规则有变化的节点会各重启代理程序一次，正在使用的连接断开一次；连续修改会合并为一次下发。",
         "sniffing": "入站「{{inbounds}}」没有识别域名，域名规则在它上面不生效。仍在执行上一版。",
         "sniffing_partial": "{{n}} 个入站的嗅探不足：域名规则（metadataOnly 时还包括 BT 等协议规则）在这些入站上不生效",
         "over_limit": "{{what}} {{used}} / {{limit}}。仍在执行上一版。",
@@ -5315,6 +6547,26 @@
         "message": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发；{{seconds}} 秒内的连续修改合并为一次。",
         "message_no_window": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。之后的修改也会这样下发，连续修改合并为一次。",
         "action": "启用"
+      },
+      "enable_policy": {
+        "title": "启用策略「{{name}}」？",
+        "effect_block": "它会开始拦截匹配的连接",
+        "effect_allow": "它会开始放行匹配的连接，排在它后面的拦截规则和白名单拒绝不再对这些连接生效（节点的来源国家规则仍然生效）",
+        "effect_report": "它会在记录里标出本应拦截的连接（仅限记录命中的节点），不拦截任何连接",
+        "scope_all": "范围：所有用户，共 {{groups}} 个分组、{{users}} 人。",
+        "scope_groups": "范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。",
+        "scope_panels": "范围：经由所选 {{panels}} 台服务器（{{names}}）出口的连接。",
+                "scope_all_unknown": "范围：所有用户（分组数和人数暂时无法确认）。",
+        "scope_groups_unknown": "范围：{{groups}} 个分组（{{names}}），人数暂时无法确认。",
+        "exempt_all_other": "其中 {{count}} 个豁免账号不受影响。",
+        "exempt_groups_other": "这些分组里的豁免账号不受影响（豁免账号共 {{count}} 个）。",
+        "exempt_panels_other": "豁免账号不受影响（共 {{count}} 个）。",
+        "exempt_unknown": "豁免账号数暂时无法确认；豁免账号不受影响。",
+"nodes_up_to_other": "最多 {{count}} 台节点",
+        "nodes_unknown": "它所作用的节点",
+        "restart": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
+        "action_on": "启用",
+        "action_report": "以仅报告启用"
       },
       "convert_policy": {
         "title": "把「{{name}}」改为拦截？",
@@ -5353,12 +6605,12 @@
       },
       "pause": {
         "title": "暂停全部访问控制？",
-        "message": "所有节点会在{{minutes}}内停止执行策略，并各重启代理程序一次；定义全部保留，恢复后照原样执行。",
+        "message": "正在执行策略的节点会在{{minutes}}内停止执行，并各重启代理程序一次；定义全部保留，恢复后照原样执行。",
         "action": "暂停"
       },
       "resume": {
         "title": "恢复访问控制？",
-        "message": "所有节点会在{{minutes}}内重新执行策略，并各重启代理程序一次。",
+        "message": "有策略可执行的节点会在{{minutes}}内重新执行，并各重启代理程序一次。",
         "action": "恢复"
       },
       "discard": {
@@ -5545,7 +6797,7 @@
         "edit": "编辑",
         "refresh": "立即刷新",
         "delete": "删除",
-        "delete_in_use": "被 {{count}} 条策略使用"
+        "delete_blocked": "使用中，无法删除"
       },
       "empty": "还没有列表。策略都从列表里取目的地。",
       "empty_filtered": "没有符合的列表",
@@ -5565,7 +6817,6 @@
         "usage": "使用情况"
       },
       "sheet": {
-        "close": "关闭",
         "source": "远程地址：{{url}}",
         "category": "社区分类：{{name}}",
         "custom": "自定义列表",
@@ -5581,30 +6832,28 @@
       },
       "dialog": {
         "title_new": "新建列表",
-        "title_edit": "编辑列表「{{name}}」",
-        "close": "关闭",
+        "type": "列表类型",
+        "not_found": "没有找到这个列表，可能已被删除",
         "name": "名称",
         "name_required": "名称必填",
         "text": "列表内容",
         "url": "地址",
         "url_https": "只支持 https 地址",
         "test_fetch": "测试拉取",
-        "fetching": "正在拉取…",
         "fetch_result": "拉取结果  HTTP {{code}} · {{size}} · 接受 {{accepted}} 条 · 忽略 {{ignored}} 条",
         "fetch_failed": "拉取失败：{{error}}",
         "refresh_follows": "刷新：跟随全局设置（每 {{hours}} 小时）",
         "category": "分类",
         "category_option": "{{name}} · {{entries}} 条",
+        "category_required": "请选择分类",
         "attrs": "属性",
         "geosite_note": "数据来自 v2fly domain-list-community。",
         "geosite_counts": "这个分类有 {{entries}} 条，其中正则 {{regexps}} 条",
-        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让 {{nodes}}各重启一次。",
-        "footer_nodes_other": "{{count}} 台节点",
-        "footer_nodes_unknown": "各节点",
+        "footer_used_other": "被 {{count}} 条启用的策略使用；内容变化会让{{nodes}}各重启一次。",
+        "footer_nodes_other": "最多 {{count}} 台节点",
+        "footer_nodes_unknown": "运行它的节点",
         "footer_unchanged": "内容未变化，不会触发重启",
         "footer_unused": "这个列表没有被使用，保存不会影响节点",
-        "save": "保存",
-        "cancel": "取消",
         "stale": "这个列表刚被其他人修改过",
         "load_latest": "载入最新",
         "preview_failed": "无法解析：{{error}}",
@@ -5623,7 +6872,6 @@
         "duplicates": "重复 {{count}} 条",
         "more_other": "还有 {{count}} 条",
         "warnings": "提醒",
-        "entries_only": "接受 {{count}} 条，其中正则 {{regexps}} 条",
         "jump": "跳到第 {{line}} 行",
         "reason": {
           "rewritten_to_network": "已改写：IP 段已对齐到网络号",
@@ -5729,7 +6977,6 @@
       "hits_source_rule": "来源规则 · {{name}}",
       "hits_list_separator": "、",
       "allowlist_report": "白名单 · 仅报告",
-      "allowlist_on": "白名单 · 开启",
       "usage_title": "按网站用量",
       "usage_help": "连接次数，不是流量；按小时、按网站的主域名汇总（如 google.com），以 IP 直连的记为「(ip)」。不含网址路径和来源 IP。只有记录用量的 Xray 节点上才有数据；列出最常用的前 20 个网站，其余合并为一行；次数为尽力而为。",
       "usage_audit": "只有管理员能查看，每次查看都会记入管理审计日志。",
@@ -5807,7 +7054,7 @@
         "manual": "手动",
         "auto": "自动",
         "manual_hint": "发现新版本时只提示，由你检查更新并确认。",
-        "auto_hint": "发现新版本就下载、校验并应用；每次让正在使用的分类变化，节点会各重启代理程序一次。"
+        "auto_hint": "发现新版本就下载、校验并应用；每次让正在使用的分类变化，使用它的策略所在的节点会各重启代理程序一次。"
       },
       "rejection": {
         "broad_entry": "列表「{{list}}」里会出现过宽的条目 {{entry}}，这次更新会被拒绝，继续使用旧数据。",
@@ -5827,7 +7074,7 @@
         "entries": "条目",
         "change": "变化",
         "in_use": "正在使用",
-        "restart": "正在使用的分类有变化，应用后各节点会重启代理程序一次。",
+        "restart": "正在使用的分类有变化，使用它的策略所在的节点应用后会重启代理程序一次。",
         "no_restart": "正在使用的分类没有变化，不会触发节点重启。",
         "cancel": "取消",
         "apply_update": "应用更新",
@@ -5855,14 +7102,15 @@
         }
       },
       "countries": "拒绝的国家或地区",
+      "countries_empty": "没有匹配的国家或地区",
       "cidrs": "拒绝的来源 IP 段（可选，每行一个）",
       "cidrs_hint": "例如 203.0.113.0/24 或 2001:db8::/32。节点前面有中转或 CDN 时，看到的是它们的地址。",
       "bad_lines": "第 {{lines}} 行不是有效的 IP 段",
       "save": "保存来源规则",
       "saved": "已保存来源规则",
       "stale": "这条来源规则刚被其他人修改过，已重新载入，请确认后再保存。",
-      "restart_other": "保存后约 {{count}} 分钟内生效，节点会重启代理程序一次。",
-      "restart_unknown": "保存后几分钟内生效，节点会重启代理程序一次。",
+      "restart_other": "保存后约 {{count}} 分钟内生效；这条规则若改变节点要执行的内容，节点会重启代理程序一次。",
+      "restart_unknown": "保存后几分钟内生效；这条规则若改变节点要执行的内容，节点会重启代理程序一次。",
       "unsaved": {
         "summary": "来源规则未保存，用下方按钮保存",
         "detail": "这个入站的「拒绝来源国家或地区」有未保存的修改。它由自己的保存按钮保存，不会随上面的确定一起保存。"
@@ -6022,11 +7270,8 @@
         "blank": "新建空白策略"
       },
       "editor": {
-        "close": "关闭",
-        "cancel": "取消",
-        "save": "保存",
         "title_new": "新建策略",
-        "title_edit": "编辑策略「{{name}}」",
+        "not_found": "没有找到这条策略，可能已被删除",
         "reload": "载入最新",
         "stale": "这条策略刚被其他人修改过",
         "name": "名称",
@@ -6043,6 +7288,7 @@
         "state": "状态",
         "match": "匹配什么",
         "lists": "列表",
+        "pick_none": "没有匹配的选项",
         "list_option": "{{name}} · {{kind}} · {{entries}} 条（正则 {{regexps}}）",
         "list_not_ready": "未就绪",
         "not_ready_hint": {
@@ -6083,9 +7329,9 @@
         "footer": {
           "disabled": "已停用的策略不会下发",
           "rename_only": "只改名称或说明不会让节点重启",
-          "applies_unknown": "保存后几分钟内在各节点生效，节点会重启代理程序一次",
-          "applies_one": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次",
-          "applies_other": "约 {{minutes}} 分钟内在 {{count}} 台节点生效，节点会重启代理程序一次"
+          "applies_unknown": "保存后几分钟内在各节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_one": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次",
+          "applies_other": "约 {{minutes}} 分钟内在最多 {{count}} 台节点生效，规则有变化的节点会重启代理程序一次"
         },
         "template_locked": {
           "summary": "匹配内容由规则组目录决定",
@@ -6100,7 +7346,7 @@
       "template_name_taken": "已有同名策略。先给现有策略改名或删除它，再添加这个规则组。",
       "turn_on": {
         "title": "开启「{{name}}」？",
-        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只记录、不拦截；选「开启拦截」会断开它命中的连接。",
+        "body": "页面已经不知道这条策略关闭前是仅报告还是开启。选「仅报告」只在记录里标出本应拦截的连接、不拦截；选「开启拦截」会断开它命中的连接。",
         "report": "仅报告",
         "block": "开启拦截",
         "cancel": "取消"
@@ -6374,17 +7620,17 @@
       },
       "too_old": "节点版本过旧，需升级",
       "exec_only": "sing-box 节点只执行，不记录",
-      "restart": "保存后这台节点会重启代理程序一次。",
+      "restart": "保存后，如果改动让这台节点要执行的内容变了，它会重启代理程序一次。",
       "cancel": "取消",
       "save": "保存",
-      "saved_other": "已保存，{{node}} 会在约 {{count}} 分钟内重启代理程序一次",
-      "saved_unknown": "已保存，{{node}} 会在几分钟内重启代理程序一次",
+      "saved_other": "已保存，{{node}} 可能会在约 {{count}} 分钟内重启代理程序一次",
+      "saved_unknown": "已保存，{{node}} 可能会在几分钟内重启代理程序一次",
       "usage_cost": "代价：最坏情况实测，繁忙节点上 Xray 代理进程的 CPU 多 +43%，节点的 agent 接收记录还要另外占用 CPU。所以每台节点自行选择，默认不开启。",
       "usage_too_old": "节点版本需升级才能记录用量",
       "usage_privacy_summary": "隐私政策还没有启用",
       "usage_privacy_detail": "按网站用量是要告知用户的记录。建议先在系统设置的「隐私与协议」里启用并发布隐私政策，发布时勾选「重大变更」让用户重新同意。这只是提醒，不影响保存。",
       "usage_off_note": "关闭后不再记录新的用量；已有的用量会保留到 {{usageDays}} 天期满后自动删除。",
-      "restart_usage": "保存后这台节点会重启代理程序一次；按网站用量保留 {{usageDays}} 天，到期自动删除。"
+      "restart_usage": "保存后这台节点可能会重启代理程序一次；按网站用量保留 {{usageDays}} 天，到期自动删除。"
     },
     "node_recording": {
       "mode": {

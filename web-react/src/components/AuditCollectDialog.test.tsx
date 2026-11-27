@@ -80,9 +80,9 @@ describe('the recording-mode dialog (S14/S15)', () => {
   it('with usage chosen, the line beside Save adds how long the usage is kept to the restart sentence', async () => {
     open(node({ supports: { policy: true, hits: true, usage: true } }))
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('保存后这台节点会重启代理程序一次。')).toBeTruthy()
+    expect(within(dialog).getByText('保存后，如果改动让这台节点要执行的内容变了，它会重启代理程序一次。')).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('radio', { name: /命中和按网站用量/ }))
-    expect(within(dialog).getByText('保存后这台节点会重启代理程序一次；按网站用量保留 9 天，到期自动删除。')).toBeTruthy()
+    expect(within(dialog).getByText('保存后这台节点可能会重启代理程序一次；按网站用量保留 9 天，到期自动删除。')).toBeTruthy()
   })
 
   it('turning usage off says the existing usage stays until it expires', async () => {
@@ -117,14 +117,14 @@ describe('the recording-mode dialog (S14/S15)', () => {
     const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement
     expect((within(dialog).getByRole('radio', { name: /只记录规则命中/ }) as HTMLInputElement).checked).toBe(true)
     expect(save.disabled).toBe(true)
-    expect(within(dialog).getByText('保存后这台节点会重启代理程序一次。')).toBeTruthy()
+    expect(within(dialog).getByText('保存后，如果改动让这台节点要执行的内容变了，它会重启代理程序一次。')).toBeTruthy()
     fireEvent.click(within(dialog).getByRole('radio', { name: /不记录/ }))
     expect(save.disabled).toBe(false)
     fireEvent.click(save)
     await waitFor(() => expect(api.setAuditCollect).toHaveBeenCalledWith(5, 'off'))
     // No second confirmation: the sentence beside the button is the warning.
     expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() => expect(snack).toHaveBeenCalledWith('已保存，东京 01 会在约 3 分钟内重启代理程序一次', 'success'))
+    await waitFor(() => expect(snack).toHaveBeenCalledWith('已保存，东京 01 可能会在约 3 分钟内重启代理程序一次', 'success'))
     expect(onClose).toHaveBeenCalled()
   })
 

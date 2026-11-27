@@ -1,0 +1,262 @@
+/*
+ * Tailwind v4 + shadcn (base-nova) stylesheet: the ordinary global setup, as in
+ * the reference project. Tailwind's preflight applies to the whole document;
+ * nothing else sets global styles.
+ *
+ * Utilities are generated from every file under src/ (Tailwind's automatic
+ * detection). That also scans i18n JSON and tests, so a few unused bare-word
+ * utilities (`.hidden`, `.table`, ...) are emitted; with every migrated view
+ * needing scanning, one explicit @source list per page is more upkeep than that
+ * costs.
+ *
+ * The `dark` variant is keyed on the `.dark` class on <html>, which
+ * src/theme/htmlAppearance.ts keeps in sync with the appearance store (the single
+ * source of truth for mode, brand colour and density).
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./shadcn-tailwind.css";
+
+/*
+ * Geist, Latin subset only (shadcn's other subsets: cyrillic, vietnamese,
+ * latin-ext, cost ~7 more faces and ~85 kB of render-blocking CSS). Characters
+ * outside Latin, including all CJK, fall through to the system stack in
+ * --font-sans. Source: @fontsource-variable/geist and geist-mono 5.3.0,
+ * `*-latin-wght-normal.woff2` with the upstream unicode-range.
+ */
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'Geist Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, 'PingFang SC', monospace;
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-ink: var(--warning-ink);
+    --color-info: var(--info);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-segment-track: var(--segment-track);
+    --color-segment-active: var(--segment-active);
+    --color-segment-border: var(--segment-border);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(0.972 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.955 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.955 0 0);
+    --muted-foreground: oklch(0.5 0 0);
+    --accent: oklch(0.955 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.88 0 0);
+    --input: oklch(0.66 0 0);
+    --ring: oklch(0.6 0 0);
+    /* The chart colours are the categorical series in data-tokens.css (light and dark values live there). */
+    --chart-1: var(--series-1);
+    --chart-2: var(--series-2);
+    --chart-3: var(--series-3);
+    --chart-4: var(--series-4);
+    --chart-5: var(--series-5);
+    /* Tabs and segmented switches share one look: a tinted track and a clearly raised active item (own surface, border, shadow). */
+    --segment-track: oklch(0.915 0.004 264);
+    --segment-active: oklch(1 0 0);
+    --segment-border: oklch(0.72 0.01 264);
+    --radius: 0.625rem;
+    --brand: oklch(0.5 0.2 264);
+    --brand-foreground: oklch(0.985 0 0);
+    --success: oklch(0.55 0.15 150);
+    --success-foreground: oklch(0.98 0.02 150);
+    --warning: oklch(0.7 0.15 75);
+    /* --warning is a fill; as an icon or dot on a light surface it reads at 2.7:1, so the light theme has a darker ink for it (see StatusBadge.contrast.test.ts). */
+    --warning-ink: oklch(0.55 0.12 70);
+    --info: oklch(0.5 0.18 250);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.5 0.2 264);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.945 0.004 264);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.235 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.235 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.29 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.29 0 0);
+    --muted-foreground: oklch(0.76 0 0);
+    --accent: oklch(0.29 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 15%);
+    --input: oklch(0.55 0 0);
+    --ring: oklch(0.66 0 0);
+    --segment-track: oklch(0.3 0 0);
+    --segment-active: oklch(0.44 0 0);
+    --segment-border: oklch(0.62 0 0);
+    --brand: oklch(0.72 0.14 264);
+    --brand-foreground: oklch(0.145 0 0);
+    --success: oklch(0.72 0.17 150);
+    --success-foreground: oklch(0.2 0.05 150);
+    --warning: oklch(0.8 0.15 80);
+    --warning-ink: oklch(0.8 0.15 80);
+    --info: oklch(0.75 0.12 240);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.72 0.14 264);
+    --sidebar-primary-foreground: oklch(0.145 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+ * Brand presets. appearance.ts offers six source colours; useHtmlAppearance puts
+ * the matching id on <html data-brand>. The values are the Material 3 tones of each
+ * source colour (tone 40 in light, tone 80 in dark, tone 20 for the label), written out
+ * so the stylesheet needs no palette generator. A colour that is not a preset gets
+ * data-brand="custom" and inline values from theme/brandColor.ts instead.
+ * The `.dark[data-brand=...]` rules have the same specificity as `:root[data-brand=...]`
+ * and come after them, so dark wins by source order. (Plain `.dark` for the token
+ * block, as in the reference project.)
+ */
+:root[data-brand="blue"]   { --brand: #0061a4; --sidebar-primary: #0061a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="purple"] { --brand: #6750a4; --sidebar-primary: #6750a4; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="teal"]   { --brand: #00696a; --sidebar-primary: #00696a; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="green"]  { --brand: #386a1f; --sidebar-primary: #386a1f; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="orange"] { --brand: #825500; --sidebar-primary: #825500; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+:root[data-brand="pink"]   { --brand: #a53265; --sidebar-primary: #a53265; --sidebar-primary-foreground: #ffffff; --brand-foreground: #ffffff; }
+.dark[data-brand="blue"]   { --brand: #9fcaff; --sidebar-primary: #9fcaff; --sidebar-primary-foreground: #003258; --brand-foreground: #003258; }
+.dark[data-brand="purple"] { --brand: #cfbcff; --sidebar-primary: #cfbcff; --sidebar-primary-foreground: #381e72; --brand-foreground: #381e72; }
+.dark[data-brand="teal"]   { --brand: #4cdadb; --sidebar-primary: #4cdadb; --sidebar-primary-foreground: #003737; --brand-foreground: #003737; }
+.dark[data-brand="green"]  { --brand: #9cd67e; --sidebar-primary: #9cd67e; --sidebar-primary-foreground: #113800; --brand-foreground: #113800; }
+.dark[data-brand="orange"] { --brand: #ffb951; --sidebar-primary: #ffb951; --sidebar-primary-foreground: #452b00; --brand-foreground: #452b00; }
+.dark[data-brand="pink"]   { --brand: #ffb0ca; --sidebar-primary: #ffb0ca; --sidebar-primary-foreground: #640036; --brand-foreground: #640036; }
+
+/*
+ * Density. --control-h is the height of buttons, inputs and selects, --row-h the
+ * height of a table row; the copied components read them (default size follows
+ * --control-h, `sm` / `lg` are --control-h -/+ 0.25rem, `xs` stays fixed). Compact
+ * is the default, both before the sync effect runs and for a user with no saved
+ * choice; compact is 2rem, the reference project's own button height.
+ */
+:root { --shell-bar-h: 3.5rem; }
+:root, :root[data-density="compact"] { --control-h: 2rem; --row-h: 2.25rem; }
+:root[data-density="comfortable"] { --control-h: 2.5rem; --row-h: 3rem; }
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    /* The document scrolls under the sticky top bar, so an in-page scroll target (scrollIntoView,
+       a focused control) stops clear of it. Bar height plus a little air. */
+    scroll-padding-top: calc(var(--shell-bar-h) + 0.5rem);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Geist stylistic sets, as in the reference project. */
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--ring) 35%, transparent);
+  }
+}
+
+/* The slide of the indeterminate bar in components/RequestProgressBar. */
+@theme inline {
+  --animate-request-progress: request-progress 1.3s ease-in-out infinite;
+  @keyframes request-progress {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(250%); }
+  }
+}
+
+/* Respect the OS reduced-motion setting for every transition and animation. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

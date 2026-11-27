@@ -819,6 +819,13 @@ type RelayLine struct {
 	// forward's quality for display, nil when it is not probed.
 	ProbeWithheld bool          `json:"-"`
 	Probe         *ProbeQuality `json:"-"`
+	// Position is loaded state, never stored in the relays column: this line's
+	// explicit place on the subscription sort scale (the one nodes.sort_order and
+	// separators share), from the subscription_line_positions table. Nil means
+	// the line was never positioned and stays right after its landing, as it
+	// always did (PlaceFloatingLines). It is not in the JSON, so an editor that
+	// rewrites the relays column can neither wipe nor forge it.
+	Position *int `json:"-"`
 }
 
 // RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index

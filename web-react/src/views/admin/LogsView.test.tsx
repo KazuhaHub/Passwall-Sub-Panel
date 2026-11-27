@@ -1,167 +1,205 @@
 // @vitest-environment jsdom
-import { ThemeProvider } from '@mui/material/styles'
-import { MemoryRouter, useLocation } from 'react-router'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
-import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { api, installReads, lastParams, list, mountPage, toast } from './logs/testHarness'
 import { useAuthStore } from '@/stores/auth'
 import LogsView from './LogsView'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
-vi.mock('@/api/client', () => ({ client: api }))
-vi.mock('@/i18n', () => ({ default: { t: (k: string) => k, language: 'zh-CN' } }))
-vi.mock('@/components/SnackbarHost', () => ({ pushSnack: vi.fn(), default: () => null }))
-vi.mock('@/components/ConfirmHost', () => ({ confirm: vi.fn(async () => true) }))
-// t over the REAL zh-CN admin bundle (then the defaultValue, then the key),
-// so a key the page asks for but the bundle lacks shows up as its raw key.
-const dict = vi.hoisted(() => ({ current: {} as Record<string, string> }))
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (k: string, o?: Record<string, unknown>) => {
-      const flat = k.startsWith('admin:') ? k.slice('admin:'.length) : k
-      const raw = dict.current[flat] ?? (typeof o?.defaultValue === 'string' ? o.defaultValue : k)
-      return raw.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (o && name in o ? String(o[name]) : m))
-    },
-    i18n: { language: 'zh-CN' },
-  }),
-}))
+const mount = (entry = '/admin/logs') => mountPage(<LogsView />, entry, '/admin/logs')
+const here = (m: ReturnType<typeof mount>) => m.router.state.location.pathname + m.router.state.location.search
 
-import zh from '@/locales/zh-CN/admin.json'
-import { flatten, type Nested } from '@/i18n/options'
-dict.current = flatten(zh as Nested)
-
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
-function Where() {
-  const loc = useLocation()
-  return <p data-testid="location">{loc.pathname + loc.search}</p>
-}
-
-function mount(url = '/admin/logs') {
-  render(
-    <MemoryRouter initialEntries={[url]}>
-      <ThemeProvider theme={theme}>
-        <LogsView />
-        <Where />
-      </ThemeProvider>
-    </MemoryRouter>,
-    { wrapper: queryWrapper(makeTestQueryClient()) },
-  )
-}
-
-beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+const subLogs = [
+  { id: 1, user_id: 7, user_upn: 'alice', ip: '203.0.113.7', ua: 'ClashMeta/1.0', client_type: 'mihomo', accessed_at: '2026-09-20T00:00:00Z', device_label: 'iOS 17.5 · iPhone15,2', device_id4: 'ab12' },
+  { id: 2, user_id: 7, user_upn: 'alice', ip: '203.0.113.8', ua: 'v2rayN/7', client_type: 'uri-list', accessed_at: '2026-09-20T00:01:00Z', device_id4: 'cd34' },
+  { id: 3, user_id: 7, user_upn: 'alice', ip: '203.0.113.9', ua: 'curl/8', client_type: 'uri-list', accessed_at: '2026-09-20T00:02:00Z' },
+]
+const empty = list([])
+const reads = (over: Record<string, unknown> = {}) => installReads({
+  '/admin/sub-logs': list(subLogs), '/admin/audit': empty, '/admin/auth-events': empty, '/admin/email-logs': empty,
+  '/admin/cert-events': { events: [], total: 0 }, '/admin/settings/ui': { sub_log_retention_days: 30, mail_sent_retention_days: 14 }, ...over,
+})
 
 describe('LogsView', () => {
-  it('reports a failed log read instead of rendering an empty log', async () => {
-    // "No log entries" is a claim about the audit trail. The loaders ran with no
-    // catch, so a failure raised an unhandled rejection and left the table
-    // reading as an account with a clean history.
-    api.get.mockRejectedValue(new Error('offline'))
+  it('reports a failed read instead of rendering an empty log', async () => {
+    // "No log entries" is a claim about the audit trail: a failure must never read as a clean history.
+    installReads({ '/admin/sub-logs': new Error('offline') })
     mount()
-
-    await waitFor(() => expect(screen.getByText('暂时无法加载日志')).toBeTruthy())
+    expect(await screen.findByText('Log data is temporarily unavailable')).toBeTruthy()
+    expect(screen.queryByText('No log entries yet')).toBeNull()
   })
-})
 
-// The device column carries what only an admin may read: the sub-log API adds
-// the device fields for admins only, so an operator offered the column would
-// see it always empty. (The location and risk tabs that used to sit here moved
-// to the admin-only risk center; LogsRoute.test covers their old links.)
-describe('LogsView admin-only device column', () => {
-  const list = (items: unknown[]) => ({ items, total: items.length })
-  const subLogs = [
-    { id: 1, user_id: 7, user_upn: 'alice', ip: '203.0.113.7', ua: 'ClashMeta/1.0', client_type: 'mihomo',
-      accessed_at: '2026-09-20T00:00:00Z', device_label: 'iOS 17.5 · iPhone15,2', device_id4: 'ab12' },
-    { id: 2, user_id: 7, user_upn: 'alice', ip: '203.0.113.8', ua: 'v2rayN/7', client_type: 'uri-list',
-      accessed_at: '2026-09-20T00:01:00Z', device_id4: 'cd34' },
-    { id: 3, user_id: 7, user_upn: 'alice', ip: '203.0.113.9', ua: 'curl/8', client_type: 'uri-list',
-      accessed_at: '2026-09-20T00:02:00Z' },
-  ]
+  it('reports a failed certificate read instead of an empty certificate log, and shows an empty one as empty', async () => {
+    installReads({ '/admin/cert-events': new Error('offline') })
+    const m = mount('/admin/logs?tab=certs')
+    expect(await screen.findByText('Log data is temporarily unavailable')).toBeTruthy()
+    m.unmount()
+    reads()
+    mount('/admin/logs?tab=certs')
+    expect(await screen.findByText('No log entries yet')).toBeTruthy()
+  })
 
-  function serve() {
-    api.get.mockImplementation(async (url: string) => {
-      if (url === '/admin/sub-logs') return { data: list(subLogs) }
-      if (url === '/admin/audit' || url === '/admin/auth-events' || url === '/admin/email-logs') return { data: list([]) }
-      if (url === '/admin/settings/ui') return { data: {} }
-      throw new Error(`Unexpected GET ${url}`)
-    })
-  }
-
-  afterEach(() => useAuthStore.setState({ role: '' }))
+  it('says how many records match, and asks the server for the page and keyword in the address', async () => {
+    reads({ '/admin/sub-logs': list(subLogs, 120) })
+    mount('/admin/logs?page=2&q=alice')
+    expect(await screen.findByText('120 results')).toBeTruthy()
+    expect(lastParams('/admin/sub-logs')).toMatchObject({ page: 2, page_size: 25, search: 'alice' })
+  })
 
   it('shows the declared device to admins only', async () => {
-    serve()
-    useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true })
+    reads()
     mount()
-
     await screen.findByText('iOS 17.5 · iPhone15,2')
-    expect(screen.queryByRole('columnheader', { name: '设备' })).not.toBeNull()
-    // Only the 4-character prefix of the digest reaches the page, and a
-    // fetch that declared nothing says so rather than leaving a blank.
+    expect(screen.queryByRole('columnheader', { name: 'Device' })).not.toBeNull()
+    // Only the 4-character prefix of the digest reaches the page; a fetch that declared nothing says so.
     expect(screen.getByText('#cd34')).toBeTruthy()
     const row3 = screen.getByText('curl/8').closest('tr') as HTMLElement
-    expect(row3.querySelectorAll('td')[5]?.textContent).toBe('—')
-    cleanup()
+    expect(within(row3).getByText('—')).toBeTruthy()
+  })
 
+  it('hides the device column from an operator, whose API response carries none', async () => {
     useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+    reads()
     mount()
     await screen.findByText('curl/8')
-    expect(screen.queryByRole('columnheader', { name: '设备' })).toBeNull()
+    expect(screen.queryByRole('columnheader', { name: 'Device' })).toBeNull()
     expect(screen.queryByText('iOS 17.5 · iPhone15,2')).toBeNull()
-    expect(screen.queryByText('#cd34')).toBeNull()
+  })
+
+  it('opens the record in a dialog whose address is a link, and closes it with Back-able state', async () => {
+    reads({ '/admin/audit': list([{ id: 9, actor: 'root', action: 'PUT /api/admin/nodes/3', target: 'node 3', ip: '198.51.100.2', at: '2026-09-20T00:00:00Z', before_json: '{"a":1}', after_json: '{"a":2}' }]) })
+    const m = mount('/admin/logs?tab=audit')
+    fireEvent.click(await screen.findByText('node 3'))
+    const dialog = await screen.findByRole('dialog')
+    expect(here(m)).toBe('/admin/logs?tab=audit&row=9')
+    expect(within(dialog).getByText('PUT /api/admin/nodes/3')).toBeTruthy()
+    // JSON is pretty-printed in a block that can be copied whole.
+    expect(within(dialog).getByText(/"a": 2/)).toBeTruthy()
+    expect(within(dialog).getAllByRole('button', { name: /^Copy/ }).length).toBe(2)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close details' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(here(m)).toBe('/admin/logs?tab=audit')
+  })
+
+  it('steps to the previous and next record of the page through the address, and stops at the ends', async () => {
+    reads()
+    const m = mount('/admin/logs?row=2')
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=3'))
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=2'))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?row=1'))
+    await waitFor(() => expect((within(screen.getByRole('dialog')).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('a tab switch leaves the page, keyword and record behind', async () => {
+    reads()
+    const m = mount('/admin/logs?page=3&q=alice&row=2')
+    await screen.findAllByText('alice')
+    // The dialog is modal, so the rest of the page is hidden from the tree while it is open.
+    fireEvent.click(screen.getByRole('tab', { name: 'Audit logs', hidden: true }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?tab=audit'))
   })
 })
 
-// The risk center's drawer links here with the account's id (exact) and its
-// UPN (display only): `q` would be a fuzzy search over user, IP, UA and
-// client, and would match other accounts whose names contain it.
+// The risk center's drawer links here with the account's id (exact) and its UPN (display only): a
+// keyword would be a fuzzy search over user, IP, UA and client and match other accounts' names too.
 describe('LogsView exact user filter', () => {
-  const list = (items: unknown[]) => ({ items, total: items.length })
-
-  function serve() {
-    api.get.mockImplementation(async (url: string) => {
-      if (url === '/admin/sub-logs' || url === '/admin/audit' || url === '/admin/auth-events'
-        || url === '/admin/email-logs') return { data: list([]) }
-      if (url === '/admin/settings/ui') return { data: {} }
-      throw new Error(`Unexpected GET ${url}`)
-    })
-  }
-
-  const lastParams = (url: string) =>
-    [...api.get.mock.calls].reverse().find(([u]) => u === url)?.[1]?.params as Record<string, unknown> | undefined
-
-  beforeEach(() => useAuthStore.setState({ role: 'admin', userId: 1, hasToken: true }))
-  afterEach(() => useAuthStore.setState({ role: '' }))
-
-  it('filters the sub log by user_id behind a removable chip', async () => {
-    serve()
-    mount('/admin/logs?tab=sub&user_id=7&upn=alice')
-
-    const chip = (await screen.findByText('用户：alice')).closest('.MuiChip-root') as HTMLElement
+  it('filters the subscription log by user_id behind a removable chip', async () => {
+    reads()
+    const m = mount('/admin/logs?tab=sub&user_id=7&upn=alice')
+    expect(await screen.findByText('User: alice')).toBeTruthy()
     await waitFor(() => expect(lastParams('/admin/sub-logs')).toMatchObject({ user_id: 7 }))
-
-    fireEvent.click(within(chip).getByTestId('CancelIcon'))
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/logs?tab=sub'))
-    expect(screen.queryByText('用户：alice')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the user filter' }))
+    await waitFor(() => expect(here(m)).toBe('/admin/logs?tab=sub'))
+    expect(screen.queryByText('User: alice')).toBeNull()
     await waitFor(() => expect(lastParams('/admin/sub-logs')?.user_id).toBeUndefined())
   })
 
-  it('filters the auth log the same way', async () => {
-    serve()
-    mount('/admin/logs?tab=auth&user_id=7&upn=alice')
-
-    expect(await screen.findByText('用户：alice')).toBeTruthy()
-    await waitFor(() => expect(lastParams('/admin/auth-events')).toMatchObject({ user_id: 7 }))
+  it('filters the sign-in log the same way, and its facets are in the address', async () => {
+    reads()
+    mount('/admin/logs?tab=auth&user_id=7&upn=alice&outcome=failure')
+    expect(await screen.findByText('User: alice')).toBeTruthy()
+    await waitFor(() => expect(lastParams('/admin/auth-events')).toMatchObject({ user_id: 7, outcome: 'failure' }))
   })
 
   it('ignores a malformed id', async () => {
-    serve()
+    reads()
     mount('/admin/logs?tab=sub&user_id=7x&upn=alice')
-
     await waitFor(() => expect(lastParams('/admin/sub-logs')).toBeDefined())
     expect(lastParams('/admin/sub-logs')?.user_id).toBeUndefined()
-    expect(screen.queryByText('用户：alice')).toBeNull()
+    expect(screen.queryByText('User: alice')).toBeNull()
+  })
+})
+
+// Purge and clear delete records for good: admin only, each names what it deletes, focus starts on
+// Cancel, and a second pick while the request is in flight sends nothing more.
+describe('LogsView clean-up', () => {
+  const openMenu = () => {
+    const trigger = screen.getByRole('button', { name: 'Clean-up options' })
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.click(trigger)
+  }
+  const deferred = <T,>() => { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
+
+  it('purges after a confirmation that names the log, once', async () => {
+    reads()
+    mount()
+    await screen.findByText('curl/8')
+    const gate = deferred<{ data: { deleted: number } }>()
+    api.post.mockImplementation(async () => gate.promise)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Purge expired' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('Purge expired subscription logs')).toBeTruthy()
+    // Focus starts on Cancel, so a stray Enter cannot confirm a deletion.
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
+    expect(api.post).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Purge expired' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/sub-logs/purge'))
+    // A second attempt while the first is in flight is ignored.
+    openMenu()
+    expect((await screen.findByRole('menuitem', { name: 'Purge expired' })).getAttribute('aria-disabled')).toBe('true')
+    expect(api.post).toHaveBeenCalledTimes(1)
+    gate.resolve({ data: { deleted: 4 } })
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Purged 4 expired logs', 'success'))
+  })
+
+  it('clears the audit log only after the confirmation', async () => {
+    reads()
+    mount('/admin/logs?tab=audit')
+    await screen.findByText('No log entries yet')
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear all' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(api.delete).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Clear all' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/audit'))
+  })
+
+  it('offers neither to an operator', async () => {
+    useAuthStore.setState({ role: 'operator', userId: 2, hasToken: true })
+    reads()
+    mount()
+    await screen.findByText('curl/8')
+    expect(screen.queryByRole('button', { name: 'Clean-up options' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retention' })).toBeNull()
+  })
+
+  it('saves the retention by writing the whole settings object back with the one field changed', async () => {
+    reads({ '/admin/settings/ui': { sub_log_retention_days: 30, other: 'kept' } })
+    api.put.mockImplementation(async (_url: string, body: unknown) => ({ data: body }))
+    mount()
+    await screen.findByText('curl/8')
+    fireEvent.click(screen.getByRole('button', { name: 'Retention' }))
+    const input = await screen.findByRole('textbox')
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('30'))
+    fireEvent.change(input, { target: { value: '90' } })
+    fireEvent.blur(input)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/settings/ui', { sub_log_retention_days: 90, other: 'kept' }))
   })
 })

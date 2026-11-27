@@ -1,14 +1,12 @@
-import { useState } from 'react'
-import { Box, Button, IconButton, Link, ListItemText, Menu, MenuItem, Typography, useTheme } from '@mui/material'
-import MoreVertIcon from '@mui/icons-material/MoreVert'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DestGroup } from '@/api/accessControl'
-import FieldHint from '@/components/FieldHint'
-import { amber } from '@/components/ToneBadge'
+import { MoreMenu } from '@/components/common/MoreMenu'
+import { FieldHint } from '@/components/common/HelpTip'
+import { Button } from '@/components/ui/button'
+import { IconError, IconPending, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import StateBadge from './StateBadge'
 import { stateDay } from './allowlistState'
 
@@ -31,117 +29,111 @@ export interface AllowlistGroupCardProps {
   onOpenGroup: () => void
 }
 
+/** A line of the card that is a note (a warning or a progress), icon first. */
+function Note({ testId, icon, children }: { testId: string; icon: ReactNode; children: ReactNode }) {
+  return <p data-testid={testId} className="flex items-start gap-1.5 text-sm">{icon}<span>{children}</span></p>
+}
+
 /**
  * ONE ALLOWLIST GROUP (S8): its state, what its list is made of, how many nodes
  * enforce it and what it did or would have done. A group that is off keeps its
  * lists and is a quiet card with one way back. The card is a summary; every
- * change is a button that opens the thing that explains it.
+ * change is a button that opens the thing that explains it. The primary action
+ * is the one the state calls for (turn on, review); the rest sit in the menu.
  */
 export default function AllowlistGroupCard(p: AllowlistGroupCardProps) {
   const { group: g, now } = p
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const [menu, setMenu] = useState<HTMLElement | null>(null)
   const num = new Intl.NumberFormat(i18n.language)
   const off = g.state === 'off'
   const noNodes = !off && g.eligible_nodes === 0
   const sep = t(`${C}list_separator`)
   const link = (label: string, onClick: () => void) => (
-    <Link component="button" type="button" underline="hover" onClick={onClick} sx={{ font: 'inherit', textAlign: 'left', verticalAlign: 'baseline' }}>{label}</Link>
+    <button type="button" onClick={onClick} className="rounded-sm text-left align-baseline underline-offset-2 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">{label}</button>
   )
   const listLinks = g.lists.map((l, i) => (
-    <Box component="span" key={l.id}>{i > 0 && sep}{link(t(`${C}list_item`, { name: l.name, entries: num.format(l.entry_count) }), () => p.onOpenEntries(l.id))}</Box>
+    <span key={l.id}>{i > 0 && sep}{link(t(`${C}list_item`, { name: l.name, entries: num.format(l.entry_count) }), () => p.onOpenEntries(l.id))}</span>
   ))
   if (g.extra_list_id > 0) {
-    listLinks.push(<Box component="span" key="extra">{listLinks.length > 0 && sep}{link(t(`${C}extra_list`), () => p.onOpenEntries(g.extra_list_id))}</Box>)
+    listLinks.push(<span key="extra">{listLinks.length > 0 && sep}{link(t(`${C}extra_list`), () => p.onOpenEntries(g.extra_list_id))}</span>)
   }
-  const menuItem = (key: string, label: string, onClick: () => void) => (
-    <MenuItem key={key} onClick={() => { setMenu(null); onClick() }}><ListItemText>{label}</ListItemText></MenuItem>
-  )
+  const warnIcon = <IconWarning aria-hidden className="mt-0.5 size-4 shrink-0 text-warning-ink" />
+
+  // What the menu offers beyond the card's one primary button: every state change stays reachable from here.
+  const menu = [
+    { id: 'edit', label: t(`${C}edit_lists`), onSelect: p.onEditLists },
+    ...(g.state === 'report' ? [{ id: 'on', label: t(`${C}turn_on`), onSelect: p.onTurnOn }] : []),
+    ...(g.state === 'on' ? [{ id: 'report', label: t(`${C}back_to_report`), onSelect: p.onBackToReport }] : []),
+    { id: 'group', label: t(`${C}open_group`), onSelect: p.onOpenGroup },
+    ...(!off ? [{ id: 'off', label: t(`${C}turn_off`), onSelect: p.onTurnOff, destructive: true }] : []),
+  ]
 
   return (
-    <Box data-testid="allowlist-card" data-group={g.group_id} sx={{
-      borderRadius: 3, border: `1px solid ${p.highlighted ? md.primary : md.outlineVariant}`, bgcolor: off ? md.surfaceContainerLow : md.surfaceContainer,
-      overflow: 'hidden', minWidth: 0,
-    }}>
+    <section
+      data-testid="allowlist-card"
+      data-group={g.group_id}
+      aria-label={g.group_name}
+      className={cn('min-w-0 overflow-hidden rounded-xl bg-card ring-1', p.highlighted ? 'ring-2 ring-brand' : 'ring-foreground/10', off && 'bg-muted/40')}
+    >
       {noNodes && (
-        <Box data-testid="allowlist-no-nodes" sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', px: 2, py: 1, bgcolor: md.errorContainer, color: md.onErrorContainer }}>
-          <ErrorOutlineIcon aria-hidden sx={{ fontSize: 18 }} />
-          <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>{t(`${C}no_nodes`)}</Typography>
-          <Button size="small" color="inherit" onClick={p.onOpenNodes}>{t(`${C}no_nodes_action`)}</Button>
-        </Box>
+        <div data-testid="allowlist-no-nodes" className="flex flex-wrap items-center gap-2 bg-destructive/10 px-4 py-2 text-sm">
+          <IconError aria-hidden className="size-4 shrink-0 text-destructive" />
+          <p className="min-w-0 flex-1">{t(`${C}no_nodes`)}</p>
+          <Button size="sm" variant="outline" onClick={p.onOpenNodes}>{t(`${C}no_nodes_action`)}</Button>
+        </div>
       )}
-      <Box sx={{ p: 2, display: 'grid', gap: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere', flex: { xs: '1 1 0', sm: '0 1 auto' } }}>{g.group_name}</Typography>
-          <Box sx={{ order: { xs: 3, sm: 2 }, flex: { xs: '1 0 100%', sm: '0 0 auto' } }}>
+      <div className="grid gap-2 p-4">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h2 className="min-w-0 flex-1 text-base font-semibold [overflow-wrap:anywhere] sm:flex-none">{g.group_name}</h2>
+          <div className="order-3 basis-full sm:order-2 sm:basis-auto">
             <StateBadge state={g.state} day={stateDay(g.state_changed_at, now)} />
-          </Box>
-          <IconButton size="small" aria-label={t(`${C}menu`, { name: g.group_name })} aria-haspopup="menu" onClick={e => setMenu(e.currentTarget)}
-            sx={{ ml: { sm: 'auto' }, order: { xs: 2, sm: 3 }, minWidth: 44, minHeight: 44 }}>
-            <MoreVertIcon />
-          </IconButton>
-        </Box>
+          </div>
+          <div className="order-2 sm:order-3 sm:ml-auto">
+            <MoreMenu label={t(`${C}menu`, { name: g.group_name })} items={menu} />
+          </div>
+        </div>
 
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, overflowWrap: 'anywhere' }}>
+        <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
           {t(`${C}members`, { members: num.format(g.members) })}{' · '}{t(`${C}lists_label`)}{listLinks.length > 0 ? listLinks : t(`${C}lists_none`)}{' · '}{t(`${C}base`, { count: g.base_count })}
-        </Typography>
+        </p>
 
         {!off && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-            <Typography variant="body2">{t(`${C}nodes`, { ok: g.eligible_nodes, total: g.total_nodes })}</Typography>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span>{t(`${C}nodes`, { ok: g.eligible_nodes, total: g.total_nodes })}</span>
             {g.ineligible.length > 0 && (
-              <Typography variant="body2" component="span">
-                <FieldHint tone="muted" summary={t(`${C}not_open`, { count: g.ineligible.length })}
-                  detail={g.ineligible.map(n => t(`${C}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${C}detail_separator`))} />
-              </Typography>
+              <FieldHint tone="muted" summary={t(`${C}not_open`, { count: g.ineligible.length })}
+                detail={g.ineligible.map(n => t(`${C}not_open_item`, { name: n.name, reason: t(`admin:access_control.allowlist.reason.${n.reason}`) })).join(t(`${C}detail_separator`))} />
             )}
-          </Box>
+          </div>
         )}
         {!off && g.pending_nodes.length > 0 && (
-          <Typography variant="body2" data-testid="allowlist-applying" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <HourglassEmptyIcon aria-hidden sx={{ fontSize: 16, color: md.onSecondaryContainer }} />
+          <Note testId="allowlist-applying" icon={<IconPending aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}>
             {t(`${C}applying`, { count: g.pending_nodes.length })}
-          </Typography>
+          </Note>
         )}
         {!off && g.not_ready_lists.length > 0 && (
-          <Typography variant="body2" data-testid="allowlist-list-not-ready" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <WarningAmberIcon aria-hidden sx={{ fontSize: 16, color: amber(theme).fg }} />
-            {t(`${C}list_not_ready`, { list: g.not_ready_lists.map(l => l.name).join(sep) })}
-          </Typography>
+          <Note testId="allowlist-list-not-ready" icon={warnIcon}>{t(`${C}list_not_ready`, { list: g.not_ready_lists.map(l => l.name).join(sep) })}</Note>
         )}
         {p.droppedOn.length > 0 && (
-          <Typography variant="body2" data-testid="allowlist-sniffing-dropped" sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
-            <WarningAmberIcon aria-hidden sx={{ fontSize: 16, mt: '2px', color: amber(theme).fg }} />
-            <span>{t(`${C}sniffing_dropped`, { nodes: p.droppedOn.join(sep) })}</span>
-          </Typography>
+          <Note testId="allowlist-sniffing-dropped" icon={warnIcon}>{t(`${C}sniffing_dropped`, { nodes: p.droppedOn.join(sep) })}</Note>
         )}
         {g.state === 'report' && g.would_deny_recent && (
-          <Typography variant="body2">{t(`${C}would_deny`, {
+          <p className="text-sm">{t(`${C}would_deny`, {
             days: g.would_deny_recent.days, sites: num.format(g.would_deny_recent.sites), times: num.format(g.would_deny_recent.count),
-          })}</Typography>
+          })}</p>
         )}
         {g.state === 'on' && g.denied_24h !== null && (
-          <Typography variant="body2">{t(`${C}denied_24h`, { times: num.format(g.denied_24h) })}</Typography>
+          <p className="text-sm">{t(`${C}denied_24h`, { times: num.format(g.denied_24h) })}</p>
         )}
 
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: { sm: 'flex-end' }, '& > button': { flex: { xs: '1 1 0', sm: '0 0 auto' } } }}>
-          {g.state === 'on' && <Button size="small" onClick={p.onViewDenied}>{t(`${C}view_denied`)}</Button>}
-          {g.state === 'report' && <Button size="small" variant="outlined" onClick={p.onReport}>{t(`${C}view_report`)}</Button>}
-          {g.state === 'report' && <Button size="small" variant="contained" onClick={p.onTurnOn}>{t(`${C}turn_on`)}</Button>}
-          {g.state === 'on' && <Button size="small" variant="outlined" onClick={p.onBackToReport}>{t(`${C}back_to_report`)}</Button>}
-          {off && <Button size="small" variant="outlined" onClick={p.onEditLists}>{t(`${C}reenable`)}</Button>}
-        </Box>
-      </Box>
-
-      <Menu anchorEl={menu} open={menu !== null} onClose={() => setMenu(null)}>
-        {menuItem('edit', t(`${C}edit_lists`), p.onEditLists)}
-        {g.state === 'report' && menuItem('on', t(`${C}turn_on`), p.onTurnOn)}
-        {g.state === 'on' && menuItem('report', t(`${C}back_to_report`), p.onBackToReport)}
-        {!off && menuItem('off', t(`${C}turn_off`), p.onTurnOff)}
-        {menuItem('group', t(`${C}open_group`), p.onOpenGroup)}
-      </Menu>
-    </Box>
+        <div className="flex flex-wrap gap-2 sm:justify-end [&>button]:flex-1 sm:[&>button]:flex-none">
+          {g.state === 'on' && <Button size="sm" variant="outline" onClick={p.onViewDenied}>{t(`${C}view_denied`)}</Button>}
+          {g.state === 'report' && <Button size="sm" variant="outline" onClick={p.onReport}>{t(`${C}view_report`)}</Button>}
+          {g.state === 'report' && <Button size="sm" onClick={p.onTurnOn}>{t(`${C}turn_on`)}</Button>}
+          {g.state === 'on' && <Button size="sm" variant="outline" onClick={p.onBackToReport}>{t(`${C}back_to_report`)}</Button>}
+          {off && <Button size="sm" variant="outline" onClick={p.onEditLists}>{t(`${C}reenable`)}</Button>}
+        </div>
+      </div>
+    </section>
   )
 }

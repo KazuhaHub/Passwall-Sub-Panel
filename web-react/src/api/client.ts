@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import i18n from '@/i18n'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
+import { notifySyncPending } from '@/components/feedback/syncPendingToast'
 import { panelAPIBase, panelURL } from '@/panelPath'
 import { announcePending, isUserObserved, syncPendingOf, userIdFromURL } from './syncPending'
 import { trackWrites } from './requestProgress'
@@ -32,6 +33,10 @@ declare module 'axios' {
     // Skip the global error toast — used when the caller wants to
     // render its own UI affordance (form field error, etc.).
     _skipErrorToast?: boolean
+    // Skip the toast only for a failure with one of these HTTP statuses or
+    // body `code`s: the caller words those itself, and every other failure
+    // of the request still toasts as usual.
+    _skipErrorToastFor?: Array<number | string>
     // Internal: marks a request that has already attempted refresh
     // once, so a subsequent 401 falls through to the logout path.
     _retried?: boolean
@@ -46,7 +51,7 @@ client.interceptors.request.use((config) => {
   return config
 })
 
-// Throttle the "3X-UI sync pending" toast so a burst of admin clicks
+// Throttle the "sync pending" toast so a burst of admin clicks
 // doesn't spam the user with the same warning.
 let lastSyncPendingToast = 0
 
@@ -166,7 +171,7 @@ client.interceptors.response.use(
         // Only the toast we actually showed moves the window; a suppressed one
         // must not swallow the next genuine notification.
         lastSyncPendingToast = now
-        pushSnack(i18n.t('common:errors.sync_pending'), 'warning')
+        notifySyncPending()
       }
     }
     return res
@@ -239,7 +244,10 @@ client.interceptors.response.use(
     // admin and sends the request again, so no error toast.
     const isPrompt = err.response?.status === 409
       && (err.response?.data as { code?: string } | undefined)?.code === 'confirm_required'
-    if (!cfg?._skipErrorToast && !isPrompt) {
+    const claimed = cfg?._skipErrorToastFor
+    const errCode = (err.response?.data as { code?: unknown } | undefined)?.code
+    const isClaimed = !!claimed && (claimed.includes(err.response?.status ?? 0) || (typeof errCode === 'string' && claimed.includes(errCode)))
+    if (!cfg?._skipErrorToast && !isPrompt && !isClaimed) {
       const status = err.response?.status ?? 0
       const level: 'error' | 'warning' = status === 429 ? 'warning' : 'error'
       const { key, msg } = categoriseError(err)

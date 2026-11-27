@@ -34,6 +34,7 @@ import (
 //	UpdateInboundConfig                 protocol, port, TLS, stream settings
 //	ConfirmAppliedConfig                a native snapshot becomes usable
 //	BatchUpdateSortOrder                the order clients see
+//	ApplySubscriptionOrder              the order clients see, lines included
 //
 // And which deliberately do NOT, because the poll owns them and render never
 // reads them: UpdateTrafficCounters, BatchUpdateTrafficCounters, UpdateHealth,
@@ -101,6 +102,10 @@ func (r invalidatingNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabl
 
 func (r invalidatingNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	return after(r.NodeRepo.BatchUpdateSortOrder(ctx, updates), r.notify)
+}
+
+func (r invalidatingNodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.SubscriptionOrderWrite) error {
+	return after(r.NodeRepo.ApplySubscriptionOrder(ctx, w), r.notify)
 }
 
 func (r invalidatingNodeRepo) Delete(ctx context.Context, id int64) error {

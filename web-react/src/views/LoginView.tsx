@@ -1,20 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CircularProgress,
-  Divider,
-  Link as MuiLink,
-  TextField,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import LoginIcon from '@mui/icons-material/Login'
-import OpenInNewIcon from '@mui/icons-material/OpenInNew'
-import FingerprintIcon from '@mui/icons-material/Fingerprint'
-import MailOutlineIcon from '@mui/icons-material/MailOutlined'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
@@ -22,18 +6,20 @@ import type { AxiosError } from 'axios'
 import { getAuthMethods, oidcLoginURL, samlLoginURL, send2FAEmail } from '@/api/auth'
 import type { AuthMethods, LoginCaptcha, TwoFAMethod } from '@/api/types'
 import { TWOFA_PRIORITY, defaultTwoFAMethod, writeLast2FAMethod } from '@/utils/twofa'
+import { IconExternalLink, IconFingerprint, IconLogin, IconSpinner } from '@/lib/icons'
 import CaptchaWidget from '@/components/CaptchaWidget'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Field } from '@/components/form/Field'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useAuthStore, selectIsAdmin } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
-import { useAppearanceStore } from '@/stores/appearance'
 import { homeForRole, isAdminPath } from '@/router/home'
-import { pushSnack } from '@/components/SnackbarHost'
-import LanguageMenu from '@/components/LanguageMenu'
-import AppearanceMenu from '@/components/AppearanceMenu'
-import SiteFooter from '@/components/SiteFooter'
-import BrandLogo from '@/components/BrandLogo'
-import { setLanguage, currentLanguage } from '@/i18n'
-import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
+import { pushSnack } from '@/components/feedback/toasts'
+import { AuthLayout } from '@/views/auth/AuthLayout'
+import { PasswordField } from '@/views/auth/PasswordField'
+import { TwoFactorStep } from '@/views/auth/TwoFactorStep'
+import { FormAlert, OrDivider } from '@/views/auth/parts'
 
 interface LocationState {
   returnTo?: string
@@ -50,15 +36,13 @@ interface LocationState {
 // buttons. It reuses all of LoginView's machinery (passkey, 2FA challenge,
 // captcha) so the admin break-glass entry stays in sync with the main page.
 export default function LoginView({ forceLocal = false }: { forceLocal?: boolean } = {}) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['auth', 'common'])
   const navigate = useNavigate()
   const location = useLocation()
 
   const auth = useAuthStore()
-  const site = useSiteStore()
-  const appearance = useAppearanceStore()
+  const appTitle = useSiteStore(st => st.appTitle)
+  const siteTitle = useSiteStore(st => st.siteTitle)
 
   const [methods, setMethods] = useState<AuthMethods | null>(null)
   const [probing, setProbing] = useState(true)
@@ -102,13 +86,6 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
   // SSO entry point (auto-bounce OR explicit click) feels the same.
   const [manualSsoRedirect, setManualSsoRedirect] = useState(false)
 
-  useEffect(() => { void site.load() }, [site])
-  useEffect(() => {
-    // getState() avoids subscribing — putting `appearance` in deps causes
-    // an infinite loop (setSystemColor → store updates → effect re-fires).
-    if (site.loaded) useAppearanceStore.getState().setSystemColor(site.themeColor || DEFAULT_PRESET_HEX)
-  }, [site.loaded, site.themeColor])
-
   const returnTo =
     (location.state as LocationState | null)?.returnTo
     ?? new URLSearchParams(location.search).get('return_to')
@@ -143,7 +120,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     }
     void probe()
     return () => { cancelled = true }
-  }, [returnTo])
+  }, [returnTo, forceLocal])
 
   // goHome routes to the requested page (or the role's default), guarding the
   // admin area against non-admins. Shared by the password and 2FA submit paths.
@@ -354,41 +331,48 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
   const ssoFirst = !forceLocal && methods?.login_mode === 'sso_first'
   const isRedirecting = !forceLocal && ((methods?.login_mode === 'sso_redirect' && methods?.sso) || manualSsoRedirect)
 
+
+  // 2FA verification methods are ordered by TWOFA_PRIORITY (passkey first — phishing-resistant)
+  // and filtered to what the server allows for this challenge.
+  const methodOrder = TWOFA_PRIORITY.filter(m => twoFAMethods.includes(m))
+  const title = appTitle || siteTitle
+
   if (probing) {
     return (
-      <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface }}>
-        <CircularProgress />
-      </Box>
+      <div role="status" className="grid min-h-svh place-items-center bg-background">
+        <IconSpinner aria-hidden className="size-6 animate-spin text-muted-foreground" />
+        <span className="sr-only">{t('common:ui.feedback.loading')}</span>
+      </div>
     )
   }
 
   if (isRedirecting) {
     return (
-      <Box sx={{
-        position: 'fixed', inset: 0,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: 2.5, bgcolor: md.surface,
-      }}>
-        <BrandLogo height={56} />
-        <CircularProgress size={28} />
-        <Typography sx={{ fontSize: 15, fontWeight: 500, color: md.onSurface }}>
-          {t('auth:redirect_pending_title')}
-        </Typography>
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
-          {t('auth:redirect_pending_body')}
-        </Typography>
-      </Box>
+      <AuthLayout title={t('auth:redirect_pending_title')} subtitle={t('auth:redirect_pending_body')}>
+        <div role="status" className="grid place-items-center">
+          <IconSpinner aria-hidden className="size-7 animate-spin text-muted-foreground" />
+        </div>
+      </AuthLayout>
     )
   }
 
   const localFormBlock = localEnabled && (
-    <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <TextField label={t('auth:username')} value={upn}
-        onChange={e => setUpn(e.target.value)}
-        autoComplete="username" autoFocus fullWidth />
-      <TextField label={t('auth:password')} type="password" value={password}
-        onChange={e => setPassword(e.target.value)}
-        autoComplete="current-password" fullWidth />
+    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      <Field label={t('auth:username')}>
+        <Input name="username" value={upn} onChange={e => setUpn(e.target.value)} autoComplete="username" autoFocus />
+      </Field>
+      {/* The recovery link is the field's hint line: under the box, on the right, where the
+          eye is when the password has just failed. */}
+      <Field label={t('auth:password')} hint={methods?.password_recovery_enabled && (
+        <span className="block text-right">
+          <RouterLink to="/forgot-password"
+            className="inline-flex min-h-11 items-center text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:min-h-0">
+            {t('auth:forgot_password')}
+          </RouterLink>
+        </span>
+      )}>
+        <PasswordField name="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+      </Field>
       {showCaptcha && methods?.captcha_enabled && (
         <CaptchaWidget
           provider={methods.captcha_provider ?? 'image'}
@@ -397,223 +381,81 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
           onChange={setCaptcha}
         />
       )}
-      {lockedMsg && <Alert severity="warning" sx={{ py: 0 }}>{lockedMsg}</Alert>}
-      {methods?.password_recovery_enabled && (
-        <Box sx={{ textAlign: 'right', mt: -0.5 }}>
-          <MuiLink component={RouterLink} to="/forgot-password" variant="body2"
-            onClick={(e) => { e.preventDefault(); navigate('/forgot-password') }}>
-            {t('auth:forgot_password')}
-          </MuiLink>
-        </Box>
-      )}
-      {methods?.registration_enabled && (
-        <Box sx={{ textAlign: 'center', mt: 0.5, fontSize: 13, color: md.onSurfaceVariant }}>
-          {t('auth:register_prompt')}{' '}
-          <MuiLink component={RouterLink} to="/register" variant="body2"
-            onClick={(e) => { e.preventDefault(); navigate('/register') }}>
-            {t('auth:create_account')}
-          </MuiLink>
-        </Box>
-      )}
-      <Button type="submit" variant={ssoFirst ? 'outlined' : 'contained'} fullWidth size="large"
-        disabled={busy}
-        startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <LoginIcon />}
-        sx={{ mt: 1 }}>
+      {lockedMsg && <FormAlert tone="warning">{lockedMsg}</FormAlert>}
+      <AsyncButton type="submit" variant={ssoFirst ? 'outline' : 'default'} size="lg" className="w-full"
+        pending={busy} icon={<IconLogin />}>
         {t('auth:submit')}
-      </Button>
-    </Box>
-  )
-
-  // 2FA verification methods are equal choices, not "TOTP with fallbacks": the
-  // user picks one. Ordered by TWOFA_PRIORITY (passkey first — phishing-resistant),
-  // filtered to what the server allows for this challenge.
-  const methodLabel: Record<TwoFAMethod, string> = {
-    totp: t('auth:twofa_m_totp'),
-    passkey: t('auth:twofa_m_passkey'),
-    email: t('auth:twofa_m_email'),
-    recovery: t('auth:twofa_m_recovery'),
-  }
-  const methodOrder = TWOFA_PRIORITY.filter(m => twoFAMethods.includes(m))
-  // Code-field copy (passkey has no code field, so reuse totp's shape for typing).
-  const codeUI = {
-    totp: { prompt: t('auth:twofa_prompt'), label: t('auth:twofa_code'), placeholder: '123456' },
-    recovery: { prompt: t('auth:twofa_recovery_prompt'), label: t('auth:twofa_recovery_label'), placeholder: 'XXXXX-XXXXX' },
-    email: { prompt: t('auth:twofa_email_prompt'), label: t('auth:twofa_email_label'), placeholder: '123456' },
-  }[twoFAMode === 'passkey' ? 'totp' : twoFAMode]
-
-  // The challenge opens on the user's last-used method (twoFAMode); the other
-  // offered methods stay tucked behind "use another method" until they ask.
-  const twoFAFormBlock = (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {twoFAMode === 'passkey' ? (
-        <>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
-            {t('auth:twofa_passkey_prompt')}
-          </Typography>
-          {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
-          <Button variant="contained" fullWidth size="large" disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <FingerprintIcon />}
-            onClick={onUsePasskey2FA}>
-            {t('auth:twofa_use_passkey')}
-          </Button>
-        </>
-      ) : twoFAMode === 'email' && !emailSent ? (
-        // Last-used was email but no code is out yet (we never auto-send on load,
-        // to avoid mailing on every challenge): offer to send one.
-        (<>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
-            {t('auth:twofa_email_prompt')}
-          </Typography>
-          {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
-          <Button variant="contained" fullWidth size="large" disabled={busy || emailCd > 0}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <MailOutlineIcon />}
-            onClick={() => void onUseEmail()}>
-            {emailCd > 0
-              ? t('auth:twofa_email_resend_wait', { sec: emailCd, defaultValue: '重新发送（{{sec}}s）' })
-              : t('auth:twofa_email_send', { defaultValue: '发送验证码' })}
-          </Button>
-        </>)
-      ) : (
-        <Box component="form" onSubmit={submit2FA} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{codeUI.prompt}</Typography>
-          <TextField
-            label={codeUI.label}
-            value={twoFACode}
-            onChange={e => setTwoFACode(e.target.value)}
-            autoFocus
-            fullWidth
-            autoComplete="one-time-code"
-            placeholder={codeUI.placeholder}
-            slotProps={{
-              htmlInput: { inputMode: 'text', autoCapitalize: 'characters' }
-            }}
-          />
-          {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
-          <Button type="submit" variant="contained" fullWidth size="large" disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <LoginIcon />}>
-            {t('auth:twofa_submit')}
-          </Button>
-          {twoFAMode === 'email' && (
-            <Button variant="text" size="small" fullWidth disabled={busy || emailCd > 0}
-              startIcon={<MailOutlineIcon fontSize="small" />}
-              onClick={() => void onUseEmail()}>
-              {emailCd > 0
-                ? t('auth:twofa_email_resend_wait', { sec: emailCd, defaultValue: '重新发送（{{sec}}s）' })
-                : t('auth:twofa_email_resend', { defaultValue: '重新发送验证码' })}
-            </Button>
-          )}
-        </Box>
-      )}
-
-      {/* Method switcher — collapsed by default to "use another method", expands to
-          the full chooser. Only when more than one method is offered. */}
-      {methodOrder.length > 1 && (
-        showMethodPicker ? (
-          <Box>
-            <Typography variant="caption" sx={{ color: md.onSurfaceVariant, display: 'block', mb: 0.75 }}>
-              {t('auth:twofa_choose_method')}
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-              {methodOrder.map(m => (
-                <Button key={m} size="small"
-                  variant={twoFAMode === m ? 'contained' : 'outlined'}
-                  startIcon={m === 'passkey' ? <FingerprintIcon /> : m === 'email' ? <MailOutlineIcon /> : undefined}
-                  onClick={() => selectMethod(m)} disabled={busy}>
-                  {methodLabel[m]}
-                </Button>
-              ))}
-            </Box>
-          </Box>
-        ) : (
-          <Button variant="text" fullWidth size="small" disabled={busy}
-            onClick={() => setShowMethodPicker(true)}>
-            {t('auth:twofa_use_other', { defaultValue: '使用其他方式验证' })}
-          </Button>
-        )
-      )}
-
-      <Button variant="text" fullWidth size="small" onClick={cancel2FA} disabled={busy}>
-        {t('auth:twofa_back')}
-      </Button>
-    </Box>
+      </AsyncButton>
+    </form>
   )
 
   const passkeyBlock = localEnabled && methods?.passkey_passwordless && (
-    <Button type="button" variant="outlined" fullWidth size="large"
-      onClick={onPasskeyLogin} disabled={busy}
-      startIcon={<FingerprintIcon />}
-      sx={{ mt: 1.5 }}>
+    <Button type="button" variant="outline" size="lg" className="w-full" onClick={onPasskeyLogin} disabled={busy}>
+      <IconFingerprint />
       {t('auth:passkey_login')}
     </Button>
   )
 
   const ssoBlock = (samlEnabled || oidcEnabled) && (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <div className="flex flex-col gap-2">
       {samlEnabled && (
-        <Button variant={ssoFirst ? 'contained' : 'outlined'} fullWidth size="large"
-          onClick={() => ssoLogin('saml')} startIcon={<OpenInNewIcon />}>
+        <Button variant={ssoFirst ? 'default' : 'outline'} size="lg" className="w-full" onClick={() => ssoLogin('saml')}>
+          <IconExternalLink />
           {t(oidcEnabled ? 'auth:saml_login' : 'auth:sso_login')}
         </Button>
       )}
       {oidcEnabled && (
-        <Button variant={ssoFirst && !samlEnabled ? 'contained' : 'outlined'} fullWidth size="large"
-          onClick={() => ssoLogin('oidc')} startIcon={<OpenInNewIcon />}>
+        <Button variant={ssoFirst && !samlEnabled ? 'default' : 'outline'} size="lg" className="w-full" onClick={() => ssoLogin('oidc')}>
+          <IconExternalLink />
           {t(samlEnabled ? 'auth:oidc_login' : 'auth:sso_login')}
         </Button>
       )}
-    </Box>
+    </div>
   )
 
-  const dividerBlock = localEnabled && (samlEnabled || oidcEnabled) && (
-    <Divider sx={{ my: 3, color: md.onSurfaceVariant, fontSize: 12 }}>
-      {t('auth:or')}
-    </Divider>
+  const dividerBlock = localEnabled && (samlEnabled || oidcEnabled) && <OrDivider />
+
+  // Local sign-in and passkey stay together; the SSO buttons go before or after them
+  // by the admin's login mode (sso_first puts SSO first).
+  const localGroup = (localFormBlock || passkeyBlock) && (
+    <div className="flex flex-col gap-3">{localFormBlock}{passkeyBlock}</div>
   )
 
   return (
-    <Box sx={{
-      position: 'fixed', inset: 0,
-      display: 'flex', flexDirection: 'column',
-      bgcolor: md.surface,
-    }}>
-      {/* Compact toolbar with language + appearance only — no nav, no avatar */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', p: 1.5, gap: 0.5 }}>
-        <LanguageMenu value={currentLanguage()} onChange={(l: AppLanguage) => setLanguage(l)} />
-        <AppearanceMenu
-          state={{ systemColor: appearance.systemColor, userColor: appearance.userColor, mode: appearance.mode }}
-          onChange={(patch) => {
-            if ('userColor' in patch) appearance.setUserColor(patch.userColor ?? null)
-            if (patch.mode) appearance.setMode(patch.mode)
-          }}
+    <AuthLayout title={title} subtitle={t(forceLocal ? 'auth:local_only_subtitle' : 'auth:subtitle')}>
+      {twoFAPending ? (
+        <TwoFactorStep
+          mode={twoFAMode}
+          methodOrder={methodOrder}
+          code={twoFACode}
+          onCodeChange={setTwoFACode}
+          error={twoFAError}
+          busy={busy}
+          emailSent={emailSent}
+          emailCd={emailCd}
+          showPicker={showMethodPicker}
+          onShowPicker={() => setShowMethodPicker(true)}
+          onSubmitCode={submit2FA}
+          onUsePasskey={onUsePasskey2FA}
+          onSendEmail={() => void onUseEmail()}
+          onSelectMethod={selectMethod}
+          onBack={cancel2FA}
         />
-      </Box>
-
-      <Box sx={{ flex: 1, display: 'grid', placeItems: 'center', px: 2 }}>
-        <Card sx={{
-          width: '100%', maxWidth: 400,
-          bgcolor: md.surfaceContainerLow,
-          boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)',
-          p: 4,
-        }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
-            <BrandLogo height={56} />
-            <Typography variant="h5" sx={{ fontWeight: 500, color: md.onSurface, mt: 1.5 }}>
-              {site.appTitle || site.siteTitle}
-            </Typography>
-            <Typography variant="body2" sx={{ mt: 0.5 }}>{t(forceLocal ? 'auth:local_only_subtitle' : 'auth:subtitle')}</Typography>
-          </Box>
-
-          {twoFAPending ? (
-            twoFAFormBlock
-          ) : ssoFirst ? (
-            <>{ssoBlock}{dividerBlock}{localFormBlock}{passkeyBlock}</>
-          ) : (
-            <>{localFormBlock}{passkeyBlock}{dividerBlock}{ssoBlock}</>
+      ) : (
+        <>
+          {ssoFirst
+            ? <>{ssoBlock}{dividerBlock}{localGroup}</>
+            : <>{localGroup}{dividerBlock}{ssoBlock}</>}
+          {localEnabled && methods?.registration_enabled && (
+            <p className="text-center text-sm text-muted-foreground">
+              {t('auth:register_prompt')}{' '}
+              <RouterLink to="/register" className="text-primary underline-offset-4 hover:underline">
+                {t('auth:create_account')}
+              </RouterLink>
+            </p>
           )}
-        </Card>
-      </Box>
-
-      <SiteFooter sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }} />
-    </Box>
+        </>
+      )}
+    </AuthLayout>
   )
 }

@@ -1,6 +1,8 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import {
+  getNodeOrder,
   listNodes,
+  type NodeOrder,
   listSeparators,
   listUnmanagedInbounds,
   type NodeListParams,
@@ -79,7 +81,7 @@ async function readAll<T>(page: (n: number) => Promise<{ items: T[]; total: numb
 /** Every node, whatever their number (a dictionary read; node writes invalidate it with the other node lists). */
 export function useAllNodes(scope: QueryScope, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
-    queryKey: [...nodeKeys.lists(scope), 'all'] as const,
+    queryKey: nodeKeys.allNodes(scope),
     queryFn: ({ signal }): Promise<Node[]> => readAll(n => listNodes({ page: n, page_size: ALL_PAGE }, signal)),
     enabled,
     ...freshness(policies.dictionaries),
@@ -94,4 +96,17 @@ export function useAllServers(scope: QueryScope, { enabled = true }: { enabled?:
     enabled,
     ...freshness(policies.dictionaries),
   })
+}
+
+/** The global subscription order (see api/nodes.ts). `select` is left to callers; the cache holds the server's shape. */
+export function nodeOrderQuery(scope: QueryScope) {
+  return queryOptions({
+    queryKey: nodeKeys.order(scope),
+    queryFn: ({ signal }): Promise<NodeOrder> => getNodeOrder(signal),
+    ...freshness(policies.nodeOrder),
+  })
+}
+
+export function useNodeOrder(scope: QueryScope, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ ...nodeOrderQuery(scope), enabled })
 }

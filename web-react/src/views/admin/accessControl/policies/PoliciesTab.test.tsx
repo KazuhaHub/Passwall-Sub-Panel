@@ -2,10 +2,12 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { confirmMock, renderAccess } from '@/test/accessControlHarness'
+import { confirmMock, renderAccess, whereIs } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
+import * as groupsApi from '@/api/groups'
 import type { DestCatalog, DestPolicies, DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
+import { PolicyCreateRoute, PolicyDetailRoute } from './PolicyRoutes'
 
 vi.mock('@/api/accessControl', async importOriginal => {
   const real = await importOriginal<typeof import('@/api/accessControl')>()
@@ -96,12 +98,35 @@ describe('writes', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('禁止 BT')
     fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
-    // Its earlier state is not known here, so the admin says which it is turned on as.
+    // Its earlier state is not known here, so the admin says which it is turned on as. That one dialog names the
+    // scope and the nodes too, so it is the only question: no second confirm follows.
+    expect(await screen.findByText(/范围：所有用户，共 1 个分组、0 人/)).toBeTruthy()
     fireEvent.click(await screen.findByRole('button', { name: '开启拦截' }))
     await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalled())
     const [id, body] = vi.mocked(api.updateDestPolicy).mock.calls[0]
     expect(id).toBe(2)
     expect(body).toMatchObject({ name: '禁止 BT', state: 'on', action: 'block', updated_at: 111, inline: { protocols: ['bittorrent'] } })
+    // Not the first policy, so no first-publish question, and the choice dialog already was the enabling question.
+    expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  // A groups read that failed must not turn into "0 groups and 0 people" in the question.
+  it('says the groups and people could not be counted when the groups read failed', async () => {
+    vi.mocked(groupsApi.listAllGroups).mockRejectedValueOnce(new Error('down'))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    const body = await screen.findByText(/范围：/)
+    expect(body.textContent).toContain('分组数和人数暂时无法确认')
+    expect(body.textContent).not.toMatch(/0 个分组|0 人/)
+  })
+
+  it('declining the choice dialog writes nothing and asks nothing more', async () => {
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止 BT')
+    fireEvent.click(screen.getByRole('switch', { name: '启用「禁止 BT」' }))
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }))
+    expect(api.updateDestPolicy).not.toHaveBeenCalled()
     expect(confirmMock).not.toHaveBeenCalled()
   })
 
@@ -133,40 +158,122 @@ describe('writes', () => {
   })
 })
 
-describe('the editor', () => {
-  it('opens on a click, saves only when changed, and an over-quota preview blocks the save', async () => {
-    renderAccess(<PoliciesTab {...props} />)
+const editPage = (id: number) => renderAccess(<PolicyDetailRoute />, { route: `/admin/access-control/policies/${id}`, path: '/admin/access-control/policies/:id' })
+
+describe('opening the editor page', () => {
+  it('a row opens the policy page, carrying the tab it was opened from', async () => {
+    const { router } = renderAccess(<PoliciesTab {...props} />, { route: '/admin/access-control?tab=policies' })
     fireEvent.click(await screen.findByText('禁止发信'))
-    const dialog = await screen.findByRole('dialog')
-    const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement
-    expect(save.disabled).toBe(true)
-    fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: '禁止发信 2' } })
-    expect(save.disabled).toBe(false)
-    expect(within(dialog).getByText('只改名称或说明不会让节点重启')).toBeTruthy()
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/1'))
+    expect(router.state.location.state).toEqual({ from: '/admin/access-control?tab=policies' })
+  })
+
+  it('the add buttons open the create page of that step, and duplicate opens a copy of the policy', async () => {
+    const { router } = renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止发信')
+    fireEvent.click(screen.getByRole('button', { name: '新建拦截策略' }))
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/new?kind=block'))
+    await router.navigate('/admin/access-control')
+    fireEvent.click(await screen.findByRole('button', { name: '新建放行策略' }))
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/new?kind=allow'))
+  })
+
+  it('history state that asks to open a policy is sent to its page, replacing the entry', async () => {
+    const { router } = renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止发信')
+    await act(async () => { await router.navigate('/admin/access-control?tab=policies', { state: { openPolicy: 2, highlightPolicy: 2 } }) })
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/2'))
+    expect(router.state.location.state).toEqual({ from: '/admin/access-control?tab=policies' })
+  })
+})
+
+describe('the policy page', () => {
+  it('shows the bar only when changed, and an over-quota preview blocks the save', async () => {
+    editPage(1)
+    const name = await screen.findByLabelText(/名称/)
+    expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
+    fireEvent.change(name, { target: { value: '禁止发信 2' } })
+    const save = await screen.findByRole('button', { name: '保存' })
+    expect(save.getAttribute('aria-disabled')).toBeNull()
+    expect(screen.getByText('只改名称或说明不会让节点重启')).toBeTruthy()
     vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget: { ...budget, regexps: { used: 300, limit: 256 } } })
-    fireEvent.change(within(dialog).getByLabelText('端口'), { target: { value: '26' } })
-    await waitFor(() => expect(within(dialog).getAllByText(/超出额度时新版本不会下发/).length).toBeGreaterThan(0), { timeout: 2000 })
-    expect((within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '26' } })
+    await waitFor(() => expect(screen.getAllByText(/超出额度时新版本不会下发/).length).toBeGreaterThan(0), { timeout: 2000 })
+    expect(screen.getByRole('button', { name: '保存' }).getAttribute('aria-disabled')).toBe('true')
   })
 
   it('a 409 stale answer offers to load the latest instead of overwriting', async () => {
     const stale = Object.assign(new Error('x'), { isAxiosError: true, response: { status: 409, data: { code: 'dest_policy_stale' } } })
     vi.mocked(api.updateDestPolicy).mockRejectedValue(stale)
-    renderAccess(<PoliciesTab {...props} />)
-    fireEvent.click(await screen.findByText('禁止发信'))
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.change(within(dialog).getByLabelText(/名称/), { target: { value: 'x' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
-    expect(await within(dialog).findByText('这条策略刚被其他人修改过')).toBeTruthy()
-    expect(within(dialog).getByRole('button', { name: '载入最新' })).toBeTruthy()
+    editPage(1)
+    fireEvent.change(await screen.findByLabelText(/名称/), { target: { value: 'x' } })
+    fireEvent.click(await screen.findByRole('button', { name: '保存' }))
+    expect(await screen.findByText('这条策略刚被其他人修改过')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '载入最新' })).toBeTruthy()
   })
 
-  it('history state opens the editor and marks the row once, then clears the state', async () => {
-    const { router } = renderAccess(<PoliciesTab {...props} />)
-    await screen.findByText('禁止发信')
-    await act(async () => { await router.navigate('/admin/access-control?tab=policies', { state: { openPolicy: 2, highlightPolicy: 2 } }) })
-    expect((await screen.findByRole('dialog')).textContent).toContain('禁止 BT')
-    await waitFor(() => expect(router.state.location.state).toBeNull())
+  it('an unknown or malformed address is "not found" in the page frame, and a malformed one asks for nothing', async () => {
+    editPage(99)
+    expect(await screen.findByText('没有找到这条策略，可能已被删除')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /访问控制/ })).toBeTruthy()
+  })
+
+  it('a malformed id makes no request at all', async () => {
+    renderAccess(<PolicyDetailRoute />, { route: '/admin/access-control/policies/7x', path: '/admin/access-control/policies/:id' })
+    expect(await screen.findByText('没有找到这条策略，可能已被删除')).toBeTruthy()
+    expect(api.getDestPolicies).not.toHaveBeenCalled()
+  })
+
+  it('stays on the page after an edit is saved and writes the next save against the version the server returned', async () => {
+    vi.mocked(api.updateDestPolicy).mockResolvedValueOnce(pol({ name: 'a', updated_at: 222 })).mockResolvedValueOnce(pol({ name: 'b', updated_at: 333 }))
+    const { router } = editPage(1)
+    fireEvent.change(await screen.findByLabelText(/名称/), { target: { value: 'a' } })
+    fireEvent.click(await screen.findByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '保存' })).toBeNull())
+    expect(whereIs(router)).toBe('/admin/access-control/policies/1')
+    fireEvent.change(screen.getByLabelText(/名称/), { target: { value: 'b' } })
+    fireEvent.click(await screen.findByRole('button', { name: '保存' }))
+    await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(api.updateDestPolicy).mock.calls[1][1]).toMatchObject({ name: 'b', updated_at: 222 })
+  })
+
+  it('leaving with unsaved changes asks, Cancel focused; saved changes leave freely', async () => {
+    const { router } = editPage(1)
+    fireEvent.change(await screen.findByLabelText(/名称/), { target: { value: 'x' } })
+    confirmMock.mockResolvedValueOnce(false)
+    await router.navigate('/admin/dashboard')
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '放弃未保存的修改？', initialFocus: 'cancel' })))
+    expect(whereIs(router)).toBe('/admin/access-control/policies/1')
+  })
+
+  it('Enter in a text box (or a form submit) writes nothing: saving is a click', async () => {
+    editPage(1)
+    const name = await screen.findByLabelText(/名称/)
+    fireEvent.change(name, { target: { value: 'x' } })
+    fireEvent.keyDown(name, { key: 'Enter' })
+    fireEvent.submit(name.closest('form')!)
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.updateDestPolicy).not.toHaveBeenCalled()
+  })
+
+  it('a copy and a blank policy are keyed by their seed: another seed starts a fresh form', async () => {
+    const view = renderAccess(<PolicyCreateRoute />, { route: '/admin/access-control/policies/new?copy=1', path: '/admin/access-control/policies/new' })
+    expect((await screen.findByLabelText(/名称/) as HTMLInputElement).value).toContain('禁止发信')
+    await view.router.navigate('/admin/access-control/policies/new?copy=2')
+    await waitFor(() => expect((screen.getByLabelText(/名称/) as HTMLInputElement).value).toContain('禁止 BT'))
+  })
+
+  it('a second Save while one is running does not write twice', async () => {
+    let release!: () => void
+    vi.mocked(api.updateDestPolicy).mockReturnValue(new Promise(r => { release = () => r(pol({})) }))
+    editPage(1)
+    fireEvent.change(await screen.findByLabelText(/名称/), { target: { value: 'x' } })
+    const save = await screen.findByRole('button', { name: '保存' })
+    fireEvent.click(save)
+    fireEvent.click(save)
+    release()
+    await waitFor(() => expect(api.updateDestPolicy).toHaveBeenCalledTimes(1))
   })
 })
 
@@ -183,7 +290,8 @@ describe('templates', () => {
     const dialog = await screen.findByRole('dialog')
     const add = within(dialog).getByRole('button', { name: '添加' }) as HTMLButtonElement
     expect(add.disabled).toBe(true)
-    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('instantiates with the state the admin picked, in the UI language', async () => {
@@ -193,7 +301,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     await waitFor(() => expect(api.instantiateDestTemplate).toHaveBeenCalledWith('bittorrent', 'on', expect.any(String)))
   })
@@ -206,7 +314,7 @@ describe('templates', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建策略' }))
     fireEvent.click(await screen.findByText('BT 下载'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: '开启' }))
+    fireEvent.click(within(dialog).getByRole('radio', { name: '开启' }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加' }))
     expect(await within(dialog).findByText(/已有同名策略/)).toBeTruthy()
   })

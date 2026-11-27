@@ -1,20 +1,18 @@
-import { useState, type ReactNode } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
-import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, type DestRef } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import { amber } from '@/components/ToneBadge'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { IconCancel, IconInfo, IconSuccess, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { useDestGroup, useDestGroupPreview, useDestStatus } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
+import { ImpactDialogFrame } from '../../nodes/delete/ImpactDialogFrame'
 import { minutesWords } from '../confirmCopy'
 import { destErrorText } from '../destErrors'
 import { blockedByLists } from './allowlistState'
@@ -23,21 +21,21 @@ const K = 'admin:access_control.allowlist.turn_on.'
 
 type Tone = 'ok' | 'failing' | 'attention' | 'quiet'
 
+const CHECK_ICON = {
+  ok: <IconSuccess aria-hidden className="size-5 text-success" />,
+  failing: <IconCancel aria-hidden className="size-5 text-destructive" />,
+  attention: <IconWarning aria-hidden className="size-5 text-warning-ink" />,
+  quiet: <IconInfo aria-hidden className="size-5 text-muted-foreground" />,
+}
+
+/** One line of the checklist: an icon and its words, never colour alone; `data-tone` is what tests read. */
 function Check({ id, tone, children, action }: { id: string; tone: Tone; children: ReactNode; action?: ReactNode }) {
-  const theme = useTheme()
-  const md = theme.palette.md
-  const icon = {
-    ok: <CheckCircleOutlineIcon aria-hidden sx={{ fontSize: 20, color: theme.palette.success.main }} />,
-    failing: <CancelOutlinedIcon aria-hidden sx={{ fontSize: 20, color: md.error }} />,
-    attention: <WarningAmberIcon aria-hidden sx={{ fontSize: 20, color: amber(theme).fg }} />,
-    quiet: <InfoOutlinedIcon aria-hidden sx={{ fontSize: 20, color: md.onSurfaceVariant }} />,
-  }[tone]
   return (
-    <Box component="li" data-testid={`check-${id}`} data-tone={tone} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-      <Box sx={{ mt: '1px' }}>{icon}</Box>
-      <Typography variant="body2" sx={{ flex: '1 1 200px', minWidth: 0, overflowWrap: 'anywhere', color: tone === 'quiet' ? md.onSurfaceVariant : md.onSurface }}>{children}</Typography>
+    <li data-testid={`check-${id}`} data-tone={tone} className="flex flex-wrap items-start gap-2">
+      <span className="mt-px">{CHECK_ICON[tone]}</span>
+      <span className={cn('min-w-0 flex-[1_1_12rem] text-sm [overflow-wrap:anywhere]', tone === 'quiet' && 'text-muted-foreground')}>{children}</span>
       {action}
-    </Box>
+    </li>
   )
 }
 
@@ -71,9 +69,6 @@ export interface TurnOnDialogProps {
  */
 export default function TurnOnDialog({ open, group, listIds, savedListIds, baseCount, hasRow = true, reportDay, onConfirm, onClose, onViewReport, onViewNodes }: TurnOnDialogProps) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const status = useDestStatus(scope, { enabled: open })
   const detail = useDestGroup(scope, group.id, { enabled: open })
@@ -112,55 +107,64 @@ export default function TurnOnDialog({ open, group, listIds, savedListIds, baseC
     }
   }
 
+  // Turning on is the one change that can leave members with nothing to reach, so focus opens on Cancel
+  // (ImpactDialogFrame) and the confirm button is the destructive one.
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  if (!open) return null
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" fullScreen={phone}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: phone ? 0 : 3 } } }}>
-      <DialogTitle>{t(`${K}title`, { group: group.name })}</DialogTitle>
-      <DialogContent>
-        {reading && <LinearProgress aria-label={t(`${K}reading`)} sx={{ mb: 1.5 }} />}
-        {failed && (
-          <Alert severity="error" sx={{ mb: 1.5 }} action={<Button color="inherit" size="small" onClick={() => void detail.refetch()}>{t('admin:access_control.retry')}</Button>}>
-            {t(`${K}read_failed`)}
-          </Alert>
-        )}
-        {r && (
-          <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1, mb: 2 }}>
-            {blocked
-              ? <Check id="lists" tone="failing">{t(`${K}not_ready`, { list: names })}</Check>
-              : <Check id="lists" tone="ok">{t(`${K}lists_ready`)}</Check>}
-            {r.unapplied_nodes > 0 && (
-              <Check id="unapplied" tone="attention"
-                action={<Button size="small" onClick={onViewNodes}>{t(`${K}view`)}</Button>}>
-                {t(`${K}unapplied`, { count: r.unapplied_nodes })}
-              </Check>
-            )}
-            {(baseCount !== undefined ? baseCount > 0 : r.base_nonempty)
-              ? <Check id="base" tone="ok">{t(`${K}base_ok`)}</Check>
-              : <Check id="base" tone="attention">{t(`${K}base_empty`)}</Check>}
-            {r.remaining_sites_24h > 0
-              ? (
-                <Check id="remaining" tone="attention" action={hasRow ? <Button size="small" onClick={onViewReport}>{t(`${K}view_report`)}</Button> : undefined}>
-                  {t(`${K}remaining`, { count: r.remaining_sites_24h, top: topSites })}
-                </Check>
-              )
-              : <Check id="remaining" tone="ok">{t(`${K}remaining_none`)}</Check>}
-            {reportDay !== null
-              ? <Check id="age" tone="quiet">{t(`${K}age`, { days: reportDay })}</Check>
-              : <Check id="age" tone="quiet">{t(`${K}age_none`)}</Check>}
-          </Box>
-        )}
-        <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: md.errorContainer, color: md.onErrorContainer }}>
-          <Typography variant="body2">{t(`${K}consequence`, { members: num.format(group.members), minutes: minutesWords(t, applyMinutes(status.data)) })}</Typography>
-          {(preview.data?.nodes_lost.length ?? 0) > 0 && (
-            <Typography variant="body2" sx={{ mt: 0.5 }}>{t(`${K}lost`, { count: preview.data?.nodes_lost.length })}</Typography>
+    <ImpactDialogFrame
+      title={t(`${K}title`, { group: group.name })}
+      cancelRef={cancelRef}
+      cancelLabel={t(`${K}cancel`)}
+      onClose={onClose}
+      actions={(
+        <AsyncButton variant="destructive" disabled={reading || failed || blocked || (!sameLists && (preview.isPending || preview.isFetching || preview.isError))} onClick={confirm}>
+          {t(`${K}confirm`)}
+        </AsyncButton>
+      )}
+    >
+      {reading && <Skeleton aria-label={t(`${K}reading`)} role="progressbar" className="h-16 w-full" />}
+      {failed && (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <span className="flex-1">{t(`${K}read_failed`)}</span>
+            <Button size="sm" variant="outline" onClick={() => void detail.refetch()}>{t('admin:access_control.retry')}</Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {r && (
+        <ul className="m-0 grid list-none gap-2 p-0">
+          {blocked
+            ? <Check id="lists" tone="failing">{t(`${K}not_ready`, { list: names })}</Check>
+            : <Check id="lists" tone="ok">{t(`${K}lists_ready`)}</Check>}
+          {r.unapplied_nodes > 0 && (
+            <Check id="unapplied" tone="attention"
+              action={<Button size="sm" variant="outline" onClick={onViewNodes}>{t(`${K}view`)}</Button>}>
+              {t(`${K}unapplied`, { count: r.unapplied_nodes })}
+            </Check>
           )}
-        </Box>
-        {refusal && <Alert severity="error" sx={{ mt: 1.5 }}>{refusal}</Alert>}
-      </DialogContent>
-      <DialogActions sx={{ ...(phone ? { position: 'sticky', bottom: 0, bgcolor: md.surfaceContainerHigh } : {}) }}>
-        <Button onClick={onClose}>{t(`${K}cancel`)}</Button>
-        <AsyncButton variant="contained" color="error" disabled={reading || failed || blocked || (!sameLists && (preview.isPending || preview.isFetching || preview.isError))} onClick={confirm}>{t(`${K}confirm`)}</AsyncButton>
-      </DialogActions>
-    </Dialog>
+          {(baseCount !== undefined ? baseCount > 0 : r.base_nonempty)
+            ? <Check id="base" tone="ok">{t(`${K}base_ok`)}</Check>
+            : <Check id="base" tone="attention">{t(`${K}base_empty`)}</Check>}
+          {r.remaining_sites_24h > 0
+            ? (
+              <Check id="remaining" tone="attention" action={hasRow ? <Button size="sm" variant="outline" onClick={onViewReport}>{t(`${K}view_report`)}</Button> : undefined}>
+                {t(`${K}remaining`, { count: r.remaining_sites_24h, top: topSites })}
+              </Check>
+            )
+            : <Check id="remaining" tone="ok">{t(`${K}remaining_none`)}</Check>}
+          {reportDay !== null
+            ? <Check id="age" tone="quiet">{t(`${K}age`, { days: reportDay })}</Check>
+            : <Check id="age" tone="quiet">{t(`${K}age_none`)}</Check>}
+        </ul>
+      )}
+      <div className="rounded-lg bg-destructive/10 p-3 text-sm">
+        <p>{t(`${K}consequence`, { members: num.format(group.members), minutes: minutesWords(t, applyMinutes(status.data)) })}</p>
+        {(preview.data?.nodes_lost.length ?? 0) > 0 && (
+          <p className="mt-1">{t(`${K}lost`, { count: preview.data?.nodes_lost.length })}</p>
+        )}
+      </div>
+      {refusal && <Alert variant="destructive"><AlertDescription>{refusal}</AlertDescription></Alert>}
+    </ImpactDialogFrame>
   )
 }

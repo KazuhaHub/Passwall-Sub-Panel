@@ -1,9 +1,20 @@
-import { useState, type ReactNode } from 'react'
-import {
-  Box, Chip, FormControlLabel, IconButton, InputAdornment, MenuItem, Switch, TextField, Tooltip, Typography,
-} from '@mui/material'
-import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { Field } from '@/components/form/Field'
+import { NumberField } from '@/components/form/NumberField'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { spacedT } from '@/i18n/spacing'
+
+/** `t` for the field's words: keys keep their `admin:` prefix, interpolation boundaries get Latin-letter spacing. */
+function useSpacedAdmin() {
+  const { t } = useTranslation(['admin', 'common'])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return { t: useCallback(spacedT(t), [t]) }
+}
 
 /** A field's value: a number, a switch or a text. */
 export type FieldValue = number | boolean | string
@@ -39,29 +50,23 @@ export function outOfRange(spec: FieldSpec, value: unknown): boolean {
   return (spec.min !== undefined && value < spec.min) || (spec.max !== undefined && value > spec.max)
 }
 
-/** The words every field shares (range, default, reset). The risk center's
- *  own block, which the access-control page reads too: they say nothing of
- *  either page. */
+/** The words every field shares (range, default). */
 const SHARED = 'admin:risk_center.policy.'
 
 /**
- * ONE POLICY FIELD, of any kind the layout names. Controlled: `value` is the
- * draft's, `onChange` writes the draft; the field keeps no copy of the
- * stored value.
+ * ONE POLICY FIELD, of any kind the layout names. Controlled: `value` is the draft's, `onChange` writes
+ * the draft; the field keeps no copy of the stored value.
  *
- * A number is typed as text (U2). A number input that re-renders from the
- * store on every keystroke cannot take "0.5" — "0." is not a number yet —
- * so while the field has focus it shows the text as typed and stores the
- * number that text reads as (its numeric prefix; '' is 0, unset). On blur
- * the text is dropped and the field shows the store again: an unset value
- * (<= 0) is an empty field whose placeholder is the SERVED default and
- * which says 默认 — never a 0 that reads as "zero tolerance" — and a set
- * value carries a reset that stores 0.
+ * A number is stored as 0 when it is unset, and an unset value is an EMPTY box that says 默认 and the
+ * served default — never a 0 that reads as "zero tolerance". NumberField supplies the editing rules (the
+ * text stays as typed until the box is left, "0.5" can be typed one character at a time, a value outside
+ * the bounds is named on the line under the box and blocks the save) and the way back: emptying the box,
+ * or its reset button, stores 0 again.
  */
-export default function PolicyField<V extends FieldValue = FieldValue>({ spec, value, onChange, defaults, effective, error }: {
+export default function PolicyField({ spec, value, onChange, defaults, effective, error }: {
   spec: FieldSpec
-  value: V | undefined
-  onChange: (v: V) => void
+  value: FieldValue | undefined
+  onChange: (v: FieldValue) => void
   /** The served defaults (ports.RiskCenterPolicyDefaults). */
   defaults: Record<string, number>
   /** A runtime knob's value in effect, when the server sent it. */
@@ -69,7 +74,7 @@ export default function PolicyField<V extends FieldValue = FieldValue>({ spec, v
   /** An error the server named for this field (a refused ignore list). */
   error?: string
 }) {
-  const { t } = useTranslation(['admin'])
+  const { t } = useSpacedAdmin()
   const label = t(spec.label)
   const hint = spec.hint ? t(spec.hint) : ''
 
@@ -77,70 +82,43 @@ export default function PolicyField<V extends FieldValue = FieldValue>({ spec, v
     // An *_off key reads as its opposite: the switch says what is ON.
     const on = spec.kind === 'inverted' ? value !== true : value === true
     return (
-      <Box>
-        <FormControlLabel label={label} sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
-          control={<Switch checked={on} onChange={(_, c) => onChange((spec.kind === 'inverted' ? !c : c) as V)} />} />
-        {hint && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: -0.5 }}>{hint}</Typography>}
-      </Box>
+      <Field label={label} hint={hint || undefined} orientation="horizontal">
+        <Switch checked={on} onCheckedChange={c => onChange(spec.kind === 'inverted' ? !c : c)} />
+      </Field>
     )
   }
 
   if (spec.kind === 'select') {
-    // '' is "never configured", which the server judges as the first
-    // option (the city tier); shown as that option rather than as blank.
+    // '' is "never configured", which the server judges as the first option (the city tier); shown as
+    // that option rather than as blank.
     const options = spec.options ?? []
     const shown = typeof value === 'string' && options.some(o => o.value === value) ? value : (options[0]?.value ?? '')
     return (
-      <TextField select fullWidth label={label} value={shown} helperText={hint}
-        onChange={e => onChange(e.target.value as V)}>
-        {options.map(o => <MenuItem key={o.value} value={o.value}>{t(o.label)}</MenuItem>)}
-      </TextField>
+      <Field label={label} hint={hint || undefined}>
+        <NativeSelect value={shown} onChange={e => onChange(e.target.value)}>
+          {options.map(o => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
+        </NativeSelect>
+      </Field>
     )
   }
 
   if (spec.kind === 'text') {
+    const text = typeof value === 'string' ? value : ''
     return (
-      <TextField fullWidth label={label} value={typeof value === 'string' ? value : ''}
-        multiline={spec.multiline} minRows={spec.multiline ? 2 : undefined}
-        error={!!error} helperText={error ? <>{error}<Box component="span" sx={{ display: 'block' }}>{hint}</Box></> : hint}
-        onChange={e => onChange(e.target.value as V)} />
+      // A refusal that came back from a save is a message to show, not a reason Save is off: the admin
+      // may only need to try again.
+      <Field label={label} hint={hint || undefined} error={error || undefined} errorBlocksSave={false}>
+        {spec.multiline
+          ? <Textarea rows={2} value={text} onChange={e => onChange(e.target.value)} />
+          : <Input value={text} onChange={e => onChange(e.target.value)} />}
+      </Field>
     )
   }
 
-  return <NumberField spec={spec} label={label} hint={hint} value={value} onChange={onChange}
-    defaults={defaults} effective={effective} />
-}
-
-function NumberField<V extends FieldValue>({ spec, label, hint, value, onChange, defaults, effective }: {
-  spec: FieldSpec
-  label: string
-  hint: string
-  value: V | undefined
-  onChange: (v: V) => void
-  defaults: Record<string, number>
-  effective?: number
-}) {
-  const { t } = useTranslation(['admin'])
-  // The text as typed, while the field has focus; null otherwise.
-  const [text, setText] = useState<string | null>(null)
   const stored = typeof value === 'number' ? value : 0
-  const set = stored > 0
   const fallback = defaults[spec.key]
-  const invalid = outOfRange(spec, stored)
-
-  const onText = (raw: string) => {
-    setText(raw)
-    if (raw.trim() === '') { onChange(0 as V); return }
-    // parseFloat reads the numeric prefix: "0." is 0 and "1e" is 1 while the
-    // admin is still typing. Text with no number in it changes nothing.
-    const n = Number.parseFloat(raw)
-    if (!Number.isFinite(n)) return
-    onChange((spec.kind === 'number' ? Math.trunc(n) : n) as V)
-  }
-
-  // The hint says what the knob means. A † field adds its range and the
-  // served default; a runtime knob's hint states its own, and its caption
-  // is the number the server runs with.
+  // The hint says what the knob means. A † field adds its range and the served default; a runtime knob's
+  // hint states its own, and its caption is the number the server runs with.
   let tail = ''
   if (spec.tail && fallback !== undefined) {
     const d = { min: spec.min, max: spec.max, d: fallback }
@@ -149,42 +127,43 @@ function NumberField<V extends FieldValue>({ spec, label, hint, value, onChange,
         : t(`${SHARED}default_only`, d)
   }
   const lines: ReactNode[] = [
-    invalid && t(`${SHARED}out_of_range`),
     [hint, tail].filter(Boolean).join(' '),
     spec.effective && effective !== undefined && t('admin:settings.risk_center.effective', { value: effective }),
   ].filter(Boolean)
-
-  const adornment = set
-    ? (
-      <InputAdornment position="end">
-        <Tooltip title={t(`${SHARED}reset_default`)}>
-          <IconButton size="small" edge="end" aria-label={t(`${SHARED}reset_default`)}
-            onClick={() => { setText(null); onChange(0 as V) }}>
-            <RestartAltIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </InputAdornment>
-    )
-    : fallback !== undefined && text === null
-      ? <InputAdornment position="end"><Chip size="small" label={t(`${SHARED}default_adornment`)} /></InputAdornment>
-      : undefined
-
+  const emptyLabel = fallback === undefined ? t(`${SHARED}default_adornment`) : `${t(`${SHARED}default_adornment`)} ${fallback}`
   return (
-    <TextField fullWidth label={label}
-      value={text ?? (set ? String(stored) : '')}
-      placeholder={fallback === undefined ? undefined : String(fallback)}
-      error={invalid}
-      onFocus={() => setText(set ? String(stored) : '')}
-      onBlur={() => setText(null)}
-      onChange={e => onText(e.target.value)}
-      helperText={lines.length > 0
-        ? lines.map((line, i) => <Box key={i} component="span" sx={{ display: 'block' }}>{line}</Box>)
-        : undefined}
-      slotProps={{
-        htmlInput: { inputMode: spec.kind === 'float' ? 'decimal' : 'numeric' },
-        // Shrunk, so the placeholder (the default) shows in an empty field.
-        inputLabel: { shrink: true },
-        input: { endAdornment: adornment },
-      }} />
+    <NumberBox spec={spec} stored={stored} emptyLabel={emptyLabel} onChange={onChange}
+      label={label} hint={lines.length > 0 ? <>{lines.map((line, i) => <span key={i} className="block">{line}</span>)}</> : undefined} />
+  )
+}
+
+/**
+ * The number box. 0 has always meant "unset, use the default" and the server accepts it, so it must stay
+ * enterable even where the field has a minimum: the box enforces the minimum on every other value, and a
+ * 0 left in it is taken as "back to the default" when the box is left — it stores 0 and the box is drawn
+ * again empty, as the default.
+ */
+function NumberBox({ spec, stored, emptyLabel, onChange, label, hint }: {
+  spec: FieldSpec
+  stored: number
+  emptyLabel: string
+  onChange: (v: FieldValue) => void
+  label: string
+  hint: ReactNode
+}) {
+  const [resets, setResets] = useState(0)
+  return (
+    <Field label={label} hint={hint}>
+      <NumberField key={resets} value={stored > 0 ? stored : null} integer={spec.kind === 'number'} min={spec.min} max={spec.max}
+        allowEmpty emptyLabel={emptyLabel}
+        onChange={n => onChange(n === null ? 0 : n)}
+        onBlur={e => {
+          const text = e.currentTarget.value.trim()
+          if (spec.min !== undefined && spec.min > 0 && text !== '' && Number.parseFloat(text) === 0) {
+            onChange(0)
+            setResets(k => k + 1)
+          }
+        }} />
+    </Field>
   )
 }

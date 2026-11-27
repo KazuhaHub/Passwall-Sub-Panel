@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -84,5 +85,27 @@ func TestAdminRuleExplainStatuses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A body past the cap answers 413 with the shared code, as the save and the
+// draft compilers do, never a malformed-JSON 400.
+func TestAdminRuleExplainOversizeBodyIs413(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	body := `{"template_slug":"default-mihomo","probe":{"host":"a.example"},"draft":{"slug":"d","content":"` + strings.Repeat("x", 4096) + `"}}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/rules/explain", bytes.NewBufferString(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Body = http.MaxBytesReader(w, c.Request.Body, 1024)
+	c.Set(middleware.CtxClaims, &jwtutil.Claims{UserID: 1, Role: domain.RoleAdmin})
+	NewAdminRuleExplainHandler(&fakeExplainer{}).Explain(c)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	if out["code"] != "body_too_large" {
+		t.Fatalf("code %v", out["code"])
 	}
 }

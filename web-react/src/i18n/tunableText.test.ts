@@ -71,18 +71,16 @@ describe('no hard-coded tunable text remains', () => {
     expect(found).toEqual([])
   })
 
-  it.each(['../views/admin/SettingsView.tsx'])(
-    'the Chinese defaultValue copies in %s', async file => {
-      const fs = await import('node:fs')
-      const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
-      // Every quoted string or template literal holding Chinese: comments
-      // are English in these files, and a defaultValue is what an admin
-      // reads when the bundle misses a key.
-      const strings = source.match(/(['`])(?:\\.|(?!\1)[^\\\n])*[一-鿿](?:\\.|(?!\1)[^\\\n])*\1/g) ?? []
-      expect(strings.length).toBeGreaterThan(0)
-      const found = strings.flatMap(s => hits('zh', s).map(l => `"${l}" in ${s}`))
-      expect(found).toEqual([])
-    })
+  it('the rebuilt settings page carries no Chinese defaultValue copies at all', async () => {
+    const fs = await import('node:fs')
+    const dir = new URL('../views/admin/settings/', import.meta.url)
+    const files = [new URL('../views/admin/SettingsView.tsx', import.meta.url), ...fs.readdirSync(dir, { recursive: true, encoding: 'utf8' })
+      .filter(f => /\.tsx?$/.test(f) && !/\.test\./.test(f)).map(f => new URL(f, dir))]
+    // Every quoted string or template literal holding Chinese: comments are English in these files, and a
+    // defaultValue is what an admin reads when the bundle misses a key. The texts live in the bundles now.
+    const found = files.flatMap(file => (fs.readFileSync(file, 'utf8').match(/(['`])(?:\\.|(?!\1)[^\\\n])*[一-鿿](?:\\.|(?!\1)[^\\\n])*\1/g) ?? []).map(s => `${file.pathname}: ${s}`))
+    expect(found).toEqual([])
+  })
 
   it('allows a default that says it is one', () => {
     // The guard's own escape hatch, pinned: without it the texts that must

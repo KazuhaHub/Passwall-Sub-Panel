@@ -53,3 +53,18 @@ describe('appearance store', () => {
     expect(resolveEffectiveMode('dark', false)).toBe('dark')
   })
 })
+
+describe('density default', () => {
+  it('is compact for a user with no saved preference', async () => {
+    vi.resetModules()
+    localStorage.clear()
+    const { useAppearanceStore: fresh } = await import('./appearance')
+    expect(fresh.getState().density).toBe('compact')
+  })
+  it('honours a saved preference, including comfortable', async () => {
+    vi.resetModules()
+    localStorage.setItem('psp-user-density', 'comfortable')
+    const { useAppearanceStore: fresh } = await import('./appearance')
+    expect(fresh.getState().density).toBe('comfortable')
+  })
+})

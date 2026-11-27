@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, useRouteError, isRouteErrorResponse } fr
 import { lazy } from 'react'
 import { ErrorFallback } from '@/components/ErrorBoundary'
 import RequireAuth from './RequireAuth'
+import NotFoundView from '@/views/NotFoundView'
 import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
 import { panelPath } from '@/panelPath'
@@ -19,21 +20,40 @@ const RegisterView = lazy(() => import('@/views/RegisterView'))
 const Enroll2FAView = lazy(() => import('@/views/Enroll2FAView'))
 const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const LegalView = lazy(() => import('@/views/LegalView'))
-const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
-const UserLayout = lazy(() => import('@/layouts/UserLayout'))
+const AdminShellRoute = lazy(() => import('./AdminShellRoute'))
+const UserShellRoute = lazy(() => import('./UserShellRoute'))
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
 const DashboardView = lazy(viewLoaders['/admin/dashboard'])
 const ServersView = lazy(viewLoaders['/admin/servers'])
 const CertificatesView = lazy(viewLoaders['/admin/certs'])
 const GroupsView = lazy(viewLoaders['/admin/groups'])
 const UsersView = lazy(viewLoaders['/admin/users'])
-const NodesView = lazy(viewLoaders['/admin/nodes'])
+const ServerCreateRoute = lazy(() => import('@/views/admin/servers/ServerCreateRoute'))
+const ServerRoute = lazy(() => import('@/views/admin/servers/ServerRoute'))
+const ServerInstallRoute = lazy(() => import('@/views/admin/servers/ServerInstallRoute'))
+const GroupDetailRoute = lazy(() => import('@/views/admin/groups/GroupDetailRoute'))
+const GroupCreatePage = lazy(() => import('@/views/admin/groups/GroupCreatePage'))
+const UserDetailRoute = lazy(() => import('@/views/admin/users/UserDetailRoute'))
+const UserCreatePage = lazy(() => import('@/views/admin/users/UserCreatePage'))
+const LegalEditorRoute = lazy(() => import('@/views/admin/legal/LegalEditorRoute'))
+const NodesPage = lazy(viewLoaders['/admin/nodes'])
+const NodeDetailRoute = lazy(() => import('@/views/admin/nodes/NodeDetailRoute'))
+const NodeCreateRoute = lazy(() => import('@/views/admin/nodes/NodeCreateRoute'))
 const RuleSetsView = lazy(viewLoaders['/admin/rules'])
+const RuleSetRoute = lazy(() => import('@/views/admin/rulesets/RuleSetRoute'))
+const RuleSetCreateRoute = lazy(() => import('@/views/admin/rulesets/RuleSetRoute').then(m => ({ default: m.RuleSetCreateRoute })))
 const TemplatesView = lazy(viewLoaders['/admin/templates'])
+const TemplateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute'))
+const TemplateCreateRoute = lazy(() => import('@/views/admin/templates/TemplateRoute').then(m => ({ default: m.TemplateCreateRoute })))
 const SubClientsView = lazy(viewLoaders['/admin/sub-clients'])
 const LogsView = lazy(viewLoaders['/admin/logs'])
 const RiskCenterView = lazy(viewLoaders['/admin/risk'])
 const AccessControlView = lazy(viewLoaders['/admin/access-control'])
+// A policy and a list are pages of their own under the access-control page; their create forms sit beside them.
+const PolicyDetailRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyDetailRoute })))
+const PolicyCreateRoute = lazy(() => import('@/views/admin/accessControl/policies/PolicyRoutes').then(m => ({ default: m.PolicyCreateRoute })))
+const ListDetailRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListDetailRoute })))
+const ListCreateRoute = lazy(() => import('@/views/admin/accessControl/lists/ListRoutes').then(m => ({ default: m.ListCreateRoute })))
 const SyncTasksView = lazy(viewLoaders['/admin/sync-tasks'])
 const NodeIssuesView = lazy(viewLoaders['/admin/node-issues'])
 const DiagnosticsView = lazy(viewLoaders['/admin/diagnostics'])
@@ -41,9 +61,19 @@ const TrafficView = lazy(viewLoaders['/admin/traffic'])
 const SettingsView = lazy(viewLoaders['/admin/settings'])
 const LanguagePacksView = lazy(viewLoaders['/admin/language-packs'])
 const MeView = lazy(viewLoaders['/user/me'])
+// Dev-only component gallery for the Tailwind/shadcn stack. The condition is a
+// compile-time constant, so a production build drops both the route and the
+// lazy chunk.
+const UiKitchenSink = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitchenSink')) : null
+const UiKitData = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitData')) : null
+const UiKitShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell')) : null
+const UiKitUserShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell').then(m => ({ default: m.UiKitUserShell }))) : null
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []
+
+function AdminNotFound() { return <NotFoundView home="/admin/dashboard" /> }
+function UserNotFound() { return <NotFoundView home="/user/me" /> }
 
 function RootRedirect() {
   const role = useAuthStore(s => s.role)
@@ -73,6 +103,10 @@ export const router = createBrowserRouter([
         path: '/',
         element: <RootRedirect />,
       },
+  ...(UiKitchenSink ? [{ path: '/__ui-kit', element: <UiKitchenSink /> }] : []),
+  ...(UiKitData ? [{ path: '/__ui-kit/data', element: <UiKitData /> }] : []),
+  ...(UiKitShell ? [{ path: '/__ui-kit/shell/*', element: <UiKitShell /> }] : []),
+  ...(UiKitUserShell ? [{ path: '/__ui-kit/shell-user', element: <UiKitUserShell /> }] : []),
   { path: '/login', element: <LoginView /> },
   { path: '/login/local', element: <LoginView forceLocal /> },
   { path: '/sso-callback', element: <SsoCallbackView /> },
@@ -90,30 +124,57 @@ export const router = createBrowserRouter([
     element: <RequireAuth adminOnly />,
     children: [
       {
-        element: <AdminLayout />,
+        element: <AdminShellRoute />,
         children: [
           { index: true, element: <Navigate to="dashboard" replace /> },
           { path: 'dashboard', element: <DashboardView /> },
           { path: 'servers', element: <ServersView /> },
+          // A server, its creation and a Passwall Node's installation are pages of their own (they were side sheets over the list).
+          { path: 'servers/new', element: <ServerCreateRoute /> },
+          { path: 'servers/:id', element: <ServerRoute /> },
+          { path: 'servers/:id/install', element: <ServerInstallRoute /> },
           { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
+          // A group is a page of its own; `?edit=<id>` on the list (the old side sheet's address) is sent on to these.
+          { path: 'groups/new', element: <GroupCreatePage /> },
+          { path: 'groups/:id', element: <GroupDetailRoute /> },
           { path: 'users', element: <UsersView /> },
-          { path: 'nodes', element: <NodesView /> },
+          // A user is a page of its own; `?user=<id>` on the list (the old side sheet's address) is sent on to these.
+          { path: 'users/new', element: <UserCreatePage /> },
+          { path: 'users/:id', element: <UserDetailRoute /> },
+          { path: 'nodes', element: <NodesPage /> },
+          // Admin only (D3); until N2 and N3 these shells offer the legacy editors.
+          { path: 'nodes/new', element: <NodeCreateRoute /> },
+          { path: 'nodes/:id', element: <NodeDetailRoute /> },
           { path: 'rules', element: <RuleSetsView /> },
+          // A rule set is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
+          { path: 'rules/new', element: <RuleSetCreateRoute /> },
+          { path: 'rules/:slug', element: <RuleSetRoute /> },
           { path: 'templates', element: <TemplatesView /> },
+          // A template is a page of its own; `?edit=` on the list (the old side sheet's address) is sent on to these.
+          { path: 'templates/new', element: <TemplateCreateRoute /> },
+          { path: 'templates/:slug', element: <TemplateRoute /> },
           { path: 'sub-clients', element: <SubClientsView /> },
           // LogsRoute sends an admin's old ?tab=geo|risk links on to the risk
           // center, where those two tabs now live.
           { path: 'logs', element: <LogsRoute><LogsView /></LogsRoute> },
           { path: 'risk', element: <RiskCenterView /> },
           { path: 'access-control', element: <AccessControlView /> },
+          { path: 'access-control/policies/new', element: <PolicyCreateRoute /> },
+          { path: 'access-control/policies/:id', element: <PolicyDetailRoute /> },
+          { path: 'access-control/lists/new', element: <ListCreateRoute /> },
+          { path: 'access-control/lists/:id', element: <ListDetailRoute /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
           { path: 'node-issues', element: <NodeIssuesView /> },
           { path: 'diagnostics', element: <DiagnosticsView /> },
           { path: 'traffic', element: <TrafficView /> },
           { path: 'settings', element: <SettingsView /> },
+          // A legal document's editor is a page under Settings (terms | privacy), so the sidebar keeps Settings lit.
+          { path: 'settings/legal/:kind', element: <LegalEditorRoute /> },
           { path: 'language-packs', element: <LanguagePacksView /> },
           ...PLACEHOLDER_PATHS.map(p => ({ path: p, element: <PlaceholderView /> })),
+          // An unknown /admin/... address: a not-found page in the shell, not a silent bounce to the dashboard.
+          { path: '*', element: <AdminNotFound /> },
         ],
       },
     ],
@@ -123,10 +184,11 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [
       {
-        element: <UserLayout />,
+        element: <UserShellRoute />,
         children: [
           { index: true, element: <Navigate to="me" replace /> },
           { path: 'me', element: <MeView /> },
+          { path: '*', element: <UserNotFound /> },
         ],
       },
     ],
@@ -138,7 +200,7 @@ export const router = createBrowserRouter([
     element: <RequireAuth />,
     children: [{ index: true, element: <Enroll2FAView /> }],
   },
-      // Catch-all: any unknown URL bounces to the role-based home.
+      // Catch-all outside /admin and /user: any unknown URL bounces to the role-based home.
       { path: '*', element: <RootRedirect /> },
     ],
   },

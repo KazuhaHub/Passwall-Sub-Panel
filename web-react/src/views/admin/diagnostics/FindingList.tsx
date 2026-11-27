@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { Box, Button, ButtonBase, Collapse, Stack, Typography, useTheme } from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { Link as RouterLink } from 'react-router'
+import { Link } from 'react-router'
 import type { MetricsSnapshot } from '@/api/diagnostics'
-import HelpTip from '@/components/HelpTip'
+import { HelpTip } from '@/components/common/HelpTip'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   FINDING_LOGS,
   breakdownInterpolation,
@@ -16,7 +15,8 @@ import {
   type SessionBase,
 } from '@/utils/diagnostics'
 import { LINK_TARGET, type CardId } from '@/utils/diagnosticsCatalog'
-import { SeverityBadge } from './StatusBadge'
+import { Disclosure } from '@/components/common/Disclosure'
+import { SeverityBadge } from './StateBadge'
 import type { DiagFormat } from './useDiagFormat'
 
 // The page's problems, each written the same way: what happened, with its
@@ -24,6 +24,8 @@ import type { DiagFormat } from './useDiagFormat'
 // reading; what to do; where to go; what to search the log for; and whether
 // it has grown since the page was opened. Notices, standing conditions
 // rather than incidents, sit below on one line each and open on demand.
+// A notice's open state lives in its own row, keyed by the finding id, so the
+// minute refresh (which re-derives the findings) leaves an open one open.
 
 const ACTIONABLE = new Set(['critical', 'error', 'warn'])
 
@@ -35,105 +37,97 @@ function interpolation(f: Finding, fmt: DiagFormat): Record<string, string> {
 }
 
 function SessionLine({ f, base, cur, fmt }: { f: Finding; base?: SessionBase; cur: MetricsSnapshot; fmt: DiagFormat }) {
-  if (f.series.length === 0) return null
+  if (f.series.length === 0) return <span />
   const d = sessionDelta(base?.metrics, cur, f.series)
   const text = fmt.t(`admin:diagnostics.problems.${sessionLineKey(d.kind, base?.rebuilt ?? false)}`, {
     count: fmt.count(d.kind === 'grew' ? d.count : 0),
     minutes: fmt.count(d.kind === 'grew' || d.kind === 'flat' ? d.minutes : 0),
   })
-  return <Typography variant="caption" data-testid="session-delta" data-kind={d.kind} sx={{ color: 'text.secondary' }}>{text}</Typography>
+  return <span data-testid="session-delta" data-kind={d.kind} className="text-xs text-muted-foreground">{text}</span>
 }
 
 /** Impact, the sentences this reading carries, the action and the log line. */
 function FindingBody({ f, fmt }: { f: Finding; fmt: DiagFormat }) {
-  const md = useTheme().palette.md
   const { t } = fmt
   const values = interpolation(f, fmt)
   const base = `admin:diagnostics.findings.${f.key}`
   const logs = FINDING_LOGS[f.id as FindingId] ?? []
   return (
-    <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-      <Typography variant="body2">{t(`${base}.impact`, values)}</Typography>
+    <div className="mt-2 space-y-1.5 text-sm">
+      <p>{t(`${base}.impact`, values)}</p>
       {findingParts(f).map(part => (
-        <Typography key={part} variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${base}.${part}`, values)}</Typography>
+        <p key={part} className="text-muted-foreground">{t(`${base}.${part}`, values)}</p>
       ))}
-      <Typography variant="body2" sx={{ fontWeight: 500 }}>{t(`${base}.action`, values)}</Typography>
+      <p className="font-medium">{t(`${base}.action`, values)}</p>
       {logs.includes('log') && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
-          <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t('admin:diagnostics.problems.log_label')}</Typography>
-          <Box component="code" sx={{
-            fontFamily: 'monospace', fontSize: 12, px: 0.75, py: 0.25, borderRadius: 1,
-            bgcolor: md.surfaceContainerHighest, wordBreak: 'break-all',
-          }}>{t(`${base}.log`)}</Box>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">{t('admin:diagnostics.problems.log_label')}</span>
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all">{t(`${base}.log`)}</code>
           {logs.includes('log_note') && (
-            <HelpTip textKey={`${base}.log_note`} labelKey="admin:diagnostics.problems.log_label" />
+            <HelpTip text={t(`${base}.log_note`)} label={t('admin:diagnostics.problems.log_label')} />
           )}
-        </Box>
+        </div>
       )}
-    </Stack>
+    </div>
   )
 }
 
-function FindingActions({ f, fmt, onShowData }: { f: Finding; fmt: DiagFormat; onShowData: (card: CardId) => void }) {
+interface RowProps {
+  f: Finding; fmt: DiagFormat; base?: SessionBase; cur: MetricsSnapshot; onShowData: (card: CardId) => void
+}
+
+function FindingFooter({ f, fmt, base, cur, onShowData }: RowProps) {
   const link = f.link ? LINK_TARGET[f.link] : undefined
   return (
-    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-      {link && (
-        <Button size="small" variant="outlined" component={RouterLink} to={link.path}>
-          {fmt.t('admin:diagnostics.links.open', { page: fmt.t(link.nav) })}
-        </Button>
-      )}
-      <Button size="small" onClick={() => onShowData(f.card)}>{fmt.t('admin:diagnostics.problems.show_data')}</Button>
-    </Box>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+      <SessionLine f={f} base={base} cur={cur} fmt={fmt} />
+      <div className="flex flex-wrap gap-2">
+        {link && (
+          // A real link (role link), drawn like a button: it navigates.
+          <Link to={link.path} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            {fmt.t('admin:diagnostics.links.open', { page: fmt.t(link.nav) })}
+          </Link>
+        )}
+        <Button variant="outline" size="sm" onClick={() => onShowData(f.card)}>{fmt.t('admin:diagnostics.problems.show_data')}</Button>
+      </div>
+    </div>
   )
 }
 
-function ProblemRow({ f, fmt, base, cur, onShowData }: {
-  f: Finding; fmt: DiagFormat; base?: SessionBase; cur: MetricsSnapshot; onShowData: (card: CardId) => void
-}) {
-  const md = useTheme().palette.md
+function ProblemRow(props: RowProps) {
+  const { f, fmt } = props
   return (
-    <Box data-testid={`finding-${f.id}`} sx={{ p: 2, borderRadius: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+    <div data-testid={`finding-${f.id}`} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+      <div className="flex flex-wrap items-start gap-2">
         <SeverityBadge severity={f.severity} />
-        <Typography sx={{ fontWeight: 600, flex: '1 1 240px', minWidth: 0 }}>
+        <h3 className="min-w-0 flex-1 basis-60 font-semibold">
           {fmt.t(`admin:diagnostics.findings.${f.key}.title`, interpolation(f, fmt))}
-        </Typography>
-      </Box>
+        </h3>
+      </div>
       <FindingBody f={f} fmt={fmt} />
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
-        <SessionLine f={f} base={base} cur={cur} fmt={fmt} />
-        <FindingActions f={f} fmt={fmt} onShowData={onShowData} />
-      </Box>
-    </Box>
+      <FindingFooter {...props} />
+    </div>
   )
 }
 
-function NoticeRow({ f, fmt, base, cur, onShowData }: {
-  f: Finding; fmt: DiagFormat; base?: SessionBase; cur: MetricsSnapshot; onShowData: (card: CardId) => void
-}) {
-  const md = useTheme().palette.md
+function NoticeRow(props: RowProps) {
+  const { f, fmt } = props
   const [open, setOpen] = useState(false)
   return (
-    <Box data-testid={`finding-${f.id}`} sx={{ borderRadius: 3, bgcolor: md.surfaceContainerLow }}>
-      <ButtonBase onClick={() => setOpen(o => !o)} aria-expanded={open}
-        sx={{ width: '100%', justifyContent: 'flex-start', gap: 1, px: 2, py: 1.25, borderRadius: 3, textAlign: 'left' }}>
-        <SeverityBadge severity={f.severity} />
-        <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }}>
-          {fmt.t(`admin:diagnostics.findings.${f.key}.title`, interpolation(f, fmt))}
-        </Typography>
-        <ExpandMoreIcon aria-hidden sx={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
-      </ButtonBase>
-      <Collapse in={open} unmountOnExit>
-        <Box sx={{ px: 2, pb: 2 }}>
+    <div data-testid={`finding-${f.id}`} className="rounded-xl bg-card ring-1 ring-foreground/10">
+      <Disclosure open={open} onToggle={() => setOpen(o => !o)} buttonClassName="px-3 py-2.5"
+        summary={
+          <span className="flex min-w-0 items-center gap-2">
+            <SeverityBadge severity={f.severity} />
+            <span className="min-w-0 flex-1 text-sm">{fmt.t(`admin:diagnostics.findings.${f.key}.title`, interpolation(f, fmt))}</span>
+          </span>
+        }>
+        <div className="px-4 pb-4">
           <FindingBody f={f} fmt={fmt} />
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
-            <SessionLine f={f} base={base} cur={cur} fmt={fmt} />
-            <FindingActions f={f} fmt={fmt} onShowData={onShowData} />
-          </Box>
-        </Box>
-      </Collapse>
-    </Box>
+          <FindingFooter {...props} />
+        </div>
+      </Disclosure>
+    </div>
   )
 }
 
@@ -150,20 +144,20 @@ export default function FindingList({ findings, fmt, base, cur, onShowData }: {
   return (
     <>
       {problems.length > 0 && (
-        <Box component="section" sx={{ mb: 3 }}>
-          <Typography variant="h6" component="h2" sx={{ mb: 1 }}>{fmt.t('admin:diagnostics.problems.title')}</Typography>
-          <Stack spacing={1.5}>
+        <section className="mb-6">
+          <h2 className="mb-2 text-sm font-medium text-muted-foreground">{fmt.t('admin:diagnostics.problems.title')}</h2>
+          <div className="space-y-3">
             {problems.map(f => <ProblemRow key={f.id} f={f} fmt={fmt} base={base} cur={cur} onShowData={onShowData} />)}
-          </Stack>
-        </Box>
+          </div>
+        </section>
       )}
       {notices.length > 0 && (
-        <Box component="section" sx={{ mb: 3 }}>
-          <Typography variant="subtitle1" component="h2" sx={{ mb: 1 }}>{fmt.t('admin:diagnostics.problems.notices_title')}</Typography>
-          <Stack spacing={1}>
+        <section className="mb-6">
+          <h2 className="mb-2 text-sm font-medium text-muted-foreground">{fmt.t('admin:diagnostics.problems.notices_title')}</h2>
+          <div className="space-y-2">
             {notices.map(f => <NoticeRow key={f.id} f={f} fmt={fmt} base={base} cur={cur} onShowData={onShowData} />)}
-          </Stack>
-        </Box>
+          </div>
+        </section>
       )}
     </>
   )

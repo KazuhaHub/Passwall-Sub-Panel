@@ -31,6 +31,15 @@ func (r *nodeRepo) Create(ctx context.Context, n *domain.Node) error {
 			Select("COALESCE(MAX(sort_order),0)").Scan(&maxSort).Error; err != nil {
 			return err
 		}
+		// A relay line dragged to the bottom has a position of its own, past
+		// every node's; a node appended below nodes alone could land above it.
+		// Same rule as node.Service.nextSortOrder: only lines that still exist
+		// count, so an orphan position row cannot push the new node out.
+		maxLine, err := maxLivePosition(ctx, r.db)
+		if err != nil {
+			return err
+		}
+		maxSort = max(maxSort, maxLine)
 		n.SortOrder = maxSort + 10
 	}
 	row, err := nodeFromDomain(n)
@@ -59,28 +68,40 @@ func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 // full-row Save here would roll those back to whatever stale values the edit
 // dialog loaded — double-counted/lost traffic, flapping health. Same
 // column-scoped rationale as UpdateTrafficCounters / UpdateHealth.
+//
+// sort_order is NOT written either: it belongs to the reorder writers
+// (BatchUpdateSortOrder, ApplySubscriptionOrder), which commit without any
+// server lock. Every caller of this method carries a copy of the node it loaded
+// earlier, so writing the column here could put back a position a reorder had
+// just committed.
 func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if n == nil || n.ID == 0 {
 		return fmt.Errorf("UpdateMetadata requires a non-zero node ID; got %+v", n)
 	}
-	return r.db.WithContext(ctx).
-		Model(&nodeRow{}).
-		Where("id = ?", n.ID).
-		Updates(map[string]any{
-			"display_name":      n.DisplayName,
-			"server_address":    n.ServerAddress,
-			"flow":              n.Flow,
-			"region":            n.Region,
-			"tags":              jsonStrings(n.Tags),
-			"sort_order":        n.SortOrder,
-			"relays":            jsonRelays(n.Relays),
-			"hide_direct":       n.HideDirect,
-			"show_relay_status": n.ShowRelayStatus,
-			"egress_panel_id":   n.EgressPanelID,
-			// The service resolves an omitted factor to the stored one
-			// before it calls here.
-			"traffic_factor_milli": n.EffectiveTrafficFactor(),
-		}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&nodeRow{}).
+			Where("id = ?", n.ID).
+			Updates(map[string]any{
+				"display_name":      n.DisplayName,
+				"server_address":    n.ServerAddress,
+				"flow":              n.Flow,
+				"region":            n.Region,
+				"tags":              jsonStrings(n.Tags),
+				"relays":            jsonRelays(n.Relays),
+				"hide_direct":       n.HideDirect,
+				"show_relay_status": n.ShowRelayStatus,
+				"egress_panel_id":   n.EgressPanelID,
+				// The service resolves an omitted factor to the stored one
+				// before it calls here.
+				"traffic_factor_milli": n.EffectiveTrafficFactor(),
+			}).Error; err != nil {
+			return err
+		}
+		// A line this save removed takes its position with it (a re-created
+		// line gets a new ID, so a stale row could never apply again). Lines that
+		// stay keep theirs: positions are written only by ApplySubscriptionOrder.
+		return pruneLinePositionsTx(tx, n.ID, n.Relays)
+	})
 }
 
 // UpdateTrafficCounters writes only the lifetime + last-raw counter columns.
@@ -381,6 +402,9 @@ func (r *nodeRepo) Delete(ctx context.Context, id int64) error {
 		if err := tx.Delete(&nodeRow{}, id).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("node_id = ?", id).Delete(&subscriptionLinePositionRow{}).Error; err != nil {
+			return err
+		}
 		if err := deleteNodeRoutesTx(tx, id); err != nil {
 			return err
 		}
@@ -437,7 +461,7 @@ func (r *nodeRepo) ListByCertID(ctx context.Context, certID int64) ([]*domain.No
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -456,7 +480,7 @@ func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -499,7 +523,7 @@ func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, 0, err
 	}
 	return out, total, nil
@@ -525,7 +549,7 @@ func (r *nodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 		}
 		out[i] = n
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), out); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -536,8 +560,19 @@ func (r *nodeRepo) withTransit(ctx context.Context, node *domain.Node, err error
 	if err != nil {
 		return nil, err
 	}
-	if err := attachTransitState(ctx, r.db.WithContext(ctx), []*domain.Node{node}); err != nil {
+	if err := attachNodeState(ctx, r.db.WithContext(ctx), []*domain.Node{node}); err != nil {
 		return nil, err
 	}
 	return node, nil
+}
+
+// attachNodeState is every piece of loaded, non-column state a node read
+// carries: transit readiness and each line's explicit position. All node read
+// paths that feed render or an admin list go through it, so a new piece of
+// state added here reaches all of them.
+func attachNodeState(ctx context.Context, db *gorm.DB, nodes []*domain.Node) error {
+	if err := attachTransitState(ctx, db, nodes); err != nil {
+		return err
+	}
+	return attachLinePositions(ctx, db, nodes)
 }

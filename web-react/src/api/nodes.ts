@@ -1,8 +1,8 @@
 import { withFrontConfirm } from '@/utils/frontConfirm'
-import { withTunnelConfirm, type TunnelConfirmation } from '@/utils/tunnelConfirm'
+import { withTunnelConfirm, type TunnelConfirmation, type TunnelConfirmOptions } from '@/utils/tunnelConfirm'
 import { client } from './client'
 import type { RouteInput } from './routes'
-import type { ListResponse, Node, RelayLine, UnmanagedInbound } from './types'
+import type { CdnIssue, ListResponse, Node, ProbeQuality, RelayLine, UnmanagedInbound } from './types'
 
 export interface AdminInbound {
   id: number
@@ -334,7 +334,8 @@ function confirmParams(tunnels?: TunnelConfirmation, front?: { confirm_front?: b
   return Object.keys(out).length > 0 ? out : undefined
 }
 
-export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequest) {
+/** `confirmOptions.present`, here and on the other tunnel-confirming calls below, renders the server's tunnel plan in the caller's own dialog (see withTunnelConfirm). */
+export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequest, confirmOptions?: TunnelConfirmOptions) {
   // Removing a tunnel line removes its listener: the server asks first.
   return withTunnelConfirm(tunnels => withFrontConfirm(async front => {
     const params = confirmParams(tunnels, front)
@@ -342,7 +343,7 @@ export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequ
       ? await client.put<Node>(`/admin/nodes/${id}/metadata`, req, { params })
       : await client.put<Node>(`/admin/nodes/${id}/metadata`, req)
     return data
-  }))
+  }), undefined, confirmOptions)
 }
 
 /** The public key that belongs to a REALITY private key; a malformed key answers 400. */
@@ -360,12 +361,12 @@ export async function setNodeEnabled(id: number, enabled: boolean) {
   await withFrontConfirm(c => client.post(`/admin/nodes/${id}/set-enabled`, c?.confirm_front ? { enabled, confirm_front: true } : { enabled }))
 }
 
-export async function deleteNode(id: number) {
+export async function deleteNode(id: number, confirmOptions?: TunnelConfirmOptions) {
   // A listener behind a shared port leaves it when deleted, and a landing's tunnel listeners go with it: the server asks first.
   await withTunnelConfirm(tunnels => withFrontConfirm(c => {
     const params = confirmParams(tunnels, c)
     return client.delete(`/admin/nodes/${id}`, params ? { params } : undefined)
-  }))
+  }), undefined, confirmOptions)
 }
 
 // recreateNodeInbound rebuilds the node's inbound on its (repointed/empty) server
@@ -379,11 +380,11 @@ export async function recreateNodeInbound(id: number) {
 // NOT contact 3X-UI. Use when the upstream server is offline so PSP doesn't
 // burn retries against a dead panel; any clients PSP previously created
 // stay on 3X-UI for the admin to clean up there.
-export async function detachNode(id: number) {
+export async function detachNode(id: number, confirmOptions?: TunnelConfirmOptions) {
   await withTunnelConfirm(tunnels => withFrontConfirm(c => {
     const params = confirmParams(tunnels, c)
     return client.post(`/admin/nodes/${id}/detach`, undefined, params ? { params } : undefined)
-  }))
+  }), undefined, confirmOptions)
 }
 
 const quiet = { _skipErrorToast: true } as const
@@ -394,13 +395,13 @@ const quiet = { _skipErrorToast: true } as const
  * removing a listener is confirmed first (see withTunnelConfirm). Switching to
  * a forward takes the entry port (0: the server picks a free one).
  */
-export async function switchLineMode(nodeId: number, lineId: string, mode: 'tunnel' | 'forward', port = 0): Promise<Node> {
+export async function switchLineMode(nodeId: number, lineId: string, mode: 'tunnel' | 'forward', port = 0, confirmOptions?: TunnelConfirmOptions): Promise<Node> {
   // A listener joining or leaving a shared port is asked about too, in the server's words.
   return withTunnelConfirm(confirmed => withFrontConfirm(async front => {
     const body = { mode, ...(port > 0 ? { port } : {}), ...(confirmed ? { confirm: true, ...(confirmed.plan ? { confirm_plan: confirmed.plan } : {}) } : {}), ...(front?.confirm_front ? { confirm_front: true } : {}) }
     const { data } = await client.post<Node>(`/admin/nodes/${nodeId}/lines/${lineId}/mode`, body, quiet)
     return data
-  }))
+  }), undefined, confirmOptions)
 }
 
 /** What the admin edits on a tunnel line's listener; empty or 0 keeps the saved value. */
@@ -433,7 +434,7 @@ export async function previewTunnelSync(nodeId: number, lineId: string): Promise
 }
 
 /** Copies the landing's protocol settings onto the listener once the admin confirmed the diff (asked here, `note` is added to the question); its own port, names and keys stay. */
-export async function syncTunnelFromLanding(nodeId: number, lineId: string, note?: string): Promise<RelayLine[]> {
+export async function syncTunnelFromLanding(nodeId: number, lineId: string, note?: string, confirmOptions?: TunnelConfirmOptions): Promise<RelayLine[]> {
   // The first request is refused with the diff; it is shown, and the plan it carries is echoed on the confirmed one.
   return withTunnelConfirm(confirmed => withFrontConfirm(async front => {
     const body = {
@@ -442,7 +443,7 @@ export async function syncTunnelFromLanding(nodeId: number, lineId: string, note
     }
     const { data } = await client.post<{ diff: TunnelDiffEntry[]; relays: RelayLine[] }>(`/admin/nodes/${nodeId}/lines/${lineId}/tunnel/sync`, body, quiet)
     return data.relays ?? []
-  }), note)
+  }), note, confirmOptions)
 }
 
 export interface NodeReorderItem {
@@ -519,5 +520,126 @@ export interface SeparatorGroupsPreview {
 export async function previewSeparatorGroups(mode: 'global' | 'node_bound', nodeIds: number[], signal?: AbortSignal): Promise<SeparatorGroupsPreview> {
   const { data } = await client.post<SeparatorGroupsPreview>('/admin/nodes/separator/group-preview', { mode, node_ids: nodeIds }, { signal, _skipErrorToast: true })
   if (!data || !Array.isArray(data.groups) || !Array.isArray(data.visible)) throw new Error('malformed separator preview')
+  return data
+}
+
+// ---- The global subscription order (GET/PUT /admin/nodes/order) ----------------------------------------------
+
+export type OrderLineType = 'direct' | 'forward' | 'tunnel' | 'cdn' | 'external'
+
+/** Why a line is not published; "" (absent) when it is. Mirrors node.OrderRow.Withheld. */
+export type OrderWithheld =
+  | '' | 'hidden_direct' | 'landing_disabled' | 'disabled' | 'egress' | 'probe' | 'source_guard' | 'waiting_entry' | 'cdn_unfit'
+
+export interface OrderLanding {
+  node_id: number
+  name: string
+  region: string
+  panel_id: number
+  panel_name: string
+  enabled: boolean
+}
+
+export interface OrderEntry {
+  panel_id: number
+  panel_name: string
+  /** The entry server no longer exists. */
+  missing: boolean
+}
+
+export interface OrderHealth {
+  state: string
+  checked_at: string | null
+  detail?: string
+}
+
+/** One row of the order: a separator, or one line (the direct line or a relay line) of a node. */
+export interface OrderRow {
+  kind: 'separator' | 'line'
+  /** Separator rows. */
+  id?: number
+  mode?: SeparatorMode
+  /** Line rows. */
+  node_id?: number
+  line_id?: string
+  name: string
+  enabled: boolean
+  position: number
+  positioned: boolean
+  landing?: OrderLanding
+  entry?: OrderEntry
+  line_type?: OrderLineType
+  hidden_direct?: boolean
+  published?: boolean
+  withheld?: OrderWithheld
+  address?: string
+  port?: number
+  traffic_factor_milli?: number
+  running?: boolean
+  probe?: ProbeQuality
+  source_withheld?: string
+  cdn_issues?: CdnIssue[]
+  health?: OrderHealth
+}
+
+export interface NodeOrder {
+  order_version: string
+  rows: OrderRow[]
+}
+
+/** The order's refs: separators and lines come from independent id sequences, so a ref is typed. */
+export type OrderRef =
+  | { kind: 'separator'; id: number }
+  | { kind: 'line'; node_id: number; line_id: string }
+
+export async function getNodeOrder(signal?: AbortSignal): Promise<NodeOrder> {
+  const { data } = await client.get<NodeOrder>('/admin/nodes/order', { signal })
+  return data
+}
+
+/** A reorder refused because the order changed since it was read; `current` is the order as it is now. */
+export class OrderStaleError extends Error {
+  readonly current: NodeOrder
+  constructor(current: NodeOrder) {
+    super('order_stale')
+    this.name = 'OrderStaleError'
+    this.current = current
+  }
+}
+
+/**
+ * Writes the COMPLETE arrangement, top to bottom, against the version it was built from. The failure toast is
+ * the caller's (the stale case has its own dialog), so the request layer stays quiet.
+ */
+export async function putNodeOrder(baseVersion: string, items: OrderRef[]): Promise<string> {
+  try {
+    const { data } = await client.put<{ order_version: string }>('/admin/nodes/order', { base_version: baseVersion, items }, { _skipErrorToast: true })
+    return data.order_version
+  } catch (err) {
+    const res = (err as { response?: { status?: number; data?: { code?: string; order?: NodeOrder } } }).response
+    if (res?.status === 409 && res.data?.code === 'order_stale' && res.data.order) throw new OrderStaleError(res.data.order)
+    throw err
+  }
+}
+
+export interface DeleteImpactLine {
+  node_id: number
+  line_id: string
+  landing_name: string
+  line_name: string
+  line_type: OrderLineType
+}
+
+export interface NodeDeleteImpact {
+  node: { id: number; name: string }
+  lines: DeleteImpactLine[]
+  /** Tunnel listeners that close with the node (tunnel.go TunnelItem). */
+  tunnels: { node_id?: number; name?: string; line_id: string; line_name: string; entry_panel_id: number; port?: number; front_port?: number }[]
+  /** English text from the server, one entry per blocking shared-port route. */
+  blocked_by_routes: string[]
+}
+
+export async function getNodeDeleteImpact(id: number, signal?: AbortSignal): Promise<NodeDeleteImpact> {
+  const { data } = await client.get<NodeDeleteImpact>(`/admin/nodes/${id}/delete-impact`, { signal })
   return data
 }

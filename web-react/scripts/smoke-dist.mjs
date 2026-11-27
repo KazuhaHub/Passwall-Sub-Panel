@@ -4,8 +4,16 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { extname, join, normalize, resolve, sep } from 'node:path'
+import { checkDist } from './dist-guards.mjs'
 
 const dist = resolve(import.meta.dirname, '../../internal/web/dist')
+// Static checks on the built files (index.html preloads, vendor chunk imports).
+// Run first: they need no browser and name the file at fault.
+const staticProblems = checkDist(dist)
+if (staticProblems.length) {
+  throw new Error(`dist static checks failed:\n  ${staticProblems.join('\n  ')}`)
+}
+
 const profile = await mkdtemp(join(tmpdir(), 'psp-web-smoke-'))
 
 const contentTypes = {
@@ -280,7 +288,7 @@ try {
   const checks = {
     'React root rendered': /<\w+/.test(root),
     'login form rendered': /<form\b/.test(root),
-    'MUI SVG icon rendered': /<svg\b/.test(root),
+    'icon rendered': /<svg\b/.test(root),
     'React error #130 absent': !/Minified React error #130/.test(`${result.stdout}\n${result.logs.join('\n')}\n${result.stderr}`),
   }
   const failed = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name)

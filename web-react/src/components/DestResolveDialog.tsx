@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Radio, RadioGroup, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { DestNodeStatus, DestResolve } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
+import { ModeRadioGroup } from '@/components/access/ModeRadioGroup'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { pushSnack } from '@/components/feedback/toasts'
 import { ResolveUnavailableBadge } from '@/components/NodePolicyStatusRow'
-import { pushSnack } from '@/components/SnackbarHost'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useDirtyClose } from '@/hooks/useDirtyClose'
 import { useDestStatus, useSetDestResolve } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -40,9 +41,6 @@ export default function DestResolveDialog({ node, onClose }: {
   onClose: () => void
 }) {
   const { t } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const open = node !== null
   const status = useDestStatus(scope, { enabled: open })
@@ -73,41 +71,33 @@ export default function DestResolveDialog({ node, onClose }: {
     }
   }
 
-  const option = (value: Row) => {
-    const unoffered = value === 'if_non_match'
-    return (
-      <FormControlLabel key={value} value={value} disabled={unoffered || save.isPending}
-        sx={{ alignItems: 'flex-start', m: 0, p: 1, borderRadius: 2, border: `1px solid ${mode === value ? md.primary : md.outlineVariant}` }}
-        control={<Radio />}
-        label={<Typography variant="body2" sx={{ pt: 0.75, color: unoffered ? md.onSurfaceVariant : md.onSurface }}>{t(`${A}option.${value}`)}</Typography>} />
-    )
-  }
-
   return (
-    <Dialog open={open} onClose={() => guard(onClose)} fullWidth maxWidth="sm" fullScreen={fullScreen}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: fullScreen ? 0 : 3 } } }}>
-      <DialogTitle>{t(`${A}title`)}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        {node && <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{node.panel_name}</Typography>}
-        {view?.unavailable && <Box><ResolveUnavailableBadge reason={view.unavailable} /></Box>}
-        {error && <Alert severity="error">{error}</Alert>}
-        <RadioGroup value={mode} onChange={(_, v) => { if (v === 'as_is' || v === 'on_demand') setMode(v) }} aria-label={t(`${A}label`)} sx={{ gap: 1 }}>
-          {ROWS.map(option)}
-        </RadioGroup>
-        <Box data-testid="resolve-cost" component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5, color: md.onSurfaceVariant }}>
-          {(['xray', 'singbox'] as const).map(e => <Typography key={e} component="li" variant="body2">{t(`${A}cost.${e}`)}</Typography>)}
-        </Box>
-        <Box data-testid="resolve-caveats" component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5, color: md.onSurfaceVariant }}>
-          {CAVEATS.map(c => <Typography key={c} component="li" variant="body2">{t(`${A}caveat.${c}`)}</Typography>)}
-        </Box>
+    <Dialog open={open} onOpenChange={next => { if (!next) guard(onClose) }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t(`${A}title`)}</DialogTitle>
+          {node && <p className="text-sm text-muted-foreground">{node.panel_name}</p>}
+        </DialogHeader>
+        <div className="grid gap-3">
+          {view?.unavailable && <div><ResolveUnavailableBadge reason={view.unavailable} /></div>}
+          {error && <Alert variant="destructive">{error}</Alert>}
+          <ModeRadioGroup<Row>
+            value={mode} aria-label={t(`${A}label`)}
+            onChange={v => { if (v === 'as_is' || v === 'on_demand') setMode(v) }}
+            options={ROWS.map(value => ({ value, disabled: value === 'if_non_match' || save.isPending, children: t(`${A}option.${value}`) }))} />
+          <ul data-testid="resolve-cost" className="grid list-disc gap-1 pl-5 text-sm text-muted-foreground">
+            {(['xray', 'singbox'] as const).map(e => <li key={e}>{t(`${A}cost.${e}`)}</li>)}
+          </ul>
+          <ul data-testid="resolve-caveats" className="grid list-disc gap-1 pl-5 text-sm text-muted-foreground">
+            {CAVEATS.map(c => <li key={c}>{t(`${A}caveat.${c}`)}</li>)}
+          </ul>
+        </div>
+        <p className="text-xs text-muted-foreground">{t(`${A}restart`)}</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => guard(onClose)}>{t(`${A}cancel`)}</Button>
+          <AsyncButton disabled={!dirty} onClick={submit}>{t(`${A}save`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions sx={{ flexDirection: 'column', alignItems: 'stretch', gap: 1, p: 2 }}>
-        <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{t(`${A}restart`)}</Typography>
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-          <Button onClick={() => guard(onClose)}>{t(`${A}cancel`)}</Button>
-          <AsyncButton variant="contained" disabled={!dirty} onClick={submit}>{t(`${A}save`)}</AsyncButton>
-        </Box>
-      </DialogActions>
     </Dialog>
   )
 }

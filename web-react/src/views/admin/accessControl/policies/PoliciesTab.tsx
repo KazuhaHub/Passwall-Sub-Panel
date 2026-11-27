@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, ButtonBase, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Typography, useTheme } from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
 import { useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestPolicy, type DestState, type DestTemplate } from '@/api/accessControl'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { IconAdd } from '@/lib/icons'
 import {
   useDeleteDestPolicy, useDestCatalog, useDestLists, useDestPolicies, useDestStatus, useInstantiateDestTemplate,
   useReorderDestPolicies, useUpdateDestPolicy,
@@ -16,18 +20,19 @@ import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes, pipelineSteps, reorderWithin, reportNotDeployedCount, splitBlockByState } from '@/utils/accessControl'
 import type { AccessNavState } from '../accessParams'
+import { accessReturnState, newPolicyPath, policyPath } from '../accessRoutes'
 import { recordsHref, relativeSince } from '../records/recordsParams'
 import { deletePolicyConfirm } from '../confirmCopy'
 import { destErrorText, reportDestError } from '../destErrors'
 import ConvertToBlockDialog from './ConvertToBlockDialog'
 import StateBadge from '../allowlist/StateBadge'
-import PolicyEditorDialog, { emptyForm, formOf, inputOf, type PolicyForm } from './PolicyEditorDialog'
+import { formOf, inputOf } from './policyForm'
 import PolicyRow, { type RowMove } from './PolicyRow'
 import { RailStep } from './PolicyRail'
 import QuotaMeters from './QuotaMeters'
 import TemplateGrid, { TemplateChooser, UnavailableDialog } from './TemplateGrid'
 import TemplateMenu from './TemplateMenu'
-import { useFirstPublishGate } from './useFirstPublish'
+import { useEnableScopeText, useFirstPublishGate, type EnableSubject } from './useFirstPublish'
 
 export interface PoliciesTabProps {
   /** Opens the exemptions sheet (`sheet=exemptions`). */
@@ -54,8 +59,6 @@ const HIGHLIGHT_MS = 2000
  */
 export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLists, onOpenAllowlist }: PoliciesTabProps) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
   const scope = useQueryScope()
   const location = useLocation()
   const navigate = useNavigate()
@@ -70,11 +73,12 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const reorder = useReorderDestPolicies(scope)
   const instantiate = useInstantiateDestTemplate(scope)
   const gate = useFirstPublishGate()
+  const enableScopeOf = useEnableScopeText()
 
-  const [editing, setEditing] = useState<{ policy: DestPolicy | null; initial?: PolicyForm } | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [highlight, setHighlight] = useState<number | null>(null)
   const [converting, setConverting] = useState<DestPolicy | null>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const [chooser, setChooser] = useState<DestTemplate | null>(null)
   const [chooserError, setChooserError] = useState<{ text: string; needsData: boolean } | null>(null)
   const [unavailableOpen, setUnavailableOpen] = useState(false)
@@ -88,7 +92,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
 
   const all = useMemo(() => [...(policies.data?.allow ?? []), ...(policies.data?.block ?? [])], [policies.data])
 
-  // History state asks for a policy: open its editor and/or scroll to and mark
+  // History state asks for a policy: open its page and/or scroll to and mark
   // its row. Handled once PER REQUEST (the location entry's key), so a second
   // request while the tab stays mounted works too; cleared by a replace that
   // keeps the URL.
@@ -101,27 +105,25 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
     if (handled.current === location.key) return
     handled.current = location.key
     const target = all.find(p => p.id === (nav.openPolicy ?? nav.highlightPolicy))
+    // The editor is a page: a request to open it goes there (replacing the entry, so Back does not return to the
+    // redirect), carrying this tab's place for the page's back link.
+    if (nav.openPolicy !== undefined && target) {
+      void navigate(policyPath(target.id), { replace: true, state: accessReturnState(location.pathname, location.search) })
+      return
+    }
     void navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
     if (!target) return
     setHighlight(target.id)
     document.querySelector(`[data-policy-id="${target.id}"]`)?.scrollIntoView?.({ block: 'center' })
     if (highlightTimer.current) clearTimeout(highlightTimer.current)
     highlightTimer.current = setTimeout(() => { setHighlight(null); highlightTimer.current = null }, HIGHLIGHT_MS)
-    if (nav.openPolicy !== undefined) setEditing({ policy: target })
   }, [location, navigate, policies.data, all])
 
-  if (policies.isPending) {
-    return (
-      <Box sx={{ display: 'grid', gap: 1 }}>
-        <Skeleton variant="text" width="60%" />
-        {[0, 1, 2, 3].map(i => <Skeleton key={i} variant="rounded" height={56} />)}
-      </Box>
-    )
-  }
+  if (policies.isPending) return <CardSkeleton lines={5} />
   if (policies.isError || !policies.data) {
     return isDestUnavailable(policies.error)
-      ? <Alert severity="info">{t('admin:access_control.unwired')}</Alert>
-      : <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void policies.refetch()}>{t('admin:access_control.retry')}</Button>}>{t(`${P}read_failed`)}</Alert>
+      ? <Alert><AlertDescription>{t('admin:access_control.unwired')}</AlertDescription></Alert>
+      : <ErrorState compact title={t(`${P}read_failed`)} reason={policies.error} retry={() => policies.refetch()} />
   }
 
   const data = policies.data
@@ -144,9 +146,13 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const hasNoExecutor = status.data ? !status.data.nodes.some(n => n.kind === 'psp' && n.supports.policy && n.state !== 'offline' && n.state !== 'unsupported_version') : false
   const nothingYet = data.allow.length === 0 && data.block.length === 0
 
+  const subjectOf = (p: DestPolicy, state: DestState): EnableSubject => ({ name: p.name, action: p.action, state, scope: p.scope, groupIds: p.group_ids, panelIds: p.panel_ids })
+
   /** The one place a policy's state is written: the whole policy, with the updated_at it was read at (R18). */
-  const setState = async (p: DestPolicy, state: DestState): Promise<boolean> => {
-    if (!(await gate(p.state === 'off' && state !== 'off'))) return false
+  const setState = async (p: DestPolicy, state: DestState, asked = false): Promise<boolean> => {
+    // A paused policy switched on says who it reaches (the gate asks, once, unless this is the very first policy).
+    const enabling = p.state === 'off' && state !== 'off'
+    if (!(await gate(enabling, enabling ? subjectOf(p, state) : undefined, { asked }))) return false
     setBusyId(p.id)
     try {
       await update.mutateAsync({ id: p.id, input: { ...inputOf(formOf(p), { id: p.id, updatedAt: p.updated_at }), state } })
@@ -161,8 +167,8 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
 
   // The switch is "deployed or not". A policy switched off here comes back as it was. When the page does not know what
   // it was (a reload since), a block policy asks rather than guess: guessing "on" would silently enforce a report-only one.
-  const turnOn = async (p: DestPolicy, state: DestState) => {
-    if (await setState(p, state)) stateBeforeOff.current.delete(p.id)
+  const turnOn = async (p: DestPolicy, state: DestState, asked = false) => {
+    if (await setState(p, state, asked)) stateBeforeOff.current.delete(p.id)
   }
   const toggle = async (p: DestPolicy) => {
     if (p.state === 'off') {
@@ -179,7 +185,8 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const choose = (state: DestState) => {
     const p = choosing
     setChoosing(null)
-    if (p) void turnOn(p, state)
+    // The choice dialog named the scope, so the enabling question is not asked again.
+    if (p) void turnOn(p, state, true)
   }
 
   const toReport = async (p: DestPolicy) => {
@@ -223,7 +230,9 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
     try { await del.mutateAsync(p.id) } catch (err) { reportDestError(t, err) }
   }
 
-  const duplicate = (p: DestPolicy) => setEditing({ policy: null, initial: { ...formOf(p), name: t(`${P}row.copy_name`, { name: p.name }), state: 'off', templateKey: '' } })
+  /** The editor and the create form are pages; they carry this tab's place so their back link returns to it. */
+  const open = (to: string) => void navigate(to, { state: accessReturnState(location.pathname, location.search) })
+  const duplicate = (p: DestPolicy) => open(newPolicyPath({ copy: p.id }))
 
   const confirmTemplate = async (state: DestState) => {
     if (!chooser) return
@@ -245,55 +254,55 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const useTemplate = (tpl: DestTemplate) => { setChooserError(null); setChooser(tpl) }
 
   /** What "add" opens in a step: a block policy (already report-only for the report step), or an allow policy. */
-  const blank = (k: 'allow' | 'block' | 'report'): PolicyForm => (k === 'report' ? { ...emptyForm('block'), state: 'report' } : emptyForm(k === 'allow' ? 'allow' : 'block'))
+  const addIn = (k: 'allow' | 'block' | 'report') => open(newPolicyPath({ kind: k }))
   const renderSection = (k: 'allow' | 'block' | 'report') => {
     const rows = section(k)
     return rows.length === 0
       ? (
-        <Box sx={{ border: `1px dashed ${md.outlineVariant}`, borderRadius: 3, p: 1.5, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${P}rail.empty_step`)}</Typography>
-          <Button size="small" onClick={() => setEditing({ policy: null, initial: blank(k) })}>{t(`${P}rail.add_${k}`)}</Button>
-        </Box>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed p-3">
+          <p className="text-sm text-muted-foreground">{t(`${P}rail.empty_step`)}</p>
+          <Button size="sm" variant="outline" onClick={() => addIn(k)}>{t(`${P}rail.add_${k}`)}</Button>
+        </div>
       )
       : (
-        <Box sx={{ display: 'grid', gap: 1 }}>
+        <div className="grid gap-2">
           {rows.map((p, i) => (
             <PolicyRow key={p.id} policy={p} index={i} count={rows.length} listNames={listNames} scopeText={scopeText(p)}
               now={now} notDeployed={reportNotDeployedCount(status.data, p)} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
-              onOpen={() => setEditing({ policy: p })} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
+              onOpen={() => open(policyPath(p.id))} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
               onDuplicate={() => duplicate(p)} onDelete={() => void remove(p)} onReport={() => void toReport(p)}
               onConvert={() => setConverting(p)} onViewRecords={() => viewRecords(p)} />
           ))}
-        </Box>
+        </div>
       )
   }
   const addButton = (k: 'allow' | 'block' | 'report') => (
-    <Button size="small" startIcon={<AddIcon />} onClick={() => setEditing({ policy: null, initial: blank(k) })}
-      aria-label={t(`${P}rail.add_${k}_aria`)}>{t(`${P}rail.add_${k}`)}</Button>
+    <Button size="sm" variant="outline" onClick={() => addIn(k)}
+      aria-label={t(`${P}rail.add_${k}_aria`)}><IconAdd />{t(`${P}rail.add_${k}`)}</Button>
   )
 
   return (
-    <Box>
-      <Box sx={{ mb: 2 }}>
+    <div>
+      <div className="mb-4">
         <QuotaMeters budget={data.budget} variant="compact" suffix={hasNoExecutor ? t(`${P}quota.no_executor`) : undefined} />
-      </Box>
+      </div>
 
       {nothingYet && catalog.data
         ? (
-          <Box sx={{ display: 'grid', gap: 1.5 }}>
-            <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>{t(`${P}empty.title`)}</Typography>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${P}empty.body`)}</Typography>
+          <div className="grid gap-3">
+            <h2 className="text-base font-semibold">{t(`${P}empty.title`)}</h2>
+            <p className="text-sm text-muted-foreground">{t(`${P}empty.body`)}</p>
             <TemplateGrid catalog={catalog.data} onUse={useTemplate} onGoToLists={() => onGoToLists('new_custom')} />
-            <Box><Button variant="outlined" startIcon={<AddIcon />} onClick={() => setEditing({ policy: null, initial: emptyForm('block') })}>{t(`${P}empty.blank`)}</Button></Box>
-          </Box>
+            <div><Button variant="outline" onClick={() => addIn('block')}><IconAdd />{t(`${P}empty.blank`)}</Button></div>
+          </div>
         )
         : (
           <>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-              <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${P}rail.order`)}</Typography>
-              <TemplateMenu catalog={catalog.data} onBlank={() => setEditing({ policy: null, initial: emptyForm('block') })}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-muted-foreground">{t(`${P}rail.order`)}</p>
+              <TemplateMenu catalog={catalog.data} onBlank={() => addIn('block')}
                 onUse={useTemplate} onShowUnavailable={() => setUnavailableOpen(true)} />
-            </Box>
+            </div>
             {steps.map((s, i) => {
               const last = i === steps.length - 1
               switch (s.id) {
@@ -304,7 +313,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                     <RailStep key={s.id} n={s.n}
                       title={data.exemptions.count > 0 ? t(`${P}rail.exempt`, { count: data.exemptions.count }) : t(`${P}rail.exempt_none`)}
                       caption={t(`${P}rail.exempt_caption`)}
-                      actions={<Button size="small" onClick={onOpenExemptions}>{t(`${P}rail.manage`)}</Button>} />
+                      actions={<Button size="sm" variant="outline" onClick={onOpenExemptions}>{t(`${P}rail.manage`)}</Button>} />
                   )
                 case 'block':
                   return <RailStep key={s.id} n={s.n} title={t(`${P}rail.block`)} actions={addButton('block')}>{renderSection('block')}</RailStep>
@@ -313,17 +322,17 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                     <RailStep key={s.id} n={s.n}
                       title={data.allowlist_groups.length > 0 ? t(`${P}rail.allowlist_count`, { count: data.allowlist_groups.length }) : t(`${P}rail.allowlist_none`)}
                       caption={t(`${P}rail.allowlist_caption`)}
-                      actions={<Button size="small" onClick={() => onOpenAllowlist()}>{t(`${P}rail.allowlist_open`)}</Button>}>
+                      actions={<Button size="sm" variant="outline" onClick={() => onOpenAllowlist()}>{t(`${P}rail.allowlist_open`)}</Button>}>
                       {data.allowlist_groups.length > 0 && (
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        <div className="flex flex-wrap gap-2">
                           {data.allowlist_groups.map(g => (
-                            <ButtonBase key={g.group_id} onClick={() => onOpenAllowlist(g.group_id)} aria-label={g.name}
-                              sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, px: 1.5, py: 0.5, minHeight: 36, borderRadius: 2, bgcolor: md.surfaceContainer }}>
-                              <Typography component="span" sx={{ fontSize: 14, overflowWrap: 'anywhere' }}>{g.name}</Typography>
+                            <button key={g.group_id} type="button" onClick={() => onOpenAllowlist(g.group_id)} aria-label={g.name}
+                              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-muted px-3 py-1 text-left outline-none hover:bg-muted/70 focus-visible:ring-3 focus-visible:ring-ring/50">
+                              <span className="text-sm [overflow-wrap:anywhere]">{g.name}</span>
                               <StateBadge state={g.state} day={g.state_days + 1} />
-                            </ButtonBase>
+                            </button>
                           ))}
-                        </Box>
+                        </div>
                       )}
                     </RailStep>
                   )
@@ -332,7 +341,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                     <RailStep key={s.id} n={s.n} title={t(`${P}rail.report`)} caption={(
                       <>
                         {t(`${P}rail.report_caption`)}
-                        {shed > 0 && <Box component="span" data-testid="rail-report-not-deployed">{t(`${P}row.not_deployed_nodes`, { count: shed })}</Box>}
+                        {shed > 0 && <span data-testid="rail-report-not-deployed">{t(`${P}row.not_deployed_nodes`, { count: shed })}</span>}
                       </>
                     )} actions={addButton('report')}>
                       {renderSection('report')}
@@ -345,24 +354,25 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
           </>
         )}
 
-      {editing && (
-        <PolicyEditorDialog open policy={editing.policy} initial={editing.initial} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
-      )}
-      <Dialog open={choosing !== null} onClose={() => setChoosing(null)} fullWidth maxWidth="xs"
-        slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: 3 } } }}>
-        <DialogTitle>{t(`${P}turn_on.title`, { name: choosing?.name ?? '' })}</DialogTitle>
-        <DialogContent><Typography variant="body2">{t(`${P}turn_on.body`)}</Typography></DialogContent>
-        <DialogActions sx={{ flexWrap: 'wrap', gap: 1, '& > :not(style) ~ :not(style)': { ml: 0 } }}>
-          <Button onClick={() => setChoosing(null)}>{t(`${P}turn_on.cancel`)}</Button>
-          <Button onClick={() => choose('on')}>{t(`${P}turn_on.block`)}</Button>
-          <Button variant="contained" autoFocus onClick={() => choose('report')}>{t(`${P}turn_on.report`)}</Button>
-        </DialogActions>
+      {/* Which state a policy comes back in, when the page cannot know. Dismissing writes nothing, and focus starts on Cancel: neither option is what a stray Enter picks. */}
+      <Dialog open={choosing !== null} onOpenChange={next => { if (!next) setChoosing(null) }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-md" initialFocus={cancelRef}>
+          <DialogHeader>
+            <DialogTitle>{t(`${P}turn_on.title`, { name: choosing?.name ?? '' })}</DialogTitle>
+            <DialogDescription>{t(`${P}turn_on.body`)} {choosing ? enableScopeOf(subjectOf(choosing, 'on')) : ''}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-wrap gap-2">
+            <Button ref={cancelRef} variant="outline" onClick={() => setChoosing(null)}>{t(`${P}turn_on.cancel`)}</Button>
+            <Button variant="outline" onClick={() => choose('on')}>{t(`${P}turn_on.block`)}</Button>
+            <Button variant="outline" onClick={() => choose('report')}>{t(`${P}turn_on.report`)}</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
       <ConvertToBlockDialog policy={converting} days={data.hit_window_days} onClose={() => setConverting(null)} onConfirm={convert}
         onViewRecords={p => { setConverting(null); viewRecords(p) }} />
       <TemplateChooser template={chooser} onClose={() => setChooser(null)} onConfirm={confirmTemplate} error={chooserError}
         onOpenSettings={() => { setChooser(null); onOpenSettings('rules') }} />
       <UnavailableDialog open={unavailableOpen} catalog={catalog.data} onClose={() => setUnavailableOpen(false)} onGoToLists={() => onGoToLists('new_custom')} />
-    </Box>
+    </div>
   )
 }

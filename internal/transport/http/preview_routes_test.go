@@ -26,6 +26,8 @@ var readOnlyPreviewRoutes = []string{
 	"/nodes/separator/group-preview",
 	"/nodes/setup-preview",
 	"/rules/explain",
+	"/rules/inspect-proxy-groups",
+	"/rules/preview-proxy-groups",
 	"/users/:id/group-preview",
 }
 

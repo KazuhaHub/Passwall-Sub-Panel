@@ -1,24 +1,21 @@
-import { Box, Typography, useTheme } from '@mui/material'
 import type { StageGroupTime } from '@/utils/diagnostics'
 import type { StageGroup } from '@/utils/diagnosticsCatalog'
-import type { M3Tokens } from '@/theme/tokensFromSource'
 import type { DiagFormat } from './useDiagFormat'
 
 /**
- * One colour per stage group, none of them a state colour: red means "needs
- * action" on this page, and the bar only says where the time of a poll that
- * may be perfectly healthy went. The location stage takes the tertiary
- * container, the compute stage's family at the opposite tone in both modes
- * (40 against 90 in light, 80 against 30 in dark), so the two stay apart.
+ * One fill per stage group, none of them a state colour: red, amber and green
+ * mean something on this page, and the bar only says where the time of a poll
+ * that may be perfectly healthy went. Brand and neutral fills only, each at a
+ * different strength, so the five stay apart in both themes; the legend beside
+ * the bar repeats every figure in words, so the fill is never the only way to
+ * tell a segment.
  */
-export function stageGroupColors(md: M3Tokens): Record<StageGroup, string> {
-  return {
-    db: md.secondary,
-    panels: md.primary,
-    compute: md.tertiary,
-    write: md.outline,
-    geo: md.tertiaryContainer,
-  }
+export const STAGE_GROUP_FILL: Record<StageGroup, string> = {
+  db: 'bg-chart-2',
+  panels: 'bg-brand',
+  compute: 'bg-foreground/75',
+  write: 'bg-brand/45',
+  geo: 'bg-muted-foreground/40',
 }
 
 /**
@@ -27,34 +24,28 @@ export function stageGroupColors(md: M3Tokens): Record<StageGroup, string> {
  * rather than squeezing labels into slivers.
  */
 export default function StageBar({ groups, fmt }: { groups: StageGroupTime[]; fmt: DiagFormat }) {
-  const md = useTheme().palette.md
-  const color = stageGroupColors(md)
   const shown = groups.filter(g => g.avgMs > 0)
   if (shown.length === 0) return null
   const { t } = fmt
   return (
-    <Box sx={{ mt: 1.5 }} data-testid="stage-bar">
-      <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant, mb: 0.5 }}>
-        {t('admin:diagnostics.cards.poll.stages.title')}
-      </Typography>
-      <Box sx={{ display: 'flex', height: 10, borderRadius: 1, overflow: 'hidden', bgcolor: md.surfaceContainerHighest }}>
+    <div className="mt-3" data-testid="stage-bar">
+      <p className="mb-1 text-xs text-muted-foreground">{t('admin:diagnostics.cards.poll.stages.title')}</p>
+      <div className="flex h-2.5 gap-px overflow-hidden rounded-sm bg-muted">
         {shown.map(g => (
-          <Box key={g.group} sx={{ flexGrow: g.avgMs, flexBasis: 0, bgcolor: color[g.group], minWidth: 2 }} />
+          <div key={g.group} className={`min-w-0.5 basis-0 ${STAGE_GROUP_FILL[g.group]}`} style={{ flexGrow: g.avgMs }} />
         ))}
-      </Box>
-      <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0, mt: 0.75, display: 'flex', flexWrap: 'wrap', columnGap: 2, rowGap: 0.5 }}>
+      </div>
+      <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
         {shown.map(g => (
-          <Box component="li" key={g.group} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
-            <Box aria-hidden sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: color[g.group], flex: '0 0 auto' }} />
-            <Typography variant="caption" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+          <li key={g.group} className="flex min-w-0 items-center gap-1.5">
+            <span aria-hidden className={`size-2.5 shrink-0 rounded-[2px] ${STAGE_GROUP_FILL[g.group]}`} />
+            <span className="text-xs tabular-nums">
               {`${t(`admin:diagnostics.cards.poll.stages.${g.group}`)} ${fmt.latency(g.avgMs)}`}
-            </Typography>
-          </Box>
+            </span>
+          </li>
         ))}
-      </Box>
-      <Typography variant="caption" sx={{ display: 'block', color: md.onSurfaceVariant, mt: 0.5 }}>
-        {t('admin:diagnostics.cards.poll.stages.note')}
-      </Typography>
-    </Box>
+      </ul>
+      <p className="mt-1 text-xs text-muted-foreground">{t('admin:diagnostics.cards.poll.stages.note')}</p>
+    </div>
   )
 }

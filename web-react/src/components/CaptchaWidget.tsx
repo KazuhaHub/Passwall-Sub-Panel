@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Box, CircularProgress, IconButton, TextField, Typography, useTheme } from '@mui/material'
-import RefreshIcon from '@mui/icons-material/Refresh'
 import { useTranslation } from 'react-i18next'
 
 import { getCaptcha } from '@/api/auth'
 import type { CaptchaProvider, LoginCaptcha } from '@/api/types'
+import { IconRefresh, IconSpinner } from '@/lib/icons'
+import { IconButton } from '@/components/common/IconButton'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 interface CaptchaWidgetProps {
   provider: CaptchaProvider
@@ -40,8 +42,6 @@ function loadScript(src: string): Promise<void> {
 }
 
 export default function CaptchaWidget({ provider, siteKey, refreshKey = 0, onChange }: CaptchaWidgetProps) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['auth'])
 
   // ----- image provider -----
@@ -101,27 +101,24 @@ export default function CaptchaWidget({ provider, siteKey, refreshKey = 0, onCha
   }, [provider, siteKey, refreshKey])
 
   if (provider !== 'image') {
-    return <Box ref={containerRef} sx={{ display: 'flex', justifyContent: 'center', minHeight: 65 }} />
+    return <div ref={containerRef} className="flex min-h-[65px] justify-center" />
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('auth:captcha_label')}</Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Box sx={{
-          width: 120, height: 40, borderRadius: 1, overflow: 'hidden',
-          display: 'grid', placeItems: 'center',
-          border: `1px solid ${md.outlineVariant}`, bgcolor: '#fff',
-        }}>
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor="captcha-answer">{t('auth:captcha_label')}</Label>
+      <div className="flex items-center gap-2">
+        {/* White behind the image whatever the theme: the challenge is drawn for a light page. */}
+        <div className="grid h-10 w-30 shrink-0 place-items-center overflow-hidden rounded-lg border bg-white">
           {loading || !image
-            ? <CircularProgress size={18} />
-            : <Box component="img" src={image} alt="captcha" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-        </Box>
-        <IconButton size="small" aria-label={t('auth:captcha_refresh')} onClick={() => fetchChallenge()}>
-          <RefreshIcon fontSize="small" />
+            ? <IconSpinner aria-hidden className="size-4.5 animate-spin text-neutral-500" />
+            : <img src={image} alt="captcha" className="size-full object-cover" />}
+        </div>
+        <IconButton label={t('auth:captcha_refresh')} size="icon-sm" onClick={() => fetchChallenge()}>
+          <IconRefresh />
         </IconButton>
-        <TextField
-          size="small"
+        <Input
+          id="captcha-answer"
           value={answer}
           onChange={e => {
             const v = e.target.value
@@ -129,12 +126,12 @@ export default function CaptchaWidget({ provider, siteKey, refreshKey = 0, onCha
             onChange({ captcha_id: captchaId, captcha_answer: v })
           }}
           placeholder={t('auth:captcha_placeholder')}
-          sx={{ flex: 1 }}
-          slotProps={{
-            htmlInput: { inputMode: 'numeric', autoComplete: 'off', maxLength: 8 }
-          }}
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={8}
+          className="flex-1"
         />
-      </Box>
-    </Box>
-  );
+      </div>
+    </div>
+  )
 }

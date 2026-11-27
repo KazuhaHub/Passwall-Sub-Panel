@@ -1,5 +1,5 @@
 import i18n from '@/i18n'
-import { pushSnack } from '@/components/SnackbarHost'
+import { pushSnack } from '@/components/feedback/toasts'
 
 // copyToClipboard hardens the typical `navigator.clipboard.writeText`
 // path with:
@@ -10,14 +10,18 @@ import { pushSnack } from '@/components/SnackbarHost'
 //     "Copy" button feel broken on HTTP deployments
 //
 // Returns true on success so the caller can chain UI state changes.
-export async function copyToClipboard(text: string): Promise<boolean> {
+//
+// `silent` suppresses the SUCCESS toast only, for a control that shows its own
+// "copied" confirmation in place (CopyButton); a failure still toasts, because
+// nothing else would tell the user the copy did not happen.
+export async function copyToClipboard(text: string, opts?: { silent?: boolean }): Promise<boolean> {
   const t = i18n.t
   // Modern path — requires a Secure Context (https or localhost) and
   // user gesture. Throws or returns rejected promise on permission deny.
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text)
-      pushSnack(t('common:errors.copied', { defaultValue: 'Copied to clipboard.' }), 'success')
+      if (!opts?.silent) pushSnack(t('common:errors.copied', { defaultValue: 'Copied to clipboard.' }), 'success')
       return true
     }
   } catch {
@@ -38,7 +42,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     const ok = document.execCommand('copy')
     document.body.removeChild(ta)
     if (ok) {
-      pushSnack(t('common:errors.copied', { defaultValue: 'Copied to clipboard.' }), 'success')
+      if (!opts?.silent) pushSnack(t('common:errors.copied', { defaultValue: 'Copied to clipboard.' }), 'success')
       return true
     }
   } catch {

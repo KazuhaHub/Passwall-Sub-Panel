@@ -1,563 +1,230 @@
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
-import {
-  Box,
-  Button,
-  Card,
-  Checkbox,
-  CircularProgress,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControlLabel,
-  IconButton,
-  Switch,
-  Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Tabs,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
-import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutlined'
-import RestartAltIcon from '@mui/icons-material/RestartAlt'
-import EditIcon from '@mui/icons-material/EditOutlined'
-import LockIcon from '@mui/icons-material/Lock'
-import LockOpenIcon from '@mui/icons-material/LockOpen'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useCan } from '@/utils/permissions'
-import { allSettledLimited } from '@/utils/promises'
-import { AsyncIconButton } from '@/components/AsyncButton'
+import { Navigate, useLocation, useNavigate } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteRuleSet, inspectProxyGroups, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
-import { useAllGroups } from '@/query/groups'
+import { deleteRuleSet, resetRuleSet, ruleSetFailureOf, saveRuleSet, type RuleSet } from '@/api/rules'
+import type { ListResponse } from '@/api/types'
+import { confirm } from '@/components/ConfirmHost'
+import { useObjectLink } from '@/components/common/objectReturn'
+import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { PageHeader } from '@/components/common/PageHeader'
+import { DataTable } from '@/components/data/DataTable'
+import { FilterBar } from '@/components/data/FilterBar'
+import { filterRows } from '@/components/data/dataTableLogic'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { pushToast } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
+import { IconDelete } from '@/lib/icons'
 import { ruleKeys } from '@/query/keys'
 import { useRuleSets, useTemplates } from '@/query/rules'
 import { useQueryScope } from '@/query/useQueryScope'
-import { useQueryClient } from '@tanstack/react-query'
-import type { ListResponse } from '@/api/types'
-import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
-import { PagedTableFooter } from '@/components/PagedTableFooter'
-import PageHeader from '@/components/PageHeader'
-import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
-import MihomoAdvancedRulesEditor from '@/components/MihomoAdvancedRulesEditor'
-import RuleEditorDialog from '@/components/RuleEditorDialog'
-import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
+import { useCan } from '@/utils/permissions'
+import { allSettledLimited } from '@/utils/promises'
+import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './rulesets/actions'
+import { ruleSetColumns } from './rulesets/columns'
+import { countLines } from './rulesets/model'
+import { RowActions } from './subscription/RowActions'
+import { RowCard } from './subscription/RowCard'
+import { StatusDot } from '@/components/common/StatusDot'
+import { isReservedSlug, legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
 
-// Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
-// SPA bundle — fetched only when a rule-set editor dialog opens.
-const CodeEditor = lazy(() => import('@/components/CodeEditor'))
+const NONE: never[] = []
+class MissingRevision extends Error {}
 
-const EMPTY: RuleSet = {
-  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, mihomo_sub_rules: [], mihomo_rematch_outbounds: [], content: '',
-}
-
-function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNullable<RuleSet['proxy_group_members']> {
-  return Object.fromEntries(Object.entries(members || {}).map(([name, list]) => [name, list.map(member => ({ ...member }))]))
-}
-
-function cloneProxyGroupOptions(options: RuleSet['proxy_group_options']): NonNullable<RuleSet['proxy_group_options']> {
-  return Object.fromEntries(Object.entries(options || {}).map(([name, value]) => [name, { ...value }]))
-}
-
-function cloneRuleSet(ruleSet: RuleSet): RuleSet {
-  return {
-    ...ruleSet,
-    proxy_group_order: [...(ruleSet.proxy_group_order || [])],
-    proxy_group_members: cloneProxyGroupMembers(ruleSet.proxy_group_members),
-    proxy_group_options: cloneProxyGroupOptions(ruleSet.proxy_group_options),
-    mihomo_sub_rules: (ruleSet.mihomo_sub_rules || []).map(rule => ({ ...rule })),
-    mihomo_rematch_outbounds: (ruleSet.mihomo_rematch_outbounds || []).map(outbound => ({ ...outbound })),
-  }
-}
-
+/**
+ * Rule sets: reusable snippets of routing rules that only take part in a subscription when a template binds them.
+ * The list is here; a rule set is NOT opened here: the row, the edit button and "New rule set" go to the rule set's own
+ * page (rulesets/RuleSetRoute). `?edit=<slug>` / `?edit=new[&copy=<slug>]` are the addresses the old side sheet used; they
+ * are sent on to the new routes (see `legacyRuleSetTarget`) because bookmarks still carry them. An operator can open a
+ * rule set (the server lets staff read them) and sees it without the means to change it.
+ */
 export default function RuleSetsView() {
-  const theme = useTheme()
-  const md = theme.palette.md
+  const legacy = legacyRuleSetTarget(useLocation().search)
+  return legacy ? <Navigate to={legacy} replace /> : <RuleSetsList />
+}
+
+function RuleSetsList() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
-
-  const qScope = useQueryScope()
+  const scope = useQueryScope()
   const queryClient = useQueryClient()
-  const rulesQuery = useRuleSets(qScope)
-  const templatesQuery = useTemplates(qScope)
-  const groupsQuery = useAllGroups(qScope)
-  const items = rulesQuery.data?.items ?? []
-  const templates = templatesQuery.data?.items ?? []
-  const groups = groupsQuery.data ?? []
-  const loading = rulesQuery.isPending
-  const rulesFailed = rulesQuery.isError || templatesQuery.isError || groupsQuery.isError
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  /** Patch the cached rule-set list after a write, so the table updates without
-   *  a round-trip. */
-  function mutateRuleItems(updater: (prev: RuleSet[]) => RuleSet[]) {
-    queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(qScope, {}), prev =>
-      prev ? { ...prev, items: updater(prev.items) } : prev)
+  const rulesQuery = useRuleSets(scope)
+  const templatesQuery = useTemplates(scope)
+  const items = rulesQuery.data?.items ?? NONE
+  const templates = templatesQuery.data?.items ?? NONE
+  const failed = rulesQuery.isError || templatesQuery.isError
+  const [q, setQ] = useUrlState('q', urlCodecs.string())
+  const navigate = useNavigate()
+  const link = useObjectLink()
+  // The page opened carries this list's place (search), so its back link returns to the list the way it was left.
+  const open = (to: string) => { const l = link(to); void navigate(l.to, { state: l.state }) }
+  // A rule set whose slug is `new` (in any case) cannot have a page: its address is the create page's. It stays in the list, and can be deleted from it.
+  const openRuleSet = (rs: RuleSet) => {
+    if (isReservedSlug(rs.slug)) { pushToast({ message: t('admin:rules.slug_unreachable', { slug: rs.slug }), severity: 'warning' }); return }
+    open(ruleSetPath(rs.slug))
   }
-  const [batchBusy, setBatchBusy] = useState<'enable' | 'disable' | 'delete' | ''>('')
+  const [checked, setChecked] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
+  const [batchBusy, setBatchBusy] = useState(false)
 
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<RuleSet>(EMPTY)
-  const [initialProxyGroupOrder, setInitialProxyGroupOrder] = useState<string[]>([])
-  const [initialProxyGroupMembers, setInitialProxyGroupMembers] = useState<NonNullable<RuleSet['proxy_group_members']>>({})
-  const [initialProxyGroupOptions, setInitialProxyGroupOptions] = useState<NonNullable<RuleSet['proxy_group_options']>>({})
-  const [busy, setBusy] = useState(false)
-  const [dialogTab, setDialogTab] = useState<'rules' | 'members'>('rules')
-
-  // Client-side pagination — rule-set lists are tiny but the footer
-  // gives the admin a per-page selector consistent with other tables.
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem('psp_page_size')
-      const n = raw ? parseInt(raw, 10) : 25
-      return Number.isFinite(n) && n > 0 ? n : 25
-    } catch { return 25 }
-  })
-  function changePageSize(n: number) {
-    setPageSize(n)
-    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
-    setPage(1)
+  /** Patch the cached list after a write, so the table updates without a round-trip. */
+  function mutateItems(updater: (prev: RuleSet[]) => RuleSet[]) {
+    queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(scope, {}), prev => (prev ? { ...prev, items: updater(prev.items) } : prev))
   }
-  const pagedItems = useMemo(
-    () => items.slice((page - 1) * pageSize, page * pageSize),
-    [items, page, pageSize],
-  )
-
-  const allChecked = pagedItems.length > 0 && pagedItems.every(i => selected.has(i.slug))
-  const someChecked = selected.size > 0 && !allChecked
-
-  // Reload after a write. Clearing the selection is deliberate (the rows it
-  // referred to may be gone), and the mount-time call is a no-op.
+  // Reload after a write. Clearing the selection is deliberate (the rows it referred to may be gone).
   function load() {
-    setSelected(new Set())
-    return Promise.all([rulesQuery.refetch(), templatesQuery.refetch(), groupsQuery.refetch()])
+    setChecked({})
+    return Promise.all([rulesQuery.refetch(), templatesQuery.refetch()])
   }
-
-  function toggleAll(checked: boolean) {
-    // Affect only currently-visible page rows so admin's "select all"
-    // can't accidentally pick up rule sets hidden behind paging.
-    setSelected(prev => {
-      const next = new Set(prev)
-      pagedItems.forEach(i => { if (checked) next.add(i.slug); else next.delete(i.slug) })
-      return next
-    })
-  }
-  function toggleOne(slug: string, checked: boolean) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (checked) next.add(slug); else next.delete(slug)
-      return next
-    })
-  }
-
-  function openCreate() {
-    setEditing(false); setForm(cloneRuleSet(EMPTY)); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
-  }
-  function openEdit(rs: RuleSet) {
-    const draft = cloneRuleSet(rs)
-    const proxyGroupMembers = draft.proxy_group_members || {}
-    const proxyGroupOptions = draft.proxy_group_options || {}
-    setEditing(true); setForm(draft); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
-    setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
-    setDialogTab('rules')
-    setDialogOpen(true)
-  }
-  // Duplicate clones the row into the create flow with a -copy suffix so
-  // admins can derive a custom variant without touching the original
-  // (especially useful for seeded rule sets that are now non-deletable
-  // and would lose customizations on Restore).
-  function openDuplicate(rs: RuleSet) {
-    const cloned = cloneRuleSet(rs)
-    const proxyGroupMembers = cloned.proxy_group_members || {}
-    const proxyGroupOptions = cloned.proxy_group_options || {}
-    setEditing(false)
-    setForm({
-      ...cloned,
-      slug: rs.slug + '-copy',
-      name: rs.name + ' (Copy)',
-      proxy_group_members: proxyGroupMembers,
-      proxy_group_options: proxyGroupOptions,
-    })
-    setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers))
-    setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
-    setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
-    setDialogTab('rules')
-    setDialogOpen(true)
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    if (!form.slug || !form.name) {
-      pushSnack(t('admin:rules.validate.slug_name_required'), 'warning'); return
+  const usedBy = (rs: RuleSet) => templates.filter(tpl => (tpl.rule_sets || []).includes(rs.slug)).map(x => x.name || x.slug)
+  const seeded = isSeeded
+  const withBusy = async (slug: string, run: () => Promise<void>) => {
+    setBusy(prev => new Set(prev).add(slug))
+    try { await run() } catch { /* The request layer already surfaced the failure. */ } finally {
+      setBusy(prev => { const next = new Set(prev); next.delete(slug); return next })
     }
-    // Creating/duplicating (not editing) with an existing slug would silently
-    // overwrite that rule set server-side (Save is a slug-keyed upsert). Block
-    // it with a clear error so a copy can't clobber the original — the slug is
-    // locked when editing, so this only fires on the create/duplicate flow.
-    if (!editing && items.some(rs => rs.slug === form.slug)) {
-      pushSnack(t('admin:rules.validate.slug_exists', { slug: form.slug }), 'warning'); return
-    }
-    setBusy(true)
-    try {
-      let draft = form
-      let inspection = await inspectProxyGroups({
-        content: draft.content,
-        proxy_group_members: draft.proxy_group_members || {},
-        proxy_group_options: draft.proxy_group_options || {},
-        mihomo_sub_rules: draft.mihomo_sub_rules || [],
-        mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
-      })
-      const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
-      if (cleanup.removedGroups.length > 0) {
-        const ok = await confirm({
-          title: t('admin:rules.confirm.cleanup_groups_title'),
-          message: t('admin:rules.confirm.cleanup_groups_message', { names: cleanup.removedGroups.join('、') }),
-          destructive: true,
-        })
-        if (!ok) return
-        draft = cleanup.ruleSet
-        setForm(draft)
-        inspection = await inspectProxyGroups({
-          content: draft.content,
-          proxy_group_members: draft.proxy_group_members || {},
-          proxy_group_options: draft.proxy_group_options || {},
-          mihomo_sub_rules: draft.mihomo_sub_rules || [],
-          mihomo_rematch_outbounds: draft.mihomo_rematch_outbounds || [],
-        })
-      }
-      const hasErrors = inspection.issues.some(issue => issue.level === 'error')
-      if (hasErrors) {
-        const hasRuleExtensionErrors = inspection.issues.some(issue => issue.level === 'error' && Boolean(issue.section))
-        setDialogTab(hasRuleExtensionErrors ? 'rules' : 'members')
-        pushSnack(t(hasRuleExtensionErrors ? 'admin:rules.validate.rule_extensions' : 'admin:rules.validate.proxy_group_members'), 'warning'); return
-      }
-      const saved = await saveRuleSet(draft)
-      if (editing) {
-        mutateRuleItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
-      }
-      pushSnack(t('admin:rules.toast.saved'), 'success')
-      setDialogOpen(false)
-      if (!editing) void load().catch(() => {})
-    } finally { setBusy(false) }
-  }
-
-  function usedByTemplates(rs: RuleSet) {
-    return templates.filter(tpl => (tpl.rule_sets || []).includes(rs.slug))
   }
 
   async function confirmDelete(rs: RuleSet) {
-    const used = usedByTemplates(rs)
-    const usage = used.length > 0
-      ? t('admin:rules.confirm.delete_used_suffix', { names: used.map(x => x.name || x.slug).join('、') })
-      : ''
-    const ok = await confirm({
-      title: t('admin:rules.confirm.delete_title'),
-      message: t('admin:rules.confirm.delete_message', { slug: rs.slug, usage }),
-      destructive: true,
+    if (!await askDeleteRuleSet(t, rs.slug, usedBy(rs))) return
+    await withBusy(rs.slug, async () => {
+      await deleteRuleSet(rs.slug)
+      pushToast({ message: t('admin:rules.toast.deleted'), severity: 'success' })
+      await load()
     })
-    if (!ok) return
-    await deleteRuleSet(rs.slug)
-    pushSnack(t('admin:rules.toast.deleted'), 'success')
-    await load()
   }
 
   async function confirmReset(rs: RuleSet) {
-    const ok = await confirm({
-      title: t('admin:rules.confirm.reset_title'),
-      message: t('admin:rules.confirm.reset_message', { slug: rs.slug }),
-      destructive: true,
-    })
-    if (!ok) return
-    await resetRuleSet(rs.slug)
-    pushSnack(t('admin:rules.toast.reset'), 'success')
-    await load()
-  }
-
-  async function batchSetEnabled(enabled: boolean) {
-    const rows = items.filter(i => selected.has(i.slug))
-    if (!rows.length) return
-    setBatchBusy(enabled ? 'enable' : 'disable')
-    try {
-      const results = await allSettledLimited(rows, r => saveRuleSet({ ...r, enabled }))
-      const failed = results.filter(r => r.status === 'rejected').length
-      if (failed > 0) pushSnack(t('admin:rules.toast.batch_partial', { ok: rows.length - failed, fail: failed }), 'warning')
-      else pushSnack(t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), 'success')
+    if (!await askResetRuleSet(t, rs.slug)) return
+    await withBusy(rs.slug, async () => {
+      await resetRuleSet(rs.slug)
+      pushToast({ message: t('admin:rules.toast.reset'), severity: 'success' })
       await load()
-    } finally { setBatchBusy('') }
+    })
   }
 
-  async function batchDelete() {
-    const rows = items.filter(i => selected.has(i.slug))
+  function menuOf(rs: RuleSet): MoreMenuItem[] {
+    const wait = busy.has(rs.slug)
+    const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:rules.duplicate'), disabled: wait, onSelect: () => open(newRuleSetPath(rs.slug)) }]
+    if (seeded(rs)) menu.push({ id: 'reset', label: t('admin:rules.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(rs) })
+    // A seeded rule set cannot be deleted; the item stays, off, and says why instead of vanishing.
+    menu.push(seeded(rs)
+      ? { id: 'delete', label: t('admin:rules.row_delete'), disabledReason: t('admin:rules.cannot_delete_seeded'), icon: IconDelete, destructive: true, disabled: true }
+      : { id: 'delete', label: t('admin:rules.row_delete'), icon: IconDelete, destructive: true, disabled: wait, onSelect: () => void confirmDelete(rs) })
+    return menu
+  }
+
+  async function batchSetEnabled(rows: RuleSet[], enabled: boolean) {
+    if (!rows.length) return
+    setBatchBusy(true)
+    try {
+      // Each rule set is saved against the revision the list holds for it, so one that someone saved since is refused, not overwritten.
+      // A row without a revision is not sent at all (that would be an unconditional overwrite) and is counted with the stale ones.
+      const results = await allSettledLimited(rows, r => (r.revision ? saveRuleSet({ ...r, enabled }, r.revision) : Promise.reject(new MissingRevision())))
+      const failures = results.flatMap(r => (r.status === 'rejected' ? [r.reason instanceof MissingRevision ? { kind: 'stale' as const } : ruleSetFailureOf(r.reason)] : []))
+      const stale = failures.filter(f => f.kind === 'stale').length
+      const fail = failures.length - stale
+      if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: rows.length - fail - stale, fail }), severity: 'warning' })
+      else if (stale === 0) pushToast({ message: t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), severity: 'success' })
+      // A refusal for a stale revision is not retried: the list is reloaded below and the person decides again from what is there.
+      if (stale > 0) pushToast({ message: t('admin:rules.toast.batch_stale', { count: stale }), severity: 'warning' })
+      await load()
+    } finally { setBatchBusy(false) }
+  }
+
+  async function batchDelete(rows: RuleSet[], hidden: number, clear: () => void) {
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:rules.confirm.batch_delete_title'),
-      message: t('admin:rules.confirm.batch_delete_message', { count: rows.length }),
+      message: t('admin:rules.confirm.batch_delete_message', { count: rows.length }) + (hidden > 0 ? ' ' + t('admin:rules.confirm.batch_delete_hidden', { count: hidden }) : ''),
+      confirmText: t('common:actions.delete'),
       destructive: true,
+      initialFocus: 'cancel',
     })
     if (!ok) return
-    setBatchBusy('delete')
+    setBatchBusy(true)
     try {
       const results = await allSettledLimited(rows, r => deleteRuleSet(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
-      const failed = rows.length - okSlugs.length
-      mutateRuleItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
-      setSelected(new Set())
-      if (failed > 0) pushSnack(t('admin:rules.toast.batch_partial', { ok: okSlugs.length, fail: failed }), 'warning')
-      else pushSnack(t('admin:rules.toast.batch_deleted', { count: okSlugs.length }), 'success')
-    } finally { setBatchBusy('') }
+      const fail = rows.length - okSlugs.length
+      mutateItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
+      clear()
+      if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: okSlugs.length, fail }), severity: 'warning' })
+      else pushToast({ message: t('admin:rules.toast.batch_deleted', { count: okSlugs.length }), severity: 'success' })
+    } finally { setBatchBusy(false) }
   }
 
-  function countLines(s: string): number {
-    return s ? s.split('\n').filter(l => l.trim()).length : 0
-  }
+  const columns = useMemo(() => ruleSetColumns({
+    t, usedBy, canConfig, busy, onEdit: openRuleSet,
+    menuOf,
+  // The row handlers close over the lists they read; they are rebuilt with the columns when those change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [t, templates, canConfig, busy, items])
 
-  function badge(label: string, bg: string, fg: string) {
-    return <Box sx={{
-      display: 'inline-block', px: 1.25, py: 0.25,
-      borderRadius: 1, fontSize: 12, fontWeight: 500,
-      bgcolor: bg, color: fg, whiteSpace: 'nowrap',
-    }}>{label}</Box>
-  }
+  const shown = useMemo(() => filterRows(items, r => `${r.slug} ${r.name}`, q), [items, q])
+  const filtered = q.trim() !== ''
 
-  // The loader had no catch on three parallel reads, so a failure raised an
-  // unhandled rejection and rendered an empty table — indistinguishable from
-  // "no rule sets are configured".
-  if (rulesFailed) {
+  if (failed) {
     return (
-      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
-        <Typography sx={{ color: md.onSurfaceVariant }}>
-          {t('admin:rules.load_failed', { defaultValue: '暂时无法加载规则集' })}
-        </Typography>
-        <Button variant="outlined" onClick={() => void load()}>
-          {t('admin:rules.retry', { defaultValue: '重试' })}
-        </Button>
-      </Box>
+      <div className="p-4 sm:p-6">
+        <PageHeader title={t('admin:rules.title')} description={t('admin:rules.subtitle')} />
+        <ErrorState title={t('admin:rules.load_failed')} reason={rulesQuery.error ?? templatesQuery.error} retry={() => load()} />
+      </div>
     )
   }
 
+  const loading = rulesQuery.isPending
   return (
-    <Box sx={{ p: 3 }}>
+    <div className="p-4 sm:p-6">
       <PageHeader
         title={t('admin:rules.title')}
-        subtitle={t('admin:rules.subtitle')}
-        actions={canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-          {t('admin:rules.create')}
-        </Button>}
+        count={loading ? undefined : items.length}
+        description={t('admin:rules.subtitle')}
+        primary={canConfig && <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button>}
       />
-      {selected.size > 0 && canConfig && (
-        <Box sx={{
-          display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
-          borderRadius: 9999, bgcolor: md.secondaryContainer, color: md.onSecondaryContainer,
-          width: 'fit-content',
-        }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 500, mr: 1 }}>
-            {t('admin:rules.selection_count', { count: selected.size })}
-          </Typography>
-          <Button size="small" variant="text" sx={{ color: 'inherit' }}
-            startIcon={batchBusy === 'enable' ? <CircularProgress size={14} /> : <LockOpenIcon />}
-            disabled={batchBusy !== ''} onClick={() => batchSetEnabled(true)}>
-            {t('admin:rules.batch_enable')}
-          </Button>
-          <Button size="small" variant="text" sx={{ color: 'inherit' }}
-            startIcon={batchBusy === 'disable' ? <CircularProgress size={14} /> : <LockIcon />}
-            disabled={batchBusy !== ''} onClick={() => batchSetEnabled(false)}>
-            {t('admin:rules.batch_disable')}
-          </Button>
-          <Button size="small" variant="text" color="error"
-            startIcon={batchBusy === 'delete' ? <CircularProgress size={14} /> : <DeleteIcon />}
-            disabled={batchBusy !== ''} onClick={batchDelete}>
-            {t('admin:rules.batch_delete')}
-          </Button>
-        </Box>
-      )}
-      <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                <TableCell padding="checkbox">
-                  <Checkbox indeterminate={someChecked} checked={allChecked}
-                    onChange={(_, c) => toggleAll(c)} disabled={items.length === 0} />
-                </TableCell>
-                <TableCell>{t('admin:rules.table.slug')}</TableCell>
-                <TableCell>{t('admin:rules.table.name')}</TableCell>
-                <TableCell align="right">{t('admin:rules.table.sort')}</TableCell>
-                <TableCell align="right">{t('admin:rules.table.lines')}</TableCell>
-                <TableCell>{t('admin:rules.table.used_by')}</TableCell>
-                <TableCell>{t('admin:rules.table.status')}</TableCell>
-                <TableCell align="right">{t('admin:rules.table.actions')}</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6 }}>
-                  <CircularProgress size={24} />
-                </TableCell></TableRow>
-              )}
-              {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
-              )}
-              {pagedItems.map(rs => {
-                const used = usedByTemplates(rs)
-                return (
-                  <TableRow key={rs.slug} hover sx={{
-                    '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
-                    opacity: rs.enabled ? 1 : 0.65,
-                  }}>
-                    <TableCell padding="checkbox">
-                      <Checkbox checked={selected.has(rs.slug)}
-                        disabled={SEEDED_RULESET_SLUGS.includes(rs.slug)}
-                        onChange={(_, c) => toggleOne(rs.slug, c)} />
-                    </TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{rs.slug}</TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>{rs.name}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{rs.sort}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>{countLines(rs.content)}</TableCell>
-                    <TableCell sx={{ fontSize: 13, color: used.length === 0 ? md.onSurfaceVariant : md.onSurface, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {used.length === 0 ? t('admin:rules.status.no_usage') : used.map(x => x.name || x.slug).join('、')}
-                    </TableCell>
-                    <TableCell>
-                      {rs.enabled
-                        ? badge(t('admin:rules.status.enabled'), md.tertiaryContainer, md.onTertiaryContainer)
-                        : badge(t('admin:rules.status.disabled'), md.surfaceContainerHighest, md.onSurfaceVariant)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {canConfig && <>
-                      <Tooltip title={t('admin:rules.edit_title')}>
-                        <IconButton size="small" onClick={() => openEdit(rs)}><EditIcon fontSize="small" /></IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('admin:rules.duplicate')}>
-                        <IconButton size="small" onClick={() => openDuplicate(rs)}
-                          sx={{ color: md.onSurfaceVariant }}>
-                          <ContentCopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      {SEEDED_RULESET_SLUGS.includes(rs.slug) && (
-                        <Tooltip title={t('admin:rules.reset_to_default')}>
-                          {/* AsyncIconButton, not a plain IconButton: reset hits the
-                              upstream and a slow link left this clickable with no
-                              feedback for the whole round-trip, inviting a repeat
-                              click that re-opened the confirm dialog mid-request. */}
-                          <AsyncIconButton size="small" onClick={() => confirmReset(rs)}
-                            sx={{ color: md.onSurfaceVariant }}>
-                            <RestartAltIcon fontSize="small" />
-                          </AsyncIconButton>
-                        </Tooltip>
-                      )}
-                      <Tooltip title={SEEDED_RULESET_SLUGS.includes(rs.slug)
-                        ? t('admin:rules.cannot_delete_seeded')
-                        : t('admin:rules.batch_delete')}>
-                        <span>
-                          <AsyncIconButton size="small" onClick={() => confirmDelete(rs)}
-                            disabled={SEEDED_RULESET_SLUGS.includes(rs.slug)}
-                            sx={{ color: md.error }}>
-                            <DeleteIcon fontSize="small" />
-                          </AsyncIconButton>
-                        </span>
-                      </Tooltip>
-                      </>}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <PagedTableFooter
-          total={items.length} page={page} pageSize={pageSize}
-          onPageChange={setPage} onPageSizeChange={changePageSize}
-        />
-      </Card>
-      {/* Create/Edit dialog */}
-      <RuleEditorDialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)} paperWidth={1120}>
-        <DialogTitle>
-          {editing ? t('admin:rules.edit_title') : t('admin:rules.create')}
-        </DialogTitle>
-        <DialogContent>
-          <Box component="form" id="rules-form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <Tabs value={dialogTab} onChange={(_, value) => setDialogTab(value)} sx={{ borderBottom: `1px solid ${md.outlineVariant}` }}>
-              <Tab value="rules" label={t('admin:rules.tabs.rules')} />
-              <Tab value="members" label={t('admin:rules.tabs.members')} />
-            </Tabs>
-            {dialogTab === 'rules' && <>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(0, 1fr) auto' }, gap: 2, alignItems: 'center' }}>
-              <TextField required fullWidth label={t('admin:rules.field.slug')}
-                value={form.slug} disabled={editing}
-                onChange={e => setForm({ ...form, slug: e.target.value })}
-                placeholder={t('admin:rules.placeholder.slug')} />
-              <TextField required fullWidth label={t('admin:rules.field.name')}
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder={t('admin:rules.placeholder.name')} />
-              <FormControlLabel
-                label={t('admin:rules.field.enabled')}
-                control={<Switch checked={form.enabled} onChange={(_, c) => setForm({ ...form, enabled: c })} />}
-                sx={{ m: 0, px: 1, whiteSpace: 'nowrap', '& .MuiFormControlLabel-label': { ml: 1 } }}
-              />
-            </Box>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '160px minmax(220px, 1fr) auto auto' }, gap: 1.5, alignItems: 'center' }}>
-              <TextField type="number" label={t('admin:rules.field.sort')}
-                value={form.sort}
-                onChange={e => setForm({ ...form, sort: Number(e.target.value) })} />
-              <FormControlLabel
-                label={t('admin:rules.field.direct_subscription_domain')}
-                control={<Switch checked={form.direct_subscription_domain} onChange={(_, c) => setForm({ ...form, direct_subscription_domain: c })} />}
-                sx={{ m: 0, px: 1, whiteSpace: 'nowrap', '& .MuiFormControlLabel-label': { ml: 1 } }}
-              />
-              <MihomoAdvancedRulesEditor value={form} onChange={setForm} />
-            </Box>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-              {t('admin:rules.hint.direct_subscription_domain')}
-            </Typography>
-            <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
-              <Suspense fallback={<Box sx={{ height: 380, display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
-                <CodeEditor
-                  value={form.content}
-                  onChange={v => setForm({ ...form, content: v })}
-                  dark={theme.palette.mode === 'dark'}
-                />
-              </Suspense>
-            </Box>
-            </>}
-            {dialogTab === 'members' && (
-              <ProxyGroupMembersEditor
-                content={form.content}
-                groupOrder={form.proxy_group_order || []}
-                initialGroupOrder={initialProxyGroupOrder}
-                onGroupOrderChange={proxy_group_order => setForm(current => ({ ...current, proxy_group_order }))}
-                members={form.proxy_group_members || {}}
-                initialMembers={initialProxyGroupMembers}
-                onChange={proxy_group_members => setForm(current => ({ ...current, proxy_group_members }))}
-                options={form.proxy_group_options || {}}
-                initialOptions={initialProxyGroupOptions}
-                onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
-                previewGroups={groups}
-                draft={form}
-                mihomoSubRules={form.mihomo_sub_rules}
-                mihomoRematchOutbounds={form.mihomo_rematch_outbounds}
-              />
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">{t('common:actions.cancel')}</Button>
-          <Button type="submit" form="rules-form" variant="contained" disabled={busy}
-            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('common:actions.ok')}
-          </Button>
-        </DialogActions>
-      </RuleEditorDialog>
-    </Box>
-  );
+      <DataTable<RuleSet>
+        aria-label={t('admin:rules.title')}
+        data={shown}
+        columns={columns}
+        getRowId={r => r.slug}
+        rowLabel={r => r.name || r.slug}
+        loading={loading}
+        selectable={canConfig}
+        selection={checked}
+        onSelectionChange={setChecked}
+        onRowOpen={openRuleSet}
+        rowOptions={r => ({ selectable: !seeded(r), state: busy.has(r.slug) ? 'pending' : r.enabled ? undefined : 'dimmed' })}
+        renderCard={(r, ctx) => (
+          <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
+            status={<StatusDot tone={r.enabled ? 'success' : 'neutral'} label={t(r.enabled ? 'admin:rules.status.enabled' : 'admin:rules.status.disabled')} />}
+            detail={`${t('admin:rules.table.lines')}: ${countLines(r.content)} · ${usedBy(r).join('、') || t('admin:rules.status.no_usage')}`}
+            actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => openRuleSet(r)} menu={menuOf(r)} /> : undefined} />
+        )}
+        toolbar={(
+          <FilterBar
+            search={{ value: q, onChange: setQ, placeholder: t('admin:rules.search_placeholder') }}
+            onClearAll={() => setQ('')}
+          />
+        )}
+        empty={filtered
+          ? <EmptyState compact title={t('admin:rules.no_match')} action={<Button variant="outline" onClick={() => setQ('')}>{t('admin:rules.clear_search')}</Button>} />
+          : <EmptyState compact title={t('admin:rules.empty')} description={t('admin:rules.empty_hint')} action={canConfig ? <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button> : undefined} />}
+        bulkActions={canConfig ? (ctx => {
+          const rows = items.filter(i => ctx.ids.includes(i.slug))
+          return (
+            <>
+              <Button variant="outline" size="sm" disabled={batchBusy} onClick={() => void batchSetEnabled(rows, true)}>{t('admin:rules.batch_enable')}</Button>
+              <Button variant="outline" size="sm" disabled={batchBusy} onClick={() => void batchSetEnabled(rows, false)}>{t('admin:rules.batch_disable')}</Button>
+              <Button variant="outline" size="sm" disabled={batchBusy} className="text-destructive" onClick={() => void batchDelete(rows, ctx.hiddenCount, ctx.clear)}>
+                <IconDelete />{t('admin:rules.batch_delete')}
+              </Button>
+            </>
+          )
+        }) : undefined}
+      />
+    </div>
+  )
 }

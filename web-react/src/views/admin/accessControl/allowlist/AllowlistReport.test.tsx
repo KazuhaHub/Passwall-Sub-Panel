@@ -58,11 +58,11 @@ describe('the report view', () => {
 
   it('shows a row per site: a bar and a count, an add button, and "added" for what is already in the list', async () => {
     renderAccess(ui, { route })
-    const row = (await screen.findByText('gstatic.com')).closest('[data-testid="report-row"]') as HTMLElement
+    const row = (await screen.findByText('gstatic.com')).closest('tr') as HTMLElement
     expect(within(row).getByText('2,210')).toBeTruthy()
     expect(within(row).getByText('5 分钟前')).toBeTruthy()
     expect(within(row).getByRole('button', { name: '加入白名单' })).toBeTruthy()
-    const added = screen.getByText('notion.so').closest('[data-testid="report-row"]') as HTMLElement
+    const added = screen.getByText('notion.so').closest('tr') as HTMLElement
     expect(within(added).getByText('已加入 · 下次下发后生效')).toBeTruthy()
     expect(within(added).queryByRole('checkbox')).toBeNull()
     expect(within(added).queryByRole('button', { name: '加入白名单' })).toBeNull()
@@ -70,7 +70,7 @@ describe('the report view', () => {
 
   it('the (ip) row cannot be added by name: it explains, and opens the supplement list instead', async () => {
     renderAccess(ui, { route })
-    const row = (await screen.findByText('(ip)')).closest('[data-testid="report-row"]') as HTMLElement
+    const row = (await screen.findByText('(ip)')).closest('tr') as HTMLElement
     expect(within(row).queryByRole('checkbox')).toBeNull()
     expect(within(row).queryByRole('button', { name: '加入白名单' })).toBeNull()
     expect(within(row).getByText('客户端直接用 IP 连接，节点只记录为 (ip)；要放行请在名单里写 IP 段')).toBeTruthy()
@@ -80,7 +80,7 @@ describe('the report view', () => {
 
   it('one add is one entries request on the supplement list, never a rebuilt list', async () => {
     renderAccess(ui, { route })
-    const row = (await screen.findByText('gstatic.com')).closest('[data-testid="report-row"]') as HTMLElement
+    const row = (await screen.findByText('gstatic.com')).closest('tr') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: '加入白名单' }))
     await waitFor(() => expect(api.editDestListEntries).toHaveBeenCalledWith(12, { add: ['domain:gstatic.com'], remove: undefined }))
     expect(snack).toHaveBeenCalledWith('已把 1 个主域名加入「Guests · 补充」，约 2 分钟内生效', 'success')
@@ -90,10 +90,10 @@ describe('the report view', () => {
   it('a selection adds together, in one request, from a bar that sticks to the bottom', async () => {
     renderAccess(ui, { route })
     await screen.findByText('gstatic.com')
-    fireEvent.click(screen.getByRole('checkbox', { name: '选择 gstatic.com' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: '选择 figma.com' }))
-    const bar = await screen.findByTestId('bulk-bar')
-    expect(within(bar).getByText('已选 2 个')).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择gstatic.com' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择figma.com' }))
+    const bar = await screen.findByRole('region', { name: '批量操作' })
+    expect(within(bar).getByText('已选2项')).toBeTruthy()
     fireEvent.click(within(bar).getByRole('button', { name: '加入白名单（2）' }))
     await waitFor(() => expect(api.editDestListEntries).toHaveBeenCalledTimes(1))
     expect(api.editDestListEntries).toHaveBeenCalledWith(12, { add: ['domain:gstatic.com', 'domain:figma.com'], remove: undefined })
@@ -103,11 +103,10 @@ describe('the report view', () => {
     vi.mocked(api.getDestGroups).mockResolvedValue([group({ lists: [{ id: 10, name: 'Guest list', entry_count: 40, state: 'ready' }] })])
     vi.mocked(api.getDestLists).mockResolvedValue({ items: [{ id: 10, name: 'Guest list', kind: 'custom', side: 'dest', entry_count: 40, regexp_count: 0, state: 'ready', empty: false, last_fetched_at: 1, last_error: '', owner_group_id: 0, updated_at: 1, used_by: [] }], refresh_hours: 24, budget: {} as api.DestBudget })
     renderAccess(ui, { route })
-    const row = (await screen.findByText('gstatic.com')).closest('[data-testid="report-row"]') as HTMLElement
-    fireEvent.click(screen.getByRole('checkbox', { name: '选择 gstatic.com' }))
-    const bar = await screen.findByTestId('bulk-bar')
-    fireEvent.mouseDown(within(bar).getByRole('combobox'))
-    fireEvent.click(await screen.findByRole('option', { name: 'Guest list' }))
+    const row = (await screen.findByText('gstatic.com')).closest('tr') as HTMLElement
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择gstatic.com' }))
+    const bar = await screen.findByRole('region', { name: '批量操作' })
+    fireEvent.change(within(bar).getByRole('combobox', { name: '加到' }), { target: { value: '10' } })
     fireEvent.click(within(bar).getByRole('button', { name: '加入白名单（1）' }))
     await waitFor(() => expect(api.editDestListEntries).toHaveBeenCalledWith(10, { add: ['domain:gstatic.com'], remove: undefined }))
     expect(within(row).queryByText('已加入 · 下次下发后生效')).toBeNull()
@@ -116,12 +115,15 @@ describe('the report view', () => {
   it('sorts by count or by recency', async () => {
     renderAccess(ui, { route })
     await screen.findByText('gstatic.com')
-    expect(screen.getAllByTestId('report-row').map(r => r.getAttribute('data-site'))).toEqual(['gstatic.com', 'figma.com', 'notion.so', '(ip)'])
-    fireEvent.click(screen.getByRole('button', { name: '最近' }))
-    expect(screen.getAllByTestId('report-row')[0].getAttribute('data-site')).toBe('gstatic.com')
-    fireEvent.click(screen.getByRole('button', { name: '次数' }))
-    fireEvent.click(screen.getByRole('button', { name: '次数' }))
-    expect(screen.getAllByTestId('report-row')[0].getAttribute('data-site')).toBe('(ip)')
+    const sites = () => Array.from(document.querySelectorAll('tbody tr[data-id]')).map(r => r.getAttribute('data-id'))
+    expect(sites()).toEqual(['gstatic.com', 'figma.com', 'notion.so', '(ip)'])
+    // The table's header cycle: a first click sorts ascending, a second descending.
+    fireEvent.click(screen.getByRole('button', { name: /最近/ }))
+    expect(sites()[0]).toBe('notion.so')
+    fireEvent.click(screen.getByRole('button', { name: /最近/ }))
+    expect(sites()[0]).toBe('gstatic.com')
+    fireEvent.click(screen.getByRole('button', { name: /次数/ }))
+    expect(sites()[0]).toBe('(ip)')
   })
 
   it('opens the destination in the test sheet from its name', async () => {
@@ -136,8 +138,8 @@ describe('the range', () => {
     vi.mocked(api.getDestSettings).mockResolvedValue(settings(3))
     const { router } = renderAccess(ui, { route })
     await screen.findByText('gstatic.com')
-    expect(screen.getAllByRole('button', { name: /^\d 天$/ }).map(b => b.textContent)).toEqual(['1 天', '3 天'])
-    fireEvent.click(screen.getByRole('button', { name: '1 天' }))
+    expect(screen.getAllByRole('radio', { name: /^\d 天$/ }).map(b => b.textContent)).toEqual(['1 天', '3 天'])
+    fireEvent.click(screen.getByRole('radio', { name: '1 天' }))
     await waitFor(() => expect(whereIs(router)).toContain('al_days=1'))
     expect(router.state.historyAction).toBe('REPLACE')
     await waitFor(() => expect(api.getDestGroupReport).toHaveBeenLastCalledWith(1, 1, expect.anything()))

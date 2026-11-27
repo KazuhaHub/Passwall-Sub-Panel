@@ -1,10 +1,8 @@
-import { Box, Tooltip, useTheme } from '@mui/material'
-import { useTranslation } from 'react-i18next'
-
 import type { GeoAnomaly, GeoEvidence } from '@/api/geoAnomalies'
 import { countryFlag } from '@/utils/geo'
 import { groupSpots, spreadKm, type SpotTree } from '@/utils/geoAnomaly'
 import { regionNamer, type RegionNamer } from '@/utils/regionName'
+import { useRiskT } from '../useRiskT'
 
 /**
  * One line per country: "🇨🇳 CN 3: Guangdong 2 (Shenzhen 2) · Hunan 1".
@@ -44,11 +42,11 @@ export function spotLine(c: SpotTree, nameRegion: RegionNamer): string {
  * that build stored) are all there is.
  */
 export function GeoPlaces({ row }: { row: Pick<GeoAnomaly, 'places' | 'evidence'> }) {
-  const { t, i18n } = useTranslation(['admin'])
+  const { t, i18n } = useRiskT()
   const nameRegion = regionNamer(t, i18n.language)
   const spots = row.evidence?.v > 0 && row.evidence.spots.length ? groupSpots(row.evidence.spots) : null
   if (spots) {
-    return <>{spots.map(c => <Box key={c.cc} sx={{ whiteSpace: 'nowrap' }}>{spotLine(c, nameRegion)}</Box>)}</>
+    return <>{spots.map(c => <div key={c.cc}>{spotLine(c, nameRegion)}</div>)}</>
   }
   return <>{row.places.length ? row.places.join(' · ') : '—'}</>
 }
@@ -60,17 +58,14 @@ export function GeoPlaces({ row }: { row: Pick<GeoAnomaly, 'places' | 'evidence'
  * was measured, or on a row from before the field existed (spreadKm).
  */
 export function GeoDistance({ evidence }: { evidence: GeoEvidence | undefined }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const km = spreadKm(evidence)
   if (km <= 0) return null
   return (
-    <Tooltip title={t('admin:geo_anomalies.max_km_hint')}>
-      <Box sx={{ whiteSpace: 'nowrap', color: md.onSurfaceVariant }}>
-        {/* String(km), not a locale-grouped number: the server already
-            rounded it, and a separator would differ by browser locale. */}
-        {t('admin:geo_anomalies.max_km', { km: String(km) })}
-      </Box>
-    </Tooltip>
+    <div className="w-fit text-muted-foreground" title={t('admin:geo_anomalies.max_km_hint')}>
+      {/* String(km), not a locale-grouped number: the server already rounded it, and a separator would
+          differ by browser locale. */}
+      {t('admin:geo_anomalies.max_km', { km: String(km) })}
+    </div>
   )
 }

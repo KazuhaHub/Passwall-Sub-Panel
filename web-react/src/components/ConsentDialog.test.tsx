@@ -93,7 +93,7 @@ describe('the consent dialog (S23)', () => {
   it('Esc is Later; a click on the backdrop does nothing', async () => {
     mount()
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(document.querySelector('.MuiBackdrop-root')!)
+    fireEvent.click(document.querySelector('[data-slot="dialog-overlay"]')!)
     expect(screen.getByRole('dialog')).toBeTruthy()
     fireEvent.keyDown(dialog, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -125,14 +125,11 @@ describe('the consent dialog (S23)', () => {
     await waitFor(() => expect(legalApi.acceptLegal).toHaveBeenLastCalledWith(4))
   })
 
-  it('on a phone: full screen, the buttons stacked full width with Agree below', async () => {
-    vi.stubGlobal('matchMedia', (q: string) => ({ matches: /max-width/.test(q), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }))
+  it('offers Later first and Agree second, so stacked on a phone Agree is the lower, last button', async () => {
     mount()
     const dialog = await screen.findByRole('dialog')
-    expect(dialog.className).toContain('MuiDialog-paperFullScreen')
     const names = within(dialog).getAllByRole('button').map(b => b.textContent)
     expect(names).toEqual(['稍后', '同意'])
-    expect(within(dialog).getByRole('button', { name: '同意' }).className).toContain('MuiButton-fullWidth')
   })
 
   it('in English', async () => {

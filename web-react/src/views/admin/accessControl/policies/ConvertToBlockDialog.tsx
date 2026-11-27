@@ -1,12 +1,12 @@
-import { useMemo } from 'react'
-import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, Typography, useMediaQuery, useTheme,
-} from '@mui/material'
+import { useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DestPolicy } from '@/api/accessControl'
-import { AsyncButton } from '@/components/AsyncButton'
-import KpiTile, { KpiGrid } from '@/components/KpiTile'
+import { KpiGrid, KpiTile } from '@/components/common/KpiTile'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useDestHits } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 
@@ -37,11 +37,10 @@ export default function ConvertToBlockDialog({ policy, days, onClose, onConfirm,
   onViewRecords: (policy: DestPolicy) => void
 }) {
   const { t, i18n } = useTranslation(['admin'])
-  const theme = useTheme()
-  const md = theme.palette.md
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const scope = useQueryScope()
   const num = new Intl.NumberFormat(i18n.language)
+  // Enforcing is the one consequential step here, so focus starts on Cancel, never on the button that does it.
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const id = policy?.id ?? 0
   const estimable = policy !== null && policy.would_block_recent !== null
   // One instant per opening: the reads are keyed by it, so it must not move on a re-render.
@@ -56,45 +55,37 @@ export default function ConvertToBlockDialog({ policy, days, onClose, onConfirm,
   const top = (sites.data?.items ?? []).filter(i => i.dest).map(i => `${i.dest} ${num.format(i.count)}`).join(' · ')
 
   return (
-    <Dialog open={policy !== null} onClose={onClose} fullWidth maxWidth="sm" fullScreen={phone}
-      slotProps={{ paper: { sx: { bgcolor: md.surfaceContainerHigh, borderRadius: phone ? 0 : 3 } } }}>
-      <DialogTitle>{t(`${C}title`, { name: policy?.name ?? '' })}</DialogTitle>
-      <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        {!estimable && (
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${C}no_collect`)}</Typography>
-        )}
-        {loading && (
-          <Box data-testid="convert-loading"><Skeleton variant="rounded" height={64} /></Box>
-        )}
-        {failed && <Alert severity="error">{t(`${C}read_failed`)}</Alert>}
-        {estimable && !loading && !failed && (would === 0
-          ? <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${C}no_hits`, { days })}</Typography>
-          : (
-            <>
-              <Box data-testid="convert-numbers">
-                <KpiGrid>
-                  <KpiTile label={t(`${C}hits`, { days })} value={t(`${C}at_least`, { n: num.format(would) })} />
-                  <KpiTile label={t(`${C}users`)} value={num.format(users.data?.total ?? 0)} />
-                </KpiGrid>
-              </Box>
-              {top && <Typography variant="body2" data-testid="convert-top" sx={{ overflowWrap: 'anywhere' }}>{t(`${C}top`, { list: top })}</Typography>}
-            </>
-          ))}
-        <Typography variant="body2">{t(`${C}body`)}</Typography>
-        {policy?.counts_as_risk === true && <Typography variant="body2">{t(`${C}counts_as_risk`)}</Typography>}
+    <Dialog open={policy !== null} onOpenChange={next => { if (!next) onClose() }}>
+      <DialogContent showCloseButton={false} className="sm:max-w-lg" initialFocus={cancelRef}>
+        <DialogHeader><DialogTitle>{t(`${C}title`, { name: policy?.name ?? '' })}</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
+          {!estimable && <p className="text-sm text-muted-foreground">{t(`${C}no_collect`)}</p>}
+          {loading && <div data-testid="convert-loading"><Skeleton className="h-16 w-full" /></div>}
+          {failed && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-sm">{t(`${C}read_failed`)}</div>}
+          {estimable && !loading && !failed && (would === 0
+            ? <p className="text-sm text-muted-foreground">{t(`${C}no_hits`, { days })}</p>
+            : (
+              <>
+                <div data-testid="convert-numbers">
+                  <KpiGrid className="my-0">
+                    <KpiTile label={t(`${C}hits`, { days })} value={t(`${C}at_least`, { n: num.format(would) })} />
+                    <KpiTile label={t(`${C}users`)} value={num.format(users.data?.total ?? 0)} />
+                  </KpiGrid>
+                </div>
+                {top && <p data-testid="convert-top" className="text-sm [overflow-wrap:anywhere]">{t(`${C}top`, { list: top })}</p>}
+              </>
+            ))}
+          <p className="text-sm">{t(`${C}body`)}</p>
+          {policy?.counts_as_risk === true && <p className="text-sm">{t(`${C}counts_as_risk`)}</p>}
+        </div>
+        <DialogFooter className="sm:items-center">
+          {estimable && would > 0 && (
+            <Button size="sm" variant="outline" className="sm:mr-auto" onClick={() => policy && onViewRecords(policy)}>{t(`${C}view_records`)}</Button>
+          )}
+          <Button ref={cancelRef} variant="outline" onClick={onClose}>{t(`${C}cancel`)}</Button>
+          <AsyncButton onClick={async () => { if (policy) await onConfirm(policy) }}>{t(`${C}action`)}</AsyncButton>
+        </DialogFooter>
       </DialogContent>
-      <DialogActions sx={{
-        flexWrap: 'wrap', gap: 1, px: phone ? 2 : undefined, pb: phone ? 2 : undefined,
-        // The gap spaces the buttons; MUI's own left margin on top of it would double it on a wrapped row.
-        '& > :not(style) ~ :not(style)': { ml: 0 },
-        ...(phone ? { flexDirection: 'column-reverse', alignItems: 'stretch', '& .MuiButton-root': { minHeight: 44 } } : {}),
-      }}>
-        {estimable && would > 0 && (
-          <Button size="small" onClick={() => policy && onViewRecords(policy)} sx={{ mr: phone ? 0 : 'auto' }}>{t(`${C}view_records`)}</Button>
-        )}
-        <Button onClick={onClose}>{t(`${C}cancel`)}</Button>
-        <AsyncButton variant="contained" onClick={async () => { if (policy) await onConfirm(policy) }}>{t(`${C}action`)}</AsyncButton>
-      </DialogActions>
     </Dialog>
   )
 }

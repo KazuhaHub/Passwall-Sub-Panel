@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/front"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
@@ -41,6 +42,7 @@ type AdminServersHandler struct {
 	repo              ports.XUIPanelRepo
 	pool              ports.XUIPool
 	nodes             ports.NodeRepo
+	syncTasks         ports.SyncTaskRepo
 	audit             ports.AuditRepo
 	async             AsyncDispatcher
 	invalidateRender  func()
@@ -80,6 +82,13 @@ type EngineLinkGuard interface {
 }
 
 // WithEngineLinkGuard binds the tunnel check run before an engine switch.
+// WithSyncTasks lets the line answers say which landings are queued for
+// deletion (a node delete only disables the node until its sync task drains).
+func (h *AdminServersHandler) WithSyncTasks(tasks ports.SyncTaskRepo) *AdminServersHandler {
+	h.syncTasks = tasks
+	return h
+}
+
 func (h *AdminServersHandler) WithEngineLinkGuard(g EngineLinkGuard) *AdminServersHandler {
 	h.links = g
 	return h
@@ -1872,24 +1881,14 @@ func actorFromGin(c *gin.Context) string {
 	return "admin"
 }
 
-func (h *AdminServersHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
-		return
-	}
-	// Refuse if any node still references this server.
-	all, err := h.nodes.List(c.Request.Context())
-	if err != nil {
-		respondError(c, err)
-		return
-	}
+// serverAttachedNodes lists the nodes whose inbound lives on the server, the
+// hidden listeners of tunnel lines named as the lines they are. hidden says at
+// least one is such a listener.
+func serverAttachedNodes(all []*domain.Node, id int64) (attached []gin.H, hidden bool) {
 	byID := make(map[int64]*domain.Node, len(all))
 	for _, n := range all {
 		byID[n.ID] = n
 	}
-	var attached []gin.H
-	hidden := false
 	for _, n := range all {
 		if n.PanelID != id {
 			continue
@@ -1913,6 +1912,94 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		}
 		attached = append(attached, item)
 	}
+	return attached, hidden
+}
+
+// serverRouteUsers lists the nodes whose routes by destination leave through the
+// server, with the routes.
+func serverRouteUsers(all []*domain.Node, id int64) []gin.H {
+	var users []gin.H
+	for _, n := range all {
+		var routes []string
+		for _, r := range n.DestRoutes {
+			if r.Target.Kind == domain.DestRouteServer && r.Target.PanelID == id {
+				routes = append(routes, r.ID)
+			}
+		}
+		if len(routes) > 0 {
+			users = append(users, gin.H{"node_id": n.ID, "node": n.DisplayName, "routes": routes})
+		}
+	}
+	return users
+}
+
+// serverEntryLines is node.LinesEnteringServer in the shape of the delete
+// answers. landing_pending_delete is true when the line's landing is queued for
+// deletion: it is only disabled until its sync task drains (up to 100 attempts
+// while its panel is down), so its lines still count. Unreadable task state
+// reads as "not pending" — the line is still listed and still blocks.
+func (h *AdminServersHandler) serverEntryLines(ctx context.Context, all []*domain.Node, id int64) []gin.H {
+	lines := make([]gin.H, 0)
+	pending := map[int64]bool{}
+	for _, l := range node.LinesEnteringServer(all, id) {
+		p, seen := pending[l.NodeID]
+		if !seen && h.syncTasks != nil {
+			p, _ = h.syncTasks.HasActiveByTargetAny(ctx, []domain.SyncTaskType{domain.SyncTaskNodeDelete}, "node", l.NodeID)
+			pending[l.NodeID] = p
+		}
+		lines = append(lines, gin.H{"node_id": l.NodeID, "line_id": l.LineID, "landing_name": l.LandingName,
+			"line_name": l.LineName, "line_type": l.LineType, "landing_pending_delete": p})
+	}
+	return lines
+}
+
+// DeleteImpact is the read-only answer to "what is still attached to this
+// server": the nodes on it, the relay lines that enter through it, the nodes
+// that leave through it (egress) and the routes that use it. Delete refuses on
+// the first, second and fourth; the UI lists them before the administrator
+// asks.
+func (h *AdminServersHandler) DeleteImpact(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	all, err := h.nodes.List(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	attached, _ := serverAttachedNodes(all, id)
+	egress := make([]gin.H, 0)
+	for _, n := range all {
+		if n.EgressPanelID == id && id != 0 {
+			egress = append(egress, gin.H{"node_id": n.ID, "node": n.DisplayName})
+		}
+	}
+	if attached == nil {
+		attached = []gin.H{}
+	}
+	routes := serverRouteUsers(all, id)
+	if routes == nil {
+		routes = []gin.H{}
+	}
+	c.JSON(http.StatusOK, gin.H{"server_id": id, "nodes": attached, "lines_entering": h.serverEntryLines(c.Request.Context(), all, id),
+		"egress_users": egress, "route_users": routes})
+}
+
+func (h *AdminServersHandler) Delete(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	// Refuse if any node still references this server.
+	all, err := h.nodes.List(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	attached, hidden := serverAttachedNodes(all, id)
 	if len(attached) > 0 {
 		message := "Server still has nodes attached; delete or reassign them first"
 		if hidden {
@@ -1927,22 +2014,27 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": message, "code": "server_has_nodes", "nodes": attached})
 		return
 	}
+	// Refuse if a relay line still enters through this server. A direct forward
+	// has no node of its own on the server (the forward travels in the transit
+	// body), so the check above cannot see it; deleting the server would leave
+	// the line published, pointing at a forward nothing runs any more. No
+	// cascade: removing a line goes through its landing's metadata save, which
+	// handles tunnels, shared-port routes and the clients.
+	if lines := h.serverEntryLines(c.Request.Context(), all, id); len(lines) > 0 {
+		message := "Relay lines still enter through this server; remove those lines on their landing nodes first"
+		for _, l := range lines {
+			if l["landing_pending_delete"] == true {
+				message += ". Some of those lines belong to nodes that are being deleted (the delete only finishes once their sync task has run): wait for that deletion to finish, or detach those nodes, then delete the server"
+				break
+			}
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": message, "code": "server_has_lines", "lines": lines})
+		return
+	}
 	// Refuse if any node's routes by destination leave through this server: the
 	// destinations they take would otherwise have nowhere to go, and the node
 	// could not be sent.
-	var users []gin.H
-	for _, n := range all {
-		var routes []string
-		for _, r := range n.DestRoutes {
-			if r.Target.Kind == domain.DestRouteServer && r.Target.PanelID == id {
-				routes = append(routes, r.ID)
-			}
-		}
-		if len(routes) > 0 {
-			users = append(users, gin.H{"node_id": n.ID, "node": n.DisplayName, "routes": routes})
-		}
-	}
-	if len(users) > 0 {
+	if users := serverRouteUsers(all, id); len(users) > 0 {
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "Routes by destination still leave through this server; change or remove them first",
 			"code":  "server_used_by_routes", "used_by": users,

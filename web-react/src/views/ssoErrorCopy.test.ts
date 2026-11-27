@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import zhCN from '../locales/zh-CN/auth.json'
 import enUS from '../locales/en-US/auth.json'
-import { SSO_ERROR_KEYS } from './SsoErrorView'
+import { SSO_ERROR_KEYS } from './auth/ssoErrorKeys'
 
 // The codes the Go side can put in the failure redirect's `error` parameter.
 // This list is the cross-language pin: the handler's page codes live in

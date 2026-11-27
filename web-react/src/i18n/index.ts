@@ -2,13 +2,16 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-import type { AppLanguage } from '@/theme'
 import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
 import { NAMESPACES, flatten, I18N_STATIC_OPTIONS, type Nested } from './options'
 
 // Language-pack schema version, mirrors service/locale.Format on the backend.
 // The exported "base template" stamps this into `psp_language_pack`.
 export const LANGUAGE_PACK_FORMAT = 1
+
+// The built-in languages are 'zh-CN' | 'zh-TW' | 'en-US', but runtime-uploaded language
+// packs can register any code, so this is a plain string.
+export type AppLanguage = string
 
 // The built-in languages are compiled into the bundle. Runtime-uploaded
 // packs are appended to SUPPORTED_LANGUAGES at boot (see loadManifest), so this
@@ -193,7 +196,7 @@ export async function setLanguage(lang: AppLanguage): Promise<void> {
   //
   // Loading CAN reject (stale build chunks after a deploy + an open tab clicks
   // language switch = 404 on a missing chunk; or a removed pack / offline
-  // backend for a custom code). Callers (UserLayout / AdminLayout / LoginView*)
+  // backend for a custom code). Callers (the shells / LoginView*)
   // fire-and-forget; without this try/catch the rejection surfaces as an
   // unhandled promise + the UI silently stays on the old language. Log it and
   // leave changeLanguage uncalled so i18next's resolvedLanguage stays consistent

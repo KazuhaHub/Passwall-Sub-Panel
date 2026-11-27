@@ -95,6 +95,9 @@ func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node,
 }
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error { return nil }
 func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error       { return nil }
+func (r *fakeNodeRepo) ApplySubscriptionOrder(ctx context.Context, w ports.SubscriptionOrderWrite) error {
+	return nil
+}
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	return nil
 }

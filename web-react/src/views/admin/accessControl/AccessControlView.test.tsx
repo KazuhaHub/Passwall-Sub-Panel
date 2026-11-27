@@ -27,12 +27,12 @@ vi.mock('./records/RecordsTab', () => ({
     </div>
   ),
 }))
-vi.mock('./sheets/TestSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="test-sheet" /> : null }))
-vi.mock('./sheets/CoverageSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="coverage-sheet" /> : null }))
-vi.mock('./sheets/ExemptionsSheet', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="exemptions-sheet" /> : null }))
-vi.mock('./lists/ListEntriesSheet', () => ({ default: ({ listId, onEdit }: { listId: number | null; onEdit: (id: number) => void }) => listId ? <button data-testid="entries-sheet" onClick={() => onEdit(listId)}>{listId}</button> : null }))
+vi.mock('./dialogs/TestDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="test-sheet" /> : null }))
+vi.mock('./dialogs/CoverageDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="coverage-sheet" /> : null }))
+vi.mock('./dialogs/ExemptionsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="exemptions-sheet" /> : null }))
+vi.mock('./lists/ListEntriesDialog', () => ({ default: ({ listId, onEdit }: { listId: number | null; onEdit: (id: number) => void }) => listId ? <button data-testid="entries-sheet" onClick={() => onEdit(listId)}>{listId}</button> : null }))
 vi.mock('./AccessSettingsDialog', () => ({ default: ({ open }: { open: boolean }) => open ? <p data-testid="settings-dialog" /> : null }))
-vi.mock('./AccountDrawerHost', () => ({ default: ({ userId }: { userId: number | null }) => userId ? <p data-testid="account-drawer">{userId}</p> : null }))
+vi.mock('./AccountDialogHost', () => ({ default: ({ userId }: { userId: number | null }) => userId ? <p data-testid="account-drawer">{userId}</p> : null }))
 vi.mock('@/components/UserAutocomplete', () => ({ default: ({ fullWidth }: { fullWidth?: boolean }) => <input aria-label="pick" data-fullwidth={String(!!fullWidth)} /> }))
 
 const node = (over: Partial<DestNodeStatus> = {}): DestNodeStatus => ({
@@ -76,7 +76,7 @@ describe('the admin-only gates', () => {
 describe('the page', () => {
   it('shows the title and the verdict, and mounts only the open tab', async () => {
     renderAccess(<AccessControlView />)
-    expect(await screen.findByText('访问控制', { selector: 'h4' })).toBeTruthy()
+    expect(await screen.findByText('访问控制', { selector: 'h1' })).toBeTruthy()
     expect(await screen.findByText('策略在 1 台节点上生效')).toBeTruthy()
     expect(screen.getByTestId('policies-tab')).toBeTruthy()
     expect(screen.queryByTestId('lists-tab')).toBeNull()
@@ -181,10 +181,10 @@ describe('the page', () => {
     vi.mocked(api.pauseDest).mockResolvedValue()
     renderAccess(<AccessControlView />)
     await screen.findByTestId('policies-tab')
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多' }))
     fireEvent.click(await screen.findByText('数据与下发设置…'))
     expect(await screen.findByTestId('settings-dialog')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多' }))
     fireEvent.click(await screen.findByText('暂停全部执行…'))
     await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ title: '暂停全部访问控制？', destructive: true })))
     await waitFor(() => expect(api.pauseDest).toHaveBeenCalledWith(true))
@@ -286,31 +286,20 @@ describe('the header on a phone', () => {
     return () => { window.matchMedia = original }
   }
 
-  it('keeps the test button and the menu with the actions and gives the account picker the full width', async () => {
+  it('keeps the test button and the menu with the header actions and gives the account picker a full-width row', async () => {
     const restore = phone(true)
     try {
       renderAccess(<AccessControlView />)
       const pick = await screen.findByLabelText('pick')
       expect(pick.getAttribute('data-fullwidth')).toBe('true')
-      expect(screen.getByRole('button', { name: '测试目的地' })).toBeTruthy()
-      expect(screen.getByRole('button', { name: '更多操作' })).toBeTruthy()
-      // All three sit in one actions container, so the menu never wraps away from the page's actions.
-      const row = pick.closest('[data-header-actions]')
-      expect(row?.contains(screen.getByRole('button', { name: '更多操作' }))).toBe(true)
-      expect(row?.contains(screen.getByRole('button', { name: '测试目的地' }))).toBe(true)
+      // The picker has a row of its own under the title; the test button and the menu stay with the header's actions.
+      const actions = screen.getByRole('button', { name: '测试目的地' }).closest('[data-slot="page-header-actions"]')
+      expect(actions?.contains(pick)).toBe(false)
+      expect(actions?.contains(screen.getByRole('button', { name: '更多' }))).toBe(true)
     } finally { restore() }
   })
 
-  it('puts the test button and the menu together at the right of the first row, and the en-US picker label is short', async () => {
-    const restore = phone(true)
-    try {
-      renderAccess(<AccessControlView />)
-      const test = await screen.findByRole('button', { name: '测试目的地' })
-      const menu = screen.getByRole('button', { name: '更多操作' })
-      // Both live in the one actions row, the test button first (it carries the free space on xs).
-      expect(test.closest('[data-header-actions]')).toBe(menu.closest('[data-header-actions]'))
-      expect(test.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    } finally { restore() }
+  it('the picker label is short enough for a phone in both languages', () => {
     expect(translate('admin:access_control.header.pick_user').length).toBeLessThanOrEqual(8)
     setTestLang('en-US')
     expect(translate('admin:access_control.header.pick_user').length).toBeLessThanOrEqual(14)

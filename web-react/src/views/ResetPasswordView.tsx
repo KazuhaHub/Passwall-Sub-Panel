@@ -1,26 +1,28 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { Alert, Box, Button, Card, CircularProgress, Link as MuiLink, TextField, Typography, useTheme } from '@mui/material'
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router'
+import { useRef, useState, type FormEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
 import { resetPassword } from '@/api/auth'
-import { useSiteStore } from '@/stores/site'
-import BrandLogo from '@/components/BrandLogo'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Field } from '@/components/form/Field'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { AuthLayout } from '@/views/auth/AuthLayout'
+import { PasswordField } from '@/views/auth/PasswordField'
+import { BackToLogin, FormAlert, focusFirstInvalid } from '@/views/auth/parts'
 
 // A password meets the panel floor: >=8 chars with at least one letter and one
 // digit (mirrors the backend's IsMinimallyStrongPassword).
 function strongEnough(pw: string): boolean {
-  return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw);
+  return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw)
 }
 
 export default function ResetPasswordView() {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['auth'])
   const navigate = useNavigate()
-  const site = useSiteStore()
   const [params] = useSearchParams()
+  const form = useRef<HTMLFormElement>(null)
 
   // A token in the URL → link delivery. Otherwise the user types their
   // username + the OTP code they received.
@@ -31,17 +33,28 @@ export default function ResetPasswordView() {
   const [code, setCode] = useState('')
   const [pw, setPw] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [pwSeen, setPwSeen] = useState(false)
+  const [confirmSeen, setConfirmSeen] = useState(false)
+  // Set by the first submit: an empty box is only reported as missing once the person has tried to go on.
+  const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => { void site.load() }, [site])
+  const pwError = pw
+    ? (pwSeen && !strongEnough(pw) ? t('auth:password_too_weak', { defaultValue: '密码至少 8 位，且含字母和数字' }) : undefined)
+    : (submitted ? t('auth:password_required') : undefined)
+  const confirmError = confirm
+    ? (confirmSeen && pw !== confirm ? t('auth:reset_password_mismatch') : undefined)
+    : (submitted ? t('auth:password_confirm_required') : undefined)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    if (pw !== confirm) { setError(t('auth:reset_password_mismatch')); return }
-    if (!strongEnough(pw)) { setError(t('auth:password_too_weak', { defaultValue: '密码至少 8 位，且含字母和数字' })); return }
+    setPwSeen(true)
+    setConfirmSeen(true)
+    setSubmitted(true)
+    if (!pw || !confirm || pw !== confirm || !strongEnough(pw)) { focusFirstInvalid(form.current); return }
     if (otpMode && (!ident.trim() || !code.trim())) return
     setBusy(true)
     try {
@@ -58,56 +71,44 @@ export default function ResetPasswordView() {
   }
 
   return (
-    <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface, px: 2 }}>
-      <Card sx={{ width: '100%', maxWidth: 400, bgcolor: md.surfaceContainerLow, p: 4 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
-          <BrandLogo height={48} />
-          <Typography variant="h5" sx={{ fontWeight: 500, mt: 1.5 }}>{t('auth:reset_password_title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5, color: md.onSurfaceVariant, textAlign: 'center' }}>
-            {t('auth:reset_password_subtitle')}
-          </Typography>
-        </Box>
-
-        {done ? (
-          <>
-            <Alert severity="success" sx={{ mb: 2 }}>{t('auth:reset_password_success')}</Alert>
-            <Button variant="contained" fullWidth size="large" onClick={() => navigate('/login')}>
-              {t('auth:logged_out_sign_in_again')}
-            </Button>
-          </>
-        ) : (
-          <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <AuthLayout title={t('auth:reset_password_title')} subtitle={t('auth:reset_password_subtitle')}>
+      {done ? (
+        <>
+          <FormAlert tone="success">{t('auth:reset_password_success')}</FormAlert>
+          <Button size="lg" className="w-full" onClick={() => navigate('/login')}>
+            {t('auth:logged_out_sign_in_again')}
+          </Button>
+        </>
+      ) : (
+        <>
+          <form ref={form} onSubmit={submit} noValidate className="flex flex-col gap-4">
             {otpMode && (
               <>
-                <TextField label={t('auth:forgot_password_upn_label')} value={ident}
-                  onChange={e => setIdent(e.target.value)} autoComplete="username" fullWidth />
-                <TextField label={t('auth:reset_password_code_label', { defaultValue: '验证码' })} value={code}
-                  onChange={e => setCode(e.target.value)} fullWidth slotProps={{
-                  htmlInput: { inputMode: 'numeric', maxLength: 8 }
-                }} />
+                <Field label={t('auth:forgot_password_upn_label')}>
+                  <Input name="username" value={ident} onChange={e => setIdent(e.target.value)} autoComplete="username" autoFocus />
+                </Field>
+                <Field label={t('auth:reset_password_code_label', { defaultValue: '验证码' })}>
+                  <Input name="code" value={code} onChange={e => setCode(e.target.value)}
+                    autoComplete="one-time-code" inputMode="numeric" maxLength={8} />
+                </Field>
               </>
             )}
-            <TextField label={t('auth:reset_password_new_label')} type="password" value={pw}
-              onChange={e => setPw(e.target.value)} autoComplete="new-password" autoFocus={!otpMode} fullWidth />
-            <TextField label={t('auth:reset_password_confirm_label')} type="password" value={confirm}
-              onChange={e => setConfirm(e.target.value)} autoComplete="new-password" fullWidth />
-            {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
-            <Button type="submit" variant="contained" fullWidth size="large" disabled={busy}
-              startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
+            <Field label={t('auth:reset_password_new_label')} error={pwError}>
+              <PasswordField name="password" value={pw} onChange={e => setPw(e.target.value)}
+                onBlur={() => setPwSeen(true)} autoComplete="new-password" autoFocus={!otpMode} />
+            </Field>
+            <Field label={t('auth:reset_password_confirm_label')} error={confirmError}>
+              <PasswordField name="password_confirm" value={confirm} onChange={e => setConfirm(e.target.value)}
+                onBlur={() => setConfirmSeen(true)} autoComplete="new-password" />
+            </Field>
+            {error && <FormAlert tone="error">{error}</FormAlert>}
+            <AsyncButton type="submit" size="lg" className="w-full" pending={busy}>
               {t('auth:reset_password_submit')}
-            </Button>
-          </Box>
-        )}
-
-        {!done && (
-          <Box sx={{ mt: 2.5, textAlign: 'center' }}>
-            <MuiLink component={RouterLink} to="/login" variant="body2"
-              onClick={(e) => { e.preventDefault(); navigate('/login') }}>
-              {t('auth:back_to_login')}
-            </MuiLink>
-          </Box>
-        )}
-      </Card>
-    </Box>
-  );
+            </AsyncButton>
+          </form>
+          <BackToLogin />
+        </>
+      )}
+    </AuthLayout>
+  )
 }

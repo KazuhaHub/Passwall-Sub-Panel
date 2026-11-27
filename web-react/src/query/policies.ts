@@ -188,6 +188,13 @@ export const policies = {
     refetchInterval: false,
     note: 'The policy page keeps a local draft seeded once; its save writes through.',
   },
+  /** One group, as its own page reads it (the page keeps its draft, so a re-read never resets the forms). */
+  groupDetail: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Keyed by group id; a save writes the result through and invalidates the lists, and the page keeps its own draft.',
+  },
   /** One account's record, as the user picker names a picked account. */
   userDetail: {
     staleTime: 15 * SECOND,
@@ -249,6 +256,16 @@ export const policies = {
     gcTime: 5 * MINUTE,
     refetchInterval: false,
     note: 'Admin-managed configuration; writes invalidate, no polling.',
+  },
+  /**
+   * The nodes page's order: one read builds every line's publication state from the live nodes. Not polled
+   * (an optimistic reorder would be overwritten mid-drag by a poll); revalidated on focus and by writes.
+   */
+  nodeOrder: {
+    staleTime: 15 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Re-read on focus and after any node write; a poll could replace an optimistic move that is still being saved.',
   },
   /**
    * Inbounds on a panel PSP does not manage. A working list an operator reads

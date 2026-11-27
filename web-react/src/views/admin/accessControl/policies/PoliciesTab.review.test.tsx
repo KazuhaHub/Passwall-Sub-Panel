@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNavigate } from 'react-router'
 
-import { renderAccess } from '@/test/accessControlHarness'
+import { renderAccess, whereIs } from '@/test/accessControlHarness'
 import * as api from '@/api/accessControl'
 import type { DestPolicy } from '@/api/accessControl'
 import PoliciesTab from './PoliciesTab'
@@ -42,17 +42,14 @@ beforeEach(() => {
 })
 
 describe('history-state requests', () => {
-  it('opens the editor for a SECOND request while the tab stays mounted', async () => {
+  it('sends a SECOND request for an editor to its page too, while the tab stays mounted', async () => {
     const { router } = renderAccess(<><Jumper /><PoliciesTab {...props} /></>, { route: '/admin/access-control?tab=policies' })
     await screen.findAllByTestId('policy-row')
     await act(async () => { await router.navigate('/admin/access-control?tab=policies', { state: { openPolicy: 1 } }) })
-    expect(await screen.findByText('编辑策略「禁止发信」')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.queryByText('编辑策略「禁止发信」')).toBeNull())
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/1'))
     await act(async () => { await router.navigate('/admin/access-control?tab=policies', { state: { openPolicy: 2 } }) })
-    expect(await screen.findByText('编辑策略「禁止 BT」')).toBeTruthy()
-    // Opens the editor twice, and the first open loads the code editor chunk: under a loaded machine that outruns the default 5 s.
-  }, 20_000)
+    await waitFor(() => expect(whereIs(router)).toBe('/admin/access-control/policies/2'))
+  })
 })
 
 describe('the row', () => {
@@ -60,9 +57,9 @@ describe('the row', () => {
     let release!: () => void
     vi.mocked(api.updateDestPolicy).mockReturnValue(new Promise(r => { release = () => r(pol({})) }))
     renderAccess(<PoliciesTab {...props} />)
-    const sw = (await screen.findByRole('switch', { name: /禁止发信/ })) as HTMLInputElement
+    const sw = await screen.findByRole('switch', { name: /禁止发信/ })
     fireEvent.click(sw)
-    await waitFor(() => expect((screen.getByRole('switch', { name: /禁止发信/ }) as HTMLInputElement).disabled).toBe(true))
+    await waitFor(() => expect(screen.getByRole('switch', { name: /禁止发信/ }).hasAttribute('data-disabled')).toBe(true))
     expect(screen.queryByRole('progressbar')).toBeNull()
     expect(screen.getByRole('switch', { name: /禁止发信/ })).toBe(sw)
     await act(async () => release())

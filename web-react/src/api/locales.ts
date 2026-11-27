@@ -28,8 +28,9 @@ export async function listLocales(signal?: AbortSignal) {
   return data
 }
 
-export async function saveLocale(pack: LocalePack) {
-  await client.put(`/admin/locales/${encodeURIComponent(pack.code)}`, pack)
+/** `quiet`: the caller shows the refusal itself (the upload dialog lists the server's message beside the text), so no toast. */
+export async function saveLocale(pack: LocalePack, opts: { quiet?: boolean } = {}) {
+  await client.put(`/admin/locales/${encodeURIComponent(pack.code)}`, pack, opts.quiet ? { _skipErrorToast: true } : undefined)
 }
 
 export async function deleteLocale(code: string) {

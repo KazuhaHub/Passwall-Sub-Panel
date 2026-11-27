@@ -1,217 +1,220 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
-import { api, editRow, installReads, list, mount, snack } from '@/test/adminSaveHarness'
+import { describe, expect, it } from 'vitest'
+import { api, installReads, list, mountPage, toast } from './subscription/testHarness'
+import { mountRuleSets, where } from './rulesets/testHarness'
 import RuleSetsView from './RuleSetsView'
 
-const confirmMock = vi.hoisted(() => vi.fn())
-vi.mock('@/components/ConfirmHost', () => ({ confirm: confirmMock }))
+const PATH = '/admin/rules'
+const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content: '- DOMAIN,a.example,DIRECT', revision: 'r1' }
+const { revision: _rev, ...sent } = base
+const seeded = { ...base, slug: 'default_rules', name: 'Seeded rules', sort: 1 }
+const template = { slug: 't1', name: 'Mihomo main', client_type: 'mihomo', is_default: false, rule_sets: ['custom'], content: '' }
+const inspection = (extra: Record<string, unknown> = {}) => ({ groups: [], builtins: [], nodes: [], lines: [], regions: [], tags: [], issues: [], ...extra })
 
-const row = { slug: 'custom', name: 'old-name', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: 'rules: []' }
+function reads(rows: unknown[] = [base, seeded]) {
+  installReads({ '/admin/rules': list(rows), '/admin/templates': list([template]), '/admin/groups': list([]) })
+  api.post.mockResolvedValue({ data: inspection() })
+}
 
-it('preserves precise line identities when editing and reopening a rule with a stale list', async () => {
-  const line = { kind: 'line' as const, node_id: 17, line_id: 'stable-relay-id' }
-  const configured = { ...row, content: '- MATCH,Pick', proxy_group_members: { Pick: [line] } }
-  installReads({ '/admin/rules': list([configured]) })
-  api.post.mockResolvedValue({ data: {
-    groups: [{ name: 'Pick', configured: true, options: { type: 'select' }, default_members: [], members: [line], preview: ['Node B'] }],
-    builtins: ['DIRECT'], nodes: [], lines: [{ node_id: 17, line_id: line.line_id, display_name: 'Node B', kind: 'relay', available: true }], regions: [], tags: [], issues: [],
-  } })
-  api.put.mockImplementation(async (_url, body) => ({ data: { ...body, name: 'saved-name' } }))
-  mount(<RuleSetsView />)
-  const dialog = await editRow()
-  fireEvent.change(within(dialog).getByDisplayValue('old-name'), { target: { value: 'new-name' } })
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  expect(api.put.mock.calls[0][1].proxy_group_members).toEqual({ Pick: [line] })
-  const reopened = await editRow('saved-name')
-  fireEvent.click(within(reopened).getByRole('tab', { name: 'admin:rules.tabs.members' }))
-  const memberName = await within(reopened).findByTitle('line:17:stable-relay-id')
-  await waitFor(() => expect(memberName.textContent).toBe('admin:rules.members.member_label_relay'))
-  expect(within(reopened).queryByText('line:17:stable-relay-id')).toBeNull()
-  fireEvent.mouseOver(memberName)
-  expect((await screen.findByRole('tooltip')).textContent).toBe('line:17:stable-relay-id')
+// Waits for the ROW, not just its text: the name must be inside a table row (closest('tr')) before the test climbs to it.
+const rowOf = (name: string) => waitFor(() => {
+  const row = screen.getByText(name).closest('tr')
+  expect(row).not.toBeNull()
+  return row as HTMLElement
 })
+async function openMenu(name: string) {
+  const row = await rowOf(name)
+  fireEvent.click(within(row).getByRole('button', { name: new RegExp(`More actions for ${name}`) }))
+}
+const menuItem = (name: RegExp | string) => screen.findByRole('menuitem', { name })
 
-it('reopens with the saved rule without reloading the stale list', async () => {
-  installReads({ '/admin/rules': list([row]) })
-  api.post.mockResolvedValue({ data: { groups: [], builtins: [], nodes: [], regions: [], tags: [], issues: [] } })
-  api.put.mockImplementation(async (_url, body) => ({ data: { ...body, name: 'server-normalized-name' } }))
-  mount(<RuleSetsView />)
-  const dialog = await editRow()
-  fireEvent.change(within(dialog).getByDisplayValue('old-name'), { target: { value: 'new-name' } })
-
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
-
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  const reopened = await editRow('server-normalized-name')
-  expect(within(reopened).getByDisplayValue('server-normalized-name')).toBeTruthy()
-})
-
-it('confirms and removes metadata for a group deleted from main rules', async () => {
-  const orphanRow = {
-    ...row,
-    content: '- DOMAIN,a,Keep\n- GEOSITE,googlefcm,📣 谷歌FCM',
-    proxy_group_order: ['📣 谷歌FCM', 'Keep'],
-    proxy_group_members: {
-      '📣 谷歌FCM': [{ kind: 'builtin' as const, value: 'DIRECT' }],
-      Keep: [{ kind: 'node_set' as const, value: 'remaining' }],
-    },
-    proxy_group_options: { '📣 谷歌FCM': { type: 'fallback' as const } },
-  }
-  const inspection = {
-    groups: [{ name: 'Keep', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: [], preview: [] }],
-    builtins: [], nodes: [], regions: [], tags: [], issues: [],
-  }
-  installReads({ '/admin/rules': list([orphanRow]) })
-  api.post.mockResolvedValue({ data: inspection })
-  api.put.mockImplementation(async (_url, body) => ({ data: body }))
-  confirmMock.mockResolvedValue(true)
-  mount(<RuleSetsView />)
-
-  const dialog = await editRow()
-  fireEvent.change(within(dialog).getByLabelText('code'), { target: { value: '- DOMAIN,a,Keep' } })
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
-
-  await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1))
-  expect(confirmMock.mock.calls[0][0]).toMatchObject({
-    title: 'admin:rules.confirm.cleanup_groups_title', destructive: true,
+describe('rule-set list', () => {
+  it('shows the rule sets with their usage and says why a failed read failed', async () => {
+    reads()
+    mountPage(<RuleSetsView />, PATH)
+    const row = await rowOf('Custom rules')
+    expect(within(row).getByText('Mihomo main')).toBeTruthy()
+    expect(within(row).getByText('Enabled')).toBeTruthy()
+    expect(within(await rowOf('Seeded rules')).getByText('Unused')).toBeTruthy()
   })
-  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-  const saved = api.put.mock.calls[0][1]
-  expect(saved.proxy_group_order).toEqual(['Keep'])
-  expect(saved.proxy_group_members).toEqual({ Keep: [{ kind: 'node_set', value: 'remaining' }] })
-  expect(saved.proxy_group_options).toEqual({})
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-})
 
-it('keeps the edited draft and does not save when orphan cleanup is canceled', async () => {
-  const orphanRow = {
-    ...row,
-    content: '- DOMAIN,a,Keep\n- MATCH,Removed',
-    proxy_group_order: ['Removed', 'Keep'],
-    proxy_group_members: { Removed: [{ kind: 'builtin' as const, value: 'DIRECT' }] },
-  }
-  const inspection = {
-    groups: [{ name: 'Keep', configured: false, options_configured: false, options: { type: 'select' }, default_members: [], members: [], preview: [] }],
-    builtins: [], nodes: [], regions: [], tags: [], issues: [],
-  }
-  installReads({ '/admin/rules': list([orphanRow]) })
-  api.post.mockResolvedValue({ data: inspection })
-  confirmMock.mockResolvedValue(false)
-  mount(<RuleSetsView />)
+  it('reports a failed read instead of an empty table, with a retry', async () => {
+    installReads({ '/admin/rules': new Error('offline'), '/admin/templates': list([]), '/admin/groups': list([]) })
+    mountPage(<RuleSetsView />, PATH)
+    expect(await screen.findByText('Rule sets are temporarily unavailable')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Retry/ })).toBeTruthy()
+  })
 
-  const dialog = await editRow()
-  fireEvent.change(within(dialog).getByLabelText('code'), { target: { value: '- DOMAIN,a,Keep' } })
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  it('gives a row one visible action, and a seeded rule set a restore item and a delete that says why it is off', async () => {
+    reads()
+    mountPage(<RuleSetsView />, PATH)
+    await openMenu('Seeded rules')
+    expect(await menuItem('Restore seeded default')).toBeTruthy()
+    const del = await menuItem(/^Delete/)
+    expect(del.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(del.getAttribute('aria-describedby')!)?.textContent).toMatch(/Seeded rule sets can't be deleted/)
+  })
 
-  await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1))
-  expect(api.put).not.toHaveBeenCalled()
-  expect((within(dialog).getByLabelText('code') as HTMLTextAreaElement).value).toBe('- DOMAIN,a,Keep')
-})
-
-it('still blocks saving when a surviving group has an error after cleanup', async () => {
-  const invalidRow = {
-    ...row,
-    content: '- DOMAIN,a,Keep\n- MATCH,Removed',
-    proxy_group_order: ['Removed', 'Keep'],
-    proxy_group_members: {
-      Removed: [{ kind: 'builtin' as const, value: 'DIRECT' }],
-      Keep: [{ kind: 'proxy_group' as const, value: 'Missing' }],
-    },
-  }
-  const group = { name: 'Keep', configured: true, options_configured: false, options: { type: 'select' }, default_members: [], members: [], preview: [] }
-  const beforeCleanup = { groups: [group], builtins: [], nodes: [], regions: [], tags: [], issues: [] }
-  const afterCleanup = {
-    ...beforeCleanup,
-    issues: [{ level: 'error', group: 'Keep', code: 'missing_group', message: 'missing' }],
-  }
-  installReads({ '/admin/rules': list([invalidRow]) })
-  api.post.mockResolvedValueOnce({ data: beforeCleanup }).mockResolvedValue({ data: afterCleanup })
-  confirmMock.mockResolvedValue(true)
-  mount(<RuleSetsView />)
-
-  const dialog = await editRow()
-  fireEvent.change(within(dialog).getByLabelText('code'), { target: { value: '- DOMAIN,a,Keep' } })
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
-
-  await waitFor(() => expect(snack).toHaveBeenCalledWith('admin:rules.validate.proxy_group_members', 'warning'))
-  expect(api.put).not.toHaveBeenCalled()
-  expect(within(dialog).getByRole('tab', { name: 'admin:rules.tabs.members' }).getAttribute('aria-selected')).toBe('true')
-})
-
-it('reports a failed read instead of showing an empty rule-set list', async () => {
-  // The loader had no catch, so a failure raised an unhandled rejection and the
-  // table rendered with no rule sets — indistinguishable from "none exist".
-  api.get.mockRejectedValue(new Error('offline'))
-  mount(<RuleSetsView />)
-
-  await waitFor(() => expect(screen.getByText('admin:rules.load_failed')).toBeTruthy())
-})
-
-it('edits unified rules, sub-rules, and Rematch outbounds on one rules page', async () => {
-  const advancedRow = {
-    ...row,
-    content: '- DOMAIN,ai.example,AI Rematch',
-    mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
-    mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai', target_sub_rule: 'ai-rules' }],
-  }
-  installReads({ '/admin/rules': list([advancedRow]) })
-  api.post.mockResolvedValue({ data: { groups: [], builtins: [], nodes: [], regions: [], tags: [], issues: [] } })
-  api.put.mockImplementation(async (_url, body) => ({ data: body }))
-  mount(<RuleSetsView />)
-
-  const dialog = await editRow()
-  expect(within(dialog).queryByRole('tab', { name: 'admin:rules.tabs.mihomo' })).toBeNull()
-  expect(within(dialog).getByText('admin:rules.hint.direct_subscription_domain')).toBeTruthy()
-  expect(within(dialog).getAllByLabelText('code')).toHaveLength(1)
-
-  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.sub_rules/ }))
-  const subRulesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.sub_rules' })
-  expect((within(subRulesDialog).getByLabelText('admin:rules.mihomo.sub_rule_name') as HTMLInputElement).value).toBe('ai-rules')
-  fireEvent.click(within(subRulesDialog).getByRole('button', { name: 'common:actions.close' }))
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin:rules.mihomo.sub_rules' })).toBeNull())
-
-  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.rematches/ }))
-  const rematchesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.rematches' })
-  expect(within(rematchesDialog).getByDisplayValue('AI Rematch')).toBeTruthy()
-
-  fireEvent.change(within(dialog).getAllByLabelText('code')[0], { target: { value: '- DOMAIN,new.example,AI Rematch' } })
-  fireEvent.change(within(rematchesDialog).getByLabelText('admin:rules.mihomo.target_rematch_name'), { target: { value: 'ai-v2' } })
-  fireEvent.click(within(rematchesDialog).getByRole('button', { name: 'common:actions.close' }))
-  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'admin:rules.mihomo.rematches' })).toBeNull())
-  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
-
-  await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
-  expect(api.put.mock.calls[0][1]).toMatchObject({
-    content: '- DOMAIN,new.example,AI Rematch',
-    mihomo_sub_rules: [{ name: 'ai-rules', content: '- MATCH,DIRECT' }],
-    mihomo_rematch_outbounds: [{ name: 'AI Rematch', target_rematch_name: 'ai-v2', target_sub_rule: 'ai-rules' }],
+  it('has no actions and no create button without config write access', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore.setState({ role: 'user', userId: 1, hasToken: true })
+    reads()
+    mountPage(<RuleSetsView />, PATH)
+    await rowOf('Custom rules')
+    expect(screen.queryByRole('button', { name: 'New rule set' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /More actions/ })).toBeNull()
   })
 })
 
-it('shows Rematch errors only after a close attempt and keeps the dialog open', async () => {
-  const invalidRow = {
-    ...row,
-    mihomo_sub_rules: [],
-    mihomo_rematch_outbounds: [{ name: '', target_rematch_name: '', target_sub_rule: '' }],
-  }
-  installReads({ '/admin/rules': list([invalidRow]) })
-  api.post.mockResolvedValue({
-    data: {
-      groups: [], builtins: [], nodes: [], regions: [], tags: [],
-      issues: [{ level: 'error', section: 'rematch_outbound', name: '', code: 'invalid_name', params: { index: 0 }, message: 'invalid' }],
-    },
+describe('deleting and restoring', () => {
+  it('names the rule set and the templates that use it, focuses Cancel, and deletes only after the answer', async () => {
+    reads()
+    api.delete.mockResolvedValue({})
+    mountPage(<RuleSetsView />, PATH)
+    await openMenu('Custom rules')
+    fireEvent.click(await menuItem('Delete'))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText(/Delete rule set custom\?/)).toBeTruthy()
+    expect(within(dialog).getByText(/referenced by Mihomo main/)).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })))
+    expect(api.delete).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/rules/custom'))
+    expect(toast).toHaveBeenCalledWith({ message: 'Deleted', severity: 'success' })
   })
-  mount(<RuleSetsView />)
 
-  const dialog = await editRow()
-  fireEvent.click(within(dialog).getByRole('button', { name: /admin:rules.mihomo.rematches/ }))
-  const rematchesDialog = await screen.findByRole('dialog', { name: 'admin:rules.mihomo.rematches' })
-  await waitFor(() => expect(api.post).toHaveBeenCalled())
-  expect(within(rematchesDialog).queryByText('admin:rules.mihomo.issues.invalid_name')).toBeNull()
+  it('restores a seeded default through a confirmation and one request, and keeps the row quiet meanwhile', async () => {
+    reads()
+    let finish!: () => void
+    api.post.mockImplementation(async (url: string) => {
+      if (url === '/admin/rules/default_rules/reset') await new Promise<void>(r => { finish = r })
+      return { data: inspection() }
+    })
+    mountPage(<RuleSetsView />, PATH)
+    await openMenu('Seeded rules')
+    fireEvent.click(await menuItem('Restore seeded default'))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Restore seeded default' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/rules/default_rules/reset'))
+    // While it runs the row's actions are off: a second restore cannot be started.
+    const row = await rowOf('Seeded rules')
+    expect((within(row).getByRole('button', { name: /^Edit rule set/ }) as HTMLButtonElement).disabled).toBe(true)
+    finish()
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: 'Restored to the seeded default', severity: 'success' }))
+  })
+})
 
-  fireEvent.click(within(rematchesDialog).getByRole('button', { name: 'common:actions.close' }))
-  await waitFor(() => expect(within(rematchesDialog).getByText('admin:rules.mihomo.issues.invalid_name')).toBeTruthy())
-  expect(screen.getByRole('dialog', { name: 'admin:rules.mihomo.rematches' })).toBeTruthy()
+describe('a rule set whose slug is reserved', () => {
+  it('has no page, says so, and can still be deleted from the list', async () => {
+    reads([{ ...base, slug: 'NEW', name: 'Odd one' }])
+    api.delete.mockResolvedValue({})
+    mountRuleSets('/admin/rules')
+    fireEvent.click(await rowOf('Odd one'))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith({ message: expect.stringContaining('reserved'), severity: 'warning' }))
+    expect(where()).toBe('/admin/rules')
+    fireEvent.click(within(await rowOf('Odd one')).getByRole('button', { name: /More actions for Odd one/ }))
+    fireEvent.click(await menuItem('Delete'))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/admin/rules/NEW'))
+  })
+})
+
+describe('opening a rule set', () => {
+  it('sends the row, its edit button, New rule set and Duplicate to the rule set pages, carrying the list\'s place', async () => {
+    reads()
+    mountRuleSets('/admin/rules?q=cus')
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
+    await waitFor(() => expect(where()).toBe('/admin/rules/custom'))
+    fireEvent.click(await screen.findByRole('link', { name: /Rule sets/ }))
+    await waitFor(() => expect(where()).toBe('/admin/rules?q=cus'))
+    fireEvent.click(await screen.findByRole('button', { name: 'New rule set' }))
+    await waitFor(() => expect(where()).toBe('/admin/rules/new'))
+  })
+
+  it('sends Duplicate to the create page with the source named', async () => {
+    reads()
+    mountRuleSets('/admin/rules')
+    await openMenu('Custom rules')
+    fireEvent.click(await menuItem('Duplicate as a new rule set'))
+    await waitFor(() => expect(where()).toBe('/admin/rules/new?copy=custom'))
+  })
+
+  it.each([
+    ['?edit=custom', '/admin/rules/custom'],
+    ['?edit=new', '/admin/rules/new'],
+    ['?edit=new&copy=custom', '/admin/rules/new?copy=custom'],
+  ])('sends an old sheet link %s on to %s', async (search, to) => {
+    reads()
+    mountRuleSets(`/admin/rules${search}`)
+    await waitFor(() => expect(where()).toBe(to))
+  })
+
+  it('lets an operator open a rule set, which the list could not before', async () => {
+    const { useAuthStore } = await import('@/stores/auth')
+    useAuthStore.setState({ role: 'operator', userId: 1, hasToken: true })
+    reads()
+    mountRuleSets('/admin/rules')
+    fireEvent.click(await rowOf('Custom rules'))
+    await waitFor(() => expect(where()).toBe('/admin/rules/custom'))
+  })
+})
+
+describe('bulk actions', () => {
+  it('sends nothing for a row that has no revision', async () => {
+    const { revision: _r, ...bare } = base
+    reads([bare])
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(toast.mock.calls.some(c => /changed since the list was loaded/.test(String(c[0]?.message)))).toBe(true))
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('leaves seeded rule sets out of the selection and confirms a bulk delete with the count', async () => {
+    reads([base, { ...base, slug: 'other', name: 'Other' }, seeded])
+    api.delete.mockResolvedValue({})
+    mountPage(<RuleSetsView />, PATH)
+    const seededRow = await rowOf('Seeded rules')
+    expect(within(seededRow).queryByRole('checkbox')).toBeNull()
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(within(await rowOf('Other')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: /Bulk delete/ }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(within(ask).getByText(/Delete 2 rule sets\?/)).toBeTruthy()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.delete).toHaveBeenCalledTimes(2))
+    expect(api.delete).toHaveBeenCalledWith('/admin/rules/custom')
+    expect(api.delete).toHaveBeenCalledWith('/admin/rules/other')
+  })
+
+  it('bulk disable saves each selected rule set with enabled false and nothing else changed', async () => {
+    reads()
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...sent, enabled: false, base_revision: 'r1' }, expect.anything()))
+  })
+
+  it('bulk disable saves against the revision the list holds, and on a stale refusal says so and reloads instead of retrying', async () => {
+    reads([{ ...base, revision: 'r1' }, { ...base, slug: 'other', name: 'Other', revision: 'o1' }])
+    api.put.mockImplementation(async (url: string) => {
+      if (url === '/admin/rules/other') throw Object.assign(new Error('409'), { response: { status: 409, data: { code: 'ruleset_stale', current: { ...base, slug: 'other', revision: 'o2' } } } })
+      return { data: { ...base, enabled: false, revision: 'r2' } }
+    })
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(within(await rowOf('Other')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...sent, enabled: false, base_revision: 'r1' }, expect.anything())
+    expect(api.put).toHaveBeenCalledWith('/admin/rules/other', expect.objectContaining({ base_revision: 'o1' }), expect.anything())
+    await waitFor(() => expect(toast.mock.calls.map(c => String(c[0]?.message ?? c[0])).some(m => /changed since the list was loaded/.test(m))).toBe(true))
+    // Only the stale line is shown for that row (it is not also counted as failed), and the success line is not.
+    const said = toast.mock.calls.map(c => String(c[0]?.message ?? c[0]))
+    expect(said.some(m => /1 rule sets were changed since the list was loaded/.test(m))).toBe(true)
+    expect(said.some(m => /failed/.test(m))).toBe(false)
+    // No second attempt, and the list was read again.
+    expect(api.put).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(api.get.mock.calls.filter(c => c[0] === '/admin/rules').length).toBeGreaterThan(1))
+  })
 })

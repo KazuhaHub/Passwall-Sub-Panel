@@ -1,0 +1,170 @@
+{
+  "outbounds": [
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "n40.example.com",
+      "server_port": 443,
+      "tag": "K",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "fw.relay.example",
+      "server_port": 8443,
+      "tag": "K fw",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "tn.relay.example",
+      "server_port": 8444,
+      "tag": "K tn",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "childPubKey",
+          "short_id": "ef01"
+        },
+        "server_name": "www.asus.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "ext.relay.example",
+      "server_port": 8446,
+      "tag": "K ext",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "aPubKey",
+          "short_id": "abcd"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "server": "n42.example.com",
+      "server_port": 8443,
+      "tag": "W",
+      "tls": {
+        "alpn": [
+          "http/1.1"
+        ],
+        "enabled": true,
+        "insecure": true,
+        "server_name": "origin.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "transport": {
+        "headers": {
+          "Host": "origin.example.com"
+        },
+        "path": "/ws",
+        "type": "ws"
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "server": "104.16.1.1",
+      "server_port": 443,
+      "tag": "W CF",
+      "tls": {
+        "alpn": [
+          "http/1.1"
+        ],
+        "enabled": true,
+        "insecure": false,
+        "server_name": "cdn.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "transport": {
+        "headers": {
+          "Host": "cdn.example.com"
+        },
+        "path": "/ws",
+        "type": "ws"
+      },
+      "type": "vless",
+      "uuid": "12345678-1234-4abc-8def-123456789abc"
+    },
+    {
+      "default": "K",
+      "outbounds": [
+        "K",
+        "K fw",
+        "K tn",
+        "K ext",
+        "W",
+        "W CF"
+      ],
+      "tag": "国外媒体",
+      "type": "selector"
+    }
+  ],
+  "route": {
+    "final": "国外媒体",
+    "rule_set": [],
+    "rules": [
+      {
+        "action": "sniff"
+      }
+    ]
+  }
+}

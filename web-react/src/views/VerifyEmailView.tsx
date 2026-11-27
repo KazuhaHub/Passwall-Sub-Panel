@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Alert, Box, Button, Card, CircularProgress, Link as MuiLink, TextField, Typography, useTheme } from '@mui/material'
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
 import { resendVerification, verifyEmail } from '@/api/auth'
-import { useSiteStore } from '@/stores/site'
-import BrandLogo from '@/components/BrandLogo'
+import { IconSpinner } from '@/lib/icons'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { Field } from '@/components/form/Field'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { AuthLayout } from '@/views/auth/AuthLayout'
+import { BackToLogin, FormAlert } from '@/views/auth/parts'
 
 export default function VerifyEmailView() {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation(['auth'])
   const navigate = useNavigate()
-  const site = useSiteStore()
   const [params] = useSearchParams()
 
   const token = params.get('token') ?? ''
@@ -29,8 +30,6 @@ export default function VerifyEmailView() {
   // button reflects when another send would actually go out.
   const [resend, setResend] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [resendLeft, setResendLeft] = useState(0)
-
-  useEffect(() => { void site.load() }, [site])
 
   useEffect(() => {
     if (resendLeft <= 0) return
@@ -84,69 +83,52 @@ export default function VerifyEmailView() {
   }
 
   return (
-    <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface, px: 2 }}>
-      <Card sx={{ width: '100%', maxWidth: 400, bgcolor: md.surfaceContainerLow, p: 4 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
-          <BrandLogo height={48} />
-          <Typography variant="h5" sx={{ fontWeight: 500, mt: 1.5 }}>{t('auth:verify_email_title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5, color: md.onSurfaceVariant }}>{t('auth:verify_email_subtitle')}</Typography>
-        </Box>
-
-        {state === 'done' ? (
-          <>
-            <Alert severity="success" sx={{ mb: 2 }}>{t('auth:verify_email_success')}</Alert>
-            <Button variant="contained" fullWidth size="large" onClick={() => navigate('/login')}>
-              {t('auth:logged_out_sign_in_again')}
-            </Button>
-          </>
-        ) : !otpMode ? (
-          <Box sx={{ display: 'grid', placeItems: 'center', py: 2, gap: 2 }}>
-            {state === 'verifying' && <CircularProgress size={28} />}
-            {state === 'error' && (
-              <>
-                <Alert severity="error" sx={{ width: '100%' }}>{error}</Alert>
-                <Button variant="outlined" onClick={() => navigate('/login')}>{t('auth:back_to_login')}</Button>
-              </>
-            )}
-          </Box>
-        ) : (
-          <Box component="form" onSubmit={submitOtp} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField label={t('auth:register_email_label')} type="email" value={ident}
-              onChange={e => setIdent(e.target.value)} autoComplete="email" autoFocus fullWidth />
-            <TextField label={t('auth:verify_email_code_label')} value={code}
-              onChange={e => setCode(e.target.value)} fullWidth slotProps={{
-              htmlInput: { inputMode: 'numeric', maxLength: 8 }
-            }} />
-            {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
-            <Button type="submit" variant="contained" fullWidth size="large" disabled={state === 'verifying'}
-              startIcon={state === 'verifying' ? <CircularProgress size={16} color="inherit" /> : undefined}>
+    <AuthLayout title={t('auth:verify_email_title')} subtitle={t('auth:verify_email_subtitle')}>
+      {state === 'done' ? (
+        <>
+          <FormAlert tone="success">{t('auth:verify_email_success')}</FormAlert>
+          <Button size="lg" className="w-full" onClick={() => navigate('/login')}>
+            {t('auth:logged_out_sign_in_again')}
+          </Button>
+        </>
+      ) : !otpMode ? (
+        <>
+          {state === 'verifying' && (
+            <div role="status" className="grid place-items-center py-2">
+              <IconSpinner className="size-6 animate-spin text-muted-foreground" />
+              <span className="sr-only">{t('auth:verify_email_title')}</span>
+            </div>
+          )}
+          {state === 'error' && <FormAlert tone="error">{error}</FormAlert>}
+          <BackToLogin />
+        </>
+      ) : (
+        <>
+          <form onSubmit={submitOtp} noValidate className="flex flex-col gap-4">
+            <Field label={t('auth:register_email_label')}>
+              <Input type="email" name="email" value={ident} onChange={e => setIdent(e.target.value)} autoComplete="email" autoFocus />
+            </Field>
+            <Field label={t('auth:verify_email_code_label')}>
+              <Input name="code" value={code} onChange={e => setCode(e.target.value)}
+                autoComplete="one-time-code" inputMode="numeric" maxLength={8} />
+            </Field>
+            {error && <FormAlert tone="error">{error}</FormAlert>}
+            <AsyncButton type="submit" size="lg" className="w-full" pending={state === 'verifying'}>
               {t('auth:verify_email_submit')}
+            </AsyncButton>
+          </form>
+          <div className="flex flex-col items-center gap-1 text-center">
+            {resend === 'sent' && <p className="text-sm text-muted-foreground">{t('auth:verify_email_resent')}</p>}
+            <Button variant="outline" size="sm" onClick={() => void doResend()}
+              disabled={!ident.trim() || resendLeft > 0 || resend === 'sending'}>
+              {resendLeft > 0
+                ? t('auth:verify_email_resend_in', { sec: resendLeft })
+                : t('auth:verify_email_resend')}
             </Button>
-            <Box sx={{ textAlign: 'center' }}>
-              {resend === 'sent' && (
-                <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 0.5 }}>
-                  {t('auth:verify_email_resent')}
-                </Typography>
-              )}
-              <Button variant="text" size="small" onClick={doResend}
-                disabled={!ident.trim() || resendLeft > 0 || resend === 'sending'}>
-                {resendLeft > 0
-                  ? t('auth:verify_email_resend_in', { sec: resendLeft })
-                  : t('auth:verify_email_resend')}
-              </Button>
-            </Box>
-          </Box>
-        )}
-
-        {state !== 'done' && (
-          <Box sx={{ mt: 2.5, textAlign: 'center' }}>
-            <MuiLink component={RouterLink} to="/login" variant="body2"
-              onClick={(e) => { e.preventDefault(); navigate('/login') }}>
-              {t('auth:back_to_login')}
-            </MuiLink>
-          </Box>
-        )}
-      </Card>
-    </Box>
-  );
+          </div>
+          <BackToLogin />
+        </>
+      )}
+    </AuthLayout>
+  )
 }

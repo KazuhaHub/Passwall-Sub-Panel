@@ -55,6 +55,11 @@ func (h *AdminRuleExplainHandler) Explain(c *gin.Context) {
 		Probe        explainProbeDTO `json:"probe"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// A draft near the rule-set cap plus the probe can cross it: answer 413
+		// like the save and the draft compilers, so the editor says "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

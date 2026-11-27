@@ -1,8 +1,6 @@
 /** @vitest-environment jsdom */
-import { ThemeProvider } from '@mui/material/styles'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createAppTheme } from '@/theme'
 import { useSiteStore } from '@/stores/site'
 import { formatMsDualTz } from '@/utils/datetime'
 import type { LiveConnection, LiveUser } from '@/api/riskCenter'
@@ -26,8 +24,6 @@ import zh from '@/locales/zh-CN/admin.json'
 import { flatten, type Nested } from '@/i18n/options'
 dict.current = flatten(zh as Nested)
 
-const theme = createAppTheme({ mode: 'light', sourceColor: '#6750a4', language: 'en-US' })
-
 const conn = (over: Partial<LiveConnection>): LiveConnection => ({
   panel_id: 1, panel_name: 'jp-1', node: 'guid-a', source_key: '198.51.100.1', ip: '198.51.100.1',
   exclusion: '', seen_at: 1_790_000_000, region: null, devices: [], ...over,
@@ -45,11 +41,7 @@ const alice: LiveUser = {
 }
 
 function mount(users: LiveUser[], extra: { onOpenUser?: (id: number) => void } = {}) {
-  render(
-    <ThemeProvider theme={theme}>
-      <LiveConnectionList users={users} deviceWindowHours={24} initiallyOpen {...extra} />
-    </ThemeProvider>,
-  )
+  render(<LiveConnectionList users={users} deviceWindowHours={24} initiallyOpen {...extra} />)
 }
 
 afterEach(() => {
@@ -62,17 +54,17 @@ afterEach(() => {
 const PANEL_TZ = 'Pacific/Chatham'
 
 describe('LiveConnectionList', () => {
-  // A source the detector set aside was never judged. In the success colour
-  // it would read as "checked, and fine" — the one thing it is not.
+  // A source the detector set aside was never judged. In the success colour it would read as "checked,
+  // and fine" — the one thing it is not.
   it('excluded sources never render in the success colour', () => {
     mount([alice])
 
-    const chip = (label: string) => screen.getByText(label).closest('.MuiChip-root') as HTMLElement
+    const badge = (label: string) => screen.getByText(label) as HTMLElement
     for (const label of ['共享出口', '忽略名单', '本机节点 / 中转', '内网']) {
-      expect(chip(label).className).not.toContain('MuiChip-colorSuccess')
-      expect(chip(label).className).toContain('MuiChip-colorDefault')
+      expect(badge(label).className).not.toContain('success')
+      expect(badge(label).getAttribute('data-variant')).toBe('outline')
     }
-    expect(chip('参与判定').className).not.toContain('MuiChip-colorSuccess')
+    expect(badge('参与判定').className).not.toContain('success')
   })
 
   // The detector counts an IPv6 /64 as one source; the address is shown for
@@ -90,7 +82,7 @@ describe('LiveConnectionList', () => {
   // read may have connections this list cannot show.
   it('marks an account whose panels were not all read', () => {
     mount([{ ...alice, unread_panels: 1 }])
-    expect(screen.getByLabelText('有面板读取失败，这个账号的连接可能不全')).toBeTruthy()
+    expect(screen.getByLabelText('有服务器读取失败，这个账号的连接可能不全')).toBeTruthy()
   })
 
   it('opens the account in the lookup', () => {
@@ -107,9 +99,7 @@ describe('LiveConnectionList', () => {
     mount([{ ...alice, connections: [conn({ devices: [{ label: 'Pixel', device_id4: 'ab12', client_type: 'clash-meta',
       ua: 'ClashMeta/1.0', fetches: 3, last_at_ms: 1_789_000_000_000 }] })] }])
     expect(screen.getAllByText(`仍有连接（截至 ${formatMsDualTz(1_790_000_000_000, PANEL_TZ)}）`)).toHaveLength(1)
-    fireEvent.mouseOver(screen.getByText('Pixel'))
-    const tip = await screen.findByRole('tooltip')
-    expect(tip.textContent ?? '').toContain(`3 次拉取，最近 ${formatMsDualTz(1_789_000_000_000, PANEL_TZ)}`)
+    expect(screen.getByText('Pixel').getAttribute('title') ?? '').toContain(`3 次拉取，最近 ${formatMsDualTz(1_789_000_000_000, PANEL_TZ)}`)
   })
 
   // 3X-UI lists an address while any connection from it is open, and its
@@ -119,9 +109,9 @@ describe('LiveConnectionList', () => {
   it('says a live address is still connected as of the panel’s scan, not when it was last used', async () => {
     mount([alice])
     expect(screen.getByRole('columnheader', { name: /^仍有连接/ })).toBeTruthy()
-    const hint = '3X-UI 只报告此刻仍有连接的地址；这里是面板扫描的时间，不是这个地址最后一次使用的时间。'
-    fireEvent.mouseOver(screen.getByLabelText(hint))
-    expect((await screen.findByRole('tooltip')).textContent).toBe(hint)
+    const hint = '3X-UI 只报告此刻仍有连接的地址；这里是服务器扫描的时间，不是这个地址最后一次使用的时间。'
+    fireEvent.click(screen.getByLabelText(hint))
+    expect(await screen.findByText(hint)).toBeTruthy()
     expect(screen.getAllByText(/^仍有连接（截至 .+）$/)).toHaveLength(alice.connections.length)
     expect(screen.queryByText(/面板时钟|最后看到/)).toBeNull()
   })

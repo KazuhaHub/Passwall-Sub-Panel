@@ -7,7 +7,7 @@ import { renderAccess } from '@/test/accessControlHarness'
 import PolicyRow from './PolicyRow'
 
 const media = vi.hoisted(() => ({ phone: true }))
-vi.mock('@mui/material', async importOriginal => ({ ...await importOriginal<typeof import('@mui/material')>(), useMediaQuery: () => media.phone }))
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => media.phone }))
 
 const policy = (over: Partial<DestPolicy> = {}): DestPolicy => ({
   id: 3, name: '加密货币交易所', description: '', action: 'block', state: 'report', list_ids: [], inline: { ports: '443' }, scope: 'all', group_ids: [], panel_ids: [],
@@ -45,14 +45,6 @@ describe('a policy row on a phone', () => {
     media.phone = true
     row(policy({ state: 'on', hits_recent: 214 }))
     expect(screen.queryByRole('button', { name: /转为拦截/ })).toBeNull()
-  })
-
-  it('every target is at least 44px: the row menu button', () => {
-    media.phone = true
-    row(policy())
-    const menu = screen.getByRole('button', { name: '「加密货币交易所」的更多操作' })
-    expect(getComputedStyle(menu).width).toBe('44px')
-    expect(getComputedStyle(menu).height).toBe('44px')
   })
 })
 

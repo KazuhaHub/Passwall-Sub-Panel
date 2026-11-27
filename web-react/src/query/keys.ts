@@ -3,6 +3,7 @@ import type { AuditFilter } from '@/api/audit'
 import type { AuthEventFilter } from '@/api/authEvents'
 import type { EmailLogFilter } from '@/api/emailLogs'
 import type { GroupListParams } from '@/api/groups'
+import type { NodeIssueListParams } from '@/api/nodeIssues'
 import type { NodeListParams } from '@/api/nodes'
 import type { ConnectionHistoryParams, FlagRecordParams, LiveParams, QueueParams } from '@/api/riskCenter'
 import type { RuleSetListParams } from '@/api/rules'
@@ -70,6 +71,10 @@ export const nodeKeys = {
   list: (s: QueryScope, params: NodeListParams) => [...nodeKeys.lists(s), params] as const,
   /** The interleaved separator rows shown among the nodes. */
   separators: (s: QueryScope) => [...nodeKeys.all(s), 'separators'] as const,
+  /** The global subscription order: every line and separator, with its publication state. */
+  order: (s: QueryScope) => [...nodeKeys.all(s), 'order'] as const,
+  /** Every node, all pages read and joined to the order by node id. */
+  allNodes: (s: QueryScope) => [...nodeKeys.lists(s), 'all'] as const,
   /** Inbounds on a panel that PSP does not manage, for one panel. */
   unmanaged: (s: QueryScope, panelId: number) => [...nodeKeys.all(s), 'unmanaged', panelId] as const,
 }
@@ -112,6 +117,8 @@ export const groupKeys = {
   list: (s: QueryScope, params: GroupListParams) => [...groupKeys.lists(s), params] as const,
   /** Every group, every page (listAllGroups): for a picker, not a table. */
   catalogue: (s: QueryScope) => [...groupKeys.all(s), 'catalogue'] as const,
+  /** One group, by id (the group's own page). */
+  detail: (s: QueryScope, id: number) => [...groupKeys.all(s), 'detail', id] as const,
 }
 
 /**
@@ -226,6 +233,12 @@ export const riskCenterKeys = {
 export const syncTaskKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'sync-tasks'] as const,
   list: (s: QueryScope, params: SyncTaskListParams) => [...syncTaskKeys.all(s), 'list', params] as const,
+}
+
+/** The node agents' issue reports, as shown on the Node issues page. */
+export const nodeIssueKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'node-issues'] as const,
+  list: (s: QueryScope, params: NodeIssueListParams) => [...nodeIssueKeys.all(s), 'list', params] as const,
 }
 
 /**

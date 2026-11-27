@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, Skeleton, Typography, useTheme } from '@mui/material'
-import AddIcon from '@mui/icons-material/Add'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, type DestGroup, type DestState } from '@/api/accessControl'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
+import { EmptyState } from '@/components/feedback/EmptyState'
+import { ErrorState } from '@/components/feedback/ErrorState'
+import { CardSkeleton } from '@/components/feedback/LoadingState'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
+import { IconAdd } from '@/lib/icons'
 import { useDestGroups, useDestStatus, usePutDestGroup } from '@/query/accessControl'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes } from '@/utils/accessControl'
@@ -43,7 +46,6 @@ export interface AllowlistTabProps {
  */
 export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSettings, onTestDestination }: AllowlistTabProps) {
   const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
   const scope = useQueryScope()
   const navigate = useNavigate()
   const location = useLocation()
@@ -77,7 +79,7 @@ export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSetting
     else setParams(allowlistSearch(params, { group: null, report: false, days: null }), { replace: true })
   }
   const viewDenied = (id: number) => void navigate({ pathname: location.pathname, search: recordsHref({ source: `g${id}`, action: 'block', since: '24h' }) }, { replace: true })
-  const openGroup = (id: number) => void navigate(`/admin/groups?edit=${id}&dtab=destination`)
+  const openGroup = (id: number) => void navigate(`/admin/groups/${id}?tab=destination`)
 
   /** A write of one group's state, from the card. The lists are kept; the updated_at is the one the card was read at. */
   const write = async (g: DestGroup, state: DestState) => {
@@ -117,38 +119,36 @@ export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSetting
   }
 
   const enableButton = (
-    <Button variant="contained" startIcon={<AddIcon />} onClick={() => setEnable({ groupId: null })}>{t(`${A}enable_button`)}</Button>
+    <Button onClick={() => setEnable({ groupId: null })}><IconAdd />{t(`${A}enable_button`)}</Button>
   )
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, flex: 1, minWidth: 200 }}>{t(`${A}intro`)}</Typography>
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-52 flex-1 text-sm text-muted-foreground">{t(`${A}intro`)}</p>
         {cards.length > 0 && enableButton}
-      </Box>
+      </div>
 
-      {groups.isPending && [0, 1].map(i => <Skeleton key={i} data-testid="allowlist-skeleton" variant="rounded" height={140} sx={{ mb: 1.5 }} />)}
+      {groups.isPending && (
+        <div className="grid gap-3">
+          {[0, 1].map(i => <div key={i} data-testid="allowlist-skeleton"><CardSkeleton lines={4} /></div>)}
+        </div>
+      )}
       {groups.isError && (
-        <Alert severity="error" action={<Button color="inherit" size="small" onClick={() => void groups.refetch()}>{t('admin:access_control.retry')}</Button>}>
-          {t(`${A}read_failed`)}
-        </Alert>
+        <ErrorState title={t(`${A}read_failed`)} reason={groups.error} retry={() => groups.refetch()} />
       )}
       {groups.data && cards.length === 0 && (
-        <Box sx={{ display: 'grid', gap: 1.5, justifyItems: 'start' }}>
-          <Typography component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>{t(`${A}empty.title`)}</Typography>
-          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{t(`${A}empty.body`)}</Typography>
-          {enableButton}
-        </Box>
+        <EmptyState title={t(`${A}empty.title`)} description={t(`${A}empty.body`)} action={enableButton} />
       )}
       {cards.length > 0 && (
-        <Box sx={{ display: 'grid', gap: 1.5 }}>
+        <div className="grid gap-3">
           {cards.map(g => (
             <AllowlistGroupCard key={g.group_id} group={g} now={now} highlighted={al.group === g.group_id} droppedOn={droppedOn(g.group_id)}
               onOpenEntries={onOpenEntries} onOpenNodes={onOpenNodes} onReport={() => openReport(g.group_id)} onViewDenied={() => viewDenied(g.group_id)}
               onTurnOn={() => setTurningOn(g)} onBackToReport={() => void change(g, 'report')} onTurnOff={() => void change(g, 'off')}
               onEditLists={() => setEnable({ groupId: g.group_id })} onOpenGroup={() => openGroup(g.group_id)} />
           ))}
-        </Box>
+        </div>
       )}
 
       {enable && (
@@ -161,6 +161,6 @@ export default function AllowlistTab({ onOpenEntries, onOpenNodes, onOpenSetting
           onViewReport={() => { const id = turningOn.group_id; setTurningOn(null); openReport(id) }}
           onViewNodes={() => { setTurningOn(null); onOpenNodes() }} />
       )}
-    </Box>
+    </div>
   )
 }

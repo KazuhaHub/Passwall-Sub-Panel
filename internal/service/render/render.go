@@ -161,6 +161,9 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	// flagged by its own Region (ADR 0040). Lines the group may not see were
 	// already removed by SubscriptionNodesFor (ADR 0041).
 	items = expandRelays(items)
+	// Lines an administrator dragged elsewhere move to their stored place; with
+	// none stored this is a no-op (see placeLines).
+	items = placeLines(items)
 	applyFactorPlaceholder(items)
 	if ct == domain.ClientURIList {
 		applyLegacyLineNames(items)

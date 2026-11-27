@@ -59,6 +59,8 @@ const servers = [
   xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? '4.0.0 (fixture)' : '',
   compat_status: 'supported', ...server }));
 const credential = 'fixture-fixed-node-credential-not-production';
+// A server's page saves only what was changed, so the manual-configuration step types this note to have something to save.
+const manualNote = 'fixture manual configuration note';
 const version = '4.0.1';
 const fingerprint = 'a'.repeat(64);
 const requests = [];
@@ -103,6 +105,8 @@ async function fixture(request, response, url) {
       totals: {}, nodes: [], policy_notes: {},
     });
     // Match GetSUIRelease's read-only metadata DTO; no upstream request is made.
+    // The servers page counts each server's nodes and lines from the node list; this fixture carries none.
+    if (pathname === '/api/admin/nodes') return reply(response, { items: [], total: 0, page: 1, page_size: 200 });
     if (pathname === '/api/admin/servers/sui-release') return reply(response, { version: 'v1.6.2' });
     // THE SERVERS PAGE READS THE PANEL'S OWN COMPATIBILITY STATE, so the fixture has
     // to answer it: a path this does not know is a throw, and the acceptance counts a
@@ -193,7 +197,7 @@ async function fixture(request, response, url) {
     const id = Number(pathname.split('/').at(-1));
     const original = servers.find(record => record.id === id);
     assert.deepEqual(body, { panel_type: original.panel_type, url: original.url, name: original.name,
-      username: '', remark: '', auth_method: 'token', insecure_https: false });
+      username: '', remark: manualNote, auth_method: 'token', insecure_https: false });
     return reply(response, original);
   }
   if (method === 'PUT' && pathname === '/api/admin/servers/7') {
@@ -210,7 +214,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname.startsWith('/api/')) return await fixture(request, response, url);
-    if (url.pathname === '/admin/servers' || url.pathname === '/') {
+    if (url.pathname === '/admin/servers' || url.pathname.startsWith('/admin/servers/') || url.pathname === '/') {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       const currentIndex = previewOnly ? await readFile(join(dist, 'index.html'), 'utf8') : indexHTML;
       let html = currentIndex.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">');
@@ -264,24 +268,38 @@ try {
   page.on('console', message => { if (message.type() === 'error') failures.push(`console.error: ${message.text()}`); });
   page.on('response', response => { if (response.status() >= 400) failures.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`); });
 
+  // The row's More menu button is named for its server ("More actions for <name>"), and Edit lives in that menu.
+  const rowOf = record => page.getByRole('row').filter({ has: page.getByText(record.name, { exact: true }) });
+  const moreOf = record => rowOf(record).getByRole('button', { name: text('admin:servers.action.more_for', { name: record.name }), exact: true });
+  // The backend, method, channel and version pickers are native selects: they are chosen by value, not opened.
+  const backendOf = dialog => dialog.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true });
+  const optionsOf = select => select.locator('option');
   async function openChooser(record) {
-    const row = page.getByRole('row').filter({ has: page.getByText(record.name, { exact: true }) });
-    await row.getByRole('button', { name: s('action.more'), exact: true }).click();
+    await moreOf(record).click();
     await expect(page.getByRole('menuitem', { name: s('install_reinstall.action'), exact: true })).toHaveCount(1);
     if (record.panel_type === 'psp') await expect(page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true })).toBeVisible();
     await page.getByRole('menuitem', { name: s('install_reinstall.action'), exact: true }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true })).toHaveText(labels[record.panel_type]);
+    await expect(backendOf(dialog)).toHaveValue(record.panel_type);
+    await expect(backendOf(dialog).locator('option:checked')).toHaveText(labels[record.panel_type]);
     await expect(dialog.getByText(text('admin:servers.install_reinstall.original', { id: record.id, backend: labels[record.panel_type] }), { exact: true })).toBeVisible();
     return dialog;
   }
+  // In a dialog the footer's Close comes before the corner X, so first() is the footer.
+  // A dialog that has just been left is still animating out: wait until it is gone before the next opens.
+  const gone = () => expect(page.getByRole('dialog')).toHaveCount(0);
+  // A server's page and its installation page are pages of their own: the back link (the same on every object page)
+  // returns to the list, and the list is back once its heading is.
+  const toList = async () => {
+    await page.locator('[data-slot="object-back"]').click();
+    await expect(page.getByRole('heading', { name: s('title'), exact: true })).toBeVisible();
+  };
+  const close = dialog => dialog.getByRole('button', { name: closeName, exact: true }).first();
   async function selectReviewedRelease(dialog) {
     await expect(dialog.getByText(s('native.release_no_stable'), { exact: true })).toBeVisible();
-    await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toHaveAttribute('aria-disabled', 'true');
-    await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).click();
-    await page.getByRole('option', { name: s('native.release_beta'), exact: true }).click();
-    await dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).click();
-    await page.getByRole('option', { name: version, exact: true }).click();
+    await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toBeDisabled();
+    await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).selectOption('beta');
+    await dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).selectOption(version);
   }
   async function copyAndCheck(dialog, expected) {
     const field = dialog.getByLabel(s('native.install_command'), { exact: true });
@@ -310,84 +328,93 @@ try {
   for (const record of servers.slice(1)) {
     const dialog = await openChooser(record);
     if (record.panel_type === 'sui') {
-      await dialog.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true }).click();
-      await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
+      await backendOf(dialog).selectOption('psp');
       await expect(dialog.getByText(s('install_reinstall.switch_unavailable'), { exact: true })).toBeVisible();
       await expect(dialog.getByRole('button', { name: s('install_reinstall.continue'), exact: true })).toBeDisabled();
-      await dialog.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true }).click();
-      await page.getByRole('option', { name: 'S-UI', exact: true }).click();
+      await backendOf(dialog).selectOption('sui');
     }
     await expect(dialog.getByText(s('install_reinstall.manual_unverified'), { exact: true })).toBeVisible();
     await expect(dialog.getByText(s('install_reinstall.manual_restore'), { exact: true })).toContainText('PSP does not perform this recovery for you');
     await expect(dialog.getByText(s('install_reinstall.manual_configure'), { exact: true })).toContainText('API connection alone does not mean');
     const guide = dialog.getByRole('link', { name: text('admin:servers.install_reinstall.official_guide', { backend: labels[record.panel_type] }), exact: true });
     await expect(guide).toHaveAttribute('href', record.panel_type === '3xui' ? 'https://github.com/MHSanaei/3x-ui' : 'https://github.com/alireza0/s-ui');
-    await dialog.getByRole('combobox', { name: s('install_reinstall.method'), exact: true }).click();
-    await expect(page.getByRole('option', { name: s('install_reinstall.automatic_unavailable'), exact: true })).toHaveAttribute('aria-disabled', 'true');
-    await page.keyboard.press('Escape');
+    // The automatic method is listed so the person sees it exists, and is off.
+    await expect(optionsOf(dialog.getByRole('combobox', { name: s('install_reinstall.method'), exact: true }))
+      .filter({ hasText: s('install_reinstall.automatic_unavailable') })).toBeDisabled();
     await dialog.getByRole('button', { name: s('install_reinstall.configure_original'), exact: true }).click();
-    await expect(page.getByRole('heading', { name: text('admin:servers.edit_title', { name: record.name }), exact: true })).toBeVisible();
-    await expect(page.getByRole('dialog').getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.getByRole('dialog').getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveCount(0);
-    await expect(page.getByRole('dialog').getByLabel(s('field.url'), { exact: false })).toHaveValue(record.url);
-    await page.getByRole('dialog').getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The server's own page opens (its name is the page's heading) and the chooser has gone.
+    await expect(page.getByRole('heading', { level: 1, name: record.name, exact: true })).toBeVisible();
+    await gone();
+    await expect(page.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveCount(0);
+    await expect(page.getByLabel(s('field.url'), { exact: false })).toHaveValue(record.url);
+    // Nothing is offered to save until something changes; the manual step records a note on the original ID.
+    await expect(page.getByRole('button', { name: text('common:actions.save'), exact: true })).toHaveCount(0);
+    await page.getByRole('textbox', { name: s('field.remark'), exact: true }).fill(manualNote);
+    await page.getByRole('button', { name: text('common:actions.save'), exact: true }).click();
+    await expect.poll(() => count('PUT', `/api/admin/servers/${record.id}`)).toBe(1);
+    await expect(page.getByRole('button', { name: text('common:actions.save'), exact: true })).toHaveCount(0);
+    await toList();
     assert.equal(count('PUT', `/api/admin/servers/${record.id}`), 1, 'Manual configuration must address the original ID.');
   }
   assert.equal(requests.some(request => /node-(migration|installation)|rotate-node/.test(request.pathname)), false,
     'Merely opening manual guidance must not issue migration/credential calls.');
 
   const pn = await openChooser(servers[0]);
-  await pn.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true }).click();
-  await expect(page.getByRole('option')).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
-  await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
+  await expect(optionsOf(backendOf(pn))).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
+  await backendOf(pn).selectOption('psp');
   await pn.getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
-  let dialog = page.getByRole('dialog');
+  // The chooser hands over to the installation page: wait for the page's own controls, then no dialog is open.
+  await expect(page.getByRole('combobox', { name: s('native.method_label'), exact: true })).toBeVisible();
+  await gone();
+  // The page is the scope the installation's helpers search.
+  let dialog = page;
   await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
   await selectReviewedRelease(dialog);
   await dialog.getByRole('button', { name: s('native.generate_command'), exact: true }).click();
   await copyAndCheck(dialog, commandFor(7));
-  await dialog.getByRole('button', { name: closeName, exact: true }).click();
-  const originalPNRow = page.getByRole('row').filter({ has: page.getByText(servers[0].name, { exact: true }) });
-  await originalPNRow.getByRole('button', { name: s('action.edit'), exact: true }).click();
-  dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveText(s('native.release_stable'));
-  await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).click();
-  await page.getByRole('option', { name: s('native.release_beta'), exact: true }).click();
-  await dialog.getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await toList();
+  await moreOf(servers[0]).click();
+  await page.getByRole('menuitem', { name: s('action.edit'), exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: servers[0].name, exact: true })).toBeVisible();
+  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveValue('stable');
+  await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).selectOption('beta');
+  await dialog.getByRole('button', { name: text('common:actions.save'), exact: true }).click();
+  await expect.poll(() => count('PUT', '/api/admin/servers/7')).toBe(1);
   assert.equal(count('PUT', '/api/admin/servers/7'), 1, 'The saved update preference must address the original PN ID.');
+  await toList();
   await (await openChooser(servers[0])).getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
-  dialog = page.getByRole('dialog');
+  await expect(page.getByRole('combobox', { name: s('native.method_label'), exact: true })).toBeVisible();
+  await gone();
   await inspectOriginalIdentity(dialog);
-  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_beta'));
-  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue(version);
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveValue('beta');
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toHaveValue(version);
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeEnabled();
   // A temporary override must not save a second preference or replace identity.
-  await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).click();
-  await page.getByRole('option', { name: s('native.release_stable'), exact: true }).click();
+  await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).selectOption('stable');
   assert.equal(count('PUT', '/api/admin/servers/7'), 1);
-  await dialog.getByRole('button', { name: closeName, exact: true }).click();
-  await originalPNRow.getByRole('button', { name: s('action.more'), exact: true }).click();
+  await toList();
+  await moreOf(servers[0]).click();
   await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
   dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_beta'));
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveValue('beta');
   // The upgrade surface selects the newest reviewed release in the saved
   // channel automatically; the administrator can still change it before
   // confirming the request.
   await expect(dialog.getByRole('button', { name: s('agent_upgrade.confirm'), exact: true })).toBeEnabled();
-  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue(version);
-  await dialog.getByRole('button', { name: closeName, exact: true }).click();
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true })).toHaveValue(version);
+  await close(dialog).click();
+  await gone();
 
   const migration = await openChooser(servers[1]);
-  await migration.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true }).click();
-  await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
+  await backendOf(migration).selectOption('psp');
   await expect(migration.getByText(text('admin:servers.install_reinstall.switch_warning', { original: '3X-UI', target: 'Passwall Node' }), { exact: true })).toBeVisible();
   assert.equal(count('GET', '/api/admin/servers/17/node-migration-preview'), 0);
   await migration.getByRole('button', { name: s('install_reinstall.precheck'), exact: true }).click();
+  await expect(page.getByText(s('migration.ready'), { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(1);
   dialog = page.getByRole('dialog');
-  await expect(dialog.getByText(s('migration.ready'), { exact: true })).toBeVisible();
   await expect(dialog.getByText(s('migration.online_hint'), { exact: true })).toBeVisible();
   const migrationDetails = dialog.getByRole('button', { name: s('migration.details'), exact: true });
   await expect(migrationDetails).toHaveAttribute('aria-expanded', 'false');
@@ -407,16 +434,20 @@ try {
   await expect(generate).toBeEnabled();
   await generate.click();
   await copyAndCheck(dialog, commandFor(17));
-  await dialog.getByRole('button', { name: closeName, exact: true }).click();
+  await close(dialog).click();
+  await gone();
 
   await page.getByRole('button', { name: s('create'), exact: true }).click();
-  dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveText('Passwall Node');
-  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveText(s('native.release_stable'));
-  await dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }).click();
-  await expect(page.getByRole('option')).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
-  await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
-  await dialog.getByRole('button', { name: text('common:actions.cancel'), exact: true }).click();
+  // Adding a server is a page of its own; it is the scope the following checks search.
+  await expect(page.getByRole('heading', { level: 1, name: s('create'), exact: true })).toBeVisible();
+  dialog = page;
+  await expect(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveValue('psp');
+  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveValue('stable');
+  await expect(optionsOf(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }))).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
+  await dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }).selectOption('psp');
+  // Re-selecting the type already chosen changes nothing, so the page is left without a question.
+  await toList();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
   assert.equal(count('POST', '/api/admin/servers'), 0, 'Reinstallation must not create a server record.');
   assert(count('GET', '/api/admin/servers/sui-release') > 0, 'The visible S-UI server must request read-only release metadata.');
@@ -426,8 +457,13 @@ try {
   assert.equal(requests.some(request => ['PATCH', 'DELETE'].includes(request.method)), false, 'No record deletion or arbitrary patch is allowed.');
   assert.equal(count('POST', '/api/admin/servers/7/node-install-command'), 1);
   assert.equal(count('POST', '/api/admin/servers/17/node-migration-command'), 1);
-  assert.deepEqual(requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe')
-    .map(request => request.body.id).sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  // A result is kept for 60 s across the trip to a server's page and back, and dropped when that server is saved, so an ID
+  // is probed again only after its own save: the first load, plus one more after each of 17, 27 and 7 was saved. Every
+  // original server is probed and no other ID ever is. The ceiling is deliberately loose (a slow runner can outlive the
+  // 60 s window and probe again on a return to the list); it is there to catch a probe loop, not to count round trips.
+  const probed = requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe').map(request => request.body.id);
+  assert.deepEqual([...new Set(probed)].sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
+  for (const id of [7, 17, 27]) assert(probed.filter(probe => probe === id).length <= 8, `Server ${id} was probed in a loop.`);
   await context.close();
   assert.deepEqual(failures, [], 'Browser/fixture errors are acceptance failures.');
   console.log('PASS: real Linux Chromium built-SPA acceptance: original backends, PN defaults/full name, truthful manual recovery, fixed identity, reviewed-release consent and node-host command/copy.');

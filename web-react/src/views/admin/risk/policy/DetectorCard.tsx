@@ -1,11 +1,11 @@
 import { useId, type ReactNode } from 'react'
-import {
-  Accordion, AccordionDetails, AccordionSummary, Box, Divider, FormControlLabel, Paper, Switch, Typography, useTheme,
-} from '@mui/material'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { useTranslation } from 'react-i18next'
 
 import type { RuntimeKnobValues } from '@/api/settings'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Switch } from '@/components/ui/switch'
+import { IconChevronRight } from '@/lib/icons'
+import { cn } from '@/lib/utils'
+import { useRiskT } from '../useRiskT'
 import PolicyField from './PolicyField'
 import type { RiskPolicyKey, RiskPolicySettings } from './policyKeys'
 import type { PolicyCardSpec, PolicyFieldSpec } from './policyLayout'
@@ -15,14 +15,12 @@ import PresetSelect from './PresetSelect'
 const P = 'admin:risk_center.policy.'
 
 /**
- * One detector's card: its switch, its preset, its key thresholds, what the
- * server will judge with, and the rest behind 高级. Laid out from the card's
- * spec (policyLayout), so the card itself decides nothing about which key
- * goes where.
+ * One detector's card: its switch, its preset, its key thresholds, what the server will judge with, and
+ * the rest behind 高级. Laid out from the card's spec (policyLayout), so the card itself decides nothing
+ * about which key goes where.
  *
- * A card switched off stays editable, dimmed: an admin may set the
- * thresholds before turning the detector on, and a value that is kept while
- * off is not one the page should hide.
+ * A card switched off stays editable, dimmed: an admin may set the thresholds before turning the detector
+ * on, and a value that is kept while off is not one the page should hide.
  */
 export default function DetectorCard({
   card, draft, defaults, effective, on, onToggle, onPatch, errors, advancedOpen, onAdvancedChange,
@@ -48,45 +46,38 @@ export default function DetectorCard({
   /** Values the card's description names (设备数: the shared days). */
   descValues?: Record<string, unknown>
 }) {
-  const { t } = useTranslation(['admin'])
-  const md = useTheme().palette.md
+  const { t } = useRiskT()
   const titleId = useId()
+  const advancedId = useId()
   const dimmed = on === false
 
   const field = (spec: PolicyFieldSpec) => {
     const wide = spec.kind === 'text' || spec.kind === 'switch' || spec.kind === 'inverted'
     return (
       // data-policy-key: where the page scrolls a field the server refused.
-      <Box key={spec.key} data-policy-key={spec.key} sx={wide ? { gridColumn: '1 / -1' } : undefined}>
+      <div key={spec.key} data-policy-key={spec.key} className={wide ? 'sm:col-span-2' : undefined}>
         <PolicyField spec={spec} value={draft[spec.key]} defaults={defaults}
           effective={spec.effective ? effective[spec.key as keyof RuntimeKnobValues] : undefined}
           error={errors[spec.key]}
           onChange={v => onPatch({ [spec.key]: v } as Partial<RiskPolicySettings>)} />
-      </Box>
+      </div>
     )
   }
-  const grid = (specs: PolicyFieldSpec[]) => (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-      {specs.map(field)}
-    </Box>
-  )
+  const grid = (specs: PolicyFieldSpec[]) => <div className="grid gap-4 sm:grid-cols-2">{specs.map(field)}</div>
 
   return (
-    <Paper component="section" aria-labelledby={titleId} variant="outlined"
-      sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, bgcolor: md.surfaceContainerLow }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
-        <Typography id={titleId} component="h2" sx={{ fontSize: 16, fontWeight: 600 }}>{t(card.title)}</Typography>
+    <Card role="region" aria-labelledby={titleId}>
+      <CardHeader>
+        <CardTitle id={titleId} role="heading" aria-level={2}>{t(card.title)}</CardTitle>
+        <CardDescription>{t(card.desc, descValues)}</CardDescription>
         {onToggle && (
-          <FormControlLabel label={t(`${P}${on === true ? 'enabled' : 'disabled'}`)} labelPlacement="start"
-            sx={{ m: 0, gap: 0.5, '& .MuiFormControlLabel-label': { minWidth: '3em', textAlign: 'right', color: md.onSurfaceVariant } }}
-            control={<Switch checked={on === true} onChange={(_, c) => onToggle(c)} />} />
+          <CardAction className="flex items-center gap-2">
+            <span className="min-w-[3em] text-right text-sm text-muted-foreground">{t(`${P}${on === true ? 'enabled' : 'disabled'}`)}</span>
+            <Switch checked={on === true} onCheckedChange={onToggle} aria-labelledby={titleId} />
+          </CardAction>
         )}
-      </Box>
-      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mt: 0.5 }}>
-        {t(card.desc, descValues)}
-      </Typography>
-
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2, opacity: dimmed ? 0.6 : 1 }}>
+      </CardHeader>
+      <CardContent className={cn('flex flex-col gap-4', dimmed && 'opacity-60')}>
         {card.preset && (
           <PresetSelect value={detectPreset(card.preset, draft, defaults)}
             onApply={preset => onPatch(applyPreset(card.preset!, preset, defaults))} />
@@ -95,25 +86,26 @@ export default function DetectorCard({
         {lines}
 
         {card.disposal && (
-          <>
-            <Divider />
-            <Typography component="h3" sx={{ fontSize: 14, fontWeight: 600 }}>{t(`${P}disposal`)}</Typography>
+          <section className="flex flex-col gap-3 border-t pt-4">
+            <h3 className="text-sm font-medium">{t(`${P}disposal`)}</h3>
             {grid(card.disposal)}
             {disposalLines}
-          </>
+          </section>
         )}
 
         {card.advanced && (
-          <Accordion disableGutters elevation={0} expanded={advancedOpen}
-            onChange={(_, open) => onAdvancedChange(open)}
-            sx={{ bgcolor: 'transparent', '&:before': { display: 'none' } }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: 0 }}>
-              <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t(`${P}advanced`)}</Typography>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: 0 }}>{grid(card.advanced)}</AccordionDetails>
-          </Accordion>
+          <section className="border-t pt-3">
+            <button type="button" aria-expanded={advancedOpen} aria-controls={advancedId}
+              onClick={() => onAdvancedChange(!advancedOpen)}
+              className="-ml-1 flex items-center gap-1.5 rounded-md px-1 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              <IconChevronRight aria-hidden className={cn('size-4 text-muted-foreground transition-transform', advancedOpen && 'rotate-90')} />
+              {t(`${P}advanced`)}
+            </button>
+            {/* Hidden, not unmounted: a value typed in it survives a collapse and the fields still exist. */}
+            <div id={advancedId} hidden={!advancedOpen} className="mt-3">{grid(card.advanced)}</div>
+          </section>
         )}
-      </Box>
-    </Paper>
+      </CardContent>
+    </Card>
   )
 }

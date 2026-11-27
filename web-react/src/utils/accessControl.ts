@@ -1,25 +1,7 @@
-import type { ComponentType } from 'react'
-import type { SvgIconProps, Theme } from '@mui/material'
-import AllInclusiveIcon from '@mui/icons-material/AllInclusive'
-import BlockIcon from '@mui/icons-material/Block'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlineOutlined'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined'
-import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined'
-import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutlineOutlined'
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
-import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined'
-import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
-import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined'
-import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import type {
   DestAction, DestBudget, DestBudgetItem, DestListsView, DestNodeState, DestNodeStatus, DestPolicies, DestPolicy, DestState, ResolveUnavailable,
   DestStatus,
 } from '@/api/accessControl'
-import type { StatusLineTone } from '@/components/StatusLine'
-import { amber, type Tone } from '@/components/ToneBadge'
 
 // THE ACCESS-CONTROL PAGE'S PURE RULES: the closed colour table, the one
 // node-state table, the page verdict and the small decisions several screens
@@ -32,37 +14,14 @@ import { amber, type Tone } from '@/components/ToneBadge'
 // asserts it. "Block" is a word, not an alarm: it is not drawn on red.
 // ---------------------------------------------------------------------------
 
+/** How bad the page verdict is, worst to quietest. The verdict line maps it onto a tone (VerdictBar). */
+export type StatusLineTone = 'failing' | 'attention' | 'measuring' | 'ok' | 'quiet'
+
 export const ACCESS_TONE_KINDS = [
   'block', 'allowlist_deny', 'observe', 'would_deny', 'allow', 'exempt', 'allowlist_enforced', 'ok', 'measuring',
   'attention', 'failing', 'paused', 'not_applicable', 'none', 'unknown', 'permanent',
 ] as const
 export type AccessToneKind = (typeof ACCESS_TONE_KINDS)[number]
-
-export function accessTone(theme: Theme, kind: AccessToneKind): Tone {
-  const md = theme.palette.md
-  const quiet = { bg: md.surfaceContainerHighest, fg: md.onSurfaceVariant }
-  switch (kind) {
-    case 'block': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: BlockIcon }
-    case 'allowlist_deny': return { bg: md.surfaceContainerHighest, fg: md.error, Icon: LockOutlinedIcon }
-    case 'observe': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: VisibilityOutlinedIcon }
-    case 'would_deny': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: ScienceOutlinedIcon }
-    case 'allow': return { ...quiet, Icon: CheckCircleOutlineIcon }
-    case 'exempt': return { bg: md.surfaceContainerHigh, fg: md.onSurface, Icon: VerifiedUserOutlinedIcon }
-    case 'allowlist_enforced': return { bg: md.surfaceContainerHigh, fg: md.onSurface, Icon: LockOutlinedIcon }
-    case 'ok': return { bg: md.surfaceContainerHigh, fg: theme.palette.success.main, text: md.onSurface, Icon: CheckCircleOutlineIcon }
-    case 'measuring': return { bg: md.secondaryContainer, fg: md.onSecondaryContainer, Icon: HourglassEmptyIcon }
-    case 'attention': return { ...amber(theme), text: md.onSurface, Icon: WarningAmberIcon }
-    case 'failing': return { bg: md.errorContainer, fg: md.onErrorContainer, Icon: ErrorOutlineIcon }
-    case 'paused': return { ...quiet, Icon: PauseCircleOutlineIcon }
-    case 'not_applicable': return { ...quiet, Icon: RemoveCircleOutlineIcon }
-    case 'none': return { ...quiet, Icon: RadioButtonUncheckedIcon }
-    case 'unknown': return { ...quiet, Icon: HelpOutlineIcon }
-    case 'permanent': return { ...quiet, Icon: AllInclusiveIcon }
-  }
-}
-
-/** The icon component, for tests that compare the table's rows. */
-export type ToneIcon = ComponentType<SvgIconProps>
 
 // ---------------------------------------------------------------------------
 // Node states (plan §7.4 S14): ONE table, read by the coverage sheet, the

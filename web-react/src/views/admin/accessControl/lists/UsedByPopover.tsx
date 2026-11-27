@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { Box, Link, Popover } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import type { DestPolicyRef } from '@/api/accessControl'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+
+const LINK = 'min-w-0 truncate text-left underline-offset-2 outline-none hover:underline focus-visible:underline'
 
 /** The "N policies" cell: a button that opens the list of who uses the list, each a link to its editor. */
 export default function UsedByPopover({ usedBy, onOpenPolicy, onOpenAllowlist }: {
@@ -12,46 +14,40 @@ export default function UsedByPopover({ usedBy, onOpenPolicy, onOpenAllowlist }:
   onOpenAllowlist: (groupId: number) => void
 }) {
   const { t } = useTranslation(['admin'])
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const [open, setOpen] = useState(false)
   const policies = usedBy.filter(u => u.kind === 'policy')
   const groups = usedBy.filter(u => u.kind === 'group')
   // A node's route has no page of its own here: it is named, not linked.
   const routes = usedBy.filter(u => u.kind === 'route')
   if (usedBy.length === 0) return <span>{t('admin:access_control.lists.usage.unused')}</span>
+  const summary = [
+    policies.length > 0 ? t('admin:access_control.lists.usage.policies', { count: policies.length }) : null,
+    groups.length > 0 ? t('admin:access_control.lists.usage.groups', { count: groups.length }) : null,
+    routes.length > 0 ? t('admin:access_control.lists.usage.routes', { count: routes.length }) : null,
+  ].filter(Boolean).join(' · ')
+  const go = (open: () => void) => { setOpen(false); open() }
   return (
-    <>
-      <Link component="button" type="button" underline="hover" onClick={e => setAnchor(e.currentTarget)}
-        sx={{ font: 'inherit', color: 'inherit' }}>
-        {[
-          policies.length > 0 ? t('admin:access_control.lists.usage.policies', { count: policies.length }) : null,
-          groups.length > 0 ? t('admin:access_control.lists.usage.groups', { count: groups.length }) : null,
-          routes.length > 0 ? t('admin:access_control.lists.usage.routes', { count: routes.length }) : null,
-        ].filter(Boolean).join(' · ')}
-      </Link>
-      <Popover open={anchor !== null} anchorEl={anchor} onClose={() => setAnchor(null)}
-        slotProps={{ paper: { sx: { maxWidth: 320, p: 1.5 } } }}>
-        <Box component="ul" sx={{ m: 0, p: 0, listStyle: 'none', display: 'grid', gap: 0.5 }}>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<button type="button" className="max-w-full truncate text-left underline-offset-2 hover:underline focus-visible:underline" />}>
+        {summary}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto max-w-80 min-w-48">
+        <ul className="m-0 grid list-none gap-1 p-0">
           {policies.map(u => (
-            <li key={`${u.kind}:${u.id}`}>
-              <Link component="button" type="button" underline="hover" sx={{ font: 'inherit', textAlign: 'left' }}
-                onClick={() => { setAnchor(null); onOpenPolicy(u.id) }}>
-                {u.name || String(u.id)}
-              </Link>
+            <li key={`${u.kind}:${u.id}`} className="flex min-w-0">
+              <button type="button" className={LINK} title={u.name || String(u.id)} onClick={() => go(() => onOpenPolicy(u.id))}>{u.name || String(u.id)}</button>
             </li>
           ))}
           {groups.map(u => (
-            <li key={`${u.kind}:${u.id}`}>
-              <Link component="button" type="button" underline="hover" sx={{ font: 'inherit', textAlign: 'left' }}
-                onClick={() => { setAnchor(null); onOpenAllowlist(u.id) }}>
-                {u.name || String(u.id)}
-              </Link>
+            <li key={`${u.kind}:${u.id}`} className="flex min-w-0">
+              <button type="button" className={LINK} title={u.name || String(u.id)} onClick={() => go(() => onOpenAllowlist(u.id))}>{u.name || String(u.id)}</button>
             </li>
           ))}
           {routes.map(u => (
-            <li key={`${u.kind}:${u.id}`} data-testid="used-by-route">{u.name || String(u.id)}</li>
+            <li key={`${u.kind}:${u.id}`} data-testid="used-by-route" className="truncate">{u.name || String(u.id)}</li>
           ))}
-        </Box>
-      </Popover>
-    </>
+        </ul>
+      </PopoverContent>
+    </Popover>
   )
 }

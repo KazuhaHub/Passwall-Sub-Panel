@@ -1,10 +1,9 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react'
-import { Box, Button, Card, Collapse, Typography, useTheme } from '@mui/material'
-import RefreshIcon from '@mui/icons-material/Refresh'
-import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
+
+import { Button } from '@/components/ui/button'
+import { IconChevronDown, IconCopy, IconRefresh, IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 
 interface State {
   error: Error | null
@@ -20,7 +19,7 @@ interface Props {
 // to a blank white screen. Async errors (fetch rejections, setTimeout
 // throws, event handlers) bypass React's boundary mechanism by design —
 // those are handled by the global axios error interceptor + the
-// SnackbarHost, not here.
+// toast layer, not here.
 //
 // NOTE: this React boundary does NOT catch errors thrown inside routed
 // components — react-router's createBrowserRouter intercepts those at the
@@ -29,9 +28,9 @@ interface Props {
 // page-level crashes get the same UI as this boundary.
 //
 // Boundaries MUST be class components because the hook surface (which
-// can read context, translate strings, theme, etc.) is unavailable
-// inside getDerivedStateFromError / componentDidCatch. The render path
-// hands off to a function component as soon as the error is captured.
+// can read context, translate strings, etc.) is unavailable inside
+// getDerivedStateFromError / componentDidCatch. The render path hands off
+// to a function component as soon as the error is captured.
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null, componentStack: null }
 
@@ -69,13 +68,16 @@ export default class ErrorBoundary extends Component<Props, State> {
 // and the router's <RouteError/>. The "view details" section is kept even in
 // production: this is a self-hosted panel for a small group, so being able to
 // ask a friend to expand + copy the trace beats hiding it.
+//
+// It must work when whatever broke is a provider (query client, router, a store):
+// so it takes nothing from context. Only the global i18n instance (useTranslation
+// without a provider reads it) and the CSS variables on <html>, which are plain
+// CSS and exist before React mounts.
 export function ErrorFallback({ error, onReload, componentStack }: {
   error: Error
   onReload: () => void
   componentStack?: string
 }) {
-  const theme = useTheme()
-  const md = theme.palette.md
   const { t } = useTranslation('common')
   const [showDetails, setShowDetails] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -93,67 +95,34 @@ export function ErrorFallback({ error, onReload, componentStack }: {
   }
 
   return (
-    <Box sx={{
-      position: 'fixed', inset: 0,
-      display: 'grid', placeItems: 'center',
-      bgcolor: md.surface, p: 3, overflow: 'auto',
-    }}>
-      <Card sx={{
-        maxWidth: 560, width: '100%',
-        p: { xs: 3, sm: 4 },
-        bgcolor: md.surfaceContainer,
-        borderRadius: 4,
-        textAlign: 'center',
-        border: `1px solid ${md.outlineVariant}`,
-      }}>
-        <ReportProblemOutlinedIcon sx={{ fontSize: 56, color: md.error, mb: 2 }} />
-        <Typography variant="h5" sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>
-          {t('error_boundary.title')}
-        </Typography>
-        <Typography sx={{ color: md.onSurfaceVariant, mb: 3, fontSize: 14, lineHeight: 1.6 }}>
-          {t('error_boundary.body')}
-        </Typography>
-        <Button variant="contained" size="large" startIcon={<RefreshIcon />} onClick={onReload}>
+    <div role="alert" className="fixed inset-0 grid place-items-center overflow-auto bg-background p-6 text-foreground">
+      <div className="w-full max-w-xl rounded-xl bg-card p-6 text-center ring-1 ring-foreground/10 sm:p-8">
+        <IconWarning aria-hidden className="mx-auto mb-4 size-12 text-destructive" />
+        <h1 className="mb-3 text-xl font-medium">{t('error_boundary.title')}</h1>
+        <p className="mb-6 text-sm/relaxed text-muted-foreground">{t('error_boundary.body')}</p>
+        <Button size="lg" onClick={onReload}>
+          <IconRefresh />
           {t('error_boundary.refresh')}
         </Button>
 
         {detail && (
-          <Box sx={{ mt: 3, textAlign: 'left' }}>
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => setShowDetails(v => !v)}
-              endIcon={<ExpandMoreIcon sx={{ transform: showDetails ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />}
-              sx={{ color: md.onSurfaceVariant }}>
-              {t('error_boundary.details', { defaultValue: '查看详情' })}
+          <div className="mt-6 text-left">
+            <Button variant="outline" size="sm" aria-expanded={showDetails} onClick={() => setShowDetails(v => !v)}>
+              {t('error_boundary.details')}
+              <IconChevronDown className={cn('transition-transform', showDetails && 'rotate-180')} />
             </Button>
-            <Collapse in={showDetails}>
-              <Box sx={{
-                mt: 1, p: 1.5,
-                borderRadius: 2,
-                bgcolor: md.surfaceContainerHighest,
-                position: 'relative',
-                maxHeight: 280, overflow: 'auto',
-              }}>
-                <Button
-                  size="small"
-                  startIcon={<ContentCopyIcon sx={{ fontSize: 14 }} />}
-                  onClick={copyDetail}
-                  sx={{ position: 'absolute', top: 4, right: 4, fontSize: 11, minWidth: 0 }}>
-                  {copied ? t('error_boundary.copied', { defaultValue: '已复制' }) : t('error_boundary.copy', { defaultValue: '复制' })}
+            {showDetails && (
+              <div className="relative mt-2 max-h-72 overflow-auto rounded-lg bg-muted p-3">
+                <Button variant="outline" size="xs" className="absolute top-1 right-1" onClick={copyDetail}>
+                  <IconCopy />
+                  {copied ? t('error_boundary.copied') : t('error_boundary.copy')}
                 </Button>
-                <Typography component="pre" sx={{
-                  m: 0, fontSize: 11, color: md.onSurfaceVariant,
-                  fontFamily: 'monospace', wordBreak: 'break-word',
-                  whiteSpace: 'pre-wrap',
-                }}>
-                  {detail}
-                </Typography>
-              </Box>
-            </Collapse>
-          </Box>
+                <pre className="m-0 font-mono text-[11px] break-words whitespace-pre-wrap text-muted-foreground">{detail}</pre>
+              </div>
+            )}
+          </div>
         )}
-      </Card>
-    </Box>
+      </div>
+    </div>
   )
 }

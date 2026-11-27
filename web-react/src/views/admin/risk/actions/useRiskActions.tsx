@@ -1,17 +1,23 @@
-import { useCallback, useState, type ReactElement, type ReactNode } from 'react'
-import {
-  Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel,
-  TextField, Typography, useTheme,
-} from '@mui/material'
-import { useTranslation } from 'react-i18next'
+import { useCallback, useRef, useState, type ReactElement } from 'react'
 import { isAxiosError } from 'axios'
 
 import type { TrustResult } from '@/api/riskCenter'
-import { pushSnack } from '@/components/SnackbarHost'
+import { AsyncButton } from '@/components/common/AsyncButton'
+import { pushSnack } from '@/components/feedback/toasts'
+import { Field } from '@/components/form/Field'
+import {
+  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogMedia, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
+import { IconWarning } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { useReviewAction } from '@/query/riskCenter'
 import { useSetServiceStatus } from '@/query/users'
 import { useQueryScope } from '@/query/useQueryScope'
 import type { Translate } from '@/utils/geoAnomaly'
+import { useRiskT } from '../useRiskT'
 import {
   expectedLevels, holdLabelKey, pauseReason, type RiskActionKind, type RiskSubject,
 } from './riskSubject'
@@ -37,9 +43,27 @@ interface DialogCopy {
   destructive: boolean
   note?: { label: string; hint?: string }
   check?: { label: string; initial: boolean }
+  /** The closing line on what the action does to access and whether it can be undone; with a checkbox, the
+   *  line for the box ticked as well, because the box changes what the action does. */
+  reversible: { unticked: string; ticked?: string }
 }
 
+/**
+ * What the dialog says: the action's own explanation, then one line on whether it can be undone — every
+ * action here changes how an account is judged or served, so the admin is told what a mistake costs.
+ */
 function dialogCopy(kind: RiskActionKind, s: RiskSubject, t: Translate): DialogCopy {
+  const copy = baseCopy(kind, s, t)
+  const key = `${A}reversible_${kind === 'redismiss' ? 'dismiss' : kind}`
+  // Trusting a held account offers to resume it, and resuming an untrusted held one offers to trust it:
+  // the line follows the box, so it never says the service is untouched when confirming resumes it.
+  const reversible = copy.check && (kind === 'trust' || kind === 'resume')
+    ? { unticked: t(key), ticked: t(`${key}_${kind === 'trust' ? 'resume' : 'trust'}`) }
+    : { unticked: t(key) }
+  return { ...copy, reversible }
+}
+
+function baseCopy(kind: RiskActionKind, s: RiskSubject, t: Translate): Omit<DialogCopy, 'reversible'> {
   const upn = { upn: s.upn }
   switch (kind) {
     case 'pause': {
@@ -171,7 +195,7 @@ export interface RiskActions {
  * was stale.
  */
 export function useRiskActions(): RiskActions {
-  const { t } = useTranslation(['admin', 'common'])
+  const { t } = useRiskT()
   const scope = useQueryScope()
   const review = useReviewAction(scope)
   const service = useSetServiceStatus(scope)
@@ -245,7 +269,7 @@ export function useRiskActions(): RiskActions {
       {current && (
         <ActionDialog key={current.seq} open={open} busy={busy}
           copy={dialogCopy(current.kind, current.subject, t)} cancelText={t('common:actions.cancel')}
-          onCancel={() => setOpen(false)} onConfirm={input => void confirm(input)} />
+          onCancel={() => setOpen(false)} onConfirm={confirm} />
       )}
     </>
   )
@@ -253,48 +277,63 @@ export function useRiskActions(): RiskActions {
   return { start, cancel, busy, dialogs }
 }
 
+/** Above every other layer the page may still have open (the risk drawer included), and below the toasts. */
+const ABOVE_EVERY_MODAL = 'z-[1600]'
+
+/**
+ * One action's confirmation. It is an alert dialog whose focus opens ON Cancel: every action here changes
+ * how an account is judged or served, so a stray Enter must not be able to confirm it. The confirm button
+ * shows its own wait and the dialog stays open on a refusal other than a conflict, with what was typed.
+ */
 function ActionDialog({ open, busy, copy, cancelText, onCancel, onConfirm }: {
   open: boolean
   busy: boolean
   copy: DialogCopy
   cancelText: string
   onCancel: () => void
-  onConfirm: (input: DialogInput) => void
+  onConfirm: (input: DialogInput) => Promise<void>
 }) {
-  const md = useTheme().palette.md
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const [note, setNote] = useState('')
   const [also, setAlso] = useState(copy.check?.initial ?? false)
-  const para = (text: string, i: number): ReactNode => (
-    <Typography key={i} sx={{ fontSize: 14, color: i === 0 ? md.onSurface : md.onSurfaceVariant }}>{text}</Typography>
-  )
   return (
-    // Above the drawer (itself above modals), so a dialog opened from the
-    // drawer — opened in turn from the Users edit dialog — is on top.
-    <Dialog open={open} onClose={busy ? undefined : onCancel} fullWidth maxWidth="xs"
-      sx={{ zIndex: th => th.zIndex.modal + 2 }}>
-      <DialogTitle>{copy.title}</DialogTitle>
-      <DialogContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {copy.paragraphs.map(para)}
-          {copy.note && (
-            <TextField label={copy.note.label} helperText={copy.note.hint} value={note} multiline minRows={2}
-              onChange={e => setNote(e.target.value)} slotProps={{ htmlInput: { maxLength: NOTE_MAX } }}
-              size="small" fullWidth sx={{ mt: 0.5 }} />
+    <AlertDialog open={open} onOpenChange={next => { if (!next && !busy) onCancel() }}>
+      <AlertDialogContent initialFocus={cancelRef} overlay={{ className: ABOVE_EVERY_MODAL }}
+        className={cn(ABOVE_EVERY_MODAL, 'data-[size=default]:max-w-md')}>
+        <AlertDialogHeader>
+          {copy.destructive && (
+            <AlertDialogMedia className="bg-destructive/10 text-destructive"><IconWarning aria-hidden /></AlertDialogMedia>
           )}
-          {copy.check && (
-            <FormControlLabel label={copy.check.label}
-              control={<Checkbox checked={also} onChange={e => setAlso(e.target.checked)} />} />
-          )}
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel} disabled={busy}>{cancelText}</Button>
-        <Button variant="contained" color={copy.destructive ? 'error' : 'primary'} disabled={busy}
-          startIcon={busy ? <CircularProgress size={14} /> : undefined}
-          onClick={() => onConfirm({ note, also })}>
-          {copy.confirm}
-        </Button>
-      </DialogActions>
-    </Dialog>
+          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
+          <AlertDialogDescription render={<div />}>
+            <div className="flex flex-col gap-2">
+              {[...copy.paragraphs, also && copy.reversible.ticked ? copy.reversible.ticked : copy.reversible.unticked]
+                .map((text, i) => <p key={i}>{text}</p>)}
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {(copy.note || copy.check) && (
+          <div className="flex flex-col gap-3">
+            {copy.note && (
+              <Field label={copy.note.label} hint={copy.note.hint}>
+                <Textarea value={note} rows={2} maxLength={NOTE_MAX} onChange={e => setNote(e.target.value)} />
+              </Field>
+            )}
+            {copy.check && (
+              <Field label={copy.check.label} orientation="horizontal">
+                <Checkbox checked={also} onCheckedChange={c => setAlso(c === true)} />
+              </Field>
+            )}
+          </div>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel ref={cancelRef} disabled={busy}>{cancelText}</AlertDialogCancel>
+          <AsyncButton variant={copy.destructive ? 'destructive' : 'default'} disabled={busy}
+            onClick={() => onConfirm({ note, also })}>
+            {copy.confirm}
+          </AsyncButton>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

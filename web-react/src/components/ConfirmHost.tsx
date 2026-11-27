@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react'
-import {
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Typography,
-  useTheme,
-} from '@mui/material'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { IconWarning } from '@/lib/icons'
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { cn } from '@/lib/utils'
 
 export interface ConfirmOpts {
   title: string
@@ -18,6 +21,12 @@ export interface ConfirmOpts {
   confirmText?: string
   cancelText?: string
   destructive?: boolean
+  /**
+   * Which button takes focus when the dialog opens. Default 'confirm', so Enter answers
+   * yes. Use 'cancel' for an irreversible action (a delete): focus then starts on Cancel
+   * and a stray Enter, typed while the dialog was still coming up, cannot confirm it.
+   */
+  initialFocus?: 'confirm' | 'cancel'
 }
 
 interface InternalState {
@@ -37,16 +46,29 @@ export function confirm(opts: ConfirmOpts): Promise<boolean> {
       resolve(false)
       return
     }
+    // A confirm raised while another is open replaces it; the replaced caller is told
+    // "no" rather than left awaiting a promise nothing will ever settle.
+    resolver?.(false)
     resolver = resolve
     setStateExternal({ open: true, opts })
   })
 }
 
+// Where the confirm sits in the stack. It must be ABOVE every layer a page can have open
+// under it: dialogs, sheets and the dialogs a sheet raises over itself, popovers and
+// menus, and tooltips, because a tooltip left open on the button that raised the confirm
+// would otherwise paint over it. It must stay BELOW the toasts
+// (components/feedback/ToastHost.tsx, z-[1700]), so a toast about the answer is never
+// hidden by the dialog. A route link in a sheet can trip the policy page's leave guard,
+// whose confirm would otherwise open beneath the sheet's backdrop where no click could
+// reach it. The shadcn primitives sit at z-50, so the level is set explicitly.
+const ABOVE_EVERY_MODAL = 'z-[1600]'
+
 export default function ConfirmHost() {
   const { t } = useTranslation('common')
-  const theme = useTheme()
-  const md = theme.palette.md
   const [state, setState] = useState<InternalState>({ open: false, opts: null })
+  const confirmRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     setStateExternal = setState
@@ -54,7 +76,8 @@ export default function ConfirmHost() {
   }, [])
 
   function close(answer: boolean) {
-    setState({ open: false, opts: state.opts })
+    // opts stay while the exit animation runs so the text does not vanish first.
+    setState(s => ({ open: false, opts: s.opts }))
     resolver?.(answer)
     resolver = null
   }
@@ -62,49 +85,36 @@ export default function ConfirmHost() {
   const opts = state.opts
   const destructive = opts?.destructive
   return (
-    // Above every modal: a confirm asks about the last thing the admin did,
-    // wherever that was — including the risk drawer (zIndex.modal + 1) and
-    // the dialogs it raises over itself (+ 2). A route link in that drawer
-    // can trip the policy page's leave guard, whose confirm at the default
-    // level opened beneath the drawer's backdrop, where no click could reach it.
-    <Dialog
-      open={state.open}
-      onClose={() => close(false)}
-      sx={{ zIndex: t => t.zIndex.modal + 3 }}
-      slotProps={{
-        paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }
-      }}
-    >
-      <DialogTitle sx={{ display: 'flex', gap: 1.5, alignItems: 'center', pt: 3 }}>
-        {destructive && (
-          <Box sx={{
-            width: 40, height: 40, borderRadius: '50%',
-            display: 'grid', placeItems: 'center', flexShrink: 0,
-            bgcolor: md.errorContainer, color: md.onErrorContainer,
-          }}>
-            <WarningAmberIcon />
-          </Box>
-        )}
-        <Typography variant="h6" component="span">{opts?.title ?? ''}</Typography>
-      </DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ color: md.onSurfaceVariant, whiteSpace: 'pre-line' }}>
-          {opts?.message ?? ''}
-        </Typography>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => close(false)} variant="text">
-          {opts?.cancelText ?? t('actions.cancel')}
-        </Button>
-        <Button
-          onClick={() => close(true)}
-          variant="contained"
-          autoFocus
-          sx={destructive ? { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: md.error } } : undefined}
-        >
-          {opts?.confirmText ?? t('actions.ok')}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+    <AlertDialog open={state.open} onOpenChange={open => { if (!open) close(false) }}>
+      <AlertDialogContent
+        // The backdrop cancels, as the previous dialog's did; Base UI's alert
+        // dialog otherwise ignores outside clicks.
+        overlay={{ className: ABOVE_EVERY_MODAL, onClick: () => close(false) }}
+        className={cn(ABOVE_EVERY_MODAL, 'data-[size=default]:max-w-md')}
+        // The confirm button takes focus by default: Enter answers yes, Esc no. A
+        // destructive caller can ask for Cancel instead (see ConfirmOpts.initialFocus).
+        initialFocus={opts?.initialFocus === 'cancel' ? cancelRef : confirmRef}
+      >
+        <AlertDialogHeader>
+          {destructive && (
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <IconWarning aria-hidden />
+            </AlertDialogMedia>
+          )}
+          <AlertDialogTitle>{opts?.title ?? ''}</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-line">{opts?.message ?? ''}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel ref={cancelRef}>{opts?.cancelText ?? t('actions.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            ref={confirmRef}
+            onClick={() => close(true)}
+            className={cn(destructive && 'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/40 dark:text-background')}
+          >
+            {opts?.confirmText ?? t('actions.ok')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
 }

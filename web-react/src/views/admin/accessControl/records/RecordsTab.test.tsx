@@ -17,7 +17,7 @@ vi.mock('@/api/accessControl', async importOriginal => {
   return { ...real, ...fns, destErrorOf: real.destErrorOf, isDestUnavailable: real.isDestUnavailable }
 })
 const media = vi.hoisted(() => ({ folded: false }))
-vi.mock('@mui/material', async importOriginal => ({ ...await importOriginal<typeof import('@mui/material')>(), useMediaQuery: () => media.folded }))
+vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => media.folded }))
 vi.mock('@/api/nodes', async importOriginal => ({ ...await importOriginal<typeof import('@/api/nodes')>(), listNodes: vi.fn() }))
 vi.mock('@/api/servers', async importOriginal => ({ ...await importOriginal<typeof import('@/api/servers')>(), listServers: vi.fn() }))
 vi.mock('@/components/UserAutocomplete', () => ({
@@ -25,7 +25,7 @@ vi.mock('@/components/UserAutocomplete', () => ({
     <button aria-label="pick-user" data-value={String(value)} onClick={() => onChange(value ? null : 7)}>pick</button>
   ),
 }))
-vi.mock('../sheets/AddExemptionDialog', () => ({
+vi.mock('../dialogs/AddExemptionDialog', () => ({
   default: ({ open, lockedUserId }: { open: boolean; lockedUserId?: number }) => open ? <p data-testid="exemption-dialog">{lockedUserId}</p> : null,
 }))
 
@@ -83,6 +83,20 @@ beforeEach(() => {
 })
 afterEach(() => { useSiteStore.setState({ timezone: '' }) })
 
+/** Opens a row's "more" menu the way a pointer does; Base UI's menu opens on pointer down. */
+function openRowMenu(row: HTMLElement) {
+  const trigger = within(row).getByRole('button', { name: '更多操作' })
+  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+  fireEvent.mouseDown(trigger, { button: 0 })
+  fireEvent.click(trigger)
+}
+/** Picks an option of a native select the way a person does: by changing its value. */
+const choose = (select: HTMLElement, text: string) => {
+  const opt = within(select).getByRole('option', { name: text }) as HTMLOptionElement
+  fireEvent.change(select, { target: { value: opt.value } })
+}
+const optionTexts = (select: HTMLElement) => within(select).getAllByRole('option').map(o => o.textContent)
+
 const lastParams = () => vi.mocked(api.getDestHits).mock.calls.at(-1)![0]!
 
 describe('an allowlist group as the rule', () => {
@@ -130,7 +144,7 @@ describe('the rows', () => {
     expect(within(first).getByText('smtp.gmail.com:587')).toBeTruthy()
     expect(within(first).getByText('东京 01')).toBeTruthy()
     expect(within(first).getByText('37')).toBeTruthy()
-    expect(within(first).getByTestId('hit-action').getAttribute('data-state')).toBe('block')
+    expect(within(first).getByTestId('hit-action').getAttribute('data-kind')).toBe('block')
     expect(within(first).getByTestId('hit-time').getAttribute('title')).toMatch(/首次 \d\d:\d\d · 最后 \d\d:\d\d/)
   })
 
@@ -138,7 +152,7 @@ describe('the rows', () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
     const badge = within(rows[1]).getByTestId('hit-action')
-    expect(badge.getAttribute('data-state')).toBe('observe')
+    expect(badge.getAttribute('data-kind')).toBe('would_deny')
     expect(badge.textContent).toBe('本应拦截')
   })
 
@@ -165,7 +179,7 @@ describe('the rows', () => {
     const rows = await screen.findAllByTestId('hit-row')
     const dest = within(rows[3]).getByTestId('hit-dest')
     expect(dest.textContent).toContain('aaaaaaaa')
-    expect(dest.getAttribute('aria-label') ?? dest.parentElement?.getAttribute('aria-label')).toContain('example.com:443')
+    expect(dest.getAttribute('title')).toContain('example.com:443')
   })
 
   it('days are headed in the panel zone: today, yesterday-or-earlier', async () => {
@@ -225,10 +239,9 @@ describe('filters', () => {
     vi.mocked(api.getDestStatus).mockResolvedValue(status([node(), node({ panel_id: 6, panel_name: '洛杉矶 02' }), node({ panel_id: 7, panel_name: '美西 A', kind: 'x-ui' })]))
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '节点' }))
-    const list = await screen.findByRole('listbox')
-    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['全部节点', '东京 01', '洛杉矶 02'])
-    fireEvent.click(within(list).getByRole('option', { name: '洛杉矶 02' }))
+    const select = screen.getByRole('combobox', { name: '节点' })
+    expect(optionTexts(select)).toEqual(['全部节点', '东京 01', '洛杉矶 02'])
+    choose(select, '洛杉矶 02')
     await waitFor(() => expect(whereIs(router)).toContain('rec_panel=6'))
   })
 
@@ -236,11 +249,10 @@ describe('filters', () => {
     vi.mocked(api.getDestHits).mockResolvedValue(result({ sources: [...result().sources, { source: 's4', name: '东京 01' }] }))
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '规则' }))
-    const list = await screen.findByRole('listbox')
-    const labels = within(list).getAllByRole('option').map(o => o.textContent)
+    const select = screen.getByRole('combobox', { name: '规则' })
+    const labels = optionTexts(select)
     expect(labels).toEqual(expect.arrayContaining(['全部规则', '禁止发信', '加密货币交易所', '来源规则 · 东京 01', '已删除的策略']))
-    fireEvent.click(within(list).getByRole('option', { name: '加密货币交易所' }))
+    choose(select, '加密货币交易所')
     await waitFor(() => expect(whereIs(router)).toContain('rec_source=p3'))
   })
 
@@ -258,10 +270,9 @@ describe('filters', () => {
     })
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '时间范围' }))
-    const list = await screen.findByRole('listbox')
-    await waitFor(() => expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['过去 1 小时', '过去 24 小时', '过去 3 天', '自定义…']))
-    fireEvent.click(within(list).getByRole('option', { name: '过去 3 天' }))
+    const select = screen.getByRole('combobox', { name: '时间范围' })
+    await waitFor(() => expect(optionTexts(select)).toEqual(['过去 1 小时', '过去 24 小时', '过去 3 天', '自定义…']))
+    choose(select, '过去 3 天')
     await waitFor(() => expect(whereIs(router)).toContain('rec_since=3d'))
   })
 
@@ -307,7 +318,7 @@ describe('the views', () => {
       : result()))
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.click(screen.getByRole('button', { name: '按目的地' }))
+    fireEvent.click(screen.getByRole('radio', { name: '按目的地' }))
     await waitFor(() => expect(whereIs(router)).toContain('rec_group_by=site'))
     const rows = await screen.findAllByTestId('hit-group-row')
     expect(rows).toHaveLength(2)
@@ -336,8 +347,8 @@ describe('the grouped views say block or report-only on every row', () => {
     ] }))
     renderAccess(ui, { route: `${route}&rec_group_by=${view}` })
     const rows = await screen.findAllByTestId('hit-group-row')
-    expect(within(rows[0]).getByTestId('hit-action').getAttribute('data-state')).toBe('block')
-    expect(within(rows[1]).getByTestId('hit-action').getAttribute('data-state')).toBe('observe')
+    expect(within(rows[0]).getByTestId('hit-action').getAttribute('data-kind')).toBe('block')
+    expect(within(rows[1]).getByTestId('hit-action').getAttribute('data-kind')).toBe('would_deny')
   })
 })
 
@@ -358,7 +369,7 @@ describe('a refused range or filter', () => {
     vi.mocked(api.getDestHits).mockImplementation(async p => { if (p?.group_by === 'site') throw refused('dest_hits_range'); return result() })
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.click(screen.getByRole('button', { name: '按目的地' }))
+    fireEvent.click(screen.getByRole('radio', { name: '按目的地' }))
     await waitFor(() => expect(whereIs(router)).toContain('rec_group_by=site'))
     expect(await screen.findByText('时间范围太长，请缩小范围')).toBeTruthy()
   })
@@ -424,7 +435,7 @@ describe('the footer and the row menu', () => {
   it('test this destination hands the host and nothing else to the test sheet', async () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '测试此目的地' }))
     expect(handlers.onTestDestination).toHaveBeenCalledWith('smtp.gmail.com')
   })
@@ -432,7 +443,7 @@ describe('the footer and the row menu', () => {
   it('open the account', async () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '打开账号' }))
     expect(handlers.onOpenUser).toHaveBeenCalledWith(7)
   })
@@ -441,7 +452,7 @@ describe('the footer and the row menu', () => {
     vi.mocked(api.addDestException).mockResolvedValue({ entry: 'gmail.com', created: { list_id: 5, policy_id: 6 } })
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('放行 smtp.gmail.com？')).toBeTruthy()
@@ -457,7 +468,7 @@ describe('the footer and the row menu', () => {
     vi.mocked(api.addDestException).mockResolvedValue({ entry: 'domain:figma.com', created: null, list_id: 9 })
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
     const dialog = await screen.findByRole('dialog')
     expect((within(dialog).getByRole('radio', { name: /补充列表/ }) as HTMLInputElement).checked).toBe(true)
@@ -471,7 +482,7 @@ describe('the footer and the row menu', () => {
     vi.mocked(api.getDestHits).mockResolvedValue(result({ items: [item({ source: 'g8', source_name: null, source_kind: 'group', dest: 'figma.com' })], sources: [{ source: 'g8', name: null }] }))
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('拒绝它的分组已删除，请选择要放行的范围。')).toBeTruthy()
@@ -484,7 +495,7 @@ describe('the footer and the row menu', () => {
   it('"exempt only this account" hands over to the exemption dialog for that account', async () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[0]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[0])
     fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('radio', { name: /只豁免 alice@corp/ }))
@@ -495,10 +506,22 @@ describe('the footer and the row menu', () => {
     expect(api.addDestException).not.toHaveBeenCalled()
   })
 
+  it('writes the exact host when that match is chosen', async () => {
+    vi.mocked(api.addDestException).mockResolvedValue({ entry: 'full:smtp.gmail.com', created: null })
+    renderAccess(ui, { route })
+    const rows = await screen.findAllByTestId('hit-row')
+    openRowMenu(rows[0])
+    fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('radio', { name: /只这个主机/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '放行' }))
+    await waitFor(() => expect(api.addDestException).toHaveBeenCalledWith({ target: 'smtp.gmail.com', match: 'host' }))
+  })
+
   it('a deleted account has no "exempt only" choice', async () => {
     renderAccess(ui, { route })
     const rows = await screen.findAllByTestId('hit-row')
-    fireEvent.click(within(rows[2]).getByRole('button', { name: '更多操作' }))
+    openRowMenu(rows[2])
     fireEvent.click(await screen.findByRole('menuitem', { name: '加入放行例外…' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByRole('radio', { name: /只豁免/ })).toBeNull()
@@ -517,6 +540,19 @@ describe('on a phone', () => {
   })
 })
 
+describe('sticky day headings', () => {
+  it('the card list sticks its headings below the shell bar, the table view keeps top 0', async () => {
+    const { unmount } = renderAccess(ui, { route })
+    await screen.findAllByTestId('hit-row')
+    expect(screen.getAllByRole('heading', { level: 3 })[0].closest('td')!.className).toContain('top-0')
+    unmount()
+    media.folded = true
+    renderAccess(ui, { route })
+    await screen.findAllByTestId('hit-row')
+    expect(screen.getAllByRole('heading', { level: 3 })[0].className).toContain('top-[var(--shell-bar-h')
+  })
+})
+
 describe('the exit server', () => {
   const tunnel = () => vi.mocked(nodesApi.listNodes).mockResolvedValue({ items: [{ id: 1, egress_panel_id: 0 }, { id: 2, egress_panel_id: 6 }], total: 2, page: 1, page_size: 500 } as never)
   const twoExits = () => vi.mocked(nodesApi.listNodes).mockResolvedValue({ items: [{ id: 1, egress_panel_id: 0 }, { id: 2, egress_panel_id: 6 }, { id: 3, egress_panel_id: 9 }, { id: 4, egress_panel_id: 6 }], total: 4 } as never)
@@ -527,7 +563,7 @@ describe('the exit server', () => {
     await waitFor(() => expect(nodesApi.listNodes).toHaveBeenCalled())
     expect(screen.queryByRole('combobox', { name: '出口服务器' })).toBeNull()
     expect(screen.queryByRole('columnheader', { name: '出口服务器' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '按出口' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: '按出口' })).toBeNull()
     expect(screen.queryAllByTestId('hit-exit')).toHaveLength(0)
     expect(lastParams()).not.toHaveProperty('exit_panel_id')
   })
@@ -536,20 +572,15 @@ describe('the exit server', () => {
     tunnel(); twoExits()
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.mouseDown(await screen.findByRole('combobox', { name: '出口服务器' }))
-    let list = await screen.findByRole('listbox')
-    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['全部出口服务器', '本服务器（直接出站）', '法兰克福 02', '新加坡 03'])
-    fireEvent.click(within(list).getByRole('option', { name: '法兰克福 02' }))
+    const exit = await screen.findByRole('combobox', { name: '出口服务器' })
+    expect(optionTexts(exit)).toEqual(['全部出口服务器', '本服务器（直接出站）', '法兰克福 02', '新加坡 03'])
+    choose(exit, '法兰克福 02')
     await waitFor(() => expect(lastParams().exit_panel_id).toBe(6))
     expect(whereIs(router)).toContain('rec_exit=6')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '出口服务器' }))
-    list = await screen.findByRole('listbox')
-    fireEvent.click(within(list).getByRole('option', { name: '本服务器（直接出站）' }))
+    choose(exit, '本服务器（直接出站）')
     await waitFor(() => expect(lastParams().exit_panel_id).toBe(0))
     expect(whereIs(router)).toContain('rec_exit=0')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: '出口服务器' }))
-    list = await screen.findByRole('listbox')
-    fireEvent.click(within(list).getByRole('option', { name: '全部出口服务器' }))
+    choose(exit, '全部出口服务器')
     await waitFor(() => expect(lastParams()).not.toHaveProperty('exit_panel_id'))
     expect(whereIs(router)).not.toContain('rec_exit')
   })
@@ -559,9 +590,8 @@ describe('the exit server', () => {
     vi.mocked(nodesApi.listNodes).mockImplementation((async (p: { page?: number }) => (p.page === 1
       ? { items: page1, total: 201 } : { items: [{ id: 201, egress_panel_id: 9 }], total: 201 })) as never)
     renderAccess(ui, { route })
-    fireEvent.mouseDown(await screen.findByRole('combobox', { name: '出口服务器' }))
-    const list = await screen.findByRole('listbox')
-    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['全部出口服务器', '本服务器（直接出站）', '新加坡 03'])
+    const exit = await screen.findByRole('combobox', { name: '出口服务器' })
+    expect(optionTexts(exit)).toEqual(['全部出口服务器', '本服务器（直接出站）', '新加坡 03'])
     expect(vi.mocked(nodesApi.listNodes).mock.calls.map(c => c[0]?.page)).toEqual([1, 2])
   })
 
@@ -569,7 +599,7 @@ describe('the exit server', () => {
     tunnel()
     renderAccess(ui, { route: `${route}&rec_exit=9` })
     const box = await screen.findByRole('combobox', { name: '出口服务器' })
-    await waitFor(() => expect(box.textContent).toBe('新加坡 03'))
+    await waitFor(() => expect((box as HTMLSelectElement).selectedOptions[0].textContent).toBe('新加坡 03'))
   })
 
   it('with a tunnel: the column names the exit server, or says this server', async () => {
@@ -603,7 +633,7 @@ describe('the exit server', () => {
       : result()))
     const { router } = renderAccess(ui, { route })
     await screen.findAllByTestId('hit-row')
-    fireEvent.click(await screen.findByRole('button', { name: '按出口' }))
+    fireEvent.click(await screen.findByRole('radio', { name: '按出口' }))
     await waitFor(() => expect(whereIs(router)).toContain('rec_group_by=exit'))
     await waitFor(() => expect(screen.getAllByTestId('hit-group-row')).toHaveLength(2))
     const rows = screen.getAllByTestId('hit-group-row')
@@ -620,7 +650,7 @@ describe('English', () => {
     renderAccess(ui, { route })
     const tiles = await screen.findByTestId('hits-tiles')
     expect(within(tiles).getAllByRole('button').map(b => b.textContent)).toEqual(['Blocked2,134', 'Would be blocked4,012'])
-    expect(screen.getByRole('button', { name: 'By destination' })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: 'By destination' })).toBeTruthy()
     expect(screen.getByRole('searchbox', { name: 'Search destinations…' })).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/observe/i)
     await act(async () => {})
