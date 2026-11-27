@@ -2,6 +2,8 @@ package yaml
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -35,9 +37,23 @@ type RuleSetRepo struct {
 	slugIndex sync.Map // map[string]string — key = slug, value = abs path
 }
 
+// ruleSetCacheEntry is keyed on (mtime, size), not mtime alone: saves rename a
+// fresh file into place so mtime moves on any sane filesystem, but on a coarse
+// timestamp filesystem two same-second edits would otherwise be invisible when
+// they change the length. A same-mtime, same-length edit still escapes the
+// cache; that only ever makes a read return the previous (self-consistent)
+// content+revision, and cannot weaken SaveIfRevision, which hashes live bytes.
 type ruleSetCacheEntry struct {
 	mtime time.Time
+	size  int64
 	value *domain.RuleSet
+}
+
+// revisionOf is the rule set revision: first 16 hex chars of SHA-256 of the
+// file bytes exactly as stored.
+func revisionOf(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 func NewRuleSetRepo(configDir string) (*RuleSetRepo, error) {
@@ -133,6 +149,18 @@ func (r *RuleSetRepo) GetBySlug(ctx context.Context, slug string) (*domain.RuleS
 }
 
 func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
+	return r.save(rs, nil)
+}
+
+// SaveIfRevision implements the compare-and-write: read the live bytes, hash,
+// compare, write — all under the write lock, so two writers holding the same
+// base revision cannot both win. Deleted-on-disk is ErrNotFound (what
+// GetBySlug returns), not a stale conflict.
+func (r *RuleSetRepo) SaveIfRevision(ctx context.Context, rs *domain.RuleSet, baseRevision string) error {
+	return r.save(rs, &baseRevision)
+}
+
+func (r *RuleSetRepo) save(rs *domain.RuleSet, base *string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if rs.Slug == "" {
@@ -145,13 +173,29 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 	// alone (pathOf -> default_rules.yaml) wrote a SECOND file next to the seed,
 	// so the list surfaced two rows sharing slug "default_rules". One slug now
 	// maps to exactly one file. ErrNotFound = genuinely new slug -> create
-	// <slug>.yaml via pathOf.
+	// <slug>.yaml via pathOf (but never when the caller asked for a
+	// compare-and-write: there is nothing to compare against).
 	p, err := r.pathForSlug(rs.Slug)
-	if errors.Is(err, domain.ErrNotFound) {
+	if errors.Is(err, domain.ErrNotFound) && base == nil {
 		p, err = r.pathOf(rs.Slug)
 	}
 	if err != nil {
 		return err
+	}
+	if base != nil {
+		live, err := os.ReadFile(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if revisionOf(live) != *base {
+			// Drop any cached copy so the caller's follow-up read of the
+			// current document is fresh even if the edit evaded the cache key.
+			r.cache.Delete(p)
+			return domain.ErrStaleRevision
+		}
 	}
 	doc := ruleSetFile{
 		Slug:                     rs.Slug,
@@ -166,10 +210,12 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 		MihomoRematchOutbounds:   rs.MihomoRematchOutbounds,
 		Content:                  rs.Content,
 	}
-	if err := writeYAML(p, doc); err != nil {
+	written, err := writeYAMLBytes(p, doc)
+	if err != nil {
 		return err
 	}
 	r.cache.Delete(p)
+	rs.Revision = revisionOf(written)
 	return nil
 }
 
@@ -231,36 +277,14 @@ func (r *RuleSetRepo) pathForSlug(slug string) (string, error) {
 }
 
 func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
-	if st, err := os.Stat(path); err == nil {
+	st, statErr := os.Stat(path)
+	if statErr == nil {
 		if v, ok := r.cache.Load(path); ok {
 			entry := v.(ruleSetCacheEntry)
-			if entry.mtime.Equal(st.ModTime()) {
+			if entry.mtime.Equal(st.ModTime()) && entry.size == st.Size() {
 				return entry.value, nil
 			}
 		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		var doc ruleSetFile
-		if err := yaml.Unmarshal(b, &doc); err != nil {
-			return nil, err
-		}
-		rs := &domain.RuleSet{
-			Slug:                     doc.Slug,
-			Name:                     doc.Name,
-			Sort:                     doc.Sort,
-			Enabled:                  doc.Enabled,
-			DirectSubscriptionDomain: doc.DirectSubscriptionDomain,
-			ProxyGroupOrder:          doc.ProxyGroupOrder,
-			ProxyGroupMembers:        doc.ProxyGroupMembers,
-			ProxyGroupOptions:        doc.ProxyGroupOptions,
-			MihomoSubRules:           doc.MihomoSubRules,
-			MihomoRematchOutbounds:   doc.MihomoRematchOutbounds,
-			Content:                  mergeLegacyRuleSetContent(doc.MihomoRules, doc.Content),
-		}
-		r.cache.Store(path, ruleSetCacheEntry{mtime: st.ModTime(), value: rs})
-		return rs, nil
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -270,7 +294,7 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, err
 	}
-	return &domain.RuleSet{
+	rs := &domain.RuleSet{
 		Slug:                     doc.Slug,
 		Name:                     doc.Name,
 		Sort:                     doc.Sort,
@@ -282,7 +306,12 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 		MihomoSubRules:           doc.MihomoSubRules,
 		MihomoRematchOutbounds:   doc.MihomoRematchOutbounds,
 		Content:                  mergeLegacyRuleSetContent(doc.MihomoRules, doc.Content),
-	}, nil
+		Revision:                 revisionOf(b),
+	}
+	if statErr == nil {
+		r.cache.Store(path, ruleSetCacheEntry{mtime: st.ModTime(), size: st.Size(), value: rs})
+	}
+	return rs, nil
 }
 
 func mergeLegacyRuleSetContent(legacy, content string) string {

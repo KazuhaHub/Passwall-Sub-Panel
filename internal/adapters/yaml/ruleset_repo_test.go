@@ -2,9 +2,13 @@ package yaml
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -234,5 +238,154 @@ func TestRuleSetRepoRejectsUnsafeSlug(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Save with unsafe slug succeeded, want error")
+	}
+}
+
+func newRevisionRepo(t *testing.T) (*RuleSetRepo, string) {
+	t.Helper()
+	root := t.TempDir()
+	repo, err := NewRuleSetRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(context.Background(), &domain.RuleSet{Slug: "rev", Name: "Rev", Enabled: true, Content: "- MATCH,DIRECT"}); err != nil {
+		t.Fatal(err)
+	}
+	return repo, filepath.Join(root, "rulesets", "rev.yaml")
+}
+
+func TestRuleSetRevisionStableAcrossReadsAndMatchesFileBytes(t *testing.T) {
+	ctx := context.Background()
+	repo, path := newRevisionRepo(t)
+	a, err := repo.GetBySlug(ctx, "rev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := repo.GetBySlug(ctx, "rev")
+	if len(a.Revision) != 16 || a.Revision != b.Revision {
+		t.Fatalf("revision unstable or wrong length: %q vs %q", a.Revision, b.Revision)
+	}
+	raw, _ := os.ReadFile(path)
+	if want := revisionOf(raw); a.Revision != want {
+		t.Fatalf("revision %q != hash of file bytes %q", a.Revision, want)
+	}
+	list, _ := repo.List(ctx)
+	if len(list) != 1 || list[0].Revision != a.Revision {
+		t.Fatalf("list revision mismatch: %#v", list)
+	}
+}
+
+func TestRuleSetRevisionChangesAfterSaveAndSaveReportsIt(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRevisionRepo(t)
+	before, _ := repo.GetBySlug(ctx, "rev")
+	next := &domain.RuleSet{Slug: "rev", Name: "Rev", Enabled: true, Content: "- MATCH,REJECT"}
+	if err := repo.Save(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := repo.GetBySlug(ctx, "rev")
+	if after.Revision == before.Revision {
+		t.Fatal("revision did not change after save")
+	}
+	if next.Revision != after.Revision {
+		t.Fatalf("Save reported %q, file has %q", next.Revision, after.Revision)
+	}
+}
+
+func TestRuleSetStaleSaveDetectedAfterDirectWriteWithSameMtimeAndSize(t *testing.T) {
+	ctx := context.Background()
+	repo, path := newRevisionRepo(t)
+	before, _ := repo.GetBySlug(ctx, "rev") // primes the cache
+	st, _ := os.Stat(path)
+	raw, _ := os.ReadFile(path)
+	edited := []byte(strings.Replace(string(raw), "DIRECT", "REJECT", 1))
+	if len(edited) != len(raw) { // DIRECT and REJECT are both six bytes
+		t.Fatal("test edit must keep the size identical")
+	}
+	if err := os.WriteFile(path, edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	// The read cache keys on (mtime, size) and cannot see this edit, but a
+	// compare-and-write always hashes the live bytes, so a save carrying the
+	// revision the reader saw is still refused.
+	err := repo.SaveIfRevision(ctx, &domain.RuleSet{Slug: "rev", Name: "Rev", Content: "x"}, before.Revision)
+	if !errors.Is(err, domain.ErrStaleRevision) {
+		t.Fatalf("want ErrStaleRevision, got %v", err)
+	}
+	// The refusal drops the stale cache entry, so the next read is fresh.
+	after, _ := repo.GetBySlug(ctx, "rev")
+	if after.Revision == before.Revision {
+		t.Fatal("revision not refreshed after on-disk edit")
+	}
+}
+
+func TestRuleSetSaveIfRevisionMatchAndMismatch(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRevisionRepo(t)
+	cur, _ := repo.GetBySlug(ctx, "rev")
+
+	stale := &domain.RuleSet{Slug: "rev", Name: "Stale", Content: "- MATCH,REJECT"}
+	if err := repo.SaveIfRevision(ctx, stale, "0000000000000000"); !errors.Is(err, domain.ErrStaleRevision) {
+		t.Fatalf("want stale, got %v", err)
+	}
+	if got, _ := repo.GetBySlug(ctx, "rev"); got.Name != "Rev" || got.Revision != cur.Revision {
+		t.Fatalf("stale save modified the file: %#v", got)
+	}
+
+	ok := &domain.RuleSet{Slug: "rev", Name: "Fresh", Content: "- MATCH,REJECT"}
+	if err := repo.SaveIfRevision(ctx, ok, cur.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if ok.Revision == "" || ok.Revision == cur.Revision {
+		t.Fatalf("new revision not reported: %q", ok.Revision)
+	}
+}
+
+func TestRuleSetSaveIfRevisionMissingFileIsNotFound(t *testing.T) {
+	repo, path := newRevisionRepo(t)
+	cur, _ := repo.GetBySlug(context.Background(), "rev")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	err := repo.SaveIfRevision(context.Background(), &domain.RuleSet{Slug: "rev", Name: "x"}, cur.Revision)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("want ErrNotFound (same as GetBySlug), got %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("file was recreated")
+	}
+}
+
+func TestRuleSetSaveIfRevisionConcurrentWritersExactlyOneWins(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newRevisionRepo(t)
+	base, _ := repo.GetBySlug(ctx, "rev")
+	const writers = 8
+	var wins, stales atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			rs := &domain.RuleSet{Slug: "rev", Name: fmt.Sprintf("writer-%d", i), Content: "- MATCH,DIRECT"}
+			switch err := repo.SaveIfRevision(ctx, rs, base.Revision); {
+			case err == nil:
+				wins.Add(1)
+			case errors.Is(err, domain.ErrStaleRevision):
+				stales.Add(1)
+			default:
+				t.Errorf("writer %d: %v", i, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	if wins.Load() != 1 || stales.Load() != writers-1 {
+		t.Fatalf("wins=%d stales=%d", wins.Load(), stales.Load())
 	}
 }
