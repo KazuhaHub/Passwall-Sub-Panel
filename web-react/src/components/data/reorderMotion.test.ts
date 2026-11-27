@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { settleDeltas, slideShift, translateYOf } from './reorderMotion'
+import { carriedDistance, settleDeltas, slideShift, translateYOf } from './reorderMotion'
 
 describe('slideShift: how far each other row moves to open the gap', () => {
   // five rows, a..e at 0..4, each 40px tall
@@ -46,4 +46,11 @@ describe('translateYOf: the vertical offset a computed transform applies', () =>
     expect(translateYOf('none')).toBe(0)
     expect(translateYOf('')).toBe(0)
   })
+})
+
+describe('carriedDistance: how far a carried row has travelled with rows of unequal height', () => {
+  const hs = [40, 60, 30, 50]
+  it('sums the heights of the rows passed going down', () => expect(carriedDistance(hs, 0, 2)).toBe(90))
+  it('is negative and sums the rows passed going up', () => expect(carriedDistance(hs, 3, 1)).toBe(-90))
+  it('is 0 in place', () => expect(carriedDistance(hs, 2, 2)).toBe(0))
 })

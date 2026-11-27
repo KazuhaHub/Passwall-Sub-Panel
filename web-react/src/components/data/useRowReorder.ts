@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { useSpacedT } from '@/i18n/spacing'
 import { finalIndexFromInsertion, insertionIndex, reorderCall, type ReorderCall } from './dataTableLogic'
 import type { RowGeometry } from './useWindowedRows'
-import { settleDeltas, slideShift, translateYOf } from './reorderMotion'
+import { carriedDistance, settleDeltas, slideShift, translateYOf } from './reorderMotion'
 import { autoScrollStep, carryTarget, insertionAtOffset } from './windowing'
 
 interface Options {
@@ -77,12 +77,21 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
   // place and animates each one from the remembered top to that place. It works whether the
   // page reorders its data at once, later, or not at all (a cancel): a row that ends where it
   // was drawn simply has nothing to travel.
-  const settle = useRef<Map<string, number> | null>(null)
+  //
+  // IT TRUSTS A ROW ID ONLY IF THE ID FOLLOWED ITS ROW. A page whose ids are positions ("0",
+  // "1", ...) keeps every id in the same slot after a reorder, so "the row with id 0" is a
+  // different row afterwards and animating by id would fly rows through each other's old
+  // places, showing a wrong order. A committed move whose ids did not change order is
+  // therefore treated as untrustworthy: the rows snap to the new (correct) order and only the
+  // carried row, found by where it went and by its content, glides from the pointer.
+  interface Settle { tops: Map<string, number>; order: string[]; id: string; expect: number | null; text: string }
+  const settle = useRef<Settle | null>(null)
   const carried = useRef<string | null>(null)
-  const rememberTops = useCallback(() => {
+  const rememberTops = useCallback((id: string, expect: number | null) => {
+    const rows = rowEls()
     const tops = new Map<string, number>()
-    for (const r of rowEls()) tops.set(r.dataset.id ?? '', r.getBoundingClientRect().top)
-    settle.current = tops
+    for (const r of rows) tops.set(r.dataset.id ?? '', r.getBoundingClientRect().top)
+    settle.current = { tops, order: rows.map(r => r.dataset.id ?? ''), id, expect, text: rows.find(r => r.dataset.id === id)?.textContent ?? '' }
   }, [rowEls])
   useLayoutEffect(() => {
     // The pointer path wrote its own transform on the carried row; it is the table's to clear.
@@ -95,14 +104,29 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
     if (!before) return
     settle.current = null
     const rows = rowEls()
-    const after = new Map<string, number>()
-    for (const r of rows) after.set(r.dataset.id ?? '', r.getBoundingClientRect().top)
-    const deltas = settleDeltas(before, after)
-    for (const r of rows) {
-      const d = deltas.get(r.dataset.id ?? '')
-      if (d === undefined || typeof r.animate !== 'function') continue
+    const glide = (r: HTMLElement, d: number) => {
+      if (Math.abs(d) < 0.5 || typeof r.animate !== 'function') return
       r.animate([{ transform: `translateY(${d}px)` }, { transform: 'none' }], { duration: REORDER_MS, easing: REORDER_EASING })
     }
+    const orderNow = rows.map(r => r.dataset.id ?? '')
+    const idsFollowed = before.expect === null || orderNow.length !== before.order.length || orderNow.some((id, i) => id !== before.order[i])
+    if (idsFollowed) {
+      const after = new Map<string, number>()
+      for (const r of rows) after.set(r.dataset.id ?? '', r.getBoundingClientRect().top)
+      const deltas = settleDeltas(before.tops, after)
+      for (const r of rows) {
+        const d = deltas.get(r.dataset.id ?? '')
+        if (d !== undefined) glide(r, d)
+      }
+      return
+    }
+    // Untrustworthy ids (a move was committed and no id changed place). A windowed table cannot say
+    // which DOM row is the target, so it just snaps.
+    if (geometry || before.expect === null) return
+    const target = rows[before.expect]
+    const from = before.tops.get(before.id)
+    // The content check keeps a page that has not applied the move (yet) from flying a bystander.
+    if (target && from !== undefined && target.textContent === before.text) glide(target, from - target.getBoundingClientRect().top)
   })
 
   const onPointerDown = useCallback((e: ReactPointerEvent, id: string) => {
@@ -200,16 +224,14 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
       window.removeEventListener('keydown', key)
       window.removeEventListener('scroll', update, true)
       stop.current = null
+      const call = commit ? reorderCall(ids, id, finalIndexFromInsertion(from, insertion)) : null
       if (motion) {
         // Handed to the layout effect, which clears the transform this path wrote on the row.
         carried.current = id
-        rememberTops()
+        rememberTops(id, call ? finalIndexFromInsertion(from, insertion) : null)
       }
       setDragging(null)
-      if (commit) {
-        const call = reorderCall(ids, id, finalIndexFromInsertion(from, insertion))
-        if (call) onReorder?.(call)
-      }
+      if (call) onReorder?.(call)
     }
     // Letting go far from the table is how a drag is abandoned.
     const up = (ev: PointerEvent) => end(!outside(ev))
@@ -227,7 +249,7 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
 
   const drop = (id: string, to: number) => {
     const call = reorderCall(ids, id, to)
-    if (lifted?.motion) rememberTops()
+    if (lifted?.motion) rememberTops(id, call ? to : null)
     setLifted(null)
     setAnnouncement(t('ui.data.reorder_dropped', { name: nameOf(id), pos: to + 1 }))
     if (call) onReorder?.(call)
@@ -258,7 +280,7 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
       // Esc must not also close a sheet or dialog the table sits in.
       e.preventDefault()
       e.stopPropagation()
-      if (lifted.motion) rememberTops()
+      if (lifted.motion) rememberTops(id, null)
       setLifted(null)
       setAnnouncement(t('ui.data.reorder_cancelled', { name: nameOf(id) }))
     }
@@ -266,7 +288,7 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
 
   const onBlur = (id: string) => {
     if (lifted?.id === id) {
-      if (lifted.motion) rememberTops()
+      if (lifted.motion) rememberTops(id, null)
       setLifted(null)
       setAnnouncement(t('ui.data.reorder_cancelled', { name: nameOf(id) }))
     }
@@ -294,7 +316,11 @@ export function useRowReorder({ enabled, ids, nameOf, onReorder, bodyRef, scroll
    */
   const shiftOf = (id: string, index: number): number | undefined => {
     if (!active || !motion) return undefined
-    if (id === active.id) return lifted && !dragging ? (lifted.to - lifted.from) * lifted.h : undefined
+    if (id === active.id) {
+      if (!lifted || dragging) return undefined
+      // Measured row by row (a transform does not change a height), so rows of unequal height still land the carried row on its slot.
+      return geometry ? (lifted.to - lifted.from) * lifted.h : carriedDistance(rowEls().map(r => r.getBoundingClientRect().height), lifted.from, lifted.to)
+    }
     return slideShift(index, active.from, slot, active.h)
   }
 

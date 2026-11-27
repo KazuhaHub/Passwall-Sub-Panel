@@ -57,6 +57,14 @@ const nav = () => screen.getByRole('navigation')
 const linkNames = () => within(nav()).getAllByRole('link').map(a => a.textContent)
 
 describe('navigation', () => {
+  it('scrolls the lit item into view, clear of the list fades', () => {
+    const spy = vi.fn()
+    Element.prototype.scrollIntoView = spy
+    mount({}, '/admin/users')
+    expect(spy).toHaveBeenCalledWith({ block: 'nearest' })
+    expect((spy.mock.contexts[0] as HTMLElement).getAttribute('aria-current')).toBe('page')
+  })
+
   it('draws the sections with their headers, and the page in the outlet', () => {
     mount()
     expect(screen.getByTestId('page')).toBeTruthy()

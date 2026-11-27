@@ -43,3 +43,15 @@ export function translateYOf(transform: string): number {
   const t = /translateY\((-?[\d.]+)px\)/.exec(transform)
   return t ? Number(t[1]) : 0
 }
+
+/**
+ * How far a row carried from index `from` to slot `to` has travelled: the summed heights of the
+ * rows it passes (positive down, negative up). With rows of unequal height `(to - from) * h`
+ * would leave it short of, or past, its slot.
+ */
+export function carriedDistance(heights: readonly number[], from: number, to: number): number {
+  let d = 0
+  if (to > from) for (let i = from + 1; i <= to; i++) d += heights[i] ?? 0
+  else for (let i = to; i < from; i++) d -= heights[i] ?? 0
+  return d
+}

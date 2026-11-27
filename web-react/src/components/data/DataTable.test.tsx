@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from './DataTable'
+import { applyReorder } from './dataTableLogic'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 beforeEach(() => { localStorage.clear() })
@@ -445,6 +446,71 @@ describe('reordering', () => {
     expect(trs[0].className).toContain('opacity-50')
     act(() => { window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 125 })) })
     expect(onReorder).toHaveBeenCalledWith({ movedId: 'a', beforeId: 'd' })
+  })
+
+  // THE SETTLE ON DROP. A stateful page, and a row box that follows the DOM order and the row's
+  // transform, so what the hook measures before and after the commit is what a browser would give.
+  function Page({ ids }: { ids: 'positional' | 'stable' }) {
+    const [items, setItems] = useState(rows)
+    return (
+      <DataTable
+        data={items.map((r, i) => ({ ...r, i }))}
+        columns={cols as ColumnDef<Row & { i: number }>[]}
+        getRowId={r => (ids === 'positional' ? String(r.i) : r.id)}
+        rowLabel={r => r.name}
+        onReorder={call => setItems(prev => applyReorder(prev, r => (ids === 'positional' ? String(prev.indexOf(r)) : r.id), call))}
+        pagination={false}
+        columnMenu={false}
+      />
+    )
+  }
+  const flowBoxes = () => {
+    const real = HTMLElement.prototype.getBoundingClientRect
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.tagName !== 'TR' || !this.hasAttribute('data-row')) return real.call(this)
+      const i = [...this.parentElement!.children].indexOf(this)
+      const top = i * 40 + parseFloat(/translateY\((-?[\d.]+)px\)/.exec(this.style.transform)?.[1] ?? '0')
+      return { top, bottom: top + 40, height: 40, left: 0, right: 100, width: 100, x: 0, y: top, toJSON() {} } as DOMRect
+    }
+    frame().getBoundingClientRect = () => ({ top: 0, bottom: 160, height: 160, left: 0, right: 400, width: 400, x: 0, y: 0, toJSON() {} }) as DOMRect
+    return () => { HTMLElement.prototype.getBoundingClientRect = real }
+  }
+  const drag = () => {
+    const h = handle('A')
+    act(() => { h.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, clientY: 20 })) })
+    act(() => { window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 125 })) }) // slot: after C, drawn 105px down
+    act(() => { window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 125 })) })
+  }
+  const names = () => screen.getAllByRole('row').slice(1).map(tr => tr.textContent)
+  const glides = (animate: ReturnType<typeof vi.fn>) => animate.mock.calls.map((c, i) => ({
+    text: (animate.mock.contexts[i] as HTMLElement).textContent, from: c[0][0].transform,
+  }))
+
+  it('settles to the final order on the first frame when row ids are positions: only the carried row glides', () => {
+    reduceMotion(false)
+    const animate = vi.fn()
+    Element.prototype.animate = animate as never
+    render(<Page ids="positional" />)
+    const restore = flowBoxes()
+    drag()
+    // the order is right at once, nothing starts from another row's old slot
+    expect(names()).toEqual(['B', 'C', 'A', 'D'])
+    // the carried row was drawn at 105 and now sits at 80
+    expect(glides(animate)).toEqual([{ text: 'A', from: 'translateY(25px)' }])
+    restore()
+  })
+
+  it('animates every row from its own old place when the ids follow the rows', () => {
+    reduceMotion(false)
+    const animate = vi.fn()
+    Element.prototype.animate = animate as never
+    render(<Page ids="stable" />)
+    const restore = flowBoxes()
+    drag()
+    expect(names()).toEqual(['B', 'C', 'A', 'D'])
+    // B and C were drawn 40px up (slid out of the way) and sit exactly there now: nothing to travel for them.
+    expect(glides(animate)).toEqual([{ text: 'A', from: 'translateY(25px)' }])
+    restore()
   })
 
   it('a pointer drag that ends where it began sends nothing, and Escape cancels one in flight', () => {

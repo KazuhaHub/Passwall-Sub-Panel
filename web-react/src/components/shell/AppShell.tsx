@@ -31,7 +31,7 @@ import { BrandIcon, BrandLogo, type Brand } from './BrandMark'
 import { CommandPalette, useCommandPaletteHotkey } from './CommandPalette'
 import { navigationProvider, type CommandProvider } from './commands'
 import { activeItem, isNavActive, visibleSections, type NavSection } from './nav'
-import { RouteFallback } from './RouteProgress'
+import { RouteFallback, RouteProgressHost } from './RouteProgress'
 import { MAIN_ID, SkipLink } from './SkipLink'
 import { ToastLogButton } from './ToastLogButton'
 import { useLogInMenu } from './ToastLogMenuItem'
@@ -96,6 +96,12 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
   const { pathname } = useLocation()
   const sections = useMemo(() => visibleSections(nav, role), [nav, role])
   const current = useMemo(() => activeItem(nav, role, pathname), [nav, role, pathname])
+  const listRef = useRef<HTMLDivElement>(null)
+  // A route change (a click, the palette, a link elsewhere) can light an item that is scrolled out of the
+  // list or sits under a fade: bring it into view, clear of the fade (the list's scroll padding).
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [current?.to])
 
   return (
     <Sidebar
@@ -114,7 +120,7 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
           <span className="truncate text-sm font-semibold">{brand.name}</span>
         </span>
       </SidebarHeader>
-      <SidebarContent aria-label={t('common:ui.shell.main_nav')} role="navigation">
+      <SidebarContent ref={listRef} aria-label={t('common:ui.shell.main_nav')} role="navigation">
         {sections.map((section, i) => (
           <Fragment key={section.labelKey ?? `top-${i}`}>
             {/* A divider opens every group after the first. On the expanded rail a
@@ -242,6 +248,7 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
 
   return (
     <TooltipProvider delay={300}>
+      <RouteProgressHost>
       <SidebarProvider>
         <SkipLink />
         <CloseMobileOnNavigate />
@@ -266,6 +273,7 @@ export function AppShell({ nav, role, brand, user, topBarActions, version, onNav
         </SidebarInset>
         <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} providers={providers} navigate={go} role={role} />
       </SidebarProvider>
+      </RouteProgressHost>
     </TooltipProvider>
   )
 }

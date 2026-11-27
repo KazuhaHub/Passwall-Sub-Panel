@@ -406,7 +406,7 @@ function SidebarSeparator({
  * the logo. The list now fades out over its first and last 14px, but only on a side that still has
  * content past it, so at rest (scrolled to the top, say) the first item is drawn in full.
  */
-function SidebarContent({ className, onScroll, ...props }: React.ComponentProps<"div">) {
+function SidebarContent({ className, onScroll, ref: outerRef, ...props }: React.ComponentProps<"div">) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   const [edges, setEdges] = React.useState({ top: false, bottom: false })
   const measure = React.useCallback(() => {
@@ -429,7 +429,11 @@ function SidebarContent({ className, onScroll, ...props }: React.ComponentProps<
   }, [measure])
   return (
     <div
-      ref={ref}
+      ref={(el) => {
+        ref.current = el
+        if (typeof outerRef === "function") outerRef(el)
+        else if (outerRef) outerRef.current = el
+      }}
       data-slot="sidebar-content"
       data-sidebar="content"
       data-fade-top={edges.top || undefined}
@@ -439,6 +443,10 @@ function SidebarContent({ className, onScroll, ...props }: React.ComponentProps<
         "no-scrollbar flex min-h-0 flex-1 flex-col gap-0 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
         "[--fade-t:0px] [--fade-b:0px] data-fade-top:[--fade-t:14px] data-fade-bottom:[--fade-b:14px]",
         "[mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-t),#000_calc(100%-var(--fade-b)),transparent_100%)]",
+        // The icon rail cannot scroll (overflow hidden) and must not fade its first and last icon.
+        "group-data-[collapsible=icon]:[mask-image:none]",
+        // A scrolled-into-view item (the active one, on a route change) lands clear of the fades.
+        "scroll-py-4",
         className
       )}
       {...props}
