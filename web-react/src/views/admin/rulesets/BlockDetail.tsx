@@ -161,8 +161,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   const wanted = pending !== null && pending !== block.target ? pending : null
 
   return (
-    <section aria-labelledby="rule-block-heading" className="flex min-w-0 flex-col gap-3">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <section aria-labelledby="rule-block-heading" className="@container flex min-w-0 flex-col gap-3">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {phone && <IconButton label={t('admin:rules.blocks.back')} onClick={onBack}><IconArrowLeft /></IconButton>}
         <h2 id="rule-block-heading" className="min-w-0 text-base font-semibold break-words">{t('admin:rules.blocks.heading', { index: block.index + 1, target: heading })}</h2>
         {block.fallback && <Badge variant="outline">{t('admin:rules.blocks.fallback')}</Badge>}
@@ -179,7 +179,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
         </div>
       ) : (
         <>
-          <div className="grid gap-3 lg:grid-cols-2">
+          {/* The note and the target side by side, labels on one line, once the group has the room (this column's own width, not the window's). */}
+          <div className="grid items-start gap-x-6 gap-y-3 @xl:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)]">
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">{t('admin:rules.blocks.note')}</span>
@@ -230,16 +231,26 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             onRowOpen={readOnly ? undefined : r => onEditRow(r.id)}
             toolbar={(
               <FilterBar
+                className="[&_[data-slot=input-group]]:sm:w-48"
                 aria-label={t('admin:rules.matchers.filter_label')}
                 search={{ value: local, onChange: setLocal, placeholder: t('admin:rules.matchers.search') }}
                 facets={typeOptions.length > 1 ? [{ id: 'type', label: t('admin:rules.matchers.filter_type'), options: typeOptions, selected: types, onChange: setTypes }] : []}
                 onClearAll={() => { setLocal(''); setTypes([]) }}
               >
                 {!readOnly && !noTarget && (
-                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                  // Add is the one button; paste and import sit beside it while the group is wide enough for the whole row, and in a menu under that.
+                  <span className="ml-auto flex items-center gap-2">
                     <Button size="sm" onClick={onAddRow}><IconAdd />{t('admin:rules.matchers.add')}</Button>
-                    <Button size="sm" variant="outline" onClick={onPaste}><IconFile />{t('admin:rules.matchers.paste')}</Button>
-                    <Button size="sm" variant="outline" onClick={onImport}><IconUpload />{t('admin:rules.matchers.import_file')}</Button>
+                    <span className="hidden items-center gap-2 @[46rem]:flex">
+                      <Button size="sm" variant="outline" onClick={onPaste}><IconFile />{t('admin:rules.matchers.paste')}</Button>
+                      <Button size="sm" variant="outline" onClick={onImport}><IconUpload />{t('admin:rules.matchers.import_file')}</Button>
+                    </span>
+                    <span className="@[46rem]:hidden">
+                      <MoreMenu items={[
+                        { id: 'paste', label: t('admin:rules.matchers.paste'), icon: IconFile, onSelect: onPaste },
+                        { id: 'import', label: t('admin:rules.matchers.import_file'), icon: IconUpload, onSelect: onImport },
+                      ]} />
+                    </span>
                   </span>
                 )}
               </FilterBar>

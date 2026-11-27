@@ -1,16 +1,20 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { RuleSet } from '@/api/rules'
 import { Field } from '@/components/form/Field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { SETTLE_MS, useSettled } from './docCache'
 import { countLines } from './model'
 
 /**
  * The rule set's own fields: what used to sit above the rules in the side sheet. The slug is the rule set's address and
  * file name, so it is set once, when the rule set is created.
  */
-export function BasicsTab({ form, setForm, editing, readOnly, slugError, nameError, usedBy }: {
+export function BasicsTab({ active, form, setForm, editing, readOnly, slugError, nameError, usedBy }: {
+  /** This tab is the one shown. A hidden tab stays built, and must not count the lines of the whole text on every keystroke made elsewhere. */
+  active: boolean
   form: RuleSet
   setForm: (next: RuleSet) => void
   editing: boolean
@@ -21,6 +25,8 @@ export function BasicsTab({ form, setForm, editing, readOnly, slugError, nameErr
   usedBy: readonly string[]
 }) {
   const { t } = useTranslation(['admin'])
+  const content = useSettled(form.content, active ? 0 : SETTLE_MS)
+  const lines = useMemo(() => countLines(content), [content])
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -44,7 +50,7 @@ export function BasicsTab({ form, setForm, editing, readOnly, slugError, nameErr
         <dt className="text-muted-foreground">{t('admin:rules.table.used_by')}</dt>
         <dd>{usedBy.length > 0 ? usedBy.join('、') : t('admin:rules.status.no_usage')}</dd>
         <dt className="text-muted-foreground">{t('admin:rules.table.lines')}</dt>
-        <dd className="tabular-nums">{countLines(form.content).toLocaleString()}</dd>
+        <dd className="tabular-nums">{lines.toLocaleString()}</dd>
       </dl>
     </div>
   )

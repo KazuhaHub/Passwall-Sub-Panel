@@ -10,10 +10,12 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { noteOf, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 
-/** The height of the directory's scroll box: what is left of the screen under the page header, tabs and toolbar. */
-export const COLUMN_HEIGHT = 'max(24rem, calc(100dvh - 21rem))'
-/** The rules table sits under the group's note and target, so it gets less of the screen. */
-export const TABLE_HEIGHT = 'max(20rem, calc(100dvh - 27rem))'
+// `--rs-stick` is the distance from the top of the window to the rules (the top bar and the page's sticky tabs and toolbar), measured
+// by the page; the fallback is its usual size.
+/** The height of the directory's scroll box: what is left of the window under the sticky strip, less the two lines above it and the Add group button under it. */
+export const COLUMN_HEIGHT = 'max(22rem, calc(100dvh - var(--rs-stick, 10rem) - 6.5rem))'
+/** The rules table sits under the group's heading, note, target and filter row (about 11.5rem), so it gets less of the screen. */
+export const TABLE_HEIGHT = 'max(18rem, calc(100dvh - var(--rs-stick, 10rem) - 13rem))'
 
 /**
  * The left column (design 3.3): the groups in match order, each with its place, target and rule count. A row opens the
@@ -58,13 +60,13 @@ export function BlockDirectory({ doc, blocks, shown, hits, selected, onSelect, r
         },
       },
       {
-        id: 'count', header: t('admin:rules.matchers.count_col'), enableSorting: false, meta: { label: t('admin:rules.matchers.count_col'), align: 'right', className: 'w-16 tabular-nums' },
+        id: 'count', header: t('admin:rules.matchers.count_col'), enableSorting: false, meta: { label: t('admin:rules.matchers.count_col'), align: 'right', className: 'w-14 tabular-nums' },
         cell: ({ row }) => <span>{hits ? (hits.get(row.original.index) ?? 0).toLocaleString() : row.original.count.toLocaleString()}</span>,
       },
     ]
     if (!readOnly) {
       cols.push({
-        id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('admin:rules.table.actions'), className: 'w-12' },
+        id: 'actions', header: '', enableSorting: false, meta: { hideable: false, align: 'right', label: t('admin:rules.table.actions'), className: 'w-10' },
         cell: ({ row }) => (
           <MoreMenu items={menuOf(row.original)} size="icon-xs" label={t('admin:rules.blocks.menu', { index: row.original.index + 1 })} />
         ),

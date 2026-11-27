@@ -89,9 +89,9 @@ describe('the scope of the routing test', () => {
     reads(); server()
     mountRuleSets(PAGE)
     const dialog = await openTester()
-    expect(within(dialog).getByText(/Assumes the client connected by name\. If it connected to an IP address, enter it\./)).toBeTruthy()
+    expect(within(dialog).getByText(/Assumes the client connected by name; if it connected to an IP address, enter it\./)).toBeTruthy()
     byTemplate(dialog)
-    expect(within(dialog).getByText(/Assumes the client connected by name\./)).toBeTruthy()
+    expect(within(dialog).getByText(/Assumes the client connected by name;/)).toBeTruthy()
   })
 
   it('in the browser, a no-resolve IP rule above the match does not make the answer uncertain when no address was entered', async () => {

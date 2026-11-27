@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import type { ProxyGroupIssue, RuleSet } from '@/api/rules'
@@ -7,19 +8,14 @@ import { confirm } from '@/components/ConfirmHost'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import type { ReorderCall } from '@/components/data/dataTableTypes'
 import { pushToast } from '@/components/feedback/toasts'
-import { SegmentedControl } from '@/components/form/SegmentedControl'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { DetailDialog } from '@/components/data/DetailDialog'
 import { IconButton } from '@/components/common/IconButton'
-import { Input } from '@/components/ui/input'
-import { NativeSelect } from '@/components/ui/native-select'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useMediaQuery } from '@/hooks/useMediaQuery'
-import { IconAdd, IconArrowLeft, IconClose, IconCopy, IconDelete, IconReset, IconSearch, IconSpinner, IconWarning } from '@/lib/icons'
+import { IconAdd, IconArrowLeft, IconCopy, IconDelete, IconReset, IconSpinner } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { copyToClipboard } from '@/utils/clipboard'
-import { blockAt, type Block } from '@/utils/ruleset/blocks'
+import { blockAt, buildBlocks, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
 import type { PasteEntry } from '@/utils/ruleset/detect'
 import { continuation, type Continuation } from '@/utils/ruleset/continuation'
@@ -34,6 +30,11 @@ import { BlockDirectory } from './BlockDirectory'
 import { MoveToDialog, moveBlockOptions, type MoveChoice } from './MoveToDialog'
 import { PasteDialog, type PasteWhere } from './PasteDialog'
 import { RuleEditDialog } from './RuleEditDialog'
+import { readDoc } from './docCache'
+import { testerPlacement, toolbarTier } from './layout'
+import { RulesToolbar } from './RulesToolbar'
+import { TesterPanel } from './TesterPanel'
+import { useContainerWidth } from './useContainerWidth'
 import { EMPTY_PROBE, RouteTester } from './RouteTester'
 import { useRouteExplain } from './useRouteExplain'
 import { isBuiltinTarget, targetChoices } from './targets'
@@ -44,7 +45,8 @@ import { useShadowFindings } from './useShadowFindings'
 
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
-const WIDE_QUERY = '(min-width: 1440px)'
+/** A window this wide shows the routing test open from the start: next to the page, not over it (see DOCK_MIN in layout.ts, with the sidebar's 16rem and the page's padding). */
+const OPEN_QUERY = '(min-width: 1760px)'
 const VIEW_KEY = 'psp_ruleset_view'
 type View = 'blocks' | 'text'
 const IMPORT_LIMIT = 1 << 20
@@ -81,10 +83,10 @@ const beforeIndex = (d: Doc, bl: readonly Block[], before: number | null): numbe
  * the same text as one document when that is easier. Both views edit the draft `content`; switching loses nothing, because
  * an edit rewrites only the lines it names (see utils/ruleset/ops).
  *
- * The routing test (design 3.9) is the third column on a wide screen, a dialog on a narrower one and a screen of its own on a
+ * The routing test (design 3.9) is a third column on a very wide page, a panel over the right side of it on a narrower one and a screen of its own on a
  * phone; the problems panel (3.13) is a dialog. Both read the same parsed draft, and both can open a line in its group.
  */
-export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groups, explain }: {
+export function RulesTab({ content, setContent, readOnly, order, rematchNames, serverIssues, showTarget, subRule, ariaLabel, cont, groups, explain, toolbarSlot }: {
   content: string
   setContent: (next: string) => void
   readOnly: boolean
@@ -105,6 +107,11 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   ariaLabel?: string
   /** What the routing test's server mode needs: the whole draft (the tester sends it as it is) and the templates to choose from. Main rules only. */
   explain?: { draft: RuleSet; templates: readonly Template[] }
+  /**
+   * Where the toolbar is drawn when the page keeps it under its tabs while the rules scroll: the element it is put into, or null while
+   * this tab is not the one shown. Left out, the toolbar is drawn here, above the rules.
+   */
+  toolbarSlot?: HTMLElement | null
   /** Which targets end the matching (see utils/ruleset/continuation): from the backend's reading of the draft's groups. */
   cont: Continuation
   /**
@@ -117,9 +124,9 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 }) {
   const { t } = useTranslation(['admin', 'common'])
   const phone = useIsMobile()
-  const history = useRuleDoc(content, setContent)
-  const { doc, blocks, apply } = history
   const [view, setViewState] = useState<View>(storedView)
+  const history = useRuleDoc(content, setContent, view === 'text')
+  const { doc, blocks, apply } = history
   const [selected, setSelected] = useState(0)
   const [opened, setOpened] = useState(false)
   const [query, setQuery] = useState('')
@@ -128,15 +135,21 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
   const [targetMode, setTargetMode] = useState<'merged' | 'runs'>('merged')
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [announce, setAnnounce] = useState('')
-  // The routing test: on a wide screen a third column, on a narrower one a dialog, on a phone a screen of its own. What was typed
-  // in it is kept here so that moving between the three, or closing it, does not lose it. "Wide" is 1440px, not the design's
-  // 1280: with the sidebar open a 1280px window leaves about 1000px for the page, and three columns there squeeze the rules
-  // table to about 225px (seen in the browser), so the column starts where the table keeps room.
-  const wide = useMediaQuery(WIDE_QUERY)
-  const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(WIDE_QUERY).matches)
+  // The routing test: a third column on a very wide page, a panel over the right side of it below that, a screen of its own on a phone
+  // (see layout.ts for the widths, which are those of this tab's own box). What was typed in it is kept here so that moving between
+  // them, or closing it, does not lose it.
+  const root = useRef<HTMLDivElement>(null)
+  const width = useContainerWidth(root)
+  const tier = toolbarTier(width)
+  const [testerOpen, setTesterOpen] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(OPEN_QUERY).matches)
+  // Focus goes to the test's first field only when the person opened it, not when the page starts with it open.
+  const testerAsked = useRef(false)
+  // Closing the test hands focus back to the button that opened it.
+  const closeTester = () => { setTesterOpen(false); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tester-toggle]')?.focus()) }
   const [probe, setProbe] = useState<ProbeInput>(EMPTY_PROBE)
   const routeExplain = useRouteExplain()
-  const testerColumn = wide && testerOpen && !subRule
+  const placement = testerPlacement({ open: testerOpen, width, phone, subRule: !!subRule })
+  const [filterRow, setFilterRow] = useState(false)
   const [issuesOpen, setIssuesOpen] = useState(false)
   const [focusRow, setFocusRow] = useState<{ id: number; token: number } | null>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -216,14 +229,19 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   /** Opens a line (from the routing test or the problems panel) in its group, with anything that would hide it cleared. */
   const jumpToLine = (line: number) => {
-    const b = blockAt(blocks, line)
-    if (!b || textOnly) return
+    // Resolved against the text as it is NOW: in the Text view the kept document can be up to a pause behind it. (A line number taken from an
+    // answer worked out on the older text is marked as updating and not offered as a link, so this is the guard for a click that got through.)
+    const d = readDoc(content)
+    const bl = d === doc ? blocks : buildBlocks(d)
+    const b = blockAt(bl, line)
+    if (!b || d.foreign.length > 0) return
+    history.settle()
     setQuery(''); setTargetFilter(''); setTargetMode('runs')
     if (shownView === 'text') setView('blocks')
     setSelected(b.index); setOpened(true)
-    setFocusRow({ id: doc.lines[line].id, token: Date.now() })
+    setFocusRow({ id: d.lines[line].id, token: Date.now() })
     // The narrower layouts show the test over the page; the page is what the jump is for.
-    if (!wide) setTesterOpen(false)
+    if (placement !== 'dock') setTesterOpen(false)
   }
 
   const reorder = ({ movedId, beforeId }: ReorderCall) => {
@@ -432,16 +450,19 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
 
   const stats = t('admin:rules.stats', { rules: blocks.reduce((n, b) => n + (b.kind === 'rules' ? b.count : 0), 0).toLocaleString(), blocks: blocks.length.toLocaleString() })
   const resultsText = !q ? '' : hitTotal === 0 ? t('admin:rules.search.none', { query }) : t('admin:rules.search.results', { count: hitTotal, blocks: hits?.size ?? 0 })
+  // What the line above the directory says: the search's answer, else the last move or paste, else (when the toolbar has no room for them) the counts.
+  const statusText = resultsText || announce || (tier === 'full' ? '' : stats)
   // On a phone the directory and the open group are two screens; the merged list of a target is a screen of its own.
   const merged = targetFilter !== '' && targetMode === 'merged'
   const showDirectory = !phone || (!opened && !merged)
   const showDetail = !phone || opened || merged
+  const docked = placement === 'dock'
 
-  const tester = <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine}
+  const tester = <RouteTester doc={doc} blocks={blocks} input={probe} setInput={setProbe} textOnly={textOnly} cont={cont} groupsKnown={groupsKnown} onJump={jumpToLine} updating={history.behind}
     server={explain ? { draft: explain.draft, templates: explain.templates, explain: routeExplain } : undefined} />
 
   // On a phone the test is a screen of its own, in place of the rules.
-  if (phone && testerOpen && !subRule) {
+  if (placement === 'screen') {
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
@@ -453,8 +474,20 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
     )
   }
 
+  const toolbar = (
+    <RulesToolbar
+      tier={tier} view={shownView} textOnly={textOnly} readOnly={readOnly}
+      query={query} onQuery={setQuery} onSearchKey={onSearchKey} searchRef={search}
+      onView={setView} history={history} dialogOpen={dialog !== null}
+      targets={targets} targetFilter={targetFilter} onTargetFilter={v => { setTargetFilter(v); setTargetMode('merged') }} targetMode={targetMode} onTargetMode={setTargetMode}
+      stats={stats} subRule={!!subRule} testerOpen={testerOpen} onToggleTester={() => { testerAsked.current = true; setTesterOpen(o => !o) }}
+      onOpenIssues={() => setIssuesOpen(true)} filterRow={filterRow} onFilterRow={setFilterRow}
+    />
+  )
+  const liveRegion = <p role="status" aria-live="polite" className="sr-only">{showDirectory && shownView === 'blocks' ? '' : (resultsText || announce)}</p>
+
   return (
-    <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
+    <div ref={root} className="flex flex-col gap-3" onKeyDown={onKeyDown}>
       {serverIssues.length > 0 && (
         <Alert variant="destructive">
           <AlertDescription>
@@ -476,44 +509,12 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label={t('admin:rules.toolbar')}>
-        {shownView === 'blocks' && <div className="relative min-w-0 flex-1 basis-64 sm:max-w-md">
-          <IconSearch aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input ref={search} value={query} className="pl-8" placeholder={t('admin:rules.search.placeholder')} aria-label={t('admin:rules.search.placeholder')}
-            onChange={e => setQuery(e.target.value)} onKeyDown={onSearchKey} data-rules-search />
-        </div>}
-        <SegmentedControl<View> aria-label={t('admin:rules.view.label')} value={shownView} onChange={setView}
-          options={[{ value: 'blocks', label: t('admin:rules.view.blocks'), disabled: textOnly }, { value: 'text', label: t('admin:rules.view.text') }]} />
-        {shownView === 'blocks' && targetFilter !== '' && (
-          <SegmentedControl<'merged' | 'runs'> aria-label={t('admin:rules.targetview.label')} value={targetMode} onChange={setTargetMode}
-            options={[{ value: 'merged', label: t('admin:rules.targetview.merged') }, { value: 'runs', label: t('admin:rules.targetview.runs') }]} />
-        )}
-        {shownView === 'blocks' && (targets.length > 1 || targetFilter !== '') && (
-          <div className="w-48">
-            <NativeSelect aria-label={t('admin:rules.search.by_target')} value={targetFilter} onChange={e => { setTargetFilter(e.target.value); setTargetMode('merged') }}>
-              <option value="">{t('admin:rules.search.by_target')}</option>
-              {targets.map(x => <option key={x} value={x}>{x}</option>)}
-            </NativeSelect>
-          </div>
-        )}
-        {!readOnly && shownView === 'blocks' && (
-          <span className="flex items-center gap-1">
-            <Button variant="outline" size="sm" disabled={!history.canUndo || dialog !== null} onClick={history.undo}>{t('admin:rules.undo')}</Button>
-            <Button variant="outline" size="sm" disabled={!history.canRedo || dialog !== null} onClick={history.redo}>{t('admin:rules.redo')}</Button>
-          </span>
-        )}
-        <span className="text-xs text-muted-foreground tabular-nums">{stats}</span>
-        <span className="ml-auto flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setIssuesOpen(true)}>
-            <IconWarning />
-            {t('admin:rules.issues.title')}
-          </Button>
-          {!subRule && <Button variant={testerOpen ? 'secondary' : 'outline'} size="sm" aria-pressed={testerOpen} onClick={() => setTesterOpen(o => !o)}>{t('admin:rules.tester.title')}</Button>}
-        </span>
-      </div>
-      <p role="status" aria-live="polite" className="min-h-4 text-xs text-muted-foreground">{resultsText || announce}</p>
+      {toolbarSlot === undefined ? toolbar : toolbarSlot ? createPortal(toolbar, toolbarSlot) : null}
+      {liveRegion}
 
-      <div className={testerColumn ? 'grid min-w-0 grid-cols-[minmax(0,1fr)_20rem] gap-4' : 'min-w-0'}>
+      {/* The anchor of the test's panel when it is over the page. */}
+      <div className="@container relative min-w-0">
+      <div className={cn('grid min-w-0 gap-4', docked && 'grid-cols-[minmax(0,1fr)_22rem]')}>
       <div className="min-w-0">
       {shownView === 'text' ? (
         <div className="flex flex-col gap-1.5">
@@ -526,10 +527,14 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
           <p className="text-xs text-muted-foreground">{t('admin:rules.editor_keyboard_hint')}</p>
         </div>
       ) : (
-        <div className={cn('grid min-w-0 gap-4', testerColumn ? 'lg:grid-cols-[minmax(13rem,16rem)_minmax(0,1fr)]' : 'lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]')}>
+        <div className="grid min-w-0 gap-4 @[46rem]:grid-cols-[minmax(16rem,19rem)_minmax(0,1fr)]">
           {showDirectory && (
             <div className="flex min-w-0 flex-col gap-2">
-              <p className="text-xs text-muted-foreground">{t('admin:rules.blocks.order_hint')}</p>
+              {/* One fixed line: the order hint, or, while there is something to say, what a search found or what the last edit did. Nothing below it moves. */}
+              <div className="min-h-4">
+                <p className={cn('text-xs text-muted-foreground', statusText && 'hidden')}>{t('admin:rules.blocks.order_hint')}</p>
+                <p role="status" aria-live="polite" className="text-xs text-foreground/80 tabular-nums">{statusText}</p>
+              </div>
               <BlockDirectory
                 doc={doc} blocks={blocks} shown={shown} hits={hits} selected={currentIndex} onSelect={select} readOnly={readOnly}
                 onReorder={reorder} reorderBlockedReason={filtering ? t('admin:rules.move.blocked_filter') : undefined} menuOf={menuOf}
@@ -564,27 +569,16 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         </div>
       )}
       </div>
-      {testerColumn && (
-        <aside aria-label={t('admin:rules.tester.title')} className="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">{t('admin:rules.tester.title')}</h2>
-            <IconButton label={t('admin:rules.tester.hide_tester')} size="icon-xs" onClick={() => setTesterOpen(false)}><IconClose /></IconButton>
-          </div>
-          {tester}
-        </aside>
-      )}
+      {docked && <TesterPanel placement="dock" asked={testerAsked} onClose={closeTester}>{tester}</TesterPanel>}
+      </div>
+      {placement === 'overlay' && <TesterPanel placement="overlay" asked={testerAsked} onClose={closeTester}>{tester}</TesterPanel>}
       </div>
       <input ref={fileInput} type="file" accept=".txt,.list,.yaml,.yml,.conf,text/plain" hidden aria-hidden tabIndex={-1}
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void readFile(f) }} />
       {renderDialog()}
-      {!wide && !phone && testerOpen && !subRule && (
-        <DetailDialog open onClose={() => setTesterOpen(false)} size="md" title={t('admin:rules.tester.title')}>
-          {tester}
-        </DetailDialog>
-      )}
       {issuesOpen && <IssuesPanel doc={doc} textOnly={textOnly}
         status={groupsKnown ? 'ready' : groups.unavailable ? 'unavailable' : groups.failed ? 'failed' : 'computing'}
-        failedMessage={groups.failedMessage} findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
+        failedMessage={groups.failedMessage} updating={history.behind} findings={groupsKnown ? findings : partialFindings} onRetry={groups.retry} onJump={textOnly ? undefined : jumpToLine} onClose={() => setIssuesOpen(false)} />}
     </div>
   )
 }
