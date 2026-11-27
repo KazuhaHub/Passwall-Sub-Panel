@@ -6,7 +6,6 @@ import {
   useEmergencyAccess,
   type MeProfile,
 } from '@/api/me'
-import { PageHeader } from '@/components/common/PageHeader'
 import { confirm } from '@/components/ConfirmHost'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { PageSkeleton } from '@/components/feedback/LoadingState'
@@ -16,16 +15,16 @@ import { useTabParam } from '@/hooks/useTabParam'
 import { meKeys } from '@/query/keys'
 import { useMyProfile, useMyUsage } from '@/query/me'
 import { useQueryScope } from '@/query/useQueryScope'
+import { AccountMenu } from './me/AccountMenu'
 import { AnnouncementBanner, AnnouncementPopup } from './me/Announcement'
 import { EmergencyCard } from './me/EmergencyCard'
 import { ClientList, RecommendedClient, splitClients } from './me/ImportClients'
 import { PasswordDialog } from './me/PasswordDialog'
 import { QuickLinks } from './me/QuickLinks'
 import { RulesDialog } from './me/RulesDialog'
-import { hasSecurityRows, SecurityTab } from './me/SecurityTab'
+import { ServiceBanner } from './me/ServiceBanner'
 import { serviceNotice } from './me/serviceNotice'
 import { ServerStatusTab } from './me/ServerStatusTab'
-import { StatusCard } from './me/StatusCard'
 import { SubscriptionCard } from './me/SubscriptionCard'
 import { TrafficTab } from './me/TrafficTab'
 import { UsageCard } from './me/UsageCard'
@@ -36,15 +35,15 @@ import PasskeyDialog from './PasskeyDialog'
 import RecoveryCodesDialog from './RecoveryCodesDialog'
 import TwoFactorDialog from './TwoFactorDialog'
 
-const TABS = ['overview', 'traffic', 'clients', 'status', 'security'] as const
+const TABS = ['overview', 'traffic', 'clients', 'status'] as const
 type Tab = (typeof TABS)[number]
 
 /**
- * THE USER PORTAL: the one page an ordinary subscriber sees, mostly on a phone. It answers, in this order, whether the
- * subscription works (the status card), how much traffic is left and when the account expires, the subscription link
- * with its copy button, QR code and the import button of the client recommended for this device, and then account
- * security. Everything else is a tab: the full client list, the traffic chart, server status, security. `?tab=` keeps the
- * old values (overview, traffic, clients, status) and adds `security`.
+ * THE USER PORTAL: the one page an ordinary subscriber sees. Top to bottom: the announcement and, if the service is held,
+ * why (coloured banners); who is signed in, with the security menu; the tabs (overview, traffic, clients, server
+ * status). The overview leads with the client recommended for this device, then two columns: the subscription link with
+ * its QR code, and the shortcuts, on the left; usage and emergency access on the right. On a phone the columns fold into
+ * one stack in the order link, usage, shortcuts, emergency access. Traffic, clients and server status are one card each.
  */
 export default function MeView() {
   const { t } = useMeT()
@@ -110,15 +109,15 @@ export default function MeView() {
     }
   }
 
-  // On a phone the tab strip scrolls sideways; a tab reached by address (?tab=security) or by the "More clients" shortcut
+  // On a phone the tab strip scrolls sideways; a tab reached by address (?tab=status) or by the "More clients" shortcut
   // would otherwise be selected out of sight, and the person could not tell where they are.
   useEffect(() => {
     document.querySelector('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({ inline: 'center', block: 'nearest' })
   }, [rawTab, profile])
 
-  // The page frame: the shell gives its content area no padding, so the page pads itself and centres a narrow column,
-  // which is what a phone shows full width and a desktop shows as one readable strip.
-  const frame = (children: React.ReactNode) => <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">{children}</div>
+  // The page frame: the shell gives its content area no padding, so the page pads itself and centres a column,
+  // which a phone shows full width and a desktop shows up to 1200px wide, where the overview has room for two columns.
+  const frame = (children: React.ReactNode) => <div className="mx-auto w-full max-w-[75rem] p-4 sm:p-6">{children}</div>
 
   // Only the FIRST load may take the page down. A refresh started by a dialog's onChanged() must not: tearing the tree
   // down unmounts that dialog, and PasskeyDialog would lose the one-time recovery codes it was just handed between the
@@ -127,63 +126,78 @@ export default function MeView() {
   // The whole page hangs off the profile, so a failed read says so and offers a retry instead of a blank screen.
   if (!profile) return frame(<ErrorState title={t('load_failed')} reason={profileQuery.error} retry={() => load()} />)
 
-  const securityOn = hasSecurityRows(profile)
-  const tab: Tab = rawTab === 'security' && !securityOn ? 'overview' : rawTab
+  const tab: Tab = rawTab
+  // Whether there is a service hold to explain: the banner row is only laid out when it, or an announcement, has something to say.
+  const held = serviceNotice(profile, t, undefined) !== null
   const announcement = profile.global_announcement
   const quickLinks = enabledSorted(profile.quick_links)
   const passkeyCount = profile.passkey_credentials?.length ?? 0
-  // A service hold is the thing to know on every tab, so it follows the person to the others; the all-clear does not.
-  const held = serviceNotice(profile, t, undefined) !== null
 
   return frame(
     <>
-      <PageHeader
-        title={profile.display_name || profile.upn}
-        description={profile.display_name ? `${profile.upn}${profile.email ? ` · ${profile.email}` : ''}` : profile.email || undefined}
-      />
-      <div className="flex flex-col gap-4">
-        {announcement?.enabled && announcement.title && <AnnouncementBanner announcement={announcement} />}
-        {(tab === 'overview' || held) && <StatusCard profile={profile} usage={usage} usageLoading={usageQuery.isPending} />}
+      {/* Banners first, whatever the tab: an announcement and, when the service is held, the reason. */}
+      {((announcement?.enabled && announcement.title) || held) && (
+        <div className="mb-4 flex flex-col gap-3">
+          {announcement?.enabled && announcement.title && <AnnouncementBanner announcement={announcement} />}
+          <ServiceBanner profile={profile} />
+        </div>
+      )}
 
-        <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
-          <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-            <TabsList>
-              <TabsTrigger value="overview">{t('tabs.overview')}</TabsTrigger>
-              <TabsTrigger value="traffic">{t('tabs.traffic')}</TabsTrigger>
-              <TabsTrigger value="clients">{t('tabs.clients')}</TabsTrigger>
-              <TabsTrigger value="status">{t('tabs.server_status')}</TabsTrigger>
-              {securityOn && <TabsTrigger value="security">{t('tabs.security')}</TabsTrigger>}
-            </TabsList>
-          </div>
-        </Tabs>
+      <div className="mb-5 flex items-center gap-3 sm:mb-6 sm:gap-4">
+        <span aria-hidden className="grid size-12 shrink-0 place-items-center rounded-full bg-brand text-lg font-medium text-brand-foreground">
+          {(profile.display_name || profile.upn).charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl leading-tight font-medium">{profile.display_name || profile.upn}</h1>
+          <p className="truncate text-sm text-muted-foreground">{profile.upn}{profile.email ? ` · ${profile.email}` : ''}</p>
+        </div>
+        <AccountMenu
+          profile={profile}
+          onPassword={() => setPwdOpen(true)} onTotp={() => setTwoFAOpen(true)}
+          onPasskeys={() => setPasskeyOpen(true)} onRecovery={() => setRecoveryOpen(true)}
+        />
+      </div>
+
+      <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
+        <div className="-mx-4 mb-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:mb-6 sm:px-0">
+          <TabsList>
+            <TabsTrigger value="overview">{t('tabs.overview')}</TabsTrigger>
+            <TabsTrigger value="traffic">{t('tabs.traffic')}</TabsTrigger>
+            <TabsTrigger value="clients">{t('tabs.clients')}</TabsTrigger>
+            <TabsTrigger value="status">{t('tabs.server_status')}</TabsTrigger>
+          </TabsList>
+        </div>
+      </Tabs>
+
+      <div className="flex flex-col gap-4 sm:gap-6">
+        {tab === 'overview' && split.hero && <RecommendedClient profile={profile} client={split.hero} onShowMore={() => setTab('clients')} />}
+        {tab === 'clients' && split.hero && <RecommendedClient profile={profile} client={split.hero} />}
 
         {tab === 'overview' && (
-          <>
-            <UsageCard
-              limitBytes={profile.traffic_limit_bytes} usage={usage} usageLoading={usageQuery.isPending}
-              expireAt={profile.expire_at ?? null} resetPeriod={profile.traffic_reset_period} charged={server.charged}
-            />
-            <SubscriptionCard subUrl={profile.sub_url} maskSignal={maskSignal} onReset={reset} onOpenRules={() => setRulesOpen(true)} />
-            {split.hero && <RecommendedClient profile={profile} client={split.hero} onShowMore={() => setTab('clients')} />}
-            {profile.emergency_access?.enabled && <EmergencyCard emergency={profile.emergency_access} onUse={tryEmergency} />}
-            <QuickLinks links={quickLinks} />
-          </>
+          /* Two independent columns from md up, so a tall card on one side opens no gap on the other. Below md the column
+             wrappers are `contents`, which removes them from the layout and makes every card a direct child of this one
+             stack, where `order` puts them in the phone sequence: link, usage, shortcuts, emergency access. */
+          <div className="flex flex-col gap-4 sm:gap-6 md:flex-row md:items-start">
+            <div className="contents md:flex md:min-w-0 md:flex-[1.5] md:flex-col md:gap-6">
+              <div className="order-1 md:order-none">
+                <SubscriptionCard subUrl={profile.sub_url} maskSignal={maskSignal} onReset={reset} onOpenRules={() => setRulesOpen(true)} />
+              </div>
+              {quickLinks.length > 0 && <div className="order-3 md:order-none"><QuickLinks links={quickLinks} /></div>}
+            </div>
+            <div className="contents md:flex md:min-w-0 md:flex-1 md:flex-col md:gap-6">
+              <div className="order-2 md:order-none">
+                <UsageCard
+                  limitBytes={profile.traffic_limit_bytes} usage={usage} usageLoading={usageQuery.isPending}
+                  expireAt={profile.expire_at ?? null} resetPeriod={profile.traffic_reset_period} charged={server.charged}
+                />
+              </div>
+              {profile.emergency_access?.enabled && <div className="order-4 md:order-none"><EmergencyCard emergency={profile.emergency_access} onUse={tryEmergency} /></div>}
+            </div>
+          </div>
         )}
-        {tab === 'clients' && (
-          <>
-            {split.hero && <RecommendedClient profile={profile} client={split.hero} />}
-            <ClientList profile={profile} clients={split.others} hasHero={!!split.hero} />
-          </>
-        )}
+        {tab === 'clients' && <ClientList profile={profile} clients={split.others} hasHero={!!split.hero} />}
         {tab === 'traffic' && <TrafficTab historyDays={profile.traffic_history_days} />}
         {tab === 'status' && <ServerStatusTab nodes={server.nodes} loading={server.loading} />}
-        {tab === 'security' && securityOn && (
-          <SecurityTab
-            profile={profile}
-            onPassword={() => setPwdOpen(true)} onTotp={() => setTwoFAOpen(true)}
-            onPasskeys={() => setPasskeyOpen(true)} onRecovery={() => setRecoveryOpen(true)}
-          />
-        )}
       </div>
 
       <AnnouncementPopup announcement={announcement} />

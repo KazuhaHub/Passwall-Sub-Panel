@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, vi } from 'vitest'
 import ConfirmHost from '@/components/ConfirmHost'
@@ -75,4 +75,13 @@ export function mountMe(page: ReactElement, entry = '/') {
     <QueryClientProvider client={client}><ConfirmHost /><MemoryRouter initialEntries={[entry]}>{page}</MemoryRouter></QueryClientProvider>,
   )
   return { client, ...view }
+}
+
+/** Opens the ⋮ account menu beside the name and chooses the entry that starts with `name`; the dialog it opens is the caller's to find. */
+export async function chooseSecurity(name: string) {
+  const trigger = await screen.findByRole('button', { name: 'Account security' })
+  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+  fireEvent.mouseDown(trigger, { button: 0 })
+  fireEvent.click(trigger)
+  fireEvent.click(await screen.findByRole('menuitem', { name: new RegExp(`^${name}`) }))
 }

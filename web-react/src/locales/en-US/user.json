@@ -5,8 +5,7 @@
     "overview": "Overview",
     "traffic": "Traffic",
     "clients": "Clients",
-    "server_status": "Server status",
-    "security": "Security"
+    "server_status": "Server status"
   },
   "status": {
     "title": "Server status",
@@ -240,19 +239,9 @@
     "consent_outdated": "The terms were just updated again. Please read them again."
   },
   "summary": {
-    "active_title": "Service active",
-    "active_body": "Your subscription and proxy service are working.",
-    "expiring_title": "Expiring soon",
-    "expiring_body": "Your subscription expires {{when}} ({{date}}). Proxy service is paused after that.",
-    "near_limit_title": "Traffic almost used up",
-    "near_limit_body": "{{percent}}% of this period's traffic is used. Proxy service pauses when the limit is reached.",
-    "emergency_title": "Emergency access is on",
     "emergency_body": "Emergency access is on."
   },
   "security": {
-    "title": "Account security",
-    "change": "Change",
-    "manage": "Manage",
-    "set_up": "Set up"
+    "title": "Account security"
   }
 }

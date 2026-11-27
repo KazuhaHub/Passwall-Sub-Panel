@@ -39,7 +39,10 @@ function Platforms({ client }: { client: SubImportClient }) {
   return <>{client.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}</>
 }
 
-/** The client for this device, with its import and install buttons: the shortest path from "I have a link" to "it works". */
+/**
+ * The client for this device, in a brand-tinted card, with its import and install buttons: the shortest path from "I have
+ * a link" to "it works". "More clients" sits at the card's far corner on the overview, where it leads to the full list.
+ */
 export function RecommendedClient({ profile, client, onShowMore }: {
   profile: ImportProfile
   client: SubImportClient
@@ -50,20 +53,21 @@ export function RecommendedClient({ profile, client, onShowMore }: {
   const doImport = useImport(profile)
   const tutorial = profile.sub_import_tutorial_url
   return (
-    <Card data-testid="recommended-client" className="ring-brand/40">
-      <CardContent className="flex flex-col gap-3">
+    <Card data-testid="recommended-client" className="bg-brand/10 ring-brand/30">
+      <CardContent className="flex flex-col gap-4">
         <div>
-          <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><IconStar className="size-3.5" />{t('import.recommended_label')}</p>
-          <h2 className="mt-1 text-lg leading-tight font-semibold">{client.name}</h2>
-          <p className="text-sm text-muted-foreground"><Platforms client={client} /></p>
+          <p className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"><IconStar className="size-3.5" />{t('import.recommended_label')}</p>
+          <h2 className="mt-1.5 text-xl leading-tight font-medium sm:text-2xl">{client.name}</h2>
+          <p className="mt-1 text-sm text-muted-foreground"><Platforms client={client} /></p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="grid flex-1 grid-cols-2 gap-2 sm:flex-none sm:flex">
-            <Button onClick={() => { void doImport(client) }}><IconExternalLink />{t('import.import')}</Button>
-            <Button variant="outline" onClick={() => openNew(client.install_url)}><IconDownload />{t('import.install')}</Button>
-            {tutorial && <Button variant="outline" className="col-span-2 sm:col-auto" onClick={() => openNew(tutorial)}><IconHelp />{t('import.tutorial')}</Button>}
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          {/* A phone packs the actions two to a row; the tutorial link takes the row under them. */}
+          <div className="grid flex-[1_1_100%] grid-cols-2 gap-2 sm:flex sm:flex-[0_1_auto] sm:gap-3">
+            <Button size="lg" onClick={() => { void doImport(client) }}><IconExternalLink />{t('import.import')}</Button>
+            <Button size="lg" variant="outline" onClick={() => openNew(client.install_url)}><IconDownload />{t('import.install')}</Button>
+            {tutorial && <Button size="lg" variant="outline" className="col-span-2 sm:col-auto" onClick={() => openNew(tutorial)}><IconHelp />{t('import.tutorial')}</Button>}
           </div>
-          {onShowMore && <Button variant="outline" className="sm:ml-auto" onClick={onShowMore}><IconDevices />{t('import.others_title')}</Button>}
+          {onShowMore && <Button variant="ghost" size="sm" className="ml-auto" onClick={onShowMore}><IconDevices />{t('import.others_title')}</Button>}
         </div>
       </CardContent>
     </Card>
@@ -71,8 +75,9 @@ export function RecommendedClient({ profile, client, onShowMore }: {
 }
 
 /**
- * Every other client. When none matches this device it is the whole list, under "Import to client" with its intro;
- * when one is recommended it is "More clients". The tutorial link lives here as well as on the recommended card.
+ * Every other client, one small box each (name, platforms, import and install). When none matches this device it is the
+ * whole list, under "Import to client" with its intro; when one is recommended it is "More clients". The tutorial link
+ * sits at the head of the card, on the right.
  */
 export function ClientList({ profile, clients, hasHero }: { profile: ImportProfile; clients: SubImportClient[]; hasHero: boolean }) {
   const { t } = useMeT()
@@ -81,26 +86,26 @@ export function ClientList({ profile, clients, hasHero }: { profile: ImportProfi
   if (clients.length === 0) return null
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="grid-cols-[1fr_auto]">
         <CardTitle>{hasHero ? t('import.others_title') : t('import.title')}</CardTitle>
-        {!hasHero && <CardDescription>{t('import.intro')}</CardDescription>}
+        {tutorial && <Button variant="outline" size="sm" className="row-span-2 self-start" onClick={() => openNew(tutorial)}><IconHelp />{t('import.tutorial')}</Button>}
+        {!hasHero && <CardDescription className="col-span-2">{t('import.intro')}</CardDescription>}
       </CardHeader>
-      <CardContent className="flex flex-col">
-        <ul className="divide-y">
+      <CardContent>
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
           {clients.map(c => (
-            <li key={c.name} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0">
+            <li key={c.name} className="flex flex-col gap-3 rounded-lg bg-card p-4 ring-1 ring-foreground/10">
               <div className="min-w-0">
                 <div className="truncate font-medium" title={c.name}>{c.name}</div>
-                <div className="text-xs text-muted-foreground"><Platforms client={c} /></div>
+                <div className="mt-0.5 text-xs text-muted-foreground"><Platforms client={c} /></div>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex gap-2">
                 <Button size="sm" onClick={() => { void doImport(c) }}>{t('import.import')}</Button>
                 <Button size="sm" variant="outline" onClick={() => openNew(c.install_url)}>{t('import.install')}</Button>
               </div>
             </li>
           ))}
         </ul>
-        {tutorial && <Button variant="outline" size="sm" className="mt-3 self-start" onClick={() => openNew(tutorial)}><IconHelp />{t('import.tutorial')}</Button>}
       </CardContent>
     </Card>
   )

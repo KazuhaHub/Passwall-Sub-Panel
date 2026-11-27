@@ -1,5 +1,6 @@
 import type { QuickLink } from '@/api/me'
 import { pushSnack } from '@/components/feedback/toasts'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { isHttpUrl } from './format'
@@ -44,9 +45,22 @@ function LinkTile({ link, onOpen }: { link: QuickLink; onOpen: Open }) {
   )
 }
 
+/** Tiles in as many columns as fit at least 190px each. */
+function TileGrid({ links, onOpen }: { links: QuickLink[]; onOpen: Open }) {
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-2.5">
+      {links.map((l, i) => <LinkTile key={`${l.url}-${i}`} link={l} onOpen={onOpen} />)}
+    </div>
+  )
+}
+
 /**
  * The admin's shortcuts. They are web addresses typed into settings, so only http and https are opened: a
  * javascript: or data: link in a hostile or mistyped setting would otherwise run on click.
+ *
+ * Adaptive, as it always was: when every link is only a label (no icon, no description, no group), tiles would be wide
+ * boxes with the text hugging the left edge, so they are a compact row of buttons; tiles appear once there is an icon,
+ * a description or a group to show.
  */
 export function QuickLinks({ links }: { links: QuickLink[] }) {
   const { t } = useMeT()
@@ -56,21 +70,25 @@ export function QuickLinks({ links }: { links: QuickLink[] }) {
     if (l.new_window) window.open(l.url, '_blank', 'noopener,noreferrer')
     else window.location.href = l.url
   }
+  const anyRich = links.some(l => (l.icon || '').trim() || (l.description || '').trim())
   const groups = groupLinks(links)
+  const hasGroups = groups.some(g => g.name !== '')
   return (
     <Card>
       <CardHeader><CardTitle>{t('links.title')}</CardTitle></CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {groups.map(g => (
+        {!anyRich && !hasGroups ? (
+          <div className="flex flex-wrap gap-2">
+            {links.map((l, i) => <Button key={`${l.url}-${i}`} variant="outline" size="sm" onClick={() => open(l)}>{l.label}</Button>)}
+          </div>
+        ) : groups.map(g => (
           <section key={g.name || '__ungrouped'} aria-label={g.name || undefined} className="flex flex-col gap-2">
             {g.name && (
               <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
                 <span>{g.name}</span><span className="h-px flex-1 bg-border" />
               </div>
             )}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {g.links.map((l, i) => <LinkTile key={`${l.url}-${i}`} link={l} onOpen={open} />)}
-            </div>
+            <TileGrid links={g.links} onOpen={open} />
           </section>
         ))}
       </CardContent>
