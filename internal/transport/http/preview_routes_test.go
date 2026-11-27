@@ -25,6 +25,7 @@ var readOnlyPreviewRoutes = []string{
 	"/nodes/:id/routes/check",
 	"/nodes/separator/group-preview",
 	"/nodes/setup-preview",
+	"/rules/explain",
 	"/users/:id/group-preview",
 }
 

@@ -1,0 +1,642 @@
+{
+ "version": 1,
+ "description": "One rule line, one connection, the expected verdict (yes / no / unknown plus the reason). Read by internal/pkg/rulematch/fixture_test.go and by the SPA matcher test; both must agree. Rule lines are the text after '- '. A port of 0/absent means 'not given'. A case with browser_differs: true is one where the SPA matcher (match.ts on the UI branch) gave a different answer when this fixture was written; the expected value is what Mihomo does, see the case's 'mihomo' source reference.",
+ "probes": {
+  "web": {
+   "host": "claude.ai",
+   "port": 443,
+   "network": "tcp"
+  },
+  "web_udp": {
+   "host": "claude.ai",
+   "port": 443,
+   "network": "udp"
+  },
+  "sub": {
+   "host": "www.claude.ai",
+   "port": 443,
+   "network": "tcp"
+  },
+  "no_port": {
+   "host": "example.com",
+   "network": "tcp"
+  },
+  "resolved": {
+   "host": "example.com",
+   "ip": "1.2.3.4",
+   "port": 80,
+   "network": "tcp"
+  },
+  "ip4": {
+   "host": "8.8.8.8",
+   "port": 53,
+   "network": "udp"
+  },
+  "ip6": {
+   "host": "2001:db8::1",
+   "port": 443,
+   "network": "tcp"
+  },
+  "proc": {
+   "host": "example.com",
+   "port": 443,
+   "network": "tcp",
+   "process": "Chrome.exe"
+  },
+  "src": {
+   "host": "example.com",
+   "port": 443,
+   "network": "tcp",
+   "src_ip": "192.168.1.5",
+   "src_port": 50000
+  }
+ },
+ "cases": [
+  {
+   "rule": "DOMAIN,claude.ai,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN,www.claude.ai,Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN,CLAUDE.AI,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "the rule value is lower-cased"
+  },
+  {
+   "rule": "DOMAIN,claude.ai,Proxy",
+   "probe": "ip4",
+   "expect": "no",
+   "note": "a connection to an address has no domain"
+  },
+  {
+   "rule": "domain-suffix,claude.ai,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "type is case-insensitive"
+  },
+  {
+   "rule": "DOMAIN-SUFFIX,claude.ai,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "a suffix rule matches the name itself"
+  },
+  {
+   "rule": "DOMAIN-SUFFIX,claude.ai,Proxy",
+   "probe": "sub",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-SUFFIX,laude.ai,Proxy",
+   "probe": "web",
+   "expect": "no",
+   "note": "the suffix must start at a label boundary"
+  },
+  {
+   "rule": "DOMAIN-SUFFIX,ai,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-SUFFIX,claude.ai,Proxy",
+   "probe": "ip4",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN-KEYWORD,laud,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-KEYWORD,CLAUD,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-KEYWORD,google,Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN-KEYWORD,8.8,Proxy",
+   "probe": "ip4",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^claude\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^CLAUDE\\.AI$,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "IgnoreCase"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^(www|api)\\.claude\\.ai$,Proxy",
+   "probe": "sub",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^[a-z]+\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^\\d+\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^claude{1}\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DOMAIN-REGEX,(?<n>claude),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "named group"
+  },
+  {
+   "rule": "DOMAIN-REGEX,claude(?=\\.ai),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "look-ahead"
+  },
+  {
+   "rule": "DOMAIN-REGEX,\\bclaude,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "\\b is not shared"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^claude.*?\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "lazy quantifier"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^(?i)claude,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "inline flags"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^[[:alpha:]]+\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "nested class"
+  },
+  {
+   "rule": "DOMAIN-REGEX,[],Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "empty class"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^claude\\.ai$,Proxy",
+   "probe": "ip4",
+   "expect": "no"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^a{3,1}$,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "regex",
+   "note": "bounds reversed"
+  },
+  {
+   "rule": "DOMAIN-REGEX,^c{1,3}laude\\.ai$,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "a comma inside a DOMAIN-REGEX payload is part of the payload",
+   "mihomo": "rules/common/base.go ParseRulePayload: DOMAIN-REGEX payload = item[1:len-1] joined with commas, target = last item",
+   "browser_differs": true
+  },
+  {
+   "rule": "IP-CIDR,8.8.8.0/24,Proxy",
+   "probe": "ip4",
+   "expect": "yes"
+  },
+  {
+   "rule": "IP-CIDR,8.8.9.0/24,Proxy,no-resolve",
+   "probe": "ip4",
+   "expect": "no"
+  },
+  {
+   "rule": "IP-CIDR,8.8.8.0/24,Proxy,no-resolve",
+   "probe": "ip4",
+   "expect": "yes"
+  },
+  {
+   "rule": "IP-CIDR,1.2.3.0/24,Proxy",
+   "probe": "resolved",
+   "expect": "yes",
+   "note": "a resolved address is supplied"
+  },
+  {
+   "rule": "IP-CIDR,1.2.4.0/24,Proxy",
+   "probe": "resolved",
+   "expect": "no"
+  },
+  {
+   "rule": "IP-CIDR,1.2.3.0/24,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "resolve",
+   "note": "Mihomo resolves the name here; no address supplied"
+  },
+  {
+   "rule": "IP-CIDR,1.2.3.0/24,Proxy,no-resolve",
+   "probe": "no_port",
+   "expect": "unknown",
+   "note": "no-resolve, and no address was supplied: Mihomo may still hold one (a connection that arrived by IP with a sniffed or mapped host), so this is not a certain no",
+   "reason": "input",
+   "mihomo": "rules/common/ipcidr.go Match tests metadata.DstIP whenever it is valid; no-resolve only stops the rule from resolving it",
+   "browser_differs": true
+  },
+  {
+   "rule": "IP-CIDR,1.2.3.0/24,Proxy,no-resolve",
+   "probe": "resolved",
+   "expect": "unknown",
+   "reason": "resolve",
+   "note": "an earlier rule or a hosts/fake-IP entry may already have resolved the name"
+  },
+  {
+   "rule": "IP-CIDR,1.2.4.0/24,Proxy,no-resolve",
+   "probe": "resolved",
+   "expect": "no"
+  },
+  {
+   "rule": "IP-CIDR6,2001:db8::/32,Proxy",
+   "probe": "ip6",
+   "expect": "yes"
+  },
+  {
+   "rule": "IP-CIDR6,2001:db9::/32,Proxy",
+   "probe": "ip6",
+   "expect": "no"
+  },
+  {
+   "rule": "IP-CIDR,8.8.8.0/24,Proxy",
+   "probe": "ip6",
+   "expect": "no",
+   "note": "address families never match"
+  },
+  {
+   "rule": "IP-CIDR,8.8.8.8/32,Proxy",
+   "probe": "ip4",
+   "expect": "yes"
+  },
+  {
+   "rule": "IP-CIDR,8.8.8.8/33,Proxy",
+   "probe": "ip4",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "invalid prefix: Mihomo refuses the line"
+  },
+  {
+   "rule": "IP-CIDR,not-a-cidr,Proxy",
+   "probe": "ip4",
+   "expect": "unknown",
+   "reason": "unsupported"
+  },
+  {
+   "rule": "IP-CIDR,192.168.1.0/24,Proxy,src",
+   "probe": "src",
+   "expect": "yes",
+   "note": "src: tests the source address"
+  },
+  {
+   "rule": "IP-CIDR,192.168.2.0/24,Proxy,src",
+   "probe": "src",
+   "expect": "no"
+  },
+  {
+   "rule": "IP-CIDR,192.168.1.0/24,Proxy,src",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "input",
+   "note": "no source address supplied"
+  },
+  {
+   "rule": "SRC-IP-CIDR,192.168.1.0/24,Proxy",
+   "probe": "src",
+   "expect": "yes"
+  },
+  {
+   "rule": "SRC-IP-CIDR,192.168.1.0/24,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "input"
+  },
+  {
+   "rule": "IP-CIDR,1.0.0.0/8,Proxy,NO-RESOLVE",
+   "probe": "no_port",
+   "expect": "unknown",
+   "reason": "resolve",
+   "note": "options are compared exactly: NO-RESOLVE is not no-resolve, so the name is resolved",
+   "mihomo": "rules/common/base.go ParseParams uses slices.Contains(params, \"no-resolve\"), a case-sensitive comparison",
+   "browser_differs": true
+  },
+  {
+   "rule": "IP-CIDR,08.8.8.0/24,Proxy",
+   "probe": "ip4",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "leading zeros: netip.ParsePrefix refuses the prefix, so Mihomo refuses the line",
+   "mihomo": "rules/common/ipcidr.go NewIPCIDR uses netip.ParsePrefix",
+   "browser_differs": true
+  },
+  {
+   "rule": "DST-PORT,443,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DST-PORT,80,Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "DST-PORT,400-500,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "DST-PORT,500-400,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "a reversed range is swapped",
+   "mihomo": "common/utils/range.go NewRange swaps start and end when start > end",
+   "browser_differs": true
+  },
+  {
+   "rule": "DST-PORT,80/443,Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "'/'-separated list",
+   "mihomo": "common/utils/ranges.go newIntRanges splits on '/' (and ',')",
+   "browser_differs": true
+  },
+  {
+   "rule": "DST-PORT,443,Proxy",
+   "probe": "no_port",
+   "expect": "unknown",
+   "reason": "input"
+  },
+  {
+   "rule": "DST-PORT,abc,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported"
+  },
+  {
+   "rule": "DST-PORT,70000,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported"
+  },
+  {
+   "rule": "SRC-PORT,50000,Proxy",
+   "probe": "src",
+   "expect": "yes"
+  },
+  {
+   "rule": "SRC-PORT,50000,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "input"
+  },
+  {
+   "rule": "NETWORK,udp,Proxy",
+   "probe": "web_udp",
+   "expect": "yes"
+  },
+  {
+   "rule": "NETWORK,UDP,Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "NETWORK,tcp,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "NETWORK,icmp,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported"
+  },
+  {
+   "rule": "PROCESS-NAME,Chrome.exe,Proxy",
+   "probe": "proc",
+   "expect": "yes"
+  },
+  {
+   "rule": "PROCESS-NAME,chrome.exe,Proxy",
+   "probe": "proc",
+   "expect": "yes",
+   "note": "compared case-insensitively",
+   "mihomo": "rules/common/process.go Match: strings.EqualFold(target, ps.pattern)",
+   "browser_differs": true
+  },
+  {
+   "rule": "PROCESS-NAME,firefox,Proxy",
+   "probe": "proc",
+   "expect": "no"
+  },
+  {
+   "rule": "PROCESS-NAME,chrome.exe,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "input"
+  },
+  {
+   "rule": "AND,((NETWORK,UDP),(DST-PORT,443)),Proxy",
+   "probe": "web_udp",
+   "expect": "yes"
+  },
+  {
+   "rule": "AND,((NETWORK,UDP),(DST-PORT,443)),Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "AND,((NETWORK,UDP),(GEOSITE,cn)),Proxy",
+   "probe": "web",
+   "expect": "no",
+   "note": "one definite no decides AND"
+  },
+  {
+   "rule": "AND,((NETWORK,TCP),(GEOSITE,cn)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "OR,((NETWORK,UDP),(DST-PORT,443)),Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "OR,((NETWORK,UDP),(GEOSITE,cn)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "OR,((NETWORK,UDP),(DST-PORT,80)),Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "OR,((DST-PORT,443),(GEOSITE,cn)),Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "one definite yes decides OR"
+  },
+  {
+   "rule": "NOT,((DOMAIN-SUFFIX,claude.ai)),Proxy",
+   "probe": "web",
+   "expect": "no"
+  },
+  {
+   "rule": "NOT,((DOMAIN-SUFFIX,google.com)),Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "NOT,((GEOSITE,cn)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "AND,((OR,((DOMAIN,a.com),(DOMAIN,claude.ai))),(NETWORK,TCP)),Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "nested"
+  },
+  {
+   "rule": "AND,((DOMAIN,claude.ai),(IP-CIDR,1.2.3.0/24,no-resolve)),Proxy",
+   "probe": "no_port",
+   "expect": "no"
+  },
+  {
+   "rule": "AND,((DOMAIN,example.com),(IP-CIDR,1.2.3.0/24)),Proxy",
+   "probe": "no_port",
+   "expect": "unknown",
+   "reason": "resolve"
+  },
+  {
+   "rule": "AND,((DOMAIN,claude.ai)),Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "NOT,((DOMAIN,a),(DOMAIN,b)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "NOT takes exactly one condition"
+  },
+  {
+   "rule": "AND,(DOMAIN,claude.ai),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "conditions must be parenthesised"
+  },
+  {
+   "rule": "AND,((MATCH),(DOMAIN,claude.ai)),Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported"
+  },
+  {
+   "rule": "AND,((DOMAIN-REGEX,^c{1,3}laude\\.ai$),(NETWORK,TCP)),Proxy",
+   "probe": "web",
+   "expect": "yes",
+   "note": "a comma inside a regex in a logic condition",
+   "mihomo": "rules/logic/logic.go payloadToRule: ParseRulePayload(needTarget=false) joins item[1:] for DOMAIN-REGEX",
+   "browser_differs": true
+  },
+  {
+   "rule": "MATCH,Proxy",
+   "probe": "web",
+   "expect": "yes"
+  },
+  {
+   "rule": "GEOIP,CN,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "GEOIP,CN,Proxy,no-resolve",
+   "probe": "ip4",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "GEOSITE,cn,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "RULE-SET,foo,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "IP-ASN,13335,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "client_data"
+  },
+  {
+   "rule": "SUB-RULE,(NETWORK,UDP),sub",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "sub_rule"
+  },
+  {
+   "rule": "REMATCH-NAME,x,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "sub_rule"
+  },
+  {
+   "rule": "DOMIAN-SUFFIX,claude.ai,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "a misspelt type"
+  },
+  {
+   "rule": "DOMAIN-WILDCARD,*.claude.ai,Proxy",
+   "probe": "web",
+   "expect": "unknown",
+   "reason": "unsupported",
+   "note": "not evaluated"
+  }
+ ]
+}
