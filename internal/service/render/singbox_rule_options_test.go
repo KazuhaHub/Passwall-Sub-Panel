@@ -21,7 +21,7 @@ func TestBuildSingBoxRouteRules_ClashRuleOptions(t *testing.T) {
 		{"src selects source ip", "IP-CIDR,1.2.3.0/24,DIRECT,src", "source_ip_cidr", "1.2.3.0/24", "direct", []string{"ip_cidr"}},
 		{"src ip6 then no-resolve", "IP-CIDR6,2001:db8::/32,Proxy,src,no-resolve", "source_ip_cidr", "2001:db8::/32", "Proxy", []string{"ip_cidr"}},
 		{"no-resolve then src", "IP-CIDR6,2001:db8::/32,Proxy,no-resolve,src", "source_ip_cidr", "2001:db8::/32", "Proxy", []string{"ip_cidr"}},
-		{"src is case-insensitive", "IP-CIDR,1.2.3.0/24,DIRECT,SRC", "source_ip_cidr", "1.2.3.0/24", "direct", []string{"ip_cidr"}},
+		{"SRC is not src (Mihomo compares options exactly)", "IP-CIDR,1.2.3.0/24,DIRECT,SRC", "ip_cidr", "1.2.3.0/24", "direct", []string{"source_ip_cidr"}},
 		{"no option keeps destination ip", "IP-CIDR,1.2.3.0/24,DIRECT", "ip_cidr", "1.2.3.0/24", "direct", []string{"source_ip_cidr"}},
 		{"no-resolve alone keeps destination ip", "IP-CIDR,1.2.3.0/24,REJECT,no-resolve", "ip_cidr", "1.2.3.0/24", "block", []string{"source_ip_cidr"}},
 		// Mihomo only reads `src` for the IP-type rules; DOMAIN-SUFFIX ignores
