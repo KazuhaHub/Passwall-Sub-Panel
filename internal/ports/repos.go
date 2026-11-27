@@ -332,6 +332,18 @@ type GroupRepo interface {
 	CountMembersByGroups(ctx context.Context, ids []int64) (map[int64]int64, error)
 }
 
+// NodeBareReader is an optional capability of a NodeRepo: reading one node by
+// its upstream coordinates WITHOUT the loaded side state (routes, tunnel link
+// readiness, probes, line positions) that GetByPanelInbound attaches with
+// several further statements. The traffic poll looks a node up once per inbound
+// and only reads and writes its counter columns, so it asks for this when the
+// repo has it. A caller that reads anything but the node's own columns must use
+// GetByPanelInbound. Asserted at the call site, like the other optional
+// capabilities, so a repo without it (a test double) is unaffected.
+type NodeBareReader interface {
+	GetByPanelInboundBare(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error)
+}
+
 type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error

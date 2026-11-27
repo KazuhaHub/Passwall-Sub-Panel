@@ -2181,7 +2181,15 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 	if s.nodes == nil || s.nodeTraffic == nil {
 		return nil
 	}
-	node, err := s.nodes.GetByPanelInbound(ctx, panelID, inboundID)
+	// Only the node's own counter columns are read and written below (the
+	// flush is column-scoped), so the light read is enough: GetByPanelInbound
+	// would also load its routes, tunnel readiness, probes and line positions,
+	// several statements per inbound on every poll.
+	lookup := s.nodes.GetByPanelInbound
+	if bare, ok := s.nodes.(ports.NodeBareReader); ok {
+		lookup = bare.GetByPanelInboundBare
+	}
+	node, err := lookup(ctx, panelID, inboundID)
 	if err != nil {
 		// Inbound exists in 3X-UI but not in our nodes table — could be an
 		// orphan or a freshly imported one we haven't loaded yet. Skip.
