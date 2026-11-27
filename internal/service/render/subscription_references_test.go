@@ -238,7 +238,7 @@ const referenceSingBoxTemplate = `{
 // lineRenderFixture is a VLESS node "A" with one enabled relay line "B" (id
 // "relay-B") and an applied credential for its user, so a render reads no
 // remote panel.
-func lineRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User) {
+func lineRenderFixture(t testing.TB) (*Service, *domain.Node, *domain.User) {
 	t.Helper()
 	n := vlessRealityNode(true)
 	n.DisplayName = "A"
@@ -260,7 +260,7 @@ func lineRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User) {
 	return s, n, u
 }
 
-func referenceRenderFixture(t *testing.T) (*Service, *domain.Node, *domain.User, *domain.RuleSet) {
+func referenceRenderFixture(t testing.TB) (*Service, *domain.Node, *domain.User, *domain.RuleSet) {
 	t.Helper()
 	s, n, u := lineRenderFixture(t)
 	rule := &domain.RuleSet{Slug: "test", Enabled: true, Content: "- MATCH,国外媒体", ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
