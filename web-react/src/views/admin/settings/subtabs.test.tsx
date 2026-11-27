@@ -57,6 +57,15 @@ describe('sub-tab addresses', () => {
     expect(selectedTab()).toBe('Name and appearance')
   })
 
+  it('keeps the sub-tab when the section that is already open is clicked again', async () => {
+    reads()
+    const { router } = mountAdmin(<SettingsView />, '/admin/settings?tab=security&sub=twofa')
+    await screen.findByText('Two-factor authentication (2FA)')
+    nav(/^Login & Security/)
+    expect(router.state.location.search).toBe('?tab=security&sub=twofa')
+    expect(selectedTab()).toBe('Two-step verification')
+  })
+
   it('has no sub-tab bar for a section that is one screen', async () => {
     reads()
     mountAdmin(<SettingsView />, '/admin/settings?tab=legal')

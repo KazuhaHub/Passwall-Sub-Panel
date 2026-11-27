@@ -594,7 +594,7 @@ describe('QueueTab states', () => {
     const warn = await screen.findByText(/^IP 地区库不可用/)
     expect(warn.closest('[data-slot="alert"]')).toBeTruthy()
     const link = screen.getByRole('button', { name: '前往 IP 地区显示' })
-    expect(link.getAttribute('href')).toBe('/admin/settings?tab=general')
+    expect(link.getAttribute('href')).toBe('/admin/settings?tab=general&sub=network')
   })
 
   it('warns as well when no database is active', async () => {
