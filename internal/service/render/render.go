@@ -108,6 +108,7 @@ type previewContext struct {
 	// segment) with marker rules so ExplainRoute can tell, in the finished
 	// document, which source every rule came from. See explain.go.
 	explain  bool
+	nonce    string        // names this call's marker rules
 	segments []ruleSegment // filled by renderForContext when explain is set
 }
 
@@ -203,9 +204,9 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	}
 	if preview != nil && preview.explain {
 		preview.segments = bundle.Segments
-		bundle.SharedRules = explainMarkSegments(bundle.Segments)
+		bundle.SharedRules = explainMarkSegments(preview.nonce, bundle.Segments)
 		marked := *u
-		marked.PersonalRules = explainMarkPersonal(u.PersonalRules)
+		marked.PersonalRules = explainMarkPersonal(preview.nonce, u.PersonalRules)
 		u = &marked
 	}
 	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)

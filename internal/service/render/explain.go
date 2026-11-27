@@ -2,9 +2,10 @@ package render
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -122,24 +123,47 @@ type ExplainProbe struct {
 // a reserved .invalid name, so the finished document says where each rule came
 // from without re-deriving the order the real render uses. The markers are
 // stripped again before anything is matched.
-func explainMarker(kind byte, index int) string {
-	return "- DOMAIN,psp-explain-" + string(kind) + strconv.Itoa(index) + ".invalid,DIRECT"
+func explainMarker(nonce string, kind byte, index int) string {
+	return "DOMAIN,psp-explain-" + nonce + "-" + string(kind) + strconv.Itoa(index) + ".invalid,DIRECT"
 }
 
-var explainMarkerRE = regexp.MustCompile(`psp-explain-([be])(\d+)\.invalid`)
+// newExplainNonce makes the marker names unguessable per call, so no rule a
+// user wrote can equal one; markers are also compared whole, never searched for.
+func newExplainNonce() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err) // crypto/rand does not fail on supported platforms
+	}
+	return hex.EncodeToString(b[:])
+}
 
-func explainMarkPersonal(personal string) string {
+type explainMarkerKey struct {
+	kind  byte
+	index int
+}
+
+// explainMarkerSet lists every marker rule of one call, for an exact lookup.
+func explainMarkerSet(nonce string, segments int) map[string]explainMarkerKey {
+	set := make(map[string]explainMarkerKey, 2*(segments+1))
+	for i := 0; i <= segments; i++ {
+		set[explainMarker(nonce, 'b', i)] = explainMarkerKey{'b', i}
+		set[explainMarker(nonce, 'e', i)] = explainMarkerKey{'e', i}
+	}
+	return set
+}
+
+func explainMarkPersonal(nonce, personal string) string {
 	body := strings.TrimRight(personal, "\n")
 	if body != "" {
 		body += "\n"
 	}
-	return explainMarker('b', 0) + "\n" + body + explainMarker('e', 0)
+	return "- " + explainMarker(nonce, 'b', 0) + "\n" + body + "- " + explainMarker(nonce, 'e', 0)
 }
 
-func explainMarkSegments(segments []ruleSegment) string {
+func explainMarkSegments(nonce string, segments []ruleSegment) string {
 	parts := make([]string, 0, len(segments)*3)
 	for i, seg := range segments {
-		parts = append(parts, explainMarker('b', i+1), strings.TrimRight(seg.Content, "\n"), explainMarker('e', i+1))
+		parts = append(parts, "- "+explainMarker(nonce, 'b', i+1), strings.TrimRight(seg.Content, "\n"), "- "+explainMarker(nonce, 'e', i+1))
 	}
 	return strings.Join(parts, "\n")
 }
@@ -327,7 +351,7 @@ func (s *Service) ExplainRoute(ctx context.Context, req ExplainRequest) (*Explai
 	}
 	resp.GroupID = user.GroupID
 
-	pc := &previewContext{template: tpl, explain: true}
+	pc := &previewContext{template: tpl, explain: true, nonce: newExplainNonce()}
 	if req.Draft != nil {
 		if req.Draft.Slug == "" {
 			return nil, &domain.CodedValidationError{Code: "explain_draft_slug_required", Msg: "draft needs a slug"}
@@ -357,15 +381,15 @@ func (s *Service) ExplainRoute(ctx context.Context, req ExplainRequest) (*Explai
 		entries []int // indexes into entries
 	}
 	segs := make([]segState, len(pc.segments)+1)
+	markers := explainMarkerSet(pc.nonce, len(pc.segments))
 	var entries []explainEntry
 	current := -1
 	personalPlaced := false
 	for _, text := range doc.Rules {
-		if m := explainMarkerRE.FindStringSubmatch(text); m != nil {
-			idx, _ := strconv.Atoi(m[2])
-			if m[1] == "b" {
-				current = idx
-				personalPlaced = personalPlaced || idx == 0
+		if m, ok := markers[text]; ok {
+			if m.kind == 'b' {
+				current = m.index
+				personalPlaced = personalPlaced || m.index == 0
 			} else {
 				current = -1
 			}

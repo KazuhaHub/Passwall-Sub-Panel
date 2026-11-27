@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -282,6 +283,23 @@ func TestExplainTemplateWithoutPersonalPlaceholder(t *testing.T) {
 	}
 }
 
+// A user's rule that merely mentions a marker name is a rule like any other.
+func TestExplainKeepsRulesThatLookLikeMarkers(t *testing.T) {
+	rs := ruleSet("common", "- OR,((DOMAIN,claude.ai),(DOMAIN,psp-explain-b0.invalid)),REJECT\n- DOMAIN,psp-explain-b99999999999999999999.invalid,DIRECT\n- MATCH,DIRECT", nil)
+	s, u := explainFixture(t, rs)
+	u.PersonalRules = "- DOMAIN,psp-explain-e1.invalid,DIRECT"
+
+	got := explain(t, s, ExplainRequest{UserID: u.ID})
+	r := got.Result
+	if got.TotalRules != 4 || r.State != ExplainMatched || r.Source != "rule_set" || r.Line != 1 || r.Target != "REJECT" {
+		t.Fatalf("%d rules, %+v %+v", got.TotalRules, r, r.ExplainRuleRef)
+	}
+	got = explain(t, s, ExplainRequest{UserID: u.ID, Probe: rulematch.ProbeInput{Host: "psp-explain-e1.invalid", Port: 443}})
+	if got.Result.Source != "personal" || got.Result.Line != 1 {
+		t.Fatalf("%+v", got.Result.ExplainRuleRef)
+	}
+}
+
 // The explanation walks the same rules the real subscription carries, in the
 // same order: the marker rules it adds are gone again, and nothing else differs.
 func TestExplainWalksExactlyTheRealSubscriptionRules(t *testing.T) {
@@ -299,8 +317,26 @@ func TestExplainWalksExactlyTheRealSubscriptionRules(t *testing.T) {
 	if err := yaml.Unmarshal(real.Body, &doc); err != nil {
 		t.Fatal(err)
 	}
-	got := explain(t, s, ExplainRequest{UserID: u.ID})
-	if got.TotalRules != len(doc.Rules) || got.TotalRules != 5 {
-		t.Fatalf("explain walked %d rules, the subscription has %d", got.TotalRules, len(doc.Rules))
+	resp := explain(t, s, ExplainRequest{UserID: u.ID})
+	if resp.TotalRules != len(doc.Rules) {
+		t.Fatalf("explain walked %d rules, the subscription has %d", resp.TotalRules, len(doc.Rules))
+	}
+	// Probe every rule by its own host: the rule that answers is the one at that
+	// position of the real document, with the same text.
+	for i, text := range doc.Rules {
+		fields := strings.Split(text, ",")
+		if len(fields) < 2 || fields[0] != "DOMAIN" && fields[0] != "DOMAIN-SUFFIX" {
+			continue
+		}
+		got := explain(t, s, ExplainRequest{UserID: u.ID, Probe: rulematch.ProbeInput{Host: fields[1], Port: 443}})
+		if got.Result.Rule != text {
+			t.Fatalf("rule %d: real %q, explained %q", i, text, got.Result.Rule)
+		}
+	}
+	// The order, end to end: the first rule is the user's, then the generated
+	// subscription-domain rule, then the rule set's.
+	want := []string{"DOMAIN,p.example,DIRECT", "DOMAIN-SUFFIX,sub.example.net,DIRECT", "DOMAIN,a.example,G", "DOMAIN,b.example,G", "MATCH,G"}
+	if strings.Join(doc.Rules, "|") != strings.Join(want, "|") {
+		t.Fatalf("real rules %q", doc.Rules)
 	}
 }
