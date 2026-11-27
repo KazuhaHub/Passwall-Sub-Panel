@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -24,10 +24,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useTabParam } from '@/hooks/useTabParam'
 import { IconCopy, IconDelete } from '@/lib/icons'
+import { cn } from '@/lib/utils'
 import { ruleKeys } from '@/query/keys'
 import { useQueryScope } from '@/query/useQueryScope'
 import { diffStats } from '@/utils/ruleset/diff'
-import { parseDoc } from '@/utils/ruleset/parse'
 import { buildBlocks } from '@/utils/ruleset/blocks'
 import { continuation } from '@/utils/ruleset/continuation'
 import { groupUsage, type RenamePlan } from '@/utils/ruleset/rename'
@@ -36,6 +36,7 @@ import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './actions'
 import { BasicsTab } from './BasicsTab'
 import { ChangesDialog } from './ChangesDialog'
+import { readDoc, SETTLE_MS, useSettled } from './docCache'
 import { cloneProxyGroupMembers, cloneProxyGroupOptions, cloneRuleSet, EMPTY, sameRuleSet } from './model'
 import { ConflictDialog } from './ConflictDialog'
 import { RenameGroupDialog } from './RenameGroupDialog'
@@ -97,6 +98,23 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const [conflict, setConflict] = useState<{ current: RuleSet | null } | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const phone = useIsMobile()
+  // The strip (tabs and toolbar) that sticks under the top bar, and the box the Rules tab's toolbar is drawn into. The strip's height
+  // is written as `--rs-stick` on the tabs, the distance from the top of the window to the rules: the columns and the routing test
+  // size themselves to what is left under it (a measured height, because the toolbar can be one row or two).
+  const strip = useRef<HTMLDivElement>(null)
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const el = strip.current
+    const host = el?.parentElement
+    if (!el || !host) return
+    if (phone) { host.style.removeProperty('--rs-stick'); return }
+    const set = () => host.style.setProperty('--rs-stick', `calc(var(--shell-bar-h) + ${Math.round(el.getBoundingClientRect().height)}px)`)
+    set()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [phone])
   // The group being renamed (its name and the names a new one may not take), and the group the Proxy groups tab asked the Rules tab to show.
   const [renaming, setRenaming] = useState<{ name: string } | null>(null)
   const [showTarget, setShowTarget] = useState<{ name: string; token: number } | null>(null)
@@ -116,7 +134,12 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   const usedBy = useMemo(() => templates.filter(tpl => (tpl.rule_sets || []).includes(seed.slug)).map(x => x.name || x.slug), [templates, seed.slug])
 
   // A rename rewrites rule lines, so it needs the rules readable as a list: with a foreign line the editor writes nothing (see parse.ts foreignOf).
-  const textOnly = useMemo(() => parseDoc(form.content).foreign.length > 0, [form.content])
+  // Worked out from the text as it stood when typing paused (and from the text itself whenever another tab is open): the whole text is
+  // read to know it, which on a long rule set is too much to do on every keystroke of the Rules tab.
+  const typing = tab === 'rules' || tab === 'sub_rules'
+  const settledContent = useSettled(form.content, typing ? SETTLE_MS : 0)
+  const settledSubRules = useSettled(form.mihomo_sub_rules, typing ? SETTLE_MS : 0)
+  const textOnly = useMemo(() => readDoc(settledContent).foreign.length > 0, [settledContent])
   // What the backend says every proxy group of THIS draft is (members included); null until that answer is in for the draft as it
   // is now. The routing test, the covered-rule findings and the rename rest on it, and none of them works the members out itself.
   // Asked only while something on screen uses it: the Proxy groups tab, the rename dialog, or the routing test / problems panel of
@@ -144,11 +167,11 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   // The proxy groups the rules name, main rules and sub-rules alike: what a sub-rule's targets may be, and the names a new group may not take.
   const ruleGroups = useMemo(() => {
     const names = new Set<string>()
-    for (const text of [form.content, ...(form.mihomo_sub_rules ?? []).map(r => r.content)]) {
-      for (const b of buildBlocks(parseDoc(text))) if (b.kind === 'rules' && b.target && !isBuiltinTarget(b.target)) names.add(b.target)
+    for (const text of [settledContent, ...(settledSubRules ?? []).map(r => r.content)]) {
+      for (const b of buildBlocks(readDoc(text))) if (b.kind === 'rules' && b.target && !isBuiltinTarget(b.target)) names.add(b.target)
     }
     return [...names]
-  }, [form.content, form.mihomo_sub_rules])
+  }, [settledContent, settledSubRules])
 
   const warn = (message: string) => pushToast({ message, severity: 'warning' })
   const changeTab = (next: Tab) => {
@@ -320,7 +343,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         // Not while a dialog is open (it is the thing being worked on) or a save is already running.
-        if (dirtyRef.current && !pendingRef.current && !document.querySelector('[role="dialog"], [role="alertdialog"]')) void saveRef.current()
+        if (dirtyRef.current && !pendingRef.current && !document.querySelector('[role="dialog"]:not([data-nonmodal]), [role="alertdialog"]')) void saveRef.current()
         return
       }
       const el = e.target as HTMLElement | null
@@ -343,9 +366,11 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       : { id: 'delete', label: t('admin:rules.row_delete'), icon: IconDelete, destructive: true, disabled: acting, onSelect: () => void remove() })
   }
 
-  // The +N −M on the review button is worked out from the deferred text, so a keystroke or an edit is not held up by a diff of the whole document.
-  const draftContent = useDeferredValue(form.content)
-  const stats = useMemo(() => (dirty ? diffStats(split(baseline.content), split(draftContent)) : { added: 0, removed: 0 }), [dirty, baseline.content, draftContent])
+  // The +N −M on the review button is worked out from the text as it stood when typing paused, so a keystroke is not followed by
+  // a split and a diff of the whole document; the saved text is split once, not again for every change of the draft.
+  const draftContent = useSettled(form.content, SETTLE_MS)
+  const baseLines = useMemo(() => split(baseline.content), [baseline.content])
+  const stats = useMemo(() => (dirty ? diffStats(baseLines, split(draftContent)) : { added: 0, removed: 0 }), [dirty, baseLines, draftContent])
   const subCount = form.mihomo_sub_rules?.length ?? 0
   const rematchCount = form.mihomo_rematch_outbounds?.length ?? 0
   const withCount = (label: string, n: number) => (n ? `${label} (${n})` : label)
@@ -395,32 +420,39 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
           {/* A disabled fieldset switches off every native control inside it: the members, sub-rule and Rematch editors while a save runs. */}
           <fieldset disabled={pending} className="min-w-0 border-0 p-0">
           <Tabs value={tab} onValueChange={v => changeTab(v as Tab)}>
-            {/* On a phone the tabs are a menu: five of them do not fit a row, and a row that scrolls hides what is off screen. */}
-            {phone && (
-              <div className="mb-3">
-                <NativeSelect aria-label={t('admin:rules.tabs.label')} value={tab} onChange={e => changeTab(e.target.value as Tab)}>
-                  <option value="rules">{t('admin:rules.tabs.rules')}</option>
-                  {!readOnly && <option value="members">{t('admin:rules.tabs.members')}</option>}
-                  {!readOnly && <option value="sub_rules">{withCount(t('admin:rules.mihomo.sub_rules'), subCount)}</option>}
-                  {!readOnly && <option value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</option>}
-                  <option value="basics">{t('admin:rules.tabs.basics')}</option>
-                </NativeSelect>
-              </div>
-            )}
-            {!phone && <div className="max-w-full overflow-x-auto">
-              <TabsList>
-                <TabsTrigger value="rules">{t('admin:rules.tabs.rules')}</TabsTrigger>
-                {!readOnly && <TabsTrigger value="members">{t('admin:rules.tabs.members')}</TabsTrigger>}
-                {!readOnly && <TabsTrigger value="sub_rules">{withCount(t('admin:rules.mihomo.sub_rules'), subCount)}</TabsTrigger>}
-                {!readOnly && <TabsTrigger value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</TabsTrigger>}
-                <TabsTrigger value="basics">{t('admin:rules.tabs.basics')}</TabsTrigger>
-              </TabsList>
-            </div>}
+            {/* The tabs and, on the Rules tab, its toolbar are one strip that stays under the top bar while the rules scroll (a phone scrolls it away:
+                two rows of controls would take a fifth of the screen). One border, on the strip, so the toolbar is not boxed again inside it. */}
+            <div ref={strip} data-slot="rules-strip" className={cn(!phone && 'sticky top-(--shell-bar-h) z-20 -mx-4 border-b bg-background px-4 pt-1 pb-2 sm:-mx-6 sm:px-6')}>
+              {/* On a phone the tabs are a menu: five of them do not fit a row, and a row that scrolls hides what is off screen. */}
+              {phone ? (
+                <div className="mb-1">
+                  <NativeSelect aria-label={t('admin:rules.tabs.label')} value={tab} onChange={e => changeTab(e.target.value as Tab)}>
+                    <option value="rules">{t('admin:rules.tabs.rules')}</option>
+                    {!readOnly && <option value="members">{t('admin:rules.tabs.members')}</option>}
+                    {!readOnly && <option value="sub_rules">{withCount(t('admin:rules.mihomo.sub_rules'), subCount)}</option>}
+                    {!readOnly && <option value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</option>}
+                    <option value="basics">{t('admin:rules.tabs.basics')}</option>
+                  </NativeSelect>
+                </div>
+              ) : (
+                <div className="max-w-full overflow-x-auto">
+                  <TabsList>
+                    <TabsTrigger value="rules">{t('admin:rules.tabs.rules')}</TabsTrigger>
+                    {!readOnly && <TabsTrigger value="members">{t('admin:rules.tabs.members')}</TabsTrigger>}
+                    {!readOnly && <TabsTrigger value="sub_rules">{withCount(t('admin:rules.mihomo.sub_rules'), subCount)}</TabsTrigger>}
+                    {!readOnly && <TabsTrigger value="rematches">{withCount(t('admin:rules.mihomo.rematches'), rematchCount)}</TabsTrigger>}
+                    <TabsTrigger value="basics">{t('admin:rules.tabs.basics')}</TabsTrigger>
+                  </TabsList>
+                </div>
+              )}
+              {/* Where the Rules tab puts its toolbar. */}
+              {!phone && <div ref={setSlot} className="mt-2 empty:hidden" />}
+            </div>
             {/* The rules and the basics stay built while another tab is shown (the text and the history are in them); the three that ask the server as they open are built only when shown, as the sheet's were. */}
             <TabsContent value="rules" keepMounted>
               <RulesTab key={rev} content={form.content} setContent={content => setForm(f => ({ ...f, content }))} readOnly={readOnly || pending}
                 order={form.proxy_group_order || []} rematchNames={(form.mihomo_rematch_outbounds || []).map(o => o.name)} serverIssues={ruleIssues}
-                showTarget={showTarget} cont={cont} explain={{ draft: form, templates }} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
+                showTarget={showTarget} cont={cont} explain={{ draft: form, templates }} toolbarSlot={phone ? undefined : tab === 'rules' ? slot : null} groups={{ known: effective !== null, loading: groupsLoading, failed: groupsFailed, failedMessage: groupsFailedMessage, unavailable: readOnly, retry: retryGroups, needed: setNeedsMain }} />
             </TabsContent>
             <TabsContent value="members" keepMounted={false}>
               <ProxyGroupMembersEditor
@@ -456,7 +488,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
               <MihomoAdvancedRulesEditor part="rematches" value={form} onChange={setForm} revealRematchIssues={rematchSeen} />
             </TabsContent>
             <TabsContent value="basics" keepMounted>
-              <BasicsTab form={form} setForm={setForm} editing={editing} readOnly={readOnly || pending} slugError={slugError} nameError={nameError} usedBy={usedBy} />
+              <BasicsTab active={tab === 'basics'} form={form} setForm={setForm} editing={editing} readOnly={readOnly || pending} slugError={slugError} nameError={nameError} usedBy={usedBy} />
             </TabsContent>
           </Tabs>
           </fieldset>

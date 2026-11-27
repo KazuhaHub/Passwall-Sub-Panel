@@ -355,7 +355,7 @@ describe('the address and the header', () => {
     reads()
     api.delete.mockResolvedValue({})
     mountRuleSets(['/admin/rules', PAGE])
-    expect(await screen.findByText(/custom · Enabled · Used by 1 templates/)).toBeTruthy()
+    expect(await screen.findByText(/custom · Used by 1 templates/)).toBeTruthy()
     fireEvent.click(within(document.querySelector<HTMLElement>('[data-slot=object-page-actions]')!).getByRole('button', { name: /More/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     const ask = await screen.findByRole('alertdialog')

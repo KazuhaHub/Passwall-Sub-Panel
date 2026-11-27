@@ -2205,8 +2205,8 @@
     "page": {
       "breadcrumb": "Rule sets",
       "new_title": "New rule set",
-      "meta": "{{slug}} · {{status}} · Used by {{count}} templates",
-      "meta_unused": "{{slug}} · {{status}} · Not used by any template"
+      "meta": "{{slug}} · Used by {{count}} templates",
+      "meta_unused": "{{slug}} · Not used by any template"
     },
     "view": {
       "blocks": "Groups",
@@ -2546,7 +2546,9 @@
       "passed": "Line {{line}} matches, but its target is PASS, so it is skipped and matching continues.",
       "scope": "Tests this rule set's draft only. In a real subscription, the user's personal rules, the direct subscription domain rule and rule sets earlier in the template are matched first.",
       "mihomo_only": "Judged in Mihomo's rule order. sing-box skips some rule types, so its result can differ.",
-      "address_assumption": "Assumes the client connected by name. If it connected to an IP address, enter it.",
+      "address_hint": "Assumes the client connected by name; if it connected to an IP address, enter it.",
+      "scope_short": "Tests this rule set's draft only, not personal rules or other rule sets.",
+      "how": "How this works",
       "ip_note": "An IP address is tested as a connection with no domain name.",
       "text_only": "The rules have lines the editor can't read as a list, so routing can't be tested until they are fixed.",
       "problem": {
@@ -2581,8 +2583,8 @@
         "scope_draft": "This rule set only",
         "template_field": "Template",
         "admin_only": "Testing against a template needs an administrator.",
-        "no_template": "This rule set isn't in a Mihomo template, so there is no whole subscription to test it in. Add it to a template to test it there.",
-        "only_singbox": "This rule set is only in sing-box templates, which can't be tested against yet: the server walks a Mihomo rule list, and sing-box compiles its rules into a different form.",
+        "no_template": "This rule set isn't in a Mihomo template, so it can't be tested against one.",
+        "only_singbox": "This rule set is only in sing-box templates, which can't be tested against yet.",
         "singbox_note": "sing-box templates aren't listed: the server walks a Mihomo rule list, and sing-box compiles its rules into a different form.",
         "user_hint": "Adds this user's personal rules and uses the lines they can see. Without a user, the default group's lines are used and no personal rules are included.",
         "run": "Test",
@@ -2590,6 +2592,7 @@
         "empty": "Press Test to run this connection through the template's whole subscription: personal rules, the direct subscription domain rule and the other rule sets, in their order.",
         "answer_server": "Answer from the server, using template {{template}} and your draft.",
         "answer_local": "Answer from this rule set's draft only, worked out in your browser.",
+        "scope_short": "Runs the template's whole subscription, with your draft in place of the saved rule set.",
         "scope_note": "Walks the subscription a Mihomo client of this template gets, with your draft in place of the saved rule set. It doesn't look up DNS and doesn't follow a subscriber's own choice in a proxy group.",
         "stale": "The draft or the values above have changed since this answer. Press Test to run it again.",
         "goes_group_default": "Traffic goes to proxy group {{target}}. Its default choice is {{default}}; subscribers can change it in their client.",

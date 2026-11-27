@@ -168,7 +168,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
         )
       )}
       <div className="flex flex-col gap-3">
-        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' || problem === 'address_empty' ? t(`admin:rules.tester.problem.${problem}`) : failureText('address')} hint={<>{t('admin:rules.tester.ip_note')} {t('admin:rules.tester.address_assumption')}</>}>
+        <Field label={t('admin:rules.tester.address')} error={problem === 'address_invalid' || problem === 'address_idn' || problem === 'address_empty' ? t(`admin:rules.tester.problem.${problem}`) : failureText('address')} hint={t('admin:rules.tester.address_hint')}>
           <Input value={input.address} placeholder={t('admin:rules.tester.address_placeholder')} spellCheck={false} autoCapitalize="none" autoCorrect="off" onChange={e => set({ address: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -231,7 +231,19 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
         ) : null}
       </div>
 
-      <p className="text-xs text-muted-foreground">{serverMode ? t('admin:rules.tester.server.scope_note') : `${t('admin:rules.tester.mihomo_only')} ${t('admin:rules.tester.scope')}`}</p>
+      {/* One line on what the answer covers; the rest is for whoever wants it. */}
+      <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <p>{t(serverMode ? 'admin:rules.tester.server.scope_short' : 'admin:rules.tester.scope_short')}</p>
+        <Disclosure summary={<span className="font-medium">{t('admin:rules.tester.how')}</span>} bodyClassName="mt-1.5 flex flex-col gap-1.5 pl-6">
+          {serverMode ? <p>{t('admin:rules.tester.server.scope_note')}</p> : (
+            <>
+              <p>{t('admin:rules.tester.ip_note')}</p>
+              <p>{t('admin:rules.tester.mihomo_only')}</p>
+              <p>{t('admin:rules.tester.scope')}</p>
+            </>
+          )}
+        </Disclosure>
+      </div>
     </section>
   )
 }
