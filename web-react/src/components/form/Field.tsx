@@ -107,7 +107,9 @@ export function Field({ label, hint, error, errorBlocksSave, required, orientati
   // No dependency list on purpose: the control is the caller's and changes without Field knowing.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setOff((findControl() as HTMLInputElement | null)?.disabled === true)
+    const control = findControl() as HTMLInputElement | null
+    // A control that is not a form element (the code editor) says so with aria-disabled.
+    setOff(control?.disabled === true || control?.getAttribute?.('aria-disabled') === 'true')
     setErrorText(error && typeof error !== 'string' ? (visibleText(document.getElementById(errorId)) || null) : null)
   })
   const reported = off || !error ? null : typeof error === 'string' ? error : errorText

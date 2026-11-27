@@ -54,7 +54,7 @@ function useJump(entry: SearchEntry | null, done: () => void) {
       target?.scrollIntoView?.({ block: 'center' })
       // A switch keeps its id on a hidden input beside the control that takes focus: look for the control inside the field.
       const scope = target?.closest('[data-slot="field"]') ?? target
-      const control = scope?.querySelector<HTMLElement>('[role="switch"], input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, button')
+      const control = scope?.querySelector<HTMLElement>('[role="switch"], input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea, .cm-content, [role="textbox"], button')
       if (control) control.focus()
       done()
     }, 50)

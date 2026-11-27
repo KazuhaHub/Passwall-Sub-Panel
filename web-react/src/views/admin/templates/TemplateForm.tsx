@@ -3,12 +3,12 @@ import { useTranslation } from 'react-i18next'
 
 import type { RuleSet } from '@/api/rules'
 import type { Template } from '@/api/templates'
+import { CodeField } from '@/components/CodeField'
 import { Field } from '@/components/form/Field'
 import { Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxItem, ComboboxList, ComboboxValue, useComboboxAnchor } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formHint } from './analysis'
 
@@ -95,10 +95,10 @@ export function TemplateForm({ form, setForm, editing, readOnly, slugError, name
         <p className="text-xs text-muted-foreground">{t('admin:templates.hint.propagation')}</p>
       </aside>
       <div className="min-w-0 lg:order-1">
-        <Field label={t('admin:templates.field.content')}>
-          <Textarea spellCheck={false} readOnly={readOnly} className="min-h-[max(24rem,60dvh)] font-mono text-[13px]" placeholder={t('admin:templates.placeholder.content')}
-            value={form.content} onChange={e => patch({ content: e.target.value })} />
-        </Field>
+        {/* A sing-box template is a JSON document, a Clash/Mihomo one YAML; both carry {{ placeholders }}. */}
+        <CodeField label={t('admin:templates.field.content')} language={form.client_type === 'sing-box' ? 'json' : 'yaml'} readOnly={readOnly}
+          height="max(24rem, 60dvh)" placeholder={t('admin:templates.placeholder.content')}
+          value={form.content} onChange={content => patch({ content })} />
       </div>
     </div>
   )

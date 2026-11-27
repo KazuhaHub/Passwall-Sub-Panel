@@ -170,7 +170,7 @@ export default function LegalEditorPage({ kind, back }: Props) {
 
   const editorPane = (
     <Suspense fallback={<Skeleton className="h-96 rounded-lg" />}>
-      <CodeEditor ref={editor} value={text} onChange={setDraft} language="plain" dark={dark} height={phone ? '60dvh' : PANE_HEIGHT} />
+      <CodeEditor ref={editor} value={text} onChange={setDraft} language="markdown" dark={dark} height={phone ? '60dvh' : PANE_HEIGHT} />
     </Suspense>
   )
   const previewPane = (

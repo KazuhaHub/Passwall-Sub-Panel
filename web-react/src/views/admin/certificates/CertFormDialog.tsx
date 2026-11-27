@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
+import { LazyCodeEditor } from '@/components/LazyCodeEditor'
 import { certKeys } from '@/query/keys'
 import { caLabel, parseDomains, sameDomains } from './model'
 import { FormDialog } from '@/components/data/FormDialog'
@@ -103,7 +103,7 @@ export function CertFormDialog({ cert, data, onClose }: { cert: Cert | null; dat
         <Input value={draft.name} autoFocus onChange={e => set('name', e.target.value)} onBlur={() => errors.blur('name', draft)} />
       </Field>
       <Field label={t('certs.col_domains')} required error={errors.errors.domains} hint={cert ? t('certs.form.domains_edit_hint') : t('certs.domains_help')}>
-        <Textarea value={draft.domains} rows={3} placeholder={'*.example.com\nexample.com'} className="font-mono" onChange={e => set('domains', e.target.value)} onBlur={() => errors.blur('domains', draft)} />
+        <LazyCodeEditor language="plain" tabMovesFocus minRows={3} placeholder={'*.example.com\nexample.com'} value={draft.domains} onChange={v => set('domains', v)} onBlur={() => errors.blur('domains', draft)} />
       </Field>
       <Field label={t('certs.form.account_label')} required error={errors.errors.account} hint={cert ? t('certs.form.account_edit_hint') : undefined}>
         <NativeSelect value={draft.account} onChange={e => set('account', e.target.value)} onBlur={() => errors.blur('account', draft)}>
