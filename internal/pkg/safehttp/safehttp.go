@@ -114,6 +114,13 @@ func NewClient(timeout time.Duration) *http.Client {
 // guard is unchanged either way; this only relaxes certificate validation.
 func NewClientTLS(timeout time.Duration, insecureSkipVerify bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Panel clients are shared per panel and fan out up to ~8 concurrent calls
+	// at ONE host (heal, traffic-floor pushes, poll). Go's default of 2 idle
+	// connections per host closes the surplus after each burst, so the next
+	// burst re-dials TCP+TLS. Keep a burst's worth warm; IdleConnTimeout
+	// (inherited from DefaultTransport) still reaps them when traffic stops.
+	transport.MaxIdleConnsPerHost = 16
+	transport.MaxIdleConns = 64
 	transport.DialContext = (&net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,

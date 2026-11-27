@@ -1,6 +1,11 @@
 package safehttp
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
 
 // BlockNonPublicDial must reject the SSRF-prone / never-a-real-host ranges and
 // allow public + RFC1918 private (legit self-hosted panels) + CGNAT (Tailscale/
@@ -35,5 +40,36 @@ func TestBlockNonPublicDial(t *testing.T) {
 		if err := BlockNonPublicDial("tcp", a, nil); err != nil {
 			t.Errorf("expected %s to be allowed, got %v", a, err)
 		}
+	}
+}
+
+// Panel clients are shared per panel and fan out up to ~8 concurrent calls at
+// ONE host; Go's default MaxIdleConnsPerHost of 2 closes the surplus
+// connections after every burst and re-dials TCP+TLS on the next one.
+func TestNewClientKeepsIdleConnsForFanOut(t *testing.T) {
+	for _, insecure := range []bool{false, true} {
+		tr, ok := NewClientTLS(time.Second, insecure).Transport.(*http.Transport)
+		if !ok {
+			t.Fatal("transport is not *http.Transport")
+		}
+		if tr.MaxIdleConnsPerHost < 16 {
+			t.Errorf("MaxIdleConnsPerHost = %d, want >= 16", tr.MaxIdleConnsPerHost)
+		}
+		if tr.MaxIdleConns < tr.MaxIdleConnsPerHost {
+			t.Errorf("MaxIdleConns = %d, below per-host %d", tr.MaxIdleConns, tr.MaxIdleConnsPerHost)
+		}
+		if tr.IdleConnTimeout <= 0 {
+			t.Error("IdleConnTimeout must stay set")
+		}
+	}
+}
+
+// The SSRF guard must survive the pool change: a loopback server is refused.
+func TestNewClientStillRefusesLoopback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	if resp, err := NewClient(2 * time.Second).Get(srv.URL); err == nil {
+		resp.Body.Close()
+		t.Fatal("expected loopback dial to be refused")
 	}
 }
