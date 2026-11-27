@@ -112,6 +112,8 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Enter' || !(e.target instanceof HTMLInputElement)) return
     e.preventDefault()
+    // Enter that commits an input-method candidate is not a request to test.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (serverMode) test()
   }
   const fieldFailure = failure?.kind === 'field' ? failure.field : null
@@ -210,7 +212,7 @@ export function RouteTester({ doc, blocks, input, setInput, textOnly, cont, grou
           <>
             {outcome && outcome.status === 'done' && <p className="text-xs text-muted-foreground">{t('admin:rules.tester.server.answer_server', { template: mihomo.find(x => x.slug === outcome.response.template_slug)?.name || outcome.response.template_slug })}</p>}
             {outcome && outcome.status === 'done' && server && (
-              <ExplainResultView t={t} response={outcome.response} draftSlug={server.draft.slug} draftName={server.draft.name} stale={outOfDate} onJump={onJump && !textOnly ? onJump : undefined} />
+              <ExplainResultView t={t} response={outcome.response} draftSlug={server.draft.slug} draftName={server.draft.name} stale={outOfDate} onJump={onJump && !textOnly && !outOfDate ? onJump : undefined} />
             )}
             {failure?.kind === 'too_large' && outcome?.status === 'failed' && <Notice tone="danger">{tooLargeText(t, failure.limitBytes, new TextEncoder().encode(JSON.stringify(outcome.asked.request)).length)}</Notice>}
             {failure?.kind === 'forbidden' && <Notice tone="danger">{t('admin:rules.tester.server.admin_only')}</Notice>}

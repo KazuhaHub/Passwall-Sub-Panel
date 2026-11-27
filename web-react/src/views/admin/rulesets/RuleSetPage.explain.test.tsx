@@ -191,6 +191,19 @@ describe('asking the server', () => {
     expect(api.put).not.toHaveBeenCalled()
   })
 
+  it('Enter that commits an input-method candidate does not ask', async () => {
+    reads(); server()
+    mountRuleSets(PAGE)
+    const dialog = await openTester()
+    byTemplate(dialog)
+    type(dialog, 'www.example.com')
+    fireEvent.keyDown(within(dialog).getByLabelText('Address'), { key: 'Enter', isComposing: true })
+    fireEvent.keyDown(within(dialog).getByLabelText('Address'), { key: 'Enter', keyCode: 229 })
+    await new Promise(r => setTimeout(r, 50))
+    expect(explains()).toHaveLength(0)
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
   it('does not send a second request while one is running', async () => {
     reads()
     let release: (v: unknown) => void = () => {}
@@ -317,6 +330,16 @@ describe('the answer', () => {
     type(dialog, 'example.org')
     expect(within(dialog).getByText(/have changed since this answer/)).toBeTruthy()
     expect(explains()).toHaveLength(1)
+  })
+
+  it('does not offer to open a line from an answer that is out of date', async () => {
+    reads()
+    server(answer({ result: { state: 'matched', certain: true, ...own({ line: 1, rule: 'DOMAIN-SUFFIX,example.com,Proxy', target: 'Proxy' }) } }))
+    mountRuleSets(PAGE)
+    const dialog = await run()
+    expect(await within(dialog).findByRole('button', { name: 'Go to line 1' })).toBeTruthy()
+    type(dialog, 'example.org')
+    expect(within(dialog).queryByRole('button', { name: 'Go to line 1' })).toBeNull()
   })
 
   it('names the mode that produced the answer when it goes back to this draft alone', async () => {
