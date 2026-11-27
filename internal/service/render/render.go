@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gopkg.in/yaml.v3"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -41,21 +42,31 @@ type Service struct {
 	// seam (defaults to time.Now, overridable in tests).
 	cache *renderCache
 	now   func() time.Time
+	// flights merges concurrent cache-miss renders of one (user, client type,
+	// cache version); renderSem caps renders running at once across all keys.
+	// renderFn is the test seam for the render itself (nil → RenderForUser).
+	flights   singleflight.Group
+	renderSem chan struct{}
+	renderFn  func(context.Context, *domain.User, domain.ClientType) (*Output, error)
 }
 
 func New(repos ports.Repos, pool ports.XUIPool, groupSvc GroupResolver) *Service {
 	return &Service{
-		repos:    repos,
-		pool:     pool,
-		groupSvc: groupSvc,
-		cache:    newRenderCache(subRenderCacheTTL),
-		now:      time.Now,
+		repos:     repos,
+		pool:      pool,
+		groupSvc:  groupSvc,
+		cache:     newRenderCache(subRenderCacheTTL),
+		now:       time.Now,
+		renderSem: make(chan struct{}, renderSlots()),
 	}
 }
 
 // Output bundles the rendered body with the headers the HTTP layer should set.
 type Output struct {
-	Body        []byte
+	Body []byte
+	// ETag is the weak validator of Body, set by RenderForUserCached so the
+	// handler need not hash the body per request. Empty on uncached renders.
+	ETag        string
 	ContentType string
 	Headers     map[string]string
 }
