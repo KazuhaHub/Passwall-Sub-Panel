@@ -1613,21 +1613,32 @@ func (s *Service) detachNoLock(ctx context.Context, n *domain.Node) (*domain.Nod
 	return routed, nil
 }
 
+// nodeTaskTypes is every task type this service dispatches (runNodeTask). See
+// userTaskTypes for why it is the ListDue filter.
+var nodeTaskTypes = []domain.SyncTaskType{
+	domain.SyncTaskNodeCreate,
+	domain.SyncTaskNodeDelete,
+	domain.SyncTaskNodeSetEnabled,
+	domain.SyncTaskNodeUpdate,
+}
+
+// OwnedTaskTypes returns the sync-task types ProcessDueTasks owns.
+func OwnedTaskTypes() []domain.SyncTaskType {
+	return append([]domain.SyncTaskType(nil), nodeTaskTypes...)
+}
+
 // ProcessDueTasks runs pending node-scoped 3X-UI write tasks.
 func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 	if s.tasks == nil {
 		return nil
 	}
-	tasks, err := s.tasks.ListDue(ctx, time.Now(), limit)
+	tasks, err := s.tasks.ListDue(ctx, time.Now(), nodeTaskTypes, limit)
 	if err != nil {
 		return err
 	}
 	for _, task := range tasks {
-		if task.Type != domain.SyncTaskNodeCreate &&
-			task.Type != domain.SyncTaskNodeDelete &&
-			task.Type != domain.SyncTaskNodeSetEnabled &&
-			task.Type != domain.SyncTaskNodeUpdate {
-			continue
+		if !slices.Contains(nodeTaskTypes, task.Type) {
+			continue // defence in depth; the query already filtered
 		}
 		claimed, err := s.tasks.MarkRunning(ctx, task.ID)
 		if err != nil {

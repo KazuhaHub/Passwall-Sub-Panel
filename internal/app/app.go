@@ -1512,7 +1512,8 @@ func (a *App) runMailLoop(ctx context.Context) {
 			if err := a.mail.ProcessReminders(ctx); err != nil {
 				log.Warn("mail reminders", "err", err)
 			}
-			// Process due mail notification tasks (retries).
+			// Process due mail notification tasks (retries). 20 is the batch
+			// size; the run drains batches up to the mailer's per-run cap.
 			if err := a.mail.ProcessDueMailTasks(ctx, 20); err != nil {
 				log.Warn("mail tasks", "err", err)
 			}

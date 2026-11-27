@@ -22,7 +22,7 @@ type dueTaskRepo struct {
 	canceled  []int64
 }
 
-func (r *dueTaskRepo) ListDue(context.Context, time.Time, int) ([]*domain.SyncTask, error) {
+func (r *dueTaskRepo) ListDue(context.Context, time.Time, []domain.SyncTaskType, int) ([]*domain.SyncTask, error) {
 	return r.due, nil
 }
 
