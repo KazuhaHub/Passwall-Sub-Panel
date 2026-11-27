@@ -1967,7 +1967,8 @@
     "tabs": {
       "rules": "规则",
       "members": "代理组",
-      "basics": "基本信息"
+      "basics": "基本信息",
+      "label": "页面分区"
     },
     "mihomo": {
       "rematches": "Rematch 出站",
@@ -2211,7 +2212,22 @@
       "mobile_hint": "手机上建议使用分组视图编辑"
     },
     "issues": {
-      "main_rules": "主规则"
+      "main_rules": "主规则",
+      "title": "问题与提示",
+      "none": "没有发现问题",
+      "computing": "正在检查…",
+      "text_only": "规则中有无法按列表读取的行，请先在文本视图中修复，才能检查被前面规则覆盖的规则。",
+      "show_more": "再显示 {{count}} 条",
+      "level": {
+        "error": "错误",
+        "warning": "警告",
+        "info": "提示"
+      },
+      "summary": "{{count}} 条规则永远不会生效",
+      "description": "这些规则已被前面的规则完全覆盖。这里只列出情况，不会修改任何内容。",
+      "tcp_note": "这些结果按 TCP 连接判断。对于 UDP，如果前面那条规则所属代理组选中的代理不支持 UDP，列为“不生效”的规则仍可能生效。",
+      "needs_groups": "大部分检查需要代理组的成员信息，只有管理员可以读取。这里只列出不依赖成员信息的结果：完全相同的规则，以及被 DIRECT 或 REJECT 规则覆盖的规则。",
+      "failed": "无法读取当前草稿的代理组成员，因此只显示不依赖成员信息的结果：完全相同的规则，以及被 DIRECT 或 REJECT 规则覆盖的规则。其余检查需要成员信息。"
     },
     "blocks": {
       "title": "规则分组",
@@ -2410,6 +2426,108 @@
       "block_scalar": "是多行条目的开头",
       "empty_item": "是空条目",
       "linebreak": "含有 Unicode 换行符"
+    },
+    "groups": {
+      "used_by": "被 {{blocks}} 个分组、{{rules}} 条规则引用",
+      "not_used": "没有规则引用这个代理组",
+      "show_rules": "在规则页查看"
+    },
+    "rename": {
+      "action": "重命名",
+      "title": "重命名代理组",
+      "new_name": "新名称",
+      "submit": "重命名",
+      "confirm": "将修改 {{rules}} 行规则和 {{refs}} 处成员引用，并把 {{lists}} 个原本跟随名称的成员列表写成明确的列表。",
+      "hint": "会更新本规则集中的规则、成员列表、选项和代理组顺序。保存规则集之前不会生效，选择「放弃」可恢复原名。",
+      "done": "已重命名为 {{name}}，保存规则集后生效。",
+      "unavailable": {
+        "text_only": "规则中有只能按文本显示的行，请先在文本视图中处理。",
+        "unreadable": "有些只能按文本显示的行仍在使用这个代理组，无法安全地重命名。",
+        "not_ready": "尚未读取到当前草稿的代理组设置，或读取失败。请稍候再试，或先处理已显示的错误。",
+        "taken": "已有同名代理组遗留的设置，改名后会被沿用。请换一个名称。",
+        "unused": "没有规则使用这个代理组，它只出现在成员列表中，无法重命名。"
+      },
+      "not_reached": "本次重命名不会修改：仍在使用旧名称的其他规则集、配置方案自己的代理组顺序和用户的个人规则。在使用这个规则集的配置方案（{{templates}}）中，它们会保留旧名称的代理组，与改名后的代理组并存。",
+      "not_reached_unbound": "本次重命名不会修改：仍在使用旧名称的其他规则集和用户的个人规则。目前没有配置方案使用这个规则集。",
+      "name_note": "与订阅线路或配置方案自身规则中的代理组同名的名称不会生成新的代理组，流量会走向那条线路或那个代理组。",
+      "precedence": "这里写出的成员列表属于本规则集。在配置方案中，第一个为某个代理组提供列表的规则集说了算，所以它们会优先于排在本规则集之后的规则集中同一代理组的列表。"
+    },
+    "targetview": {
+      "label": "显示方式",
+      "runs": "按分组",
+      "merged": "合并查看",
+      "note": "所有指向「{{target}}」的规则，共 {{count}} 条，分布在 {{blocks}} 个分组，合在一起方便查看。规则的顺序决定去向，所以不能在这里修改。要修改规则，请打开所属分组。",
+      "col_group": "分组",
+      "col_line": "行",
+      "open": "打开第 {{index}} 组",
+      "table": "指向 {{target}} 的全部规则",
+      "back_to": "按分组编辑"
+    },
+    "tester": {
+      "title": "测试去向",
+      "address": "地址",
+      "address_placeholder": "域名或 IP",
+      "port": "端口",
+      "network": "网络协议",
+      "more": "更多条件",
+      "resolved_ip": "域名解析得到的 IP",
+      "process": "进程名",
+      "src_port": "来源端口",
+      "src_ip": "来源 IP",
+      "empty": "输入一个域名或 IP，查看它命中哪条规则、走哪个代理组。",
+      "matched": "命中第 {{index}} 组（{{group}}）的规则 {{rule}}，第 {{line}} 行。",
+      "goes_group": "流量交给代理组 {{target}}。",
+      "goes_builtin": "流量{{action}}。",
+      "action": {
+        "DIRECT": "直连",
+        "REJECT": "被拒绝",
+        "REJECT-DROP": "被丢弃"
+      },
+      "no_match": "没有规则命中，Mihomo 会直连。",
+      "no_certain": "没有一条规则能确定命中。",
+      "also_matching": "另有 {{count}} 条规则也能匹配，但排在后面不会生效：",
+      "uncertain_title": "结果不确定",
+      "uncertain_body": "下列规则无法在这里判断，其中任何一条都可能先命中：",
+      "branch_client_data": "第 {{line}} 行 {{rule}} 需要客户端的数据，此处无法判断。",
+      "branch_resolve": "第 {{line}} 行 {{rule}} 是 IP 规则，Mihomo 会在此处解析域名。填写解析得到的 IP 可得到确定结果。",
+      "branch_input": "第 {{line}} 行 {{rule}} 需要一个没有填写的条件（见“更多条件”）。",
+      "branch_regex": "第 {{line}} 行 {{rule}} 的正则表达式无法在此安全运行。",
+      "branch_sub_rule": "第 {{line}} 行 {{rule}} 会跳转到子规则，此处无法跟进。",
+      "branch_unsupported": "第 {{line}} 行 {{rule}} 的类型无法在此判断。",
+      "branch_if_match": "若命中 → {{target}}",
+      "branch_else": "若它们都没有命中，继续向下：",
+      "passed": "第 {{line}} 行命中，但目标是 PASS，会被跳过并继续匹配。",
+      "scope": "仅测试本规则集的草稿。实际订阅中，用户的个人规则、DIRECT 订阅域名规则以及配置方案中排在前面的规则集会先于本规则集匹配。",
+      "mihomo_only": "按 Mihomo 的规则顺序判断；sing-box 会跳过部分规则类型，结果可能不同。",
+      "ip_note": "IP 地址按没有域名的连接测试。",
+      "text_only": "规则中有无法按列表读取的行，修复后才能测试去向。",
+      "problem": {
+        "address_invalid": "请输入域名或 IP，不要带网址、端口或空格",
+        "port_invalid": "端口必须是 0 到 65535 的数字",
+        "resolved_invalid": "解析得到的 IP 格式不正确",
+        "src_invalid": "来源端口或来源 IP 格式不正确",
+        "address_idn": "请输入域名的 punycode（xn--）形式，含非 ASCII 字符的域名无法在这里判断"
+      },
+      "more_count": "还有 {{count}} 条",
+      "go_to_line": "转到第 {{line}} 行",
+      "back": "返回规则",
+      "show_tester": "显示测试去向",
+      "hide_tester": "隐藏测试去向",
+      "branch_resolve_entered": "第 {{line}} 行 {{rule}} 是 no-resolve 的 IP 规则。你填写的解析 IP 落在它的范围内，但这里无法确定前面的规则是否已经解析过这个域名。",
+      "continues_title": "这条规则可能不是最终结果",
+      "continues_body": "{{target}} 可能把匹配继续交给下面的规则（它当前的选择可能是 PASS，或者它是 Rematch 出站）。下面的规则也可能生效。",
+      "also_may_apply": "另有 {{count}} 条规则也能匹配，可能会生效：",
+      "udp_note": "如果选中的代理不支持 UDP，Mihomo 会跳过它并尝试下一条规则；这里没有模拟这种情况。",
+      "no_groups": "当前草稿的代理组成员暂时无法获取，因此把流量交给代理组的规则都按“可能继续匹配”处理。"
+    },
+    "lint": {
+      "shadowed_same": "第 {{line}} 行已先命中，目标相同，这一行是多余的",
+      "shadowed_other": "第 {{line}} 行已先命中（{{winner}}），TCP 下这一行不会生效",
+      "duplicate": "与第 {{line}} 行完全相同",
+      "after_match": "位于兜底规则（第 {{line}} 行）之后，TCP 下不会命中",
+      "group_other": "TCP 下不会生效：被前面目标不同的规则抢先命中",
+      "group_same": "多余：前面的规则已把同样的流量交给同一个目标",
+      "group_after": "TCP 下不会命中：位于兜底规则之后"
     }
   },
   "nodes": {

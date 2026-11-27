@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { configure, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useAuthStore } from '@/stores/auth'
 import { defaultRulesContent } from '@/utils/ruleset/defaultRules.fixture'
 import { api, installReads, list, mountRuleSets, toast, where } from './testHarness'
+
+// The draft's inspection is asked for a second after the draft settles (useDraftInspection), so waits are longer than the default.
+configure({ asyncUtilTimeout: 4000 })
 
 const content = '- DOMAIN,a.example,Proxy\n- DOMAIN-SUFFIX,b.example,Proxy\n# ads\n- DOMAIN-KEYWORD,adx,Block\n- IP-CIDR,10.0.0.0/8,Block,no-resolve\n'
 const base = { slug: 'custom', name: 'Custom rules', sort: 5, enabled: true, direct_subscription_domain: false, proxy_group_order: [] as string[], content }
@@ -274,7 +277,10 @@ describe('saving', () => {
     mountRuleSets(PAGE)
     fireEvent.click(await tab('Sub-rules (1)'))
     expect((await screen.findByLabelText('Sub-rule name') as HTMLInputElement).value).toBe('ai-rules')
-    fireEvent.change(await screen.findByRole('textbox', { name: 'ai-rules' }), { target: { value: '- MATCH,REJECT' } })
+    // The sub-rule is edited in the same grouped editor as the main rules: its one group is open, aim it at REJECT.
+    const panel = within(await screen.findByRole('tabpanel'))
+    fireEvent.change(await panel.findByLabelText('Target'), { target: { value: 'REJECT' } })
+    fireEvent.click(await panel.findByRole('button', { name: 'Change to REJECT (1 lines)' }))
     fireEvent.click(await tab('Rematch outbounds (1)'))
     fireEvent.change(await screen.findByLabelText('Rematch name'), { target: { value: 'ai-v2' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))

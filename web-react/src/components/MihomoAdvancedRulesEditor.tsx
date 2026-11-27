@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { inspectProxyGroups, type MihomoRematchOutbound, type MihomoSubRule, type ProxyGroupIssue, type RuleSet } from '@/api/rules'
@@ -25,6 +25,13 @@ interface Props {
    * must not start out red.
    */
   revealRematchIssues?: boolean
+  /**
+   * Draws the content of the selected sub-rule in place of the plain code editor. The rule-set page gives it the grouped rule
+   * editor of its Rules tab, so a sub-rule is edited the same way the main rules are. `index` and `generation` together identify the
+   * sub-rule (key the editor by both: `generation` changes whenever a sub-rule is added or removed, so a list shifting under an
+   * index never hands one sub-rule's undo history to another).
+   */
+  renderContent?: (args: { index: number; generation: number; value: string; onChange: (content: string) => void; ariaLabel: string }) => ReactNode
 }
 
 /**
@@ -32,12 +39,13 @@ interface Props {
  * outbounds. Each is edited on its own tab of the rule-set sheet. The content is checked by the server
  * (inspect-proxy-groups, 300 ms after the last change) and the findings that belong to these parts are listed here.
  */
-export default function MihomoAdvancedRulesEditor({ value, onChange, onValidationChange, part, revealRematchIssues = false }: Props) {
+export default function MihomoAdvancedRulesEditor({ value, onChange, onValidationChange, part, revealRematchIssues = false, renderContent }: Props) {
   const { t } = useTranslation(['admin', 'common'])
   const subRules = value.mihomo_sub_rules || []
   const rematches = value.mihomo_rematch_outbounds || []
   const [selectedSubRuleIndex, setSelectedSubRuleIndex] = useState(0)
   const [issues, setIssues] = useState<ProxyGroupIssue[]>([])
+  const [generation, setGeneration] = useState(0)
   const [checking, setChecking] = useState(false)
   const serialized = useMemo(() => JSON.stringify([
     value.content,
@@ -90,6 +98,7 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
   function addSubRule() {
     const name = nextSubRuleName()
     patch({ mihomo_sub_rules: [...subRules, { name, content: '- MATCH,DIRECT' }] })
+    setGeneration(g => g + 1)
     setSelectedSubRuleIndex(subRules.length)
   }
 
@@ -99,6 +108,7 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
 
   function removeSubRule(index: number) {
     patch({ mihomo_sub_rules: subRules.filter((_, i) => i !== index) })
+    setGeneration(g => g + 1)
     if (index < selectedSubRuleIndex) setSelectedSubRuleIndex(selectedSubRuleIndex - 1)
     else if (index === selectedSubRuleIndex && selectedSubRuleIndex >= subRules.length - 1) setSelectedSubRuleIndex(Math.max(0, selectedSubRuleIndex - 1))
   }
@@ -191,11 +201,17 @@ export default function MihomoAdvancedRulesEditor({ value, onChange, onValidatio
             <Field label={t('admin:rules.mihomo.sub_rule_name')}>
               <Input value={selected.name} onChange={event => updateSubRule(selectedIndex, { ...selected, name: event.target.value })} />
             </Field>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border">
-              <Suspense fallback={<div className="grid h-80 place-items-center"><IconSpinner aria-hidden className="animate-spin text-muted-foreground" /></div>}>
-                <CodeEditor value={selected.content} onChange={content => updateSubRule(selectedIndex, { ...selected, content })} height="20rem" ariaLabel={selected.name || t('admin:rules.mihomo.unnamed_sub_rule')} />
-              </Suspense>
-            </div>
+            {renderContent ? (
+              <div className="min-w-0">
+                {renderContent({ index: selectedIndex, generation, value: selected.content, onChange: content => updateSubRule(selectedIndex, { ...selected, content }), ariaLabel: selected.name || t('admin:rules.mihomo.unnamed_sub_rule') })}
+              </div>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-hidden rounded-lg border">
+                <Suspense fallback={<div className="grid h-80 place-items-center"><IconSpinner aria-hidden className="animate-spin text-muted-foreground" /></div>}>
+                  <CodeEditor value={selected.content} onChange={content => updateSubRule(selectedIndex, { ...selected, content })} height="20rem" ariaLabel={selected.name || t('admin:rules.mihomo.unnamed_sub_rule')} />
+                </Suspense>
+              </div>
+            )}
           </> : <p className="py-16 text-center text-sm text-muted-foreground">{t('admin:rules.mihomo.no_sub_rules')}</p>}
         </div>
       </div>

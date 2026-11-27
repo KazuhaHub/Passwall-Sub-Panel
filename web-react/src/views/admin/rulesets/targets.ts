@@ -10,6 +10,17 @@ export interface TargetChoices {
 
 const BUILTIN = new Set<string>(BUILTIN_TARGETS)
 
+/*
+ * What is NOT offered, and why (checked against internal/service/render, 2026-11):
+ * - Subscription lines. The backend does resolve a line name used as a rule target (line_names.go lineNameCatalog.resolve), but
+ *   by the line's name AS RENDERED, which carries the `{{ factor }}` placeholder and the region flag the template switches on
+ *   (newLineNameCatalog: base is the render item's name). The inspection data has only the stored display name, so the
+ *   editor could not write a name that is certain to resolve, and an unresolvable one makes the subscription of a user it does not resolve for fail to
+ *   render (ambiguous / unavailable line errors, line_names.go) instead of failing at save. A line is made a member of a proxy group on the
+ *   Proxy groups tab, which stores a node and line identity; a rule then points at that group. A line name a rule already has stays what the picker shows.
+ * - Sub-rules. A sub-rule name is the third field of a `SUB-RULE` line, which has no outbound at all (targetIndex returns -1 for
+ *   it); named as the target of an ordinary rule it would simply become a proxy group with that name.
+ */
 /**
  * The outbounds a rule can point at, from what the rule set itself says. Proxy groups have no list of their own: a
  * name that appears as a target and is not a built-in outbound or a Rematch outbound IS a group (the backend finds

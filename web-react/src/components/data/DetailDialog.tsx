@@ -63,7 +63,7 @@ export interface DetailDialogProps {
  * same thing. Focus is trapped while it is open and returns to what opened it, and a dialog opened from this
  * one stacks above it with its own trap: Esc closes only the top one (Base UI's dialog does all of that).
  *
- * It replaces the right-hand DetailSheet. Anything with tabs or more than a screen of content is a page instead.
+ * It replaces the old right-hand side sheet. Anything with tabs or more than a screen of content is a page instead.
  */
 export function DetailDialog({ open, onClose, title, status, description, actions, footer, children, size = 'md', nav, initialFocus, onSubmit, className }: DetailDialogProps) {
   const { t } = useSpacedT()

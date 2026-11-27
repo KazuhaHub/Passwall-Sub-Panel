@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { IconButton } from '@/components/common/IconButton'
 import { MoreMenu, type MoreMenuItem } from '@/components/common/MoreMenu'
 import { DataTable } from '@/components/data/DataTable'
+import type { DataTableHandle } from '@/components/data/dataTableTypes'
 import { FilterBar } from '@/components/data/FilterBar'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Badge } from '@/components/ui/badge'
@@ -34,7 +35,7 @@ interface Row {
  * every rule of the group, and the button says how many), and its rules as a table. The table is the shared DataTable,
  * which draws only the rows near the screen once a group is long (the seeded set has one of 6,904).
  */
-export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBack, onEditRow, onAddRow, onPaste, onImport, onDeleteRows, onMoveRows, onRetarget, onSetNote, onEditText }: {
+export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBack, focusRow, onEditRow, onAddRow, onPaste, onImport, onDeleteRows, onMoveRows, onRetarget, onSetNote, onEditText }: {
   doc: Doc
   block: Block
   choices: TargetChoices
@@ -43,6 +44,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   query: string
   phone: boolean
   onBack: () => void
+  /** A line to bring into view and mark (a jump from the routing test or the problems panel); `token` makes the same line count again. */
+  focusRow?: { id: number; token: number } | null
   onEditRow: (id: number) => void
   onAddRow: () => void
   onPaste: () => void
@@ -60,6 +63,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   // The target the picker holds now (null: none, or a new name that is not usable).
   const [pending, setPending] = useState<string | null>(null)
   const [noteDraft, setNoteDraft] = useState<string | null>(null)
+  const table = useRef<DataTableHandle>(null)
+  const [marked, setMarked] = useState<string | null>(null)
   const note = block.kind !== 'text' ? noteOf(doc, block) : ''
   // A run of lines with no target is not a group traffic can be sent to: it is shown and can be edited or deleted, but nothing is added to it, pasted into it or moved out of it.
   const noTarget = block.kind === 'notarget'
@@ -85,6 +90,15 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
       return Object.keys(keep).length === Object.keys(prev).length ? prev : keep
     })
   }, [rows])
+
+  // A jump clears what would hide the line, then scrolls to it once the table has drawn.
+  useEffect(() => {
+    if (!focusRow) return
+    setLocal(''); setTypes([])
+    setMarked(String(focusRow.id))
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => table.current?.scrollToRow(String(focusRow.id), { align: 'center' })))
+    return () => cancelAnimationFrame(frame)
+  }, [focusRow])
 
   const needle = [query, local].map(s => s.trim().toLowerCase()).filter(Boolean)
   const shown = useMemo(() => rows.filter(r => {
@@ -204,6 +218,8 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             columns={columns}
             getRowId={r => String(r.id)}
             rowLabel={r => r.shown}
+            handleRef={table}
+            activeRowId={marked}
             pagination={false}
             columnMenu={false}
             maxHeight={TABLE_HEIGHT}
