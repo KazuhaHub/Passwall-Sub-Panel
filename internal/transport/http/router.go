@@ -1057,6 +1057,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 // ruleSetBodyLimit caps PUT /api/admin/rules/:slug and the two draft-compile
 // POSTs (inspect-proxy-groups, preview-proxy-groups) at 8 MiB.
+//
+// Trade-off: the audit middleware reads the body at engine level, before auth,
+// so anyone can make this prefix buffer up to 8 MiB per request. It is
+// bandwidth-bound (the sender must upload every byte), the same per-byte cost
+// as with the old 1 MiB cap.
 const ruleSetBodyLimit = 8 << 20
 
 // trustedProxies resolves the SetTrustedProxies argument from the
