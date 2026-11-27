@@ -62,7 +62,7 @@ describe('SubClientsView', () => {
   it('saves the whole settings object with only the two edited fields changed', async () => {
     mount()
     fireEvent.click(await screen.findByText('Alpha'))
-    const keywords = await screen.findByLabelText(/Keywords/)
+    const keywords = await screen.findByRole('textbox', { name: /Keywords/ })
     // Typing keeps what was typed: a comma or space is not eaten while the next word has not arrived.
     fireEvent.change(keywords, { target: { value: 'a,' } })
     expect((keywords as HTMLInputElement).value).toBe('a,')
@@ -99,7 +99,7 @@ describe('SubClientsView', () => {
   it('appends a new family at the end and a new app after the last one', async () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: 'Add detection family' }))
-    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Delta' } })
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Name' }), { target: { value: 'Delta' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add app' }))
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
