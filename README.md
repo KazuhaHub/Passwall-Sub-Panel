@@ -159,6 +159,8 @@ config_dir: "/opt/psp/config"
 data_dir:   "/opt/psp/data"
 
 # 不写 mysql 块就用默认 SQLite：/opt/psp/data/panel.db
+# SQLite 以 WAL 模式运行，目录里会多出 panel.db-wal、panel.db-shm 两个文件；
+# 备份时要连同它们一起复制（或先停止面板），只拷 panel.db 可能丢掉最近的写入
 # 要用 MySQL，加上：
 # mysql:
 #   host: "127.0.0.1"

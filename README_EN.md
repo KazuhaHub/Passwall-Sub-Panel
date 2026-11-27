@@ -126,6 +126,8 @@ config_dir: "/opt/psp/config"
 data_dir:   "/opt/psp/data"
 
 # Omit the mysql block to use embedded SQLite at /opt/psp/data/panel.db
+# SQLite runs in WAL mode, so panel.db-wal and panel.db-shm appear beside it;
+# copy them together with panel.db (or stop the panel first) when backing up
 # To use MySQL:
 # mysql:
 #   host: "127.0.0.1"

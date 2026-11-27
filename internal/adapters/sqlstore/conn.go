@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	sqlitedriver "github.com/glebarez/sqlite"
@@ -132,7 +133,7 @@ func openWithLogger(kind, dsn string, gormLogger logger.Interface) (*gorm.DB, er
 				return nil, fmt.Errorf("sqlite parent dir: %w", err)
 			}
 		}
-		db, err = gorm.Open(sqlitedriver.Open(dsn), cfg)
+		db, err = gorm.Open(sqlitedriver.Open(sqliteDSN(dsn)), cfg)
 	case "mysql":
 		db, err = gorm.Open(mysqldriver.Open(dsn), cfg)
 	case "postgres":
@@ -169,6 +170,44 @@ func openWithLogger(kind, dsn string, gormLogger logger.Interface) (*gorm.DB, er
 		sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	}
 	return db, nil
+}
+
+// sqliteDSN adds the pragmas a long-running panel wants to a SQLite path.
+//
+// The bare path used SQLite's defaults: rollback journal and synchronous=FULL,
+// so with MaxOpenConns(1) every commit paid the whole fsync sequence and a
+// read queued behind every write. WAL + synchronous=NORMAL fsyncs the log only
+// at checkpoints (a power loss can drop the last commits but never corrupts
+// the file) and lets readers proceed beside the writer. The modernc driver
+// runs each `_pragma` query value as a PRAGMA on every new connection. It
+// already defaults busy_timeout to 5000; it is spelled out so the value is
+// visible here and does not depend on the driver's default.
+//
+// A pragma the caller already put in the DSN is left alone (the test template
+// copy selects journal_mode(MEMORY) this way), and in-memory databases are
+// returned untouched because WAL does not apply to them. WAL adds `-wal` and
+// `-shm` files beside the database; they must be backed up with it and live in
+// the same writable directory.
+func sqliteDSN(dsn string) string {
+	if dsn == ":memory:" || strings.Contains(dsn, "mode=memory") {
+		return dsn
+	}
+	defaults := []struct{ name, pragma string }{
+		{"journal_mode(", "journal_mode(WAL)"},
+		{"synchronous(", "synchronous(NORMAL)"},
+		{"busy_timeout(", "busy_timeout(5000)"},
+	}
+	for _, d := range defaults {
+		if strings.Contains(dsn, d.name) {
+			continue
+		}
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "_pragma=" + d.pragma
+	}
+	return dsn
 }
 
 // NewRepos wires up every repository implementation and returns the

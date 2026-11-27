@@ -55,6 +55,8 @@ config_dir: "./config"
 
 # Runtime data dir. With the default SQLite setup, the DB file is:
 #   ./data/panel.db
+# SQLite runs in WAL mode: panel.db-wal and panel.db-shm appear beside it and
+# must be backed up together with panel.db (or stop the panel first).
 data_dir: "./data"
 
 # Optional database connection.
