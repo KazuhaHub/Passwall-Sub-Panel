@@ -1,0 +1,237 @@
+name: Watch
+
+# Weekly checks on questions about the WORLD rather than about a change: did an
+# upstream ship past what we tested, did an advisory land against code we already
+# shipped, do the real third-party panels still drive. None of them is a required
+# check, and a red run is the signal, not a broken build; the person who last
+# edited the schedule is notified by GitHub. Scheduled workflows are disabled after
+# 60 days without repository activity, which this repository is nowhere near.
+#
+# They are not in test.yml because a PR that did not cause them must not go red on
+# them. Only `compat` also runs on a pull request, and only for the paths that are
+# its own inputs.
+#
+#   compat         3X-UI and S-UI releases past the tested ceilings, and our own
+#                  Node releases the upgrade registry has not ruled on.
+#   govulncheck    reachable vulnerabilities on main and the V3 maintenance line.
+#   third-party    the adapters against real 3X-UI and S-UI containers (the job
+#                  lives in third-party.yml, which release.yml also runs).
+
+on:
+  schedule:
+    # Mondays 03:17 UTC. Off the hour on purpose — scheduled runs at :00 queue
+    # behind everyone else's and get delayed or dropped.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  # Also on changes to the compat inputs, so an edit that puts the compat file out
+  # of reach of its own watcher is caught on the PR rather than on the next Monday.
+  #
+  # THE EMBEDDED COPY IS LISTED SEPARATELY BECAUSE `docs/compat/**` DOES NOT COVER
+  # IT. The copy the panel ships is a compat input — adding a release means editing
+  # it and the published document together — and a change to only one of them is
+  # exactly the drift a guard test already rejects. Watching it here is what makes
+  # that edit run the check as well.
+  pull_request:
+    paths:
+      - "docs/compat/**"
+      - "cmd/compatwatch/**"
+      - "internal/version/ceiling*.go"
+      - "internal/adapters/noderelease/passwall-node-v4.json"
+      - ".github/workflows/watch.yml"
+
+# Everything here is built with go.mod's exact compiler, in test.yml's shape, and
+# the build-baseline guard holds this file there like every other workflow that
+# sets up Go.
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+permissions:
+  contents: read
+
+jobs:
+  # WHY THIS IS A JOB AND NOT A CHECKLIST ITEM: the ceiling is the only compat
+  # fact that goes stale with nobody editing anything — it is a claim about an
+  # upstream that keeps shipping. Its failure is quiet from the maintainer's side
+  # but loud from the admin's: PSP refuses a panel upgrade whose target exceeds the
+  # ceiling, so a stale file shows up as somebody being blocked from upgrading,
+  # months after the release that did it.
+  #
+  # The Node registry check exists because its failure is quiet from EVERY side:
+  # a release that shipped and that nobody reviewed is invisible to every other
+  # check, which read the registry instead of questioning it. It is the mirror of
+  # the ceiling — there an upstream outran us, here our own releases did.
+  #
+  # It never edits either file. Raising a ceiling means the live-panel review pass
+  # in docs/3xui-compat.md; reviewing a Node release means a human deciding whether
+  # to offer it. What it refuses to allow is SILENCE.
+  #
+  # Two different reds: exit 1 means a real gap (do the review pass, or record the
+  # decision), exit 2 means a comparison could not be made at all (the watcher
+  # itself needs attention). "Could not tell" is deliberately not green.
+  compat:
+    name: compat ceilings (upstream panels and node registry)
+    runs-on: ubuntu-latest
+    # A build and a few API reads; the default 360 minutes is only ever a hang.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # Built rather than `go run`: go run reports a child's non-zero exit as
+      # plain 1, which would collapse "an upstream is ahead" (1) into "the
+      # watcher could not tell" (2) — the one distinction this job exists to
+      # make. Verified: a program calling os.Exit(2) comes back as 1 under
+      # `go run` and as 2 when the built binary is executed.
+      - name: build the watcher
+        run: go build -o /tmp/compatwatch ./cmd/compatwatch
+      - name: compare ceilings and the node registry against published releases
+        env:
+          # Lifts the GitHub API quota off the anonymous 60/hour-per-IP limit
+          # that Actions runners share, so an "unknown" verdict means something
+          # about the upstream rather than about the runner's neighbours.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          /tmp/compatwatch
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "::notice::Upstream ceilings are current and every published Node release is accounted for." ;;
+            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/3x-ui-v4.json or docs/compat/sui-v4.json), or a published Node release is neither exercised by the matrix in docs/compat/passwall-node-v4.json nor passed over with a reason in docs/compat/verification-v1.json. The table above names which. Neither is an admission decision: the panel offers what is published." ;;
+            2) echo "::error::A comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
+            *) echo "::error::compatwatch exited $code" ;;
+          esac
+          exit $code
+
+  # WHY A SCHEDULE: a scan at release time answers "does this commit call a known
+  # vulnerability" and never "does the code we already shipped call one published
+  # since". An advisory that lands in a quiet week is not reported until the next
+  # release happens to run a scan, which is how gRPC's HTTP/2 memory exhaustion was
+  # found on release/v3. Pull requests do not scan, so an unrelated advisory cannot
+  # turn them red; release.yml scans again before it publishes.
+  #
+  # WHY release/v3 IS HERE. It is the long-term V3 line (docs/3xui-compat.md), it
+  # publishes its own releases, and nothing on main looks at it: Dependabot's
+  # alerts and security updates cover the default branch only, and a schedule only
+  # fires from the default branch's copy of a workflow. So this file, on main,
+  # checks the branch out, and builds it with that branch's own go.mod toolchain --
+  # the compiler its releases are built with, whose standard library is part of
+  # what is being scanned. The branch itself is not modified. When the V3 line is
+  # retired, its matrix entry goes with it.
+  #
+  # Every OS the releases ship: an advisory whose code sits in a _windows.go or
+  # _darwin.go file is never evaluated on a linux runner. Measured locally on
+  # release/v3: 20s for linux, 5s each for windows and darwin.
+  govulncheck:
+    name: govulncheck (${{ matrix.ref }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # One line's finding must not cancel the other's scan.
+      fail-fast: false
+      matrix:
+        ref: [main, release/v3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-go@v7
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      # ALLOWLISTED ADVISORIES. govulncheck has no ignore flag, so a finding with no
+      # fixed version would hold this step red until upstream ships one. An ID listed
+      # here is reported as a warning instead; every other finding still fails, and so
+      # does a run whose findings cannot be read (exit 3 with no "Vulnerability #N:
+      # GO-..." line means the output format moved, not that the tree is clean). An
+      # entry that stops being reported is flagged for removal. Keep the reason and the
+      # mitigation next to each ID; remove it once upstream ships a fix.
+      #
+      #   (none)
+      - name: Reachable vulnerability check
+        env:
+          GOVULNCHECK_ALLOW: ""
+        run: |
+          set -u
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
+          failed=0
+          seen=""
+          for goos in linux windows darwin
+          do
+            echo "== GOOS=$goos"
+            # The default shell runs with -e, so the exit status is caught here
+            # rather than read from $? after a bare assignment.
+            code=0
+            out=$(GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... 2>&1) || code=$?
+            printf '%s\n' "$out"
+            case "$code" in
+              0) ;;
+              3)
+                ids=$(printf '%s\n' "$out" | sed -nE 's/^Vulnerability #[0-9]+: (GO-[0-9]+-[0-9]+).*/\1/p' | sort -u)
+                # Every finding heading must yield an ID, or an unreadable one could
+                # ride along beside an allowlisted one.
+                headings=$(printf '%s\n' "$out" | grep -c '^Vulnerability #' || true)
+                parsed=$(printf '%s\n' "$out" | grep -cE '^Vulnerability #[0-9]+: GO-[0-9]+-[0-9]+' || true)
+                if [ -z "$ids" ] || [ "$headings" != "$parsed" ]; then
+                  echo "::error::govulncheck reported findings for GOOS=$goos that could not all be read ($parsed of $headings)"
+                  failed=1
+                fi
+                for id in $ids
+                do
+                  case " $GOVULNCHECK_ALLOW " in
+                    *" $id "*)
+                      echo "::warning::$id is allowlisted (GOOS=$goos); see the comment above this step"
+                      seen="$seen $id" ;;
+                    *)
+                      echo "::error::$id is reachable (GOOS=$goos)"
+                      failed=1 ;;
+                  esac
+                done ;;
+              *)
+                echo "::error::govulncheck failed for GOOS=$goos (exit $code)"
+                failed=1 ;;
+            esac
+          done
+          for id in $GOVULNCHECK_ALLOW
+          do
+            case " $seen " in
+              *" $id "*) ;;
+              *) echo "::warning::$id is allowlisted but no longer reported; remove it" ;;
+            esac
+          done
+          exit "$failed"
+
+  # THE REAL THIRD-PARTY PANELS. The adapters against actual 3X-UI and S-UI
+  # containers at the reviewed ceilings; the job itself is third-party.yml, which
+  # release.yml also runs before it cuts a tag. Weekly rather than on a push: it pulls
+  # two third-party images, has the longest timeout in the repository, and a change
+  # that breaks an adapter is caught at the next release or Monday, whichever is first.
+  third-party:
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/third-party.yml

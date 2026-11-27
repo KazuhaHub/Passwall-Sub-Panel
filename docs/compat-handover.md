@@ -64,7 +64,7 @@ $ node deploy/compat/plan.mjs --emit cases
 | R02 逐 case 校验器 | `deploy/compat/check-go-results.test.mjs` | 同一文件：skip、零匹配、截断流、非零退出、后报成功 |
 | R03 汇总门 | `deploy/compat/check-case-set.test.mjs` | 同一文件：删一个报告、空目录、报告自身非通过、报告不可读 |
 | R03/R10 发布门 | `deploy/release_workflow_test.mjs` | 同一文件：共享缓存、可覆盖发布、写出 token 越界、把发布挂在交叉编译上 |
-| R07 第三方隔离 | CI 作业 `third-party adapters (isolated real panels)` 全绿 | 空环境检查；`third-party_env.test.mjs` |
+| R07 第三方隔离 | `third-party.yml` 作业 `third-party adapters (isolated real panels)` 全绿（`watch.yml` 每周跑，`release.yml` 在打 tag 之前跑） | 空环境检查；`third-party_env.test.mjs` |
 | R08 数据链路 | `dataplane.sh` 端到端 | `PSP_DATA_SABOTAGE=credentials` / `no-enforcement`，两者都必须非零退出 |
 | R05 反方向 | PN `deployment/compat/old-psp.sh` 全 PASS | `PSP_CANDIDATE_AGENT=/bin/true` 必须 FAIL |
 
@@ -112,7 +112,7 @@ setup ──┬─ node-compatibility ─┐
 
 ## 9. 分支保护设置
 
-见 [维护 SOP §6](compat-maintenance.md)：ruleset `main protection`（id `23046834`）要求九个检查，含 `compatibility gate`，附读取命令与改前原值。
+见 [维护 SOP §6](compat-maintenance.md)：ruleset `main protection`（id `23046834`）只要求一个检查 `required`（`test.yml` 的汇总作业），附读取命令与改前的九个检查。
 
 ## 10. 下一位维护者的操作命令
 

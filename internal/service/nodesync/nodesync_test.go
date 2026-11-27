@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -231,13 +230,7 @@ func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
 
 func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "nodesync-tasks.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlstore.EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := openMigratedTestDB(t)
 	repos := sqlstore.NewRepos(db)
 	agent := &domain.NodeAgent{
 		AgentID: "agt_sync_tasks", PanelID: 909,
@@ -355,13 +348,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 
 func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "nodesync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlstore.EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	db := openMigratedTestDB(t)
 	repos := sqlstore.NewRepos(db)
 	limit, ipLimit := int64(1_000), 2
 	user := &domain.User{

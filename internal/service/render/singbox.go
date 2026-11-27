@@ -650,12 +650,33 @@ func parseClashRuleLine(rawLine string) (kind, value, target string, ok bool) {
 		return kind, "", target, target != ""
 	}
 	value = normalizeRulePart(parts[1])
-	for i := len(parts) - 1; i >= 2; i-- {
-		candidate := normalizeRulePart(parts[i])
-		if candidate == "" || i > 2 && candidate == "no-resolve" {
+	// Share Mihomo's target selection (it skips trailing `no-resolve` / `src`
+	// options case-insensitively) instead of keeping a second copy of the
+	// option list: the two used to diverge, which compiled
+	// `IP-CIDR,x,DIRECT,src` with the non-existent outbound "src".
+	index := ruleOutboundTargetIndex(parts)
+	if index < 0 {
+		return kind, value, "", false
+	}
+	target = normalizeRulePart(parts[index])
+	// Options sit after the target. `src` flips the rule to match the SOURCE
+	// address (Mihomo's common.ParseParams -> WithIPCIDRSourceIP), i.e. the
+	// SRC-* rule type; it is ignored by rule types that do not read it.
+	for _, option := range parts[index+1:] {
+		if !strings.EqualFold(normalizeRulePart(option), "src") {
 			continue
 		}
-		target = candidate
+		switch kind {
+		case "IP-CIDR", "IP-CIDR6":
+			kind = "SRC-IP-CIDR"
+		case "GEOIP", "IP-ASN", "IP-SUFFIX":
+			// Mihomo honours `src` here too, but sing-box has no source-side
+			// equivalent (rule_sets match the destination). Renaming to the
+			// SRC-* type routes the line through singBoxRouteRule's default
+			// "unsupported, drop" path rather than silently matching the
+			// destination instead.
+			kind = "SRC-" + kind
+		}
 		break
 	}
 	return kind, value, target, value != "" && target != ""

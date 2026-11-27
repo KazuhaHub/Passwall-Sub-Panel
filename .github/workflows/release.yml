@@ -100,6 +100,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Real third-party panels, before any tag: a blank-tag dispatch stops without cutting one;
+  # a hand-pushed tag already exists, so the run fails, nothing is published, and a fix needs a new commit and tag.
+  third-party:
+    name: Real third-party panels
+    permissions:
+      contents: read
+    uses: ./.github/workflows/third-party.yml
+
   # THE TAG IS CUT HERE, NOT ON SOMEBODY'S LAPTOP.
   #
   # The release is one dispatch against the latest tested main commit, and this
@@ -111,6 +119,7 @@ jobs:
   # could run at all.
   tag:
     name: Cut the release tag
+    needs: third-party
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # THIS JOB CARRIES NO CONDITION, AND THAT IS NOT A STYLE CHOICE.
@@ -206,7 +215,7 @@ jobs:
           # AND THE COMMIT HAS TO BE ON MAIN, JUDGED BY A RUN THAT TESTED IT THERE.
           # A dispatch can be started from any branch, and a branch head usually has
           # a green test.yml run already: the pull_request one, which tested the
-          # merge ref rather than this commit and skips the third-party lane. Asked
+          # merge ref rather than this commit. Asked
           # without a branch, the lookup took that run, and the dispatch would have
           # cut a permanent tag on unmerged code and moved :beta. The ancestry check
           # refuses the commit, `--branch main` refuses the borrowed evidence. Main
@@ -225,6 +234,81 @@ jobs:
             echo "the test suite has not succeeded on ${SHA:0:7} on main (conclusion: ${conclusion:-none})" >&2
             exit 1
           }
+
+      # BEFORE A TAG EXISTS. This is the release's vulnerability gate: the PR suite
+      # does not run govulncheck, so an unrelated upstream advisory cannot turn a PR
+      # red, and watch.yml scans weekly. It sits ahead of the allocate-and-tag step so
+      # a finding never leaves a permanent tag behind; on a pushed tag the tag job
+      # failing still stops every publishing job, which all sit behind it.
+      #
+      # EVERY OS THE RELEASE SHIPS, NOT ONLY THE RUNNER'S. govulncheck analyses the
+      # packages as they build for the current GOOS, so an advisory whose vulnerable
+      # code lives only in a _windows.go or _darwin.go file is never evaluated on a
+      # linux runner. The tool is installed once for the host: `go run` under
+      # GOOS=windows would build a Windows govulncheck and then fail to execute it.
+      # One OS failing does not stop the others from being scanned. Measured locally:
+      # 9s for linux, 7s and 6s for windows and darwin.
+      # ALLOWLISTED ADVISORIES. govulncheck has no ignore flag, so a finding with no
+      # fixed version would hold this step red until upstream ships one. An ID listed
+      # here is reported as a warning instead; every other finding still fails, and so
+      # does a run whose findings cannot be read (exit 3 with no "Vulnerability #N:
+      # GO-..." line means the output format moved, not that the tree is clean). An
+      # entry that stops being reported is flagged for removal. Keep the reason and the
+      # mitigation next to each ID; remove it once upstream ships a fix.
+      #
+      #   (none)
+      - name: Reachable vulnerability check
+        env:
+          GOVULNCHECK_ALLOW: ""
+        run: |
+          set -u
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 || exit 1
+          failed=0
+          seen=""
+          for goos in linux windows darwin
+          do
+            echo "== GOOS=$goos"
+            # The default shell runs with -e, so the exit status is caught here
+            # rather than read from $? after a bare assignment.
+            code=0
+            out=$(GOOS="$goos" "$(go env GOPATH)/bin/govulncheck" ./... 2>&1) || code=$?
+            printf '%s\n' "$out"
+            case "$code" in
+              0) ;;
+              3)
+                ids=$(printf '%s\n' "$out" | sed -nE 's/^Vulnerability #[0-9]+: (GO-[0-9]+-[0-9]+).*/\1/p' | sort -u)
+                # Every finding heading must yield an ID, or an unreadable one could
+                # ride along beside an allowlisted one.
+                headings=$(printf '%s\n' "$out" | grep -c '^Vulnerability #' || true)
+                parsed=$(printf '%s\n' "$out" | grep -cE '^Vulnerability #[0-9]+: GO-[0-9]+-[0-9]+' || true)
+                if [ -z "$ids" ] || [ "$headings" != "$parsed" ]; then
+                  echo "::error::govulncheck reported findings for GOOS=$goos that could not all be read ($parsed of $headings)"
+                  failed=1
+                fi
+                for id in $ids
+                do
+                  case " $GOVULNCHECK_ALLOW " in
+                    *" $id "*)
+                      echo "::warning::$id is allowlisted (GOOS=$goos); see the comment above this step"
+                      seen="$seen $id" ;;
+                    *)
+                      echo "::error::$id is reachable (GOOS=$goos)"
+                      failed=1 ;;
+                  esac
+                done ;;
+              *)
+                echo "::error::govulncheck failed for GOOS=$goos (exit $code)"
+                failed=1 ;;
+            esac
+          done
+          for id in $GOVULNCHECK_ALLOW
+          do
+            case " $seen " in
+              *" $id "*) ;;
+              *) echo "::warning::$id is allowlisted but no longer reported; remove it" ;;
+            esac
+          done
+          exit "$failed"
 
       - name: Allocate the next number on the line and create the tag
         id: cut

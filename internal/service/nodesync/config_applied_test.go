@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,20 +30,9 @@ type configAppliedFixture struct {
 
 func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 	t.Helper()
+	db := openMigratedTestDB(t)
 	sqlstore.ConfigureSecretKey("test-only-native-config-ack-key")
 	t.Cleanup(func() { sqlstore.ConfigureSecretKey("") })
-	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "config-applied.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = connection.Close() })
-	if err := sqlstore.EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
 	repos := sqlstore.NewRepos(db)
 	now := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.UTC)
 	captured, pending, checked := now.Add(-time.Hour), now.Add(-30*time.Minute), now.Add(-time.Minute)
@@ -77,7 +65,7 @@ func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 		t.Fatal(err)
 	}
 	f := &configAppliedFixture{db: db, repos: &repos, agent: agent, node: node, now: now}
-	f.service, err = New(Options{CoreCatalog: corefixtures.Static{},
+	service, err := New(Options{CoreCatalog: corefixtures.Static{},
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
 		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return f.now },
@@ -85,6 +73,7 @@ func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.service = service
 	f.service.SetRenderInvalidator(func() { f.invalidations++ })
 	return f
 }

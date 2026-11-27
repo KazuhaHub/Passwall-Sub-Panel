@@ -1,6 +1,9 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel domain errors. Specific business errors should wrap one of these
 // via fmt.Errorf("%w: ...", ErrXxx); callers use errors.Is to classify.
@@ -11,6 +14,10 @@ var (
 	ErrUnauthorized  = errors.New("unauthorized")
 	ErrForbidden     = errors.New("forbidden")
 	ErrConflict      = errors.New("conflict")
+	// ErrStaleRevision means a compare-and-write save carried a base revision
+	// that no longer matches the stored document (someone else saved or the
+	// file was edited on disk). It is a conflict; nothing was written.
+	ErrStaleRevision = fmt.Errorf("%w: stale revision", ErrConflict)
 	// ErrResourceExhausted means otherwise-valid work cannot be admitted
 	// because a bounded durable resource is full. Callers may retry after
 	// existing work has drained; HTTP transports should map it to 429.

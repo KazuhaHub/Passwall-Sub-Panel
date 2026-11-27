@@ -12,6 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
@@ -59,6 +60,12 @@ type ruleSetDTO struct {
 	MihomoSubRules         []domain.MihomoSubRule         `json:"mihomo_sub_rules,omitempty"`
 	MihomoRematchOutbounds []domain.MihomoRematchOutbound `json:"mihomo_rematch_outbounds,omitempty"`
 	Content                string                         `json:"content"`
+	// Revision is read-only (responses only; ignored on input): a content hash
+	// of the stored file. BaseRevision is the optimistic-concurrency token a
+	// PUT may carry: the Revision the editor last loaded. Empty/absent keeps
+	// the legacy unconditional overwrite.
+	Revision     string `json:"revision,omitempty"`
+	BaseRevision string `json:"base_revision,omitempty"`
 }
 
 func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
@@ -72,6 +79,7 @@ func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
 		MihomoSubRules:           r.MihomoSubRules,
 		MihomoRematchOutbounds:   r.MihomoRematchOutbounds,
 		Content:                  r.Content,
+		Revision:                 r.Revision,
 	}
 }
 
@@ -106,6 +114,11 @@ func (h *AdminRuleSetsHandler) Get(c *gin.Context) {
 func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 	var req ruleSetDTO
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// The cap lives in middleware; a body past it must read as 413, not as
+		// a malformed-JSON 400, so the editor can say "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -147,7 +160,23 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Mihomo template binding", "issues": issues})
 		return
 	}
-	if err := h.repo.Save(c.Request.Context(), saved); err != nil {
+	var saveErr error
+	if req.BaseRevision != "" {
+		saveErr = h.repo.SaveIfRevision(c.Request.Context(), saved, req.BaseRevision)
+	} else {
+		saveErr = h.repo.Save(c.Request.Context(), saved)
+	}
+	if err := saveErr; err != nil {
+		if errors.Is(err, domain.ErrStaleRevision) {
+			body := gin.H{"error": "Rule set changed since it was loaded", "code": "ruleset_stale"}
+			// The current document lets the editor offer a reload/merge; if it
+			// vanished between the compare and this read, omit it.
+			if cur, gerr := h.repo.GetBySlug(c.Request.Context(), req.Slug); gerr == nil {
+				body["current"] = ruleSetDTOFromDomain(cur)
+			}
+			c.JSON(http.StatusConflict, body)
+			return
+		}
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -228,6 +257,11 @@ type inspectProxyGroupsRequest struct {
 func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 	var req inspectProxyGroupsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// The cap lives in middleware; a body past it must read as 413, not as
+		// a malformed-JSON 400, so the editor can say "too large".
+		if middleware.AbortBodyTooLarge(c, err) {
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

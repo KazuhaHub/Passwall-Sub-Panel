@@ -288,7 +288,7 @@ PR 不使用生产凭据或生产后端；外部 PR 不能通过高权限 workfl
 | [旧 PSP 人工验证记录](psp-node-rootless-observability-progress.md) | `wire-contract`（人工、一次性） | 具体旧 PSP／新 PN 的观测上报实测记录 | 所有基础功能或反方向持续 CI |
 | PN `.github/workflows/test.yml` 升级 E2E | `upgrade-mechanism` | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
 | [第三方矩阵](compat/3x-ui-v4.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
-| [上游 watcher](../.github/workflows/compat-watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
+| [上游 watcher](../.github/workflows/watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
 | [ADR 0038](adr/0038-refused-node-report-is-recorded.md)、拒绝记录与显示 | `wire-contract` | 被拒上报在 `node_agents` 留痕、进判定、在服务器列表显示为 `incompatible` 并给出两个代际数字 | **不构成 dataplane 证据，也不构成反方向（新 PN × 旧 PSP）支持承诺**；合规 PN 因自校验是收报规则的超集而永不触发该路径，它只对按不同共享模块代际构建的对端、第三方实现或异常客户端生效 |
 
 **六类里今天只有三类有实例。** 上表覆盖 `wire-contract`、`adapter-live` 和
@@ -316,14 +316,14 @@ P1 的具体 schema 与 P2 反方向验证的旧 PSP 清单应在实现 PR 中�
 - `27cad1d2`：统一后端边界模型，增加 `min_supported=beta1`，两条 workflow 及测试从有序矩阵派生支持集合，未移除旧版本。
 - 本次规范扩展：保留既有支持集合，目标引入有界双向验证；新增反方向承诺须先有完整证据。区分政策下限和运行时拒绝、beta 显式承诺和稳定版默认承诺，补齐行为证据、升级路径与门禁验收。
 - 2026-11-03：PN `min_supported` 从 `4.0.0` 提升到 `4.1.0`（PN 第一个正式版，提交 `0c80df36`），`contract_source` 同步移到 `v4.1.0`。
-  - **现在未被测试**：`4.0.0` 至 `4.0.1.11` 全部 13 个 4.0.x 发布。它们的行仍留在 `released_nodes`，作为评审记录，也因为 compat-watch 按这张表核对每个已发布版本；它们的 pin 已从 `verification-v1.json` 移除，需要时可从 git 历史恢复。
+  - **现在未被测试**：`4.0.0` 至 `4.0.1.11` 全部 13 个 4.0.x 发布。它们的行仍留在 `released_nodes`，作为评审记录，也因为 `watch.yml` 的 `compat` 作业按这张表核对每个已发布版本；它们的 pin 已从 `verification-v1.json` 移除，需要时可从 git 历史恢复。
   - 安装数量：拿不到。
   - wire 上报：照常接受。4.1.0 与 4.0.1.11 之间没有协议变化（仍是 protocol 1），`wire.min_protocol_version` 未动，没有任何节点因此被拒绝。
   - 桥接路径：4.0.x 节点经现有远程升级（`linux-systemd`／`managed-docker`）或重新安装升到 4.1.0，无需停机迁移。
   - 最后一个仍受支持的 PSP：不适用，本次没有 PSP 停止支持任何节点。
   - 真正移除协议：未决定，是另一项决定。
 - 2026-11-14：PN `4.2.0-beta.1` 与 `4.2.0-beta.2` 加入 `released_nodes`，`min_supported` 仍为 `4.1.0`，没有任何版本变为未测试。
-  - 矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.2`（提交 `feaa6adb`）；`4.2.0-beta.1` 位于两端之间，只作为评审记录，使 compat-watch 能核对每个已发布版本，不单独运行。
+  - 矩阵的两端变为 `4.1.0` 与 `4.2.0-beta.2`（提交 `feaa6adb`）；`4.2.0-beta.1` 位于两端之间，只作为评审记录，使 `watch.yml` 的 `compat` 作业能核对每个已发布版本，不单独运行。
   - `contract_source` 移到 `v4.2.0-beta.2`。已发布的预发布版本可以作为契约来源：它只需能被命名、固定提交并被拉取，规划器与来源检查都接受 `-beta.N`／`-rc.N`。选它是因为它是第一个声明 `policy.destination.v1` 并上报 `PolicyStatus` 的 PN 版本。
   - 新增 `TestLive_RealNodePolicyContract`（目的地策略往返：下发、上报摘要、撤回），由固定来源契约任务运行，按 `deploy/compat/profiles-node-contract.json` 的 `node-policy-v1` 判定。它不属于 `node-wire-v1`：该 profile 会在下限 `4.1.0` 上运行，而 `4.1.0` 早于该能力。
 - 2026-11-14：PN `4.2.0-beta.3`（`6a6f7a4e`）、`4.2.0-beta.4`（`e7ed6687`）与 `4.2.0-beta.5`（`124e42cb`）加入 `released_nodes`，`min_supported` 仍为 `4.1.0`，没有任何版本变为未测试。
