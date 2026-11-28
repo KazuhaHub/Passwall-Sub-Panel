@@ -250,3 +250,84 @@ func TestBoundedPassesSeeRowsStampedInAnotherZone(t *testing.T) {
 		t.Fatalf("the hourly pass must see rows stamped in another zone: up=%d, want 550", got)
 	}
 }
+
+// A user silent for two days and then active again. The first hour after the
+// gap has no sample at or before its :00 inside a bounded window, and the
+// segment across the gap is dropped (longer than the heartbeat) by every pass,
+// full or bounded. So the bounded value IS the hour's value and must keep
+// growing as samples arrive; treating the hour as left-incomplete froze it at
+// whatever the first five minutes had brought.
+func TestBoundedPassKeepsGrowingTheFirstHourAfterAGap(t *testing.T) {
+	svc, g := newServiceFromTest(t)
+	ctx := context.Background()
+	hour := time.Date(2026, 6, 20, 1, 0, 0, 0, time.UTC)
+	now := hour.Add(-2 * time.Hour)
+	svc.now = func() time.Time { return now }
+	insertUserSnap(t, g, 1, hour.Add(-48*time.Hour), 0, 0, 0)
+	if err := svc.RollupBeforePrune(ctx); err != nil { // the full pass
+		t.Fatal(err)
+	}
+	for _, s := range []struct {
+		at    time.Duration
+		total int64
+		want  int64
+	}{{5 * time.Minute, 100, -1}, {10 * time.Minute, 200, 100}, {55 * time.Minute, 1100, 1000}} {
+		insertUserSnap(t, g, 1, hour.Add(s.at), s.total, 0, s.total)
+		now = hour.Add(s.at + time.Minute)
+		if err := svc.RollupRecent(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := upOf(t, svc, 1, hour); got != s.want {
+			t.Fatalf("after the sample at +%v the hour holds %d, want %d", s.at, got, s.want)
+		}
+	}
+	now = hour.Add(70 * time.Minute)
+	if err := svc.RollupBeforePrune(ctx); err != nil { // bounded
+		t.Fatal(err)
+	}
+	if got := upOf(t, svc, 1, hour); got != 1000 {
+		t.Fatalf("the bounded hourly pass must leave the hour at 1000, got %d", got)
+	}
+}
+
+// A window that reaches back towards the 7-day prune is no longer sure to hold
+// every sample that matters, so it falls back to the insert-once rule.
+func TestWindowIsExact(t *testing.T) {
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		emitSince time.Time
+		want      bool
+	}{
+		{time.Time{}, false}, // a full pass has no window
+		{now.Add(-3 * time.Hour), true},
+		{now.Add(-48 * time.Hour), true},
+		{now.Add(-5 * 24 * time.Hour), false},
+	} {
+		if got := windowIsExact(c.emitSince, now); got != c.want {
+			t.Errorf("windowIsExact(%v) = %v, want %v", now.Sub(c.emitSince), got, c.want)
+		}
+	}
+}
+
+// On SQLite the window is found by text and then cut by instant, so the slack
+// for zones does not come back as rows.
+func TestRecentWindowReadsOnlyItsRowsOnSQLite(t *testing.T) {
+	svc, g := newServiceFromTest(t)
+	if g.Dialector.Name() != "sqlite" {
+		t.Skip("the two-step bound is SQLite's")
+	}
+	now := time.Date(2026, 6, 20, 12, 30, 0, 0, time.UTC)
+	la := time.FixedZone("PDT", -7*3600)
+	insertUserSnap(t, g, 1, now.Add(-20*time.Hour), 1, 0, 1)        // inside the slack, outside the window
+	insertUserSnap(t, g, 1, now.Add(-20*time.Hour).In(la), 2, 0, 2) // the same, stamped elsewhere
+	insertUserSnap(t, g, 1, now.Add(-4*time.Hour).In(la), 3, 0, 3)  // inside the window
+	insertUserSnap(t, g, 1, now.Add(-30*time.Minute), 4, 0, 4)      // inside the window
+	var n int64
+	q := svc.withRecentRawWindow(g.Table("traffic_snapshots"), now.Add(-3*time.Hour))
+	if err := q.Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("the window returned %d rows, want the 2 inside it", n)
+	}
+}
