@@ -447,13 +447,14 @@ func OwnedTaskTypes() []domain.SyncTaskType {
 	return append([]domain.SyncTaskType(nil), certTaskTypes...)
 }
 
-// ProcessDueTasks drives the cert_issue / cert_renew tasks. Mirrors the
-// user/node task processors: claim, run, then succeed / retry (transient) /
-// fail-fast (permanent or attempt cap). Wired into runSyncTaskLoop.
-func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+// ProcessDueBatch drives one batch of cert_issue / cert_renew tasks. Mirrors
+// the user/node task processors: claim, run, then succeed / retry (transient) /
+// fail-fast (permanent or attempt cap). Reports how many tasks ran and how many
+// did not succeed. Wired into app's runCertTaskLoop.
+func (s *Service) ProcessDueBatch(ctx context.Context, limit int) (ran, failed int, err error) {
 	tasks, err := s.tasks.ListDue(ctx, time.Now(), certTaskTypes, limit)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	for _, task := range tasks {
 		if !slices.Contains(certTaskTypes, task.Type) {
@@ -467,7 +468,9 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 		if !claimed {
 			continue
 		}
+		ran++
 		if err := s.runCertTask(ctx, task); err != nil {
+			failed++
 			if isPermanentCertError(err) || task.Attempts+1 >= maxCertTaskAttempts {
 				log.Warn("cert task gave up", "task_id", task.ID, "cert_id", task.TargetID, "attempts", task.Attempts+1, "err", err.Error())
 				s.markCertFailed(ctx, task.TargetID, err)
@@ -488,7 +491,14 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 		}
 		s.recordCertEvent(ctx, task.TargetID, task.Type, true, "")
 	}
-	return nil
+	return ran, failed, nil
+}
+
+// ProcessDueTasks runs one batch and reports only whether the batch itself
+// failed. See ProcessDueBatch.
+func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+	_, _, err := s.ProcessDueBatch(ctx, limit)
+	return err
 }
 
 func (s *Service) runCertTask(ctx context.Context, task *domain.SyncTask) error {
