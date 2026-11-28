@@ -20,6 +20,26 @@ export interface RuleSet {
   revision?: string
 }
 
+/**
+ * One row of GET /admin/rules: the rule set without its bodies (the rules text, the proxy-group member/option maps and the
+ * sub-rule/rematch bodies, each of which can be hundreds of KB). The server derives what a list needs from the text:
+ * `line_count` (non-blank lines), `size_bytes` (of the rules text) and `targets` (the ordered proxy-group names the rules
+ * point at, the backend's own reading, which the template pages compare with a template's groups). `revision` is what a
+ * bulk write checks against. The whole document is `RuleSet`, read with `getRuleSet`.
+ */
+export interface RuleSetSummary {
+  slug: string
+  name: string
+  sort: number
+  enabled: boolean
+  direct_subscription_domain: boolean
+  proxy_group_order: string[]
+  revision?: string
+  line_count: number
+  size_bytes: number
+  targets: string[]
+}
+
 export interface MihomoSubRule {
   name: string
   content: string
@@ -111,12 +131,13 @@ export interface RuleSetListParams {
 
 export async function listRuleSets(params: RuleSetListParams = {}, signal?: AbortSignal) {
   const merged = { page: 1, page_size: 200, ...params }
-  const { data } = await client.get<ListResponse<RuleSet>>('/admin/rules', { params: merged, signal })
+  const { data } = await client.get<ListResponse<RuleSetSummary>>('/admin/rules', { params: merged, signal })
   return data
 }
 
-export async function getRuleSet(slug: string) {
-  const { data } = await client.get<RuleSet>(`/admin/rules/${slug}`)
+/** `quiet`: the caller words a failure (a 404 is "no such rule set" on the page) instead of the request layer's toast. */
+export async function getRuleSet(slug: string, opts: { signal?: AbortSignal; quiet?: boolean } = {}) {
+  const { data } = await client.get<RuleSet>(`/admin/rules/${slug}`, { signal: opts.signal, ...(opts.quiet ? { _skipErrorToast: true } : {}) })
   return data
 }
 

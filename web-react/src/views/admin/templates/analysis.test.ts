@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import { coverageOf, extractProxyGroups, extractRuleTargets, formHint } from './analysis'
 
-const rs = (slug: string, content: string, enabled = true): RuleSet => ({
-  slug, name: slug, sort: 1, enabled, direct_subscription_domain: false, proxy_group_order: [], content,
+// A list row as the server sends it: `targets` is derived there from the rules text (Go test
+// TestAdminRuleSetsListTargetsMatchTheFormerBrowserAnswer pins that against what this page used to compute itself).
+const rs = (slug: string, targets: string[], enabled = true): RuleSetSummary => ({
+  slug, name: slug, sort: 1, enabled, direct_subscription_domain: false, proxy_group_order: [], line_count: targets.length, size_bytes: 0, targets,
 })
 const sets = new Map([
-  ['ads', rs('ads', '- DOMAIN-SUFFIX,ads.example,REJECT\n- DOMAIN-SUFFIX,a.example,Proxy,no-resolve\n# comment\n- MATCH,Fallback')],
-  ['off', rs('off', '- DOMAIN,x.example,Hidden', false)],
+  ['ads', rs('ads', ['Proxy', 'Fallback'])],
+  ['off', rs('off', ['Hidden'], false)],
 ])
 const longYaml = (groups: string[]) => 'proxies: []\nproxy-groups:\n' + groups.map(g => `  - name: "${g}"\n    type: select\n`).join('') + 'rules: []\n'
 
@@ -17,8 +19,8 @@ describe('template coverage', () => {
     expect(extractProxyGroups('rules:\n  - name: not-a-group\n').size).toBe(0)
   })
 
-  it('collects the targets of enabled rule sets, skipping built-ins, comments and no-resolve', () => {
-    expect([...extractRuleTargets([...sets.values()])].sort()).toEqual(['Fallback', 'Proxy'])
+  it('collects the targets of the enabled rule sets, once each and in order, and none of a disabled one', () => {
+    expect([...extractRuleTargets([...sets.values(), rs('more', ['Fallback', 'Extra'])])]).toEqual(['Proxy', 'Fallback', 'Extra'])
   })
 
   it('says unbound, auto, missing or ok', () => {

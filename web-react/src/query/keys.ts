@@ -144,6 +144,8 @@ export const ruleKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'rules'] as const,
   lists: (s: QueryScope) => [...ruleKeys.all(s), 'list'] as const,
   list: (s: QueryScope, params: RuleSetListParams) => [...ruleKeys.lists(s), params] as const,
+  /** One whole rule set (its text included), by slug: what the editor opens. */
+  detail: (s: QueryScope, slug: string) => [...ruleKeys.all(s), 'detail', slug] as const,
 }
 
 /** YAML-backed subscription templates (`<ConfigDir>/templates/`). */

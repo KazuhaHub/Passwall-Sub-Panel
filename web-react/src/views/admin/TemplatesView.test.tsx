@@ -10,8 +10,9 @@ const PATH = '/admin/templates'
 const yaml = 'proxies: []\nproxy-groups:\n  - name: Proxy\n    type: select\nrules: []\n'
 const custom = { slug: 'custom-tpl', name: 'Custom template', client_type: 'mihomo', is_default: false, rule_sets: ['ads', 'cn'], content: yaml }
 const seeded = { slug: 'default-mihomo', name: 'Seeded template', client_type: 'mihomo', is_default: true, rule_sets: [], content: '' }
-const rule = (slug: string, content: string, enabled = true) => ({ slug, name: `${slug} rules`, sort: 1, enabled, direct_subscription_domain: false, proxy_group_order: [], content })
-const ruleSets = [rule('ads', '- DOMAIN,a.example,Proxy'), rule('cn', '- DOMAIN,b.example,Other'), rule('off', '- MATCH,DIRECT', false)]
+// A list row as the server sends it: `targets` comes from the server's reading of the rules (stated here for each row), not from any text.
+const rule = (slug: string, targets: string[], enabled = true) => ({ slug, name: `${slug} rules`, sort: 1, enabled, direct_subscription_domain: false, proxy_group_order: [], line_count: targets.length, size_bytes: 0, targets })
+const ruleSets = [rule('ads', ['Proxy']), rule('cn', ['Other']), rule('off', [], false)]
 
 function reads(rows: unknown[] = [custom, seeded]) {
   installReads({ '/admin/templates': list(rows), '/admin/rules': list(ruleSets) })

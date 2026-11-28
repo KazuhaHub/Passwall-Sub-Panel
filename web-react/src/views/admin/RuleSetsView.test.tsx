@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, installReads, list, mountPage, toast } from './subscription/testHarness'
-import { mountRuleSets, where } from './rulesets/testHarness'
+import { api, list, mountPage, toast } from './subscription/testHarness'
+import { installReads, mountRuleSets, where } from './rulesets/testHarness'
 import RuleSetsView from './RuleSetsView'
 
 const PATH = '/admin/rules'
@@ -125,6 +125,8 @@ describe('opening a rule set', () => {
     mountRuleSets('/admin/rules?q=cus')
     fireEvent.click(within(await rowOf('Custom rules')).getByRole('button', { name: /^Edit rule set/ }))
     await waitFor(() => expect(where()).toBe('/admin/rules/custom'))
+    // The page reads its own rule set now, so the link is clicked once that read has replaced the loading frame (which has the link too).
+    await screen.findByRole('heading', { name: 'Custom rules' })
     fireEvent.click(await screen.findByRole('link', { name: /Rule sets/ }))
     await waitFor(() => expect(where()).toBe('/admin/rules?q=cus'))
     fireEvent.click(await screen.findByRole('button', { name: 'New rule set' }))
@@ -193,6 +195,28 @@ describe('bulk actions', () => {
     fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
     fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/rules/custom', { ...sent, enabled: false, base_revision: 'r1' }, expect.anything()))
+  })
+
+  it('bulk disable reads each rule set whole first (the list has no text), and writes that document back with only enabled changed', async () => {
+    reads()
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(api.get.mock.calls.some(c => c[0] === '/admin/rules/custom')).toBe(true)
+    // The list row carries no text, so a body that still has it can only have come from the whole document.
+    expect((api.put.mock.calls[0][1] as { content: string }).content).toBe(base.content)
+  })
+
+  it('bulk disable refuses a row whose stored revision is no longer the one the list showed, and sends nothing for it', async () => {
+    reads()
+    const read = api.get.getMockImplementation()!
+    api.get.mockImplementation(async (url: string, ...rest: unknown[]) => (url === '/admin/rules/custom' ? { data: { ...base, revision: 'r2' } } : read(url, ...rest)))
+    mountPage(<RuleSetsView />, PATH)
+    fireEvent.click(within(await rowOf('Custom rules')).getByRole('checkbox'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Bulk disable' }))
+    await waitFor(() => expect(toast.mock.calls.map(c => String(c[0]?.message ?? c[0])).some(m => /changed since the list was loaded/.test(m))).toBe(true))
+    expect(api.put).not.toHaveBeenCalled()
   })
 
   it('bulk disable saves against the revision the list holds, and on a stale refusal says so and reloads instead of retrying', async () => {

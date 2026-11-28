@@ -27,6 +27,7 @@ await context.route('**/api/**', async route => {
   if (path.endsWith('/preview-proxy-groups')) data = { group_id: 2, status: 'ready', groups: [{ name: 'Pick', members: ['日本节点', '日本节点 中转专线', 'DIRECT'] }] }
   else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
+  else if (/\/admin\/rules\/[^/]+$/.test(path)) data = draft
   else if (path.endsWith('/admin/groups')) data = envelope([{ id: 2, slug: 'default', name: 'Default', tag_filter: { all: true, tags: [] } }])
   else if (path.endsWith('/admin/templates')) data = envelope([])
   else if (path.endsWith('/version')) data = { version: 'member-prefix-fixture' }

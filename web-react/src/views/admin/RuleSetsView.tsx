@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { deleteRuleSet, resetRuleSet, ruleSetFailureOf, saveRuleSet, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, getRuleSet, resetRuleSet, ruleSetFailureOf, saveRuleSet, type RuleSetSummary } from '@/api/rules'
 import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { useObjectLink } from '@/components/common/objectReturn'
@@ -25,14 +25,14 @@ import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 import { askDeleteRuleSet, askResetRuleSet, isSeeded } from './rulesets/actions'
 import { ruleSetColumns } from './rulesets/columns'
-import { countLines } from './rulesets/model'
 import { RowActions } from './subscription/RowActions'
 import { RowCard } from './subscription/RowCard'
 import { StatusDot } from '@/components/common/StatusDot'
 import { isReservedSlug, legacyRuleSetTarget, newRuleSetPath, ruleSetPath } from './rulesets/ruleSetRoutes'
 
 const NONE: never[] = []
-class MissingRevision extends Error {}
+/** A row the bulk write refuses to touch: it has no revision to write against, or the stored one is no longer the one the list showed. */
+class StaleRow extends Error {}
 
 /**
  * Rule sets: reusable snippets of routing rules that only take part in a subscription when a template binds them.
@@ -62,7 +62,7 @@ function RuleSetsList() {
   // The page opened carries this list's place (search), so its back link returns to the list the way it was left.
   const open = (to: string) => { const l = link(to); void navigate(l.to, { state: l.state }) }
   // A rule set whose slug is `new` (in any case) cannot have a page: its address is the create page's. It stays in the list, and can be deleted from it.
-  const openRuleSet = (rs: RuleSet) => {
+  const openRuleSet = (rs: RuleSetSummary) => {
     if (isReservedSlug(rs.slug)) { pushToast({ message: t('admin:rules.slug_unreachable', { slug: rs.slug }), severity: 'warning' }); return }
     open(ruleSetPath(rs.slug))
   }
@@ -71,15 +71,15 @@ function RuleSetsList() {
   const [batchBusy, setBatchBusy] = useState(false)
 
   /** Patch the cached list after a write, so the table updates without a round-trip. */
-  function mutateItems(updater: (prev: RuleSet[]) => RuleSet[]) {
-    queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(scope, {}), prev => (prev ? { ...prev, items: updater(prev.items) } : prev))
+  function mutateItems(updater: (prev: RuleSetSummary[]) => RuleSetSummary[]) {
+    queryClient.setQueryData<ListResponse<RuleSetSummary>>(ruleKeys.list(scope, {}), prev => (prev ? { ...prev, items: updater(prev.items) } : prev))
   }
   // Reload after a write. Clearing the selection is deliberate (the rows it referred to may be gone).
   function load() {
     setChecked({})
     return Promise.all([rulesQuery.refetch(), templatesQuery.refetch()])
   }
-  const usedBy = (rs: RuleSet) => templates.filter(tpl => (tpl.rule_sets || []).includes(rs.slug)).map(x => x.name || x.slug)
+  const usedBy = (rs: RuleSetSummary) => templates.filter(tpl => (tpl.rule_sets || []).includes(rs.slug)).map(x => x.name || x.slug)
   const seeded = isSeeded
   const withBusy = async (slug: string, run: () => Promise<void>) => {
     setBusy(prev => new Set(prev).add(slug))
@@ -88,7 +88,7 @@ function RuleSetsList() {
     }
   }
 
-  async function confirmDelete(rs: RuleSet) {
+  async function confirmDelete(rs: RuleSetSummary) {
     if (!await askDeleteRuleSet(t, rs.slug, usedBy(rs))) return
     await withBusy(rs.slug, async () => {
       await deleteRuleSet(rs.slug)
@@ -97,7 +97,7 @@ function RuleSetsList() {
     })
   }
 
-  async function confirmReset(rs: RuleSet) {
+  async function confirmReset(rs: RuleSetSummary) {
     if (!await askResetRuleSet(t, rs.slug)) return
     await withBusy(rs.slug, async () => {
       await resetRuleSet(rs.slug)
@@ -106,7 +106,7 @@ function RuleSetsList() {
     })
   }
 
-  function menuOf(rs: RuleSet): MoreMenuItem[] {
+  function menuOf(rs: RuleSetSummary): MoreMenuItem[] {
     const wait = busy.has(rs.slug)
     const menu: MoreMenuItem[] = [{ id: 'duplicate', label: t('admin:rules.duplicate'), disabled: wait, onSelect: () => open(newRuleSetPath(rs.slug)) }]
     if (seeded(rs)) menu.push({ id: 'reset', label: t('admin:rules.reset_to_default'), disabled: wait, onSelect: () => void confirmReset(rs) })
@@ -117,14 +117,21 @@ function RuleSetsList() {
     return menu
   }
 
-  async function batchSetEnabled(rows: RuleSet[], enabled: boolean) {
+  async function batchSetEnabled(rows: RuleSetSummary[], enabled: boolean) {
     if (!rows.length) return
     setBatchBusy(true)
     try {
-      // Each rule set is saved against the revision the list holds for it, so one that someone saved since is refused, not overwritten.
-      // A row without a revision is not sent at all (that would be an unconditional overwrite) and is counted with the stale ones.
-      const results = await allSettledLimited(rows, r => (r.revision ? saveRuleSet({ ...r, enabled }, r.revision) : Promise.reject(new MissingRevision())))
-      const failures = results.flatMap(r => (r.status === 'rejected' ? [r.reason instanceof MissingRevision ? { kind: 'stale' as const } : ruleSetFailureOf(r.reason)] : []))
+      // The list holds summaries, and a PUT replaces the whole document (the server keeps nothing of an omitted field), so each
+      // rule set is read in full first and written back with only `enabled` changed, against the revision that read returned.
+      // It is still refused, not overwritten, when that revision is not the one the list showed (someone saved since the list was
+      // loaded), and a row without a revision is never sent at all (that would be an unconditional overwrite): both count as stale.
+      const results = await allSettledLimited(rows, async r => {
+        // quiet: a failed read is counted in the one summary toast below, not announced once per row as well.
+        const full = await getRuleSet(r.slug, { quiet: true })
+        if (!r.revision || full.revision !== r.revision) throw new StaleRow()
+        return saveRuleSet({ ...full, enabled }, full.revision)
+      })
+      const failures = results.flatMap(r => (r.status === 'rejected' ? [r.reason instanceof StaleRow ? { kind: 'stale' as const } : ruleSetFailureOf(r.reason)] : []))
       const stale = failures.filter(f => f.kind === 'stale').length
       const fail = failures.length - stale
       if (fail > 0) pushToast({ message: t('admin:rules.toast.batch_partial', { ok: rows.length - fail - stale, fail }), severity: 'warning' })
@@ -135,7 +142,7 @@ function RuleSetsList() {
     } finally { setBatchBusy(false) }
   }
 
-  async function batchDelete(rows: RuleSet[], hidden: number, clear: () => void) {
+  async function batchDelete(rows: RuleSetSummary[], hidden: number, clear: () => void) {
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:rules.confirm.batch_delete_title'),
@@ -185,7 +192,7 @@ function RuleSetsList() {
         description={t('admin:rules.subtitle')}
         primary={canConfig && <Button onClick={() => open(newRuleSetPath())}>{t('admin:rules.create')}</Button>}
       />
-      <DataTable<RuleSet>
+      <DataTable<RuleSetSummary>
         tableId="admin.ruleSets"
         aria-label={t('admin:rules.title')}
         data={shown}
@@ -201,7 +208,7 @@ function RuleSetsList() {
         renderCard={(r, ctx) => (
           <RowCard title={r.name || r.slug} subtitle={r.slug} open={ctx.open}
             status={<StatusDot tone={r.enabled ? 'success' : 'neutral'} label={t(r.enabled ? 'admin:rules.status.enabled' : 'admin:rules.status.disabled')} />}
-            detail={`${t('admin:rules.table.lines')}: ${countLines(r.content)} · ${usedBy(r).join('、') || t('admin:rules.status.no_usage')}`}
+            detail={`${t('admin:rules.table.lines')}: ${r.line_count} · ${usedBy(r).join('、') || t('admin:rules.status.no_usage')}`}
             actions={canConfig ? <RowActions name={r.name || r.slug} editLabel={t('admin:rules.edit_title')} menuLabel={t('admin:rules.row_menu', { name: r.name || r.slug })} busy={busy.has(r.slug)} onEdit={() => openRuleSet(r)} menu={menuOf(r)} /> : undefined} />
         )}
         toolbar={(
