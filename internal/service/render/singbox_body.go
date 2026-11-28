@@ -394,7 +394,7 @@ func (in *singBoxBodyInput) reduced(block *singBoxRuleBlock) (string, bool) {
 // singBoxBody returns the sing-box document. The reduced assembly is used under
 // the same terms as for Mihomo: see (*Service).mihomoBody.
 func (s *Service) singBoxBody(in *singBoxBodyInput) (string, error) {
-	if strings.TrimSpace(in.shared) == "" {
+	if s.fullPipelineOnly || strings.TrimSpace(in.shared) == "" {
 		return in.full()
 	}
 	block := s.singBoxRuleBlocks.get(in.shared, "", analyseSingBoxRuleBlock)
@@ -402,12 +402,12 @@ func (s *Service) singBoxBody(in *singBoxBodyInput) (string, error) {
 		return in.full()
 	}
 	context := renderContext(in.template.Content, in.user.PersonalRules, ruleSetSettings(resolvedRuleBundle{ProxyGroupOrder: in.order, ProxyGroupMembers: in.members, ProxyGroupOptions: in.options}))
-	proven, compared := block.compared.lookup(context)
+	proven, compared, recheck := block.compared.lookup(context)
 	if compared && !proven {
 		return in.full()
 	}
 	reduced, ok := in.reduced(block)
-	if ok && proven {
+	if ok && proven && !recheck {
 		return reduced, nil
 	}
 	body, err := in.full()

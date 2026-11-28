@@ -233,21 +233,25 @@ func (in *mihomoBodyInput) reduced(block *ruleBlock) (string, bool) {
 // full pipeline. Either way the bytes returned from a compared render are the
 // reference's.
 func (s *Service) mihomoBody(in *mihomoBodyInput) (string, error) {
+	if s.fullPipelineOnly {
+		return in.full()
+	}
 	block := s.sharedRuleBlock(in)
 	if block == nil {
 		return in.full()
 	}
 	context := renderContext(in.template.Content, in.user.PersonalRules, ruleSetSettings(in.bundle))
-	proven, compared := block.compared.lookup(context)
+	proven, compared, recheck := block.compared.lookup(context)
 	if compared && !proven {
 		return in.full()
 	}
 	reduced, ok := in.reduced(block)
-	if ok && proven {
+	if ok && proven && !recheck {
 		return reduced, nil
 	}
-	// Not compared yet, or the reduced assembly declined this render (which says
-	// nothing about the context: the next subscriber's lines may let it through).
+	// Not compared yet, due for its periodic comparison (reducedRecheckEvery),
+	// or the reduced assembly declined this render (which says nothing about
+	// the context: the next subscriber's lines may let it through).
 	body, err := in.full()
 	if ok {
 		same := err == nil && body == reduced

@@ -55,13 +55,34 @@ type ruleBlock struct {
 // the template text and the personal rules. See (*Service).mihomoBody.
 type comparedContexts struct {
 	mu     sync.Mutex
-	proven map[[sha256.Size]byte]bool
+	proven map[[sha256.Size]byte]contextRecord
+}
+
+// contextRecord is the outcome of a context's last comparison and how many
+// renders have relied on it since.
+type contextRecord struct {
+	same    bool
+	renders uint32
 }
 
 // comparedContextsMax bounds the contexts one block remembers. When it is
 // reached the record starts over, and each context is compared once more on
 // its next render.
 const comparedContextsMax = 4096
+
+// reducedRecheckEvery is how many renders of a proven context go by before one
+// is assembled both ways again.
+//
+// The first comparison proves a context for the subscriber who happened to
+// come first. That it then holds for every other subscriber rests on an
+// argument (every pass reaches a shared rule only through its target, and the
+// stand-in has one rule per target), which no check on the first render can
+// confirm, because the first render has one subscriber's lines. Comparing
+// again on a later render puts another subscriber's lines through both paths.
+// A difference found there is logged and pins the context to the full
+// pipeline, the same as one found on the first render. At this rate the check
+// adds about a four-hundredth of a full render to the average one.
+const reducedRecheckEvery = 256
 
 func renderContext(parts ...string) [sha256.Size]byte {
 	hash := sha256.New()
@@ -73,20 +94,27 @@ func renderContext(parts ...string) [sha256.Size]byte {
 	return context
 }
 
-func (c *comparedContexts) lookup(context [sha256.Size]byte) (proven, compared bool) {
+// lookup reports whether the context was compared and came out the same, and
+// whether this render is the one that compares it again. It counts the render.
+func (c *comparedContexts) lookup(context [sha256.Size]byte) (proven, compared, recheck bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	proven, compared = c.proven[context]
-	return proven, compared
+	record, compared := c.proven[context]
+	if !compared || !record.same {
+		return false, compared, false
+	}
+	record.renders++
+	c.proven[context] = record
+	return true, true, record.renders%reducedRecheckEvery == 0
 }
 
 func (c *comparedContexts) record(context [sha256.Size]byte, same bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.proven == nil || len(c.proven) >= comparedContextsMax {
-		c.proven = map[[sha256.Size]byte]bool{}
+		c.proven = map[[sha256.Size]byte]contextRecord{}
 	}
-	c.proven[context] = same
+	c.proven[context] = contextRecord{same: same}
 }
 
 // The marker rules bracket the stand-in so it can be found in the serialised

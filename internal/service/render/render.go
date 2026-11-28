@@ -54,7 +54,17 @@ type Service struct {
 	ruleBlocks        ruleBlockCache[ruleBlock]
 	singBoxRuleBlocks ruleBlockCache[singBoxRuleBlock]
 	ruleBlockCompared func(same bool)
+	// fullPipelineOnly turns the reduced assemblies off: every render takes the
+	// full pipeline, as before they existed. See SetFullPipelineOnly.
+	fullPipelineOnly bool
 }
+
+// SetFullPipelineOnly makes every render take the full pipeline. It is the
+// operator's way back without a release (PSP_RENDER_FULL_PIPELINE=1, wired in
+// app.Build): the reduced assemblies fall back on their own wherever they see
+// a reason to, but a wrong document they do not see would otherwise be served
+// until the next periodic comparison. Call it before the first render.
+func (s *Service) SetFullPipelineOnly(on bool) { s.fullPipelineOnly = on }
 
 func New(repos ports.Repos, pool ports.XUIPool, groupSvc GroupResolver) *Service {
 	return &Service{
