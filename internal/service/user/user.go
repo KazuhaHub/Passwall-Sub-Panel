@@ -3207,18 +3207,20 @@ func OwnedTaskTypes() []domain.SyncTaskType {
 	return append([]domain.SyncTaskType(nil), userTaskTypes...)
 }
 
-// ProcessDueTasks runs pending user-scoped sync tasks. It is safe to call
-// from a periodic background loop; every failed remote write is persisted
-// with a backoff and retried later.
-func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+// ProcessDueBatch runs one batch of pending user-scoped sync tasks. It is safe
+// to call from a periodic background loop; every failed remote write is
+// persisted with a backoff and retried later. It reports how many tasks it ran
+// and how many of those did not succeed, which is what the loop needs to decide
+// whether to take the next batch at once (app.drainDueTasks).
+func (s *Service) ProcessDueBatch(ctx context.Context, limit int) (ran, failed int, err error) {
 	if s.tasks == nil {
-		return nil
+		return 0, 0, nil
 	}
 	// Ask only for the types this processor runs: an untyped window let 20 due
 	// mail or node rows at the head of the queue hide every user task.
 	tasks, err := s.tasks.ListDue(ctx, time.Now(), userTaskTypes, limit)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	for _, task := range tasks {
 		if !slices.Contains(userTaskTypes, task.Type) {
@@ -3238,7 +3240,9 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			// just canceled never fires.
 			continue
 		}
+		ran++
 		if err := s.runUserTask(ctx, task); err != nil {
+			failed++
 			// Cap retries at maxUserTaskAttempts. At 1-minute backoff this
 			// is ~1.5 hours of trying — long enough for any realistic
 			// transient outage, short enough that a permanently broken
@@ -3267,7 +3271,14 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			log.Warn("user task mark-succeeded", "task_id", task.ID, "err", err)
 		}
 	}
-	return nil
+	return ran, failed, nil
+}
+
+// ProcessDueTasks runs one batch and reports only whether the batch itself
+// failed. See ProcessDueBatch.
+func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+	_, _, err := s.ProcessDueBatch(ctx, limit)
+	return err
 }
 
 func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error {

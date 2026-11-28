@@ -1627,14 +1627,15 @@ func OwnedTaskTypes() []domain.SyncTaskType {
 	return append([]domain.SyncTaskType(nil), nodeTaskTypes...)
 }
 
-// ProcessDueTasks runs pending node-scoped 3X-UI write tasks.
-func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+// ProcessDueBatch runs one batch of pending node-scoped 3X-UI write tasks and
+// reports how many it ran and how many of those did not succeed.
+func (s *Service) ProcessDueBatch(ctx context.Context, limit int) (ran, failed int, err error) {
 	if s.tasks == nil {
-		return nil
+		return 0, 0, nil
 	}
 	tasks, err := s.tasks.ListDue(ctx, time.Now(), nodeTaskTypes, limit)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	for _, task := range tasks {
 		if !slices.Contains(nodeTaskTypes, task.Type) {
@@ -1652,7 +1653,9 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			// and here — skip so the 3X-UI mutation the admin canceled never runs.
 			continue
 		}
+		ran++
 		if err := s.runNodeTask(ctx, task); err != nil {
+			failed++
 			if isPermanentNodeTaskError(err) {
 				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
 					log.Warn("node task cancel", "task_id", task.ID, "err", markErr)
@@ -1686,7 +1689,14 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			log.Warn("node task mark-succeeded", "task_id", task.ID, "err", err)
 		}
 	}
-	return nil
+	return ran, failed, nil
+}
+
+// ProcessDueTasks runs one batch and reports only whether the batch itself
+// failed. See ProcessDueBatch.
+func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
+	_, _, err := s.ProcessDueBatch(ctx, limit)
+	return err
 }
 
 func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error {

@@ -2322,26 +2322,87 @@ func (a *App) pruneAuthEvents(ctx context.Context) {
 }
 
 func (a *App) runSyncTaskLoop(ctx context.Context) {
-	interval := 30 * time.Second
-	t := time.NewTicker(interval)
+	t := time.NewTicker(syncTaskInterval)
 	defer t.Stop()
-	log.Info("sync task loop started", "interval", interval.String())
+	log.Info("sync task loop started", "interval", syncTaskInterval.String())
 	for {
-		if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.user.ProcessDueTasks(ctx, 20) }); err != nil {
-			log.Warn("user sync tasks", "err", err)
-		}
-		if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.node.ProcessDueTasks(ctx, 20) }); err != nil {
-			log.Warn("node sync tasks", "err", err)
-		}
+		// User tasks, then node tasks, one after the other as they always ran:
+		// both write clients and inbounds on the same panels, and whether the
+		// two could run side by side was not established.
+		a.drainSyncTasks(ctx, "user", a.user.ProcessDueBatch)
+		a.drainSyncTasks(ctx, "node", a.node.ProcessDueBatch)
+		// Certificate tasks stay on this goroutine, after the node tasks. A
+		// certificate deploy writes the node's stream settings and enqueues a
+		// push; a node task that has just pushed re-reads the row and writes it
+		// back whole (node.runNodeTask), with no compare-and-swap. Run side by
+		// side, a deploy landing between that re-read and that write is undone
+		// and its push was already deduplicated against the running task: the
+		// node keeps the old certificate until it expires. On one goroutine the
+		// two cannot interleave. Giving certificates a loop of their own (an
+		// ACME issuance can hold this one for minutes) needs that write-back
+		// made conditional first.
 		if a.cert != nil {
-			if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.cert.ProcessDueTasks(ctx, 20) }); err != nil {
-				log.Warn("cert sync tasks", "err", err)
-			}
+			a.drainSyncTasks(ctx, "cert", a.cert.ProcessDueBatch)
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+const (
+	syncTaskInterval = 30 * time.Second
+	syncTaskBatch    = 20
+	// syncTaskDrainBudget is how long one tick may keep taking batches. Shorter
+	// than the interval, so the tick after a long drain is not late.
+	syncTaskDrainBudget = 25 * time.Second
+)
+
+// drainSyncTasks runs one processor's due tasks for one tick. Each batch is
+// admitted through the operation gate on its own, so an exclusive operation
+// (a restore) waits for one batch, not for the whole backlog.
+func (a *App) drainSyncTasks(ctx context.Context, kind string, batch func(context.Context, int) (int, int, error)) {
+	err := drainDueTasks(ctx, syncTaskBatch, syncTaskDrainBudget, time.Now, func(ctx context.Context, limit int) (ran, failed int, err error) {
+		err = a.operationGate.RunRead(ctx, func(ctx context.Context) error {
+			var berr error
+			ran, failed, berr = batch(ctx, limit)
+			return berr
+		})
+		return ran, failed, err
+	})
+	if err != nil {
+		log.Warn(kind+" sync tasks", "err", err)
+	}
+}
+
+// drainDueTasks takes batches until the queue has no full batch left.
+//
+// One batch per tick meant 20 tasks every 30 seconds: after a panel came back,
+// a backlog of 500 took more than 12 minutes to clear although each task now
+// succeeded at once. A batch that came back full and with no failure says there
+// is probably more and nothing is in the way, so the next one starts at once.
+//
+// It stops on the first batch with a failure. While a panel is down every task
+// for it waits out a timeout; taking batch after batch would spend the whole
+// tick waiting on the same dead panel. Failed tasks are pushed a minute out by
+// their processor, so they are not in the next batch either way.
+//
+// It also stops when the budget is used up or the context is done; the caller's
+// ticker brings it back.
+func drainDueTasks(ctx context.Context, limit int, budget time.Duration, now func() time.Time, batch func(context.Context, int) (ran, failed int, err error)) error {
+	started := now()
+	for {
+		ran, failed, err := batch(ctx, limit)
+		if err != nil {
+			return err
+		}
+		if ran < limit || failed > 0 {
+			return nil
+		}
+		if ctx.Err() != nil || now().Sub(started) >= budget {
+			return nil
 		}
 	}
 }
