@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { panelPath } from '@/panelPath'
 import { viewLoaders } from './viewModules'
 import LogsRoute from './LogsRoute'
+import { loadAdminShell, loadEnroll2FA, loadUserShell, withAllNamespaces } from './shellLoaders'
 
 const LoginView = lazy(() => import('@/views/LoginView'))
 const SsoCallbackView = lazy(() => import('@/views/SsoCallbackView'))
@@ -17,11 +18,11 @@ const LoggedOutView = lazy(() => import('@/views/LoggedOutView'))
 const ForgotPasswordView = lazy(() => import('@/views/ForgotPasswordView'))
 const ResetPasswordView = lazy(() => import('@/views/ResetPasswordView'))
 const RegisterView = lazy(() => import('@/views/RegisterView'))
-const Enroll2FAView = lazy(() => import('@/views/Enroll2FAView'))
+const Enroll2FAView = lazy(loadEnroll2FA)
 const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const LegalView = lazy(() => import('@/views/LegalView'))
-const AdminShellRoute = lazy(() => import('./AdminShellRoute'))
-const UserShellRoute = lazy(() => import('./UserShellRoute'))
+const AdminShellRoute = lazy(loadAdminShell)
+const UserShellRoute = lazy(loadUserShell)
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
 const DashboardView = lazy(viewLoaders['/admin/dashboard'])
 const ServersView = lazy(viewLoaders['/admin/servers'])
@@ -64,10 +65,10 @@ const MeView = lazy(viewLoaders['/user/me'])
 // Dev-only component gallery for the Tailwind/shadcn stack. The condition is a
 // compile-time constant, so a production build drops both the route and the
 // lazy chunk.
-const UiKitchenSink = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitchenSink')) : null
-const UiKitData = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitData')) : null
-const UiKitShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell')) : null
-const UiKitUserShell = import.meta.env.DEV ? lazy(() => import('@/views/admin/UiKitShell').then(m => ({ default: m.UiKitUserShell }))) : null
+const UiKitchenSink = import.meta.env.DEV ? lazy(withAllNamespaces(() => import('@/views/admin/UiKitchenSink'))) : null
+const UiKitData = import.meta.env.DEV ? lazy(withAllNamespaces(() => import('@/views/admin/UiKitData'))) : null
+const UiKitShell = import.meta.env.DEV ? lazy(withAllNamespaces(() => import('@/views/admin/UiKitShell'))) : null
+const UiKitUserShell = import.meta.env.DEV ? lazy(withAllNamespaces(() => import('@/views/admin/UiKitShell').then(m => ({ default: m.UiKitUserShell })))) : null
 
 // All admin pages migrated.
 const PLACEHOLDER_PATHS: string[] = []

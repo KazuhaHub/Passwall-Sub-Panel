@@ -282,5 +282,14 @@
       "announce_more_errors": "More new messages: {{count}}, errors: {{errors}}",
       "severity_prefix": "{{severity}}: "
     }
+  },
+  "traffic_chart": {
+    "empty": "No traffic in this range",
+    "aria": "Traffic from {{from}} to {{to}}, {{total}} in total",
+    "table": "Show as table",
+    "col_date": "Date",
+    "up": "Up",
+    "down": "Down",
+    "total": "Total"
   }
 }

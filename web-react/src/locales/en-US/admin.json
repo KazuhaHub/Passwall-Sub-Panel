@@ -989,13 +989,7 @@
       "timezone_unknown": "Unknown time zone. Use a name such as Asia/Shanghai."
     },
     "scope_label": "View by",
-    "rank_limit": "Show",
-    "chart": {
-      "empty": "No traffic in this range",
-      "aria": "Traffic from {{from}} to {{to}}, {{total}} in total",
-      "table": "Show as table",
-      "col_date": "Date"
-    }
+    "rank_limit": "Show"
   },
   "templates": {
     "title": "Templates",

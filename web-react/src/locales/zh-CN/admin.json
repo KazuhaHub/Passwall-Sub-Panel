@@ -984,13 +984,7 @@
       "timezone_unknown": "未知时区，请使用 Asia/Shanghai 这样的名称。"
     },
     "scope_label": "查看维度",
-    "rank_limit": "显示数量",
-    "chart": {
-      "empty": "该时间范围内没有流量",
-      "aria": "{{from}} 至 {{to}} 的流量，合计 {{total}}",
-      "table": "以表格显示",
-      "col_date": "日期"
-    }
+    "rank_limit": "显示数量"
   },
   "templates": {
     "title": "配置方案",
