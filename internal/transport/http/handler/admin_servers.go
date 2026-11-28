@@ -237,7 +237,12 @@ type serverDTO struct {
 	XrayVersion   string `json:"xray_version,omitempty"`
 	// Address is where a Passwall Node server's last sync came from: the
 	// default for its nodes' connection address and its links' exit address.
-	Address                      string   `json:"address,omitempty"`
+	Address string `json:"address,omitempty"`
+	// InterfaceAddresses are the public addresses the node reported for its own
+	// interfaces, any number of IPv4 and IPv6 (a server can hold several). Empty
+	// for other panels and for a node that has not sent a full report with the
+	// source-guard capability; Address stays the fallback then.
+	InterfaceAddresses           []string `json:"interface_addresses,omitempty"`
 	CoreEngine                   string   `json:"core_engine,omitempty"`
 	CoreVersion                  string   `json:"core_version,omitempty"`
 	DesiredCoreEngine            string   `json:"desired_core_engine,omitempty"`
@@ -2292,6 +2297,7 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 		dto.NodeCompatibility = "unknown"
 		if agent != nil {
 			dto.Address = agent.ObservedAddress
+			dto.InterfaceAddresses = append([]string(nil), agent.InterfaceAddresses...)
 			dto.CoreEngine = string(agent.ObservedCoreEngine)
 			dto.DesiredCoreEngine = string(domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine))
 			dto.DesiredCoreVersion = agent.DesiredCoreVersion

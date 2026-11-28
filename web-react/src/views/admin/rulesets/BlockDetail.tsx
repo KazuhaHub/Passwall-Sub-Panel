@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 
@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { IconAdd, IconArrowLeft, IconDelete, IconEdit, IconFile, IconUpload } from '@/lib/icons'
 import { noteOf, type Block } from '@/utils/ruleset/blocks'
 import type { Doc } from '@/utils/ruleset/parse'
-import { TABLE_HEIGHT } from './BlockDirectory'
+import { DETAIL_TOOLBAR, PANE_HEIGHT } from './BlockDirectory'
 import { typeName } from './ruleTypes'
 import { TargetSelect } from './TargetSelect'
 import type { TargetChoices } from './targets'
@@ -153,6 +153,23 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, readOnly, doc])
 
+  // The table's scroll box is sized so the group's pane ends where the directory does: the shared pane height, less what sits above the box.
+  const root = useRef<HTMLElement>(null)
+  const tableBox = useRef<HTMLDivElement>(null)
+  const [above, setAbove] = useState(180)
+  useLayoutEffect(() => {
+    const el = root.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const read = () => {
+      const box = tableBox.current
+      if (box) setAbove(Math.round(box.getBoundingClientRect().top - el.getBoundingClientRect().top))
+    }
+    read()
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [block.kind])
+
   const range = block.kind === 'rules'
     ? (block.count === 1 ? t('admin:rules.blocks.line_single', { line: block.ruleStart + 1 }) : t('admin:rules.blocks.line_range', { from: block.ruleStart + 1, to: block.end }))
     : t('admin:rules.blocks.line_range', { from: block.start + 1, to: block.end })
@@ -161,7 +178,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   const wanted = pending !== null && pending !== block.target ? pending : null
 
   return (
-    <section aria-labelledby="rule-block-heading" className="@container flex min-w-0 flex-col gap-3">
+    <section ref={root} aria-labelledby="rule-block-heading" className="@container flex min-w-0 flex-col gap-3">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {phone && <IconButton label={t('admin:rules.blocks.back')} onClick={onBack}><IconArrowLeft /></IconButton>}
         <h2 id="rule-block-heading" className="min-w-0 text-base font-semibold break-words">{t('admin:rules.blocks.heading', { index: block.index + 1, target: heading })}</h2>
@@ -213,6 +230,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
           )}
           </div>
 
+          <div ref={tableBox}>
           <DataTable<Row>
             tableId="admin.ruleSets.matchers"
             aria-label={t('admin:rules.blocks.matchers', { target: heading })}
@@ -224,7 +242,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             activeRowId={marked}
             pagination={false}
             columnMenu={false}
-            maxHeight={TABLE_HEIGHT}
+            maxHeight={`calc(${PANE_HEIGHT} - ${above}px - ${DETAIL_TOOLBAR} - 1.75rem)`}
             selectable={!readOnly}
             selection={checked}
             onSelectionChange={setChecked}
@@ -277,6 +295,7 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
               </div>
             )}
           />
+          </div>
           <p className="text-xs text-muted-foreground tabular-nums" role="status">{shown.length === rows.length ? '' : t('admin:rules.matchers.shown_of', { shown: shown.length, total: rows.length })}</p>
         </>
       )}

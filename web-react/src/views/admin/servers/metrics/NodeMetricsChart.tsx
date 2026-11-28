@@ -99,11 +99,11 @@ export function metricsChartOption({ times, series, coverage, from, to, locale, 
       ...base.yAxis, type: 'value', min: 0, splitNumber: 3,
       axisLabel: { ...base.yAxis.axisLabel, formatter: (value: number) => formatValue(value, unit) },
     },
-    series: series.map((item, index) => lineSeries(index, {
+    series: series.map((item, index) => lineSeries(index, tk, {
       name: item.name,
       data: item.values.map((value, i) => [instants[i], value]),
       connectNulls: false,
-    })),
+    }, { fillAlpha: series.length > 1 ? 0.14 : 0.22 })),
   }
 }
 

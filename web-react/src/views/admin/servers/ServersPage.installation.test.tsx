@@ -2,7 +2,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { Server } from '@/api/servers'
-import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, showIdentity, mountExpanded, selectMethod, openInstallation, pickRowAction, generatedFiles } from './install/installationHarness'
+import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, showIdentity, mountExpanded, selectMethod, openInstallation, openServerTab, pickRowAction, generatedFiles } from './install/installationHarness'
 import { api, installReads, list, mount } from './testHarness'
 import ServersPage from './ServersPage'
 import { NativeInstallationPage } from './install/NativeInstallationPage'
@@ -57,7 +57,7 @@ describe('Passwall Node installation', () => {
     installReads({ '/admin/servers': list([saved]) })
     api.put.mockResolvedValue({ data: saved })
     mount(<ServersPage />)
-    await pickRowAction(nativeServer, 'admin:servers.action.edit')
+    await pickRowAction(nativeServer, 'admin:servers.action.edit_settings')
     expect(((await screen.findByRole('combobox', { name: 'admin:servers.field.update_channel' })) as HTMLSelectElement).value).toBe('beta')
     expect(screen.getByText('admin:servers.hint.update_channel_short')).toBeTruthy()
     const remark = screen.getByRole('textbox', { name: 'admin:servers.field.remark' }) as HTMLInputElement
@@ -166,7 +166,7 @@ describe('Passwall Node installation', () => {
     installReads({ '/admin/servers': list([stored]), '/admin/servers/7/node-agent-status': waiting })
     api.put.mockResolvedValue({ data: { ...stored, update_channel: preference } })
     mount(<ServersPage />)
-    await pickRowAction(nativeServer, 'admin:servers.action.edit')
+    await pickRowAction(nativeServer, 'admin:servers.action.edit_settings')
     const channel = await screen.findByRole('combobox', { name: 'admin:servers.field.update_channel' }) as HTMLSelectElement
     expect(channel.value).toBe(from)
     fireEvent.change(channel, { target: { value: preference } })
@@ -252,7 +252,7 @@ describe('Passwall Node installation', () => {
     const upstream: Server = { ...nativeServer, panel_type: panelType, auth_method: 'token', url: 'https://upstream.test', has_api_token: true }
     installReads({ '/admin/servers': list([upstream]) })
     mount(<ServersPage />)
-    await pickRowAction(upstream, 'admin:servers.install_reinstall.action')
+    await openServerTab(upstream, 'maintenance', 'admin:servers.install_reinstall.action')
     const backend = screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }) as HTMLSelectElement
     expect(backend.value).toBe(panelType)
     expect(backend.selectedOptions[0].textContent).toBe(label)

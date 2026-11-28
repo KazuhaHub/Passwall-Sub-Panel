@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -20,26 +20,16 @@ import { useAllNodes } from '@/query/nodes'
 import { type ServerListResponse, useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useCan } from '@/utils/permissions'
-import SharedPortsDialog from '../fronts/SharedPortsDialog'
 import { ServerDeleteDialog } from '../nodes/delete/ServerDeleteDialog'
 import { legacyPageSize } from '../logs/shared'
 import { CountsColumn, StatusColumn, VersionColumn, ActionsColumn, serverColumns } from './columns'
-import { CoreDialog } from './dialogs/CoreDialog'
-import { LineMultipliersDialog } from './dialogs/LineMultipliersDialog'
-import { NativeAgentUpgradeDialog } from './dialogs/NativeAgentUpgradeDialog'
-import NodeDiagnosticsDialog from './dialogs/NodeDiagnosticsDialog'
-import { NodeMigrationPreviewDialog } from './dialogs/NodeMigrationPreviewDialog'
-import { ReinstallBackendDialog } from './dialogs/ReinstallBackendDialog'
-import RetiredRouteCleanupDialog from './dialogs/RetiredRouteCleanupDialog'
 import ServerAccessDialog from './dialogs/ServerAccessDialog'
 import NodeMetricsDialog from './metrics/NodeMetricsDialog'
-import { leaveInstallation } from './install/installHandoff'
-import { rotateWithConfirm } from './install/rotateCredential'
 import { ServersContext, type ServersCtx } from './serversContext'
 import { hasCapability } from './serverModel'
 import { NameCell, TypeCell } from './cells'
 import { rowMenu } from './rowMenu'
-import { NEW_SERVER_PATH, serverInstallPath, serverPath } from './serverRoutes'
+import { NEW_SERVER_PATH, serverPath } from './serverRoutes'
 import { ServersBanners } from './ServersBanners'
 import { useReleaseInfo } from './useReleaseInfo'
 import { useServerProbes } from './useServerProbes'
@@ -57,9 +47,9 @@ function parseSort(raw: string): { by: string; dir: 'asc' | 'desc' } {
 /**
  * The upstream servers PSP manages (3X-UI, S-UI, Passwall Node). One row per server: is it reachable, is its version
  * supported, does anything need attention, how many nodes and lines it carries. One visible action (test the
- * connection) and everything else in the More menu. A server (add / edit) and a Passwall Node's installation are pages
- * of their own, reached from here and returning here; the short tasks (metrics, diagnostics, shared ports, core) are
- * dialogs over the list.
+ * connection) and everything else in the More menu. A server (add / open) and a Passwall Node's installation are pages
+ * of their own, reached from here and returning here; the maintenance of a server (install, upgrades, core, credential,
+ * shared ports) and its diagnostics are on the server's page, and only host metrics stay a dialog over the list.
  *
  * The list is a plain database read, never polled, and the connection probe is a separate concern: refreshing the list
  * must never imply a request to an upstream server (see useServerProbes).
@@ -121,47 +111,18 @@ export default function ServersPage() {
 
   // ---- what is open over the list ----
   const [deleteTarget, setDeleteTarget] = useState<Server | null>(null)
-  const [coreTarget, setCoreTarget] = useState<Server | null>(null)
   const [metricsTarget, setMetricsTarget] = useState<Server | null>(null)
-  const [diagnosticsTarget, setDiagnosticsTarget] = useState<Server | null>(null)
-  const [upgradeTarget, setUpgradeTarget] = useState<Server | null>(null)
-  const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
-  const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
-  const [lineFactorsTarget, setLineFactorsTarget] = useState<Server | null>(null)
-  const [sharedPortsTarget, setSharedPortsTarget] = useState<Server | null>(null)
-  const [retiredTarget, setRetiredTarget] = useState<Server | null>(null)
   const [accessNode, setAccessNode] = useState<{ node: DestNodeStatus; name: string } | null>(null)
-  const [rotatingId, setRotatingId] = useState<number | null>(null)
-  const [coreBusyId, setCoreBusyId] = useState<number | null>(null)
   // A server's page and its installation page are pages of their own: they carry this list's place (page, search, order),
   // so their back link returns to the list the way it was left.
   const link = useObjectLink()
   const navigate = useNavigate()
-  const openEdit = (s: Server) => void navigate(...pageArgs(serverPath(s.id)))
-  const openInstallation = (s: Server) => void navigate(...pageArgs(serverInstallPath(s.id)))
+  const openServer = (s: Server) => void navigate(...pageArgs(serverPath(s.id)))
+  const openSettings = (s: Server) => void navigate(...pageArgs(`${serverPath(s.id)}?tab=settings`))
   function pageArgs(to: string): [string, { state: unknown }] { const l = link(to); return [l.to, { state: l.state }] }
-  // A rotation that finishes after the administrator moved on must not pull them to the installation page.
-  const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-
-  async function rotateCredential(s: Server) {
-    setRotatingId(s.id)
-    try {
-      const provisioned = await rotateWithConfirm(t, s)
-      // The credential is shown once: it travels in memory to the installation page, never in the address or history.
-      if (provisioned && mounted.current) {
-        leaveInstallation({ server: provisioned.server, provisioning: provisioned, creating: false })
-        void navigate(...pageArgs(serverInstallPath(provisioned.server.id)))
-      }
-    } finally { setRotatingId(null) }
-  }
-
-  const busyId = up.upgrading ?? rotatingId ?? coreBusyId
   const menuOf = (s: Server) => rowMenu(s, {
-    edit: openEdit, install: setReinstallTarget, upgradeAgent: setUpgradeTarget, upgradePanel: x => void up.runUpgradePanel(x),
-    core: setCoreTarget, rotate: x => void rotateCredential(x), lineFactors: setLineFactorsTarget, sharedPorts: setSharedPortsTarget,
-    retiredRoutes: setRetiredTarget, metrics: setMetricsTarget, diagnostics: setDiagnosticsTarget, remove: setDeleteTarget,
-  }, { t, admin, busy: busyId === s.id })
+    open: openServer, editSettings: openSettings, metrics: setMetricsTarget, remove: setDeleteTarget,
+  }, { t })
 
   const ctx: ServersCtx = {
     probeOf: probes.stateFor, accessOf, countsOf: (s: Server) => counts?.get(s.id) ?? (counts ? { nodes: 0, lines: 0 } : undefined),
@@ -215,7 +176,7 @@ export default function ServersPage() {
         selection={selection}
         onSelectionChange={setSelection}
         rowLabel={s => s.name}
-        onRowOpen={openEdit}
+        onRowOpen={openServer}
         maxHeight={null}
         renderCard={(s, { open }) => <ServerCard s={s} open={open} />}
         toolbar={(
@@ -246,30 +207,11 @@ export default function ServersPage() {
       />
 
       <NodeMetricsDialog server={metricsTarget} open={metricsTarget !== null} onClose={() => setMetricsTarget(null)} />
-      <NodeDiagnosticsDialog server={diagnosticsTarget} open={diagnosticsTarget !== null} onClose={() => setDiagnosticsTarget(null)} />
       {accessNode && <ServerAccessDialog node={accessNode.node} serverName={accessNode.name} onClose={() => setAccessNode(null)} />}
-      <NativeAgentUpgradeDialog server={upgradeTarget} onClose={() => { setUpgradeTarget(null); refresh() }} />
-      {coreTarget && (
-        <CoreDialog key={coreTarget.id} server={coreTarget} onClose={() => setCoreTarget(null)}
-          onSelected={(s, engine, version) => mutateItems(prev => prev.map(i => (i.id === s.id ? { ...i, desired_core_engine: engine, desired_core_version: version } : i)))}
-          onUpgraded={s => void probes.probeServer(s)} onBusy={setCoreBusyId} />
-      )}
       {deleteTarget && (
         <ServerDeleteDialog server={deleteTarget} onClose={() => setDeleteTarget(null)}
           onDeleted={() => { setDeleteTarget(null); pushSnack(t('admin:servers.toast.deleted'), 'success'); load() }} />
       )}
-      {retiredTarget && <RetiredRouteCleanupDialog server={retiredTarget} onClose={() => setRetiredTarget(null)} />}
-      {sharedPortsTarget && <SharedPortsDialog key={`sharedports-${sharedPortsTarget.id}`} server={sharedPortsTarget} onClose={() => setSharedPortsTarget(null)} />}
-      {lineFactorsTarget && <LineMultipliersDialog key={`linefactors-${lineFactorsTarget.id}`} server={lineFactorsTarget} onClose={() => setLineFactorsTarget(null)} />}
-      <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
-        onClose={() => setReinstallTarget(null)}
-        onNativeInstall={s => { setReinstallTarget(null); openInstallation(s) }}
-        onNativeMigration={s => { setReinstallTarget(null); setMigrationTarget(s) }}
-        onConfigure={s => { setReinstallTarget(null); openEdit(s) }} />
-      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'}
-        server={migrationTarget ? items.find(i => i.id === migrationTarget.id) ?? migrationTarget : null}
-        onRefreshServer={load} onClose={() => { setMigrationTarget(null); load() }}
-        onNativeInstall={s => { setMigrationTarget(null); openInstallation(s) }} />
     </div>
     </ServersContext.Provider>
   )
@@ -280,7 +222,7 @@ function ServerCard({ s, open }: { s: Server; open?: () => void }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex min-w-0 items-start justify-between gap-2">
-        <button type="button" onClick={open} className="min-w-0 flex-1 text-left outline-none focus-visible:underline"><NameCell s={s} /></button>
+        <div className="min-w-0 flex-1"><NameCell s={s} onOpen={open} /></div>
         <ActionsColumn s={s} />
       </div>
       <div className="flex flex-wrap items-start gap-x-6 gap-y-2">

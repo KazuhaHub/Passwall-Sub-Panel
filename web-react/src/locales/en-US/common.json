@@ -248,7 +248,8 @@
         "searching": "Searching",
         "pages": "Pages",
         "open": "Open the command palette"
-      }
+      },
+      "open_menu": "Open menu"
     },
     "feedback": {
       "loading": "Loading",

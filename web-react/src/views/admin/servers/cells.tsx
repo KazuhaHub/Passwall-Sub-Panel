@@ -9,23 +9,38 @@ import { StatusDot } from '@/components/common/StatusDot'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { ipCapBadgeTone } from '@/utils/capabilities'
+import { AddressSummary } from './AddressList'
+import { serverAddresses } from './addresses'
 import { ipCapTone, resourceTone, splitVersionIdentity, typeLabel, updateVersionOf, accessToneOf } from './serverModel'
 import type { ProbeState } from './useServerProbes'
 
-/** Name first; the address under it, clipped with the whole text in the title; the identity warning, when there is one, in words. */
-export function NameCell({ s }: { s: Server }) {
+/**
+ * Name first; the address(es) under it, clipped with the whole text in the title or the popover; the identity warning, when there is one, in words.
+ * With `onOpen` the name line is a button that opens the server; the address trigger stays outside it (a button never holds another),
+ * and its clicks stop there so they never reach a row that opens on click.
+ */
+export function NameCell({ s, onOpen }: { s: Server; onOpen?: () => void }) {
   const { t } = useTranslation('admin')
+  const head = (
+    <>
+      <span className="min-w-0 truncate font-medium" title={s.name}>{s.name}</span>
+      {s.client_identities_warning && (
+        <span title={t('admin:servers.identities.warning_tip')} data-testid="client-identities-warning">
+          <StatusBadge tone="warning" label={t('admin:servers.identities.warning')} />
+        </span>
+      )}
+    </>
+  )
+  const reported = serverAddresses(s).reported
   return (
     <div className="flex min-w-0 flex-col">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 truncate font-medium" title={s.name}>{s.name}</span>
-        {s.client_identities_warning && (
-          <span title={t('admin:servers.identities.warning_tip')} data-testid="client-identities-warning">
-            <StatusBadge tone="warning" label={t('admin:servers.identities.warning')} />
-          </span>
-        )}
-      </div>
-      <span className="truncate text-xs text-muted-foreground" title={s.url}>{s.url}</span>
+      {onOpen
+        ? <button type="button" onClick={onOpen} className="flex min-w-0 items-center gap-2 text-left outline-none focus-visible:underline">{head}</button>
+        : <div className="flex min-w-0 items-center gap-2">{head}</div>}
+      {/* The addresses the node reported replace the stored address line; a server with none (or only blank ones) keeps what it always showed. */}
+      {reported
+        ? <div onClick={onOpen ? e => e.stopPropagation() : undefined}><AddressSummary s={s} /></div>
+        : <span className="truncate text-xs text-muted-foreground" title={s.url}>{s.url}</span>}
       {typeof s.client_identities === 'number' && (
         <span className="text-xs text-muted-foreground" data-testid="client-identities">{t('admin:servers.identities.count', { count: s.client_identities })}</span>
       )}

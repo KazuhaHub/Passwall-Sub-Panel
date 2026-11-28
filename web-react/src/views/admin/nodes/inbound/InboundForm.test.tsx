@@ -38,7 +38,7 @@ async function mountForm(initial?: Partial<InboundFormState>, props: Partial<Inb
 const pick = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 // The server picker is a searchable combobox: open it, choose the option by its name.
 const pickServer = async (name: string) => {
-  fireEvent.mouseDown(screen.getByLabelText('3X-UI server'))
+  fireEvent.mouseDown(screen.getByLabelText('Server'))
   fireEvent.click(await screen.findByRole('option', { name }))
 }
 const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
@@ -133,10 +133,10 @@ describe('server picker', () => {
 
   it('shows only when the servers are given', async () => {
     const { unmount } = await mountForm()
-    expect(screen.queryByLabelText('3X-UI server')).toBeNull()
+    expect(screen.queryByLabelText('Server')).toBeNull()
     unmount()
     await mountForm({}, { servers })
-    expect(screen.getByLabelText('3X-UI server')).toBeTruthy()
+    expect(screen.getByLabelText('Server')).toBeTruthy()
   })
 
   it('re-derives name, region and address, and resets what an S-UI server does not take', async () => {
@@ -161,7 +161,7 @@ describe('server picker', () => {
     expect(state).toMatchObject({ panel_id: 2, display_name: 'Mine', region: 'XX', server_address: 'mine.example' })
   })
 
-  it('puts an S-UI-only protocol back to VLESS REALITY when a 3X-UI server is picked, and does not leave JSON', async () => {
+  it('puts an S-UI-only protocol back to VLESS REALITY when a Server is picked, and does not leave JSON', async () => {
     const onLeaveJson = vi.fn()
     await mountForm({ panel_id: 2, protocol: 'tuic', vless_network: 'http', vless_security: 'tls', tls_alpn_text: 'h3' }, { servers, server: sui(), onLeaveJson })
     await pickServer('Tokyo')

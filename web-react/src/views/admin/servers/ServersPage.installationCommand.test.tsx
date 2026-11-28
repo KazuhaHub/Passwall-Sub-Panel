@@ -2,7 +2,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { NativeServerProvisioning, Server } from '@/api/servers'
-import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, copyScript, showIdentity, mountExpanded, selectMethod, openInstallation, generatedFiles, materialContents, materialPreviews } from './install/installationHarness'
+import { releaseCatalog, nativeServer, provisioning, waiting, reads, versionInput, selectVersion, copyScript, showIdentity, mountExpanded, selectMethod, openInstallation, openServerTab, generatedFiles, materialContents, materialPreviews } from './install/installationHarness'
 import { api, installReads, list, mount } from './testHarness'
 import { useAuthStore } from '@/stores/auth'
 import ServersPage from './ServersPage'
@@ -36,13 +36,12 @@ describe('Passwall Node installation', () => {
   it('opens the unified install entry without upgrade capabilities and reuses the original identity and credential on reopen', async () => {
     reads()
     mount(<ServersPage />)
-    const row = (await screen.findByText(nativeServer.name)).closest('tr')!
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    expect(screen.getAllByRole('menuitem', { name: 'admin:servers.install_reinstall.action' })).toHaveLength(1)
+    await openServerTab(nativeServer, 'maintenance')
+    expect(await screen.findAllByRole('button', { name: 'admin:servers.install_reinstall.action' })).toHaveLength(1)
     // The agent upgrade is offered for a native node, here disabled with its reason under the label (the node is not ready).
-    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('button', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByText('admin:servers.menu.not_ready')).toBeTruthy()
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.install_reinstall.action' }))
     expect((screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }) as HTMLSelectElement).value).toBe('psp')
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-installation'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
@@ -78,9 +77,9 @@ describe('Passwall Node installation', () => {
     reads()
     useAuthStore.setState({ role: 'operator' })
     mount(<ServersPage />)
-    const row = (await screen.findByText(nativeServer.name)).closest('tr')!
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.install_reinstall.action' })).toBeNull()
+    await openServerTab(nativeServer, 'maintenance')
+    await screen.findByRole('button', { name: 'admin:servers.agent_upgrade.action' })
+    expect(screen.queryByRole('button', { name: 'admin:servers.install_reinstall.action' })).toBeNull()
     expect(api.get.mock.calls.some(([url]) => String(url).endsWith('/node-installation') || String(url).includes('node-migration-preview'))).toBe(false)
   })
   it('defaults to Passwall Node first and continues to Linux installation on its page after one create', async () => {

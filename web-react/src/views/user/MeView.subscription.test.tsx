@@ -116,6 +116,18 @@ describe('emergency access', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/user/me/emergency-access'))
   })
 
+  it('lays out by the card\'s own width (container query), not the window\'s', async () => {
+    serve({}, { emergency_access: emergency })
+    mountMe(<MeView />)
+    const card = await screen.findByTestId('emergency-access')
+    expect(card.className).toContain('@container')
+    const button = screen.getByRole('button', { name: 'Use emergency access' })
+    expect(button.className).toContain('w-full')
+    expect(button.className).toContain('@md:w-auto')
+    expect(button.parentElement?.className).toContain('@md:flex-row')
+    expect(button.parentElement?.className).not.toMatch(/(^|\s)sm:flex-row/)
+  })
+
   it('is off, and says why, when no use is left', async () => {
     serve({}, { emergency_access: { ...emergency, available: false, remaining: 0, status: 'no_quota' } })
     mountMe(<MeView />)

@@ -759,7 +759,8 @@
       "delete_family_body": "{{name}} 及其导入 App 将从列表中移除，保存后生效。",
       "apps_count_other": "{{count}} 个 App",
       "format_uri_list": "URI 列表（V2rayN / Passwall）",
-      "sub_path_hint": "订阅链接中地址之后、令牌之前的部分。修改后，已发出的订阅链接将失效。"
+      "sub_path_hint": "订阅链接中地址之后、令牌之前的部分。修改后，已发出的订阅链接将失效。",
+      "enable_named": "启用 {{name}}"
     },
     "legal": {
       "title": "隐私与协议页",
@@ -2802,7 +2803,8 @@
       },
       "bulk": {
         "enable": "启用线路（{{count}}）",
-        "disable": "停用线路（{{count}}）"
+        "disable": "停用线路（{{count}}）",
+        "set_multiplier": "设置倍率…（{{count}}）"
       },
       "delete": {
         "title": "删除线路“{{name}}”？",
@@ -2819,7 +2821,8 @@
         "inbound": "入站",
         "general": "基本信息",
         "lines_question": "用户怎么连进来",
-        "no_lines": "没有可显示的线路"
+        "no_lines": "没有可显示的线路",
+        "add_hint": "想给这个节点加中转？在这里添加一条线路即可，不用新建节点。"
       },
       "published_count": "已发布 {{published}} / {{total}} 条线路"
     },
@@ -3194,7 +3197,7 @@
       "hy2_masquerade_content_string": "返回内容",
       "ss_iv_check": "ivCheck（拒绝重放的 IV）",
       "protocol": "协议",
-      "panel": "3X-UI 服务器",
+      "panel": "服务器",
       "panel_search_placeholder": "搜索 / 选择服务器",
       "listen": "监听地址（留空=所有）",
       "port": "端口",
@@ -3354,7 +3357,8 @@
       "tags": "Tags",
       "display_name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为直连线路的流量倍率（如 ×1.5）。",
       "traffic_factor": "流量倍率",
-      "traffic_factor_direct": "直连线路流量倍率"
+      "traffic_factor_direct": "直连线路流量倍率",
+      "region_search_placeholder": "选择或输入地区"
     },
     "action": {
       "recreate_inbound": "在服务器上重建入站",
@@ -3375,7 +3379,10 @@
       "delete_separator": "删除分隔标题",
       "create_separator": "新增分隔标题",
       "refresh": "刷新",
-      "row_menu": "“{{name}}”的操作"
+      "row_menu": "“{{name}}”的操作",
+      "set_multiplier": "倍率…",
+      "add_relay_line": "添加中转线路…",
+      "edit_node_page": "编辑节点"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region",
@@ -3699,6 +3706,21 @@
       "step_exit": "出口",
       "step_review": "核对",
       "basics": "基本信息"
+    },
+    "multiplier": {
+      "title_one": "{{name}} 的倍率",
+      "title_bulk": "设置 {{count}} 条线路的倍率",
+      "hint": "下面所有线路使用同一个倍率。",
+      "field": "新倍率",
+      "field_hint": "0 到 100，最多 3 位小数。1 表示按实际流量计费。",
+      "invalid": "请输入 0 到 100 之间、最多 3 位小数的数字。",
+      "line": "线路",
+      "old": "当前",
+      "new": "新倍率",
+      "apply": "应用",
+      "toast": "已设置 {{count}} 条线路的倍率",
+      "partial": "{{ok}} 台服务器已完成，{{fail}} 台失败",
+      "failed": "无法设置倍率：{{message}}"
     }
   },
   "users": {
@@ -4699,7 +4721,15 @@
       "not_found": "没有此服务器，它可能已被删除。",
       "forbidden": "你无权访问此服务器。",
       "install_not_found": "没有此 Passwall Node 服务器，它可能已被删除，或不是 Passwall Node。",
-      "create_forbidden": "仅全局管理员可添加服务器。"
+      "create_forbidden": "仅全局管理员可添加服务器。",
+      "tabs": {
+        "overview": "概览",
+        "settings": "设置",
+        "maintenance": "维护",
+        "monitoring": "监控"
+      },
+      "unsaved": "有未保存的修改",
+      "view_nodes": "查看节点"
     },
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
@@ -4994,11 +5024,12 @@
       "upgrade_xray": "升级 Xray",
       "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据",
-      "line_factors": "线路倍率",
       "shared_ports": "共用端口（SNI）",
       "refresh": "刷新",
       "more_for": "{{name}} 的更多操作",
-      "edit": "编辑"
+      "edit": "编辑",
+      "open": "打开",
+      "edit_settings": "编辑设置"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
@@ -5093,20 +5124,6 @@
       "resolve": "主机名匹配",
       "recording_hits_and_usage": "记录命中和按网站用量",
       "usage_retention": "用量保留 {{days}} 天"
-    },
-    "line_factors": {
-      "title": "线路倍率 — {{name}}",
-      "hint": "设置此服务器上线路的流量倍率。仅对保存之后产生的流量生效。",
-      "empty": "此服务器上还没有线路。",
-      "select_all": "全选线路",
-      "field": "流量倍率",
-      "field_hint": "应用于所选线路。1 = 按实际用量计费，0 = 免费。",
-      "invalid": "请输入 0 到 100 之间的倍率（最多 3 位小数）",
-      "apply": "应用到所选",
-      "updated": "已更新 {{count}} 条线路",
-      "load_failed": "无法加载此服务器的线路。",
-      "loading": "正在加载线路…",
-      "apply_failed": "更新线路失败：{{message}}"
     },
     "identities": {
       "count": "{{count}} 个客户端身份",
@@ -5381,7 +5398,37 @@
       "group_connection": "连接",
       "test_hint": "测试使用已保存的设置连接服务器，并记录其版本。请先保存修改。"
     },
-    "resource_state": "资源：{{state}}"
+    "resource_state": "资源：{{state}}",
+    "addresses": {
+      "title": "公网地址",
+      "ipv4": "IPv4",
+      "ipv6": "IPv6",
+      "observed": "面板从此地址连接",
+      "seen_from": "面板看到节点从此地址连接",
+      "none": "节点尚未上报地址。",
+      "open": "{{count}} 个公网地址，显示列表"
+    },
+    "maintenance": {
+      "run": "打开",
+      "group": {
+        "install": "安装",
+        "upgrade": "升级",
+        "access": "访问与路由"
+      },
+      "install": "重新安装，或把此服务器迁移到其他后端。",
+      "agent": "升级此服务器上的 Passwall Node 程序。",
+      "panel": "把面板升级到最新版本。",
+      "core": "把 Xray 内核升级到最新版本。",
+      "core_native": "选择内核引擎及其确切版本。",
+      "rotate": "为节点签发新凭据，旧凭据随即失效。",
+      "ports": "由多条线路共用、按 SNI 区分的端口。",
+      "retired": "清理此服务器上遗留的旧 VLESS 路由。"
+    },
+    "monitoring": {
+      "open": "打开",
+      "metrics": "主机的 CPU、内存、网络和磁盘随时间的变化。",
+      "diagnostics": "从面板对节点做检查并查看结果。"
+    }
   },
   "diagnostics": {
     "title": "运行诊断",
@@ -6590,13 +6637,13 @@
         "scope_all": "范围：所有用户，共 {{groups}} 个分组、{{users}} 人。",
         "scope_groups": "范围：{{groups}} 个分组（{{names}}），共 {{users}} 人。",
         "scope_panels": "范围：经由所选 {{panels}} 台服务器（{{names}}）出口的连接。",
-                "scope_all_unknown": "范围：所有用户（分组数和人数暂时无法确认）。",
+        "scope_all_unknown": "范围：所有用户（分组数和人数暂时无法确认）。",
         "scope_groups_unknown": "范围：{{groups}} 个分组（{{names}}），人数暂时无法确认。",
         "exempt_all_other": "其中 {{count}} 个豁免账号不受影响。",
         "exempt_groups_other": "这些分组里的豁免账号不受影响（豁免账号共 {{count}} 个）。",
         "exempt_panels_other": "豁免账号不受影响（共 {{count}} 个）。",
         "exempt_unknown": "豁免账号数暂时无法确认；豁免账号不受影响。",
-"nodes_up_to_other": "最多 {{count}} 台节点",
+        "nodes_up_to_other": "最多 {{count}} 台节点",
         "nodes_unknown": "它所作用的节点",
         "restart": "{{nodes}}会在{{minutes}}内各重启代理程序一次，正在使用的连接断开一次，客户端会自动重连。",
         "action_on": "启用",
@@ -7247,7 +7294,26 @@
         "allowlist_count_other": "白名单分组 · {{count}} 个",
         "allowlist_none": "没有分组启用白名单",
         "allowlist_caption": "成员只能访问名单里的目的地",
-        "allowlist_open": "打开白名单分组"
+        "allowlist_open": "打开白名单分组",
+        "source_other": "入站来源规则 · {{count}} 条",
+        "source_none": "没有入站来源规则",
+        "source_caption": "先于下面所有步骤检查；豁免账号也绕不过",
+        "source_where": "在各节点的「入站」标签页里设置。点一行即可打开。",
+        "source_empty": "还没有入站拒绝来源国家或网段。到节点的「入站」标签页里按节点设置。",
+        "source_open_nodes": "打开节点",
+        "source_open_aria": "编辑 {{name}} 的来源规则",
+        "source_unknown_node": "节点 #{{id}}",
+        "source_countries_other": "{{count}} 个国家",
+        "source_cidrs_other": "{{count}} 个网段",
+        "source_state_on": "开启",
+        "source_state_report": "仅报告",
+        "filter_label": "筛选「{{step}}」里的策略",
+        "filter_placeholder": "名称、名单或范围",
+        "filter_none": "没有策略匹配「{{q}}」",
+        "shown_of": "{{shown}} / {{total}}",
+        "fold": "收起「{{step}}」",
+        "unfold": "展开「{{step}}」（{{count}}）",
+        "count_aria": "{{count}} 条策略"
       },
       "row": {
         "paused": "已停用",

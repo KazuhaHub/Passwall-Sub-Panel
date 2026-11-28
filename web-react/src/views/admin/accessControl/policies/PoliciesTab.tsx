@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
@@ -16,6 +16,7 @@ import {
   useReorderDestPolicies, useUpdateDestPolicy,
 } from '@/query/accessControl'
 import { useAllGroups } from '@/query/groups'
+import { useAllNodes } from '@/query/nodes'
 import { useServersList } from '@/query/servers'
 import { useQueryScope } from '@/query/useQueryScope'
 import { applyMinutes, pipelineSteps, reorderWithin, reportNotDeployedCount, splitBlockByState } from '@/utils/accessControl'
@@ -28,8 +29,10 @@ import ConvertToBlockDialog from './ConvertToBlockDialog'
 import StateBadge from '../allowlist/StateBadge'
 import { formOf, inputOf } from './policyForm'
 import PolicyRow, { type RowMove } from './PolicyRow'
+import PolicyStepList from './PolicyStepList'
 import { RailStep } from './PolicyRail'
 import QuotaMeters from './QuotaMeters'
+import SourceRulesStep from './SourceRulesStep'
 import TemplateGrid, { TemplateChooser, UnavailableDialog } from './TemplateGrid'
 import TemplateMenu from './TemplateMenu'
 import { useEnableScopeText, useFirstPublishGate, type EnableSubject } from './useFirstPublish'
@@ -67,6 +70,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const lists = useDestLists(scope)
   const status = useDestStatus(scope)
   const groups = useAllGroups(scope)
+  const nodes = useAllNodes(scope)
   const servers = useServersList(scope, { page: 1, page_size: 200 })
   const update = useUpdateDestPolicy(scope)
   const del = useDeleteDestPolicy(scope)
@@ -129,6 +133,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const data = policies.data
   const listNames = Object.fromEntries((lists.data?.items ?? []).map(l => [l.id, l.name]))
   const groupName = new Map((groups.data ?? []).map(g => [g.id, g.name]))
+  const nodeName = new Map((nodes.data ?? []).map(n => [n.id, n.display_name]))
   const panelName = new Map((servers.data?.items ?? []).map(s => [s.id, s.name]))
   const deleted = (kind: 'group' | 'panel') => t(`${P}row.deleted_${kind}`)
   const scopeText = (p: DestPolicy) => p.scope === 'all'
@@ -255,27 +260,27 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
 
   /** What "add" opens in a step: a block policy (already report-only for the report step), or an allow policy. */
   const addIn = (k: 'allow' | 'block' | 'report') => open(newPolicyPath({ kind: k }))
-  const renderSection = (k: 'allow' | 'block' | 'report') => {
-    const rows = section(k)
-    return rows.length === 0
-      ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed p-3">
-          <p className="text-sm text-muted-foreground">{t(`${P}rail.empty_step`)}</p>
-          <Button size="sm" variant="outline" onClick={() => addIn(k)}>{t(`${P}rail.add_${k}`)}</Button>
-        </div>
-      )
-      : (
-        <div className="grid gap-2">
-          {rows.map((p, i) => (
-            <PolicyRow key={p.id} policy={p} index={i} count={rows.length} listNames={listNames} scopeText={scopeText(p)}
-              now={now} notDeployed={reportNotDeployedCount(status.data, p)} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
-              onOpen={() => open(policyPath(p.id))} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
-              onDuplicate={() => duplicate(p)} onDelete={() => void remove(p)} onReport={() => void toReport(p)}
-              onConvert={() => setConverting(p)} onViewRecords={() => viewRecords(p)} />
-          ))}
-        </div>
-      )
-  }
+  /** The count beside a step's heading (not inside it, so the heading is its words alone); read out as "N policies". */
+  const stepBadge = (count: number) => count > 0 ? (
+    <span data-testid="step-count" className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
+      <span aria-hidden>{count}</span>
+      <span className="sr-only">{t(`${P}rail.count_aria`, { count })}</span>
+    </span>
+  ) : undefined
+  const stepCaption = (caption: ReactNode, k: 'allow' | 'block' | 'report') => (
+    section(k).length === 0 ? (caption ? <>{caption}{' · '}<span>{t(`${P}rail.empty_step`)}</span></> : <span>{t(`${P}rail.empty_step`)}</span>) : caption
+  )
+  const renderSection = (k: 'allow' | 'block' | 'report', label: string) => (
+    <PolicyStepList label={label} rows={section(k)} forceOpen={highlight !== null && section(k).some(p => p.id === highlight)}
+      searchText={p => [p.name, ...p.list_ids.map(id => listNames[id] ?? ''), scopeText(p)].join(' ')}
+      renderRow={(p, i, count) => (
+        <PolicyRow key={p.id} policy={p} index={i} count={count} listNames={listNames} scopeText={scopeText(p)}
+          now={now} notDeployed={reportNotDeployedCount(status.data, p)} busy={busyId === p.id} moving={reorder.isPending} highlighted={highlight === p.id} hitDays={data.hit_window_days}
+          onOpen={() => open(policyPath(p.id))} onToggle={() => void toggle(p)} onMove={m => void move(p, k, m)}
+          onDuplicate={() => duplicate(p)} onDelete={() => void remove(p)} onReport={() => void toReport(p)}
+          onConvert={() => setConverting(p)} onViewRecords={() => viewRecords(p)} />
+      )} />
+  )
   const addButton = (k: 'allow' | 'block' | 'report') => (
     <Button size="sm" variant="outline" onClick={() => addIn(k)}
       aria-label={t(`${P}rail.add_${k}_aria`)}><IconAdd />{t(`${P}rail.add_${k}`)}</Button>
@@ -290,6 +295,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       {nothingYet && catalog.data
         ? (
           <div className="grid gap-3">
+            <SourceRulesStep nodeName={id => nodeName.get(id)} onlyWhenActive />
             <h2 className="text-base font-semibold">{t(`${P}empty.title`)}</h2>
             <p className="text-sm text-muted-foreground">{t(`${P}empty.body`)}</p>
             <TemplateGrid catalog={catalog.data} onUse={useTemplate} onGoToLists={() => onGoToLists('new_custom')} />
@@ -303,11 +309,12 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
               <TemplateMenu catalog={catalog.data} onBlank={() => addIn('block')}
                 onUse={useTemplate} onShowUnavailable={() => setUnavailableOpen(true)} />
             </div>
+            <SourceRulesStep nodeName={id => nodeName.get(id)} />
             {steps.map((s, i) => {
               const last = i === steps.length - 1
               switch (s.id) {
                 case 'allow':
-                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.allow`)} caption={t(`${P}rail.allow_caption`)} actions={addButton('allow')}>{renderSection('allow')}</RailStep>
+                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.allow`)} badge={stepBadge(data.allow.length)} caption={stepCaption(t(`${P}rail.allow_caption`), 'allow')} actions={addButton('allow')}>{renderSection('allow', t(`${P}rail.allow`))}</RailStep>
                 case 'exempt':
                   return (
                     <RailStep key={s.id} n={s.n}
@@ -316,7 +323,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                       actions={<Button size="sm" variant="outline" onClick={onOpenExemptions}>{t(`${P}rail.manage`)}</Button>} />
                   )
                 case 'block':
-                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.block`)} actions={addButton('block')}>{renderSection('block')}</RailStep>
+                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.block`)} badge={stepBadge(split.enforced.length)} caption={stepCaption(null, 'block')} actions={addButton('block')}>{renderSection('block', t(`${P}rail.block`))}</RailStep>
                 case 'allowlist':
                   return (
                     <RailStep key={s.id} n={s.n}
@@ -338,13 +345,13 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
                   )
                 case 'report':
                   return (
-                    <RailStep key={s.id} n={s.n} title={t(`${P}rail.report`)} caption={(
+                    <RailStep key={s.id} n={s.n} title={t(`${P}rail.report`)} badge={stepBadge(split.report.length)} caption={(
                       <>
-                        {t(`${P}rail.report_caption`)}
+                        {stepCaption(t(`${P}rail.report_caption`), 'report')}
                         {shed > 0 && <span data-testid="rail-report-not-deployed">{t(`${P}row.not_deployed_nodes`, { count: shed })}</span>}
                       </>
                     )} actions={addButton('report')}>
-                      {renderSection('report')}
+                      {renderSection('report', t(`${P}rail.report`))}
                     </RailStep>
                   )
                 default:

@@ -2,7 +2,7 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads, list, mount, server } from './testHarness'
-import { openMenuOf, pickRowAction } from './install/installationHarness'
+import { openServerTab } from './install/installationHarness'
 import ServersPage from './ServersPage'
 
 const psp = { ...server, panel_type: 'psp' }
@@ -28,7 +28,7 @@ function install(fronts: unknown, ports: unknown[] = []) {
 }
 
 async function openDialog() {
-  await pickRowAction(server as never, 'admin:servers.action.shared_ports')
+  await openServerTab(psp as never, 'maintenance', 'admin:servers.action.shared_ports')
   return screen.findByRole('dialog')
 }
 
@@ -36,8 +36,9 @@ describe('ServersPage shared ports', () => {
   it('offers the dialog for a Passwall Node server only', async () => {
     installReads({ '/admin/servers': list([server]) })
     mount(<ServersPage />)
-    await openMenuOf(server as never)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.action.shared_ports' })).toBeNull()
+    await openServerTab(server as never, 'maintenance')
+    await screen.findByRole('button', { name: 'admin:servers.action.upgrade_xray' })
+    expect(screen.queryByRole('button', { name: 'admin:servers.action.shared_ports' })).toBeNull()
   })
 
   it('says Xray is needed and disables adding when the server cannot run fronts', async () => {

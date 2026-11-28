@@ -32,6 +32,8 @@ import { BulkNodeActions } from './BulkNodeActions'
 import { LineCard } from './LineCard'
 import { LineDialog } from './LineDialog'
 import { MoveToDialog } from './MoveToDialog'
+import { SetMultiplierDialog } from './SetMultiplierDialog'
+import { multiplierLineOf, multiplierLinesOf, type MultiplierLine } from './multiplierModel'
 import { SeparatorDialog } from './SeparatorDialog'
 import { StaleOrderDialog } from './StaleOrderDialog'
 import { SeparatorRowCell } from './cells'
@@ -70,6 +72,7 @@ export default function LinesTab() {
   const tableRef = useRef<DataTableHandle>(null)
   const [moveTarget, setMoveTarget] = useState<OrderRow | null>(null)
   const [added, setAdded] = useState<string[]>([])
+  const [multiplier, setMultiplier] = useState<{ lines: MultiplierLine[]; clear?: () => void } | null>(null)
 
   const filters: ListFilters = {
     q: url.q, type: view.state.filters.type ?? NONE, status: view.state.filters.status ?? NONE,
@@ -106,15 +109,16 @@ export default function LinesTab() {
     edit: (row: OrderRow) => { lineSel.select(rowId(row)); setUrl({ edit: true }) },
     add: (row: OrderRow) => { lineSel.select(`${row.node_id}.new`); setUrl({ edit: true }) },
     toggle: (row: OrderRow, enable: boolean) => { void actions.toggle(row.node_id ?? 0, [row.line_id ?? ''], enable) },
+    multiplier: (row: OrderRow) => { const line = itemOf(row) && multiplierLineOf(itemOf(row)!); if (line) setMultiplier({ lines: [line] }) },
     remove: (row: OrderRow) => actions.askDelete({ row, node: nodeMap.get(row.node_id ?? 0), exitName: itemOf(row)?.exitName }),
   }
   // N4: the deletion dialogs read what a delete takes with it before asking; the row menu and the bulk bar open them.
   const deletion = useNodeDeletion({ rows, serverMap })
   const handlers = useRowHandlers({ lines: lineHandlers, moveTo: setMoveTarget, editSeparator: id => sepSel.select(String(id)), deletion })
-  const menuFor = useCallback((item: ListRow, opts?: { parent?: boolean }): MoreMenuItem[] =>
-    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, canMove: !moves.saving, withAddLine: opts?.parent }), [capsOf, handlers, t, moves.saving])
+  const menuFor = useCallback((item: ListRow): MoreMenuItem[] =>
+    rowMenuItems({ row: item.row, caps: capsOf(item.row), handlers, t, canMove: !moves.saving }), [capsOf, handlers, t, moves.saving])
   const nodeHref = admin ? (id: number) => `/admin/nodes/${id}` : undefined
-  const menuOf = useCallback((item: ListRow, opts?: { parent?: boolean }) => menuFor(item, opts), [menuFor])
+  const menuOf = menuFor
 
   const hasFactor = items.some(i => i.row.traffic_factor_milli !== undefined && i.row.traffic_factor_milli !== 1000)
   const cols = useMemo(() => orderColumns({ t, colors, labels, tz, nodeHref, menuOf, hasFactor }), [t, colors, labels, tz, admin, menuOf, hasFactor]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,7 +235,7 @@ export default function LinesTab() {
     return r && r.kind === 'line' && r.line_id !== 'direct' ? [{ nodeId: r.node_id ?? 0, lineId: r.line_id ?? '' }] : []
   })
   const bulk = (ids: string[], clear: () => void) => (
-    <BulkNodeActions nodeIds={nodeIdsOf(ids)} lineRefs={relayRefsOf(ids)} toggleLines={actions.toggle} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
+    <BulkNodeActions nodeIds={nodeIdsOf(ids)} lineRefs={relayRefsOf(ids)} toggleLines={actions.toggle} multiplierCount={multiplierLinesOf(items, ids).length} onSetMultiplier={() => setMultiplier({ lines: multiplierLinesOf(items, ids), clear })} admin={admin} serverOf={id => serverMap.get(nodeMap.get(id)?.panel_id ?? 0)} clear={clear} onDelete={deletion.deleteMany} />
   )
 
   const common = {
@@ -320,7 +324,7 @@ export default function LinesTab() {
           activeRowId={lineSel.selected && open?.row.line_id === 'direct' ? `landing:${open.row.node_id}` : lineSel.selected}
           rowOptions={r => ({ openable: !!r.list, state: r.list ? rowStateOf(r.list) : undefined })}
           renderCard={(r, ctx) => (r.list
-            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list, { parent: true })} open={ctx.open} />
+            ? <LineCard item={r.list} colors={colors} labels={labels} menu={menuFor(r.list)} open={ctx.open} />
             : <span className="text-sm font-medium">{r.group.name}</span>)}
         />
       )}
@@ -335,6 +339,7 @@ export default function LinesTab() {
         onSelect={id => lineSel.select(id, { replace: true })} onClose={closeSheet}
       />
       {actions.dialogs}
+      {multiplier && admin && <SetMultiplierDialog lines={multiplier.lines} onClose={() => setMultiplier(null)} onDone={multiplier.clear} />}
       <SeparatorDialog
         separatorId={!admin || !sepSel.selected ? null : sepSel.selected === 'new' ? 'new' : Number(sepSel.selected)}
         separators={separators.data ?? []}

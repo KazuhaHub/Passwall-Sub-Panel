@@ -12,10 +12,14 @@ import type { Doc } from '@/utils/ruleset/parse'
 
 // `--rs-stick` is the distance from the top of the window to the rules (the top bar and the page's sticky tabs and toolbar), measured
 // by the page; the fallback is its usual size.
-/** The height of the directory's scroll box: what is left of the window under the sticky strip, less the two lines above it and the Add group button under it. */
-export const COLUMN_HEIGHT = 'max(22rem, calc(100dvh - var(--rs-stick, 10rem) - 6.5rem))'
-/** The rules table sits under the group's heading, note, target and filter row (about 11.5rem), so it gets less of the screen. */
-export const TABLE_HEIGHT = 'max(18rem, calc(100dvh - var(--rs-stick, 10rem) - 13rem))'
+/** The one height both panes share: what is left of the window under the sticky strip, less the page's bottom padding. */
+export const PANE_HEIGHT = 'max(24rem, calc(100dvh - var(--rs-stick, 10rem) - 2rem))'
+/** The directory's scroll box: the shared height less the row under it (Add group and the status line) and the box's own border. */
+export const COLUMN_HEIGHT = `calc(${PANE_HEIGHT} - 2.5rem - 2px)`
+/** A table under one line of text (the merged target view). */
+export const TABLE_HEIGHT = `calc(${PANE_HEIGHT} - 2.5rem - 2px)`
+/** Everything in a group's pane that is not the table's scroll box, in rem, for the part of it that does not change: the gap above the filter row and that row. */
+export const DETAIL_TOOLBAR = 'calc(var(--control-h) + 0.75rem + 0.75rem + 2px)'
 
 /**
  * The left column (design 3.3): the groups in match order, each with its place, target and rule count. A row opens the

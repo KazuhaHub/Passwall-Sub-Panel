@@ -2,7 +2,7 @@ import { useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { ObjectPage, objectErrorKind, type ObjectPageState } from '@/components/common/ObjectPage'
 import { useBackTarget } from '@/components/common/objectReturn'
-import { ServerFormPage } from './page/ServerFormPage'
+import { ServerDetailPage } from './detail/ServerDetailPage'
 import { SERVERS_PATH, parseServerId } from './serverRoutes'
 import { useServerRecord } from './useServerRecord'
 
@@ -16,11 +16,11 @@ function ServerRecordPage({ id }: { id: number }) {
     : kind ? { kind: 'error', reason: query.error, retry: () => query.refetch() }
     : !server ? { kind: 'loading' } : undefined
   if (state || !server) return <ObjectPage back={{ to: back, label: t('admin:servers.title') }} state={state} />
-  return <ServerFormPage editing={server} />
+  return <ServerDetailPage server={server} />
 }
 
 /**
- * `/admin/servers/:id`: one server, its settings on a page. Only for a real id: an address that is not a positive whole
+ * `/admin/servers/:id`: one server as a page: overview, settings, maintenance, monitoring. Only for a real id: an address that is not a positive whole
  * number is "no such server" in the page's own frame, never a request. Keyed by the id so another server starts from a
  * clean form.
  */

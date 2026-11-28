@@ -13,7 +13,7 @@ describe('add and edit server form', () => {
     installReads({ '/admin/servers': list([server]) })
     api.put.mockResolvedValue({ data: server })
     mount(<ServersPage />)
-    await pickRowAction(server as never, 'admin:servers.action.edit')
+    await pickRowAction(server as never, 'admin:servers.action.edit_settings')
     const token = await screen.findByLabelText(/admin:servers.field.api_token/) as HTMLInputElement
     expect(token.value).toBe('')
     expect(token.type).toBe('password')
@@ -39,13 +39,13 @@ describe('add and edit server form', () => {
   it('asks before leaving a form with unsaved changes, and not otherwise', async () => {
     installReads({ '/admin/servers': list([server]) })
     const { router } = mount(<ServersPage />)
-    await pickRowAction(server as never, 'admin:servers.action.edit')
+    await pickRowAction(server as never, 'admin:servers.action.edit_settings')
     expect(router.state.location.pathname).toBe('/admin/servers/1')
     // An untouched form is left without a question.
     fireEvent.click(await screen.findByRole('link', { name: 'admin:servers.title' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/servers'))
 
-    await pickRowAction(server as never, 'admin:servers.action.edit')
+    await pickRowAction(server as never, 'admin:servers.action.edit_settings')
     fireEvent.change(await name(), { target: { value: 'edited' } })
     fireEvent.click(screen.getByRole('link', { name: 'admin:servers.title' }))
     const ask = await screen.findByRole('alertdialog')
@@ -58,6 +58,13 @@ describe('add and edit server form', () => {
   it('opens the server by its address on the page, and treats a malformed or unknown one as no such server', async () => {
     installReads({ '/admin/servers': list([server]) })
     mount(<ServersPage />, '/admin/servers/1')
+    // The page opens on its overview; the form is the Settings tab, also reachable by its address.
+    expect((await screen.findByRole('tab', { name: 'admin:servers.detail.tabs.overview' })).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('textbox', { name: /admin:servers.field.name/ })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'admin:servers.detail.tabs.settings' }))
+    expect(((await name()) as HTMLInputElement).value).toBe('server')
+    cleanup()
+    mount(<ServersPage />, '/admin/servers/1?tab=settings')
     expect(((await name()) as HTMLInputElement).value).toBe('server')
     cleanup()
     api.get.mockClear()
@@ -72,7 +79,7 @@ describe('add and edit server form', () => {
   it('runs the connection test from the page and says the result in words', async () => {
     installReads({ '/admin/servers': list([server]) })
     api.post.mockResolvedValue({ data: { ok: false, error: 'connection refused' } })
-    mount(<ServersPage />, '/admin/servers/1')
+    mount(<ServersPage />, '/admin/servers/1?tab=settings')
     await name()
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.action.test' }))
     expect((await screen.findByRole('alert')).textContent).toContain('connection refused')
@@ -83,7 +90,7 @@ describe('add and edit server form', () => {
     installReads({ '/admin/servers': list([server]) })
     let release: (v: { data: unknown }) => void = () => {}
     api.put.mockReturnValue(new Promise(resolve => { release = resolve }))
-    mount(<ServersPage />, '/admin/servers/1')
+    mount(<ServersPage />, '/admin/servers/1?tab=settings')
     fireEvent.change(await name(), { target: { value: 'renamed' } })
     fireEvent.click(save())
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
@@ -96,7 +103,7 @@ describe('add and edit server form', () => {
 
   it('deletes from the page after its confirmation and returns to the list', async () => {
     installReads({ '/admin/servers': list([server]), '/admin/servers/1/delete-impact': { server_id: 1, nodes: [], lines_entering: [], egress_users: [], route_users: [] } })
-    const { router } = mount(<ServersPage />, '/admin/servers/1')
+    const { router } = mount(<ServersPage />, '/admin/servers/1?tab=settings')
     await name()
     fireEvent.click(screen.getByRole('button', { name: /ui.shell.more/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.delete' }))

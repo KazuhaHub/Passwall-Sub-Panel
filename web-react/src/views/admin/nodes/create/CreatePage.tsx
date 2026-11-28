@@ -15,7 +15,7 @@ import { nodeKeys } from '@/query/keys'
 import { useAllNodes, useAllServers } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import { discardChangesConfirm } from '../../accessControl/confirmCopy'
-import { GeneralFields, generalProblems, type GeneralDraft, type GeneralField } from '../general/GeneralFields'
+import { GeneralFields, generalProblems, regionOptionsOf, type GeneralDraft, type GeneralField } from '../general/GeneralFields'
 import { InboundForm } from '../inbound/InboundForm'
 import { serverHost } from '../inbound/inboundModel'
 import { randomRealitySite } from '@/utils/xrayReality'
@@ -60,6 +60,7 @@ function Wizard({ servers, writable }: { servers: Server[]; writable: Server[] }
   const general: GeneralDraft = { display_name: w.form.display_name, server_address: w.form.server_address, region: w.form.region, tags: splitTagsText(w.form.tags_text) }
   const problems = generalProblems(general)
   const tagOptions = [...new Set((nodes.data ?? NONE).flatMap(n => n.tags ?? []))].sort((a, b) => a.localeCompare(b))
+  const regionOptions = regionOptionsOf(nodes.data ?? NONE)
   const names = STEPS.map(s => t(`nodes.create_page.step_${s}`))
   const label = w.step < 2 ? 'nodes.setup.next' : w.step === 2 || !w.plan || w.changed ? 'nodes.setup.review' : 'nodes.setup.confirm'
 
@@ -78,7 +79,7 @@ function Wizard({ servers, writable }: { servers: Server[]; writable: Server[] }
             <InboundForm form={w.form} setForm={w.setForm} server={w.landing} servers={writable} json={w.json} onLeaveJson={() => w.setJsonMode(false)}
               onGenKeys={w.genKeys} onRandomRealitySite={w.randomizeSite} onGenSSPassword={w.genSSPassword} genKeysBusy={w.genBusy} />
             <FormSection title={t('nodes.create_page.basics')}>
-              <GeneralFields draft={general} tagOptions={tagOptions}
+              <GeneralFields draft={general} tagOptions={tagOptions} regionOptions={regionOptions}
                 patch={({ tags, ...rest }) => w.setForm(f => ({ ...f, ...rest, ...(tags ? { tags_text: tags.join(', ') } : {}) }))}
                 error={f => (w.attempted || touched.has(f) ? problems[f] : undefined)} blur={f => setTouched(s => (s.has(f) ? s : new Set(s).add(f)))} />
             </FormSection>

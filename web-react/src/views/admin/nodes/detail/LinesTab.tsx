@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/feedback/EmptyState'
 import { ErrorState } from '@/components/feedback/ErrorState'
 import { TableSkeleton } from '@/components/feedback/LoadingState'
 import { urlCodecs, useUrlState } from '@/hooks/useUrlState'
-import { IconDelete, IconEdit } from '@/lib/icons'
+import { IconAdd, IconDelete, IconEdit } from '@/lib/icons'
 import { FactorCell, StatusCell } from '../list/cells'
 import { landingColorsOf } from '../list/listModel'
 import type { ListRow } from '../list/types'
@@ -75,8 +75,9 @@ export default function LinesTab({ nodeId }: { nodeId: number }) {
     <section className="flex flex-col gap-3" aria-label={t('nodes.line.tabs.lines_question')}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{t('nodes.line.tabs.lines_question')}</h2>
-        <Button size="sm" onClick={() => setEdit('new')}>{t('nodes.action.add_line')}</Button>
+        <Button size="sm" onClick={() => setEdit('new')}><IconAdd />{t('nodes.action.add_line')}</Button>
       </div>
+      <p className="-mt-1 text-xs text-muted-foreground">{t('nodes.line.tabs.add_hint')}</p>
       {mine.length === 0
         ? <EmptyState compact title={t('nodes.line.tabs.no_lines')} action={<Button variant="outline" size="sm" render={<Link to="/admin/nodes" />}>{t('nodes.detail.back')}</Button>} />
         : <ul className="flex flex-col gap-3">{mine.map(card)}</ul>}
