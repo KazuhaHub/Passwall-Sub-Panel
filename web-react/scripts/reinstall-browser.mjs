@@ -274,11 +274,24 @@ try {
   // The backend, method, channel and version pickers are native selects: they are chosen by value, not opened.
   const backendOf = dialog => dialog.getByRole('combobox', { name: s('install_reinstall.backend'), exact: true });
   const optionsOf = select => select.locator('option');
-  async function openChooser(record) {
+  // Maintenance actions are on the server's own page, on its Maintenance tab; each is a button named by its label.
+  const maintenanceButton = name => page.getByRole('button', { name, exact: true });
+  const tabOf = tab => page.getByRole('tab', { name: s(`detail.tabs.${tab}`), exact: true });
+  async function openServer(record) {
+    await toList();
     await moreOf(record).click();
-    await expect(page.getByRole('menuitem', { name: s('install_reinstall.action'), exact: true })).toHaveCount(1);
-    if (record.panel_type === 'psp') await expect(page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true })).toBeVisible();
-    await page.getByRole('menuitem', { name: s('install_reinstall.action'), exact: true }).click();
+    await page.getByRole('menuitem', { name: s('action.open'), exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: record.name, exact: true })).toBeVisible();
+  }
+  async function openMaintenance(record) {
+    await openServer(record);
+    await tabOf('maintenance').click();
+    await expect(maintenanceButton(s('install_reinstall.action'))).toHaveCount(1);
+  }
+  async function openChooser(record) {
+    await openMaintenance(record);
+    if (record.panel_type === 'psp') await expect(maintenanceButton(s('agent_upgrade.action'))).toBeVisible();
+    await maintenanceButton(s('install_reinstall.action')).click();
     const dialog = page.getByRole('dialog');
     await expect(backendOf(dialog)).toHaveValue(record.panel_type);
     await expect(backendOf(dialog).locator('option:checked')).toHaveText(labels[record.panel_type]);
@@ -288,11 +301,16 @@ try {
   // In a dialog the footer's Close comes before the corner X, so first() is the footer.
   // A dialog that has just been left is still animating out: wait until it is gone before the next opens.
   const gone = () => expect(page.getByRole('dialog')).toHaveCount(0);
-  // A server's page and its installation page are pages of their own: the back link (the same on every object page)
-  // returns to the list, and the list is back once its heading is.
+  // A server's page, its installation page and the add page are pages of their own: the back link (the same on every
+  // object page) goes one page back (the installation page returns to the server's page it was opened from), so it is
+  // followed until the list's heading is there. From the list itself it does nothing.
   const toList = async () => {
-    await page.locator('[data-slot="object-back"]').click();
-    await expect(page.getByRole('heading', { name: s('title'), exact: true })).toBeVisible();
+    const listHeading = page.getByRole('heading', { name: s('title'), exact: true });
+    for (let hops = 0; hops < 4 && !(await listHeading.isVisible()); hops++) {
+      await page.locator('[data-slot="object-back"]').click();
+      await page.waitForTimeout(250);
+    }
+    await expect(listHeading).toBeVisible();
   };
   const close = dialog => dialog.getByRole('button', { name: closeName, exact: true }).first();
   async function selectReviewedRelease(dialog) {
@@ -375,8 +393,9 @@ try {
   await dialog.getByRole('button', { name: s('native.generate_command'), exact: true }).click();
   await copyAndCheck(dialog, commandFor(7));
   await toList();
+  await toList();
   await moreOf(servers[0]).click();
-  await page.getByRole('menuitem', { name: s('action.edit'), exact: true }).click();
+  await page.getByRole('menuitem', { name: s('action.edit_settings'), exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: servers[0].name, exact: true })).toBeVisible();
   await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveValue('stable');
   await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).selectOption('beta');
@@ -394,9 +413,8 @@ try {
   // A temporary override must not save a second preference or replace identity.
   await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).selectOption('stable');
   assert.equal(count('PUT', '/api/admin/servers/7'), 1);
-  await toList();
-  await moreOf(servers[0]).click();
-  await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
+  await openMaintenance(servers[0]);
+  await maintenanceButton(s('agent_upgrade.action')).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveValue('beta');
   // The upgrade surface selects the newest reviewed release in the saved
@@ -437,6 +455,7 @@ try {
   await close(dialog).click();
   await gone();
 
+  await toList();
   await page.getByRole('button', { name: s('create'), exact: true }).click();
   // Adding a server is a page of its own; it is the scope the following checks search.
   await expect(page.getByRole('heading', { level: 1, name: s('create'), exact: true })).toBeVisible();
