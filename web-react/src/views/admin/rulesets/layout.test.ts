@@ -24,12 +24,13 @@ describe('where the routing test goes', () => {
 })
 
 describe('what the toolbar keeps in view', () => {
-  it('shows everything, counts included, from 960px', () => {
-    expect(toolbarTier(976)).toBe('full')
-    expect(toolbarTier(960)).toBe('full')
+  it('shows everything, counts included, from 1100px', () => {
+    expect(toolbarTier(1232)).toBe('full')
+    expect(toolbarTier(1100)).toBe('full')
   })
   it('drops the counts (the directory says them) from 760px and moves the least used controls into More under that', () => {
-    expect(toolbarTier(959)).toBe('compact')
+    expect(toolbarTier(1099)).toBe('compact')
+    expect(toolbarTier(976)).toBe('compact')
     expect(toolbarTier(760)).toBe('compact')
     expect(toolbarTier(759)).toBe('narrow')
     expect(toolbarTier(343)).toBe('narrow')

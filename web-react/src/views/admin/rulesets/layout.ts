@@ -6,8 +6,12 @@
 
 /** The groups column and the open group keep their room next to a docked routing test from this width (17rem + 40rem + 22rem + gaps). */
 export const DOCK_MIN = 1360
-/** From this width the toolbar says the counts itself; under it the directory's own line does. */
-export const FULL_MIN = 960
+/**
+ * From this width the toolbar says the counts itself; under it the directory's own line does. Search, view, undo, the target
+ * filter, the counts, Problems and Test routing need about 1000px in one row; under that the counts left too late and the
+ * filter wrapped to a second line of its own, leaving the right side of that line empty.
+ */
+export const FULL_MIN = 1100
 /** Under this width the issues button and the target filter live in the More menu. */
 export const COMPACT_MIN = 760
 

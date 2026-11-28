@@ -31,7 +31,7 @@ describe('deleting from the nodes list', () => {
     mountPage(<NodesPage />)
     await screen.findAllByText('Node2')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Node1' }))
-    await screen.findByRole('menuitem', { name: 'Open node' })
+    await screen.findByRole('menuitem', { name: 'Edit node' })
     for (const name of ['Delete node', 'Remove from panel only', 'Recreate inbound on server']) {
       expect(screen.queryByRole('menuitem', { name })).toBeNull()
     }

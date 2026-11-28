@@ -77,9 +77,10 @@ export function RulesToolbar({ tier, view, textOnly, readOnly, query, onQuery, o
   return (
     <div className="flex flex-col gap-2">
       <div role="toolbar" aria-label={t('admin:rules.toolbar')} className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {/* One line from the compact width up: the search gives way, nothing wraps onto a half-empty second line. */}
+        <div className={cn('flex min-w-0 flex-1 items-center gap-2', narrow ? 'flex-wrap' : 'flex-nowrap')}>
           {blocks && (
-            <div className={cn('relative min-w-0', narrow ? 'basis-full' : 'max-w-sm min-w-44 flex-1 basis-56')}>
+            <div className={cn('relative min-w-0', narrow ? 'basis-full' : 'max-w-sm min-w-36 flex-1 basis-56')}>
               <IconSearch aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input ref={searchRef} value={query} className="pl-8" placeholder={t('admin:rules.search.placeholder')} aria-label={t('admin:rules.search.placeholder')}
                 onChange={e => onQuery(e.target.value)} onKeyDown={onSearchKey} data-rules-search />
@@ -94,7 +95,7 @@ export function RulesToolbar({ tier, view, textOnly, readOnly, query, onQuery, o
             </span>
           )}
           {filterShown && !narrow && (
-            <div className={cn('flex min-w-0 items-center gap-2', tier === 'compact' ? 'w-40' : 'w-48')}>
+            <div className={cn('flex min-w-0 shrink-0 items-center gap-2', tier === 'compact' ? 'w-40' : 'w-48')}>
               {targetSelect}
             </div>
           )}

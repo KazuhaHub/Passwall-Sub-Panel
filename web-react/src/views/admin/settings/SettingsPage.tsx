@@ -6,7 +6,7 @@ import { useTabParam } from '@/hooks/useTabParam'
 import { discardChangesConfirm } from '../accessControl/confirmCopy'
 import { useDirtyTabs } from '../nodes/detail/useDirtyTabs'
 import { useAdminT } from '../useAdminT'
-import { AudienceProvider, AudienceRail } from './audience'
+import { AudiencePicker, AudienceProvider } from './audience'
 import { BrandSection } from './BrandSection'
 import { SettingsDirtyContext } from './dirtyContext'
 import { GeneralSection } from './GeneralSection'
@@ -114,12 +114,10 @@ function SettingsPageInner() {
   }
   return (
     <div className="p-4 sm:p-6">
-      <PageHeader title={t('settings.title')} />
+      <PageHeader title={t('settings.title')} secondary={<AudiencePicker />} />
       <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 md:sticky md:top-4 md:self-start">
           <SettingsSearch onPick={pick} />
-          {/* Who before what: the audience, then the sections. Both fit in an 800px-tall window (the audience list scrolls inside 14rem). */}
-          <AudienceRail />
           <SettingsNav active={tab} onSelect={select} dirty={dirtySections} />
         </aside>
         <SettingsDirtyContext.Provider value={dirtyContext}><div className="min-w-0 max-w-3xl">

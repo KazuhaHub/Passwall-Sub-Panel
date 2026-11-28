@@ -15,7 +15,7 @@ const nodeInbound = (id: number) => `/admin/nodes/${id}?tab=inbound`
  * below and not even an exempt account gets past them, so they are listed here, but they are written in each node's Inbound tab.
  * Only the rules in force or reporting are listed; each row opens the node's tab where it is edited.
  */
-export default function SourceRulesStep({ nodeName, onlyWhenActive = false }: { nodeName: (id: number) => string | undefined; onlyWhenActive?: boolean }) {
+export default function SourceRulesStep({ nodeName, onlyWhenActive = false, last = false }: { nodeName: (id: number) => string | undefined; onlyWhenActive?: boolean; last?: boolean }) {
   const { t } = useTranslation(['admin'])
   const rules = useDestSourceRules(useQueryScope())
   // A failed or missing read draws nothing: the policies below are the page, this step is a pointer.
@@ -24,7 +24,7 @@ export default function SourceRulesStep({ nodeName, onlyWhenActive = false }: { 
   // Beside the template gallery (no policies yet) the step is only worth its room when a rule is actually in force.
   if (onlyWhenActive && items.length === 0) return null
   return (
-    <RailStep n={0}
+    <RailStep n={0} last={last}
       title={items.length > 0 ? t(`${P}source`, { count: items.length }) : t(`${P}source_none`)}
       caption={t(`${P}source_caption`)}
       actions={items.length === 0 ? <Button size="sm" variant="outline" render={<Link to="/admin/nodes" />}>{t(`${P}source_open_nodes`)}</Button> : undefined}>

@@ -119,11 +119,11 @@ describe('the row menu of a line', () => {
   it('lists the line items, then the node items, then Delete line, in that order; a direct row has no line enable and no delete', async () => {
     mountPage(<NodesPage />)
     await menuOf('Node1 · GZ')
-    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit line', 'Multiplier…', 'Disable line', 'Disable node', 'Move to…', 'Edit node', 'Open node', 'Delete line'])
+    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit line', 'Multiplier…', 'Disable line', 'Disable node', 'Move to…', 'Edit node', 'Delete line'])
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     await menuOf('Node1')
-    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit direct line', 'Multiplier…', 'Add relay line…', 'Disable node', 'Move to…', 'Edit node', 'Open node'])
+    expect((await screen.findAllByRole('menuitem')).map(i => i.textContent)).toEqual(['Edit node', 'Multiplier…', 'Add relay line…', 'Disable node', 'Move to…'])
   })
 })
 

@@ -24,6 +24,7 @@ export function OptionCombobox<V extends string | number>({ options, value, onCh
   'aria-label'?: string
   'aria-describedby'?: string
   'aria-invalid'?: boolean | 'true' | 'false'
+  'aria-required'?: boolean
 }) {
   return (
     <Combobox

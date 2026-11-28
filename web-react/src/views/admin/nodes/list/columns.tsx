@@ -5,9 +5,11 @@ import { LandingColorBar } from '@/components/diagram/LandingColorBar'
 import type { LandingColor } from '@/components/diagram/landingColor'
 import { Link } from 'react-router'
 import { formatDualTz } from '@/utils/datetime'
+import { regionLabel } from '@/utils/regions'
+import i18n from '@/i18n'
 import type { PathLabels } from '../shared/pathOf'
 import { statusOf } from '../shared/statusOf'
-import { AddressCell, FactorCell, NameCell, PathCell, RowMenu, StatusCell, TagsCell } from './cells'
+import { AddressCell, FactorCell, NameCell, PathCell, RowMenu, StatusCell, SwitchCell, TagsCell } from './cells'
 import type { ListRow, TreeItem } from './types'
 
 export interface ColumnCtx {
@@ -52,7 +54,7 @@ export function orderColumns(c: ColumnCtx): ColumnDef<ListRow, any>[] {
     { id: 'landing_server', header: t('nodes.col.landing_server'), ...sortless, meta: { label: t('nodes.col.landing_server'), defaultHidden: true },
       cell: ctx => ctx.row.original.row.landing?.panel_name ?? '' },
     { id: 'region', header: t('nodes.col.region'), ...sortless, meta: { label: t('nodes.col.region'), defaultHidden: true },
-      cell: ctx => ctx.row.original.row.landing?.region ?? '' },
+      cell: ctx => regionLabel(ctx.row.original.row.landing?.region ?? '', i18n.resolvedLanguage ?? 'en') },
     { id: 'tags', header: t('nodes.col.tags'), ...sortless, meta: { label: t('nodes.col.tags'), defaultHidden: true },
       cell: ctx => <TagsCell item={ctx.row.original} /> },
     { id: 'id', header: t('nodes.col.id'), ...sortless, meta: { label: t('nodes.col.id'), defaultHidden: true, className: 'font-mono text-muted-foreground' },
@@ -61,6 +63,8 @@ export function orderColumns(c: ColumnCtx): ColumnDef<ListRow, any>[] {
       cell: ctx => ctx.row.original.node?.desired_protocol ?? ctx.row.original.node?.protocol ?? '—' },
     { id: 'checked_at', header: t('nodes.col.checked_at'), ...sortless, meta: { label: t('nodes.col.checked_at'), defaultHidden: true },
       cell: ctx => formatDualTz(ctx.row.original.row.health?.checked_at, c.tz) },
+    { id: 'enabled', header: t('nodes.col.enabled'), ...sortless, meta: { label: t('nodes.col.enabled'), align: 'right', className: 'w-16' },
+      cell: ctx => <SwitchCell item={ctx.row.original} items={c.menuOf(ctx.row.original)} /> },
     { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: t('nodes.col.actions'), className: 'w-10' },
       cell: ctx => <RowMenu items={c.menuOf(ctx.row.original)} name={ctx.row.original.row.name} /> },
   ]

@@ -75,7 +75,10 @@ export function LineDialog({ item, newLine, editor, nav, siblings, colors, label
       status={item && !newLine && <StatusCell item={item} />}
       actions={editor ? (item && !newLine && <Button size="sm" variant="outline" onClick={onBack}>{t('nodes.line.back_to_view')}</Button>) : item && (
         <>
-          {canEdit && <Button size="sm" onClick={onEdit}>{t(direct ? 'nodes.action.edit_direct' : 'nodes.action.edit_line')}</Button>}
+          {/* A direct line is the node itself: its edit is the node's full editor, not the small form of the line's own settings. */}
+          {canEdit && (direct && nodeHref
+            ? <Button size="sm" render={<Link to={`${nodeHref}?tab=general`} />}>{t('nodes.action.edit_node_page')}</Button>
+            : <Button size="sm" onClick={onEdit}>{t('nodes.action.edit_line')}</Button>)}
           {menu.length > 0 && <MoreMenu items={menu} label={t('nodes.action.row_menu', { name: row?.name ?? '' })} />}
         </>
       )}

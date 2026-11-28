@@ -142,7 +142,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const {
     data, columns, getRowId, mode = 'client', total: serverTotal, pagination = true, pageSizeOptions,
     columnMenu = true, selectable, rowLabel, bulkActions, onRowOpen, activeRowId, rowClassName, toolbar,
-    loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className,
+    loading, error, onRetry, empty, onReorder, getSubRows, defaultExpanded, renderCard, maxHeight: maxHeightProp, className, flush = false,
     rowOptions, onRowHover, highlightedIds, relatedIds, tableId,
   } = props
   const { t, i18n } = useSpacedT()
@@ -637,14 +637,14 @@ export function DataTable<T>(props: DataTableProps<T>) {
   return (
     <div data-slot="data-table" className={cn('flex min-w-0 flex-col', className)}>
       {(toolbar || columnMenu) && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className={cn('flex flex-wrap items-center gap-2', flush ? 'px-3 py-3' : 'mb-3')}>
           <div className="min-w-0 flex-1">{toolbar}</div>
           {columnMenu && !cards && <ColumnMenu table={table} onResetWidths={resetWidths} canResetWidths={canResetWidths} />}
         </div>
       )}
 
       {/* Windowed with the page as scroller: clip, not hidden. A hidden-overflow ancestor is a scroll container and the sticky header would stick to it, not to the page. */}
-      <div className={cn('rounded-xl border bg-card', windowed && !ownScroller ? 'overflow-clip' : 'overflow-hidden')}>
+      <div className={cn(flush ? 'border-t' : 'rounded-xl border bg-card', windowed && !ownScroller ? 'overflow-clip' : 'overflow-hidden')}>
         {cards ? (
           <ul aria-label={props['aria-label']} aria-busy={loading || undefined} className="divide-y">
             {selectable && rows.length > 0 && (

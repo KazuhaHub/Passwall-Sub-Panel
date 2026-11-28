@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { destErrorOf, isDestUnavailable, type DestPolicy, type DestState, type DestTemplate } from '@/api/accessControl'
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { IconAdd } from '@/lib/icons'
 import {
   useDeleteDestPolicy, useDestCatalog, useDestLists, useDestPolicies, useDestStatus, useInstantiateDestTemplate,
-  useReorderDestPolicies, useUpdateDestPolicy,
+  useDestSourceRules, useReorderDestPolicies, useUpdateDestPolicy,
 } from '@/query/accessControl'
 import { useAllGroups } from '@/query/groups'
 import { useAllNodes } from '@/query/nodes'
@@ -31,6 +31,7 @@ import { formOf, inputOf } from './policyForm'
 import PolicyRow, { type RowMove } from './PolicyRow'
 import PolicyStepList from './PolicyStepList'
 import { RailStep } from './PolicyRail'
+import { PolicySteps, type StepEntry } from './PolicySteps'
 import QuotaMeters from './QuotaMeters'
 import SourceRulesStep from './SourceRulesStep'
 import TemplateGrid, { TemplateChooser, UnavailableDialog } from './TemplateGrid'
@@ -60,6 +61,12 @@ const HIGHLIGHT_MS = 2000
  * which policy a hit is credited to within one action. A policy is always
  * written whole with the `updated_at` it was read at (R18).
  */
+/** The rail step a policy is listed in: allow, or block split by its state (report-only has a step of its own). */
+function stepOfPolicy(p: DestPolicy, data: { allow: DestPolicy[] }): 'allow' | 'block' | 'report' {
+  if (data.allow.some(a => a.id === p.id)) return 'allow'
+  return splitBlockByState([p]).report.length > 0 ? 'report' : 'block'
+}
+
 export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLists, onOpenAllowlist }: PoliciesTabProps) {
   const { t, i18n } = useTranslation(['admin'])
   const scope = useQueryScope()
@@ -77,6 +84,10 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const reorder = useReorderDestPolicies(scope)
   const instantiate = useInstantiateDestTemplate(scope)
   const gate = useFirstPublishGate()
+  const sourceRules = useDestSourceRules(scope)
+  const [params, setParams] = useSearchParams()
+  const stepParam = params.get('step')
+  const selectStep = (id: string) => setParams(prev => { const out = new URLSearchParams(prev); out.set('step', id); return out }, { replace: true })
   const enableScopeOf = useEnableScopeText()
 
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -103,6 +114,10 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
   const handled = useRef<string | null>(null)
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current) }, [])
+  // Scrolled to after the render that shows it: in the split view its step is drawn only once the address names it.
+  useEffect(() => {
+    if (highlight !== null) document.querySelector(`[data-policy-id="${highlight}"]`)?.scrollIntoView?.({ block: 'center' })
+  }, [highlight])
   useEffect(() => {
     const nav = location.state as AccessNavState | null
     if (!nav || (nav.openPolicy === undefined && nav.highlightPolicy === undefined) || !policies.data) return
@@ -115,10 +130,13 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       void navigate(policyPath(target.id), { replace: true, state: accessReturnState(location.pathname, location.search) })
       return
     }
-    void navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
+    // The step the policy is in is written to the address with the same replace, so the split view opens on it and
+    // stays there after the highlight fades (a second, separate write could race this one).
+    const search = new URLSearchParams(location.search)
+    if (target) search.set('step', stepOfPolicy(target, policies.data))
+    void navigate({ pathname: location.pathname, search: search.toString() ? `?${search}` : '' }, { replace: true, state: null })
     if (!target) return
     setHighlight(target.id)
-    document.querySelector(`[data-policy-id="${target.id}"]`)?.scrollIntoView?.({ block: 'center' })
     if (highlightTimer.current) clearTimeout(highlightTimer.current)
     highlightTimer.current = setTimeout(() => { setHighlight(null); highlightTimer.current = null }, HIGHLIGHT_MS)
   }, [location, navigate, policies.data, all])
@@ -286,6 +304,74 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
       aria-label={t(`${P}rail.add_${k}_aria`)}><IconAdd />{t(`${P}rail.add_${k}`)}</Button>
   )
 
+  const renderStep = (s: (typeof steps)[number], last: boolean): ReactNode => {
+    switch (s.id) {
+      case 'allow':
+        return <RailStep key={s.id} n={s.n} last={last} title={t(`${P}rail.allow`)} badge={stepBadge(data.allow.length)} caption={stepCaption(t(`${P}rail.allow_caption`), 'allow')} actions={addButton('allow')}>{renderSection('allow', t(`${P}rail.allow`))}</RailStep>
+      case 'exempt':
+        return (
+          <RailStep key={s.id} n={s.n} last={last}
+            title={data.exemptions.count > 0 ? t(`${P}rail.exempt`, { count: data.exemptions.count }) : t(`${P}rail.exempt_none`)}
+            caption={t(`${P}rail.exempt_caption`)}
+            actions={<Button size="sm" variant="outline" onClick={onOpenExemptions}>{t(`${P}rail.manage`)}</Button>} />
+        )
+      case 'block':
+        return <RailStep key={s.id} n={s.n} last={last} title={t(`${P}rail.block`)} badge={stepBadge(split.enforced.length)} caption={stepCaption(null, 'block')} actions={addButton('block')}>{renderSection('block', t(`${P}rail.block`))}</RailStep>
+      case 'allowlist':
+        return (
+          <RailStep key={s.id} n={s.n} last={last}
+            title={data.allowlist_groups.length > 0 ? t(`${P}rail.allowlist_count`, { count: data.allowlist_groups.length }) : t(`${P}rail.allowlist_none`)}
+            caption={t(`${P}rail.allowlist_caption`)}
+            actions={<Button size="sm" variant="outline" onClick={() => onOpenAllowlist()}>{t(`${P}rail.allowlist_open`)}</Button>}>
+            {data.allowlist_groups.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {data.allowlist_groups.map(g => (
+                  <button key={g.group_id} type="button" onClick={() => onOpenAllowlist(g.group_id)} aria-label={g.name}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-muted px-3 py-1 text-left outline-none hover:bg-muted/70 focus-visible:ring-3 focus-visible:ring-ring/50">
+                    <span className="text-sm [overflow-wrap:anywhere]">{g.name}</span>
+                    <StateBadge state={g.state} day={g.state_days + 1} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </RailStep>
+        )
+      case 'report':
+        return (
+          <RailStep key={s.id} n={s.n} last={last} title={t(`${P}rail.report`)} badge={stepBadge(split.report.length)} caption={(
+            <>
+              {stepCaption(t(`${P}rail.report_caption`), 'report')}
+              {shed > 0 && <span data-testid="rail-report-not-deployed">{t(`${P}row.not_deployed_nodes`, { count: shed })}</span>}
+            </>
+          )} actions={addButton('report')}>
+            {renderSection('report', t(`${P}rail.report`))}
+          </RailStep>
+        )
+      default:
+        return <RailStep key={s.id} n={s.n} title={t(`${P}rail.rest`)} last={last} />
+  }
+  }
+
+  const sourceCount = (sourceRules.data?.items ?? []).filter(r => r.state !== 'off' && (r.countries.length > 0 || r.cidrs.length > 0)).length
+  const navLabel: Record<string, string> = {
+    allow: t(`${P}rail.allow`), exempt: t(`${P}rail.nav_exempt`), block: t(`${P}rail.block`),
+    allowlist: t(`${P}rail.nav_allowlist`), report: t(`${P}rail.report`),
+  }
+  const countOf: Record<string, number> = {
+    allow: data.allow.length, exempt: data.exemptions.count, block: split.enforced.length,
+    allowlist: data.allowlist_groups.length, report: split.report.length,
+  }
+  const stepEntries: StepEntry[] = [
+    // Step 0 is drawn only once its read answered (a failed read leaves the policies as the page).
+    ...(sourceRules.data ? [{ id: 'source', n: 0, label: t(`${P}rail.nav_source`), count: sourceCount,
+      render: (last: boolean) => <SourceRulesStep nodeName={id => nodeName.get(id)} last={last} /> }] : []),
+    ...steps.map(st => ({ id: st.id, n: st.n, label: navLabel[st.id] ?? t(`${P}rail.nav_rest`), count: countOf[st.id], render: (last: boolean) => renderStep(st, last) })),
+  ]
+  // The step in the address (a link from the records writes the step of the policy it points at); else the first step
+  // that holds something, so the page does not open on an empty step.
+  const firstFull = stepEntries.find(e => e.id !== 'exempt' && (e.count ?? 0) > 0)?.id ?? 'block'
+  const selectedStep = stepEntries.some(e => e.id === stepParam) ? stepParam! : firstFull
+
   return (
     <div>
       <div className="mb-4">
@@ -309,55 +395,7 @@ export default function PoliciesTab({ onOpenExemptions, onOpenSettings, onGoToLi
               <TemplateMenu catalog={catalog.data} onBlank={() => addIn('block')}
                 onUse={useTemplate} onShowUnavailable={() => setUnavailableOpen(true)} />
             </div>
-            <SourceRulesStep nodeName={id => nodeName.get(id)} />
-            {steps.map((s, i) => {
-              const last = i === steps.length - 1
-              switch (s.id) {
-                case 'allow':
-                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.allow`)} badge={stepBadge(data.allow.length)} caption={stepCaption(t(`${P}rail.allow_caption`), 'allow')} actions={addButton('allow')}>{renderSection('allow', t(`${P}rail.allow`))}</RailStep>
-                case 'exempt':
-                  return (
-                    <RailStep key={s.id} n={s.n}
-                      title={data.exemptions.count > 0 ? t(`${P}rail.exempt`, { count: data.exemptions.count }) : t(`${P}rail.exempt_none`)}
-                      caption={t(`${P}rail.exempt_caption`)}
-                      actions={<Button size="sm" variant="outline" onClick={onOpenExemptions}>{t(`${P}rail.manage`)}</Button>} />
-                  )
-                case 'block':
-                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.block`)} badge={stepBadge(split.enforced.length)} caption={stepCaption(null, 'block')} actions={addButton('block')}>{renderSection('block', t(`${P}rail.block`))}</RailStep>
-                case 'allowlist':
-                  return (
-                    <RailStep key={s.id} n={s.n}
-                      title={data.allowlist_groups.length > 0 ? t(`${P}rail.allowlist_count`, { count: data.allowlist_groups.length }) : t(`${P}rail.allowlist_none`)}
-                      caption={t(`${P}rail.allowlist_caption`)}
-                      actions={<Button size="sm" variant="outline" onClick={() => onOpenAllowlist()}>{t(`${P}rail.allowlist_open`)}</Button>}>
-                      {data.allowlist_groups.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {data.allowlist_groups.map(g => (
-                            <button key={g.group_id} type="button" onClick={() => onOpenAllowlist(g.group_id)} aria-label={g.name}
-                              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-muted px-3 py-1 text-left outline-none hover:bg-muted/70 focus-visible:ring-3 focus-visible:ring-ring/50">
-                              <span className="text-sm [overflow-wrap:anywhere]">{g.name}</span>
-                              <StateBadge state={g.state} day={g.state_days + 1} />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </RailStep>
-                  )
-                case 'report':
-                  return (
-                    <RailStep key={s.id} n={s.n} title={t(`${P}rail.report`)} badge={stepBadge(split.report.length)} caption={(
-                      <>
-                        {stepCaption(t(`${P}rail.report_caption`), 'report')}
-                        {shed > 0 && <span data-testid="rail-report-not-deployed">{t(`${P}row.not_deployed_nodes`, { count: shed })}</span>}
-                      </>
-                    )} actions={addButton('report')}>
-                      {renderSection('report', t(`${P}rail.report`))}
-                    </RailStep>
-                  )
-                default:
-                  return <RailStep key={s.id} n={s.n} title={t(`${P}rail.rest`)} last={last} />
-              }
-            })}
+            <PolicySteps label={t(`${P}rail.steps_aria`)} entries={stepEntries} selected={selectedStep} onSelect={selectStep} />
           </>
         )}
 
