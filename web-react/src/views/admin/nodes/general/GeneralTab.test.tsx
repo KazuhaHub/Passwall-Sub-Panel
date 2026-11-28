@@ -19,15 +19,23 @@ function open(over: Parameters<typeof landing>[1] = {}, onDirtyChange = vi.fn())
 
 beforeEach(() => toast.mockReset())
 
+/** The region is a country picker: type part of the name, then choose the country. */
+async function pickRegion(name: string) {
+  const input = screen.getByLabelText(/Region/)
+  fireEvent.change(input, { target: { value: name } })
+  fireEvent.keyDown(input, { key: 'ArrowDown' })
+  fireEvent.click(await screen.findByRole('option', { name: new RegExp(name) }))
+}
+
 describe('General tab', () => {
   it('saves the four fields and the current flow, and nothing that belongs to a line, the exit or the order', async () => {
     open()
     fireEvent.change(await screen.findByLabelText(/Display name/), { target: { value: 'Taipei 01' } })
-    fireEvent.change(screen.getByLabelText(/Region/), { target: { value: 'TW-N' } })
+    await pickRegion('Taiwan')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(metadataPuts()).toHaveLength(1))
     // `relays` absent keeps every line and the direct line's switch; `flow` must be sent or the server clears it.
-    expect(metadataPuts()[0][1]).toEqual({ display_name: 'Taipei 01', server_address: 'land.example', region: 'TW-N', tags: ['premium'], flow: 'xtls-rprx-vision' })
+    expect(metadataPuts()[0][1]).toEqual({ display_name: 'Taipei 01', server_address: 'land.example', region: 'TW', tags: ['premium'], flow: 'xtls-rprx-vision' })
     expect(api.put).toHaveBeenCalledTimes(1)
   })
 
@@ -53,7 +61,7 @@ describe('General tab', () => {
     open()
     await waitFor(() => expect(screen.getByTestId('node-groups').textContent).toContain('VIP'))
     expect(screen.getByTestId('node-groups-removed').textContent).toContain('Staff')
-    fireEvent.change(screen.getByLabelText(/Region/), { target: { value: 'JP' } })
+    await pickRegion('Japan')
     await waitFor(() => expect(api.post.mock.calls.at(-1)![1]).toMatchObject({ region: 'JP', relays: [{ id: 'F1', region: 'CN', tags: ['cmcc'] }] }))
   })
 

@@ -45,7 +45,7 @@ describe('create page', () => {
     const router = mount()
     // Step 1: the inbound and the basics, prefilled from the server.
     expect(((await screen.findByLabelText(/Display name/)) as HTMLInputElement).value).toBe('server')
-    expect((screen.getByLabelText(/Region/) as HTMLInputElement).value).toBe('US')
+    expect((screen.getByLabelText(/Region/) as HTMLInputElement).value).toMatch(/United States · US$/)
     const sni = screen.getByLabelText(/Reality server names|serverNames/i) as HTMLInputElement
     const target = screen.getByLabelText(/Reality dest/) as HTMLInputElement
     const previous = sni.value

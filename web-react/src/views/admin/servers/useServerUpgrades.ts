@@ -33,9 +33,14 @@ function markBusy(b: Busy, ids: number[]): () => void {
 }
 /** Whether an upgrade or batch action started anywhere (the list or the server's page) is still running on this server. */
 export function useServerBusy(id: number): boolean {
+  return useBusyServers().has(id)
+}
+
+/** Every server with an upgrade or batch action in flight, for a list that gates each row's menu. */
+export function useBusyServers(): ReadonlySet<number> {
   const b = busyFor(useQueryClient())
   const subscribe = (w: () => void) => { b.watchers.add(w); return () => { b.watchers.delete(w) } }
-  return useSyncExternalStore(subscribe, () => b.snapshot, () => b.snapshot).has(id)
+  return useSyncExternalStore(subscribe, () => b.snapshot, () => b.snapshot)
 }
 
 /**

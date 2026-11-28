@@ -140,6 +140,7 @@
     "saved": "已保存",
     "panel_path_sso_notice": "面板路径已更新；如启用了 SSO，请同步更新身份提供商中登记的回调地址。",
     "scope": {
+      "applies_to": "适用于",
       "audience": "适用范围",
       "all_users": "所有用户（全局默认）",
       "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
@@ -3358,7 +3359,8 @@
       "display_name_factor_hint": "提示：可使用 {{placeholder}}，订阅中会替换为直连线路的流量倍率（如 ×1.5）。",
       "traffic_factor": "流量倍率",
       "traffic_factor_direct": "直连线路流量倍率",
-      "region_search_placeholder": "选择或输入地区"
+      "region_search_placeholder": "搜索国家或地区",
+      "region_none": "没有匹配的国家或地区"
     },
     "action": {
       "recreate_inbound": "在服务器上重建入站",
@@ -3382,7 +3384,9 @@
       "row_menu": "“{{name}}”的操作",
       "set_multiplier": "倍率…",
       "add_relay_line": "添加中转线路…",
-      "edit_node_page": "编辑节点"
+      "edit_node_page": "编辑节点",
+      "node_switch": "启用或停用节点 {{name}}",
+      "line_switch": "启用或停用线路 {{name}}"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region",
@@ -3459,6 +3463,7 @@
       "landing_server": "落地服务器"
     },
     "col": {
+      "enabled": "启用",
       "line": "线路",
       "path": "路径",
       "address": "地址",

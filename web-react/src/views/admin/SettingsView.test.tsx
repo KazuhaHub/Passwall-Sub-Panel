@@ -153,9 +153,8 @@ describe('the risk policy lives in the risk center', () => {
       },
     })
     mountAdmin(<SettingsView />, '/admin/settings?tab=general&sub=reminders')
-    const audience = await screen.findByRole('combobox', { name: 'Audience' })
-    await screen.findByRole('option', { name: group.name })
-    fireEvent.change(audience, { target: { value: String(group.id) } })
+    fireEvent.click(await screen.findByRole('button', { name: /^Applies to/ }))
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: new RegExp(`^${group.name}`) }))
 
     expect(await screen.findByText('Notification thresholds')).toBeTruthy()
     expect(screen.getByText('Emergency access (over-limit break-glass)')).toBeTruthy()
@@ -165,21 +164,22 @@ describe('the risk policy lives in the risk center', () => {
   })
 })
 
-describe('the audience rail', () => {
+describe('the audience picker', () => {
   const scopeRead = { '/admin/groups/1/scope-settings': { overrides: { 'notify.expire_before_days': '5' }, overridable: ['notify.expire_before_days', 'security.emergency_access_enabled'] } }
 
-  it('lists All users first, then each group with a quiet count of its overrides, and the selected entry is marked', async () => {
+  it('picks the audience in the page header: All users first, then each group with a quiet count of its overrides, and the chosen one is checked', async () => {
     reads(scopeRead)
     mountAdmin(<SettingsView />, '/admin/settings?tab=general&sub=reminders')
-    const rail = (await screen.findByRole('heading', { name: 'Audience' })).closest('section')!
-    const entry = await within(rail).findByRole('button', { name: new RegExp(`^${group.name}`) })
-    await waitFor(() => expect(entry.textContent).toContain('1'))
-    expect(within(entry).getByText('1 override')).toBeTruthy()
-    const names = within(rail).getAllByRole('button').map(b => b.textContent ?? '')
+    const trigger = await screen.findByRole('button', { name: /^Applies to/ })
+    expect(trigger.textContent).toContain('All users (global default)')
+    fireEvent.click(trigger)
+    const entry = await screen.findByRole('menuitemradio', { name: new RegExp(`^${group.name}`) })
+    await waitFor(() => expect(entry.textContent).toContain('1 override'))
+    const names = screen.getAllByRole('menuitemradio').map(b => b.textContent ?? '')
     expect(names[0]).toBe('All users (global default)')
-    expect(within(rail).getByRole('button', { name: 'All users (global default)' }).getAttribute('aria-current')).toBe('true')
+    expect(screen.getByRole('menuitemradio', { name: 'All users (global default)' }).getAttribute('aria-checked')).toBe('true')
     fireEvent.click(entry)
-    await waitFor(() => expect(entry.getAttribute('aria-current')).toBe('true'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Applies to/ }).textContent).toContain(group.name))
     expect(await screen.findByText('Notification thresholds')).toBeTruthy()
   })
 

@@ -14,11 +14,11 @@ const handlers = (): RowActionHandlers => ({
 const ids = (r: OrderRow, c = caps()) => rowMenuItems({ row: r, caps: c, handlers: handlers(), t }).map(i => i.id)
 
 describe('a line row menu', () => {
-  it('offers the core actions on a direct row, with Add relay line, in order', () => {
-    expect(ids(row('direct'))).toEqual(['edit-line', 'multiplier', 'add-line', 'toggle-node', 'move', 'edit-node', 'open-node'])
+  it('offers the core actions on a direct row, its edit being the full node editor, with Add relay line, in order', () => {
+    expect(ids(row('direct'))).toEqual(['edit-node', 'multiplier', 'add-line', 'toggle-node', 'move'])
   })
   it('offers the line and the node switch on a relay row, and delete last', () => {
-    expect(ids(row('r1'))).toEqual(['edit-line', 'multiplier', 'toggle-line', 'toggle-node', 'move', 'edit-node', 'open-node', 'delete-line'])
+    expect(ids(row('r1'))).toEqual(['edit-line', 'multiplier', 'toggle-line', 'toggle-node', 'move', 'edit-node', 'delete-line'])
   })
   it('does not offer the multiplier for a row whose line cannot be addressed', () => {
     expect(ids(row('direct', { landing: { enabled: true, name: 'L' } as never }))).not.toContain('multiplier')

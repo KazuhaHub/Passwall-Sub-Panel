@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { CopyText } from '@/components/common/CopyButton'
 import { MoreMenu, type MoreMenuItem } from '@/components/common/MoreMenu'
 import { StatusBadge } from '@/components/common/StatusBadge'
@@ -60,6 +61,24 @@ export function TagsCell({ item }: { item: ListRow }) {
       {tags.slice(0, 3).map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
       {tags.length > 3 && <span className="text-xs text-muted-foreground">+{tags.length - 3}</span>}
     </span>
+  )
+}
+
+/**
+ * The row's on/off switch, so a line or a node is turned on or off without opening a menu. It is the same action the
+ * row's menu offers (and gated the same way, since it is read from that menu): on a relay row the LINE's switch, on a
+ * direct row the NODE's (the direct line is the node). A row whose menu offers neither shows nothing.
+ */
+export function SwitchCell({ item, items }: { item: ListRow; items: MoreMenuItem[] }) {
+  const t = useNodesT()
+  const row = item.row
+  const direct = row.line_id === 'direct'
+  const action = items.find(i => i.id === (direct ? 'toggle-node' : 'toggle-line'))
+  if (!action?.onSelect) return null
+  const on = direct ? row.landing?.enabled !== false : row.enabled !== false
+  return (
+    <Switch size="sm" checked={on} disabled={action.disabled} aria-label={t(direct ? 'nodes.action.node_switch' : 'nodes.action.line_switch', { name: row.name })}
+      onCheckedChange={next => { if (next !== on) action.onSelect?.() }} onClick={e => e.stopPropagation()} />
   )
 }
 

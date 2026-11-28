@@ -33,7 +33,9 @@ import { NEW_SERVER_PATH, serverPath } from './serverRoutes'
 import { ServersBanners } from './ServersBanners'
 import { useReleaseInfo } from './useReleaseInfo'
 import { useServerProbes } from './useServerProbes'
-import { useServerUpgrades } from './useServerUpgrades'
+import { useBusyServers, useServerUpgrades } from './useServerUpgrades'
+import { CoreDialog } from './dialogs/CoreDialog'
+import { NativeAgentUpgradeDialog } from './dialogs/NativeAgentUpgradeDialog'
 
 const NONE: Server[] = []
 const DEFAULT_SORT = 'id-asc'
@@ -120,9 +122,14 @@ export default function ServersPage() {
   const openServer = (s: Server) => void navigate(...pageArgs(serverPath(s.id)))
   const openSettings = (s: Server) => void navigate(...pageArgs(`${serverPath(s.id)}?tab=settings`))
   function pageArgs(to: string): [string, { state: unknown }] { const l = link(to); return [l.to, { state: l.state }] }
+  const busyIds = useBusyServers()
+  const [upgradeTarget, setUpgradeTarget] = useState<Server | null>(null)
+  const [coreTarget, setCoreTarget] = useState<Server | null>(null)
+  const [coreBusyId, setCoreBusyId] = useState<number | null>(null)
   const menuOf = (s: Server) => rowMenu(s, {
     open: openServer, editSettings: openSettings, metrics: setMetricsTarget, remove: setDeleteTarget,
-  }, { t })
+    upgradeAgent: setUpgradeTarget, upgradePanel: x => void up.runUpgradePanel(x), core: setCoreTarget,
+  }, { t, busy: up.upgrading === s.id || coreBusyId === s.id || busyIds.has(s.id) })
 
   const ctx: ServersCtx = {
     probeOf: probes.stateFor, accessOf, countsOf: (s: Server) => counts?.get(s.id) ?? (counts ? { nodes: 0, lines: 0 } : undefined),
@@ -206,6 +213,12 @@ export default function ServersPage() {
         }}
       />
 
+      <NativeAgentUpgradeDialog server={upgradeTarget} onClose={() => { setUpgradeTarget(null); refresh() }} />
+      {coreTarget && (
+        <CoreDialog key={coreTarget.id} server={coreTarget} onClose={() => setCoreTarget(null)}
+          onSelected={(s, engine, version) => mutateItems(prev => prev.map(i => (i.id === s.id ? { ...i, desired_core_engine: engine, desired_core_version: version } : i)))}
+          onUpgraded={s => void probes.probeServer(s)} onBusy={setCoreBusyId} />
+      )}
       <NodeMetricsDialog server={metricsTarget} open={metricsTarget !== null} onClose={() => setMetricsTarget(null)} />
       {accessNode && <ServerAccessDialog node={accessNode.node} serverName={accessNode.name} onClose={() => setAccessNode(null)} />}
       {deleteTarget && (

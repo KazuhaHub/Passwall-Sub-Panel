@@ -1,7 +1,10 @@
 import { Field } from '@/components/form/Field'
 import { TagsField } from '@/components/form/TagsField'
 import { Input } from '@/components/ui/input'
-import { SuggestInput } from '../../settings/parts'
+import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { OptionCombobox } from '@/components/OptionCombobox'
+import { regionOptions as allRegions } from '@/utils/regions'
 import type { PreviewHint } from '@/hooks/useDraftPreview'
 import { validateHost, validateName } from '@/utils/validators'
 import { useNodesT } from '../shared/useNodesT'
@@ -28,6 +31,12 @@ export function generalProblems(d: GeneralDraft): Partial<Record<GeneralField, s
   return out
 }
 
+/** The region as the picker holds it: a code upper-cased, anything else trimmed, blank as nothing chosen. */
+export function regionValue(r: string): string | null {
+  const v = r.trim()
+  return v === '' ? null : /^[A-Za-z]{2}$/.test(v) ? v.toUpperCase() : v
+}
+
 /** The regions nodes already use, most used first (ties alphabetical); blank values are skipped. */
 export function regionOptionsOf(nodes: readonly { region?: string }[]): string[] {
   const count = new Map<string, number>()
@@ -45,14 +54,20 @@ export function GeneralFields({ draft, patch, error, blur, tagOptions, regionOpt
   error: (f: GeneralField) => string | undefined
   blur: (f: GeneralField) => void
   tagOptions: readonly string[]
-  /** Regions in use, offered as suggestions; any other text is still accepted. */
+  /** Regions in use (ISO codes), listed first in the country picker. */
   regionOptions?: readonly string[]
   /** The groups that would see the node with these values; absent on the create page (nothing is saved yet to compare with). */
   visible?: PreviewHint
   removed?: string[]
 }) {
   const t = useNodesT()
+  const { i18n } = useTranslation()
   const set = patch
+  const regions = useMemo(() => {
+    const cur = regionValue(draft.region)
+    const used = cur && !regionOptions.includes(cur) ? [...regionOptions, cur] : regionOptions
+    return allRegions(used, i18n.resolvedLanguage ?? 'en')
+  }, [regionOptions, draft.region, i18n.resolvedLanguage])
   return (
     <div className="flex flex-col gap-4">
       <Field label={t('nodes.field.display_name')} required hint={t('nodes.field.display_name_factor_hint', { placeholder: '{{ factor }}' })} error={error('display_name') && t(error('display_name')!)}>
@@ -61,10 +76,11 @@ export function GeneralFields({ draft, patch, error, blur, tagOptions, regionOpt
       <Field label={t('nodes.field.server_address')} required error={error('server_address') && t(error('server_address')!)}>
         <Input id={GENERAL_ID.server_address} value={draft.server_address} onChange={e => set({ server_address: e.target.value })} onBlur={() => blur('server_address')} />
       </Field>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[18rem_minmax(0,1fr)]">
         <Field label={t('nodes.field.region')} required error={error('region') && t(error('region')!)}>
-          <SuggestInput id={GENERAL_ID.region} value={draft.region} options={regionOptions} placeholder={t('nodes.field.region_search_placeholder')}
-            onChange={region => set({ region })} onBlur={() => blur('region')} />
+          <OptionCombobox id={GENERAL_ID.region} options={regions} value={regionValue(draft.region)}
+            placeholder={t('nodes.field.region_search_placeholder')} emptyText={t('nodes.field.region_none')}
+            onChange={region => { set({ region: region ?? '' }); blur('region') }} />
         </Field>
         <Field label={t('nodes.field.tags')}>
           {p => <TagsField id={p.id} aria-labelledby={p.labelId} value={draft.tags} suggestions={tagOptions} onChange={tags => set({ tags })} />}

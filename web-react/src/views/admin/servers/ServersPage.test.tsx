@@ -27,14 +27,15 @@ it('does not re-probe upstream servers when the list is merely refreshed', async
   expect(probes()).toBe(before)
 })
 
-it('keeps the row menu to open, edit settings, host metrics and delete', async () => {
+it('keeps the row menu to open, edit settings, host metrics, the upgrades and delete', async () => {
   const native = { ...server, panel_type: 'psp', url: 'psp://agt_1' }
   installReads({ '/admin/servers': list([native, { ...server, id: 2, name: 'upstream' }]) })
   mount(<ServersPage />)
   await openMenuOf(native as never)
   expect(screen.getAllByRole('menuitem').map(i => i.textContent)).toEqual([
-    'admin:servers.action.open', 'admin:servers.action.edit_settings', 'admin:nodeMetrics.title', 'admin:servers.action.delete',
-  ])
+    'admin:servers.action.open', 'admin:servers.action.edit_settings', 'admin:nodeMetrics.title',
+    'admin:servers.agent_upgrade.action', 'admin:servers.action.select_core', 'admin:servers.action.delete',
+  ].map(x => expect.stringContaining(x)))
   fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
   await openMenuOf({ ...server, name: 'upstream' } as never)
   // Host metrics belong to a Passwall Node only.

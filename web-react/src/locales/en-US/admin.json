@@ -143,6 +143,7 @@
     "saved": "Saved",
     "panel_path_sso_notice": "The panel path was updated. If SSO is enabled, update the callback URLs registered with your identity provider.",
     "scope": {
+      "applies_to": "Applies to",
       "audience": "Audience",
       "all_users": "All users (global default)",
       "override_hint": "Override the settings below for this group; un-overridden items inherit the global default.",
@@ -3369,7 +3370,8 @@
       "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the direct line's traffic multiplier (e.g. ×1.5) in subscriptions.",
       "traffic_factor": "Traffic multiplier",
       "traffic_factor_direct": "Direct line traffic multiplier",
-      "region_search_placeholder": "Pick or type a region"
+      "region_search_placeholder": "Search a country or region",
+      "region_none": "No matching country or region"
     },
     "action": {
       "recreate_inbound": "Recreate inbound on server",
@@ -3393,7 +3395,9 @@
       "row_menu": "Actions for {{name}}",
       "set_multiplier": "Multiplier…",
       "add_relay_line": "Add relay line…",
-      "edit_node_page": "Edit node"
+      "edit_node_page": "Edit node",
+      "node_switch": "Turn node {{name}} on or off",
+      "line_switch": "Turn line {{name}} on or off"
     },
     "validate": {
       "address_region_required": "Address and Region are required",
@@ -3470,6 +3474,7 @@
       "landing_server": "Landing server"
     },
     "col": {
+      "enabled": "On",
       "line": "Line",
       "path": "Path",
       "address": "Address",
