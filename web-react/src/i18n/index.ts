@@ -4,7 +4,7 @@ import { initReactI18next } from 'react-i18next'
 
 import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
 import { NAMESPACES, I18N_STATIC_OPTIONS, type Nested } from './options'
-import { BASE_LANGUAGE, createResources, type LocaleLoaders } from './resources'
+import { BASE_LANGUAGE, createResources, type LocaleLoaders, SHELL_NAMESPACES } from './resources'
 
 // Language-pack schema version, mirrors service/locale.Format on the backend.
 // The exported "base template" stamps this into `psp_language_pack`.
@@ -75,6 +75,10 @@ const resources = createResources({
   isBuiltin: isBuiltinLanguage,
   manifestReady: () => manifestReady,
   instance: i18n,
+  // Under vitest a view is mounted directly, without the shell route whose loader adds
+  // its namespace, so every page test that uses the real module would read raw keys.
+  // The test of the real boot (bootstrap.test.ts) asks for the app's behaviour instead.
+  eager: import.meta.env.MODE === 'test' && !(globalThis as { __PSP_I18N_APP_BOOT__?: boolean }).__PSP_I18N_APP_BOOT__ ? SHELL_NAMESPACES : [],
 })
 
 // loadBuiltinSource returns the RAW (nested, un-flattened) source JSON for a

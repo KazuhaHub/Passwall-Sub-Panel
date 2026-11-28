@@ -43,12 +43,14 @@ export interface ResourceDeps {
   /** Resolves once the manifest of uploaded packs has been folded into the supported list. */
   manifestReady: () => Promise<void>
   instance: Pick<I18n, 'hasResourceBundle' | 'addResourceBundle' | 'changeLanguage' | 'language' | 'resolvedLanguage'>
+  /** Namespaces to load from the first paint on top of BASE (none in the app; see index.ts for the one caller that sets it). */
+  eager?: readonly string[]
 }
 
 export function createResources(deps: ResourceDeps) {
   const { loaders, instance } = deps
   // BASE is needed from the first paint; a shell adds its own when it is entered.
-  const required = new Set<string>(BASE_NAMESPACES)
+  const required = new Set<string>([...BASE_NAMESPACES, ...(deps.eager ?? [])])
 
   async function loadBuiltinNamespace(lang: string, ns: string): Promise<Flat> {
     const loader = loaders[`/src/locales/${lang}/${ns}.json`]

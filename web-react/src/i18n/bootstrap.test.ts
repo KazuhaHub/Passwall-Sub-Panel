@@ -11,6 +11,9 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('@/api/i18n', () => api)
 
+// Boot as the app does: index.ts otherwise loads the shell namespaces up front under vitest, for page tests.
+;(globalThis as { __PSP_I18N_APP_BOOT__?: boolean }).__PSP_I18N_APP_BOOT__ = true
+
 async function freshBoot(lang: string) {
   vi.resetModules()
   localStorage.setItem('psp-lang', lang)
