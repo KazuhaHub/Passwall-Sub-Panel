@@ -1812,13 +1812,14 @@ func (a *App) pruneDestRows(ctx context.Context) {
 	count(metrics.DestPruneOrphans, n, err)
 }
 
-// runRollup re-emits EVERY hourly bucket (the hourly cleanup loop's
-// rollup-before-prune pass + first-run backfill).
+// runRollup is the hourly cleanup loop's rollup-before-prune pass: a full
+// backfill the first time in a process, afterwards only the buckets that can
+// have changed since the previous pass (rollup.RollupBeforePrune).
 func (a *App) runRollup(ctx context.Context) {
 	if a.rollup == nil {
 		return
 	}
-	if err := a.rollup.RollupOnce(ctx); err != nil {
+	if err := a.rollup.RollupBeforePrune(ctx); err != nil {
 		log.Warn("traffic rollup", "err", err)
 	}
 }

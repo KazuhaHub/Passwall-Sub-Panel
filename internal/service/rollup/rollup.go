@@ -58,8 +58,10 @@
 //     writes go through GORM's OnConflict upsert; re-running on the same raw rows
 //     reproduces the same values.
 //
-//   - Two passes: RollupOnce re-emits EVERY bucket from a full raw scan (hourly
-//     cleanup's rollup-before-prune pass + first-run backfill). RollupRecent emits
+//   - Three passes: RollupOnce re-emits EVERY bucket from a full raw scan (the
+//     backfill). RollupBeforePrune is the hourly cleanup's rollup-before-prune
+//     pass: RollupOnce the first time, afterwards only what changed since the
+//     previous pass. RollupRecent emits
 //     only buckets in the last few hours from a bounded raw window
 //     (withRecentRawWindow) — called every traffic poll to keep "today" live
 //     without re-scanning/re-writing the whole 7-day raw set each cycle.
@@ -70,6 +72,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -108,6 +111,11 @@ type Service struct {
 	// time.Now() (process TZ) with hourFloor() (UTC) fixtures was flaky in any
 	// non-UTC environment.
 	now func() time.Time
+
+	// lastComplete is when the last RollupBeforePrune pass that succeeded
+	// started (zero until the first one). See RollupBeforePrune.
+	mu           sync.Mutex
+	lastComplete time.Time
 }
 
 // New builds the rollup service. pollInterval is the traffic poll cadence; the
@@ -130,10 +138,66 @@ func heartbeatFor(pollInterval time.Duration) time.Duration {
 }
 
 // RollupOnce aggregates the raw user/node tables into their *_hourly tables,
-// re-emitting EVERY bucket. Idempotent (upsert). Used by the hourly cleanup
-// loop (rollup-before-prune) and first-run backfill.
+// re-emitting EVERY bucket from a full raw scan. Idempotent (upsert). It is the
+// backfill: RollupBeforePrune runs it as the first pass of a process.
 func (s *Service) RollupOnce(ctx context.Context) error {
 	return s.rollup(ctx, time.Time{})
+}
+
+// RollupBeforePrune is the hourly cleanup loop's rollup-before-prune pass.
+//
+// The first pass of a process is RollupOnce: the backfill, which also covers
+// whatever happened while the process was down. Every later pass emits only the
+// buckets since the previous pass that SUCCEEDED, less a margin, from a raw
+// window bounded the same way (withRecentRawWindow).
+//
+// Why that is enough: raw rows are only ever appended, with captured_at = the
+// poll's own clock. A pass that started at T has emitted every bucket its
+// samples reach. A sample that arrives after T changes a bucket only through
+// the segment from the sample before it, and a segment longer than the
+// heartbeat is dropped, so nothing before hourFloor(T - heartbeat) can change
+// again. Buckets older than that are final and were written by an earlier pass.
+//
+// The full pass every hour read all raw rows of the retention window into
+// memory and rewrote every bucket: about 100k rows today, tens of millions at a
+// few thousand users, and on SQLite it holds the only connection meanwhile.
+//
+// The mark moves only when a pass succeeds, so after any number of failed
+// passes the next one still starts from the last good one. A clock that went
+// backwards makes the mark meaningless and the pass is a full one again.
+//
+// A bucket at the old edge of the bounded window may have no sample at or
+// before its :00 inside that window. emitFromAccs then treats it as
+// left-incomplete and inserts it only if it is absent, so a bounded window can
+// never shrink a value an earlier pass wrote.
+func (s *Service) RollupBeforePrune(ctx context.Context) error {
+	started := s.now()
+	s.mu.Lock()
+	last := s.lastComplete
+	s.mu.Unlock()
+
+	var emitSince time.Time // zero = every bucket
+	if !last.IsZero() && !last.After(started) {
+		emitSince = last.Add(-beforePruneMargin(s.heartbeat))
+	}
+	if err := s.rollup(ctx, emitSince); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.lastComplete = started
+	s.mu.Unlock()
+	return nil
+}
+
+// beforePruneMargin is how far behind the previous pass RollupBeforePrune
+// starts emitting: the longest segment that can still reach back across that
+// pass (the heartbeat) plus the hour its first bucket starts in, and never less
+// than the window the per-poll pass keeps fresh.
+func beforePruneMargin(heartbeat time.Duration) time.Duration {
+	if m := heartbeat + time.Hour; m > rollupRecentEmitWindow {
+		return m
+	}
+	return rollupRecentEmitWindow
 }
 
 // RollupRecent aggregates the same tables but only re-emits buckets within the
