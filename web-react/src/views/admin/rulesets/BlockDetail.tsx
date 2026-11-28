@@ -178,7 +178,11 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
   const wanted = pending !== null && pending !== block.target ? pending : null
 
   return (
-    <section ref={root} aria-labelledby="rule-block-heading" className="@container flex min-w-0 flex-col gap-3">
+    // One card, the size of the group list beside it: the group's name, note and target, its filter row and its rules, so
+    // the two panes start and end on the same lines instead of the rules table starting a header's height lower.
+    <section ref={root} aria-labelledby="rule-block-heading" className="@container flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
+      <div className="flex min-w-0 flex-col gap-3 px-3 pt-3">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {phone && <IconButton label={t('admin:rules.blocks.back')} onClick={onBack}><IconArrowLeft /></IconButton>}
         <h2 id="rule-block-heading" className="min-w-0 text-base font-semibold break-words">{t('admin:rules.blocks.heading', { index: block.index + 1, target: heading })}</h2>
@@ -188,15 +192,15 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
       </header>
 
       {block.kind === 'text' ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 pb-3">
           <pre className="max-h-[50dvh] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
             {doc.lines.slice(block.start, block.end).map(l => l.raw.replace(/\r$/, '')).join('\n')}
           </pre>
           {!readOnly && <div><Button variant="outline" onClick={() => onEditText(doc.lines.slice(block.start, block.end).map(l => l.id))}>{t('admin:rules.matchers.edit_lines_as_text')}</Button></div>}
         </div>
-      ) : (
-        <>
-          {/* The note and the target side by side, labels on one line, once the group has the room (this column's own width, not the window's). */}
+      ) : null}
+      {/* The note and the target side by side, labels on one line, once the group has the room (this column's own width, not the window's). */}
+      {block.kind !== 'text' && (
           <div className="grid items-start gap-x-6 gap-y-3 @xl:grid-cols-[minmax(0,1fr)_minmax(16rem,24rem)]">
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex items-center gap-2">
@@ -229,7 +233,9 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             </div>
           )}
           </div>
-
+      )}
+      </div>
+      {block.kind !== 'text' && (
           <div ref={tableBox}>
           <DataTable<Row>
             tableId="admin.ruleSets.matchers"
@@ -242,7 +248,9 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             activeRowId={marked}
             pagination={false}
             columnMenu={false}
-            maxHeight={`calc(${PANE_HEIGHT} - ${above}px - ${DETAIL_TOOLBAR} - 1.75rem)`}
+            // Less the row the group list keeps under its own card, so the two cards end on the same line.
+            maxHeight={`calc(${PANE_HEIGHT} - ${above}px - ${DETAIL_TOOLBAR} - 2.5rem)`}
+            flush
             selectable={!readOnly}
             selection={checked}
             onSelectionChange={setChecked}
@@ -296,8 +304,10 @@ export function BlockDetail({ doc, block, choices, readOnly, query, phone, onBac
             )}
           />
           </div>
-          <p className="text-xs text-muted-foreground tabular-nums" role="status">{shown.length === rows.length ? '' : t('admin:rules.matchers.shown_of', { shown: shown.length, total: rows.length })}</p>
-        </>
+      )}
+      </div>
+      {block.kind !== 'text' && (
+        <p className="text-xs text-muted-foreground tabular-nums" role="status">{shown.length === rows.length ? '' : t('admin:rules.matchers.shown_of', { shown: shown.length, total: rows.length })}</p>
       )}
     </section>
   )

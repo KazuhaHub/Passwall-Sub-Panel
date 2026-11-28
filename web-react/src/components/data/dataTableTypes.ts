@@ -188,6 +188,11 @@ interface DataTableBase<T> {
   /** Imperative access: scrollToRow. */
   handleRef?: Ref<DataTableHandle>
   className?: string
+  /**
+   * Drawn inside a card the page owns: no frame of its own, the toolbar padded like the card's content and a rule above
+   * the rows. The rule set editor uses it so a group's header, filter row and rules are one card the size of the list beside it.
+   */
+  flush?: boolean
 }
 
 /**
