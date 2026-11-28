@@ -14,9 +14,19 @@ export function readDoc(content: string): Doc {
   const hit = recent.get(content)
   if (hit) { recent.delete(content); recent.set(content, hit); return hit }
   const doc = parseDoc(content)
+  seedDoc(content, doc)
+  return doc
+}
+
+/**
+ * Remembers `doc` as the reading of `content`. A structured edit produces the document first and the text from it, so the
+ * other readers of that text (the foreign-line check, the group names) take this document instead of reading 9,500 lines
+ * again after every edit, and see the same line ids as the editor does.
+ */
+export function seedDoc(content: string, doc: Doc): void {
+  recent.delete(content)
   recent.set(content, doc)
   if (recent.size > KEEP) recent.delete(recent.keys().next().value as string)
-  return doc
 }
 
 /** How long typing must pause before what is derived from the text is worked out again. */
