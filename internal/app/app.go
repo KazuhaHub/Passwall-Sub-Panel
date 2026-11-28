@@ -103,6 +103,11 @@ func (a sharedMigratorAdapter) ReconcileOrphans(ctx context.Context, userID int6
 	return a.s.ReconcileOrphans(ctx, userID)
 }
 
+// WithOrphanSweep is the optional sweep hook user.HealSharedClients looks for.
+func (a sharedMigratorAdapter) WithOrphanSweep(ctx context.Context) context.Context {
+	return a.s.WithOrphanSweep(ctx)
+}
+
 func (a sharedMigratorAdapter) DeleteSharedForUser(ctx context.Context, userID int64) error {
 	return a.s.DeleteSharedForUser(ctx, userID)
 }
