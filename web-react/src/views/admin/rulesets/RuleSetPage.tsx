@@ -194,6 +194,10 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
   /** Takes a rule set the server returned as the new saved state: the draft, the baseline (revision included) and the members tab's reference. */
   function adopt(saved: RuleSet) {
     listsChanged()
+    // The cached document under this slug is what the create route copies from and what Back to this page would reopen. It is
+    // never refetched on its own (see ruleSetDetailQuery), so the saved state has to be written into it here: left alone, a
+    // Duplicate right after a save copied the version from before the save.
+    queryClient.setQueryData(ruleKeys.detail(scope, saved.slug), cloneRuleSet(saved))
     setForm(cloneRuleSet(saved))
     setBaseline(cloneRuleSet(saved))
     setInitialOrder([...(saved.proxy_group_order || [])])

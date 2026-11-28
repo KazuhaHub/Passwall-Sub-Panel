@@ -69,6 +69,26 @@ describe('the rule-set page', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: /unsaved/i })).toBeNull())
   })
 
+  // The editor's document lives in the query cache under its slug, and the create route seeds a copy from the same entry. A save
+  // that left the entry as it was when the page opened made Duplicate copy the version from BEFORE the save.
+  it('duplicates what was just saved, not what the page opened with', async () => {
+    reads()
+    api.post.mockResolvedValue({ data: inspection({ groups: [] }) })
+    api.put.mockResolvedValue({ data: { ...base, name: 'Renamed', content: '- MATCH,DIRECT\n', revision: 'r2' } })
+    mountRuleSets(PAGE)
+    fireEvent.click(await tab('General'))
+    fireEvent.change(await label(/^Name/), { target: { value: 'Renamed' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('heading', { name: 'Renamed' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('region', { name: /unsaved/i })).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: /Duplicate/ }))
+    expect((await label(/^Name/) as HTMLInputElement).value).toBe('Renamed (Copy)')
+    fireEvent.click(await tab('Rules'))
+    fireEvent.click(await screen.findByRole('radio', { name: 'Text' }))
+    expect((await screen.findByRole('textbox', { name: 'Main rules' }) as HTMLTextAreaElement).value).toBe('- MATCH,DIRECT\n')
+  })
+
   it('shows the groups of the rules and edits through the form: add a rule, change a target, delete a rule', async () => {
     reads()
     mountRuleSets(PAGE)

@@ -126,7 +126,8 @@ function RuleSetsList() {
       // It is still refused, not overwritten, when that revision is not the one the list showed (someone saved since the list was
       // loaded), and a row without a revision is never sent at all (that would be an unconditional overwrite): both count as stale.
       const results = await allSettledLimited(rows, async r => {
-        const full = await getRuleSet(r.slug)
+        // quiet: a failed read is counted in the one summary toast below, not announced once per row as well.
+        const full = await getRuleSet(r.slug, { quiet: true })
         if (!r.revision || full.revision !== r.revision) throw new StaleRow()
         return saveRuleSet({ ...full, enabled }, full.revision)
       })
