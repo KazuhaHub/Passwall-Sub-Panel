@@ -41,11 +41,11 @@ type emergencyDirectiveUsers struct {
 	err  error
 }
 
-func (r emergencyDirectiveUsers) GetByID(context.Context, int64) (*domain.User, error) {
+func (r emergencyDirectiveUsers) ListByIDs(context.Context, []int64) ([]*domain.User, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return r.user, nil
+	return []*domain.User{r.user}, nil
 }
 
 type emergencyDirectiveClients struct {

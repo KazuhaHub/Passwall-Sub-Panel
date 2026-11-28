@@ -1976,7 +1976,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		ForRosterVersion: rosterVersion,
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
 	}
-	users := make(map[int64]*domain.User)
+	users, err := s.rosterUsers(ctx, snapshot.Clients)
+	if err != nil {
+		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, err
+	}
 	emergencyQuotaGBByUser := make(map[int64]float64)
 	for _, desired := range snapshot.Clients {
 		client := desired.Client
@@ -1985,11 +1988,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		}
 		user := users[client.UserID]
 		if user == nil {
-			user, err = s.users.GetByID(ctx, client.UserID)
-			if err != nil {
-				return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load user %d: %w", client.UserID, err)
-			}
-			users[client.UserID] = user
+			// The list read leaves out an account that no longer exists, where
+			// the point read it replaced failed. It must still fail here: an
+			// entry built without the account would carry no gate.
+			return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load user %d: %w", client.UserID, domain.ErrNotFound)
 		}
 		counter, counterKnown := counters[client.ID]
 		baseline := int64(0)
@@ -2080,6 +2082,39 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
 	return body, envelope, nil
+}
+
+// rosterUsers reads the accounts the clients of a roster belong to, by id, in
+// one list read (the repository chunks it under the dialects' parameter
+// limits) instead of one statement per account on every poll of every server.
+// The accounts come back resolved exactly as GetByID resolves them. One that
+// no longer exists is absent from the map; the caller decides what that means.
+func (s *Service) rosterUsers(ctx context.Context, clients []ports.NativeDesiredClient) (map[int64]*domain.User, error) {
+	seen := make(map[int64]struct{}, len(clients))
+	ids := make([]int64, 0, len(clients))
+	for _, desired := range clients {
+		if desired.Client == nil {
+			continue
+		}
+		if _, dup := seen[desired.Client.UserID]; !dup {
+			seen[desired.Client.UserID] = struct{}{}
+			ids = append(ids, desired.Client.UserID)
+		}
+	}
+	users := make(map[int64]*domain.User, len(ids))
+	if len(ids) == 0 {
+		return users, nil
+	}
+	loaded, err := s.users.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("nodesync: load roster users: %w", err)
+	}
+	for _, user := range loaded {
+		if user != nil {
+			users[user.ID] = user
+		}
+	}
+	return users, nil
 }
 
 // aggregateCoverage derives the denominator from PSP's own native-panel client
