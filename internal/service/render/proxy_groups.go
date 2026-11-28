@@ -260,6 +260,15 @@ func withEffectiveProxyGroupDependencies(targets []string, configs map[string][]
 	return append(out, targets...)
 }
 
+// RuleTargets is the ordered, de-duplicated list of proxy-group names a rule
+// body sends traffic to, built-in exits excluded: exactly what the renderer
+// turns into generated groups. It is exported so the admin API reports the
+// backend's own reading of a rule set (the template page's coverage hint) rather
+// than a second parser in the browser that can drift from it.
+func RuleTargets(content string) []string {
+	return ruleTargetsInOrder(content)
+}
+
 func ruleTargetsInOrder(rules string) []string {
 	return ruleTargetsInOrderExcluding(rules, nil)
 }

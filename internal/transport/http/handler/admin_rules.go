@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,6 +27,12 @@ type AdminRuleSetsHandler struct {
 		PreviewMihomoGroup(context.Context, int64, *domain.RuleSet) (*render.GroupSubscriptionPreview, error)
 	}
 	previewUsers ports.UserRepo
+	// summaries memoizes what the list derives from a rule set's body (line
+	// count, targets), keyed by slug and valid for one Revision (a content hash
+	// of the stored file). The seeded default is ~474 KB, and parsing it on every
+	// list request is exactly the cost the summary exists to avoid.
+	summaryMu sync.Mutex
+	summaries map[string]cachedRuleSetDerived
 }
 
 func (h *AdminRuleSetsHandler) WithGroupPreview(renderer *render.Service, users ports.UserRepo) *AdminRuleSetsHandler {
@@ -83,6 +90,86 @@ func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
 	}
 }
 
+// ruleSetSummaryDTO is one row of the list: the fields a list or a picker reads,
+// without the bodies. Content, the proxy-group member/option maps and the
+// sub-rule and rematch bodies are left out (each can be hundreds of KB); the
+// editor reads them with GET /rules/:slug. LineCount, SizeBytes and Targets are
+// derived from Content on the server so the browser never needs it:
+//   - LineCount is the non-blank lines of Content (what the list's Lines column shows);
+//   - SizeBytes is len(Content);
+//   - Targets is render.RuleTargets(Content): the ordered proxy-group names the rules send traffic to.
+//
+// Revision is the optimistic-concurrency token a bulk write compares against.
+type ruleSetSummaryDTO struct {
+	Slug                     string   `json:"slug"`
+	Name                     string   `json:"name"`
+	Sort                     int      `json:"sort"`
+	Enabled                  bool     `json:"enabled"`
+	DirectSubscriptionDomain bool     `json:"direct_subscription_domain"`
+	ProxyGroupOrder          []string `json:"proxy_group_order"`
+	Revision                 string   `json:"revision,omitempty"`
+	LineCount                int      `json:"line_count"`
+	SizeBytes                int      `json:"size_bytes"`
+	Targets                  []string `json:"targets"`
+}
+
+type cachedRuleSetDerived struct {
+	revision  string
+	lineCount int
+	targets   []string
+}
+
+func (h *AdminRuleSetsHandler) summaryOf(r *domain.RuleSet) ruleSetSummaryDTO {
+	d := h.derivedOf(r)
+	return ruleSetSummaryDTO{
+		Slug: r.Slug, Name: r.Name, Sort: r.Sort, Enabled: r.Enabled,
+		DirectSubscriptionDomain: r.DirectSubscriptionDomain,
+		ProxyGroupOrder:          r.ProxyGroupOrder,
+		Revision:                 r.Revision,
+		LineCount:                d.lineCount,
+		SizeBytes:                len(r.Content),
+		Targets:                  d.targets,
+	}
+}
+
+// derivedOf reads the body once per revision. A rule set with no revision (a
+// repo that does not hash) is derived every time rather than cached under an
+// empty key that would never invalidate.
+func (h *AdminRuleSetsHandler) derivedOf(r *domain.RuleSet) cachedRuleSetDerived {
+	if r.Revision != "" {
+		h.summaryMu.Lock()
+		hit, ok := h.summaries[r.Slug]
+		h.summaryMu.Unlock()
+		if ok && hit.revision == r.Revision {
+			return hit
+		}
+	}
+	d := cachedRuleSetDerived{revision: r.Revision, targets: render.RuleTargets(r.Content)}
+	for _, line := range strings.Split(r.Content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			d.lineCount++
+		}
+	}
+	if r.Revision != "" {
+		h.summaryMu.Lock()
+		if h.summaries == nil {
+			h.summaries = map[string]cachedRuleSetDerived{}
+		}
+		h.summaries[r.Slug] = d
+		h.summaryMu.Unlock()
+	}
+	return d
+}
+
+func (h *AdminRuleSetsHandler) forgetSummary(slug string) {
+	h.summaryMu.Lock()
+	delete(h.summaries, slug)
+	h.summaryMu.Unlock()
+}
+
+// List returns a summary per rule set, never the bodies (see ruleSetSummaryDTO).
+// An external script that read `content` from this list now gets none of it and
+// must call GET /api/admin/rules/:slug per rule set.
 func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 	p := parsePagination(c)
 	items, total, err := h.repo.ListPaged(c.Request.Context(), p)
@@ -90,9 +177,9 @@ func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	out := make([]ruleSetDTO, len(items))
+	out := make([]ruleSetSummaryDTO, len(items))
 	for i, r := range items {
-		out[i] = ruleSetDTOFromDomain(r)
+		out[i] = h.summaryOf(r)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -305,6 +392,7 @@ func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	h.forgetSummary(slug)
 	if h.invalidate != nil {
 		h.invalidate()
 	}
