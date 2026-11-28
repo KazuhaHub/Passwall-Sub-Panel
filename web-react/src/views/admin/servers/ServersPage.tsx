@@ -26,7 +26,7 @@ import { CountsColumn, StatusColumn, VersionColumn, ActionsColumn, serverColumns
 import ServerAccessDialog from './dialogs/ServerAccessDialog'
 import NodeMetricsDialog from './metrics/NodeMetricsDialog'
 import { ServersContext, type ServersCtx } from './serversContext'
-import { hasCapability } from './serverModel'
+import { hasCapability, updateVersionOf } from './serverModel'
 import { NameCell, TypeCell } from './cells'
 import { rowMenu } from './rowMenu'
 import { NEW_SERVER_PATH, serverPath } from './serverRoutes'
@@ -201,10 +201,18 @@ export default function ServersPage() {
           const rows = ctxBulk.loadedRows
           const core = rows.filter(s => s.panel_type !== 'psp' && hasCapability(s, 'core.upgrade'))
           const panel = rows.filter(s => hasCapability(s, 'panel.upgrade'))
+          // Passwall Nodes ready for a remote upgrade that have a newer release on their channel, each with its own target.
+          const agents = rows.flatMap(s => {
+            const target = s.panel_type === 'psp' && s.node_upgrade_ready ? updateVersionOf(s, releases.nodeReleases, null) : undefined
+            return target ? [{ server: s, target }] : []
+          })
           const busy = up.batchBusy !== '' || probes.testingAll
           return (
             <>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void probes.runTestMany(rows)}>{t('admin:servers.batch_test')}</Button>
+              <Button variant="outline" size="sm" disabled={busy || agents.length === 0} onClick={() => void up.batchUpgradeAgent(agents)}>
+                {agents.length > 0 ? t('admin:servers.batch_upgrade_agent_count', { count: agents.length }) : t('admin:servers.batch_upgrade_agent')}
+              </Button>
               <Button variant="outline" size="sm" disabled={busy || core.length === 0} onClick={() => void up.batchUpgradeXray(core)}>{t('admin:servers.batch_upgrade_xray')}</Button>
               <Button variant="outline" size="sm" disabled={busy || panel.length === 0} onClick={() => void up.batchUpgradePanel(panel)}>{t('admin:servers.batch_upgrade_panel')}</Button>
               <Button variant="destructive" size="sm" disabled={busy} onClick={() => void up.batchDelete(rows)}>{t('admin:servers.batch_delete')}</Button>

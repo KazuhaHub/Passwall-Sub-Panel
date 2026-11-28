@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
@@ -74,11 +75,21 @@ export function SwitchCell({ item, items }: { item: ListRow; items: MoreMenuItem
   const row = item.row
   const direct = row.line_id === 'direct'
   const action = items.find(i => i.id === (direct ? 'toggle-node' : 'toggle-line'))
-  if (!action?.onSelect) return null
   const on = direct ? row.landing?.enabled !== false : row.enabled !== false
+  // Off from the click until the row's own value changes (the list reads it back after the save), so a double click
+  // sends one request, not two. A save that fails leaves the value as it was: the switch comes back after a while.
+  const [pendingFrom, setPendingFrom] = useState<boolean | null>(null)
+  useEffect(() => { if (pendingFrom !== null && pendingFrom !== on) setPendingFrom(null) }, [on, pendingFrom])
+  useEffect(() => {
+    if (pendingFrom === null) return
+    const timer = setTimeout(() => setPendingFrom(null), 8000)
+    return () => clearTimeout(timer)
+  }, [pendingFrom])
+  if (!action?.onSelect) return null
   return (
-    <Switch size="sm" checked={on} disabled={action.disabled} aria-label={t(direct ? 'nodes.action.node_switch' : 'nodes.action.line_switch', { name: row.name })}
-      onCheckedChange={next => { if (next !== on) action.onSelect?.() }} onClick={e => e.stopPropagation()} />
+    <Switch size="sm" checked={on} disabled={action.disabled || pendingFrom !== null} aria-busy={pendingFrom !== null || undefined}
+      aria-label={t(direct ? 'nodes.action.node_switch' : 'nodes.action.line_switch', { name: row.name })}
+      onCheckedChange={next => { if (next !== on && pendingFrom === null) { setPendingFrom(on); action.onSelect?.() } }} onClick={e => e.stopPropagation()} />
   )
 }
 

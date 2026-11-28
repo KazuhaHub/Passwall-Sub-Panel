@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import type { Server } from '@/api/servers'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -60,7 +60,7 @@ function Wizard({ servers, writable }: { servers: Server[]; writable: Server[] }
   const general: GeneralDraft = { display_name: w.form.display_name, server_address: w.form.server_address, region: w.form.region, tags: splitTagsText(w.form.tags_text) }
   const problems = generalProblems(general)
   const tagOptions = [...new Set((nodes.data ?? NONE).flatMap(n => n.tags ?? []))].sort((a, b) => a.localeCompare(b))
-  const regionOptions = regionOptionsOf(nodes.data ?? NONE)
+  const regionOptions = useMemo(() => regionOptionsOf(nodes.data ?? NONE), [nodes.data])
   const names = STEPS.map(s => t(`nodes.create_page.step_${s}`))
   const label = w.step < 2 ? 'nodes.setup.next' : w.step === 2 || !w.plan || w.changed ? 'nodes.setup.review' : 'nodes.setup.confirm'
 

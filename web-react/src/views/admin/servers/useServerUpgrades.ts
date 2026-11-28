@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
-  deleteServer, upgradeOptions, upgradePanel, upgradePreview, upgradeXray, type Server, type UpgradePreviewResult,
+  deleteServer, requestNativeAgentUpgrade, upgradeOptions, upgradePanel, upgradePreview, upgradeXray, type Server, type UpgradePreviewResult,
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/feedback/toasts'
@@ -58,7 +58,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
   // The server whose upgrade request is in flight: set BEFORE the confirm opens, so a double click on the menu item
   // cannot stack two confirms (it once fired two upgrade requests).
   const [upgrading, setUpgrading] = useState<number | null>(null)
-  const [batchBusy, setBatchBusy] = useState<'upgrade_xray' | 'upgrade_panel' | 'delete' | ''>('')
+  const [batchBusy, setBatchBusy] = useState<'upgrade_agent' | 'upgrade_xray' | 'upgrade_panel' | 'delete' | ''>('')
 
   async function runUpgradePanel(s: Server, force = false): Promise<void> {
     setUpgrading(s.id)
@@ -134,6 +134,55 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
       release()
       setUpgrading(null)
     }
+  }
+
+  // Passwall Node agents, each to the newest release its update channel offers (what the Version column calls "Update
+  // available"). The node checks the expected version and the upgrade path itself and refuses what it cannot walk, so a
+  // refusal here is reported per server, never retried or forced. Pinning another version stays in the per-server dialog.
+  async function batchUpgradeAgent(wanted: { server: Server; target: string }[]) {
+    if (!wanted.length) return
+    // The same check the per-server dialog makes first: a node that refuses (an uncanonical version, no updater) or that
+    // does not offer this target is left out and named, rather than sent a request the operator then sees refused.
+    const checked = await allSettledLimited(wanted, r => upgradeOptions(r.server.id, 'agent'))
+    const rows: typeof wanted = []
+    const skipped: string[] = []
+    wanted.forEach((r, i) => {
+      const res = checked[i]
+      // Best-effort, as in the dialog: an unanswered check leaves the decision to the node.
+      if (res.status !== 'fulfilled') { rows.push(r); return }
+      const o = res.value
+      const offered = o.targets?.map(x => x.version)
+      if (o.state === 'blocked' || (offered && offered.length > 0 && !offered.includes(r.target))) skipped.push(r.server.name)
+      else rows.push(r)
+    })
+    if (!rows.length) {
+      pushSnack(t('admin:servers.toast.batch_upgrade_agent_none', { names: skipped.join(', ') }), 'warning')
+      return
+    }
+    const ok = await confirm({
+      title: t('admin:servers.confirm.batch_upgrade_agent_title'),
+      message: [t('admin:servers.confirm.batch_upgrade_agent_message', { count: rows.length }),
+        ...rows.map(r => `${r.server.name}: ${r.server.panel_version?.split(' ')[0] ?? '?'} → ${r.target}`),
+        ...(skipped.length ? ['', t('admin:servers.confirm.batch_upgrade_agent_skipped', { names: skipped.join(', ') })] : [])].join('\n'),
+      confirmText: t('admin:servers.action.upgrade'),
+      destructive: true,
+      initialFocus: 'cancel',
+    })
+    if (!ok) return
+    setBatchBusy('upgrade_agent')
+    const release = markBusy(busy, rows.map(r => r.server.id))
+    try {
+      const results = await allSettledLimited(rows, r =>
+        requestNativeAgentUpgrade(r.server.id, r.target, r.server.panel_version?.split(' ')[0] ?? '', crypto.randomUUID()))
+      const success = results.filter(r => r.status === 'fulfilled').length
+      const failed = rows.length - success
+      if (failed > 0) {
+        const names = rows.filter((_, i) => results[i].status !== 'fulfilled').map(r => r.server.name).join(', ')
+        pushSnack(t('admin:servers.toast.batch_upgrade_agent_partial', { ok: success, fail: failed, names }), 'warning')
+      } else pushSnack(t('admin:servers.toast.batch_upgrade_agent_ok', { count: success }), 'success')
+      clearSelection()
+      refresh()
+    } finally { release(); setBatchBusy('') }
   }
 
   // Latest-only by design: pinning a version stays in the single-server dialog, because different servers offer
@@ -223,5 +272,5 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
     } finally { release(); setBatchBusy('') }
   }
 
-  return { upgrading, batchBusy, runUpgradePanel, batchUpgradeXray, batchUpgradePanel, batchDelete }
+  return { upgrading, batchBusy, runUpgradePanel, batchUpgradeAgent, batchUpgradeXray, batchUpgradePanel, batchDelete }
 }

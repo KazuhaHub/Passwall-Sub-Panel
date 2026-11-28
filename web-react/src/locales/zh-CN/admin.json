@@ -4738,6 +4738,9 @@
     },
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
+    "batch_upgrade_agent": "升级 Passwall Node",
+    "batch_upgrade_agent_count_one": "升级 Passwall Node（{{count}}）",
+    "batch_upgrade_agent_count_other": "升级 Passwall Node（{{count}}）",
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
@@ -5064,6 +5067,10 @@
       "credentials_required": "请先配置 API Token 或用户名密码"
     },
     "toast": {
+      "batch_upgrade_agent_none": "所选服务器目前都无法执行此升级：{{names}}。打开服务器查看原因。",
+      "batch_upgrade_agent_partial": "{{ok}} 台已发起升级，{{fail}} 台被拒绝：{{names}}。打开服务器查看原因。",
+      "batch_upgrade_agent_ok_other": "已向 {{count}} 台服务器发起升级",
+      "batch_upgrade_agent_ok_one": "已向 {{count}} 台服务器发起升级",
       "saved": "已保存",
       "created": "已创建",
       "deleted": "已删除",
@@ -5085,6 +5092,10 @@
       "upgrade_unavailable": "此实例当前不能升级该组件（{{reasons}}）。"
     },
     "confirm": {
+      "batch_upgrade_agent_skipped": "已排除（节点目前无法执行此升级，打开查看原因）：{{names}}",
+      "batch_upgrade_agent_message_other": "{{count}} 台服务器将把代理升级到其更新通道上的最新版本。节点会重启代理，连接可能短暂中断。",
+      "batch_upgrade_agent_message_one": "{{count}} 台服务器将把代理升级到其更新通道上的最新版本。节点会重启代理，连接可能短暂中断。",
+      "batch_upgrade_agent_title": "升级 Passwall Node 代理？",
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "batch_upgrade_xray_title": "批量升级 Xray",
@@ -7296,6 +7307,11 @@
         "no_executor": "当前没有节点执行"
       },
       "rail": {
+        "steps_aria": "匹配顺序",
+        "nav_source": "入站来源规则",
+        "nav_exempt": "豁免账号",
+        "nav_allowlist": "白名单组",
+        "nav_rest": "其他所有连接",
         "order": "按匹配顺序，从上到下，命中第一条即停止",
         "allow": "放行",
         "allow_caption": "命中即放行",

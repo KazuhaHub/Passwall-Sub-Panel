@@ -186,13 +186,17 @@ export default function LinesTab() {
   const related = useMemo(() => relatedIds(rows, hover), [rows, hover])
   const openItem = (item: ListRow) => { if (item.row.kind === 'separator') { if (admin) sepSel.select(String(item.row.id)) } else lineSel.select(item.id) }
 
-  // `E` on a focused row opens the line editor; Enter keeps opening the sheet.
+  // `E` on a focused row opens its editor (a relay's line editor, a direct row's node page); Enter keeps opening the sheet.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!admin || e.key.toLowerCase() !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return
     const el = e.target as HTMLElement
     if (!el.matches('[data-row]')) return
     const item = items.find(i => i.id === el.dataset.id) ?? tree.find(g => g.id === el.dataset.id)?.list
-    if (item && item.row.kind === 'line') { e.preventDefault(); lineHandlers.edit(item.row) }
+    if (!item || item.row.kind !== 'line') return
+    e.preventDefault()
+    // A direct line is the node: its edit is the node's editor, as in its menu and its sheet.
+    if (item.row.line_id === 'direct' && nodeHref) void navigate(`${nodeHref(item.row.node_id ?? 0)}?tab=general`)
+    else lineHandlers.edit(item.row)
   }
 
   const statusOptions = useMemo(() => {

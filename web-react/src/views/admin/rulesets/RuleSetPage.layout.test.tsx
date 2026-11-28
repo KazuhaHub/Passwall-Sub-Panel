@@ -105,7 +105,7 @@ describe('the routing test beside the page', () => {
 
 describe('what the toolbar keeps in view', () => {
   it('says the counts itself when it has the room, and groups find, view and filter on the left', async () => {
-    box.width = 1000
+    box.width = 1200
     mountRuleSets(PAGE)
     const bar = await toolbar()
     expect(within(bar).getByText(STATS)).toBeTruthy()
@@ -114,7 +114,7 @@ describe('what the toolbar keeps in view', () => {
     expect(within(bar).getByRole('radiogroup', { name: 'View' })).toBeTruthy()
   })
 
-  it('leaves the counts to the directory under 960px and keeps every control', async () => {
+  it('leaves the counts to the directory under 1100px and keeps every control', async () => {
     box.width = 800
     mountRuleSets(PAGE)
     const bar = await toolbar()

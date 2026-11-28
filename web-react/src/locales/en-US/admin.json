@@ -4764,6 +4764,9 @@
     },
     "batch_test": "Test selected",
     "batch_delete": "Delete selected",
+    "batch_upgrade_agent": "Upgrade Passwall Node",
+    "batch_upgrade_agent_count_one": "Upgrade Passwall Node ({{count}})",
+    "batch_upgrade_agent_count_other": "Upgrade Passwall Node ({{count}})",
     "batch_upgrade_xray": "Upgrade Xray on selected",
     "batch_upgrade_panel": "Upgrade 3X-UI on selected",
     "field": {
@@ -5090,6 +5093,10 @@
       "credentials_required": "Please configure an API token or username/password first."
     },
     "toast": {
+      "batch_upgrade_agent_none": "None of the selected servers can take this upgrade now: {{names}}. Open a server to see why.",
+      "batch_upgrade_agent_partial": "Upgrade requested on {{ok}}, refused on {{fail}}: {{names}}. Open a server to see why.",
+      "batch_upgrade_agent_ok_other": "Upgrade requested on {{count}} servers",
+      "batch_upgrade_agent_ok_one": "Upgrade requested on {{count}} server",
       "saved": "Saved",
       "created": "Created",
       "deleted": "Deleted",
@@ -5111,6 +5118,10 @@
       "upgrade_unavailable": "This instance cannot upgrade that component right now ({{reasons}})."
     },
     "confirm": {
+      "batch_upgrade_agent_skipped": "Left out (the node cannot take this upgrade now; open it to see why): {{names}}",
+      "batch_upgrade_agent_message_other": "{{count}} servers will upgrade their agents to the newest release on their update channel. Each node restarts its agent; connections may drop briefly.",
+      "batch_upgrade_agent_message_one": "{{count}} server will upgrade its agent to the newest release on its update channel. Each node restarts its agent; connections may drop briefly.",
+      "batch_upgrade_agent_title": "Upgrade Passwall Node agents?",
       "batch_delete_title": "Delete servers",
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
       "batch_upgrade_xray_title": "Upgrade Xray on selected servers",
@@ -7360,6 +7371,11 @@
         "no_executor": "no node enforces right now"
       },
       "rail": {
+        "steps_aria": "Match order",
+        "nav_source": "Inbound source rules",
+        "nav_exempt": "Exempt accounts",
+        "nav_allowlist": "Allowlist groups",
+        "nav_rest": "Everything else",
         "order": "In match order, top to bottom; the first match stops the check",
         "allow": "Allow",
         "allow_caption": "a match is let through",

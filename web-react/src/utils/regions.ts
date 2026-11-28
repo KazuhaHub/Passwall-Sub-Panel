@@ -15,13 +15,18 @@ export interface RegionOption {
   label: string
 }
 
+const nameCache = new Map<string, (code: string) => string | undefined>()
 function names(lang: string): (code: string) => string | undefined {
+  let fn = nameCache.get(lang)
+  if (fn) return fn
   try {
     const dn = new Intl.DisplayNames([lang], { type: 'region', fallback: 'none' })
-    return code => dn.of(code) ?? undefined
+    fn = code => dn.of(code) ?? undefined
   } catch {
-    return () => undefined
+    fn = () => undefined
   }
+  nameCache.set(lang, fn)
+  return fn
 }
 
 /** One region as the picker and the lists show it. A value that is not a known code (an older free-text region) is shown as is. */
