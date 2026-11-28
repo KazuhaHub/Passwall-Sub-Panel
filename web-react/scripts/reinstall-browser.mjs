@@ -141,6 +141,13 @@ async function fixture(request, response, url) {
       target_pinnable: true, reason_codes: [],
       targets: [{ version, offered_by_policy: true }],
     });
+    // THE SERVER PAGE'S OVERVIEW READS A NATIVE NODE'S LATEST HOST SAMPLE for its
+    // interface list. The fixture answers as a node without host telemetry, the
+    // unremarkable case: the field says the node has not reported its interfaces.
+    const metrics = pathname.match(/^\/api\/admin\/servers\/(\d+)\/node-metrics\/current$/);
+    if (metrics && servers.some(record => record.id === Number(metrics[1]) && record.panel_type === 'psp')) {
+      return reply(response, { available: false, freshness: 'unsupported', summary: {} });
+    }
     if (pathname === '/api/admin/servers/7/node-installation') return reply(response, provisioning(7));
     if (pathname === '/api/admin/servers/7/node-agent-status') return reply(response, { state: 'running', core_state: 'running', configured_nodes: 3 });
     const createdRead = previewOnly && pathname.match(/^\/api\/admin\/servers\/(\d+)\/(node-installation|node-agent-status)$/);

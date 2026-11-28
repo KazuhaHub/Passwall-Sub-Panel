@@ -5408,6 +5408,25 @@
       "none": "节点尚未上报地址。",
       "open": "{{count}} 个公网地址，显示列表"
     },
+    "interfaces": {
+      "title": "网络接口",
+      "up": "已启用",
+      "disabled": "已停用",
+      "state_down": "无链路",
+      "state_lowerlayerdown": "无链路",
+      "state_dormant": "休眠",
+      "state_notpresent": "不存在",
+      "state_testing": "测试中",
+      "default_v4": "IPv4 默认路由",
+      "default_v6": "IPv6 默认路由",
+      "no_address": "无地址",
+      "truncated": "节点截断了此列表。",
+      "open": "{{name}}：{{count}} 个地址，查看列表",
+      "not_reported": "此节点不上报接口地址：版本较旧，或最近一次采样未能读取。",
+      "empty": "最近一次主机采样中没有接口。",
+      "load_failed": "无法加载网络接口。",
+      "unreported": "节点尚未上报其网络接口。"
+    },
     "maintenance": {
       "run": "打开",
       "group": {

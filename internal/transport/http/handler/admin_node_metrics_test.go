@@ -282,3 +282,76 @@ func TestNodeMetricsSeparatesDeploymentFromScopeAndPreservesLargeLifecycleCounte
 		t.Fatal("unsupported failure counter represented as zero")
 	}
 }
+
+func currentNetwork(t *testing.T, agent *domain.NodeAgent, snapshotJSON string) (reported bool, interfaces []map[string]any) {
+	t.Helper()
+	at := time.Date(2026, 11, 27, 8, 0, 0, 0, time.UTC)
+	snapshot := &nodemetrics.Snapshot{Observation: &domain.NodeHostObservation{
+		AgentID: "agt_1", ReceivedAt: at, CollectedAt: at, SnapshotJSON: []byte(snapshotJSON),
+	}}
+	router := newNodeMetricsRouter(t, nativePanel(), agent, &nodeMetricsServiceStub{snapshot: snapshot})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/servers/7/node-metrics/current", nil))
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Body.String())
+	}
+	var body struct {
+		Network struct {
+			Reported   bool             `json:"addresses_reported"`
+			Interfaces []map[string]any `json:"interfaces"`
+		} `json:"network"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Network.Reported, body.Network.Interfaces
+}
+
+const snapshotWithAddresses = `{"network":{"counter_epoch":"e","default_ipv4_interface":"eth0","interfaces":[
+	{"name":"eth0","index":2,"mtu":1500,"up":true,"operational_state":"up","addresses":["10.0.0.5/8","203.0.113.7/24","2001:db8::7/64"]},
+	{"name":"wg0","index":5,"mtu":1420,"up":false,"addresses_truncated":true}
+]},"unavailable":[]}`
+
+func TestNodeMetricsListsInterfaceAddressesForACapableNode(t *testing.T) {
+	agent := nativeAgent(true)
+	agent.ObservedCapabilities = append(agent.ObservedCapabilities, "host.interface_addresses.v1")
+	reported, interfaces := currentNetwork(t, agent, snapshotWithAddresses)
+	if !reported || len(interfaces) != 2 {
+		t.Fatalf("reported=%v interfaces=%v", reported, interfaces)
+	}
+	eth0 := interfaces[0]
+	if eth0["name"] != "eth0" || eth0["up"] != true || eth0["is_default_ipv4"] != true || eth0["is_default_ipv6"] != false {
+		t.Fatalf("eth0 = %v", eth0)
+	}
+	if addresses := eth0["addresses"].([]any); len(addresses) != 3 || addresses[1] != "203.0.113.7/24" {
+		t.Fatalf("eth0 addresses = %v", addresses)
+	}
+	if interfaces[1]["addresses_truncated"] != true || len(interfaces[1]["addresses"].([]any)) != 0 {
+		t.Fatalf("wg0 = %v", interfaces[1])
+	}
+}
+
+// An older node never sends addresses, and a capable node whose read failed
+// says so with a token. Neither may read as "this interface has no address".
+func TestNodeMetricsInterfaceAddressesDegradeWithoutTheCapability(t *testing.T) {
+	reported, interfaces := currentNetwork(t, nativeAgent(true), snapshotWithAddresses)
+	if reported || len(interfaces) != 2 || len(interfaces[0]["addresses"].([]any)) != 0 {
+		t.Fatalf("an agent without the capability: reported=%v interfaces=%v", reported, interfaces)
+	}
+
+	agent := nativeAgent(true)
+	agent.ObservedCapabilities = append(agent.ObservedCapabilities, "host.interface_addresses.v1")
+	failed := strings.Replace(snapshotWithAddresses, `"unavailable":[]`, `"unavailable":["network.addresses"]`, 1)
+	if reported, _ := currentNetwork(t, agent, failed); reported {
+		t.Fatal("a failed address read was reported as complete")
+	}
+	// The node upgraded, but the stored sample is from before: no addresses
+	// anywhere must not read as "no address" on every link.
+	before := `{"network":{"counter_epoch":"e","interfaces":[{"name":"eth0","index":2,"mtu":1500,"up":true}]}}`
+	if reported, _ := currentNetwork(t, agent, before); reported {
+		t.Fatal("a sample from before the upgrade was reported as complete")
+	}
+	if reported, interfaces := currentNetwork(t, agent, `not json`); reported || len(interfaces) != 0 {
+		t.Fatalf("an undecodable snapshot: reported=%v interfaces=%v", reported, interfaces)
+	}
+}

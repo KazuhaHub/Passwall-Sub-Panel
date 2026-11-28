@@ -5439,6 +5439,25 @@
       "none": "The node has not reported its addresses yet.",
       "open": "{{count}} public addresses, show the list"
     },
+    "interfaces": {
+      "title": "Network interfaces",
+      "up": "Up",
+      "disabled": "Disabled",
+      "state_down": "No link",
+      "state_lowerlayerdown": "No link",
+      "state_dormant": "Dormant",
+      "state_notpresent": "Not present",
+      "state_testing": "Testing",
+      "default_v4": "IPv4 default route",
+      "default_v6": "IPv6 default route",
+      "no_address": "No address",
+      "truncated": "The node shortened this list.",
+      "open": "{{name}}: {{count}} addresses, show the list",
+      "not_reported": "This node does not report interface addresses: it runs an older version, or could not read them in the latest sample.",
+      "empty": "No interfaces in the latest host sample.",
+      "load_failed": "Could not load the interfaces.",
+      "unreported": "The node has not reported its interfaces."
+    },
     "maintenance": {
       "run": "Open",
       "group": {

@@ -48,6 +48,13 @@ export const policies = {
     refetchInterval: false,
     note: 'Read when a link editor opens; the probe window is a minute or more, so no polling.',
   },
+  /** A node's latest host sample on the server overview: one read per visit, the metrics sheet has its own refresh. */
+  nodeMetricsCurrent: {
+    staleTime: 30 * SECOND,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Read when the server overview opens; a sample arrives at most once a minute and the metrics sheet refreshes on demand, so no polling.',
+  },
   /** Shared ports and the port-usage view: read when their dialog opens, refreshed by every write. */
   fronts: {
     staleTime: 0,

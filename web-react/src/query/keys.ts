@@ -174,6 +174,12 @@ export const serverKeys = {
   list: (s: QueryScope, params: ServerListParams) => [...serverKeys.lists(s), params] as const,
 }
 
+/** A Passwall Node's latest host sample, as the server page's overview reads it. */
+export const nodeMetricsKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'node-metrics'] as const,
+  current: (s: QueryScope, serverId: number) => [...nodeMetricsKeys.all(s), 'current', serverId] as const,
+}
+
 export const authEventKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'auth-events'] as const,
   /** The admin auth-log page, with its own filters. */
