@@ -37,7 +37,7 @@ interface Props {
  * The y axis is in the same bytes format as every other traffic figure.
  */
 export default function TrafficChart({ items, height = 360 }: Props) {
-  const { t } = useTranslation('admin')
+  const { t } = useTranslation('common')
   const tk = useChartTokens()
   const { hidden, toggle } = useHiddenSeries()
   const ref = useRef<HTMLDivElement | null>(null)
@@ -65,9 +65,9 @@ export default function TrafficChart({ items, height = 360 }: Props) {
   }, [empty])
 
   const names = useMemo(() => ({
-    up: t('traffic.trend.summary_up'),
-    down: t('traffic.trend.summary_down'),
-    total: t('traffic.trend.summary_total'),
+    up: t('traffic_chart.up'),
+    down: t('traffic_chart.down'),
+    total: t('traffic_chart.total'),
   }), [t])
 
   useEffect(() => {
@@ -98,10 +98,10 @@ export default function TrafficChart({ items, height = 360 }: Props) {
     }, true)
   }, [items, tk, names, empty, hidden])
 
-  if (empty) return <EmptyState compact title={t('traffic.chart.empty')} className="min-h-40" />
+  if (empty) return <EmptyState compact title={t('traffic_chart.empty')} className="min-h-40" />
 
   const total = items.reduce((sum, i) => sum + i.total_bytes, 0)
-  const summary = t('traffic.chart.aria', { from: items[0].date, to: items[items.length - 1].date, total: bytesToHuman(total) })
+  const summary = t('traffic_chart.aria', { from: items[0].date, to: items[items.length - 1].date, total: bytesToHuman(total) })
 
   return (
     <div>
@@ -110,14 +110,14 @@ export default function TrafficChart({ items, height = 360 }: Props) {
       <div ref={ref} role="img" aria-label={summary} style={{ width: '100%', height }} />
       <details className="mt-2 text-sm">
         <summary className="inline-flex min-h-8 cursor-pointer items-center rounded text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
-          {t('traffic.chart.table')}
+          {t('traffic_chart.table')}
         </summary>
         <div className="mt-2 max-h-72 overflow-auto rounded-lg border">
           <table className="w-full text-sm tabular-nums">
             <caption className="sr-only">{summary}</caption>
             <thead className="sticky top-0 bg-muted text-left text-xs text-muted-foreground">
               <tr>
-                <th scope="col" className="px-3 py-1.5 font-medium">{t('traffic.chart.col_date')}</th>
+                <th scope="col" className="px-3 py-1.5 font-medium">{t('traffic_chart.col_date')}</th>
                 <th scope="col" className="px-3 py-1.5 text-right font-medium">{names.up}</th>
                 <th scope="col" className="px-3 py-1.5 text-right font-medium">{names.down}</th>
                 <th scope="col" className="px-3 py-1.5 text-right font-medium">{names.total}</th>

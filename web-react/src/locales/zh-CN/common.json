@@ -277,5 +277,14 @@
       "announce_more_errors": "另有{{count}}条新提示，其中{{errors}}条错误",
       "severity_prefix": "{{severity}}："
     }
+  },
+  "traffic_chart": {
+    "empty": "该时间范围内没有流量",
+    "aria": "{{from}} 至 {{to}} 的流量，合计 {{total}}",
+    "table": "以表格显示",
+    "col_date": "日期",
+    "up": "上行",
+    "down": "下行",
+    "total": "范围总计"
   }
 }

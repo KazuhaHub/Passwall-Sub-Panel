@@ -52,7 +52,7 @@ describe('TrafficChart', () => {
   it('says there is no traffic instead of drawing empty axes', () => {
     render(<TrafficChart items={[]} />)
 
-    expect(screen.getByText('traffic.chart.empty')).toBeTruthy()
+    expect(screen.getByText('traffic_chart.empty')).toBeTruthy()
     expect(screen.queryByRole('img')).toBeNull()
     expect(setOption).not.toHaveBeenCalled()
   })
