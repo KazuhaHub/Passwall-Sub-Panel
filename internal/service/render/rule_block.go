@@ -18,9 +18,13 @@ import (
 // A ruleBlock is what the shared rule text reduces to once, for every render:
 //
 //   - targets: the distinct outbound targets its rules name. Every pass over a
-//     rule (line-name binding, pruning, validation, final naming, group
-//     discovery) depends on the rule only through its target, so one rule per
-//     distinct target says everything the other 9.5k do.
+//     rule in the `rules` list (line-name binding, pruning, validation, final
+//     naming, group discovery) depends on the rule only through its target and
+//     its SUB-RULE reference, so one rule per distinct target and reference
+//     says everything the other 9.5k do. A rule read as something else (a
+//     template that copies its rules under `dns` through a YAML alias gets them
+//     read as name servers) is not covered by that, and never reaches it: the
+//     copy puts the markers into the document twice and splice refuses.
 //   - standIn: those representative rules between two marker rules, as YAML
 //     list items. The document is built, checked and serialised with them in
 //     place of the whole block.

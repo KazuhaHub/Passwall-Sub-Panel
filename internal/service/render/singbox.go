@@ -661,6 +661,13 @@ func splitCSVLine(line string) []string {
 	if strings.ContainsAny(line, "()") {
 		return splitTopLevelRuleFields(line)
 	}
+	// Without a quote there is nothing for the CSV reader to interpret, and
+	// without a line break there is one record: the fields are the text between
+	// the commas. The reader allocates a 4 KB buffer per call, which for the
+	// shipped rule set was a quarter of a sing-box render's allocation.
+	if line != "" && !strings.ContainsAny(line, "\"\r\n") {
+		return strings.Split(line, ",")
+	}
 	r := csv.NewReader(strings.NewReader(line))
 	r.FieldsPerRecord = -1
 	parts, err := r.Read()

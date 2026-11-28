@@ -84,3 +84,26 @@ func BenchmarkSeedRenderFirst(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkSeedRenderFull measures the full pipeline on its own: one shared rule
+// names a subscription line, which every render has to rewrite per subscriber,
+// so the reduced assembly declines each time.
+func BenchmarkSeedRenderFull(b *testing.B) {
+	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+		b.Run(string(ct), func(b *testing.B) {
+			s, u := seedRenderFixture(b, ct)
+			rules := s.repos.RuleSet.(referenceRuleRepo).rule
+			rules.Content = "- DOMAIN,relay.example.org,A B\n" + rules.Content
+			ctx := context.Background()
+			if _, err := s.RenderForUser(ctx, u, ct); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := s.RenderForUser(ctx, u, ct); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
