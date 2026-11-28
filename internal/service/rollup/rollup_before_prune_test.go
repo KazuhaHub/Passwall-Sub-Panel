@@ -302,8 +302,9 @@ func TestWindowIsExact(t *testing.T) {
 		{now.Add(-3 * time.Hour), true},
 		{now.Add(-48 * time.Hour), true},
 		{now.Add(-5 * 24 * time.Hour), false},
+		{now.Add(-71 * time.Hour), false}, // the window starts two hours before that
 	} {
-		if got := windowIsExact(c.emitSince, now); got != c.want {
+		if got := (&Service{heartbeat: time.Hour}).windowIsExact(c.emitSince, now); got != c.want {
 			t.Errorf("windowIsExact(%v) = %v, want %v", now.Sub(c.emitSince), got, c.want)
 		}
 	}
@@ -329,5 +330,15 @@ func TestRecentWindowReadsOnlyItsRowsOnSQLite(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("the window returned %d rows, want the 2 inside it", n)
+	}
+}
+
+// At a poll cadence of days the heartbeat reaches past the prune on its own:
+// even the per-poll pass, three hours behind now, is then not exact.
+func TestWindowIsNotExactWhenTheLookBackReachesThePrune(t *testing.T) {
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	svc := &Service{heartbeat: heartbeatFor(48 * time.Hour)}
+	if svc.windowIsExact(now.Add(-3*time.Hour), now) {
+		t.Fatal("a window that starts five days back must not be taken as exact")
 	}
 }

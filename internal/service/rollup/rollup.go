@@ -170,9 +170,10 @@ func (s *Service) RollupOnce(ctx context.Context) error {
 // so is one pass a day (fullPassEvery).
 //
 // A bucket at the old edge of the bounded window may have no sample at or
-// before its :00 inside that window. emitFromAccs then treats it as
-// left-incomplete and inserts it only if it is absent, so a bounded window can
-// never shrink a value an earlier pass wrote.
+// before its :00 inside that window. The window reaches back at least one
+// heartbeat, so nothing the bucket depends on is missing and its value is
+// overwritten like any other (emitFromAccs, exact). Only a window that starts
+// too close to the 7-day prune falls back to inserting such a bucket once.
 func (s *Service) RollupBeforePrune(ctx context.Context) error {
 	started := s.now()
 	s.mu.Lock()
@@ -196,11 +197,10 @@ func (s *Service) RollupBeforePrune(ctx context.Context) error {
 	return nil
 }
 
-// fullPassEvery is how often RollupBeforePrune is a full pass again. A bounded
-// window cannot tell a bucket whose earlier sample lies beyond its reach (a
-// gap longer than the heartbeat before the segment that lands in it) from one
-// that has none: both are left-incomplete and insert-once, so a value written
-// short stays short. The full pass sees every sample and overwrites it. Raw
+// fullPassEvery is how often RollupBeforePrune is a full pass again. The
+// bounded passes are exact by argument (see emitFromAccs); the full pass is the
+// corrector for whatever the argument does not cover: a snapshot committed
+// more than an hour after it was stamped, a window too old to be exact. Raw
 // rows live for 7 days, so each bucket gets several of these before its rows
 // are pruned, at a twenty-fourth of what the full pass every hour used to cost.
 const fullPassEvery = 24 * time.Hour
@@ -427,7 +427,7 @@ func (s *Service) rollupUser(ctx context.Context, cutoff, emitSince time.Time) (
 		samples[i] = rawSample{entityID: r.UserID, upBytes: r.UpBytes, downBytes: r.DownBytes, totalBytes: r.TotalBytes, capturedAt: r.CapturedAt}
 	}
 	buckets, earliest := accumulate(samples, cutoff, s.heartbeat)
-	overwrite, keepIfNew := emitFromAccs(buckets, earliest, "user_id", emitSince, windowIsExact(emitSince, cutoff))
+	overwrite, keepIfNew := emitFromAccs(buckets, earliest, "user_id", emitSince, s.windowIsExact(emitSince, cutoff))
 	return s.upsertSplit(ctx, "traffic_snapshots_hourly", []string{"user_id", "bucket_start"}, overwrite, keepIfNew)
 }
 
@@ -458,7 +458,7 @@ func (s *Service) rollupNode(ctx context.Context, cutoff, emitSince time.Time) (
 		samples[i] = rawSample{entityID: r.NodeID, upBytes: r.UpBytes, downBytes: r.DownBytes, totalBytes: r.TotalBytes, capturedAt: r.CapturedAt}
 	}
 	buckets, earliest := accumulate(samples, cutoff, s.heartbeat)
-	overwrite, keepIfNew := emitFromAccs(buckets, earliest, "node_id", emitSince, windowIsExact(emitSince, cutoff))
+	overwrite, keepIfNew := emitFromAccs(buckets, earliest, "node_id", emitSince, s.windowIsExact(emitSince, cutoff))
 	return s.upsertSplit(ctx, "node_traffic_snapshots_hourly", []string{"node_id", "bucket_start"}, overwrite, keepIfNew)
 }
 
@@ -491,11 +491,7 @@ func (s *Service) withRecentRawWindow(q *gorm.DB, emitSince time.Time) *gorm.DB 
 	if emitSince.IsZero() {
 		return q
 	}
-	lookBack := s.heartbeat + time.Hour
-	if lookBack < 2*time.Hour {
-		lookBack = 2 * time.Hour
-	}
-	from := emitSince.Add(-lookBack)
+	from := emitSince.Add(-s.lookBack())
 	if s.db.Dialector.Name() != "sqlite" {
 		return q.Where("captured_at >= ?", from)
 	}
@@ -520,8 +516,21 @@ const sqliteZoneSlack = 26 * time.Hour
 // the insert-once rule for left-incomplete buckets.
 const exactWindowMax = 72 * time.Hour
 
-func windowIsExact(emitSince, now time.Time) bool {
-	return !emitSince.IsZero() && now.Sub(emitSince) <= exactWindowMax
+//
+// It is the window's START that has to be inside retained data, so the
+// look-back counts: at a poll cadence of days the heartbeat alone reaches past
+// the prune.
+func (s *Service) windowIsExact(emitSince, now time.Time) bool {
+	return !emitSince.IsZero() && now.Sub(emitSince.Add(-s.lookBack())) <= exactWindowMax
+}
+
+// lookBack is how far before emitSince a bounded pass reads raw rows; see
+// withRecentRawWindow.
+func (s *Service) lookBack() time.Duration {
+	if lb := s.heartbeat + time.Hour; lb > 2*time.Hour {
+		return lb
+	}
+	return 2 * time.Hour
 }
 
 // upsertSplit writes the overwrite set (re-emit allowed) and the keepIfNew set
