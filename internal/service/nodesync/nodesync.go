@@ -1577,6 +1577,17 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			return err
 		}
 		statuses := objectStatuses(report.Objects, nodeprotocol.StreamRoster)
+		// Indexed once: finding each roster client by walking the snapshot made
+		// this loop quadratic in the roster on every full report. The first
+		// row of an id is the one the walk found.
+		desiredByID := make(map[int64]*ports.NativeDesiredClient, len(snapshot.Clients))
+		for i := range snapshot.Clients {
+			if client := snapshot.Clients[i].Client; client != nil {
+				if _, seen := desiredByID[client.ID]; !seen {
+					desiredByID[client.ID] = &snapshot.Clients[i]
+				}
+			}
+		}
 		for _, currentClient := range currentRoster.Clients {
 			appliedClient, existed := appliedClients[currentClient.Key]
 			if !existed || !sameProtocolClient(appliedClient, currentClient) {
@@ -1607,13 +1618,7 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 					Detail: "roster object missing from full report",
 				})
 			}
-			var desired *ports.NativeDesiredClient
-			for i := range snapshot.Clients {
-				if snapshot.Clients[i].Client != nil && snapshot.Clients[i].Client.ID == clientID {
-					desired = &snapshot.Clients[i]
-					break
-				}
-			}
+			desired := desiredByID[clientID]
 			if desired == nil {
 				continue
 			}
@@ -1631,6 +1636,23 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 						attachment.AppliedPassword != update.AppliedPassword {
 						renderCredentialsChanged = true
 					}
+				}
+				// A FULL REPORT REPLAYS EVERY OBJECT, and nearly always in the
+				// state it reported last time. Writing it regardless was one
+				// transaction per client per attachment per full report of every
+				// server, to store what the row already said.
+				//
+				// The comparison is with the row as THIS sync loaded it (the
+				// desired snapshot), so it costs no read. A row another writer
+				// moved after that load (a membership resync that removed and
+				// re-added the attachment, a server migration resetting it to
+				// pending) is left as that writer made it instead of being
+				// overwritten from a stale view, and the next full report, whose
+				// snapshot shows the move, writes it. That is the order of events
+				// the old unconditional write already had whenever the other
+				// writer landed just after it.
+				if attachmentSettled(attachment, update) {
+					continue
 				}
 				if err := s.clients.UpdateInboundState(ctx, update); err != nil {
 					return fmt.Errorf("nodesync: update client %d attachment %d: %w", clientID, attachment.NodeID, err)
@@ -1737,6 +1759,44 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		return fmt.Errorf("nodesync: record missing report objects: %w", err)
 	}
 	return nil
+}
+
+// attachmentSettled reports whether PSPClientRepo.UpdateInboundState(update)
+// would leave an attachment that reads as stored exactly as it is.
+//
+// IT RESTATES THAT WRITER'S RULES AND MUST CHANGE WITH THEM: the state is
+// always written; pending and rejected keep the first-failure time they are
+// given, else the stored one, else start the clock now; applied and blocked
+// clear it; applied also writes the roster version, and the credentials only
+// when the update carries any. Anything this cannot show to be a no-op is
+// reported as not settled, which costs one redundant write and nothing else.
+// TestAttachmentSettledNeverSkipsAWriteThatChangesTheRow runs the writer over
+// every pairing and holds this to it.
+func attachmentSettled(stored, update domain.PSPClientInbound) bool {
+	if stored.State != update.State {
+		return false
+	}
+	switch update.State {
+	case domain.ClientApplyPending, domain.ClientApplyRejected:
+		if stored.FirstFailedAt == nil {
+			// The writer would start the clock, or set the reported time.
+			return false
+		}
+		return update.FirstFailedAt == nil || update.FirstFailedAt.Equal(*stored.FirstFailedAt)
+	case domain.ClientApplyApplied:
+		if stored.FirstFailedAt != nil || stored.AppliedVersion != update.AppliedVersion {
+			return false
+		}
+		if update.AppliedEmail == "" && update.AppliedUUID == "" && update.AppliedPassword == "" {
+			return true
+		}
+		return stored.AppliedEmail == update.AppliedEmail && stored.AppliedUUID == update.AppliedUUID &&
+			stored.AppliedPassword == update.AppliedPassword
+	case domain.ClientApplyBlocked:
+		return stored.FirstFailedAt == nil
+	default:
+		return false
+	}
 }
 
 func sameProtocolClient(a, b nodeprotocol.Client) bool {

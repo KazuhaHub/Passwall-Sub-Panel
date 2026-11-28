@@ -425,6 +425,9 @@ func (r *pspClientRepo) SetInbounds(ctx context.Context, clientID int64, inbound
 // UpdateInboundState is the only writer of attachment convergence. A missing
 // FirstFailedAt starts the clock on the first pending/rejected transition and
 // preserves it across retries; applied/blocked clear it.
+//
+// nodesync.attachmentSettled restates these rules to skip a write that would
+// change nothing; a change to what is written here must be made there too.
 func (r *pspClientRepo) UpdateInboundState(ctx context.Context, inbound domain.PSPClientInbound) error {
 	if inbound.ClientID == 0 || inbound.NodeID == 0 {
 		return errors.New("UpdateInboundState: client and node IDs required")
