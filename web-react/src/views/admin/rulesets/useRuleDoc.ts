@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { buildBlocks, type Block } from '@/utils/ruleset/blocks'
 import { serializeDoc, type Doc } from '@/utils/ruleset/parse'
-import { readDoc, SETTLE_MS, useSettledFlush } from './docCache'
+import { readDoc, seedDoc, SETTLE_MS, useSettledFlush } from './docCache'
 
 const HISTORY = 60
 
@@ -38,6 +38,7 @@ export function useRuleDoc(content: string, setContent: (next: string) => void, 
   const show = (d: Doc) => {
     const text = serializeDoc(d)
     kept.current = { content: text, doc: d }
+    seedDoc(text, d)
     setContent(text)
     redraw(n => n + 1)
   }
