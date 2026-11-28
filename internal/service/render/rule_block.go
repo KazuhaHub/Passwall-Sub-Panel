@@ -3,6 +3,7 @@ package render
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -36,6 +37,7 @@ import (
 type ruleBlock struct {
 	targets []string
 	// standIn has no trailing newline, like every block handed to a template.
+	// It also carries the comment lines above the first rule and below the last.
 	standIn string
 	// emittedStandIn is what the serialiser writes for standIn; emitted is what
 	// it writes for the whole block. Both end in a newline.
@@ -106,17 +108,23 @@ const (
 //
 // The accepted shape is what the rule editor and the shipped rule set produce:
 // a block sequence at column 0, one rule per line, with whole-line comments
-// between rules. Everything is decided by running the real parser and the real
-// serialiser over the text, never by imitating them:
+// directly above rules or after the last one. Everything is decided by running
+// the real parser and the real serialiser over the text, never by imitating
+// them:
 //
 //   - the text must parse to one sequence of string scalars, one per "- " line;
 //   - re-serialising it (what prepareRules does when no target is rewritten)
-//     must give one line per rule again, with comments only between rules;
-//   - parsing those lines inside a document and serialising that document (what
-//     finishMihomo does) must reproduce them unchanged, four spaces in.
+//     must give one line per rule again, and comment lines, nothing else;
+//   - parsing the rule lines inside a document and serialising that document
+//     (what finishMihomo does) must reproduce them unchanged, four spaces in.
 //
 // The last step is the proof that the lines spliced into a finished document
 // are the lines the full pipeline would have written there.
+//
+// Comments above the first rule and below the last are not part of what is
+// spliced. Which node they attach to depends on what the template and the
+// personal rules put around the block, so they stay in the stand-in, at the
+// same places, and go through the document like any other template text.
 func analyseRuleBlock(shared, indent string) *ruleBlock {
 	// A tab, a carriage return or a placeholder makes the text depend on how the
 	// template is composed around it; leave those to the full pipeline.
@@ -152,9 +160,8 @@ func analyseRuleBlock(shared, indent string) *ruleBlock {
 		if rule.Kind != yaml.ScalarNode || rule.Tag != "!!str" || rule.Anchor != "" || rule.Style&^(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
 			return nil
 		}
-		// A comment may only sit on its own lines directly above a rule. One
-		// above the first rule would be claimed by whatever precedes the block.
-		if rule.LineComment != "" || rule.FootComment != "" || index == 0 && rule.HeadComment != "" {
+		// A comment on a rule's own line would have to travel with that rule.
+		if rule.LineComment != "" {
 			return nil
 		}
 		// Every rule must be one the reference checker accepts; a block with a
@@ -170,23 +177,30 @@ func analyseRuleBlock(shared, indent string) *ruleBlock {
 	if err != nil {
 		return nil
 	}
-	prepared := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	first, last := -1, -1
 	ruleLines := make([]string, 0, len(values))
-	for _, line := range prepared {
+	for index, line := range lines {
 		switch {
 		case strings.HasPrefix(line, "- "):
+			if first < 0 {
+				first = index
+			}
+			last = index
 			ruleLines = append(ruleLines, line)
 		case strings.HasPrefix(line, "#"):
 		default:
+			// A blank line: the serialiser set a comment apart from the rules.
 			return nil
 		}
 		if strings.Contains(line, "{{") || isNodeRefLine(indent, line) {
 			return nil
 		}
 	}
-	if len(ruleLines) != len(values) || !strings.HasPrefix(prepared[0], "- ") || !strings.HasPrefix(prepared[len(prepared)-1], "- ") {
+	if len(ruleLines) != len(values) {
 		return nil
 	}
+	leading, prepared, trailing := lines[:first], lines[first:last+1], lines[last+1:]
 
 	// The second half of the round trip, in a document of its own: the lines as
 	// a template would carry them, between the two markers.
@@ -239,7 +253,7 @@ func analyseRuleBlock(shared, indent string) *ruleBlock {
 		}
 	}
 	standIn = append(standIn, "- "+ruleBlockEnd)
-	block.standIn = strings.Join(standIn, "\n")
+	block.standIn = strings.Join(slices.Concat(leading, standIn, trailing), "\n")
 	block.standInRules = len(standIn)
 	block.emittedStandIn = ruleBlockEmitIndent + strings.Join(standIn, "\n"+ruleBlockEmitIndent) + "\n"
 	block.emitted = ruleBlockEmitIndent + strings.Join(prepared, "\n"+ruleBlockEmitIndent) + "\n"

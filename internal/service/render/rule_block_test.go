@@ -63,6 +63,7 @@ func TestReducedRuleAssemblyMatchesFullPipeline(t *testing.T) {
 		"implicit-groups-in-rules", "implicit-groups-template-defines", "implicit-groups-template-refers",
 		"implicit-groups-template-refers-and-rules", "implicit-groups-escaped", "implicit-groups-escaped-personal",
 		"comments-head-only", "comments-template", "comments-template-empty-personal",
+		"comments-leading", "comments-trailing", "comments-framed", "comments-framed-own-groups",
 		"target-unknown-name", "target-unknown-with-members", "personal-shadows", "personal-comment-only",
 		"shared-yaml-specials", "shared-long-line", "shared-at-sign", "shared-control-characters",
 		"shared-builtins-only", "shared-many-groups", "group-options-url-test",
@@ -103,9 +104,10 @@ func TestReducedRuleAssemblyMatchesFullPipeline(t *testing.T) {
 // in. Each document is rendered both ways; a seed that fails is printed.
 func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 	targets := []string{"国外媒体", "DIRECT", "REJECT", "🚀 节点选择", "🎮 UDP控制", "🐟 漏网之鱼", "Extra", "⚡ QUIC控制", "Group: one", "it's", "#hash", "A", "A B", "Nobody Home", "PASS", "\"国外媒体\"", "'Extra'"}
-	// A wild document also uses the shapes the reduction declines (a target
-	// naming a subscription line, inline comments, indentation, blank lines);
-	// a tame one stays within what the rule editor writes.
+	// A wild document also uses the shapes the Mihomo reduction declines (a
+	// target naming a subscription line, inline comments, indentation, blank
+	// lines); a tame one stays within what the rule editor writes, comments
+	// above the first rule and below the last included.
 	rule := func(r *rand.Rand, wild, subRules bool) string {
 		target := targets[r.Intn(len(targets))]
 		for !wild && (target == "A" || target == "A B") {
@@ -162,13 +164,9 @@ func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 		for i := 0; i < rules; i++ {
 			switch r.Intn(14) {
 			case 0:
-				if wild || i > 0 {
-					lines = append(lines, "# a comment about the next rule")
-				}
+				lines = append(lines, "# a comment about the next rule")
 			case 1:
-				if wild || i > 0 {
-					lines = append(lines, "# first line", "#second line")
-				}
+				lines = append(lines, "# first line", "#second line")
 			case 2:
 				if wild {
 					lines = append(lines, "")
@@ -176,8 +174,8 @@ func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 			}
 			lines = append(lines, rule(r, wild, subRules))
 		}
-		if wild && r.Intn(8) == 0 {
-			lines = append(lines, "# trailing comment")
+		if r.Intn(8) == 0 {
+			lines = append(lines, "# trailing comment", "# - DOMAIN,retired.example,DIRECT")
 		}
 		return strings.Join(lines, "\n") + strings.Repeat("\n", r.Intn(3))
 	}
@@ -351,9 +349,20 @@ func TestRuleBlockAnalysis(t *testing.T) {
 	if block.emitted != wantEmitted {
 		t.Fatalf("emitted:\n%s", block.emitted)
 	}
+	// Comments around the rules stay with the stand-in, not with what is spliced.
+	framed := analyseRuleBlock("# top\n# of the list\n- DOMAIN,a.example,G\n# why\n- MATCH,G\n# - DOMAIN,retired.example,G\n", "  ")
+	if framed == nil {
+		t.Fatal("a block with comments around its rules was refused")
+	}
+	if want := "# top\n# of the list\n- " + ruleBlockBegin + "\n- DOMAIN,a.example,G\n- " + ruleBlockEnd + "\n# - DOMAIN,retired.example,G"; framed.standIn != want {
+		t.Fatalf("stand-in:\n%s", framed.standIn)
+	}
+	if want := "    - DOMAIN,a.example,G\n    # why\n    - MATCH,G\n"; framed.emitted != want || framed.standInRules != 3 {
+		t.Fatalf("emitted:\n%s", framed.emitted)
+	}
 	for name, shared := range map[string]string{
-		"comment above the first rule": "# top\n- MATCH,G",
-		"comment after the last rule":  "- MATCH,G\n# end",
+		"comment set apart at the top": "# top\n\n- MATCH,G",
+		"comment set apart at the end": "- MATCH,G\n\n# end",
 		"inline comment":               "- MATCH,G # why",
 		"comment followed by a blank":  "- DOMAIN,a,G\n# foot\n\n- MATCH,G",
 		"indented":                     "  - MATCH,G",
