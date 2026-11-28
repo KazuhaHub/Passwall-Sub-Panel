@@ -13,13 +13,13 @@ import (
 // A panel's roster is not bounded by a statement's parameter limit. The
 // attachment read used to list every client ID of the panel as its own bound
 // parameter, which SQLite refuses above 32766 and PostgreSQL/MySQL above
-// 65535: past that size every sync of the server failed outright. 33000 is
-// above the smallest of those limits.
+// 65535: past that size every sync of the server failed outright.
+//
+// Pinned by counting the parameters the attachment read binds, not by building
+// a panel above the limit: tens of thousands of rows took minutes under the
+// race detector, and proved nothing on the two dialects whose limit is higher.
 func TestNativeDesiredLoadIsNotBoundedByParameterLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("inserts 33000 clients")
-	}
-	const panelID, otherPanelID, nodeID, clients = int64(3), int64(4), int64(900), 33000
+	const panelID, otherPanelID, nodeID, clients = int64(3), int64(4), int64(900), 600
 	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatal(err)
@@ -27,9 +27,17 @@ func TestNativeDesiredLoadIsNotBoundedByParameterLimit(t *testing.T) {
 	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
-	// One transaction, and no statement log: the fixture is some 130 multi-row
-	// inserts, each of which the slow-query logger would otherwise print whole.
-	seed := db.Session(&gorm.Session{Logger: logger.Discard}).Begin()
+	attachmentReadParams := -1
+	if err := db.Callback().Query().After("gorm:query").Register("test:count_attachment_params", func(tx *gorm.DB) {
+		if tx.Statement.Table == "psp_client_inbounds" {
+			attachmentReadParams = len(tx.Statement.Vars)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove("test:count_attachment_params") })
+	// No statement log: the slow-query logger would print each multi-row insert whole.
+	seed := db.Session(&gorm.Session{Logger: logger.Discard})
 	rows := make([]pspClientRow, 0, clients+1)
 	for i := 1; i <= clients; i++ {
 		rows = append(rows, pspClientRow{ID: int64(i), UserID: int64(i), PanelID: panelID, Email: "c" + strconv.Itoa(i)})
@@ -48,13 +56,13 @@ func TestNativeDesiredLoadIsNotBoundedByParameterLimit(t *testing.T) {
 	if err := seed.CreateInBatches(attachments, 500).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.Commit().Error; err != nil {
-		t.Fatal(err)
-	}
 
 	snapshot, err := NewRepos(db).NativeDesired.Load(t.Context(), panelID)
 	if err != nil {
 		t.Fatalf("load a %d-client panel: %v", clients, err)
+	}
+	if attachmentReadParams != 1 {
+		t.Fatalf("the attachment read bound %d parameters for %d clients, want 1 (the panel id)", attachmentReadParams, clients)
 	}
 	if len(snapshot.Clients) != clients {
 		t.Fatalf("clients = %d, want %d", len(snapshot.Clients), clients)
