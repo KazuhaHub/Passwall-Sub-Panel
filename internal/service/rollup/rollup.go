@@ -116,6 +116,8 @@ type Service struct {
 	// started (zero until the first one). See RollupBeforePrune.
 	mu           sync.Mutex
 	lastComplete time.Time
+	// lastFull is when the last full pass that succeeded started.
+	lastFull time.Time
 }
 
 // New builds the rollup service. pollInterval is the traffic poll cadence; the
@@ -164,7 +166,8 @@ func (s *Service) RollupOnce(ctx context.Context) error {
 //
 // The mark moves only when a pass succeeds, so after any number of failed
 // passes the next one still starts from the last good one. A clock that went
-// backwards makes the mark meaningless and the pass is a full one again.
+// backwards makes the mark meaningless and the pass is a full one again, and
+// so is one pass a day (fullPassEvery).
 //
 // A bucket at the old edge of the bounded window may have no sample at or
 // before its :00 inside that window. emitFromAccs then treats it as
@@ -173,11 +176,12 @@ func (s *Service) RollupOnce(ctx context.Context) error {
 func (s *Service) RollupBeforePrune(ctx context.Context) error {
 	started := s.now()
 	s.mu.Lock()
-	last := s.lastComplete
+	last, lastFull := s.lastComplete, s.lastFull
 	s.mu.Unlock()
 
 	var emitSince time.Time // zero = every bucket
-	if !last.IsZero() && !last.After(started) {
+	full := last.IsZero() || last.After(started) || started.Sub(lastFull) >= fullPassEvery
+	if !full {
 		emitSince = last.Add(-beforePruneMargin(s.heartbeat))
 	}
 	if err := s.rollup(ctx, emitSince); err != nil {
@@ -185,16 +189,31 @@ func (s *Service) RollupBeforePrune(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.lastComplete = started
+	if full {
+		s.lastFull = started
+	}
 	s.mu.Unlock()
 	return nil
 }
 
+// fullPassEvery is how often RollupBeforePrune is a full pass again. A bounded
+// window cannot tell a bucket whose earlier sample lies beyond its reach (a
+// gap longer than the heartbeat before the segment that lands in it) from one
+// that has none: both are left-incomplete and insert-once, so a value written
+// short stays short. The full pass sees every sample and overwrites it. Raw
+// rows live for 7 days, so each bucket gets several of these before its rows
+// are pruned, at a twenty-fourth of what the full pass every hour used to cost.
+const fullPassEvery = 24 * time.Hour
+
 // beforePruneMargin is how far behind the previous pass RollupBeforePrune
-// starts emitting: the longest segment that can still reach back across that
-// pass (the heartbeat) plus the hour its first bucket starts in, and never less
-// than the window the per-poll pass keeps fresh.
+// starts emitting. A sample that arrives after that pass changes buckets from
+// the hour its segment starts in: the segment is at most one heartbeat long,
+// that hour starts at most an hour before it, and one more hour covers a
+// sample stamped before the pass started but committed after it (the poll
+// writes its snapshots in one batch at its end). Never less than the window
+// the per-poll pass keeps fresh.
 func beforePruneMargin(heartbeat time.Duration) time.Duration {
-	if m := heartbeat + time.Hour; m > rollupRecentEmitWindow {
+	if m := heartbeat + 2*time.Hour; m > rollupRecentEmitWindow {
 		return m
 	}
 	return rollupRecentEmitWindow
@@ -387,7 +406,7 @@ func (s *Service) rollupUser(ctx context.Context, cutoff, emitSince time.Time) (
 	q := s.db.WithContext(ctx).
 		Table("traffic_snapshots").
 		Select("user_id, up_bytes, down_bytes, total_bytes, captured_at")
-	q = withRecentRawWindow(q, emitSince)
+	q = s.withRecentRawWindow(q, emitSince)
 	if err := q.Find(&raws).Error; err != nil {
 		return 0, err
 	}
@@ -418,7 +437,7 @@ func (s *Service) rollupNode(ctx context.Context, cutoff, emitSince time.Time) (
 	q := s.db.WithContext(ctx).
 		Table("node_traffic_snapshots").
 		Select("node_id, up_bytes, down_bytes, total_bytes, captured_at")
-	q = withRecentRawWindow(q, emitSince)
+	q = s.withRecentRawWindow(q, emitSince)
 	if err := q.Find(&raws).Error; err != nil {
 		return 0, err
 	}
@@ -434,29 +453,47 @@ func (s *Service) rollupNode(ctx context.Context, cutoff, emitSince time.Time) (
 	return s.upsertSplit(ctx, "node_traffic_snapshots_hourly", []string{"node_id", "bucket_start"}, overwrite, keepIfNew)
 }
 
-// withRecentRawWindow bounds a raw-table query to the window RollupRecent emits
-// (buckets >= emitSince) plus a look-back so the oldest emitted bucket's
-// left-boundary segment (the sample before its :00, up to maxInterpGap earlier)
-// is still fetched. captured_at is indexed (idx_traffic_captured /
-// idx_node_traffic_captured), so this is a small range scan, not a full read of
-// the 7-day raw window. RollupOnce passes a zero emitSince and keeps the full scan.
-func withRecentRawWindow(q *gorm.DB, emitSince time.Time) *gorm.DB {
+// withRecentRawWindow bounds a raw-table query to the window a bounded pass
+// emits (buckets >= emitSince) plus a look-back, so that the oldest emitted
+// bucket still has the sample before its :00 in hand. captured_at is indexed
+// (idx_traffic_captured / idx_node_traffic_captured), so this is a range scan,
+// not a full read of the 7-day raw window. A zero emitSince keeps the full scan.
+//
+// The look-back has two parts.
+//
+// The segment that crosses a bucket's :00 is at most one heartbeat long, so its
+// left sample lies at most heartbeat + 1h before the bucket's end; a fixed 2h
+// was too short for any poll cadence above 48 minutes, and the bucket was then
+// computed without that segment and kept short (it is insert-once when its
+// left sample is out of sight).
+//
+// On SQLite the comparison is not one of instants. The driver stores a time as
+// text with its zone offset and compares text, so a row reads as early or as
+// late as its wall clock, whatever instant it is. The two raw tables are not
+// even stamped alike: user snapshots carry the panel's timezone, node
+// snapshots and this bound the process's. A row stamped at -07:00 reads seven
+// hours earlier than a UTC bound and fell out of the window, so with the panel
+// on a zone behind the process no user bucket was ever written by a bounded
+// pass. Offsets span -12h to +14h, so the bound is lowered by the widest
+// distance two of them can have. The extra rows cost a little reading and
+// nothing else: accumulate and emitFromAccs work on instants and bound the
+// result exactly. PostgreSQL and MySQL compare instants and need none of it.
+func (s *Service) withRecentRawWindow(q *gorm.DB, emitSince time.Time) *gorm.DB {
 	if emitSince.IsZero() {
 		return q
 	}
-	// The bound MUST be in the same wall-clock representation the driver stored
-	// captured_at in (the process TZ), NOT forced to UTC: the SQLite driver
-	// persists times as TZ-offset-bearing strings and compares them
-	// lexicographically, so a UTC bound vs a local-offset stored string silently
-	// excludes valid rows (e.g. "16:37-07:00" < "23:37+00:00" as strings). In
-	// production the clock is pinned to UTC so this IS UTC; in a non-UTC dev/test
-	// env it matches the local-offset rows. emitSince already carries the process
-	// TZ (it comes from time.Now()). accumulate's cutoff + emitSince filters still
-	// bound the result exactly. The 2h look-back (maxInterpGap of boundary context
-	// + 1h margin) keeps the oldest emitted bucket's left-boundary segment in range
-	// and absorbs minor string-ordering fuzz.
-	return q.Where("captured_at >= ?", emitSince.Add(-2*time.Hour))
+	lookBack := s.heartbeat + time.Hour
+	if lookBack < 2*time.Hour {
+		lookBack = 2 * time.Hour
+	}
+	if s.db.Dialector.Name() == "sqlite" {
+		lookBack += sqliteZoneSlack
+	}
+	return q.Where("captured_at >= ?", emitSince.Add(-lookBack))
 }
+
+// sqliteZoneSlack is the widest distance between two zone offsets (-12h, +14h).
+const sqliteZoneSlack = 26 * time.Hour
 
 // upsertSplit writes the overwrite set (re-emit allowed) and the keepIfNew set
 // (insert-once, never shrink) for one hourly table. See emitFromAccs for why the
