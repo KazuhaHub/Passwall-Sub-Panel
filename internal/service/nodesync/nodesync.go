@@ -1577,6 +1577,17 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			return err
 		}
 		statuses := objectStatuses(report.Objects, nodeprotocol.StreamRoster)
+		// Indexed once: finding each roster client by walking the snapshot made
+		// this loop quadratic in the roster on every full report. The first
+		// row of an id is the one the walk found.
+		desiredByID := make(map[int64]*ports.NativeDesiredClient, len(snapshot.Clients))
+		for i := range snapshot.Clients {
+			if client := snapshot.Clients[i].Client; client != nil {
+				if _, seen := desiredByID[client.ID]; !seen {
+					desiredByID[client.ID] = &snapshot.Clients[i]
+				}
+			}
+		}
 		for _, currentClient := range currentRoster.Clients {
 			appliedClient, existed := appliedClients[currentClient.Key]
 			if !existed || !sameProtocolClient(appliedClient, currentClient) {
@@ -1607,13 +1618,7 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 					Detail: "roster object missing from full report",
 				})
 			}
-			var desired *ports.NativeDesiredClient
-			for i := range snapshot.Clients {
-				if snapshot.Clients[i].Client != nil && snapshot.Clients[i].Client.ID == clientID {
-					desired = &snapshot.Clients[i]
-					break
-				}
-			}
+			desired := desiredByID[clientID]
 			if desired == nil {
 				continue
 			}
@@ -1631,6 +1636,23 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 						attachment.AppliedPassword != update.AppliedPassword {
 						renderCredentialsChanged = true
 					}
+				}
+				// A FULL REPORT REPLAYS EVERY OBJECT, and nearly always in the
+				// state it reported last time. Writing it regardless was one
+				// transaction per client per attachment per full report of every
+				// server, to store what the row already said.
+				//
+				// The comparison is with the row as THIS sync loaded it (the
+				// desired snapshot), so it costs no read. A row another writer
+				// moved after that load (a membership resync that removed and
+				// re-added the attachment, a server migration resetting it to
+				// pending) is left as that writer made it instead of being
+				// overwritten from a stale view, and the next full report, whose
+				// snapshot shows the move, writes it. That is the order of events
+				// the old unconditional write already had whenever the other
+				// writer landed just after it.
+				if attachmentSettled(attachment, update) {
+					continue
 				}
 				if err := s.clients.UpdateInboundState(ctx, update); err != nil {
 					return fmt.Errorf("nodesync: update client %d attachment %d: %w", clientID, attachment.NodeID, err)
@@ -1737,6 +1759,44 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 		return fmt.Errorf("nodesync: record missing report objects: %w", err)
 	}
 	return nil
+}
+
+// attachmentSettled reports whether PSPClientRepo.UpdateInboundState(update)
+// would leave an attachment that reads as stored exactly as it is.
+//
+// IT RESTATES THAT WRITER'S RULES AND MUST CHANGE WITH THEM: the state is
+// always written; pending and rejected keep the first-failure time they are
+// given, else the stored one, else start the clock now; applied and blocked
+// clear it; applied also writes the roster version, and the credentials only
+// when the update carries any. Anything this cannot show to be a no-op is
+// reported as not settled, which costs one redundant write and nothing else.
+// TestAttachmentSettledNeverSkipsAWriteThatChangesTheRow runs the writer over
+// every pairing and holds this to it.
+func attachmentSettled(stored, update domain.PSPClientInbound) bool {
+	if stored.State != update.State {
+		return false
+	}
+	switch update.State {
+	case domain.ClientApplyPending, domain.ClientApplyRejected:
+		if stored.FirstFailedAt == nil {
+			// The writer would start the clock, or set the reported time.
+			return false
+		}
+		return update.FirstFailedAt == nil || update.FirstFailedAt.Equal(*stored.FirstFailedAt)
+	case domain.ClientApplyApplied:
+		if stored.FirstFailedAt != nil || stored.AppliedVersion != update.AppliedVersion {
+			return false
+		}
+		if update.AppliedEmail == "" && update.AppliedUUID == "" && update.AppliedPassword == "" {
+			return true
+		}
+		return stored.AppliedEmail == update.AppliedEmail && stored.AppliedUUID == update.AppliedUUID &&
+			stored.AppliedPassword == update.AppliedPassword
+	case domain.ClientApplyBlocked:
+		return stored.FirstFailedAt == nil
+	default:
+		return false
+	}
 }
 
 func sameProtocolClient(a, b nodeprotocol.Client) bool {
@@ -1976,7 +2036,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		ForRosterVersion: rosterVersion,
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
 	}
-	users := make(map[int64]*domain.User)
+	users, err := s.rosterUsers(ctx, snapshot.Clients)
+	if err != nil {
+		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, err
+	}
 	emergencyQuotaGBByUser := make(map[int64]float64)
 	for _, desired := range snapshot.Clients {
 		client := desired.Client
@@ -1985,11 +2048,10 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		}
 		user := users[client.UserID]
 		if user == nil {
-			user, err = s.users.GetByID(ctx, client.UserID)
-			if err != nil {
-				return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load user %d: %w", client.UserID, err)
-			}
-			users[client.UserID] = user
+			// The list read leaves out an account that no longer exists, where
+			// the point read it replaced failed. It must still fail here: an
+			// entry built without the account would carry no gate.
+			return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load user %d: %w", client.UserID, domain.ErrNotFound)
 		}
 		counter, counterKnown := counters[client.ID]
 		baseline := int64(0)
@@ -2080,6 +2142,39 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
 	return body, envelope, nil
+}
+
+// rosterUsers reads the accounts the clients of a roster belong to, by id, in
+// one list read (the repository chunks it under the dialects' parameter
+// limits) instead of one statement per account on every poll of every server.
+// The accounts come back resolved exactly as GetByID resolves them. One that
+// no longer exists is absent from the map; the caller decides what that means.
+func (s *Service) rosterUsers(ctx context.Context, clients []ports.NativeDesiredClient) (map[int64]*domain.User, error) {
+	seen := make(map[int64]struct{}, len(clients))
+	ids := make([]int64, 0, len(clients))
+	for _, desired := range clients {
+		if desired.Client == nil {
+			continue
+		}
+		if _, dup := seen[desired.Client.UserID]; !dup {
+			seen[desired.Client.UserID] = struct{}{}
+			ids = append(ids, desired.Client.UserID)
+		}
+	}
+	users := make(map[int64]*domain.User, len(ids))
+	if len(ids) == 0 {
+		return users, nil
+	}
+	loaded, err := s.users.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("nodesync: load roster users: %w", err)
+	}
+	for _, user := range loaded {
+		if user != nil {
+			users[user.ID] = user
+		}
+	}
+	return users, nil
 }
 
 // aggregateCoverage derives the denominator from PSP's own native-panel client

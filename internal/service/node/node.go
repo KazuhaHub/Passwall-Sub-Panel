@@ -1322,7 +1322,20 @@ func (s *Service) NormalizeRealityFingerprintsForPanel(ctx context.Context, pane
 	if !ok {
 		return 0, fmt.Errorf("node repository does not support REALITY fingerprint convergence")
 	}
-	nodes, err := s.nodes.List(ctx)
+	// THIS RUNS ON EVERY SYNC OF EVERY NATIVE XRAY SERVER. List reads every node
+	// of the fleet and attaches its routes, link readiness, probes and line
+	// positions with several further statements, to keep the handful of rows
+	// whose panel matches. Only the node's own columns are read below (and a
+	// node that is rewritten is read again by id before it is pushed), so the
+	// repository is asked for that server's bare rows when it offers them. The
+	// panel filter below stays for a repository that does not.
+	var nodes []*domain.Node
+	var err error
+	if lister, ok := s.nodes.(ports.NodePanelBareLister); ok {
+		nodes, err = lister.ListByPanelBare(ctx, panelID)
+	} else {
+		nodes, err = s.nodes.List(ctx)
+	}
 	if err != nil {
 		return 0, err
 	}

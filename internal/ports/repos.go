@@ -344,6 +344,17 @@ type NodeBareReader interface {
 	GetByPanelInboundBare(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error)
 }
 
+// NodePanelBareLister is an optional capability of a NodeRepo: the nodes of one
+// server, in List's order, WITHOUT the side state List attaches to every node
+// of the fleet. The REALITY fingerprint convergence runs on every sync of every
+// native Xray server and reads only the stored stream of that server's own
+// nodes, so it asks for this when the repo has it. A caller that reads
+// anything but a node's own columns must use List. Asserted at the call site,
+// like NodeBareReader.
+type NodePanelBareLister interface {
+	ListByPanelBare(ctx context.Context, panelID int64) ([]*domain.Node, error)
+}
+
 type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error

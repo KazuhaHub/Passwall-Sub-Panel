@@ -49,13 +49,23 @@ func (r *nativeDesiredRepo) Load(ctx context.Context, panelID int64) (*ports.Nat
 		if len(clientRows) == 0 {
 			return nil
 		}
-		ids := make([]int64, len(clientRows))
 		for i := range clientRows {
-			ids[i] = clientRows[i].ID
 			result.Clients[i].Client = rowToPSPClient(&clientRows[i])
 		}
+		// THE PANEL'S CLIENTS ARE NAMED BY A SUBQUERY, NOT BY A LIST OF THEIR IDS.
+		// A list binds one parameter per client, so the statement grew with the
+		// roster and stopped working altogether at SQLite's 32766 parameters
+		// (65535 on PostgreSQL and MySQL): from then on every sync of that
+		// server failed. Chunking the list would keep it under the limit but
+		// send the ids back to the database that just produced them.
+		//
+		// It runs in the transaction of the client read above. An attachment
+		// whose client is not among clientRows (one created between the two
+		// statements where the isolation level allows that) is simply not
+		// handed to anyone below, exactly as a row outside the list was not.
 		var attachmentRows []pspClientInboundRow
-		if err := tx.Where("client_id IN ?", ids).Order("client_id, node_id").Find(&attachmentRows).Error; err != nil {
+		if err := tx.Where("client_id IN (?)", tx.Model(&pspClientRow{}).Select("id").Where("panel_id = ?", panelID)).
+			Order("client_id, node_id").Find(&attachmentRows).Error; err != nil {
 			return err
 		}
 		byClient := make(map[int64][]domain.PSPClientInbound, len(clientRows))

@@ -606,3 +606,61 @@ func TestImportExisting_NonVLESSAdoptsNoFlow(t *testing.T) {
 		t.Fatalf("non-VLESS must not adopt a flow: got %q", repo.created.Flow)
 	}
 }
+
+// panelListingNodeRepo offers the light read of one server's nodes, and counts
+// the whole-fleet read it replaces.
+type panelListingNodeRepo struct {
+	*normalizationNodeRepo
+	fleetReads int
+	panelReads []int64
+}
+
+func (r *panelListingNodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
+	r.fleetReads++
+	return r.normalizationNodeRepo.List(ctx)
+}
+
+func (r *panelListingNodeRepo) ListByPanelBare(_ context.Context, panelID int64) ([]*domain.Node, error) {
+	r.panelReads = append(r.panelReads, panelID)
+	var out []*domain.Node
+	for _, n := range r.nodes {
+		if n.PanelID == panelID {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// Every sync of a native Xray server runs this convergence. It reads the
+// server's own nodes, not every node of the fleet with its routes, link
+// readiness, probes and line positions attached.
+func TestNormalizeRealityFingerprintsForPanelReadsOnlyThatPanel(t *testing.T) {
+	now := time.Now()
+	stale := `{"network":"tcp","security":"reality","realitySettings":{"settings":{"fingerprint":"firefox"}}}`
+	own := &domain.Node{
+		ID: 1, PanelID: 7, InboundID: 3, DesiredProtocol: "vless", DesiredPort: 443,
+		InboundSettings: `{"decryption":"none"}`, StreamSettings: stale, ConfigSyncedAt: &now,
+	}
+	foreign := &domain.Node{
+		ID: 2, PanelID: 8, InboundID: 3, DesiredProtocol: "vless", DesiredPort: 443,
+		InboundSettings: `{"decryption":"none"}`, StreamSettings: stale, ConfigSyncedAt: &now,
+	}
+	base := &captureNodeRepo{node: own}
+	repo := &panelListingNodeRepo{normalizationNodeRepo: &normalizationNodeRepo{captureNodeRepo: base, nodes: []*domain.Node{foreign, own}}}
+	client := &stubXUIClient{}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
+
+	changed, err := svc.NormalizeRealityFingerprintsForPanel(context.Background(), 7, "26.9.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.fleetReads != 0 || len(repo.panelReads) != 1 || repo.panelReads[0] != 7 {
+		t.Fatalf("fleet reads = %d, panel reads = %v, want one read of panel 7", repo.fleetReads, repo.panelReads)
+	}
+	if changed != 1 || !strings.Contains(own.StreamSettings, `"fingerprint":"chrome"`) {
+		t.Fatalf("the panel's node was not normalized: changed=%d stream=%s", changed, own.StreamSettings)
+	}
+	if foreign.StreamSettings != stale {
+		t.Fatalf("another panel's node was touched: %s", foreign.StreamSettings)
+	}
+}

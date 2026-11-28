@@ -320,3 +320,51 @@ func TestGetByPanelInboundBareReadsOnlyTheNodeRow(t *testing.T) {
 		t.Errorf("an unknown inbound = %v, want ErrNotFound", err)
 	}
 }
+
+// ListByPanelBare is the nodes of one server, in List's order, read with one
+// statement on the nodes table: no other server's rows and none of the side
+// state List attaches to every node.
+func TestListByPanelBareReadsOnlyThePanelsNodeRows(t *testing.T) {
+	fx := newSideStateFixture(t, 12, 4)
+	ctx := t.Context()
+	all, err := fx.repos.Node.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lister, ok := fx.repos.Node.(ports.NodePanelBareLister)
+	if !ok {
+		t.Fatal("the SQL node repo must offer the light panel read")
+	}
+	const panelID = int64(2)
+	counter := countQueries(t, fx.db)
+	bare, err := lister.ListByPanelBare(ctx, panelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("ListByPanelBare: %s", counter)
+	var want []*domain.Node
+	for _, node := range all {
+		if node.PanelID == panelID {
+			want = append(want, node)
+		}
+	}
+	if len(want) != 3 {
+		t.Fatalf("fixture has %d nodes on panel %d, want 3", len(want), panelID)
+	}
+	if counter.statements != 1 || counter.rows["nodes"] != int64(len(want)) || len(counter.rows) != 1 {
+		t.Errorf("light read ran %s, want one statement returning the panel's %d nodes", counter, len(want))
+	}
+	if len(bare) != len(want) {
+		t.Fatalf("nodes = %d, want %d", len(bare), len(want))
+	}
+	for i := range want {
+		if bare[i].ID != want[i].ID || bare[i].PanelID != panelID || bare[i].StreamSettings != want[i].StreamSettings ||
+			bare[i].InboundSettings != want[i].InboundSettings || bare[i].DesiredPort != want[i].DesiredPort ||
+			bare[i].ConfigSyncState != want[i].ConfigSyncState {
+			t.Errorf("node %d: bare %+v, full %+v", i, bare[i], want[i])
+		}
+	}
+	if none, err := lister.ListByPanelBare(ctx, 9999); err != nil || len(none) != 0 {
+		t.Errorf("an unknown panel = (%v, %v), want no nodes", none, err)
+	}
+}
