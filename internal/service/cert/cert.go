@@ -450,7 +450,7 @@ func OwnedTaskTypes() []domain.SyncTaskType {
 // ProcessDueBatch drives one batch of cert_issue / cert_renew tasks. Mirrors
 // the user/node task processors: claim, run, then succeed / retry (transient) /
 // fail-fast (permanent or attempt cap). Reports how many tasks ran and how many
-// did not succeed. Wired into app's runCertTaskLoop.
+// did not succeed. Wired into app's runSyncTaskLoop.
 func (s *Service) ProcessDueBatch(ctx context.Context, limit int) (ran, failed int, err error) {
 	tasks, err := s.tasks.ListDue(ctx, time.Now(), certTaskTypes, limit)
 	if err != nil {

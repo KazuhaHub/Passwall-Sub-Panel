@@ -1169,9 +1169,6 @@ func (a *App) Run() error {
 		a.probePanelVersionsOnce(bgCtx)
 	})
 	safego.GoTracked(&a.bgWG, "sync-task-loop", func() { a.runSyncTaskLoop(bgCtx) })
-	if a.cert != nil {
-		safego.GoTracked(&a.bgWG, "cert-task-loop", func() { a.runCertTaskLoop(bgCtx) })
-	}
 	// V3-transitional: kick off the silent shared-client migration. Only enqueues
 	// per-user tasks for users still on the legacy per-node model; the sync-task
 	// loop (started above) drains them with backoff. Self-regulating + deduped, so
@@ -2334,25 +2331,19 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 		// two could run side by side was not established.
 		a.drainSyncTasks(ctx, "user", a.user.ProcessDueBatch)
 		a.drainSyncTasks(ctx, "node", a.node.ProcessDueBatch)
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
+		// Certificate tasks stay on this goroutine, after the node tasks. A
+		// certificate deploy writes the node's stream settings and enqueues a
+		// push; a node task that has just pushed re-reads the row and writes it
+		// back whole (node.runNodeTask), with no compare-and-swap. Run side by
+		// side, a deploy landing between that re-read and that write is undone
+		// and its push was already deduplicated against the running task: the
+		// node keeps the old certificate until it expires. On one goroutine the
+		// two cannot interleave. Giving certificates a loop of their own (an
+		// ACME issuance can hold this one for minutes) needs that write-back
+		// made conditional first.
+		if a.cert != nil {
+			a.drainSyncTasks(ctx, "cert", a.cert.ProcessDueBatch)
 		}
-	}
-}
-
-// runCertTaskLoop drains the certificate tasks on a loop of their own. One
-// ACME issuance can take minutes (a DNS challenge waits for propagation), and
-// in the shared loop every user and node task waited behind it; the other way
-// round, a dead panel holding up twenty user tasks delayed a renewal. A
-// certificate task touches a panel only to push the finished certificate,
-// through the same node pusher a request thread uses.
-func (a *App) runCertTaskLoop(ctx context.Context) {
-	t := time.NewTicker(syncTaskInterval)
-	defer t.Stop()
-	for {
-		a.drainSyncTasks(ctx, "cert", a.cert.ProcessDueBatch)
 		select {
 		case <-ctx.Done():
 			return
