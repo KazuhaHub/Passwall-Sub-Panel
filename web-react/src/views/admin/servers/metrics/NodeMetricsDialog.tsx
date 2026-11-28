@@ -21,6 +21,10 @@ import { useSiteStore } from '@/stores/site'
 import { Notice } from '@/components/common/Notice'
 import { useAdminT } from '../../useAdminT'
 import NodeDiagnosticsDialog from '../dialogs/NodeDiagnosticsDialog'
+import { useQueryClient } from '@tanstack/react-query'
+import { nodeMetricsKeys } from '@/query/keys'
+import { useQueryScope } from '@/query/useQueryScope'
+import { InterfaceList } from './InterfaceList'
 import NodeMetricsChart, { formatBits, formatBytes, formatValue, metricsTimeFormatter, type MetricsSeries } from './NodeMetricsChart'
 
 const RANGES: { key: string; hours: number; resolution: HistoryResolution }[] = [
@@ -68,6 +72,8 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
   const [diagnostics, setDiagnostics] = useState(false)
   const refreshController = useRef<AbortController | null>(null)
   const serverID = server?.id ?? 0
+  const queryClient = useQueryClient()
+  const scope = useQueryScope()
   // Keep old history during a range fetch, but never show another server's data.
   const current = data?.serverID === serverID ? data.current : null
   const history = data?.serverID === serverID ? data.history : null
@@ -85,11 +91,13 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
       ])
       if (signal?.aborted) return
       setData({ serverID, current: currentBody, history: historyBody })
+      // The server overview behind the sheet reads the same sample through the query cache.
+      queryClient.setQueryData(nodeMetricsKeys.current(scope, serverID), currentBody)
       setStatus('ready')
     } catch {
       if (!signal?.aborted) setStatus('error')
     }
-  }, [serverID, range])
+  }, [serverID, range, queryClient, scope])
 
   useEffect(() => {
     if (!open || !serverID) return
@@ -257,6 +265,10 @@ export default function NodeMetricsDialog({ server, open, onClose }: {
                   <MetricPlot title={t('admin:nodeMetrics.retrans')} {...chartProps}
                     series={plotSeries(history, [['tcp_retrans_percent', t('admin:nodeMetrics.retrans'), 'percent']])} />
                 </div>
+                <section className="flex flex-col gap-2">
+                  <h3 className="text-sm font-medium">{t('admin:servers.interfaces.title')}</h3>
+                  <InterfaceList network={current.network} />
+                </section>
                 <Notice tone="info">{t('admin:nodeMetrics.networkScopeHint')}</Notice>
               </TabsContent>
 

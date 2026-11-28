@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { isAxiosError } from 'axios'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Server } from '@/api/servers'
@@ -8,6 +9,8 @@ import { useAllNodes } from '@/query/nodes'
 import { useQueryScope } from '@/query/useQueryScope'
 import { useCan } from '@/utils/permissions'
 import { AddressGroups } from '../AddressList'
+import { InterfaceList } from '../metrics/InterfaceList'
+import { useNodeMetricsCurrent } from '@/query/nodeMetrics'
 import { serverAddresses } from '../addresses'
 import { CountsCell, StatusCell, VersionCell } from '../cells'
 import type { MaintenanceAction, MaintenanceGroup } from '../maintenance'
@@ -54,6 +57,9 @@ export function ServerOverview({ server, probe, releases }: { server: Server; pr
             : server.panel_type === 'psp' ? <span className="text-muted-foreground">{t('admin:servers.addresses.none')}</span>
               : <span className="font-mono text-[0.8125rem] break-all">{server.url}</span>}
       </Field>
+      {server.panel_type === 'psp' && (
+        <Field label={t('admin:servers.interfaces.title')}><ServerInterfaces server={server} /></Field>
+      )}
       <Field label={t('admin:servers.table.counts')}>
         <div className="flex flex-wrap items-center gap-3">
           <CountsCell counts={counts} />
@@ -62,6 +68,32 @@ export function ServerOverview({ server, probe, releases }: { server: Server; pr
       </Field>
       <Field label={t('admin:servers.table.type')}>{typeLabel(server)}</Field>
     </dl>
+  )
+}
+
+/**
+ * A Passwall Node's interfaces from its latest host sample. A server whose node cannot answer (not enrolled yet, no
+ * host telemetry, or a panel without the endpoint: all 404) says the node has not reported them rather than claiming a
+ * load failure; a stale sample says so above the list.
+ */
+function ServerInterfaces({ server }: { server: Server }) {
+  const { t } = useTranslation('admin')
+  const scope = useQueryScope()
+  const current = useNodeMetricsCurrent(scope, server.id)
+  if (current.isPending) return <span className="text-muted-foreground">…</span>
+  if (current.isError) {
+    const missing = isAxiosError(current.error) && current.error.response?.status === 404
+    return <span className="text-muted-foreground">{t(missing ? 'admin:servers.interfaces.unreported' : 'admin:servers.interfaces.load_failed')}</span>
+  }
+  const data = current.data
+  if (!data.network) {
+    return <span className="text-muted-foreground">{t(data.available ? 'admin:nodeMetrics.waitingForSample' : 'admin:servers.interfaces.unreported')}</span>
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      {data.freshness === 'stale' && <p className="text-xs text-muted-foreground">{t('admin:nodeMetrics.staleHint')}</p>}
+      <InterfaceList network={data.network} />
+    </div>
   )
 }
 

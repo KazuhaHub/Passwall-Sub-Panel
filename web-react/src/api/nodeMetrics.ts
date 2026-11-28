@@ -66,6 +66,30 @@ export interface NodeHealthFinding {
   recovery_seconds?: number
 }
 
+/** One interface of the latest sample, for diagnostics. */
+export interface NodeNetworkInterface {
+  name: string
+  index: number
+  /** The administrative flag; `operational_state` is the link's own (up, down, lowerlayerdown, ...), or ''. */
+  up: boolean
+  operational_state: string
+  is_default_ipv4: boolean
+  is_default_ipv6: boolean
+  /** `address/prefix-length`, IPv4 first, public and private. Empty when the node does not report them. */
+  addresses: string[]
+  /** The node cut the list at the protocol's bound, so it is not the whole list. */
+  addresses_truncated: boolean
+}
+
+export interface NodeNetworkInterfaces {
+  /**
+   * False for a node that does not report addresses (older version) or could not read them this time. Then an empty
+   * list means "unknown", never "no address".
+   */
+  addresses_reported: boolean
+  interfaces: NodeNetworkInterface[]
+}
+
 export interface NodeMetricsCurrent {
   available: boolean
   freshness: NodeMetricsFreshness
@@ -79,6 +103,8 @@ export interface NodeMetricsCurrent {
     unexpected_exits: string | null
     last_unexpected_exit_at: string | null
   }
+  /** Absent from panels that predate it, and when there is no sample yet. */
+  network?: NodeNetworkInterfaces
 }
 
 export interface NodeMetricsSeriesPoint extends Partial<NodeMetricsSummary> {

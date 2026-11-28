@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, fireEvent, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads } from '../testHarness'
@@ -11,7 +12,7 @@ import type { Server } from '@/api/servers'
 // React's dev-only StrictMode double-invokes an effect to check its cleanup: the harness's own
 // StrictMode-wrapped `mount` would double the very first fetch and throw off every call-count
 // assertion below. The sheet needs no router or query client, so it renders bare.
-function mount(page: ReactElement) { return render(page) }
+function mount(page: ReactElement) { return render(<QueryClientProvider client={new QueryClient()}>{page}</QueryClientProvider>) }
 
 /**
  * SLOW-NETWORK FEEDBACK for the metrics dialog: switching the range chip or

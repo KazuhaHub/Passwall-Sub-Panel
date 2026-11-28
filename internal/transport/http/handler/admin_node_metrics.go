@@ -2,12 +2,16 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -123,7 +127,66 @@ func (h *AdminNodeMetricsHandler) Current(c *gin.Context) {
 		"summary": summaryOf(snapshot.Derived),
 		"core":    coreLifecycleOf(snapshot.Sample),
 		"health":  gin.H{"status": health.Status, "findings": findingsOf(health)},
+		"network": networkInterfacesOf(agent, snapshot.Observation.SnapshotJSON),
 	})
+}
+
+// networkInterfacesOf lists the latest sample's interfaces with their
+// addresses, for diagnostics.
+//
+// addresses_reported is what lets the SPA say "no address" rather than
+// "unknown": it is true only for a node that declared
+// host.interface_addresses.v1 and whose sample does not carry the
+// network.addresses token, and whose stored sample carries addresses. An older
+// node, a failed read, or a sample taken before an upgrade leaves the lists
+// empty and the flag false. A snapshot that does not decode is an empty list,
+// never an error: the interface table is a convenience beside the summary.
+func networkInterfacesOf(agent *domain.NodeAgent, snapshotJSON []byte) gin.H {
+	result := gin.H{"addresses_reported": false, "interfaces": []gin.H{}}
+	var observation nodeprotocol.HostObservation
+	if len(snapshotJSON) == 0 || json.Unmarshal(snapshotJSON, &observation) != nil || observation.Network == nil {
+		return result
+	}
+	// The capability is the agent's current one, and the stored sample can
+	// predate it (a node that just upgraded). A sample with no address on any
+	// interface is therefore read as "not reported" too: a node that reaches
+	// the panel has an address somewhere, so the case lost is one that does
+	// not occur, and the one avoided is every link reading "no address".
+	reported := hasObservedCapability(agent, nodeprotocol.CapabilityHostInterfaceAddresses) &&
+		!slices.Contains(observation.Unavailable, nodeprotocol.UnavailableNetAddresses) &&
+		carriesAddresses(observation.Network)
+	result["addresses_reported"] = reported
+	network := observation.Network
+	interfaces := make([]gin.H, 0, len(network.Interfaces))
+	for _, source := range network.Interfaces {
+		addresses := source.Addresses
+		if addresses == nil || !reported {
+			addresses = []string{}
+		}
+		interfaces = append(interfaces, gin.H{
+			"name": source.Name, "index": source.Index, "up": source.Up,
+			"operational_state":   string(source.OperationalState),
+			"is_default_ipv4":     network.DefaultIPv4Interface != "" && source.Name == network.DefaultIPv4Interface,
+			"is_default_ipv6":     network.DefaultIPv6Interface != "" && source.Name == network.DefaultIPv6Interface,
+			"addresses":           addresses,
+			"addresses_truncated": reported && source.AddressesTruncated,
+		})
+	}
+	result["interfaces"] = interfaces
+	return result
+}
+
+func carriesAddresses(network *nodeprotocol.NetworkObservation) bool {
+	for _, networkInterface := range network.Interfaces {
+		if len(networkInterface.Addresses) > 0 || networkInterface.AddressesTruncated {
+			return true
+		}
+	}
+	return false
+}
+
+func hasObservedCapability(agent *domain.NodeAgent, capability string) bool {
+	return agent != nil && slices.Contains(agent.ObservedCapabilities, capability)
 }
 
 func noSampleFreshness(capable bool) string {
