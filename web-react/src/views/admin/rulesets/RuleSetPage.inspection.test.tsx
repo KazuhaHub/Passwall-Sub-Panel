@@ -60,11 +60,12 @@ describe('when the draft is inspected', () => {
     await waitFor(() => expect(inspections()).toHaveLength(2))
     await pause(1600)
     expect(inspections()).toHaveLength(2)
-    // The save asks once itself (as it always did); the page resets to what was saved, which is the draft already answered.
+    // The draft being saved is the one already answered, so the save reuses that answer and asks nothing itself; the page then resets
+    // to what was saved, which is that same draft.
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
     await pause(1600)
-    expect(inspections()).toHaveLength(3)
+    expect(inspections()).toHaveLength(2)
   })
 
   it('a request in flight is dropped when a newer draft supersedes it', async () => {
@@ -130,5 +131,64 @@ describe('the problems panel says where it stands', () => {
     expect(await within(dialog).findByText(/Redundant/)).toBeTruthy()
     expect(inspections()).toHaveLength(0)
     useAuthStore.setState({ role: 'admin' })
+  })
+})
+
+describe('what a save asks the server before it writes', () => {
+  /** Opens the Proxy groups tab (the draft is read once and the answer is fresh), then edits the name, which is not part of what is read. */
+  async function freshThenRename() {
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Proxy groups' }))
+    await waitFor(() => expect(inspections()).toHaveLength(1))
+    await screen.findByLabelText('Proxy group type')
+    fireEvent.click(await screen.findByRole('tab', { name: 'General' }))
+    fireEvent.change(await screen.findByLabelText(/^Name/), { target: { value: 'Renamed' } })
+  }
+
+  it('reuses a fresh answer for the same draft: the save is one request, the PUT', async () => {
+    reads()
+    await freshThenRename()
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(inspections()).toHaveLength(1)
+  })
+
+  it('asks again when the answer is for an older draft: it inspects, then writes', async () => {
+    reads()
+    mountRuleSets(PAGE)
+    fireEvent.click(await screen.findByRole('tab', { name: 'Proxy groups' }))
+    await waitFor(() => expect(inspections()).toHaveLength(1))
+    fireEvent.change(await screen.findByLabelText('Proxy group type'), { target: { value: 'url-test' } })
+    // Saved inside the one-second pause: the answer held is for the draft before the edit, so it is stale.
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(inspections()).toHaveLength(2)
+    const order = api.post.mock.invocationCallOrder[1]
+    expect(api.put.mock.invocationCallOrder[0]).toBeGreaterThan(order)
+  })
+
+  it('still refuses to write when the fresh answer holds an error, with no further request', async () => {
+    reads()
+    api.post.mockImplementation(async () => ({ data: { ...answer().data, issues: [{ level: 'error', section: 'proxy_group', group: 'Proxy', message: 'bad members' }] } }))
+    await freshThenRename()
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await pause(300)
+    expect(api.put).not.toHaveBeenCalled()
+    expect(inspections()).toHaveLength(1)
+  })
+
+  it('still confirms the removal of orphan group settings from a fresh answer, and asks again about the cleaned draft before writing', async () => {
+    installReads({ '/admin/rules': list([{ ...base, proxy_group_order: ['Gone'] }]), '/admin/templates': list([]), '/admin/groups': list([]) })
+    api.post.mockImplementation(async () => answer())
+    await freshThenRename()
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText(/Gone/)).toBeTruthy()
+    expect(inspections()).toHaveLength(1)
+    expect(api.put).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete and save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(inspections()).toHaveLength(2)
+    expect(api.put.mock.calls[0][1]).toMatchObject({ proxy_group_order: [] })
   })
 })

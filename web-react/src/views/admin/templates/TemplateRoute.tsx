@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router'
 
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import type { Template } from '@/api/templates'
 import { ObjectPage, objectErrorKind, type ObjectPageState } from '@/components/common/ObjectPage'
 import { useBackTarget } from '@/components/common/objectReturn'
@@ -25,7 +25,7 @@ function useTemplateData() {
   return {
     templates, ruleSets, failed, ready,
     items: templates.data?.items ?? (NONE as Template[]),
-    rules: ruleSets.data?.items ?? (NONE as RuleSet[]),
+    rules: ruleSets.data?.items ?? (NONE as RuleSetSummary[]),
     reload: () => Promise.all([templates.refetch(), ruleSets.refetch()]),
   }
 }

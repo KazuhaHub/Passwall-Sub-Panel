@@ -26,6 +26,7 @@ await context.route('**/api/**', async route => {
     data = { group_id: id, status: 'ready', groups: [{ name: 'Pick', members: id === 2 ? ['🇯🇵专线'] : ['🇯🇵专线 [中转:52787c21]', '🇯🇵专线 [中转:6b752549]'] }] }
   } else if (path.endsWith('/inspect-proxy-groups')) data = inspection
   else if (path.endsWith('/admin/rules')) data = envelope([draft])
+  else if (/\/admin\/rules\/[^/]+$/.test(path)) data = draft
   else if (path.endsWith('/admin/groups')) data = envelope(groups)
   else if (path.endsWith('/admin/templates')) data = envelope([{ slug: 'mihomo', name: 'Mihomo', client_type: 'mihomo', is_default: true, rule_sets: ['test'], content: '' }])
   else if (path.endsWith('/version')) data = { version: 'group-preview-browser-fixture' }

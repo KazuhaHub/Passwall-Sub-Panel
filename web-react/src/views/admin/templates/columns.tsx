@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next'
 import type { ColumnDef } from '@tanstack/react-table'
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import type { Template } from '@/api/templates'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
 import { StatusBadge } from '@/components/common/StatusBadge'
@@ -11,7 +11,7 @@ import { coverageOf } from './analysis'
 
 export interface TemplateColumnCtx {
   t: TFunction
-  ruleSets: ReadonlyMap<string, RuleSet>
+  ruleSets: ReadonlyMap<string, RuleSetSummary>
   canConfig: boolean
   busy: ReadonlySet<string>
   onEdit: (tpl: Template) => void

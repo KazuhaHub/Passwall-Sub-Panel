@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import type { Template } from '@/api/templates'
 import { CodeField } from '@/components/CodeField'
 import { Field } from '@/components/form/Field'
@@ -25,18 +25,18 @@ export function TemplateForm({ form, setForm, editing, readOnly, slugError, name
   readOnly: boolean
   slugError?: string
   nameError?: string
-  ruleSets: readonly RuleSet[]
+  ruleSets: readonly RuleSetSummary[]
 }) {
   const { t } = useTranslation(['admin'])
   const anchor = useComboboxAnchor()
   const ruleSetMap = useMemo(() => new Map(ruleSets.map(r => [r.slug, r])), [ruleSets])
   // The picker works on objects; a bound slug that no longer exists still shows (by its slug) and can be removed.
-  const options = useMemo<RuleSet[]>(() => {
+  const options = useMemo<RuleSetSummary[]>(() => {
     const known = new Set(ruleSets.map(r => r.slug))
-    const dangling = form.rule_sets.filter(s => !known.has(s)).map(s => ({ slug: s, name: s, enabled: false } as RuleSet))
+    const dangling = form.rule_sets.filter(s => !known.has(s)).map(s => ({ slug: s, name: s, enabled: false } as RuleSetSummary))
     return [...ruleSets, ...dangling]
   }, [ruleSets, form.rule_sets])
-  const chosen = form.rule_sets.map(s => options.find(o => o.slug === s)).filter((x): x is RuleSet => Boolean(x))
+  const chosen = form.rule_sets.map(s => options.find(o => o.slug === s)).filter((x): x is RuleSetSummary => Boolean(x))
   const hint = formHint(form, ruleSetMap)
   const patch = (p: Partial<Template>) => setForm(f => ({ ...f, ...p }))
 
@@ -61,11 +61,11 @@ export function TemplateForm({ form, setForm, editing, readOnly, slugError, name
         <Field label={t('admin:templates.field.rule_sets')} hint={t('admin:templates.hint.rule_sets')}>
           {p => (
             <Combobox multiple items={options} value={chosen} disabled={readOnly}
-              onValueChange={v => patch({ rule_sets: (v as RuleSet[]).map(r => r.slug) })}
-              itemToStringLabel={(r: RuleSet) => `${r.name} (${r.slug})`} isItemEqualToValue={(a: RuleSet, b: RuleSet) => a.slug === b.slug}>
+              onValueChange={v => patch({ rule_sets: (v as RuleSetSummary[]).map(r => r.slug) })}
+              itemToStringLabel={(r: RuleSetSummary) => `${r.name} (${r.slug})`} isItemEqualToValue={(a: RuleSetSummary, b: RuleSetSummary) => a.slug === b.slug}>
               <ComboboxChips ref={anchor}>
                 <ComboboxValue>
-                  {(values: RuleSet[]) => (
+                  {(values: RuleSetSummary[]) => (
                     <>
                       {values.map(r => <ComboboxChip key={r.slug}>{r.name || r.slug}</ComboboxChip>)}
                       <ComboboxChipsInput id={p.id} aria-describedby={p['aria-describedby']} placeholder={values.length === 0 ? t('admin:templates.placeholder.rule_sets') : undefined} />
@@ -76,7 +76,7 @@ export function TemplateForm({ form, setForm, editing, readOnly, slugError, name
               <ComboboxContent anchor={anchor}>
                 <ComboboxEmpty>{t('admin:templates.no_rule_sets')}</ComboboxEmpty>
                 <ComboboxList>
-                  {(r: RuleSet) => (
+                  {(r: RuleSetSummary) => (
                     <ComboboxItem key={r.slug} value={r} disabled={!r.enabled && !form.rule_sets.includes(r.slug)}>
                       {`${r.name} (${r.slug})`}{!r.enabled && <span className="ml-1 text-xs text-muted-foreground">{t('admin:rules.status.disabled')}</span>}
                     </ComboboxItem>

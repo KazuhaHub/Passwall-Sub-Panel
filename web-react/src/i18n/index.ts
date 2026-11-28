@@ -3,7 +3,8 @@ import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
 import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
-import { NAMESPACES, flatten, I18N_STATIC_OPTIONS, type Nested } from './options'
+import { NAMESPACES, I18N_STATIC_OPTIONS, type Nested } from './options'
+import { BASE_LANGUAGE, createResources, type LocaleLoaders, SHELL_NAMESPACES } from './resources'
 
 // Language-pack schema version, mirrors service/locale.Format on the backend.
 // The exported "base template" stamps this into `psp_language_pack`.
@@ -35,95 +36,21 @@ export function serverLanguageMeta(code: string): LocaleMeta | undefined {
   return serverLanguages.find(m => m.code === code)
 }
 
-// NAMESPACES / flatten / the static init options live in ./options (a
-// side-effect-free module) so tests can import the real config without
-// triggering this module's bootstrap IIFE. Pre-fix this module statically
-// imported all 7 namespaces × 2 languages (14 JSON modules, ~120KB of which
-// admin.json was 57KB per language) into the main bundle; the glob below now
-// code-splits them per (lang, ns).
+// NAMESPACES / flatten / the static init options live in ./options and the namespace
+// loading logic in ./resources (both side-effect-free) so tests can import the real thing
+// without triggering this module's bootstrap IIFE. The glob below code-splits the locale
+// JSON per (lang, ns); which namespaces load when is decided in ./resources.
 
 // Vite's import.meta.glob gives us per-(lang, ns) lazy chunks. The
 // `import()`-style returns a Promise<{ default: Nested }> — wrapped in
 // flatten() at register time so the runtime cost is paid once per
 // namespace-language, not per t() call.
-const localeLoaders = import.meta.glob<{ default: Nested }>('@/locales/*/*.json')
+const localeLoaders: LocaleLoaders = import.meta.glob<{ default: Nested }>('@/locales/*/*.json')
 
-async function loadNamespace(lang: AppLanguage, ns: string): Promise<Record<string, string> | null> {
-  const key = `/src/locales/${lang}/${ns}.json`
-  const loader = localeLoaders[key]
-  if (!loader) return null
-  const mod = await loader()
-  return flatten(mod.default)
-}
-
-// resolveInitialLanguage picks the language to bundle into the first paint.
-// Mirrors i18next's detection order (querystring → localStorage → navigator)
-// but runs synchronously here so we can preload only that one language's
-// namespaces. i18next then takes over for runtime detection/switching.
-function resolveInitialLanguage(): AppLanguage {
-  if (typeof window !== 'undefined') {
-    const url = new URL(window.location.href)
-    const q = url.searchParams.get('lang')
-    if (q && SUPPORTED_LANGUAGES.includes(q as AppLanguage)) return q as AppLanguage
-    try {
-      const stored = localStorage.getItem('psp-lang')
-      if (stored && SUPPORTED_LANGUAGES.includes(stored as AppLanguage)) return stored as AppLanguage
-    } catch { /* localStorage disabled — fall through */ }
-    const nav = (window.navigator?.language || '').toLowerCase()
-    if (/^zh-(tw|hk|mo)|^zh-hant/.test(nav)) return 'zh-TW'
-    if (nav.startsWith('zh')) return 'zh-CN'
-    if (nav.startsWith('en')) return 'en-US'
-  }
-  return 'zh-CN'
-}
-
-// Pre-load every namespace for a BUILT-IN language, in parallel (from the Vite
-// glob chunks). Other languages stream in on demand when the user toggles the
-// language picker.
-async function loadLanguageResources(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
-  const entries = await Promise.all(
-    NAMESPACES.map(async ns => {
-      const flat = await loadNamespace(lang, ns)
-      return [ns, flat ?? {}] as const
-    }),
-  )
-  return Object.fromEntries(entries)
-}
-
-// Fetch + flatten a SERVER-supplied pack. Missing namespaces resolve to {} — the
-// i18next fallback chain fills the gaps, so a partial pack is safe.
-async function loadServerLanguageResources(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
-  const { namespaces } = await fetchLanguageBundle(lang)
-  const out: Record<string, Record<string, string>> = {}
-  for (const ns of NAMESPACES) {
-    const tree = namespaces[ns]
-    out[ns] = tree ? flatten(tree as Nested) : {}
-  }
-  return out
-}
-
-// Dispatch by origin: built-ins from the glob, uploaded packs over HTTP.
-function loadResourcesFor(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
-  return isBuiltinLanguage(lang) ? loadLanguageResources(lang) : loadServerLanguageResources(lang)
-}
-
-// loadBuiltinSource returns the RAW (nested, un-flattened) source JSON for a
-// built-in language. The admin "export base template" affordance uses it so
-// translators start from the exact shipped strings in their original nesting.
-export async function loadBuiltinSource(lang: AppLanguage): Promise<Record<string, Record<string, unknown>>> {
-  const out: Record<string, Record<string, unknown>> = {}
-  await Promise.all(NAMESPACES.map(async ns => {
-    const key = `/src/locales/${lang}/${ns}.json`
-    const loader = localeLoaders[key]
-    out[ns] = loader ? ((await loader()).default as Record<string, unknown>) : {}
-  }))
-  return out
-}
-
-// loadManifest fetches the uploaded-pack list and folds it into SUPPORTED_LANGUAGES
-// BEFORE i18n.init — i18next rejects changeLanguage to codes outside supportedLngs,
-// so the whitelist must already contain server codes. Never throws: a manifest
-// failure just leaves the three built-ins available.
+// loadManifest fetches the uploaded-pack list and folds it into SUPPORTED_LANGUAGES.
+// i18next rejects changeLanguage to codes outside supportedLngs, and `supportedLngs` below
+// is this same array, so a code appended after init is accepted too. Never throws: a
+// manifest failure just leaves the three built-ins available.
 async function loadManifest(): Promise<void> {
   try {
     const langs = await fetchLanguages()
@@ -138,32 +65,82 @@ async function loadManifest(): Promise<void> {
   }
 }
 
-export const i18nReady = (async () => {
-  // Order matters: manifest first (extends supportedLngs + lets
-  // resolveInitialLanguage accept a persisted custom code), THEN resolve, THEN
-  // load resources, THEN init. This whole IIFE must never reject — main.tsx
-  // awaits it before mounting React, so a throw here would hang the app on a
-  // blank screen. Every await below is guarded.
-  await loadManifest()
-  let lng = resolveInitialLanguage()
-  const resources: Record<string, Record<string, Record<string, string>>> = {}
+// Started at module load so it runs in parallel with the locale chunk imports rather than
+// ahead of them (it used to be awaited first: one round trip, THEN the chunks).
+const manifestReady = loadManifest()
+
+const resources = createResources({
+  loaders: localeLoaders,
+  fetchPack: fetchLanguageBundle,
+  isBuiltin: isBuiltinLanguage,
+  manifestReady: () => manifestReady,
+  instance: i18n,
+  // Under vitest a view is mounted directly, without the shell route whose loader adds
+  // its namespace, so every page test that uses the real module would read raw keys.
+  // The test of the real boot (bootstrap.test.ts) asks for the app's behaviour instead.
+  eager: import.meta.env.MODE === 'test' && !(globalThis as { __PSP_I18N_APP_BOOT__?: boolean }).__PSP_I18N_APP_BOOT__ ? SHELL_NAMESPACES : [],
+})
+
+// loadBuiltinSource returns the RAW (nested, un-flattened) source JSON for a
+// built-in language. The admin "export base template" affordance uses it so
+// translators start from the exact shipped strings in their original nesting.
+export async function loadBuiltinSource(lang: AppLanguage): Promise<Record<string, Record<string, unknown>>> {
+  const out: Record<string, Record<string, unknown>> = {}
+  await Promise.all(NAMESPACES.map(async ns => {
+    const loader = localeLoaders[`/src/locales/${lang}/${ns}.json`]
+    out[ns] = loader ? ((await loader()).default as Record<string, unknown>) : {}
+  }))
+  return out
+}
+
+// The language hints the browser holds (querystring, then localStorage), in i18next's
+// detection order.
+function languageHints(): string[] {
+  if (typeof window === 'undefined') return []
+  const hints: string[] = []
+  const q = new URL(window.location.href).searchParams.get('lang')
+  if (q) hints.push(q)
   try {
-    resources[lng] = await loadResourcesFor(lng)
+    const stored = localStorage.getItem('psp-lang')
+    if (stored) hints.push(stored)
+  } catch { /* localStorage disabled — fall through */ }
+  return hints
+}
+
+// resolveInitialLanguage picks the language to bundle into the first paint. Mirrors
+// i18next's detection order (querystring -> localStorage -> navigator) but runs
+// synchronously so only that one language is preloaded.
+function resolveInitialLanguage(): AppLanguage {
+  if (typeof window !== 'undefined') {
+    for (const hint of languageHints()) if (SUPPORTED_LANGUAGES.includes(hint)) return hint
+    const nav = (window.navigator?.language || '').toLowerCase()
+    if (/^zh-(tw|hk|mo)|^zh-hant/.test(nav)) return 'zh-TW'
+    if (nav.startsWith('zh')) return 'zh-CN'
+    if (nav.startsWith('en')) return 'en-US'
+  }
+  return 'zh-CN'
+}
+
+export const i18nReady = (async () => {
+  // This whole IIFE must never reject — main.tsx awaits it before mounting React, so a
+  // throw here would hang the app on a blank screen. Every await below is guarded.
+  //
+  // The manifest is only waited for when a stored/queried language is NOT a built-in: a
+  // persisted custom code is accepted only once the manifest has put it in
+  // SUPPORTED_LANGUAGES. A built-in language needs nothing from it, so the common case
+  // mounts without waiting for that request at all.
+  if (languageHints().some(h => !isBuiltinLanguage(h))) await manifestReady
+  let lng = resolveInitialLanguage()
+  let initial: Awaited<ReturnType<typeof resources.initial>>
+  try {
+    initial = await resources.initial(lng)
   } catch (err) {
     // A stale/removed custom pack (or a failed fetch) must never block mount —
     // fall back to the always-present built-in default.
     // eslint-disable-next-line no-console
     console.warn('i18n: failed to load initial language, falling back to zh-CN', lng, err)
-    lng = 'zh-CN'
-    resources[lng] = await loadLanguageResources('zh-CN')
-  }
-  // Register the zh-CN fallback bundle too when it isn't the active language:
-  // load:'currentOnly' means i18next won't lazy-load the fallback, so a partial
-  // custom pack would otherwise surface raw keys instead of Chinese.
-  if (!resources['zh-CN']) {
-    try {
-      resources['zh-CN'] = await loadLanguageResources('zh-CN')
-    } catch { /* built-in should always be present; ignore */ }
+    lng = BASE_LANGUAGE
+    initial = await resources.initial(lng)
   }
   await i18n
     .use(LanguageDetector)
@@ -173,13 +150,13 @@ export const i18nReady = (async () => {
       // fallbackNS, …) lives in ./options so a unit test exercises the same
       // config. Only the per-instance dynamic bits + plugin config are here.
       ...I18N_STATIC_OPTIONS,
-      resources,
+      resources: initial,
       lng,
       supportedLngs: SUPPORTED_LANGUAGES,
       detection: {
         order: ['querystring', 'localStorage', 'navigator'],
-        lookupQuerystring: 'lang',
         lookupLocalStorage: 'psp-lang',
+        lookupQuerystring: 'lang',
         caches: ['localStorage'],
       },
       react: {
@@ -189,32 +166,15 @@ export const i18nReady = (async () => {
   return i18n
 })()
 
-export async function setLanguage(lang: AppLanguage): Promise<void> {
-  // Lazy-load on first switch — subsequent toggles hit i18next's in-memory
-  // cache (hasResourceBundle) so they're free. Built-ins come from the Vite
-  // glob; uploaded packs are fetched over HTTP (loadResourcesFor dispatches).
-  //
-  // Loading CAN reject (stale build chunks after a deploy + an open tab clicks
-  // language switch = 404 on a missing chunk; or a removed pack / offline
-  // backend for a custom code). Callers (the shells / LoginView*)
-  // fire-and-forget; without this try/catch the rejection surfaces as an
-  // unhandled promise + the UI silently stays on the old language. Log it and
-  // leave changeLanguage uncalled so i18next's resolvedLanguage stays consistent
-  // with what t() actually returns.
-  if (!i18n.hasResourceBundle(lang, 'common')) {
-    try {
-      const resources = await loadResourcesFor(lang)
-      for (const [ns, bundle] of Object.entries(resources)) {
-        i18n.addResourceBundle(lang, ns, bundle, true, true)
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('setLanguage: failed to load resources for', lang, err)
-      return
-    }
-  }
-  await i18n.changeLanguage(lang)
-}
+// Make the namespaces a shell reads available before it renders (the shell route loaders
+// call this). See ./resources.
+export const ensureNamespaces = resources.ensureNamespaces
+
+// Switch language. Loading CAN reject (stale build chunks after a deploy + an open tab
+// clicks language switch = 404 on a missing chunk; or a removed pack / offline backend for
+// a custom code). Callers fire-and-forget, so ./resources logs and leaves changeLanguage
+// uncalled: i18next's resolvedLanguage stays consistent with what t() actually returns.
+export const setLanguage = resources.setLanguage
 
 export function currentLanguage(): AppLanguage {
   const lng = i18n.resolvedLanguage
