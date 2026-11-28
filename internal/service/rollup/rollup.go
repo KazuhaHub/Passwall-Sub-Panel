@@ -516,7 +516,6 @@ const sqliteZoneSlack = 26 * time.Hour
 // the insert-once rule for left-incomplete buckets.
 const exactWindowMax = 72 * time.Hour
 
-//
 // It is the window's START that has to be inside retained data, so the
 // look-back counts: at a poll cadence of days the heartbeat alone reaches past
 // the prune.
