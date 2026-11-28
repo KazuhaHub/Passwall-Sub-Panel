@@ -500,6 +500,27 @@ func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 	return out, nil
 }
 
+// ListByPanelBare is List narrowed to one server and without attachNodeState:
+// that server's node rows alone, in List's order (ports.NodePanelBareLister).
+// Their routes, readiness, probe and position fields are zero, so only a caller
+// that reads the nodes' own columns may use it.
+func (r *nodeRepo) ListByPanelBare(ctx context.Context, panelID int64) ([]*domain.Node, error) {
+	var rows []nodeRow
+	if err := r.db.WithContext(ctx).Where("panel_id = ?", panelID).
+		Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Node, len(rows))
+	for i := range rows {
+		n, err := rows[i].toDomain()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
 var nodeSortAllowlist = map[string]string{
 	"id":           "id",
 	"display_name": "display_name",
