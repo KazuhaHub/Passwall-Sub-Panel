@@ -290,10 +290,11 @@ func (b *ruleBlock) splice(document string) (string, bool) {
 	return document[:at] + b.emitted + document[at+len(b.emittedStandIn):], true
 }
 
-// ruleBlockCacheEntries bounds the analysed blocks kept. An entry pins the rule
-// text it was made from and its serialised form, about 1.1 MB for the shipped
-// rule set. A deployment has one block per distinct combination of bound rule
-// sets and subscription domain, usually one or two.
+// ruleBlockCacheEntries bounds the analysed blocks kept per output format. An
+// entry pins the rule text it was made from and its serialised form: about
+// 1.1 MB for the shipped rule set as Mihomo, 1.9 MB as sing-box. A deployment
+// has one block per distinct combination of bound rule sets and subscription
+// domain, usually one or two.
 const ruleBlockCacheEntries = 8
 
 type ruleBlockKey struct {

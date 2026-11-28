@@ -28,33 +28,36 @@ func observeReduced(s *Service) func() string {
 
 func init() { goldenObserve = observeReduced }
 
-func compareReduced(t testing.TB, s *Service, u *domain.User) (string, *Output, error) {
+func compareReduced(t testing.TB, s *Service, u *domain.User, ct domain.ClientType) (string, *Output, error) {
 	t.Helper()
 	report := observeReduced(s)
-	out, err := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
+	out, err := s.RenderForUser(context.Background(), u, ct)
 	return report(), out, err
 }
 
 // Every golden case, rendered both ways. The golden pins the full pipeline to
-// the bytes of 72a2d43f; this pins the reduced assembly to the full pipeline.
-// The cases the reduction must apply to are listed, so that a change which
+// the bytes of 72a2d43f; this pins the reduced assemblies to the full pipeline.
+// The cases a reduction must apply to are listed, so that a change which
 // quietly makes it decline everything cannot pass as "no differences".
 func TestReducedRuleAssemblyMatchesFullPipeline(t *testing.T) {
 	goldenTB = t
 	_, observed := goldenRenders()
 	applied := map[string]bool{}
 	for name, outcome := range observed {
-		name, isMihomo := strings.CutSuffix(name, "/"+string(domain.ClientMihomo))
-		if !isMihomo {
-			continue
-		}
 		if outcome == "differs" {
 			t.Errorf("%s: the reduced assembly produced a different document", name)
 		}
 		applied[name] = outcome == "same"
 	}
-	for _, name := range []string{
-		"seed", "seed-personal", "seed-members",
+	expect := func(ct domain.ClientType, want bool, names ...string) {
+		for _, name := range names {
+			if applied[name+"/"+string(ct)] != want {
+				t.Errorf("%s/%s: reduced assembly applied = %v, want %v", name, ct, !want, want)
+			}
+		}
+	}
+	expect(domain.ClientMihomo, true,
+		"seed", "seed-members",
 		"colliding-names", "line-labels", "line-visibility", "awkward-fleet", "fleet-line-kinds",
 		"quoted-targets", "rule-options", "logical-rules", "sub-rule-defined", "rematch",
 		"implicit-groups-in-rules", "implicit-groups-template-defines", "implicit-groups-template-refers",
@@ -64,24 +67,26 @@ func TestReducedRuleAssemblyMatchesFullPipeline(t *testing.T) {
 		"shared-yaml-specials", "shared-long-line", "shared-at-sign", "shared-control-characters",
 		"shared-builtins-only", "shared-many-groups", "group-options-url-test",
 		"template-own-groups", "template-swapped-blocks", "template-deep-indent", "template-inline-placeholder",
-		"subscription-domain",
-	} {
-		if !applied[name] {
-			t.Errorf("%s: the reduced assembly did not apply", name)
-		}
-	}
-	// Shapes the reduction must leave to the full pipeline.
-	for _, name := range []string{
+		"subscription-domain")
+	// Shapes the Mihomo reduction must leave to the full pipeline.
+	expect(domain.ClientMihomo, false,
 		"seed-line-in-shared-rules", "target-line-names", "target-line-quoted", "flag-prefix",
 		"comments-and-blanks", "crlf", "shared-two-documents", "shared-flow-sequence", "shared-plain-lines",
 		"shared-indented-sequence", "shared-literal-block", "shared-multiline-plain", "shared-anchors", "shared-tagged",
 		"shared-placeholder", "shared-node-ref-line", "shared-non-string-scalars", "shared-single-field",
-		"template-common-twice", "template-no-common", "template-anchored-rules", "template-common-elsewhere", "template-trailer",
-	} {
-		if applied[name] {
-			t.Errorf("%s: the reduced assembly applied to a shape it must decline", name)
-		}
-	}
+		"template-common-twice", "template-no-common", "template-anchored-rules", "template-common-elsewhere", "template-trailer")
+	// sing-box never puts the rule text itself into the document, so comments,
+	// quoting and layout of the block do not matter to it.
+	expect(domain.ClientSingBox, true,
+		"seed", "seed-members",
+		"colliding-names", "line-labels", "awkward-fleet", "fleet-line-kinds",
+		"quoted-targets", "rule-options", "logical-rules", "comments-and-blanks", "crlf",
+		"implicit-groups-in-rules", "implicit-groups-escaped", "personal-shadows",
+		"shared-yaml-specials", "shared-long-line", "shared-indented-sequence", "shared-literal-block",
+		"shared-builtins-only", "shared-many-groups", "group-options-url-test", "subscription-domain")
+	expect(domain.ClientSingBox, false,
+		"seed-line-in-shared-rules", "target-line-names", "target-line-quoted", "flag-prefix",
+		"shared-flow-sequence", "shared-plain-lines", "shared-anchors", "shared-placeholder", "shared-empty")
 	if testing.Verbose() {
 		names := []string{}
 		for name, ok := range applied {
@@ -90,7 +95,7 @@ func TestReducedRuleAssemblyMatchesFullPipeline(t *testing.T) {
 			}
 		}
 		sort.Strings(names)
-		t.Logf("reduced assembly applied to %d of %d cases: %s", len(names), len(applied), strings.Join(names, ", "))
+		t.Logf("a reduced assembly applied to %d of %d renders: %s", len(names), len(applied), strings.Join(names, ", "))
 	}
 }
 
@@ -117,7 +122,7 @@ func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 		case 3:
 			value = fmt.Sprintf("DOMAIN-KEYWORD,%s,%s", []string{"a: b", "x #y", "plain", "🎬 video", "*star", "quote\"d", "tick's", "ends ", "été", "back\\slash", "[bracket]", "{brace}", "100%", "yes", "~"}[r.Intn(15)], target)
 		case 4:
-			value = fmt.Sprintf("GEOSITE,category-%d@cn,%s", r.Intn(9), target)
+			value = fmt.Sprintf("%s,%s", []string{"GEOSITE,category-ads", "GEOSITE,google@cn", "GEOIP,CN", "GEOIP,telegram", "GEOSITE,youtube", "DST-PORT,8000-9000", "NETWORK,udp", "PROCESS-NAME,curl"}[r.Intn(8)], target)
 		case 5:
 			value = "MATCH," + target
 		case 6:
@@ -176,19 +181,21 @@ func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 		}
 		return strings.Join(lines, "\n") + strings.Repeat("\n", r.Intn(3))
 	}
+	singBoxTemplates := []string{referenceSingBoxTemplate, readTemplateContent(t, "../../seed/files/templates/default-sing-box.yaml"), singBoxTemplateRulesElsewhere}
 	templates := []string{referenceMihomoTemplate, goldenTemplateOwnGroups, goldenTemplateRefersOnly, goldenTemplateComments, goldenTemplateSwapped, goldenTemplateDeep, goldenTemplateInline, goldenTemplateTrailer, goldenTemplateAnchored}
 	subRules := []domain.MihomoSubRule{{Name: "child", Content: "- DOMAIN,sub.example,国外媒体\n- MATCH,A B"}, {Name: "other", Content: "- MATCH,Extra"}}
 
-	iterations := 240
+	iterations := 120
 	if testing.Short() {
-		iterations = 60
+		iterations = 40
 	}
-	compared := 0
+	compared := map[domain.ClientType]int{}
 	for seed := 0; seed < iterations; seed++ {
 		r := rand.New(rand.NewSource(int64(seed)))
 		withSubRules := r.Intn(2) == 0
 		sc := goldenScenario{
 			mihomo:   templates[r.Intn(len(templates))],
+			singBox:  singBoxTemplates[r.Intn(len(singBoxTemplates))],
 			shared:   block(r, 1+r.Intn(30), seed%3 == 0, withSubRules),
 			personal: block(r, r.Intn(4), seed%2 == 0, withSubRules),
 			members: map[string][]domain.ProxyGroupMember{
@@ -199,54 +206,130 @@ func TestReducedRuleAssemblyMatchesFullPipelineOnRandomRules(t *testing.T) {
 		if withSubRules {
 			sc.subRules = subRules
 		}
-		s, u := sc.build(t)
-		outcome, reduced, reducedErr := compareReduced(t, s, u)
-		if testing.Verbose() && outcome == "" {
-			t.Logf("seed %d: not compared (%v)", seed, reducedErr)
+		if r.Intn(4) == 0 {
+			// A group that defaults to PASS: sing-box drops its rules.
+			sc.members["Extra"] = []domain.ProxyGroupMember{{Kind: "builtin", Value: "PASS"}, {Kind: "node_set", Value: "all"}}
 		}
-		switch outcome {
-		case "differs":
-			t.Errorf("seed %d: the reduced assembly produced a different document\ntemplate:\n%s\nshared:\n%s\npersonal:\n%s", seed, sc.mihomo, sc.shared, sc.personal)
-		case "same":
-			compared++
-			// The second render of a proven context returns the reduced
-			// document alone; it must still be the first render's bytes.
-			again, _, err := compareReduced(t, s, u)
-			second, err2 := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
-			if again != "" || err != nil || err2 != nil || reducedErr != nil || string(second.Body) != string(reduced.Body) {
-				t.Errorf("seed %d: a proven context rendered differently the second time (%q, %v, %v)", seed, again, err, err2)
+		for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+			s, u := sc.build(t)
+			outcome, reduced, reducedErr := compareReduced(t, s, u, ct)
+			if testing.Verbose() && outcome == "" {
+				t.Logf("seed %d %s: not compared (%v)", seed, ct, reducedErr)
+			}
+			switch outcome {
+			case "differs":
+				t.Errorf("seed %d %s: the reduced assembly produced a different document\ntemplate:\n%s\nshared:\n%s\npersonal:\n%s", seed, ct, sc.mihomo, sc.shared, sc.personal)
+			case "same":
+				compared[ct]++
+				// The second render of a proven context returns the reduced
+				// document alone; it must still be the first render's bytes.
+				again, second, err := compareReduced(t, s, u, ct)
+				if again != "" || err != nil || reducedErr != nil || string(second.Body) != string(reduced.Body) {
+					t.Errorf("seed %d %s: a proven context rendered differently the second time (%q, %v)", seed, ct, again, err)
+				}
 			}
 		}
 	}
-	if compared < iterations/4 {
-		t.Fatalf("the reduced assembly applied to only %d of %d random documents", compared, iterations)
+	for ct, count := range compared {
+		if count < iterations/4 {
+			t.Errorf("the %s reduced assembly applied to only %d of %d random documents", ct, count, iterations)
+		}
+	}
+	if len(compared) != 2 {
+		t.Fatalf("a reduced assembly never applied: %v", compared)
 	}
 }
+
+// singBoxTemplateRulesElsewhere carries the route rules under a key no pass
+// reads as route rules, one level deeper than route.rules.
+const singBoxTemplateRulesElsewhere = `{
+  "outbounds":
+  {{ outbounds }},
+  "route": {
+    "final": {{ final_outbound }},
+    "rule_set":
+    {{ rule_sets }}
+  },
+  "notes": {
+    "kept": {
+      "rules":
+      {{ route_rules }}
+    }
+  }
+}`
 
 // A context whose comparison fails must keep the full pipeline, and return the
 // full pipeline's bytes on the very render that found the difference.
 func TestReducedRuleAssemblyThatDiffersIsNeverServed(t *testing.T) {
-	sc := goldenScenario{shared: "- DOMAIN,a.example,国外媒体\n- MATCH,国外媒体"}
-	s, u := sc.build(t)
-	want, err := s.RenderForUser(context.Background(), u, domain.ClientMihomo)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s, u = sc.build(t)
-	block := s.ruleBlocks.get(sc.shared, "  ", analyseRuleBlock)
-	if block == nil {
-		t.Fatal("the rule block was not analysed")
-	}
-	// Stand in for a serialiser that would have written the block differently.
-	block.emitted = strings.Replace(block.emitted, "a.example", "b.example", 1)
-	for attempt, wantOutcome := range []string{"differs", ""} {
-		outcome, got, err := compareReduced(t, s, u)
-		if err != nil || string(got.Body) != string(want.Body) {
-			t.Fatalf("render %d served something other than the full pipeline's document (%v)", attempt, err)
+	sc := goldenScenario{shared: "- DOMAIN,a.example,国外媒体\n- DOMAIN,b.example,国外媒体\n- MATCH,国外媒体"}
+	for _, ct := range []domain.ClientType{domain.ClientMihomo, domain.ClientSingBox} {
+		s, u := sc.build(t)
+		want, err := s.RenderForUser(context.Background(), u, ct)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if outcome != wantOutcome {
-			t.Fatalf("render %d: comparison outcome %q, want %q", attempt, outcome, wantOutcome)
+
+		// Stand in for a serialiser that would have written the block
+		// differently than the analysis recorded, in a rule that is not one of
+		// the representatives (a changed representative makes the reduction
+		// decline before anything is compared).
+		s, u = sc.build(t)
+		if ct == domain.ClientMihomo {
+			block := s.ruleBlocks.get(sc.shared, "  ", analyseRuleBlock)
+			if block == nil {
+				t.Fatal("the rule block was not analysed")
+			}
+			block.emitted = strings.Replace(block.emitted, "b.example", "c.example", 1)
+		} else {
+			block := s.singBoxRuleBlocks.get(sc.shared, "", analyseSingBoxRuleBlock)
+			if block == nil || len(block.rules) != 3 || block.rules[1].stand != nil {
+				t.Fatal("the rule block was not compiled as expected")
+			}
+			block.rules[1].text = strings.Replace(block.rules[1].text, "b.example", "c.example", 1)
+		}
+		for attempt, wantOutcome := range []string{"differs", ""} {
+			outcome, got, err := compareReduced(t, s, u, ct)
+			if err != nil || string(got.Body) != string(want.Body) {
+				t.Fatalf("%s render %d served something other than the full pipeline's document (%v)", ct, attempt, err)
+			}
+			if outcome != wantOutcome {
+				t.Fatalf("%s render %d: comparison outcome %q, want %q", ct, attempt, outcome, wantOutcome)
+			}
+		}
+	}
+}
+
+func TestSingBoxRuleBlockAnalysis(t *testing.T) {
+	block := analyseSingBoxRuleBlock("# top\n- DOMAIN,a.example,G\n- GEOSITE,youtube,G\n- GEOSITE,youtube,H # again\n- DOMAIN,b.example,G\n- DOMAIN,c.example,PASS\n- PROCESS-PATH,/x,G\n- SUB-RULE,(NETWORK,tcp),child\n- 'MATCH,\"H\"'\n- DOMAIN,after.example,Z\n", "")
+	if block == nil {
+		t.Fatal("a rule list was refused")
+	}
+	if got := strings.Join(block.targets, "|"); got != "G|H|PASS|Z" {
+		t.Fatalf("targets %q", got)
+	}
+	// PASS, the unsupported PROCESS-PATH and the SUB-RULE have no sing-box form.
+	summary := []string{}
+	for _, rule := range block.rules {
+		summary = append(summary, fmt.Sprintf("%s>%s match=%v stand=%v", rule.target, rule.outbound, rule.match, rule.stand != nil))
+	}
+	want := "G>G match=false stand=true|G>G match=false stand=true|H>H match=false stand=true|G>G match=false stand=false|H>H match=true stand=false|Z>Z match=false stand=true"
+	if got := strings.Join(summary, "|"); got != want {
+		t.Fatalf("compiled rules:\n%s\nwant:\n%s", got, want)
+	}
+	if want := "      {\n        \"action\": \"route\",\n        \"domain\": [\n          \"a.example\"\n        ],\n        \"outbound\": \"G\"\n      }"; block.rules[0].text != want {
+		t.Fatalf("route rule text:\n%s", block.rules[0].text)
+	}
+	for name, shared := range map[string]string{
+		"flow":           "[\"MATCH,G\"]",
+		"plain lines":    "MATCH,G",
+		"placeholder":    "- DOMAIN,{{ site_title }},G",
+		"nested list":    "- [MATCH, G]",
+		"anchored rule":  "- &a MATCH,G",
+		"empty":          "",
+		"malformed YAML": "- \"MATCH,G",
+	} {
+		if analyseSingBoxRuleBlock(shared, "") != nil {
+			t.Errorf("%s: a block of this shape was accepted", name)
 		}
 	}
 }

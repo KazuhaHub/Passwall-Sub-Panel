@@ -48,10 +48,11 @@ type Service struct {
 	flights   singleflight.Group
 	renderSem chan struct{}
 	renderFn  func(context.Context, *domain.User, domain.ClientType) (*Output, error)
-	// ruleBlocks keeps the shared rule text analysed across renders (see
-	// ruleBlock). ruleBlockCompared is a test seam: it observes each comparison
-	// of the reduced Mihomo assembly with the full one.
+	// ruleBlocks and singBoxRuleBlocks keep the shared rule text analysed across
+	// renders (see ruleBlock, singBoxRuleBlock). ruleBlockCompared is a test
+	// seam: it observes each comparison of a reduced assembly with the full one.
 	ruleBlocks        ruleBlockCache[ruleBlock]
+	singBoxRuleBlocks ruleBlockCache[singBoxRuleBlock]
 	ruleBlockCompared func(same bool)
 }
 
@@ -232,7 +233,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
 	items = internalItems
 	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied, preview != nil)
 	}
 	if preview != nil && preview.explain {
 		preview.unconfirmed = s.explainUnconfirmedLines(ctx, u, items)

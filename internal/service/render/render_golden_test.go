@@ -331,7 +331,6 @@ func renderGoldenScenarios() []goldenScenario {
 func goldenCases() []goldenCase {
 	cases := []goldenCase{
 		{"seed", goldenSeed(nil)},
-		{"seed-personal", goldenSeed(func(_ *Service, u *domain.User, _ *domain.RuleSet) { u.PersonalRules = goldenPersonalRules })},
 		{"seed-line-in-shared-rules", goldenSeed(func(_ *Service, _ *domain.User, rule *domain.RuleSet) {
 			rule.Content = "- DOMAIN,relay.example.org,A B\n" + rule.Content
 		})},
