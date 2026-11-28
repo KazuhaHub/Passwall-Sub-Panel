@@ -351,6 +351,14 @@ describe('the address and the header', () => {
     expect(screen.getByRole('link', { name: /Rule sets/ })).toBeTruthy()
   })
 
+  it('opens a rule set with one read of that rule set and no read of the list', async () => {
+    reads()
+    mountRuleSets(PAGE)
+    await screen.findByRole('heading', { name: 'Custom rules' })
+    const gets = api.get.mock.calls.map(c => c[0] as string).filter(u => u.startsWith('/admin/rules'))
+    expect(gets).toEqual(['/admin/rules/custom'])
+  })
+
   it('names the templates that use the rule set, and deletes through the same confirmation as the list', async () => {
     reads()
     api.delete.mockResolvedValue({})

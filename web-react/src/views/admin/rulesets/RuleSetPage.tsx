@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { deleteRuleSet, getRuleSet, inspectProxyGroups, resetRuleSet, RULESET_BODY_LIMIT, ruleSetFailureOf, ruleSetRequestBody, saveRuleSet, type ProxyGroupIssue, type RuleSet } from '@/api/rules'
 import type { Template } from '@/api/templates'
-import type { Group, ListResponse } from '@/api/types'
+import type { Group } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import { useObjectLeaveGuard } from '@/components/common/ObjectTabs'
@@ -182,13 +182,18 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     setTab(next)
   }
 
-  function patchList(update: (prev: RuleSet[]) => RuleSet[]) {
-    queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(scope, {}), prev => (prev ? { ...prev, items: update(prev.items) } : prev))
+  /**
+   * A write here changes what the list and the template pages show (line count, targets, revision). Those hold summaries the
+   * server derives from the text, which the page cannot rebuild itself, so they are marked stale and read again when next shown
+   * (nothing is requested while no list is on screen).
+   */
+  function listsChanged() {
+    void queryClient.invalidateQueries({ queryKey: ruleKeys.lists(scope) })
   }
 
   /** Takes a rule set the server returned as the new saved state: the draft, the baseline (revision included) and the members tab's reference. */
   function adopt(saved: RuleSet) {
-    patchList(prev => prev.map(item => (item.slug === saved.slug ? saved : item)))
+    listsChanged()
     setForm(cloneRuleSet(saved))
     setBaseline(cloneRuleSet(saved))
     setInitialOrder([...(saved.proxy_group_order || [])])
@@ -212,6 +217,9 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     if (editing && !baseRevision) { warn(t('admin:rules.revision_missing')); return }
     const size = bytesOf(ruleSetRequestBody(form, baseRevision))
     if (size > RULESET_BODY_LIMIT) { warn(t('admin:rules.too_large', { size: mb(size), limit: mb(RULESET_BODY_LIMIT) })); return }
+    // The server's reading of this exact draft, when the page already holds it (the members tab, the rename or the routing test asked
+    // for it): `fresh` is by content, so it answers for the draft as it is now. Reusing it saves a second upload of the whole text.
+    const known = fresh ? inspection : null
     // From here the editor is locked (`pending`) until the answer is in, so nothing typed meanwhile is overwritten by the response or reported as saved.
     setPending(true)
     try {
@@ -223,7 +231,8 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         mihomo_sub_rules: d.mihomo_sub_rules || [],
         mihomo_rematch_outbounds: d.mihomo_rematch_outbounds || [],
       }, undefined, true)
-      let inspection = await inspect(draft)
+      // Only a fresh answer stands in for the request. The draft the orphan-group cleanup rewrites below is a different draft and is always asked.
+      let inspection = known ?? await inspect(draft)
       const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
       if (cleanup.removedGroups.length > 0) {
         const ok = await confirm({
@@ -257,8 +266,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
         setConflict(null)
       } else {
         leaving.current = true
-        patchList(prev => [...prev, saved])
-        void queryClient.invalidateQueries({ queryKey: ruleKeys.lists(scope) })
+        listsChanged()
         // The new rule set's own page, with the list's place still behind its back link.
         void navigate(ruleSetPath(saved.slug), { replace: true, state: location.state })
       }
@@ -319,7 +327,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
       await deleteRuleSet(seed.slug)
       pushToast({ message: t('admin:rules.toast.deleted'), severity: 'success' })
       leaving.current = true
-      patchList(prev => prev.filter(item => item.slug !== seed.slug))
+      listsChanged()
       void navigate(back, { replace: true })
     } catch { /* The request layer already surfaced the failure. */ } finally { setActing(false) }
   }
@@ -330,6 +338,7 @@ export function RuleSetPage({ mode, seed, metaSource, existingSlugs, templates, 
     try {
       await resetRuleSet(seed.slug)
       pushToast({ message: t('admin:rules.toast.reset'), severity: 'success' })
+      listsChanged()
       await onReseed()
     } catch { /* The request layer already surfaced the failure. */ } finally { setActing(false) }
   }

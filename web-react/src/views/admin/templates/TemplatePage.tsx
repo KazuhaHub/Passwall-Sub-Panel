@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import { deleteTemplate, resetTemplate, saveTemplate, type Template } from '@/api/templates'
 import type { ListResponse } from '@/api/types'
 import { ObjectPage } from '@/components/common/ObjectPage'
@@ -35,7 +35,7 @@ export function TemplatePage({ mode, seed, existingSlugs, ruleSets, back, readOn
   /** What the form starts from: the stored template, a blank one, or a copy. */
   seed: Template
   existingSlugs: readonly string[]
-  ruleSets: readonly RuleSet[]
+  ruleSets: readonly RuleSetSummary[]
   back: string
   readOnly: boolean
   leaving: MutableRefObject<boolean>

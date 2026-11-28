@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { RuleSet } from '@/api/rules'
+import type { RuleSetSummary } from '@/api/rules'
 import { deleteTemplate, resetTemplate, type Template } from '@/api/templates'
 import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
@@ -62,7 +62,7 @@ function TemplatesList() {
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
-  const ruleSetMap = useMemo(() => new Map<string, RuleSet>(ruleSets.map(r => [r.slug, r])), [ruleSets])
+  const ruleSetMap = useMemo(() => new Map<string, RuleSetSummary>(ruleSets.map(r => [r.slug, r])), [ruleSets])
 
   /** Patch the cached list after a write, so the table updates without a round-trip. */
   function mutateItems(updater: (prev: Template[]) => Template[]) {
