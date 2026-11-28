@@ -76,7 +76,7 @@ func TestSeedTemplates_PrivateDNSUsesSystemResolver(t *testing.T) {
 	})
 }
 
-func readTemplateContent(t *testing.T, path string) string {
+func readTemplateContent(t testing.TB, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {

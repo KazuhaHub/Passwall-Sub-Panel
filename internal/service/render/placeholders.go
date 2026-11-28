@@ -98,6 +98,13 @@ func expandNodeRefs(body string, items []renderItem) string {
 	lines := strings.Split(body, "\n")
 	out := make([]string, 0, len(lines))
 	for _, ln := range lines {
+		// inlineNodeRefRE needs an '@'. Nearly every line of a real document is
+		// a rule without one, and running the backtracking matcher over ten
+		// thousand of them was a tenth of a render.
+		if !strings.Contains(ln, "@") {
+			out = append(out, ln)
+			continue
+		}
 		m := inlineNodeRefRE.FindStringSubmatch(ln)
 		if m == nil {
 			out = append(out, ln)

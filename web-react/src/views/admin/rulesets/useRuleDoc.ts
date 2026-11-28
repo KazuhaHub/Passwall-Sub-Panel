@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { buildBlocks, type Block } from '@/utils/ruleset/blocks'
 import { serializeDoc, type Doc } from '@/utils/ruleset/parse'
-import { readDoc, SETTLE_MS, useSettledFlush } from './docCache'
+import { readDoc, seedDoc, SETTLE_MS, useSettledFlush } from './docCache'
 
 const HISTORY = 60
 
@@ -9,7 +9,8 @@ const HISTORY = 60
  * The structured view's hold on the draft. `content` is the one source of truth (it is what is saved); the DOCUMENT read
  * from it is kept alongside, because lines carry ids that must survive edits (selections and open dialogs name lines by
  * id). While `content` is what the last edit produced, the kept document is used as it is; any other content (the text
- * view typed into, a discard, a restore) is read afresh and its lines get new ids.
+ * view typed into, a discard, a restore) is read through `readDoc`: a text it has not seen lately is read afresh and its
+ * lines get new ids, a text equal to a recent one (the draft an edit or an undo just produced) comes back as that document.
  *
  * Every structured edit is a function from document to document and one step of the undo history, which holds documents,
  * not text, so undoing brings back the old ids with the old lines (design 3.12 item 8). Text mode has CodeMirror's own
@@ -38,6 +39,7 @@ export function useRuleDoc(content: string, setContent: (next: string) => void, 
   const show = (d: Doc) => {
     const text = serializeDoc(d)
     kept.current = { content: text, doc: d }
+    seedDoc(text, d)
     setContent(text)
     redraw(n => n + 1)
   }

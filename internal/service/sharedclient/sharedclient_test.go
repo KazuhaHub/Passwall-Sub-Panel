@@ -110,6 +110,8 @@ type fakeXUI struct {
 	added          bool
 	attachedTo     []int            // inboundIDs passed to AttachClient (the existing-client path)
 	liveClients    map[string][]int // orphan-reconcile tests: panel-wide email -> inbounds
+	listCalls      int              // counts ListClientInbounds invocations
+	listErrOnCall  int              // when non-zero, that (1-based) ListClientInbounds call fails
 	updatedSpec    ports.ClientSpec
 	updateCalls    int
 	getClientCalls int // counts GetClient invocations (orphan reconcile must not loop these)
@@ -175,6 +177,12 @@ func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetai
 
 // ListClientInbounds returns the panel-wide live client→inbounds map (orphan tests).
 func (c *fakeXUI) ListClientInbounds(context.Context) (map[string][]int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.listCalls++
+	if c.listErrOnCall != 0 && c.listCalls == c.listErrOnCall {
+		return nil, errors.New("panel listing failed")
+	}
 	return c.liveClients, nil
 }
 
