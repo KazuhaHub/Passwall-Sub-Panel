@@ -2446,6 +2446,13 @@ func clientAlreadyGone(err error) bool {
 	return errors.Is(err, domain.ErrNotFound) || ports.IsClientNotFoundMessage(err.Error())
 }
 
+// orphanSweeper is the optional half of a SharedMigrator that can share panel
+// listings between the users of one heal sweep. Optional so the test doubles
+// that do not model panels need not grow a method.
+type orphanSweeper interface {
+	WithOrphanSweep(ctx context.Context) context.Context
+}
+
 // HealSharedClients is the v3.9.0 shared-model drift heal. It walks every user and
 // re-runs a FULL membership reconcile (ResyncMembership) per user: rebuild the
 // desired psp_client set, provision it, push lifecycle, and delete now-orphaned
@@ -2467,6 +2474,12 @@ func (s *Service) HealSharedClients(ctx context.Context) (int, error) {
 	}
 	cfg, _ := s.settings.Load(ctx, ports.UISettings{})
 	concurrency := paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
+	// One sweep for the whole walk: the orphan pass of every user then shares a
+	// single listing per panel instead of listing the panel once per user. The
+	// sweep's context lives only inside this call.
+	if sweeper, ok := s.migrator.(orphanSweeper); ok {
+		ctx = sweeper.WithOrphanSweep(ctx)
+	}
 
 	const pageSize = 200
 	var mu sync.Mutex

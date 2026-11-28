@@ -48,7 +48,23 @@ type Service struct {
 	flights   singleflight.Group
 	renderSem chan struct{}
 	renderFn  func(context.Context, *domain.User, domain.ClientType) (*Output, error)
+	// ruleBlocks and singBoxRuleBlocks keep the shared rule text analysed across
+	// renders (see ruleBlock, singBoxRuleBlock). ruleBlockCompared is a test
+	// seam: it observes each comparison of a reduced assembly with the full one.
+	ruleBlocks        ruleBlockCache[ruleBlock]
+	singBoxRuleBlocks ruleBlockCache[singBoxRuleBlock]
+	ruleBlockCompared func(same bool)
+	// fullPipelineOnly turns the reduced assemblies off: every render takes the
+	// full pipeline, as before they existed. See SetFullPipelineOnly.
+	fullPipelineOnly bool
 }
+
+// SetFullPipelineOnly makes every render take the full pipeline. It is the
+// operator's way back without a release (PSP_RENDER_FULL_PIPELINE=1, wired in
+// app.Build): the reduced assemblies fall back on their own wherever they see
+// a reason to, but a wrong document they do not see would otherwise be served
+// until the next periodic comparison. Call it before the first render.
+func (s *Service) SetFullPipelineOnly(on bool) { s.fullPipelineOnly = on }
 
 func New(repos ports.Repos, pool ports.XUIPool, groupSvc GroupResolver) *Service {
 	return &Service{
@@ -227,7 +243,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	lineNames, internalItems := newLineNameCatalog(items, st.SubRegionFlagPrefix, nodes)
 	items = internalItems
 	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied)
+		return s.renderSingBox(ctx, u, tpl, items, bundle.SharedRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, st, lineNames, applied, preview != nil)
 	}
 	if preview != nil && preview.explain {
 		preview.unconfirmed = s.explainUnconfirmedLines(ctx, u, items)
@@ -245,90 +261,21 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	if err != nil {
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
-	subRulesYAML, err := marshalMihomoSubRules(bundle.SubRules)
-	if err != nil {
-		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
+	in := &mihomoBodyInput{
+		template: tpl, user: u, bundle: bundle, items: items,
+		proxiesYAML: string(proxiesYAML), lineNames: lineNames, generatedLines: generatedLines, lineOrigin: lineOrigin,
+		placeholders: s.profilePlaceholders(u, st),
 	}
-	compose := func(groups string) string {
-		if groups == "[]" {
-			groups = "" // A template may append its own group list entries.
-		}
-		subRules := subRulesYAML
-		if subRules == "{}" {
-			subRules = "" // Likewise, allow template-owned sub-rule mappings.
-		}
-		body := substituteBlockPlaceholders(tpl.Content, map[string]string{
-			"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
-			"proxy_groups":   groups,
-			"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
-			"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
-			"sub_rules":      subRules,
-		})
-		body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
-		return expandNodeRefs(body, items)
+	var body string
+	if preview != nil {
+		// A preview renders a draft once, and an explanation marks every rule
+		// with a per-request nonce: neither has rule text worth keeping analysed.
+		body, err = in.full()
+	} else {
+		body, err = s.mihomoBody(in)
 	}
-	// Use a harmless list entry instead of [] so templates may append custom
-	// groups after the generated block. Only template-owned names are fixed.
-	probe, err := parseMihomoSubscription(compose("- name: " + yamlScalar(lineNames.probe) + "\n  type: select\n  proxies: [DIRECT]"))
-	if err != nil {
-		return nil, fmt.Errorf("resolve template names: %w", err)
-	}
-	fixedNames, _, err := lineNames.mihomoNames(probe)
 	if err != nil {
 		return nil, err
-	}
-	templateTargets := make(map[string]bool, len(fixedNames))
-	for name := range fixedNames {
-		templateTargets[name] = true
-	}
-	for name := range configuredGroupNames(bundle.ProxyGroupMembers, bundle.ProxyGroupOptions) {
-		fixedNames[name] = true
-	}
-	userCopy := *u
-	userCopy.PersonalRules, err = lineNames.prepareRules(u.PersonalRules, fixedNames, generatedLines, true)
-	if err != nil {
-		return nil, err
-	}
-	u = &userCopy
-	bundle.SharedRules, err = lineNames.prepareRules(bundle.SharedRules, fixedNames, generatedLines, true)
-	if err != nil {
-		return nil, err
-	}
-	for index := range bundle.SubRules {
-		bundle.SubRules[index].Content, err = lineNames.prepareRules(bundle.SubRules[index].Content, fixedNames, generatedLines, true)
-		if err != nil {
-			return nil, err
-		}
-	}
-	subRulesYAML, err = marshalMihomoSubRules(bundle.SubRules)
-	if err != nil {
-		return nil, err
-	}
-	advanced := MihomoRuleFeatures{SubRules: bundle.SubRules, RematchOutbounds: bundle.RematchOutbounds}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithFeatures(strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n"), bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
-	if err != nil {
-		return nil, fmt.Errorf("build proxy groups: %w", err)
-	}
-	body := compose(proxyGroupsYAML)
-	missingGroups, err := mihomoMissingTemplateGroups(body)
-	if err != nil {
-		return nil, fmt.Errorf("resolve template dependencies: %w", err)
-	}
-	if len(missingGroups) > 0 {
-		groupRules := strings.Join([]string{u.PersonalRules, bundle.SharedRules}, "\n")
-		for _, group := range missingGroups {
-			// These synthetic targets drive group generation only, never rules.
-			groupRules += "\n- MATCH," + group
-		}
-		proxyGroupsYAML, err = buildProxyGroupsYAMLWithFeatures(groupRules, bundle.ProxyGroupOrder, bundle.ProxyGroupMembers, bundle.ProxyGroupOptions, items, advanced, templateTargets)
-		if err != nil {
-			return nil, fmt.Errorf("build template dependency groups: %w", err)
-		}
-		body = compose(proxyGroupsYAML)
-	}
-	body, err = lineNames.finishMihomo(body, generatedLines, lineOrigin)
-	if err != nil {
-		return nil, fmt.Errorf("finalize subscription line names: %w", err)
 	}
 
 	// Build profile name for Content-Disposition header.

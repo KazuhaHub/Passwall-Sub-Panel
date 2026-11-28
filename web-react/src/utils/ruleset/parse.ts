@@ -179,13 +179,45 @@ export function listIndent(doc: Pick<Doc, 'lines'>): string | null {
   return null
 }
 
+/**
+ * The lines `derive` made, so that `makeDoc` can tell a line it may hand on from an object that only looks like one (a
+ * copy with another text spread over it). Lines are never changed after they are made.
+ */
+const derived = new WeakSet<object>()
+
 function derive(raw: string, id: number, indent: string | null): Line {
+  const line = deriveLine(raw, id, indent)
+  derived.add(line)
+  return line
+}
+
+function deriveLine(raw: string, id: number, indent: string | null): Line {
   if (raw.trim() === '') return { id, raw, kind: 'blank' }
   if (raw.trimStart().startsWith('#')) return { id, raw, kind: 'comment' }
   const item = ITEM_RE.exec(raw)
   if (item && indent !== null && item[1] !== indent) return { id, raw, kind: 'text' }
   const scan = scanRule(raw)
   return scan ? { id, raw, kind: 'rule', rule: ruleOf(scan) } : { id, raw, kind: 'text' }
+}
+
+/**
+ * `l` itself when reading it again under `indent` would give an equal line, else null. What a line is depends on its
+ * text and, for a list item, on whether its indent is the list's:
+ *  - blank and comment lines are decided before the indent is looked at;
+ *  - an item at another indent is `text` whatever else it holds;
+ *  - a line that was a `rule` scanned as one, and the scan reads only the text, so it is that rule again at any indent
+ *    that does not rule it out.
+ * A `text` line at an indent that does not rule it out is read again: it may have been text only because the list's
+ * indent used to be another (the first item was removed), and that is rare enough not to track.
+ */
+function reusable(l: { raw: string; id?: number }, indent: string | null): Line | null {
+  if (!derived.has(l)) return null
+  const line = l as Line
+  if (line.kind === 'blank' || line.kind === 'comment') return line
+  const item = ITEM_RE.exec(line.raw)
+  const offIndent = item !== null && indent !== null && item[1] !== indent
+  if (offIndent) return line.kind === 'text' ? line : null
+  return line.kind === 'rule' ? line : null
 }
 
 /** One line on its own (no list to compare the indent with). */
@@ -196,10 +228,14 @@ export function parseLine(raw: string, indent: string | null = null, id: number 
 /**
  * Builds a document from lines (keeping the ids of those that have one). The kind of a line depends on the whole list
  * (its indent), so every edit comes back through here.
+ *
+ * A line that comes from another document and would read the same here is handed on as the same object (`reusable`).
+ * The undo history keeps whole documents: with every line read again each step of the seeded rule set held about 3 MB,
+ * with the untouched lines shared it holds its array of lines and the few that changed.
  */
 export function makeDoc(lines: readonly { raw: string; id?: number }[], trailingNewline: boolean): Doc {
   const indent = listIndent({ lines: lines as Line[] })
-  const out = lines.map(l => derive(l.raw, l.id ?? newId(), indent))
+  const out = lines.map(l => reusable(l, indent) ?? derive(l.raw, l.id ?? newId(), indent))
   return { lines: out, indent, foreign: foreignOf(out), trailingNewline }
 }
 

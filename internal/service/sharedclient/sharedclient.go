@@ -1116,6 +1116,12 @@ func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
 			noteErr(err)
 			continue
 		}
+		// Inside a heal sweep the panel was already listed once for all users.
+		// That listing is old by now, so it is trusted for one answer only:
+		// "this user has nothing to clean up here". See orphan_sweep.go.
+		if swept, serr := s.sweepListing(ctx, panelID, cli); serr == nil && swept != nil && nothingToReconcile(swept, desired, userID) {
+			continue
+		}
 		// ONE panel-wide read drives BOTH the coverage gate and the stale-client
 		// scan: ListClientInbounds returns every live client's inbound set, so a
 		// busy panel costs a single call instead of one GetClient per desired email.
