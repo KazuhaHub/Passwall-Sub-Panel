@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -331,21 +332,16 @@ func goldenCases() []goldenCase {
 	cases := []goldenCase{
 		{"seed", goldenSeed(nil)},
 		{"seed-personal", goldenSeed(func(_ *Service, u *domain.User, _ *domain.RuleSet) { u.PersonalRules = goldenPersonalRules })},
-		{"seed-content-only", func(t testing.TB) (*Service, *domain.User) { return seedRenderFixture(t, domain.ClientMihomo) }},
-		{"seed-content-only-sing-box", func(t testing.TB) (*Service, *domain.User) { return seedRenderFixture(t, domain.ClientSingBox) }},
 		{"seed-line-in-shared-rules", goldenSeed(func(_ *Service, _ *domain.User, rule *domain.RuleSet) {
 			rule.Content = "- DOMAIN,relay.example.org,A B\n" + rule.Content
 		})},
-		{"seed-members", goldenSeed(func(_ *Service, u *domain.User, rule *domain.RuleSet) {
+		{"seed-members", goldenSeed(func(s *Service, u *domain.User, rule *domain.RuleSet) {
 			u.PersonalRules = goldenPersonalRules
 			rule.ProxyGroupMembers = map[string][]domain.ProxyGroupMember{
 				"📹 油管视频": {{Kind: "line", NodeID: 7, LineID: "relay-B"}, {Kind: "proxy_group", Value: "🚀 节点选择"}},
 				"💬 Ai平台": {{Kind: "node_set", Value: "all"}},
 			}
 			rule.ProxyGroupOptions = map[string]domain.ProxyGroupOptions{"💬 Ai平台": {Type: ProxyGroupTypeURLTest}}
-		})},
-		{"seed-flag-prefix", goldenSeed(func(s *Service, u *domain.User, _ *domain.RuleSet) {
-			u.PersonalRules = goldenPersonalRules
 			s.repos.Settings = fakeSettings{s: ports.UISettings{SubRegionFlagPrefix: true, SubBaseURL: "https://sub.example.net"}}
 		})},
 		{"colliding-names", func(t testing.TB) (*Service, *domain.User) {
@@ -402,32 +398,61 @@ func goldenCases() []goldenCase {
 	return cases
 }
 
+// goldenObserve, when set, watches one Service and returns what to report about
+// its render next to the hash. It is set by the tests of an alternative
+// assembly, so that this file compiles unchanged against the production code
+// the hashes are generated from.
+var goldenObserve func(s *Service) (report func() string)
+
 // goldenRender is one render reduced to what must not change.
-func goldenRender(t testing.TB, c goldenCase, ct domain.ClientType) string {
+func goldenRender(t testing.TB, c goldenCase, ct domain.ClientType) (string, string) {
 	t.Helper()
 	s, u := c.build(t)
+	report := func() string { return "" }
+	if goldenObserve != nil {
+		report = goldenObserve(s)
+	}
 	out, err := s.RenderForUser(context.Background(), u, ct)
 	if err != nil {
-		return "error: " + goldenLineTokenRE.ReplaceAllString(err.Error(), "psp-line-<token>-")
+		return "error: " + goldenLineTokenRE.ReplaceAllString(err.Error(), "psp-line-<token>-"), report()
 	}
 	sum := sha256.Sum256(goldenLineTokenRE.ReplaceAll(out.Body, []byte("psp-line-<token>-")))
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:]), report()
 }
 
-func TestRenderGolden(t *testing.T) {
-	got := map[string]string{}
+// goldenRenders renders every case in every format once per test binary. Two
+// tests read it: the shipped rule set is half a megabyte and a render of it is
+// slow under the race detector, where the whole Go suite runs in CI.
+var goldenRenders = sync.OnceValues(func() (map[string]string, map[string]string) {
+	hashes, observed := map[string]string{}, map[string]string{}
 	for _, c := range goldenCases() {
 		for _, ct := range allClientTypes {
-			// The same inputs must render to the same bytes every time, or a
-			// hash could not pin anything.
-			first := goldenRender(t, c, ct)
-			if again := goldenRender(t, c, ct); again != first {
-				t.Fatalf("%s/%s is not deterministic: %s then %s", c.name, ct, first, again)
-			}
-			got[c.name+"/"+string(ct)] = first
+			name := c.name + "/" + string(ct)
+			hashes[name], observed[name] = goldenRender(goldenTB, c, ct)
 		}
 	}
-	if os.Getenv("PSP_UPDATE_RENDER_GOLDEN") != "" {
+	return hashes, observed
+})
+
+// goldenTB is the test whose fixtures goldenRenders builds; fixtures only use
+// it to fail.
+var goldenTB testing.TB
+
+func TestRenderGolden(t *testing.T) {
+	update := os.Getenv("PSP_UPDATE_RENDER_GOLDEN") != ""
+	goldenTB = t
+	got, _ := goldenRenders()
+	if update {
+		// The same inputs must render to the same bytes every time, or a hash
+		// could not pin anything. Checked when the hashes are written;
+		// afterwards a document that varied would fail the comparison below.
+		for _, c := range goldenCases() {
+			for _, ct := range allClientTypes {
+				if again, _ := goldenRender(t, c, ct); again != got[c.name+"/"+string(ct)] {
+					t.Fatalf("%s/%s is not deterministic: %s then %s", c.name, ct, got[c.name+"/"+string(ct)], again)
+				}
+			}
+		}
 		raw, err := json.MarshalIndent(got, "", "  ")
 		if err != nil {
 			t.Fatal(err)

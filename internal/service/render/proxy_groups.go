@@ -73,6 +73,26 @@ func buildProxyGroupsYAMLWithFeatures(rules string, preferredOrder []string, mem
 }
 
 func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, error) {
+	groups, _, err := buildProxyGroupsYAMLFromLines(nil, subscriptionRuleLines(rules), preferredOrder, members, options, items, resolve, excluded...)
+	return groups, err
+}
+
+// buildProxyGroupsYAMLForBlock is buildProxyGroupsYAMLWithFeatures for rule text
+// in which one marker rule stands for an analysed rule block. It reports false
+// unless the marker was read exactly once as a rule of its own: that is what
+// shows the text around it parsed as the rule list the block belongs to.
+func buildProxyGroupsYAMLForBlock(block *ruleBlock, rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, advanced MihomoRuleFeatures, templateTargets map[string]bool) (string, bool) {
+	ruleLines, err := parseRuleSequence(strings.Join(advanced.allRuleFragments(rules), "\n"))
+	if err != nil {
+		// The full pipeline would fall back to reading the text line by line,
+		// YAML syntax included; that reading cannot be reproduced from targets.
+		return "", false
+	}
+	groups, standIns, err := buildProxyGroupsYAMLFromLines(block.targets, ruleLines, preferredOrder, members, options, items, true, advanced.outboundNames(), templateTargets)
+	return groups, err == nil && standIns == 1
+}
+
+func buildProxyGroupsYAMLFromLines(blockTargets []string, ruleLines []string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool, excluded ...map[string]bool) (string, int, error) {
 	var excludedTargets map[string]bool
 	if len(excluded) > 0 {
 		excludedTargets = excluded[0]
@@ -86,7 +106,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			targetExclusions[name] = true
 		}
 	}
-	targets := ruleTargetsInOrderExcluding(rules, targetExclusions, true)
+	targets, standIns := ruleLineTargets(blockTargets, ruleLines, targetExclusions, true)
 	targets = withEffectiveProxyGroupDependencies(targets, members)
 	if len(excluded) > 1 {
 		kept := []string{}
@@ -99,7 +119,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	}
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
-		return "[]", nil
+		return "[]", standIns, nil
 	}
 
 	lines := make([]string, 0, len(targets)*6)
@@ -159,7 +179,7 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 			}
 		}
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), standIns, nil
 }
 
 // Explicit rule targets can name a line directly. Such names are not groups;
@@ -265,24 +285,45 @@ func ruleTargetsInOrder(rules string) []string {
 }
 
 func ruleTargetsInOrderExcluding(rules string, excluded map[string]bool, rawPolicy ...bool) []string {
+	targets, _ := ruleLineTargets(nil, subscriptionRuleLines(rules), excluded, len(rawPolicy) > 0 && rawPolicy[0])
+	return targets
+}
+
+// ruleLineTargets lists the distinct group-forming targets of the rules in
+// first-occurrence order. With blockTargets, a rule equal to
+// ruleBlockGroupMarker stands for every rule of an analysed block: the block's
+// targets are taken, in their own order, at the marker's position. The second
+// result counts the markers read.
+func ruleLineTargets(blockTargets []string, ruleLines []string, excluded map[string]bool, rawPolicy bool) ([]string, int) {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, rawLine := range subscriptionRuleLines(rules) {
+	standIns := 0
+	add := func(target string) {
+		if target == "" || builtInRuleTargets[target] || excluded[target] || seen[target] {
+			return
+		}
+		seen[target] = true
+		out = append(out, target)
+	}
+	for _, rawLine := range ruleLines {
+		if blockTargets != nil && rawLine == ruleBlockGroupMarker {
+			standIns++
+			for _, target := range blockTargets {
+				add(target)
+			}
+			continue
+		}
 		parts := splitRuleFields(rawLine)
 		if len(parts) < 2 || strings.EqualFold(parts[0], "SUB-RULE") {
 			continue
 		}
 		target := ruleOutboundTarget(parts)
-		if len(rawPolicy) > 0 && rawPolicy[0] {
+		if rawPolicy {
 			target = mihomoRuleTarget(rawLine)
 		}
-		if target == "" || builtInRuleTargets[target] || excluded[target] || seen[target] {
-			continue
-		}
-		seen[target] = true
-		out = append(out, target)
+		add(target)
 	}
-	return out
+	return out, standIns
 }
 
 // Saved rule fragments may quote an entire YAML rule scalar, independently of

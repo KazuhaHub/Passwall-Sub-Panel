@@ -2,6 +2,7 @@ package render
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -57,4 +58,40 @@ func TestSeedRenderKeepsEveryRule(t *testing.T) {
 	if len(out.Body) < 400_000 {
 		t.Fatalf("rendered body is %d bytes; the default rule set alone is over 400 KB", len(out.Body))
 	}
+}
+
+// BenchmarkSeedRenderFirst measures what BenchmarkSeedRender leaves out: the
+// renders that pay for the steady state. "process" is the first render after a
+// start (the shared rules are analysed, and the document is assembled both ways
+// and compared); "context" is the first render of a new template or personal
+// rule text against rules already analysed (assembled both ways and compared).
+func BenchmarkSeedRenderFirst(b *testing.B) {
+	ctx := context.Background()
+	b.Run("process", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			b.StopTimer()
+			s, u := seedRenderFixture(b, domain.ClientMihomo)
+			b.StartTimer()
+			if _, err := s.RenderForUser(ctx, u, domain.ClientMihomo); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("context", func(b *testing.B) {
+		s, u := seedRenderFixture(b, domain.ClientMihomo)
+		if _, err := s.RenderForUser(ctx, u, domain.ClientMihomo); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		index := 0
+		for b.Loop() {
+			index++
+			user := *u
+			user.PersonalRules = fmt.Sprintf("- DOMAIN,personal-%d.example,DIRECT", index)
+			if _, err := s.RenderForUser(ctx, &user, domain.ClientMihomo); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
