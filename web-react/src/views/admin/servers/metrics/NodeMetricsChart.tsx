@@ -158,7 +158,7 @@ export default function NodeMetricsChart({ times, series, coverage, height = 240
       <div ref={ref} role="img" aria-label={label} style={{ width: '100%', height }} />
       <details className="mt-2 text-sm" onToggle={event => setTableOpen(event.currentTarget.open)}>
         <summary className="inline-flex min-h-8 cursor-pointer items-center rounded text-muted-foreground outline-none select-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50">
-          {t('admin:traffic.chart.table')}
+          {t('common:traffic_chart.table')}
         </summary>
         {tableOpen && (
           <div className="mt-2 max-h-72 overflow-auto rounded-lg border">

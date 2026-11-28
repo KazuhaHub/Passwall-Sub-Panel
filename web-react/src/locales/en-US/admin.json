@@ -7441,7 +7441,8 @@
           "detail": "This policy comes from a built-in rule group, so what it matches is read-only. Name, description, state and scope can be changed; to change the matching, duplicate it as a custom policy."
         },
         "bittorrent_block_only": "BitTorrent can only be used by block policies.",
-        "removed_deleted_other": "{{count}} deleted group or node was removed from the scope; it takes effect when you save",
+        "removed_deleted_one": "{{count}} deleted group or node was removed from the scope; it takes effect when you save",
+        "removed_deleted_other": "{{count}} deleted groups or nodes were removed from the scope; it takes effect when you save",
         "position_report": "In step {{step}}, checked after every rule that is in force",
         "state_aria": "Policy state"
       },
