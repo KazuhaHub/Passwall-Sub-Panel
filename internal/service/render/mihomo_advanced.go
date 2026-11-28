@@ -250,8 +250,9 @@ func splitRuleFields(line string) []string {
 	if line == "" || strings.HasPrefix(line, "#") || strings.Contains(line, "{{") {
 		return nil
 	}
-	fields := []string{}
-	for _, span := range ruleFieldSpans(line) {
+	spans := ruleFieldSpans(line)
+	fields := make([]string, 0, len(spans))
+	for _, span := range spans {
 		fields = append(fields, normalizeRulePart(line[span[0]:span[1]]))
 	}
 	return fields

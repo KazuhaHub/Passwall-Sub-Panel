@@ -252,11 +252,17 @@ func configuredGroupNames(members map[string][]domain.ProxyGroupMember, options 
 // Only the outbound target is rewritten. Preserve all condition text and flags,
 // including nested logical expressions, quoting and no-resolve/src suffixes.
 func rewriteRuleTarget(line string, transform func(string) (string, error), rawPolicy ...bool) (string, error) {
+	// One split and one span scan serve every reading below. This runs for each
+	// of ~9.5k rules in three passes of a full render, and reading the target
+	// through mihomoRuleTarget split and scanned the line twice more.
 	fields := splitRuleFields(line)
 	target := ruleOutboundTarget(fields)
 	spans := ruleFieldSpans(line)
 	if len(rawPolicy) > 0 && rawPolicy[0] {
-		target = mihomoRuleTarget(line)
+		target = ""
+		if index := ruleOutboundTargetIndex(fields); index >= 0 && index < len(spans) {
+			target = strings.TrimSpace(line[spans[index][0]:spans[index][1]])
+		}
 	}
 	if target == "" {
 		return line, nil
@@ -300,7 +306,8 @@ func mihomoRuleTarget(line string) string {
 func ruleFieldSpans(line string) [][2]int {
 	start, depth := 0, 0
 	var quote byte
-	spans := [][2]int{}
+	// Nearly every rule has three or four fields.
+	spans := make([][2]int, 0, 4)
 	for index := 0; index < len(line); index++ {
 		ch := line[index]
 		if quote != 0 {

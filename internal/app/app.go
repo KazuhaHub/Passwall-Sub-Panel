@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -593,6 +594,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	reconcileSvc.SetPSPClientRepo(repos.PSPClient)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
+	// The way back to the full render pipeline without a release. Read here
+	// and not in config.yaml because it is an escape hatch, not a setting: it
+	// should be gone again once whatever made it necessary is fixed.
+	if os.Getenv("PSP_RENDER_FULL_PIPELINE") == "1" {
+		renderSvc.SetFullPipelineOnly(true)
+		log.Warn("render: PSP_RENDER_FULL_PIPELINE=1, every subscription takes the full pipeline")
+	}
 	// Node configuration confirmations and ordering changes affect both the
 	// enabled-node snapshots and final subscriptions. Clear both cache layers
 	// after the DB write commits so the next refresh sees the current nodes.
