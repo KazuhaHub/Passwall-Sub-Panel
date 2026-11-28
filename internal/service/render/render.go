@@ -249,12 +249,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	if err != nil {
 		return nil, fmt.Errorf("marshal Mihomo sub-rules: %w", err)
 	}
-	// withRules=false leaves both rule blocks empty. The two passes that only
-	// read what the TEMPLATE defines and references (the name probe, and the
-	// missing-group check) do not need the rules in the document, and with the
-	// default rule set the rules are ~99% of it: parsing 474 KB of rules to
-	// read a few dozen group names was most of a render's cost.
-	compose := func(groups string, withRules bool) string {
+	compose := func(groups string) string {
 		if groups == "[]" {
 			groups = "" // A template may append its own group list entries.
 		}
@@ -262,15 +257,11 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 		if subRules == "{}" {
 			subRules = "" // Likewise, allow template-owned sub-rule mappings.
 		}
-		common, personal := "", ""
-		if withRules {
-			common, personal = strings.TrimRight(bundle.SharedRules, "\n"), strings.TrimRight(u.PersonalRules, "\n")
-		}
 		body := substituteBlockPlaceholders(tpl.Content, map[string]string{
 			"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
 			"proxy_groups":   groups,
-			"rules_common":   common,
-			"rules_personal": personal,
+			"rules_common":   strings.TrimRight(bundle.SharedRules, "\n"),
+			"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
 			"sub_rules":      subRules,
 		})
 		body = substituteInlinePlaceholders(body, s.profilePlaceholders(u, st))
@@ -278,8 +269,12 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	}
 	// Use a harmless list entry instead of [] so templates may append custom
 	// groups after the generated block. Only template-owned names are fixed.
-	// mihomoNames reads only the names under `proxies` and `proxy-groups`.
-	probe, err := parseMihomoSubscription(compose("- name: "+yamlScalar(lineNames.probe)+"\n  type: select\n  proxies: [DIRECT]", false))
+	// The probe carries the rule text although only the names under `proxies`
+	// and `proxy-groups` are read from it: a rule block that does not fit the
+	// template as YAML must fail HERE, with this error. Leaving the rules out
+	// let a rule set with a second YAML document render, and moved the error of
+	// a malformed block to a later step with a different text.
+	probe, err := parseMihomoSubscription(compose("- name: " + yamlScalar(lineNames.probe) + "\n  type: select\n  proxies: [DIRECT]"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve template names: %w", err)
 	}
@@ -319,7 +314,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
-	body := compose(proxyGroupsYAML, true)
+	body := compose(proxyGroupsYAML)
 	missingGroups, err := mihomoMissingTemplateGroups(body)
 	if err != nil {
 		return nil, fmt.Errorf("resolve template dependencies: %w", err)
@@ -334,7 +329,7 @@ func (s *Service) renderForContext(ctx context.Context, u *domain.User, ct domai
 		if err != nil {
 			return nil, fmt.Errorf("build template dependency groups: %w", err)
 		}
-		body = compose(proxyGroupsYAML, true)
+		body = compose(proxyGroupsYAML)
 	}
 	body, err = lineNames.finishMihomo(body, generatedLines, lineOrigin)
 	if err != nil {
