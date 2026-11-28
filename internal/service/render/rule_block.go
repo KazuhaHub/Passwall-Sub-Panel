@@ -78,7 +78,11 @@ const comparedContextsMax = 4096
 // argument (every pass reaches a shared rule only through its target, and the
 // stand-in has one rule per target), which no check on the first render can
 // confirm, because the first render has one subscriber's lines. Comparing
-// again on a later render puts another subscriber's lines through both paths.
+// again on a later render puts whoever that render belongs to through both
+// paths: another subscriber where the context is shared, the same one where
+// personal rules make the context a subscriber's own. A render on which the
+// reduced assembly declines compares nothing, so the check is a sample, not a
+// guarantee.
 // A difference found there is logged and pins the context to the full
 // pipeline, the same as one found on the first render. At this rate the check
 // adds about a four-hundredth of a full render to the average one.
@@ -111,7 +115,9 @@ func (c *comparedContexts) lookup(context [sha256.Size]byte) (proven, compared, 
 func (c *comparedContexts) record(context [sha256.Size]byte, same bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.proven == nil || len(c.proven) >= comparedContextsMax {
+	// Only a NEW context can overflow the record: the periodic comparison
+	// writes a context that is already there, and must not wipe the others.
+	if _, known := c.proven[context]; c.proven == nil || (!known && len(c.proven) >= comparedContextsMax) {
 		c.proven = map[[sha256.Size]byte]contextRecord{}
 	}
 	c.proven[context] = contextRecord{same: same}
