@@ -64,6 +64,9 @@ export interface Server {
   /** Passwall Node servers: the address PSP last saw the server sync from.
    *  The default for a node's connection address and a tunnel's exit address. */
   address?: string
+  /** Passwall Node servers: every public address the node reported for its own interfaces (several IPv4 and IPv6 are normal).
+   *  Absent when the node sent none; `address` is then all there is. */
+  interface_addresses?: string[]
   username?: string
   remark?: string
   region?: string

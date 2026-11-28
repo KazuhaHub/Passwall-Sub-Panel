@@ -530,19 +530,21 @@ export function RulesTab({ content, setContent, readOnly, order, rematchNames, s
         <div className="grid min-w-0 gap-4 @[46rem]:grid-cols-[minmax(16rem,19rem)_minmax(0,1fr)]">
           {showDirectory && (
             <div className="flex min-w-0 flex-col gap-2">
-              {/* One fixed line: the order hint, or, while there is something to say, what a search found or what the last edit did. Nothing below it moves. */}
-              <div className="min-h-4">
-                <p className={cn('text-xs text-muted-foreground', statusText && 'hidden')}>{t('admin:rules.blocks.order_hint')}</p>
-                <p role="status" aria-live="polite" className="text-xs text-foreground/80 tabular-nums">{statusText}</p>
-              </div>
               <BlockDirectory
                 doc={doc} blocks={blocks} shown={shown} hits={hits} selected={currentIndex} onSelect={select} readOnly={readOnly}
                 onReorder={reorder} reorderBlockedReason={filtering ? t('admin:rules.move.blocked_filter') : undefined} menuOf={menuOf}
                 onAdd={() => addGroup(blocks.length)}
               />
-              {!readOnly && blocks.length > 0 && (
-                <div><Button variant="outline" size="sm" onClick={() => addGroup(blocks.length)}><IconAdd />{t('admin:rules.blocks.add')}</Button></div>
-              )}
+              {/* One fixed row under the list, so nothing above it pushes the two panes out of line: Add group, then the order hint or, while there is something to say, what a search found or what the last edit did. */}
+              <div className="flex h-8 items-center gap-3">
+                {!readOnly && blocks.length > 0 && (
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => addGroup(blocks.length)}><IconAdd />{t('admin:rules.blocks.add')}</Button>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className={cn('text-xs text-muted-foreground', statusText && 'hidden')}>{t('admin:rules.blocks.order_hint')}</p>
+                  <p role="status" aria-live="polite" className="text-xs text-foreground/80 tabular-nums">{statusText}</p>
+                </div>
+              </div>
             </div>
           )}
           {showDetail && (

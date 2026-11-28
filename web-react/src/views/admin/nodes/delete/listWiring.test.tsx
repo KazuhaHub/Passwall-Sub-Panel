@@ -24,15 +24,15 @@ const reads = () => installReads({
 })
 
 describe('deleting from the nodes list', () => {
-  // The row menu is about the line: deleting the node (and the other node-level work) moved to the node page's menu
+  // The row menu carries the core node actions (enable or disable, edit, open), but deleting the node (and the rest) lives on the node page's menu
   // (covered in NodeDetailPage.test) and stays in the bulk bar (below).
-  it('the row menu of a line offers no node-level action', async () => {
+  it('the row menu of a line offers no destructive node action', async () => {
     reads()
     mountPage(<NodesPage />)
     await screen.findAllByText('Node2')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Node1' }))
     await screen.findByRole('menuitem', { name: 'Open node' })
-    for (const name of ['Delete node', 'Remove from panel only', 'Recreate inbound on server', 'Disable node']) {
+    for (const name of ['Delete node', 'Remove from panel only', 'Recreate inbound on server']) {
       expect(screen.queryByRole('menuitem', { name })).toBeNull()
     }
   })

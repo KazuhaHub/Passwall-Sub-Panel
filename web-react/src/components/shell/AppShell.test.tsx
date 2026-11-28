@@ -160,10 +160,12 @@ describe('footer version', () => {
 describe('collapsing to the icon rail', () => {
   const state = () => document.querySelector('[data-slot="sidebar"]')?.getAttribute('data-state')
 
-  it('toggles from the top-bar button and remembers it', () => {
+  it('toggles from the button in the sidebar and remembers it', () => {
     mount()
     expect(state()).toBe('expanded')
-    fireEvent.click(screen.getByRole('button', { name: '展开或收起侧栏' }))
+    const button = screen.getByRole('button', { name: '展开或收起侧栏' })
+    expect(button.closest('[data-slot="sidebar-footer"]')).not.toBeNull()
+    fireEvent.click(button)
     expect(state()).toBe('collapsed')
     expect(localStorage.getItem('psp-sidebar-collapsed')).toBe('1')
   })
@@ -200,7 +202,7 @@ describe('phone width', () => {
   it('has no desktop rail; the menu is a sheet that closes when a link is followed', async () => {
     mount()
     expect(document.querySelector('[data-slot="sidebar"][data-state]')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '展开或收起侧栏' }))
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     const sheet = await screen.findByRole('dialog', { name: '导航菜单' })
     fireEvent.click(within(sheet).getByRole('link', { name: '分组' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '导航菜单' })).toBeNull())
@@ -225,7 +227,7 @@ describe('nav tooltips', () => {
   it('are not opened in the phone sheet, so one Escape closes the sheet', async () => {
     setViewport(true)
     mount()
-    fireEvent.click(screen.getByRole('button', { name: '展开或收起侧栏' }))
+    fireEvent.click(screen.getByRole('button', { name: '打开菜单' }))
     const sheet = await screen.findByRole('dialog', { name: '导航菜单' })
     const link = within(sheet).getByRole('link', { name: '分组' })
     link.focus()

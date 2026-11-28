@@ -9,7 +9,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { nodeGroupsHint, useLineVisibility } from '../../useLineVisibility'
 import { useApplyNode } from '../lines/useNodeDetail'
 import { useNodesT } from '../shared/useNodesT'
-import { GENERAL_ID, GeneralFields, generalProblems, type GeneralDraft, type GeneralField } from './GeneralFields'
+import { GENERAL_ID, GeneralFields, generalProblems, regionOptionsOf, type GeneralDraft, type GeneralField } from './GeneralFields'
 
 const NONE: never[] = []
 const draftOf = (n: Node): GeneralDraft => ({ display_name: n.display_name, server_address: n.server_address, region: n.region, tags: n.tags ?? [] })
@@ -39,6 +39,7 @@ export function GeneralTab({ node, onDirtyChange }: { node: Node; onDirtyChange:
 
   const problems = generalProblems(draft)
   const error = (f: GeneralField) => (attempted || touched.has(f) ? problems[f] : undefined)
+  const regions = useMemo(() => regionOptionsOf(nodes.data ?? NONE), [nodes.data])
   const tags = useMemo(() => [...new Set((nodes.data ?? NONE).flatMap(n => n.tags ?? []))].sort((a, b) => a.localeCompare(b)), [nodes.data])
 
   // Which groups would receive the node with the unsaved values; its own lines are sent as saved (they are not edited here).
@@ -69,7 +70,7 @@ export function GeneralTab({ node, onDirtyChange }: { node: Node; onDirtyChange:
     <FormValidityProvider>
       <form className="flex max-w-2xl flex-col gap-5" onSubmit={e => { e.preventDefault(); void save() }} noValidate>
         <GeneralFields draft={draft} patch={p => setEdit({ ...draft, ...p })} error={error} blur={f => setTouched(s => (s.has(f) ? s : new Set(s).add(f)))}
-          tagOptions={tags} visible={groups.now} removed={groups.removed} />
+          tagOptions={tags} regionOptions={regions} visible={groups.now} removed={groups.removed} />
         {(node.relays ?? []).length > 0 && <p className="text-xs text-muted-foreground">{t('nodes.line_labels.node_change_hint')}</p>}
         <SaveBar dirty={dirty} pending={pending} onSave={() => void save()} onDiscard={() => { setEdit(null); setTouched(new Set()); setAttempted(false) }} />
       </form>

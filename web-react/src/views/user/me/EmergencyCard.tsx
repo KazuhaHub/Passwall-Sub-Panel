@@ -44,15 +44,15 @@ export function EmergencyCard({ emergency, onUse }: {
   const off = emergency.remaining <= 0 || !emergency.available
   const meta = 'inline-flex items-center gap-1 text-xs text-muted-foreground [&_svg]:size-3.5'
   return (
-    <Card data-testid="emergency-access" className={cn(TONE_STYLE.info.tint, TONE_STYLE.info.ring, 'ring-1')}>
+    <Card data-testid="emergency-access" className={cn('@container', TONE_STYLE.info.tint, TONE_STYLE.info.ring, 'ring-1')}>
       <CardContent className="flex flex-col gap-4">
-        {/* The button sits beside the text from sm up; on a phone it goes below, so a long label does not squeeze the sentence into a sliver. */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+        {/* The button sits beside the text once the card itself is wide enough, and goes below, full width, when it is not: the card sits in a narrow column at desktop widths too, so the window's width says nothing about it. */}
+        <div className="flex flex-col gap-3 @md:flex-row @md:items-start @md:gap-4">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <IconDiagnose className="mt-0.5 size-5 shrink-0 text-info" />
             <div className="min-w-0 flex-1">
               <h2 className="font-heading text-base leading-snug font-semibold">{t('emergency.title')}</h2>
-              <p className="mt-1 text-sm">{statusText(t, emergency)}</p>
+              <p className="mt-1 text-sm break-words">{statusText(t, emergency)}</p>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 <span className={meta}><IconTime />{t('emergency.meta_duration', { hours: emergency.duration_hours })}</span>
                 {quotaActive && <span className={meta}><IconUsage />{t('emergency.meta_quota', { total: bytesToHuman(emergency.quota_bytes) })}</span>}
@@ -60,7 +60,7 @@ export function EmergencyCard({ emergency, onUse }: {
               </div>
             </div>
           </div>
-          <AsyncButton className="sm:shrink-0" disabled={off} onClick={onUse}>{t('emergency.use')}</AsyncButton>
+          <AsyncButton className="w-full @md:w-auto @md:shrink-0" disabled={off} onClick={onUse}>{t('emergency.use')}</AsyncButton>
         </div>
         {windowActive && quotaActive && (
           <div>

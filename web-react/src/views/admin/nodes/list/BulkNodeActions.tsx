@@ -14,11 +14,14 @@ import { useNodesT } from '../shared/useNodesT'
  * by what each node's server allows, and the labels say "节点" with a count because a direct row's enable is the
  * whole node. The line actions (enable or disable the selected relay lines) are N2's; delete opens the impact dialog (delete/).
  */
-export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, serverOf, clear, onDelete }: {
+export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, multiplierCount = 0, onSetMultiplier, admin, serverOf, clear, onDelete }: {
   nodeIds: number[]
   /** The relay lines among the selected rows. Enabling or disabling them writes each node's lines once. */
   lineRefs?: { nodeId: number; lineId: string }[]
   toggleLines?: (nodeId: number, lineIds: readonly string[], enabled: boolean, opts?: { quiet?: boolean }) => Promise<boolean>
+  /** How many lines the selection stands for (a landing row stands for all of its lines), and the dialog that sets one multiplier on them. */
+  multiplierCount?: number
+  onSetMultiplier?: () => void
   admin: boolean
   /** The landing server of a node, for its capabilities. */
   serverOf: (nodeId: number) => Server | undefined
@@ -72,6 +75,9 @@ export function BulkNodeActions({ nodeIds, lineRefs = [], toggleLines, admin, se
           <Button variant="outline" size="sm" disabled={busy !== ''} onClick={() => void setLinesEnabled(true)}>{t('nodes.line.bulk.enable', { count: lineRefs.length })}</Button>
           <Button variant="outline" size="sm" disabled={busy !== ''} onClick={() => void setLinesEnabled(false)}>{t('nodes.line.bulk.disable', { count: lineRefs.length })}</Button>
         </>
+      )}
+      {admin && onSetMultiplier && multiplierCount > 0 && (
+        <Button variant="outline" size="sm" disabled={busy !== ''} onClick={onSetMultiplier}>{t('nodes.line.bulk.set_multiplier', { count: multiplierCount })}</Button>
       )}
       {admin && <Button variant="destructive" size="sm" disabled={busy !== '' || deletable.length === 0} onClick={() => onDelete(deletable, clear)}>{t('nodes.bulk.delete_nodes', { count: deletable.length })}</Button>}
     </>

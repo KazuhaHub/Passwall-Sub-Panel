@@ -1,6 +1,7 @@
 import { Field } from '@/components/form/Field'
 import { TagsField } from '@/components/form/TagsField'
 import { Input } from '@/components/ui/input'
+import { SuggestInput } from '../../settings/parts'
 import type { PreviewHint } from '@/hooks/useDraftPreview'
 import { validateHost, validateName } from '@/utils/validators'
 import { useNodesT } from '../shared/useNodesT'
@@ -27,16 +28,25 @@ export function generalProblems(d: GeneralDraft): Partial<Record<GeneralField, s
   return out
 }
 
+/** The regions nodes already use, most used first (ties alphabetical); blank values are skipped. */
+export function regionOptionsOf(nodes: readonly { region?: string }[]): string[] {
+  const count = new Map<string, number>()
+  for (const n of nodes) { const r = n.region?.trim(); if (r) count.set(r, (count.get(r) ?? 0) + 1) }
+  return [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([r]) => r)
+}
+
 /**
  * Name, address, region and tags, with the groups that would receive the node (ADR 0041) under the last two.
  * Controlled by the caller; it knows nothing about saving, so the General tab and the create page share it.
  */
-export function GeneralFields({ draft, patch, error, blur, tagOptions, visible, removed }: {
+export function GeneralFields({ draft, patch, error, blur, tagOptions, regionOptions = [], visible, removed }: {
   draft: GeneralDraft
   patch: (p: Partial<GeneralDraft>) => void
   error: (f: GeneralField) => string | undefined
   blur: (f: GeneralField) => void
   tagOptions: readonly string[]
+  /** Regions in use, offered as suggestions; any other text is still accepted. */
+  regionOptions?: readonly string[]
   /** The groups that would see the node with these values; absent on the create page (nothing is saved yet to compare with). */
   visible?: PreviewHint
   removed?: string[]
@@ -53,7 +63,8 @@ export function GeneralFields({ draft, patch, error, blur, tagOptions, visible, 
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
         <Field label={t('nodes.field.region')} required error={error('region') && t(error('region')!)}>
-          <Input id={GENERAL_ID.region} value={draft.region} onChange={e => set({ region: e.target.value })} onBlur={() => blur('region')} />
+          <SuggestInput id={GENERAL_ID.region} value={draft.region} options={regionOptions} placeholder={t('nodes.field.region_search_placeholder')}
+            onChange={region => set({ region })} onBlur={() => blur('region')} />
         </Field>
         <Field label={t('nodes.field.tags')}>
           {p => <TagsField id={p.id} aria-labelledby={p.labelId} value={draft.tags} suggestions={tagOptions} onChange={tags => set({ tags })} />}

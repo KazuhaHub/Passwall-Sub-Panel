@@ -110,8 +110,15 @@ export async function pickRowAction(server: Server, action: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name: action }))
 }
 
+/** Open a server from the list, on one of its tabs; with `action`, press that maintenance action (its button is named by its label). */
+export async function openServerTab(server: Server, tab: 'overview' | 'settings' | 'maintenance' | 'monitoring', action?: string) {
+  await pickRowAction(server, 'admin:servers.action.open')
+  fireEvent.click(await screen.findByRole('tab', { name: `admin:servers.detail.tabs.${tab}` }))
+  if (action) fireEvent.click(await screen.findByRole('button', { name: action }))
+}
+
 export async function openInstallation(server: Server) {
-  await pickRowAction(server, 'admin:servers.install_reinstall.action')
+  await openServerTab(server, 'maintenance', 'admin:servers.install_reinstall.action')
   fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
 }
 

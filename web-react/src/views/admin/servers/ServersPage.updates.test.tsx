@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Server } from '@/api/servers'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import { api, installReads, list, mount, snack } from './testHarness'
-import ConfirmHost from '@/components/ConfirmHost'
+import { openServerTab } from './install/installationHarness'
 import { useAuthStore } from '@/stores/auth'
 import english from '@/locales/en-US/admin.json'
 import ServersPage from './ServersPage'
@@ -50,12 +50,14 @@ const rowFor = async (name: string) => (await screen.findByText(name)).closest('
 const upgradeWrites = () => api.post.mock.calls.filter(([url]) => url !== '/admin/servers/probe')
 
 describe('Server update hints and paired tray icons', () => {
-  it('offers install, Node upgrade and core selection in the More menu, with the remark column off by default', async () => {
+  it('offers install, Node upgrade and core selection on the server page, with the remark column off by default', async () => {
     installReads({ '/admin/servers': list([native]) })
     mount(<ServersPage />)
-    fireEvent.click(within(await rowFor(native.name)).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    await rowFor(native.name)
+    expect(screen.queryByText('admin:servers.table.remark')).toBeNull()
+    await openServerTab(native, 'maintenance')
     for (const name of ['admin:servers.install_reinstall.action', 'admin:servers.agent_upgrade.action', 'admin:servers.action.select_core']) {
-      expect(screen.getByRole('menuitem', { name }).getAttribute('aria-disabled')).not.toBe('true')
+      expect((await screen.findByRole('button', { name })).getAttribute('aria-disabled')).not.toBe('true')
     }
     expect(screen.queryByText('admin:servers.table.remark')).toBeNull()
     expect(english.servers.install_reinstall.action).toBe('Install / Reinstall')
@@ -116,9 +118,9 @@ describe('Server update hints and paired tray icons', () => {
     // failed under load — which is how this test flaked, not the code.
     expect(await within(row).findByText('admin:servers.update_available')).toBeTruthy()
     expect(within(row).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    await openServerTab(limited, 'maintenance')
     // Shown disabled with its reason under the label, not hidden: the upgrade is the one thing this node cannot do yet.
-    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    expect((await screen.findByRole('button', { name: 'admin:servers.agent_upgrade.action' })).getAttribute('aria-disabled')).toBe('true')
     expect(screen.getByText('admin:servers.menu.not_ready')).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
   })
@@ -130,9 +132,9 @@ describe('Server update hints and paired tray icons', () => {
     expect(within(suiRow).getByText('admin:servers.update_available')).toBeTruthy()
     expect(within(suiRow).queryByRole('link')).toBeNull()
     expect(within(await rowFor(xui.name)).getByText('admin:servers.update_available')).toBeTruthy()
-    fireEvent.click(within(suiRow).getByRole('button', { name: 'admin:servers.action.more_for' }))
+    await openServerTab(sui, 'maintenance')
     // S-UI has no remote upgrade: both entries are shown disabled with the reason, never hidden and never offered and refused.
-    const unsupported = ['admin:servers.action.upgrade_panel', 'admin:servers.action.upgrade_xray'].map(name => screen.getByRole('menuitem', { name }))
+    const unsupported = await Promise.all(['admin:servers.action.upgrade_panel', 'admin:servers.action.upgrade_xray'].map(name => screen.findByRole('button', { name })))
     expect(unsupported.every(item => item.getAttribute('aria-disabled') === 'true')).toBe(true)
     expect(screen.getAllByText('admin:servers.menu.not_supported')).toHaveLength(2)
     expect(releaseReads).not.toHaveBeenCalled()
@@ -191,11 +193,10 @@ describe('the 3X-UI upgrade confirm states what the target is not', () => {
         upgrade_mode: 'latest_only',
       },
     })
-    mount(<><ConfirmHost /><ServersPage /></>)
+    mount(<ServersPage />)
 
-    const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+    await rowFor(xui.name)
+    await openServerTab(xui, 'maintenance', 'admin:servers.action.upgrade_panel')
 
     // The dialog body is one joined string whose lines are i18n KEYS in this
     // harness, so a substring regex is what matches a single line.
@@ -213,11 +214,10 @@ describe('the 3X-UI upgrade confirm states what the target is not', () => {
         target_pinnable: true,
       },
     })
-    mount(<><ConfirmHost /><ServersPage /></>)
+    mount(<ServersPage />)
 
-    const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+    await rowFor(xui.name)
+    await openServerTab(xui, 'maintenance', 'admin:servers.action.upgrade_panel')
 
     // The target line is present, so the dialog did open; the caveat is absent
     // because nothing said the target was unpinnable.
@@ -239,11 +239,10 @@ describe('the upgrade action asks the instance before it fires', () => {
 
   it.each(['unsupported', 'blocked'])('does not fire when the instance answers %s', async state => {
     installReads({ '/admin/servers': list([xui]), ...optionRead(state) })
-    mount(<><ConfirmHost /><ServersPage /></>)
+    mount(<ServersPage />)
 
-    const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+    await rowFor(xui.name)
+    await openServerTab(xui, 'maintenance', 'admin:servers.action.upgrade_panel')
 
     // The harness mocks pushSnack, so the message is read from the spy rather
     // than the DOM — and it is the i18n KEY, because t() resolves keys to
@@ -266,11 +265,10 @@ describe('the upgrade action asks the instance before it fires', () => {
         compat_status: 'supported', target_pinnable: false,
       },
     })
-    mount(<><ConfirmHost /><ServersPage /></>)
+    mount(<ServersPage />)
 
-    const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+    await rowFor(xui.name)
+    await openServerTab(xui, 'maintenance', 'admin:servers.action.upgrade_panel')
 
     expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
     expect(snack.mock.calls.some(([message]) => /upgrade_unavailable/.test(message))).toBe(false)
@@ -283,11 +281,10 @@ describe('the upgrade action asks the instance before it fires', () => {
       '/admin/servers': list([xui]),
       '/admin/servers/9/upgrade-preview': { update_available: true, current_version: '3.4.2', target_version: 'v3.7.0' },
     })
-    mount(<><ConfirmHost /><ServersPage /></>)
+    mount(<ServersPage />)
 
-    const row = await rowFor(xui.name)
-    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more_for' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+    await rowFor(xui.name)
+    await openServerTab(xui, 'maintenance', 'admin:servers.action.upgrade_panel')
 
     expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
   })

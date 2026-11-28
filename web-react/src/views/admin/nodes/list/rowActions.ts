@@ -1,12 +1,14 @@
 import type { TFunction } from 'i18next'
 import type { OrderRow } from '@/api/nodes'
 import type { MoreMenuItem } from '@/components/common/MoreMenu'
+import { hasMultiplier } from './multiplierModel'
 import { IconAdd, IconDelete, IconEdit, IconNode, IconPower, IconReorder } from '@/lib/icons'
 
 /**
  * What a row's menu can do. The handlers a later package owns are OPTIONAL and their entries appear only when
  * the package provides them, so N1 ships no button that does nothing:
  *   N2 fills toggleLine, deleteLine and addLine (the line editor and its save path);
+ *   editMultiplier is the quick multiplier dialog;
  *   N4 replaces deleteNode / removeFromPanel with the impact dialogs.
  */
 export interface RowActionHandlers {
@@ -22,6 +24,7 @@ export interface RowActionHandlers {
   toggleLine?: (row: OrderRow, enable: boolean) => void
   deleteLine?: (row: OrderRow) => void
   addLine?: (row: OrderRow) => void
+  editMultiplier?: (row: OrderRow) => void
 }
 
 /** What the signed-in account and the landing's server allow. */
@@ -41,12 +44,10 @@ export interface RowMenuOptions {
   t: TFunction
   /** Reordering is off while a save is running; Move to… stays on under a filter. */
   canMove?: boolean
-  /** The by-node view's parent row: Add line is offered there, right after the line items. */
-  withAddLine?: boolean
   openNodeHref?: (nodeId: number) => string
 }
 
-export function rowMenuItems({ row, caps, handlers: h, t, canMove = true, withAddLine, openNodeHref }: RowMenuOptions): MoreMenuItem[] {
+export function rowMenuItems({ row, caps, handlers: h, t, canMove = true, openNodeHref }: RowMenuOptions): MoreMenuItem[] {
   if (row.kind === 'separator') {
     if (!caps.admin) return []
     return [
@@ -62,15 +63,22 @@ export function rowMenuItems({ row, caps, handlers: h, t, canMove = true, withAd
   if (!caps.admin) {
     return [{ id: 'toggle-node', label: t(nodeOn ? 'nodes.action.disable_node' : 'nodes.action.enable_node'), icon: IconPower, disabled: !caps.enable, onSelect: () => h.toggleNode(row, !nodeOn) }]
   }
-  // A row's menu is about THAT LINE. Everything about the node (enable or disable, recreate the inbound, remove it from
-  // the panel only, delete it) lives on the node page, one item away: "Open node".
+  // A row's menu holds the core actions for the row and for its node, so nothing needs a trip to the node page:
+  // the line (edit, multiplier, enable or disable, move, delete), then the node (enable or disable, edit, open).
+  // On a direct row the line IS the node, so its multiplier and its switch are the node's. A relay can be added
+  // from any direct row, because it is another line of that node. Recreate and remove-from-panel stay on the node page.
   const items: MoreMenuItem[] = [
     { id: 'edit-line', label: t(direct ? 'nodes.action.edit_direct' : 'nodes.action.edit_line'), icon: IconEdit, onSelect: () => h.editLine(row) },
-    { id: 'move', label: t('nodes.action.move_to'), icon: IconReorder, disabled: !canMove, onSelect: () => h.moveTo(row) },
   ]
+  // Offered only for a row whose line can be addressed: a row that cannot be written would otherwise open nothing.
+  if (h.editMultiplier && hasMultiplier(row)) items.push({ id: 'multiplier', label: t('nodes.action.set_multiplier'), icon: IconEdit, onSelect: () => h.editMultiplier?.(row) })
+  if (direct && h.addLine) items.push({ id: 'add-line', label: t('nodes.action.add_relay_line'), icon: IconAdd, onSelect: () => h.addLine?.(row) })
   if (!direct && h.toggleLine) items.push({ id: 'toggle-line', label: t(row.enabled ? 'nodes.action.disable_line' : 'nodes.action.enable_line'), icon: IconPower, onSelect: () => h.toggleLine?.(row, !row.enabled) })
-  if (withAddLine && h.addLine) items.push({ id: 'add-line', label: t('nodes.action.add_line'), icon: IconAdd, onSelect: () => h.addLine?.(row) })
-  items.push({ id: 'open-node', label: t('nodes.action.open_node'), icon: IconNode, separatorBefore: true, to: openNodeHref?.(row.node_id ?? 0) ?? `/admin/nodes/${row.node_id}` })
+  items.push({ id: 'toggle-node', label: t(nodeOn ? 'nodes.action.disable_node' : 'nodes.action.enable_node'), icon: IconPower, disabled: !caps.enable, onSelect: () => h.toggleNode(row, !nodeOn) })
+  items.push({ id: 'move', label: t('nodes.action.move_to'), icon: IconReorder, disabled: !canMove, onSelect: () => h.moveTo(row) })
+  const nodeHref = openNodeHref?.(row.node_id ?? 0) ?? `/admin/nodes/${row.node_id}`
+  items.push({ id: 'edit-node', label: t('nodes.action.edit_node_page'), icon: IconEdit, separatorBefore: true, to: `${nodeHref}?tab=general` })
+  items.push({ id: 'open-node', label: t('nodes.action.open_node'), icon: IconNode, to: nodeHref })
   if (!direct && h.deleteLine) items.push({ id: 'delete-line', label: t('nodes.action.delete_line'), icon: IconDelete, destructive: true, onSelect: () => h.deleteLine?.(row) })
   return items
 }

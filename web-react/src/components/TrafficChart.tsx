@@ -91,9 +91,10 @@ export default function TrafficChart({ items, height = 360 }: Props) {
       xAxis: { ...base.xAxis, type: 'category', data: items.map(i => i.date) },
       yAxis: { ...base.yAxis, type: 'value', axisLabel: { ...base.yAxis.axisLabel, formatter: (v: number) => bytesToHuman(v) } },
       series: [
-        lineSeries(0, { name: names.up, data: items.map(i => i.up_bytes) }),
-        lineSeries(1, { name: names.down, data: items.map(i => i.down_bytes) }),
-        lineSeries(2, { name: names.total, data: items.map(i => i.total_bytes) }),
+        lineSeries(0, tk, { name: names.up, data: items.map(i => i.up_bytes) }, { fillAlpha: 0.16 }),
+        lineSeries(1, tk, { name: names.down, data: items.map(i => i.down_bytes) }, { fillAlpha: 0.16 }),
+        // Total is the sum of the other two, so it is a bare line: a fill under it would bury theirs.
+        lineSeries(2, tk, { name: names.total, data: items.map(i => i.total_bytes) }, { area: false }),
       ],
     }, true)
   }, [items, tk, names, empty, hidden])

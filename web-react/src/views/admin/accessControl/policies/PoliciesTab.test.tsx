@@ -15,6 +15,7 @@ vi.mock('@/api/accessControl', async importOriginal => {
   return { ...real, ...fns, destErrorOf: real.destErrorOf, isDestUnavailable: real.isDestUnavailable }
 })
 vi.mock('@/api/groups', async importOriginal => ({ ...await importOriginal<typeof import('@/api/groups')>(), listAllGroups: vi.fn(() => Promise.resolve([{ id: 3, name: '学生' }])) }))
+vi.mock('@/api/nodes', async importOriginal => ({ ...await importOriginal<typeof import('@/api/nodes')>(), listNodes: vi.fn(() => Promise.resolve({ items: [{ id: 15, panel_id: 5, display_name: '东京入口' }, { id: 18, panel_id: 5, display_name: '大阪入口' }], total: 2 })) }))
 vi.mock('@/api/servers', async importOriginal => ({ ...await importOriginal<typeof import('@/api/servers')>(), listServers: vi.fn(() => Promise.resolve({ items: [{ id: 5, name: '东京 01', panel_type: 'psp' }], total: 1 })) }))
 
 const budget = { rules: { used: 2, limit: 256 }, domains: { used: 0, limit: 50000 }, regexps: { used: 230, limit: 256 }, cidrs: { used: 0, limit: 20000 }, source_cidrs: { used: 0, limit: 60000 }, subjects: { used: 0, limit: 5000 }, bytes: { used: 0, limit: 1000 } }
@@ -54,12 +55,102 @@ beforeEach(() => {
   vi.mocked(api.previewDestPolicy).mockResolvedValue({ budget })
 })
 
+describe('the inbound source rules step', () => {
+  it('lists the inbounds with a rule in force, each linking to that node\'s Inbound tab', async () => {
+    vi.mocked(api.getDestSourceRules).mockResolvedValue({ geoip_available: true, items: [
+      { node_id: 15, countries: ['CN', 'RU'], cidrs: ['10.0.0.0/8'], state: 'on', updated_at: 1 },
+      { node_id: 18, countries: ['US'], cidrs: [], state: 'report', updated_at: 1 },
+      { node_id: 19, countries: ['FR'], cidrs: [], state: 'off', updated_at: 1 },
+    ] })
+    renderAccess(<PoliciesTab {...props} />)
+    const rows = await screen.findAllByTestId('source-rule-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('东京入口')
+    expect(rows[0].textContent).not.toContain('东京 01')
+    expect(rows[0].textContent).toContain('2 个国家 · 1 个网段')
+    expect(rows[0].textContent).toContain('开启')
+    expect(rows[0].getAttribute('href')).toBe('/admin/nodes/15?tab=inbound')
+    expect(rows[1].textContent).toContain('大阪入口')
+    expect(rows[1].textContent).toContain('仅报告')
+    expect(screen.getByRole('heading', { level: 2, name: /入站来源规则 · 2 条/ })).toBeTruthy()
+  })
+
+  it('still shows the step above the template gallery when there are no policies yet', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ allow: [], block: [] }))
+    vi.mocked(api.getDestSourceRules).mockResolvedValue({ geoip_available: true, items: [{ node_id: 15, countries: ['CN'], cidrs: [], state: 'on', updated_at: 1 }] })
+    renderAccess(<PoliciesTab {...props} />)
+    const rows = await screen.findAllByTestId('source-rule-row')
+    expect(rows[0].textContent).toContain('东京入口')
+    expect(screen.getByText('BT 下载')).toBeTruthy()
+  })
+
+  it('draws only the gallery when there are no policies and no rule in force', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ allow: [], block: [] }))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('BT 下载')
+    expect(screen.queryByTestId('source-rule-row')).toBeNull()
+    expect(screen.queryByText(/没有入站来源规则/)).toBeNull()
+  })
+
+  it('reads a step count as a count beside the heading, not inside it', async () => {
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('禁止发信')
+    const heading = screen.getByRole('heading', { level: 2, name: /^放行/ })
+    expect(heading.textContent).not.toMatch(/\d/)
+    expect(within(heading.parentElement!).getByTestId('step-count').textContent).toContain('1 条策略')
+  })
+
+  it('says where the rules are set when there are none, with a link to Nodes', async () => {
+    renderAccess(<PoliciesTab {...props} />)
+    expect(await screen.findByText(/按节点设置/)).toBeTruthy()
+    expect(screen.getByText('打开节点').closest('a')?.getAttribute('href')).toBe('/admin/nodes')
+  })
+})
+
+describe('long steps', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => pol({ id: 100 + i, name: `策略 ${i + 1}`, priority: i + 1 }))
+
+  it('keeps up to six policies as a plain list, with no filter', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ block: many(6) }))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('策略 1')
+    expect(screen.queryByRole('searchbox')).toBeNull()
+  })
+
+  it('filters a step of more than six by name, and folds it away', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ block: many(8) }))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('策略 1')
+    expect(screen.getAllByTestId('policy-row')).toHaveLength(9)
+    fireEvent.change(screen.getByRole('searchbox', { name: /筛选「拦截」/ }), { target: { value: '策略 7' } })
+    expect(screen.getAllByTestId('policy-row')).toHaveLength(2)
+    expect(screen.getByRole('status').textContent).toBe('1 / 8')
+    fireEvent.change(screen.getByRole('searchbox', { name: /筛选「拦截」/ }), { target: { value: '没有这个' } })
+    expect(screen.getByText('没有策略匹配「没有这个」')).toBeTruthy()
+    fireEvent.change(screen.getByRole('searchbox', { name: /筛选「拦截」/ }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '收起「拦截」' }))
+    expect(screen.getAllByTestId('policy-row')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '展开「拦截」（8）' }))
+    expect(screen.getAllByTestId('policy-row')).toHaveLength(9)
+  })
+
+  it('keeps a row\'s place in the whole step while a filter hides its neighbours', async () => {
+    vi.mocked(api.getDestPolicies).mockResolvedValue(policies({ block: many(8) }))
+    renderAccess(<PoliciesTab {...props} />)
+    await screen.findByText('策略 1')
+    fireEvent.change(screen.getByRole('searchbox', { name: /筛选「拦截」/ }), { target: { value: '策略 3' } })
+    fireEvent.click(screen.getByRole('button', { name: '「策略 3」的更多操作' }))
+    fireEvent.click(await screen.findByText('上移'))
+    await waitFor(() => expect(api.reorderDestPolicies).toHaveBeenCalledWith('block', [100, 102, 101, 103, 104, 105, 106, 107]))
+  })
+})
+
 describe('the rail', () => {
   it('draws allow, exempt, block, allowlist, report-only, rest with computed numbers, quota with amber, and rows in two lines', async () => {
     renderAccess(<PoliciesTab {...props} />)
     expect(await screen.findByText('禁止发信')).toBeTruthy()
     const heads = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)
-    expect(heads).toEqual(['放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '没有分组启用白名单 · 成员只能访问名单里的目的地', '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行'])
+    expect(heads).toEqual(['没有入站来源规则 · 先于下面所有步骤检查；豁免账号也绕不过', '放行 · 命中即放行', '豁免账号 · 3 个 · 不受任何访问限制', '拦截', '没有分组启用白名单 · 成员只能访问名单里的目的地', '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果 · 这一步还没有策略', '其余连接：直接放行'])
     expect(screen.getByText(/额度/).textContent).toContain('正则 230 / 256')
     const rows = screen.getAllByTestId('policy-row')
     expect(rows).toHaveLength(4)
@@ -77,7 +168,7 @@ describe('the rail', () => {
     ] }))
     renderAccess(<PoliciesTab {...props} />)
     const head = await screen.findByRole('heading', { level: 2, name: /白名单分组 · 2 个/ })
-    const step = head.parentElement!.parentElement!
+    const step = head.parentElement!.parentElement!.parentElement!
     expect(within(step).getByRole('button', { name: /Guests/ }).textContent).toContain('仅报告 · 第 3 天')
     expect(within(step).getByRole('button', { name: /Dev/ }).textContent).toContain('开启')
     fireEvent.click(within(step).getByRole('button', { name: /Guests/ }))

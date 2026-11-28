@@ -14,6 +14,7 @@ export interface LineRowHandlers {
   add: (row: OrderRow) => void
   toggle: (row: OrderRow, enable: boolean) => void
   remove: (row: OrderRow) => void
+  multiplier?: (row: OrderRow) => void
 }
 
 /** A menu handler cannot be awaited; a failed request was already surfaced by the request layer, so it is not rethrown. */
@@ -46,6 +47,8 @@ export function useRowHandlers({ lines, moveTo, editSeparator, deletion }: {
     toggleLine: (row, enable) => live.current.lines.toggle(row, enable),
     deleteLine: row => live.current.lines.remove(row),
     addLine: row => live.current.lines.add(row),
+    // Defined only when the caller can edit multipliers, so the menu offers nothing it cannot do.
+    ...(live.current.lines.multiplier ? { editMultiplier: (row: OrderRow) => live.current.lines.multiplier?.(row) } : {}),
     moveTo: row => live.current.moveTo(row),
     toggleNode: safe(async (row, enable) => {
       await setNodeEnabled(row.node_id ?? 0, enable)

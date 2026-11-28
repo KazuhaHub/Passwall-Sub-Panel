@@ -20,7 +20,8 @@ describe('metrics charts', () => {
     expect(option.xAxis.axisLabel.hideOverlap).toBe(true)
     expect(option.xAxis.axisLabel.formatter(Date.parse(start))).toBe('00:00')
     expect(option.legend.show).toBe(false)
-    expect(option.series[0].showSymbol).toBe(false)
+    expect(option.series[0].showSymbol).toBe(true) // three points
+    expect(option.series[0].areaStyle.color.type).toBe('linear')
     expect(option.xAxis.axisLine.show).toBe(false)
     expect(option.series[0].data[1]).toEqual([Date.parse('2026-10-21T07:50:00Z'), null])
     expect(option.series[0].connectNulls).toBe(false)

@@ -84,6 +84,19 @@ describe('SubClientsView', () => {
     })
   })
 
+  it('turns a family on or off from the table, as a draft saved with the page', async () => {
+    mount()
+    const beta = await screen.findByRole('switch', { name: 'Enable Beta' })
+    expect(beta.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(beta)
+    expect(screen.getByRole('switch', { name: 'Enable Beta' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable Alpha' }))
+    expect(api.put).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect((sentBody().sub_clients as unknown as { enabled: boolean }[]).map(f => f.enabled)).toEqual([false, true, true])
+  })
+
   it('sends the families in the order the admin dragged them into', async () => {
     mount()
     const handle = await screen.findByRole('button', { name: 'Drag to reorder: Alpha' })

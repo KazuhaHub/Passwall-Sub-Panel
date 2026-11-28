@@ -40,12 +40,17 @@ describe('TrafficChart', () => {
     expect(within(rows[2]).getAllByText('0')).toHaveLength(3)
   })
 
-  it('tells the three series apart by line pattern as well as colour, with no always-on markers', () => {
+  it('tells the three series apart by line pattern as well as colour, fills the parts but not the total', () => {
     render(<TrafficChart items={items} />)
 
     const series = setOption.mock.calls[0][0].series as { lineStyle: { type: string }; showSymbol: boolean }[]
     expect(new Set(series.map(s => s.lineStyle.type)).size).toBe(3)
-    expect(series.every(s => s.showSymbol === false)).toBe(true)
+    const filled = series as unknown as { areaStyle?: { color: { type: string; colorStops: { color: string }[] } }; showSymbol: boolean }[]
+    expect(filled[0].areaStyle?.color.type).toBe('linear')
+    expect(filled[1].areaStyle?.color.type).toBe('linear')
+    expect(filled[2].areaStyle).toBeUndefined()
+    // Few points: a marker on each.
+    expect(series.every(s => s.showSymbol === true)).toBe(true)
     expect(setOption.mock.calls[0][0].legend.show).toBe(false)
   })
 

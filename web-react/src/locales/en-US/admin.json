@@ -764,7 +764,8 @@
       "apps_count_one": "{{count}} app",
       "apps_count_other": "{{count}} apps",
       "format_uri_list": "URI list (V2rayN / Passwall)",
-      "sub_path_hint": "The part of each subscription link after the address and before the token. Changing it breaks the links already handed out."
+      "sub_path_hint": "The part of each subscription link after the address and before the token. Changing it breaks the links already handed out.",
+      "enable_named": "Enable {{name}}"
     },
     "legal": {
       "title": "Privacy and terms page",
@@ -2812,7 +2813,8 @@
       },
       "bulk": {
         "enable": "Enable lines ({{count}})",
-        "disable": "Disable lines ({{count}})"
+        "disable": "Disable lines ({{count}})",
+        "set_multiplier": "Set multiplier… ({{count}})"
       },
       "delete": {
         "title": "Delete line \"{{name}}\"?",
@@ -2829,7 +2831,8 @@
         "inbound": "Inbound",
         "general": "General",
         "lines_question": "How users connect",
-        "no_lines": "No lines to show"
+        "no_lines": "No lines to show",
+        "add_hint": "Need a relay for this node? Add it here as another line. There is no need to create a new node."
       },
       "published_count": "{{published}} of {{total}} lines published"
     },
@@ -3227,7 +3230,7 @@
       "hy2_masquerade_content_string": "Response body",
       "ss_iv_check": "ivCheck (reject replayed IV)",
       "protocol": "Protocol",
-      "panel": "3X-UI server",
+      "panel": "Server",
       "panel_search_placeholder": "Search / select server",
       "listen": "Listen (blank = all)",
       "port": "Port",
@@ -3365,7 +3368,8 @@
       "tags": "Tags",
       "display_name_factor_hint": "Tip: {{placeholder}} is replaced with the direct line's traffic multiplier (e.g. ×1.5) in subscriptions.",
       "traffic_factor": "Traffic multiplier",
-      "traffic_factor_direct": "Direct line traffic multiplier"
+      "traffic_factor_direct": "Direct line traffic multiplier",
+      "region_search_placeholder": "Pick or type a region"
     },
     "action": {
       "recreate_inbound": "Recreate inbound on server",
@@ -3386,7 +3390,10 @@
       "delete_separator": "Delete separator",
       "create_separator": "New separator",
       "refresh": "Refresh",
-      "row_menu": "Actions for {{name}}"
+      "row_menu": "Actions for {{name}}",
+      "set_multiplier": "Multiplier…",
+      "add_relay_line": "Add relay line…",
+      "edit_node_page": "Edit node"
     },
     "validate": {
       "address_region_required": "Address and Region are required",
@@ -3719,6 +3726,21 @@
       "step_exit": "Exit",
       "step_review": "Review",
       "basics": "Basics"
+    },
+    "multiplier": {
+      "title_one": "Multiplier of {{name}}",
+      "title_bulk": "Set multiplier for {{count}} lines",
+      "hint": "One multiplier applied to every line below.",
+      "field": "New multiplier",
+      "field_hint": "0 to 100, up to 3 decimals. 1 charges users one-for-one.",
+      "invalid": "Enter a number from 0 to 100 with at most 3 decimals.",
+      "line": "Line",
+      "old": "Now",
+      "new": "New",
+      "apply": "Apply",
+      "toast": "Multiplier set on {{count}} lines",
+      "partial": "{{ok}} servers done, {{fail}} failed",
+      "failed": "Could not set the multiplier: {{message}}"
     }
   },
   "users": {
@@ -4725,7 +4747,15 @@
       "not_found": "No such server. It may have been deleted.",
       "forbidden": "You do not have access to this server.",
       "install_not_found": "No such Passwall Node server. It may have been deleted, or it is not a Passwall Node.",
-      "create_forbidden": "Only a Global Administrator can add servers."
+      "create_forbidden": "Only a Global Administrator can add servers.",
+      "tabs": {
+        "overview": "Overview",
+        "settings": "Settings",
+        "maintenance": "Maintenance",
+        "monitoring": "Monitoring"
+      },
+      "unsaved": "Unsaved changes",
+      "view_nodes": "View nodes"
     },
     "batch_test": "Test selected",
     "batch_delete": "Delete selected",
@@ -5020,11 +5050,12 @@
       "upgrade_xray": "Upgrade Xray",
       "select_core": "Select core and version",
       "rotate_node_credential": "Rotate node credential",
-      "line_factors": "Line multipliers",
       "shared_ports": "Shared ports (SNI)",
       "refresh": "Refresh",
       "more_for": "More actions for {{name}}",
-      "edit": "Edit"
+      "edit": "Edit",
+      "open": "Open",
+      "edit_settings": "Edit settings"
     },
     "core_tier": {
       "recommended": "Recommended (broad compatibility)",
@@ -5119,21 +5150,6 @@
       "resolve": "Host name matching",
       "recording_hits_and_usage": "Rule matches and per-site usage",
       "usage_retention": "usage kept {{days}} days"
-    },
-    "line_factors": {
-      "title": "Line multipliers — {{name}}",
-      "hint": "Set the traffic multiplier of lines on this server. Only traffic after saving is affected.",
-      "empty": "This server has no lines yet.",
-      "select_all": "Select all lines",
-      "field": "Traffic multiplier",
-      "field_hint": "Applied to the selected lines. 1 = one-for-one, 0 = free.",
-      "invalid": "Enter a multiplier between 0 and 100 (up to 3 decimals)",
-      "apply": "Apply to selected",
-      "updated": "{{count}} lines updated",
-      "updated_one": "{{count}} line updated",
-      "load_failed": "Could not load the lines of this server.",
-      "loading": "Loading lines…",
-      "apply_failed": "Could not update the lines: {{message}}"
     },
     "identities": {
       "count": "{{count}} client identities",
@@ -5413,7 +5429,37 @@
       "group_connection": "Connection",
       "test_hint": "The test reaches the server with the saved settings and records its version. Save your changes first."
     },
-    "resource_state": "Resources: {{state}}"
+    "resource_state": "Resources: {{state}}",
+    "addresses": {
+      "title": "Public addresses",
+      "ipv4": "IPv4",
+      "ipv6": "IPv6",
+      "observed": "Panel connects from here",
+      "seen_from": "The panel sees the node connect from",
+      "none": "The node has not reported its addresses yet.",
+      "open": "{{count}} public addresses, show the list"
+    },
+    "maintenance": {
+      "run": "Open",
+      "group": {
+        "install": "Installation",
+        "upgrade": "Upgrades",
+        "access": "Access and routing"
+      },
+      "install": "Install again, or move this server to another backend.",
+      "agent": "Upgrade the Passwall Node program on this server.",
+      "panel": "Upgrade the panel to its latest release.",
+      "core": "Upgrade the Xray core to its latest release.",
+      "core_native": "Choose the core engine and its exact version.",
+      "rotate": "Issue a new credential for the node. The old one stops working.",
+      "ports": "Ports shared by several lines, told apart by SNI.",
+      "retired": "Remove the retired VLESS routes left on this server."
+    },
+    "monitoring": {
+      "open": "Open",
+      "metrics": "CPU, memory, network and disk of the host, over time.",
+      "diagnostics": "Run checks on the node from the panel and read the result."
+    }
   },
   "diagnostics": {
     "title": "Diagnostics",
@@ -7313,7 +7359,30 @@
         "allowlist_count_other": "Allowlist groups · {{count}}",
         "allowlist_none": "No group has an allowlist",
         "allowlist_caption": "members reach only the destinations in their lists",
-        "allowlist_open": "Open allowlist groups"
+        "allowlist_open": "Open allowlist groups",
+        "source_one": "Inbound source rules · {{count}}",
+        "source_other": "Inbound source rules · {{count}}",
+        "source_none": "No inbound source rules",
+        "source_caption": "checked before everything below; exempt accounts do not get past them",
+        "source_where": "Edited per node, in its Inbound tab. Click a row to open it.",
+        "source_empty": "No inbound denies source countries or networks yet. Set them per node, in its Inbound tab.",
+        "source_open_nodes": "Open nodes",
+        "source_open_aria": "Edit the source rules of {{name}}",
+        "source_unknown_node": "Node #{{id}}",
+        "source_countries_one": "{{count}} country",
+        "source_countries_other": "{{count}} countries",
+        "source_cidrs_one": "{{count}} network",
+        "source_cidrs_other": "{{count}} networks",
+        "source_state_on": "On",
+        "source_state_report": "Report only",
+        "filter_label": "Filter the policies of {{step}}",
+        "filter_placeholder": "Name, list or scope",
+        "filter_none": "No policy matches \"{{q}}\"",
+        "shown_of": "{{shown}} of {{total}}",
+        "fold": "Fold {{step}}",
+        "unfold": "Show {{step}} ({{count}})",
+        "count_aria_one": "1 policy",
+        "count_aria_other": "{{count}} policies"
       },
       "row": {
         "paused": "Paused",

@@ -73,16 +73,17 @@ describe('report-only in the rail', () => {
     renderAccess(<PoliciesTab {...props} />)
     await screen.findByText('加密货币交易所')
     expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual([
+      '没有入站来源规则 · 先于下面所有步骤检查；豁免账号也绕不过',
       '放行 · 命中即放行', '没有豁免账号 · 不受任何访问限制', '拦截', '没有分组启用白名单 · 成员只能访问名单里的目的地',
       '仅报告 · 不拦截，只记录本应拦截的连接；不改变任何连接的结果', '其余连接：直接放行',
     ])
     // The enforced step holds the block and the off rows, the report step the report rows only.
     const heads = screen.getAllByRole('heading', { level: 2 })
-    const reportStep = heads[4].parentElement!.parentElement!
+    const reportStep = heads[5].parentElement!.parentElement!.parentElement!
     expect(within(reportStep).getByText('加密货币交易所')).toBeTruthy()
     expect(within(reportStep).getByText('成人内容')).toBeTruthy()
     expect(within(reportStep).queryByText('禁止发信')).toBeNull()
-    const blockStepEl = heads[2].parentElement!.parentElement!
+    const blockStepEl = heads[3].parentElement!.parentElement!.parentElement!
     expect(within(blockStepEl).getByText('禁止发信')).toBeTruthy()
     expect(within(blockStepEl).getByText('禁止 BT')).toBeTruthy()
   })

@@ -215,6 +215,9 @@
  * choice; compact is 2rem, the reference project's own button height.
  */
 :root { --shell-bar-h: 3.5rem; }
+/* One curve and one duration for every sidebar motion: the width, the offset of the content column and the labels. */
+:root { --sidebar-ease: cubic-bezier(0.2, 0, 0, 1); --sidebar-duration: 240ms; }
+@media (prefers-reduced-motion: reduce) { :root { --sidebar-duration: 0ms; } }
 :root, :root[data-density="compact"] { --control-h: 2rem; --row-h: 2.25rem; }
 :root[data-density="comfortable"] { --control-h: 2.5rem; --row-h: 3rem; }
 

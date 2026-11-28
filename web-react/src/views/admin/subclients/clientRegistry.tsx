@@ -1,16 +1,16 @@
 // The client-family table of the Sub clients page (the detection-family list + its sheet). The data helpers
 // live in ./presets and are re-exported here because SettingsView still imports normalizeRegistry from this path.
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 import type { SubClientFamily } from '@/api/settings'
 import { IconAdd, IconDelete, IconEdit } from '@/lib/icons'
 import { MoreMenu } from '@/components/common/MoreMenu'
-import { StatusDot } from '@/components/common/StatusDot'
 import { applyReorder } from '@/components/data/dataTableLogic'
 import { DataTable } from '@/components/data/DataTable'
 import { EmptyState } from '@/components/feedback/EmptyState'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { RowCard } from '../subscription/RowCard'
 import { FamilyDialog } from './FamilyDialog'
 import type { useRegistryActions } from './useRegistryActions'
@@ -45,6 +45,16 @@ export default function ClientRegistry({ families, onChange, actions }: {
   const { t } = useTranslation('admin')
   const { open, setOpen, addFamily, remove } = actions
   const rows = useMemo<Row[]>(() => families.map((f, i) => ({ f, i })), [families])
+  // The switch edits the draft like every other field of the page: it is saved with the page's Save.
+  const setEnabled = useCallback((i: number, enabled: boolean) => {
+    onChange(families.map((f, n) => (n === i ? { ...f, enabled } : f)))
+  }, [families, onChange])
+  const enableSwitch = (r: Row) => (
+    <span data-no-row-click="" className="inline-flex">
+      <Switch size="sm" checked={r.f.enabled} onCheckedChange={v => setEnabled(r.i, v)}
+        aria-label={t('settings.subscription.enable_named', { name: r.f.name.trim() || t('settings.subscription.unnamed_family') })} />
+    </span>
+  )
   const columns = useMemo<ColumnDef<Row, any>[]>(() => {
     const s = (k: string) => t(`settings.subscription.${k}`)
     return [
@@ -54,10 +64,8 @@ export default function ClientRegistry({ families, onChange, actions }: {
         cell: c => { const k = c.row.original.f.keywords.join(', '); return <span className="font-mono text-xs" title={k}>{k}</span> } },
       { id: 'format', header: s('rule_table.format'), ...sortless, meta: { className: 'w-28' }, cell: c => c.row.original.f.render_format },
       { id: 'apps', header: s('rule_table.apps'), ...sortless, meta: { align: 'right', className: 'w-16 tabular-nums' }, cell: c => c.row.original.f.apps.length },
-      { id: 'enabled', header: s('rule_table.enabled'), ...sortless, meta: { className: 'w-28' },
-        cell: c => c.row.original.f.enabled
-          ? <StatusDot tone="success" label={s('rule_field.enabled')} />
-          : <StatusDot tone="neutral" label={s('rule_table.disabled')} /> },
+      { id: 'enabled', header: s('rule_table.enabled'), ...sortless, meta: { className: 'w-20' },
+        cell: c => enableSwitch(c.row.original) },
       { id: 'actions', header: '', ...sortless, meta: { hideable: false, align: 'right', label: s('rule_table.actions'), className: 'w-10' },
         cell: c => {
           const { f, i } = c.row.original
@@ -68,7 +76,8 @@ export default function ClientRegistry({ families, onChange, actions }: {
           ]} />
         } },
     ]
-  }, [t, setOpen, remove])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, setOpen, remove, setEnabled])
 
   return (
     <>
@@ -88,7 +97,7 @@ export default function ClientRegistry({ families, onChange, actions }: {
           const name = r.f.name.trim() || t('settings.subscription.unnamed_family')
           return (
             <RowCard title={name} subtitle={r.f.keywords.join(', ')} open={ctx.open}
-              status={<StatusDot tone={r.f.enabled ? 'success' : 'neutral'} label={t(r.f.enabled ? 'settings.subscription.rule_field.enabled' : 'settings.subscription.rule_table.disabled')} />}
+              status={enableSwitch(r)}
               detail={`${r.f.render_format} · ${t('settings.subscription.apps_count', { count: r.f.apps.length })}`}
               actions={<MoreMenu size="icon-xs" label={t('settings.subscription.row_menu', { name })} items={[
                 { id: 'edit', label: t('settings.subscription.edit_family'), icon: IconEdit, onSelect: () => setOpen(r.i) },

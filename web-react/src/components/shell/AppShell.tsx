@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { Role } from '@/api/types'
 import type { VersionInfo } from '@/api/version'
-import { IconSearch } from '@/lib/icons'
+import { IconSearch, IconSidebar } from '@/lib/icons'
 import { IconButton } from '@/components/common/IconButton'
 import { setSyncPendingNavigator } from '@/components/feedback/syncPendingToast'
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,8 @@ function CloseMobileOnNavigate() {
   return null
 }
 
+const IS_MAC = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+
 function VersionFooter({ version }: { version: VersionInfo }) {
   const { t } = useTranslation('common')
   const channel = ['stable', 'rc', 'beta', 'pending', 'testing'].includes(version.channel ?? '') ? version.channel : 'unknown'
@@ -84,6 +86,26 @@ function VersionFooter({ version }: { version: VersionInfo }) {
         {version.build_date && <span>built: {version.build_date}</span>}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+/** Collapse or expand the desktop rail. It lives in the sidebar's footer, in both states, so it never moves. */
+function CollapseButton() {
+  const { t } = useTranslation('common')
+  const { toggleSidebar, state } = useSidebar()
+  const label = t('ui.shell.toggle_sidebar')
+  return (
+    <IconButton
+      label={label}
+      tooltip={`${label} (${IS_MAC ? '⌘B' : 'Ctrl B'})`}
+      side="right"
+      size="icon-sm"
+      aria-expanded={state === 'expanded'}
+      onClick={toggleSidebar}
+      className="shrink-0 max-md:hidden"
+    >
+      <IconSidebar />
+    </IconButton>
   )
 }
 
@@ -161,16 +183,13 @@ function AppSidebar({ nav, role, brand, version, onNavIntent }: Pick<AppShellPro
           </Fragment>
         ))}
       </SidebarContent>
-      {version && (
-        <SidebarFooter className="border-t py-1.5">
-          <VersionFooter version={version} />
-        </SidebarFooter>
-      )}
+      <SidebarFooter className={cn('flex-row items-center justify-between gap-2 border-t px-2 py-1.5 group-data-[collapsible=icon]:justify-center', !version && 'max-md:hidden')}>
+        {version && <VersionFooter version={version} />}
+        <CollapseButton />
+      </SidebarFooter>
     </Sidebar>
   )
 }
-
-const IS_MAC = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
 
 /** The search box in the top bar: a button that opens the palette, with its shortcut. */
 function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
@@ -200,7 +219,7 @@ function TopBar({ title, onOpenPalette, actions, user }: { title?: string; onOpe
   const logInMenu = useLogInMenu()
   return (
     <header className="sticky top-0 z-30 flex h-(--shell-bar-h) shrink-0 items-center gap-1 border-b bg-background px-2 sm:gap-2 sm:px-4">
-      <SidebarTrigger label={t('ui.shell.toggle_sidebar')} />
+      <SidebarTrigger label={t('ui.shell.open_menu')} className="md:hidden" />
       {title && <h2 className="min-w-0 truncate text-sm font-medium md:hidden">{title}</h2>}
       <div className="flex min-w-0 flex-1 items-center md:px-1">
         <PaletteTrigger onOpen={onOpenPalette} />

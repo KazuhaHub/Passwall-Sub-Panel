@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
   deleteServer, upgradeOptions, upgradePanel, upgradePreview, upgradeXray, type Server, type UpgradePreviewResult,
@@ -6,6 +7,36 @@ import {
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/feedback/toasts'
 import { allSettledLimited } from '@/utils/promises'
+
+// Which servers have an upgrade or batch action in flight. The list's batch buttons and a server's own page are different
+// hook instances, and each must see what the other started, so the state lives with the query client they share
+// (one per signed-in session) rather than in either component.
+interface Busy { counts: Map<number, number>; watchers: Set<() => void>; snapshot: ReadonlySet<number> }
+const busyOf = new WeakMap<QueryClient, Busy>()
+function busyFor(client: QueryClient): Busy {
+  let b = busyOf.get(client)
+  if (!b) { b = { counts: new Map(), watchers: new Set(), snapshot: new Set() }; busyOf.set(client, b) }
+  return b
+}
+function publish(b: Busy) { b.snapshot = new Set(b.counts.keys()); b.watchers.forEach(w => w()) }
+/** Marks `ids` busy until the returned function is called. */
+function markBusy(b: Busy, ids: number[]): () => void {
+  ids.forEach(id => b.counts.set(id, (b.counts.get(id) ?? 0) + 1))
+  publish(b)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    ids.forEach(id => { const n = (b.counts.get(id) ?? 1) - 1; if (n <= 0) b.counts.delete(id); else b.counts.set(id, n) })
+    publish(b)
+  }
+}
+/** Whether an upgrade or batch action started anywhere (the list or the server's page) is still running on this server. */
+export function useServerBusy(id: number): boolean {
+  const b = busyFor(useQueryClient())
+  const subscribe = (w: () => void) => { b.watchers.add(w); return () => { b.watchers.delete(w) } }
+  return useSyncExternalStore(subscribe, () => b.snapshot, () => b.snapshot).has(id)
+}
 
 /**
  * The remote upgrades and the bulk actions of the list. Every one states what it will do before it does it (the
@@ -18,6 +49,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
   clearSelection: () => void
 }) {
   const { t } = useTranslation('admin')
+  const busy = busyFor(useQueryClient())
   // The server whose upgrade request is in flight: set BEFORE the confirm opens, so a double click on the menu item
   // cannot stack two confirms (it once fired two upgrade requests).
   const [upgrading, setUpgrading] = useState<number | null>(null)
@@ -25,6 +57,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
 
   async function runUpgradePanel(s: Server, force = false): Promise<void> {
     setUpgrading(s.id)
+    const release = markBusy(busy, [s.id])
     try {
       // ASK THE INSTANCE FIRST, when it can answer. The decision is the server's; a dialog that decided for itself
       // would be a second decision source, and the one the operator saw would not be the one enforced. A failure
@@ -93,6 +126,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
       }
       pushSnack(body?.error ?? body?.message ?? (err as { message?: string }).message ?? 'unknown', 'error')
     } finally {
+      release()
       setUpgrading(null)
     }
   }
@@ -109,6 +143,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
     })
     if (!ok) return
     setBatchBusy('upgrade_xray')
+    const release = markBusy(busy, rows.map(r => r.id))
     try {
       const results = await allSettledLimited(rows, r => upgradeXray(r.id))
       const success = results.filter(r => r.status === 'fulfilled').length
@@ -117,7 +152,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
       void allSettledLimited(rows.filter((_, i) => results[i].status === 'fulfilled'), s => probeServer(s))
       if (failed > 0) pushSnack(t('admin:servers.toast.batch_upgrade_xray_partial', { ok: success, fail: failed }), 'warning')
       else pushSnack(t('admin:servers.toast.batch_upgrade_xray_ok', { count: success }), 'success')
-    } finally { setBatchBusy('') }
+    } finally { release(); setBatchBusy('') }
   }
 
   // UNLIKE the core, a panel upgrade restarts the whole panel process — every user on it drops for 30-60 seconds — and
@@ -135,6 +170,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
     })
     if (!ok) return
     setBatchBusy('upgrade_panel')
+    const release = markBusy(busy, rows.map(r => r.id))
     try {
       const results = await allSettledLimited(rows, r => upgradePanel(r.id))
       let initiated = 0; let alreadyLatest = 0; let blocked = 0; let failed = 0
@@ -154,7 +190,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
       // A disruptive batch clears the selection when it completes, so an immediate re-click cannot fire it again
       // without fresh intent.
       clearSelection()
-    } finally { setBatchBusy('') }
+    } finally { release(); setBatchBusy('') }
   }
 
   async function batchDelete(rows: Server[]) {
@@ -170,6 +206,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
     })
     if (!ok) return
     setBatchBusy('delete')
+    const release = markBusy(busy, rows.map(r => r.id))
     try {
       const results = await allSettledLimited(rows, r => deleteServer(r.id))
       const okCount = results.filter(r => r.status === 'fulfilled').length
@@ -178,7 +215,7 @@ export function useServerUpgrades({ probeServer, refresh, clearSelection }: {
       if (failed > 0) pushSnack(t('admin:servers.toast.batch_partial', { ok: okCount, fail: failed }), 'warning')
       else pushSnack(t('admin:servers.toast.batch_deleted', { count: okCount }), 'success')
       refresh()
-    } finally { setBatchBusy('') }
+    } finally { release(); setBatchBusy('') }
   }
 
   return { upgrading, batchBusy, runUpgradePanel, batchUpgradeXray, batchUpgradePanel, batchDelete }

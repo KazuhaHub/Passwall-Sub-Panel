@@ -243,7 +243,8 @@
         "searching": "搜索中",
         "pages": "页面",
         "open": "打开命令面板"
-      }
+      },
+      "open_menu": "打开菜单"
     },
     "feedback": {
       "loading": "加载中",
