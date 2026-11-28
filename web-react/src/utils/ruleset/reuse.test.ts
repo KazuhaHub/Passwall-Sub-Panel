@@ -62,7 +62,7 @@ describe('a shared line says what reading it again would say', () => {
     expect(after.lines.map(l => l.kind)).toEqual(['rule', 'rule', 'text', 'comment', 'blank'])
     expect(after).toEqual(reread(after))
     // And back: a line that was a rule under one indent is text under the other.
-    const again = insertRules(makeDoc([{ raw: '- DOMAIN,a.example,X' }, ...after.lines], true), 0, [], 'X')
+    const again = makeDoc([{ raw: '- DOMAIN,a.example,X' }, ...after.lines], true)
     expect(again.lines.map(l => l.kind)).toEqual(['rule', 'text', 'text', 'rule', 'comment', 'blank'])
     expect(again).toEqual(reread(again))
   })
