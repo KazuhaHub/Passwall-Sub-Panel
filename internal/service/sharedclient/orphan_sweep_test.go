@@ -134,3 +134,24 @@ func TestReconcileOrphans_SweepListingFailureFallsBackToAFreshRead(t *testing.T)
 		t.Fatalf("want the orphan deleted on the fallback read, got %v", xui.deleted)
 	}
 }
+
+// The sweep's listing succeeded, the panel is down by the user's turn, and the
+// old listing shows a possible orphan: the fresh read fails, and that failure is
+// reported as it always was. Nothing is deleted on the old listing.
+func TestReconcileOrphans_SweepStillReportsAPanelThatWentDown(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{{NodeID: 1}}, byUser: []*domain.PSPClient{
+		{ID: 1, UserID: 18, PanelID: 10, Email: "u18@psp.local"},
+	}}
+	xui := &fakeXUI{listErrOnCall: 2, liveClients: map[string][]int{
+		"u18@psp.local":           {1},
+		"u18-kf2d62608@psp.local": {1},
+	}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	err := svc.ReconcileOrphans(svc.WithOrphanSweep(context.Background()), 18)
+	if err == nil {
+		t.Fatal("the failed fresh read must be reported")
+	}
+	if len(xui.deleted) != 0 || xui.listCalls != 2 {
+		t.Fatalf("no delete without a fresh listing (deleted=%v, listings=%d)", xui.deleted, xui.listCalls)
+	}
+}
